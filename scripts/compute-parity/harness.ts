@@ -1,0 +1,429 @@
+// 计算纯函数 TS↔wasm 对照脚手架的**跑器与口径**（issue #220 的配套基建）。
+//
+// 设计（用户裁决的「多维度多场景」）：
+// - 每个 wasm 出口登记为一个 PairSpec：`ts` 侧是迁移前/保留的 TS 原生实现，
+//   `wasm` 侧是计算核出口；两侧吃**同一份输入**、产出按同一口径归一后逐字节比对。
+// - 场景（CaseSpec）带维度标注：scale（xs/s/m/l 输入量级）、shape（结构变体）、
+//   edge（边界/病态输入）、flow（cold/paged/idempotent 等状态流形态）。
+//   parity 门禁默认只跑 xs/s/m（+全部 shape/edge）；`COMPUTE_PARITY_SCALE=full`
+//   才含 l，CI 不为极量级付时间。
+// - 同一套 Suite 既喂 parity（vitest：`scripts/compute-parity.test.mts`）也喂
+//   性能（node：`scripts/compute-parity-bench.mts`）——对照面只有一份。
+
+/** 输入量级维度。l 档只在 `COMPUTE_PARITY_SCALE=full` 下参与 parity。 */
+export type Scale = 'xs' | 's' | 'm' | 'l'
+
+export interface CaseMeta {
+  readonly scale?: Scale
+  /** 结构变体标签（如 single-part / multi-part / cjk / astral）。 */
+  readonly shape?: string
+  /** 边界或病态输入（空串、畸形、未闭合、NaN 时刻……）。 */
+  readonly edge?: boolean
+  /** 状态流形态（cold / paged / idempotent / prefix-scan / replay-script）。 */
+  readonly flow?: string
+}
+
+export interface CaseSpec<In> {
+  readonly id: string
+  readonly meta: CaseMeta
+  /** 每次运行取一份新输入（纯函数约定：不得就地改输入）。 */
+  readonly build: () => In
+}
+
+export type PairFn<In, Out> = (input: In) => Out | Promise<Out>
+
+export type Domain =
+  | 'streaming-split'
+  | 'streaming-budget'
+
+export interface PairSpec<In, Out> {
+  /** wasm 出口名（与 `#[wasm_bindgen(js_name)]` 一致）。 */
+  readonly name: string
+  readonly domain: Domain
+  readonly ts: PairFn<In, Out>
+  readonly wasm: PairFn<In, Out>
+  /**
+   * 归一化（键序、包装结构对齐等）后进 stableJson 比对；缺省恒等。
+   * 键序本身不在迁移契约内（Rust serde Map 为字典序）。
+   */
+  readonly normalize?: (value: Out) => unknown
+  /** 已过审的两侧差异 case id（如高亮 js/go 引擎级残差）：报告为 known-diff 不算红。 */
+  readonly knownDivergences?: readonly string[]
+  readonly cases: readonly CaseSpec<In>[]
+}
+
+export interface Suite {
+  readonly domain: Domain
+  readonly pairs: readonly PairSpec<unknown, unknown>[]
+}
+
+// ── 归一化比对口径 ───────────────────────────────────────────────────────────
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/** 键序归一的 JSON 字符串（与 eventsComputeParity 的 stableJson 同一语义）。 */
+export function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (isRecord(value)) {
+    const entries = Object.keys(value)
+      .filter(key => value[key] !== undefined)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')
+    return `{${entries}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+
+/**
+ * 边界归一：把 serde_wasm_bindgen 编成 JS `Map` 的 BTreeMap 深转回普通对象。
+ *
+ * 口径依据 `pylon-markdown/src/wasm_exit.rs` 头注：旧产物把 `properties` 编成
+ * Map（`JSON.stringify` 得 `{}`），wasm 侧的在途修复是边界上就给普通对象；
+ * 本归一与其同语义，产物更新后是空操作。只影响比对口径，不改两侧实现。
+ */
+export function normalizeBoundaryMaps<T>(value: T): T {
+  if (value instanceof Map) {
+    return normalizeBoundaryMaps(Object.fromEntries(value)) as T
+  }
+  if (Array.isArray(value)) return value.map(item => normalizeBoundaryMaps(item)) as T
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) out[key] = normalizeBoundaryMaps(item)
+    return out as T
+  }
+  return value
+}
+
+function truncate(text: string, limit = 320): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}…(${text.length}B)`
+}
+
+// ── 维度过滤 ─────────────────────────────────────────────────────────────────
+
+export function includeCase(meta: CaseMeta, scale: Scale): boolean {
+  const caseScale = meta.scale ?? 'xs'
+  const rank: Record<Scale, number> = { xs: 0, s: 1, m: 2, l: 3 }
+  return rank[caseScale] <= rank[scale]
+}
+
+export function resolveScale(requested?: string): Scale {
+  if (requested === 'full' || requested === 'l') return 'l'
+  if (requested === 'xs' || requested === 's') return 's'
+  return 'm'
+}
+
+// ── parity 跑器 ──────────────────────────────────────────────────────────────
+
+export interface ParityRow {
+  readonly domain: Domain
+  readonly pair: string
+  readonly caseId: string
+  readonly meta: CaseMeta
+  readonly outcome: 'ok' | 'known-diff' | 'mismatch'
+  readonly detail?: string
+}
+
+function normalizeOut<Out>(pair: PairSpec<unknown, unknown>, value: Out): unknown {
+  return pair.normalize ? pair.normalize(value) : value
+}
+
+export async function runParity(
+  suites: readonly Suite[],
+  options: { scale: Scale } = { scale: resolveScale(process.env.COMPUTE_PARITY_SCALE) },
+): Promise<ParityRow[]> {
+  const rows: ParityRow[] = []
+  for (const suite of suites) {
+    for (const pair of suite.pairs) {
+      const known = new Set(pair.knownDivergences ?? [])
+      for (const scenario of pair.cases) {
+        if (!includeCase(scenario.meta, options.scale)) continue
+        const input = scenario.build()
+        const tsOut = normalizeOut(pair, await pair.ts(input))
+        const wasmOut = normalizeOut(pair, await pair.wasm(input))
+        const tsJson = stableJson(tsOut)
+        const wasmJson = stableJson(wasmOut)
+        if (tsJson === wasmJson) {
+          rows.push({ domain: suite.domain, pair: pair.name, caseId: scenario.id, meta: scenario.meta, outcome: 'ok' })
+          continue
+        }
+        if (known.has(scenario.id)) {
+          rows.push({
+            domain: suite.domain, pair: pair.name, caseId: scenario.id, meta: scenario.meta,
+            outcome: 'known-diff',
+            detail: `已过审差异：TS ${truncate(tsJson)} / wasm ${truncate(wasmJson)}`,
+          })
+          continue
+        }
+        rows.push({
+          domain: suite.domain, pair: pair.name, caseId: scenario.id, meta: scenario.meta,
+          outcome: 'mismatch',
+          detail: `TS(${tsJson.length}B) ${truncate(tsJson)}\n    wasm(${wasmJson.length}B) ${truncate(wasmJson)}`,
+        })
+      }
+    }
+  }
+  return rows
+}
+
+export function summarizeParity(rows: readonly ParityRow[]): string {
+  const ok = rows.filter(row => row.outcome === 'ok').length
+  const known = rows.filter(row => row.outcome === 'known-diff').length
+  const bad = rows.filter(row => row.outcome === 'mismatch')
+  const lines = [
+    `parity 断言 ${rows.length} 项：ok ${ok} / known-diff ${known} / mismatch ${bad.length}`,
+  ]
+  for (const row of bad) {
+    lines.push(`  ✗ [${row.domain}] ${row.pair} · ${row.caseId}（scale=${row.meta.scale ?? 'xs'}${row.meta.shape ? ` shape=${row.meta.shape}` : ''}${row.meta.edge ? ' edge' : ''}）`)
+    if (row.detail) lines.push(`    ${row.detail}`)
+  }
+  for (const row of rows.filter(item => item.outcome === 'known-diff')) {
+    lines.push(`  ~ [${row.domain}] ${row.pair} · ${row.caseId}：已过审差异`)
+  }
+  return lines.join('\n')
+}
+
+// ── 性能跑器 ─────────────────────────────────────────────────────────────────
+
+export interface BenchRow {
+  readonly domain: Domain
+  readonly pair: string
+  readonly caseId: string
+  readonly meta: CaseMeta
+  readonly tsMs: number
+  readonly wasmMs: number
+  /** <1 表示 wasm 更快。 */
+  readonly ratio: number
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right)
+  return sorted[Math.floor(sorted.length / 2)]!
+}
+
+export interface BenchOptions {
+  scale: Scale
+  /** 采样轮数（取中位数；不含两侧各 1 轮预热）。 */
+  rounds?: number
+}
+
+export async function runBench(
+  suites: readonly Suite[],
+  options: BenchOptions,
+): Promise<BenchRow[]> {
+  const rounds = options.rounds ?? 3
+  const rows: BenchRow[] = []
+  for (const suite of suites) {
+    for (const pair of suite.pairs) {
+      for (const scenario of pair.cases) {
+        if (!includeCase(scenario.meta, options.scale)) continue
+        const input = scenario.build()
+        // 预热各一轮：JIT / wasm 模块加载 / npm 引擎首载都算冷启动，不进样本。
+        await pair.ts(input)
+        await pair.wasm(input)
+        const tsSamples: number[] = []
+        const wasmSamples: number[] = []
+        for (let round = 0; round < rounds; round += 1) {
+          let started = performance.now()
+          await pair.ts(input)
+          tsSamples.push(performance.now() - started)
+          started = performance.now()
+          await pair.wasm(input)
+          wasmSamples.push(performance.now() - started)
+        }
+        const tsMs = median(tsSamples)
+        const wasmMs = median(wasmSamples)
+        rows.push({
+          domain: suite.domain, pair: pair.name, caseId: scenario.id, meta: scenario.meta,
+          tsMs, wasmMs, ratio: wasmMs / tsMs,
+        })
+      }
+    }
+  }
+  return rows
+}
+
+export function formatBenchTable(rows: readonly BenchRow[]): string {
+  const head = ['domain', 'pair', 'case', 'scale', 'ts(ms)', 'wasm(ms)', 'wasm/ts']
+  const body = rows.map(row => [
+    row.domain, row.pair, row.caseId, row.meta.scale ?? 'xs',
+    row.tsMs >= 100 ? row.tsMs.toFixed(0) : row.tsMs.toFixed(2),
+    row.wasmMs >= 100 ? row.wasmMs.toFixed(0) : row.wasmMs.toFixed(2),
+    row.ratio.toFixed(2),
+  ])
+  const widths = head.map((column, index) => Math.max(column.length, ...body.map(cells => cells[index]!.length)))
+  const line = (cells: readonly string[]) => cells.map((cell, index) => cell.padStart(index >= 4 ? widths[index]! : 0).padEnd(widths[index]!)).join('  ')
+  const separator = widths.map(width => '─'.repeat(width)).join('──')
+  return [line(head), separator, ...body.map(cells => line(cells))].join('\n')
+}
+
+// ── 内存跑器 ─────────────────────────────────────────────────────────────────
+//
+// 「不算内存的 benchmark 只做了一半」——wasm 计算核的线性内存只增不减（没有归还
+// 系统的路径），一次大输入的峰值会永久留在核里，这是速度表看不见的成本。
+//
+// 三类读数，各自解决「可信度」的不同问题：
+//
+// 1. **结果字节数**（`resultBytes`）：两侧返回值 `stableJson` 后的长度。**确定性**，
+//    与 GC 无关，直接解释「一次调用在边界上制造了多少 JS 垃圾」——比值也因此可复现。
+// 2. **核线性内存**（`computeLinearBytes` / `markdownLinearBytes`）：`WebAssembly.Memory`
+//    的 `buffer.byteLength`。同样与 GC 无关，且就是计算核自身的占用——它只会随高水位
+//    上涨，所以这里量的是「跑过这个 case 之后核永久变大多少」。
+// 3. **宿主保留增量**（`tsRetainedBytes` / `wasmRetainedBytes`）：调用前后的
+//    `retained()` 差。有 `globalThis.gc`（`node --expose-gc`）时精确；没有时**是上限**
+//    （含尚未回收的垃圾），输出里会点明 `gc=` 状态，不要把上限当精确值读。
+//
+// harness 不 import `node:*`：探针由入口注入（与产品源码「不耦合 node」同一条纪律）。
+
+/** 宿主内存探针（由跑器注入）。 */
+export interface MemoryProbe {
+  /** 当前宿主保留字节数（heapUsed + external + arrayBuffers 口径由实现决定）。 */
+  retained(): number
+  /** 尽力回收；无 GC 时为空操作。 */
+  collect(): void
+  /** 是否真的能强制回收（决定 `*RetainedBytes` 是精确值还是上限）。 */
+  readonly canCollect: boolean
+  /** 各计算核的线性内存字节数（key = 产物名，如 `pylon-compute`）。 */
+  linearMemory(): Record<string, number>
+}
+
+export interface MemoryRow {
+  readonly domain: Domain
+  readonly pair: string
+  readonly caseId: string
+  readonly meta: CaseMeta
+  /** 两侧返回值键序归一后的字节数。 */
+  readonly tsResultBytes: number
+  readonly wasmResultBytes: number
+  /** 计算核线性内存增量（跨整轮，含预热）。 */
+  readonly linearDeltaBytes: number
+  /** 单个计算核的线性内存高水位（跑完本 case 后）。 */
+  readonly linearHighWaterBytes: number
+  /** 单次调用的宿主保留增量；无 GC 时是上限。 */
+  readonly tsRetainedBytes: number
+  readonly wasmRetainedBytes: number
+}
+
+export interface MemoryOptions {
+  scale: Scale
+  probe: MemoryProbe
+  /** 计入保留增量的重复次数（取平均，压单次抖动）。 */
+  repeats?: number
+}
+
+/**
+ * 一个 case 的内存读数。
+ *
+ * 顺序有意如此：先两侧各跑一遍（预热 + 拿结果），**在这一次调用前后量核线性内存**
+ * ——线性内存是只涨不跌的**高水位**，重复调用不会让它再涨，所以「本 case 让核永久长高
+ * 多少」只能由一次调用给出；若把它放在 repeats 循环两侧量，读到的是「跑 N 次之后涨了
+ * 多少」，既不是单次成本、也不是峰值（两者在 allocator 复用后会重合，混在一起读不出东西）。
+ * 保留增量则相反：需要多次取平均压抖动，且每次都先 `collect()`。
+ */
+export async function runMemory(
+  suites: readonly Suite[],
+  options: MemoryOptions,
+): Promise<MemoryRow[]> {
+  const { probe } = options
+  const repeats = options.repeats ?? 8
+  const rows: MemoryRow[] = []
+  for (const suite of suites) {
+    for (const pair of suite.pairs) {
+      for (const scenario of pair.cases) {
+        if (!includeCase(scenario.meta, options.scale)) continue
+        const input = scenario.build()
+        // 预热：JIT / wasm 装载 / 引擎首载都算冷启动，不计入保留增量。
+        const tsWarm = await pair.ts(input)
+        const wasmWarm = await pair.wasm(input)
+        const tsResultBytes = stableJson(normalizeOut(pair, tsWarm)).length
+        const wasmResultBytes = stableJson(normalizeOut(pair, wasmWarm)).length
+
+        // 单次调用的线性内存增量 = 本 case 把核的高水位抬高了多少（高水位不回落）。
+        const linearBefore = sumLinear(probe.linearMemory())
+        await pair.wasm(input)
+        const linearAfterSingle = sumLinear(probe.linearMemory())
+
+        probe.collect()
+        const tsBaseline = probe.retained()
+        for (let index = 0; index < repeats; index += 1) await pair.ts(input)
+        probe.collect()
+        const tsRetained = (probe.retained() - tsBaseline) / repeats
+
+        probe.collect()
+        const wasmBaseline = probe.retained()
+        for (let index = 0; index < repeats; index += 1) await pair.wasm(input)
+        probe.collect()
+        const wasmRetained = (probe.retained() - wasmBaseline) / repeats
+
+        rows.push({
+          domain: suite.domain,
+          pair: pair.name,
+          caseId: scenario.id,
+          meta: scenario.meta,
+          tsResultBytes,
+          wasmResultBytes,
+          linearDeltaBytes: linearAfterSingle - linearBefore,
+          linearHighWaterBytes: sumLinear(probe.linearMemory()),
+          tsRetainedBytes: tsRetained,
+          wasmRetainedBytes: wasmRetained,
+        })
+      }
+    }
+  }
+  return rows
+}
+
+function sumLinear(linear: Record<string, number>): number {
+  let total = 0
+  for (const value of Object.values(linear)) total += value
+  return total
+}
+
+/** KiB 显示；≥1MiB 用 MiB，便于扫表。 */
+function bytes(value: number): string {
+  const abs = Math.abs(value)
+  if (abs >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)}M`
+  return `${(value / 1024).toFixed(1)}K`
+}
+
+export function formatMemoryTable(rows: readonly MemoryRow[], probe: MemoryProbe): string {
+  const head = ['domain', 'pair', 'case', 'scale', 'ts结果', 'wasm结果', '结果比', '核线性Δ', '核高水位', 'wasm保留/次', 'ts保留/次', '保留比']
+  const body = rows.map(row => [
+    row.domain, row.pair, row.caseId, row.meta.scale ?? 'xs',
+    bytes(row.tsResultBytes), bytes(row.wasmResultBytes),
+    row.tsResultBytes === 0 ? '—' : (row.wasmResultBytes / row.tsResultBytes).toFixed(2),
+    bytes(row.linearDeltaBytes), bytes(row.linearHighWaterBytes),
+    bytes(row.wasmRetainedBytes), bytes(row.tsRetainedBytes),
+    row.tsRetainedBytes <= 1 ? '—' : (row.wasmRetainedBytes / row.tsRetainedBytes).toFixed(2),
+  ])
+  const widths = head.map((column, index) => Math.max(column.length, ...body.map(cells => cells[index]!.length)))
+  const line = (cells: readonly string[]) => cells.map((cell, index) => cell.padEnd(widths[index]!)).join('  ')
+  const separator = widths.map(width => '─'.repeat(width)).join('──')
+  const header = `保留增量口径：${probe.canCollect ? '已强制 GC（精确）' : '无 --expose-gc，读作上限'}` +
+    '；「保留比」<1 表示 wasm 路径每次调用留下的宿主内存更少'
+  return [header, line(head), separator, ...body.map(cells => line(cells))].join('\n')
+}
+
+/**
+ * 分域汇总。**「本域核增长」用 `linearDeltaBytes` 求和**，不是 `linearHighWaterBytes`
+ * ——后者是只涨不跌的累计高水位，按域读会变成「越靠后的域越大」的假象。
+ */
+export function summarizeMemory(rows: readonly MemoryRow[]): string {
+  const byDomain = new Map<string, MemoryRow[]>()
+  for (const row of rows) {
+    const list = byDomain.get(row.domain) ?? []
+    list.push(row)
+    byDomain.set(row.domain, list)
+  }
+  const lines = ['分域内存小结（结果字节比中位 / 本域核线性内存增长 / 保留比中位）']
+  for (const [domain, list] of byDomain) {
+    const resultRatios = list.filter(row => row.tsResultBytes > 0).map(row => row.wasmResultBytes / row.tsResultBytes).sort((a, b) => a - b)
+    const retainedRatios = list.filter(row => row.tsRetainedBytes > 1).map(row => row.wasmRetainedBytes / row.tsRetainedBytes).sort((a, b) => a - b)
+    const growth = list.reduce((total, row) => total + row.linearDeltaBytes, 0)
+    const pick = (values: number[]): string => (values.length === 0 ? '—' : values[Math.floor(values.length / 2)]!.toFixed(2))
+    lines.push(`  ${domain.padEnd(18)} 结果 ${pick(resultRatios).padStart(6)} / 核增长 ${bytes(growth).padStart(9)} / 保留 ${pick(retainedRatios).padStart(6)}`)
+  }
+  return lines.join('\n')
+}

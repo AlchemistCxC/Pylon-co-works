@@ -104,6 +104,10 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 本项目已经开始转换部分css为Tailwind v4
 - 涉及到对存量已有CSS进行修改时，建议使用Tailwind CSS进行替换（过于复杂的可以继续使用）
 - 新增CSS时请区分类型，涉及到：布局，响应式断点，状态变体，一致性token时优先使用Tailwind CSS，若涉及复杂样式，组件时使用原生CSS
+
+### §6.2 注释规范
+
+本项目存在大量存量注释，部分注释说法已过期，为了避免误导后来者，请在工作时顺手清理可确认的过时注释（尤其是你在review时以及正在进行契约变更型任务）
  
 ## §7 修订
 

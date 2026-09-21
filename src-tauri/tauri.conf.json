@@ -24,7 +24,7 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "connect-src": "ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost",
         "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http:",
         "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost",
         "script-src": "'self' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost",
@@ -32,7 +32,7 @@
       },
       "devCsp": {
         "default-src": "'self' asset: http://localhost:5173",
-        "connect-src": "ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost ws://localhost:5173 http://localhost:5173",
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost ws://localhost:5173 http://localhost:5173",
         "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http: http://localhost:5173",
         "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",
         "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",

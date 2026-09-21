@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { findLastStableBlockBoundary, splitOpenCodeFenceTail, splitStreamingMarkdown } from '../streamingMarkdownSplit.ts'
+// TS 基线（streamingMarkdownSplit.ts）已随 #220 切流退役：以下断言逐条保留，
+// 被测对象换成 wasm 出口（`src-tauri/pylon-compute` 的 split.rs，宿主单测与
+// parity 门禁钉同一契约）。
+import { findLastStableBlockBoundary, splitOpenCodeFenceTail, splitStreamingMarkdown } from '../../../../infrastructure/compute/streamingCompute.ts'
 
 describe('findLastStableBlockBoundary / splitStreamingMarkdown', () => {
   it('单段文本：尾部即不稳定区，stable 为空', () => {

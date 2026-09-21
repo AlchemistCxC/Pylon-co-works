@@ -668,45 +668,26 @@ fn normalize_kernel_event(
     let status = update
         .and_then(|value| value.get("status"))
         .and_then(serde_json::Value::as_str);
-    let event_type = match session_update {
-        Some("user_message_chunk") => "user.message",
-        Some("agent_message_chunk") => "assistant.text.delta",
-        Some("agent_thought_chunk") => "assistant.thinking.delta",
-        Some("tool_call") => "tool.call.started",
-        Some("tool_call_update") if status == Some("completed") => "tool.call.completed",
-        Some("tool_call_update") if matches!(status, Some("failed" | "error")) => {
-            "tool.call.failed"
-        }
-        Some("tool_call_update") => "tool.call.updated",
-        Some("done") => "turn.completed",
-        Some("error") => "turn.failed",
-        // Cancellation is a terminal turn failure with an explicit reason;
-        // keep one canonical failure family instead of inventing a second
-        // terminal event type that the semantic bridge cannot consume.
-        Some("cancelled") => "turn.failed",
-        Some("usage_update") => "usage.updated",
-        Some("plan") => "plan.replaced",
-        Some("current_mode_update") => "session.mode-updated",
-        Some("session_info_update") => "session.model-updated",
-        Some("config_option_update") => "session.config-updated",
-        Some("available_commands_update") => "session.commands-updated",
-        // #110 F7：`unknown` 归因。原先只落一个 "unknown" 死账——体检时 830 行
-        // unknown 无法从库内归因，只能逐条反查 raw。现在把未识别的判别符与 update
-        // 键集合打点，新形状一出现即可定位；raw 仍按 §5.10 原则 5 完整保留
-        // （unknown 不静默丢弃，也不改写历史行）。
-        _ => {
-            tracing::warn!(
-                target: "canonical_event",
-                owner = %owner_key,
-                discriminator = session_update.unwrap_or("<missing-update>"),
-                update_keys = %update
-                    .map(|map| map.keys().cloned().collect::<Vec<_>>().join(","))
-                    .unwrap_or_default(),
-                "unrecognized session/update discriminator: event recorded as 'unknown' with raw preserved"
-            );
-            "unknown"
-        }
-    };
+    // #220 WP1：判别符 → canonical 类型的映射是**同一个事实的两处手抄**（此处与 TS
+    // `canonicalEventTypeFor`），现由 `pylon-canonical-types` 单源给出；本函数不再自带
+    // switch（含过时即编译不过的口径）。
+    let canonical_type = pylon_canonical_types::canonical_event_type_for(session_update, status);
+    let event_type = canonical_type.as_str();
+    // #110 F7：`unknown` 归因。原先只落一个 "unknown" 死账——体检时 830 行
+    // unknown 无法从库内归因，只能逐条反查 raw。现在把未识别的判别符与 update
+    // 键集合打点，新形状一出现即可定位；raw 仍按 §5.10 原则 5 完整保留
+    // （unknown 不静默丢弃，也不改写历史行）。
+    if canonical_type.is_unknown() {
+        tracing::warn!(
+            target: "canonical_event",
+            owner = %owner_key,
+            discriminator = session_update.unwrap_or("<missing-update>"),
+            update_keys = %update
+                .map(|map| map.keys().cloned().collect::<Vec<_>>().join(","))
+                .unwrap_or_default(),
+            "unrecognized session/update discriminator: event recorded as 'unknown' with raw preserved"
+        );
+    }
 
     let mut typed_payload = serde_json::Map::new();
     if let Some(update) = update {
@@ -817,7 +798,7 @@ fn normalize_kernel_event(
         raw_omitted_bytes,
     ) = retain_raw_payload(raw_for_storage);
     Ok(CanonicalEventRow {
-        event_id: format!("{owner_key}#{sequence}"),
+        event_id: pylon_canonical_types::canonical_event_id(&owner_key, sequence),
         owner_key,
         profile_id: input.owner.profile_id,
         agent_id: input.owner.agent_id,
@@ -962,10 +943,12 @@ pub(crate) fn parse_canonical_event(
     let agent_id = agent_id.expect("checked");
     let local_session_id = local_session_id.expect("checked");
     // owner_key = JSON 数组序列化（禁冒号拼接——source 可含冒号，与 toCanonicalOwnerKey 同纪律）。
-    let owner_key = serde_json::to_string(&[&profile_id, &agent_id, &local_session_id])
-        .map_err(|e| EventError::Invalid(format!("owner_key 序列化失败: {e}")))?;
+    let owner_key =
+        pylon_canonical_types::canonical_owner_key(&profile_id, &agent_id, &local_session_id)
+            .map_err(|e| EventError::Invalid(format!("owner_key 序列化失败: {e}")))?;
     // rule 1：event_id = owner_key#sequence 确定性推导（禁 content 哈希）。
-    let expected_id = format!("{owner_key}#{}", sequence.expect("checked"));
+    let expected_id =
+        pylon_canonical_types::canonical_event_id(&owner_key, sequence.expect("checked"));
     if event_id != expected_id {
         return Err(EventError::Invalid(format!(
             "eventId 与 owner+sequence 推导不一致: 期望 {expected_id}，实际 {event_id}"
@@ -1312,7 +1295,7 @@ fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredCanonicalEve
     ) = derive_raw_metadata(&raw);
     Ok(StoredCanonicalEventRow {
         event: CanonicalEventRow {
-            event_id: format!("{owner_key}#{sequence}"),
+            event_id: pylon_canonical_types::canonical_event_id(&owner_key, sequence),
             owner_key,
             profile_id,
             agent_id,

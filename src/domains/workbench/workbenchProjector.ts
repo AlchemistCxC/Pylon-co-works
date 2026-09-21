@@ -1,9 +1,22 @@
 /**
- * A04：唯一 Workbench projector。
+ * A04：唯一 Workbench projector（**TS 活实现**）。
  *
- * 这是一个 deep pure module：输入已经归一化、带 sequence 的 semantic envelope，
- * 输出可丢弃的 WorkbenchDocument。它不读取时钟、store、registry 或 IO；live、
- * restart、recovery 只要喂给同一组 envelopes，就得到同一份 document。
+ * 2026-09-21：投影折叠自 Rust/WASM **回退**到本文件（判决与依据见 ADR-0018 的 scope
+ * 修订）。回退理由是基准数据，不是口味：
+ * - 速度：wasm 投影在现实入口（mixed flow）只有 1.12×、页级 2.08→1.92×，而合成 delta
+ *   形 6.75× 的根因是 Rust 折叠本体比 TS 整条管线慢数倍/事件（数据模型问题，非边界问题）；
+ * - 内存：文档必须在计算核里与 JS 里**各存一份**，同 workload 持有成本实测 4.4–6.1×，
+ *   且任何微优化都碰不到它（结构成本）。
+ * 合计是负收益，故回退。回退后：**文档只有一份**，没有「核就绪」这回事，也没有跨语言
+ * 编组/线性内存高水位。
+ *
+ * 保留 wasm 的只有 markdown 解析/高亮与流式切分/揭示——那两块在同形状对照里是赢的
+ * （markdown 流式形 12–25×、切分大输入 2–3×）。
+ *
+ * 本文件是**读层 + 折叠层**：输入已归一化、带 sequence 的 semantic envelope，输出可丢弃的
+ * WorkbenchDocument；不读时钟、store、registry 或 IO——live、restart、recovery 只要喂同一组
+ * envelopes 就得到同一份 document。文档内的键序契约（`appliedRanges` 的逐字节 JSON 比较、
+ * 渲染层浅比较依赖的引用稳定）在本实现下天然成立。
  */
 import { coalesceAdjacentDisplayTextParts, coalesceAdjacentReasoningParts, createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'

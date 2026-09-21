@@ -1,0 +1,40 @@
+[package]
+name = "pylon-compute"
+version = "0.2.4-Rev"
+edition = "2021"
+description = "Pylon 前端计算核（Rust/WASM）——issue #220"
+publish = false
+
+# cdylib：wasm-pack 打包的产物形态；rlib：让同一份纯逻辑能在宿主目标上跑原生
+# 单测与 property test（D1/D2 计量与切分不变量用原生测试跑，比 wasm 里快得多）。
+# wasm-bindgen 在非 wasm 目标上照常编译，因此宿主构建不会成为障碍。
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+# #220 WP3：D2（揭示计量按 UTF-16 单位且不劈字素）的命门。Rust 字符串是 UTF-8，
+# 而契约按 UTF-16 计量；`unicode-segmentation` 是 UAX#29 的参考实现，用来保证
+# 切分点不落在字素内部（emoji ZWJ、regional indicator 等边角）。
+unicode-segmentation = "1"
+
+# wasm-opt 的特性开关必须与 rustc 实际发射的指令对齐。
+# rustc 1.82 起为 wasm32-unknown-unknown 默认打开 bulk-memory / nontrapping-fptoint /
+# multivalue / reference-types 等特性；wasm-pack 0.14.0 捆绑的 wasm-opt 是 binaryen 117
+# （2023 年），默认特性集比 rustc 旧，于是 `-O` 直接验证失败：
+#   [wasm-validator error] Bulk memory operations require bulk memory [--enable-bulk-memory]
+# 显式打开这些特性即可（未用到的开关是无害的）。若将来 rustc 再开启新默认特性，
+# 这里要同步补开关——症状与上面这行完全一致。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-O",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--enable-multivalue",
+    "--enable-reference-types",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+    "--enable-extended-const",
+]

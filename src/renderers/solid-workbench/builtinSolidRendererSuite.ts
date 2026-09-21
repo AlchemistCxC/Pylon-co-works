@@ -2,6 +2,7 @@ import type { RendererSlotContribution, RendererSuiteContribution } from '../../
 import type { RenderAppearanceSnapshot, RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
 import type { RendererPrepareContext, WorkbenchHostPort, WorkbenchMountInput, WorkbenchRendererFactory, WorkbenchRendererInstance } from './workbenchContracts.ts'
 import { loadSolidWorkbench } from './loadSolidWorkbench.ts'
+import { whenStreamingComputeReady } from '../../infrastructure/compute/streamingCompute.ts'
 import { loadBuiltinSolidContentSlot } from './loadBuiltinSolidContentSlot.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS, SHARED_TOOL_SETTINGS_SCHEMA } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
@@ -108,6 +109,11 @@ function createBuiltinSolidContentSurface(): RenderSurface {
 const factory: WorkbenchRendererFactory = Object.freeze({
   async prepare(context: RendererPrepareContext) {
     const module = await loadSolidWorkbench()
+    // #220：流式文本计算核在**浏览器**宿主是异步初始化的（Node/vitest 在模块导入时
+    // 同步完成）。切分与揭示引擎的调用点都是同步上下文（Solid memo、rAF 回调），
+    // 就绪前调用会显式报错而不是静默降级——因此必须在首次渲染前等它。
+    // `prepare` 是宿主给的异步前置，落这里最合适，且不会把 `mount` 变成异步。
+    await whenStreamingComputeReady()
     return {
       mount(container: HTMLElement, input: WorkbenchMountInput, host: WorkbenchHostPort): WorkbenchRendererInstance {
         return module.mountSolidWorkbenchFromHostPort({ host: container, input, hostPort: host, activation: context.activation })

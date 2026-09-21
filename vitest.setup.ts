@@ -1,5 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 
+// #220：计算核在测试宿主里必须**同步**可用（切分、揭示引擎、投影折叠的调用点全是
+// 同步上下文），所以在任何测试文件求值前预初始化 wasm。node:* 只出现在 scripts/
+// 侧（tsconfig 的 include 不含它），产品源码里不出现——那是这次重构要消除的耦合。
+import { preloadComputeWasm } from './scripts/wasmPreload.ts'
+
+preloadComputeWasm()
+
 // 组件测试（jsdom）所需的最小浏览器 API 垫片
 import { afterAll, afterEach, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'

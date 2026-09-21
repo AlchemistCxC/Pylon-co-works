@@ -1,0 +1,45 @@
+[package]
+name = "pylon-markdown"
+version = "0.2.4-Rev"
+edition = "2021"
+description = "Pylon markdown 引擎与代码高亮（Rust/WASM）——issue #220 WP4"
+publish = false
+
+# cdylib 供 wasm-pack 打包；rlib 让同一份逻辑在宿主跑原生单测。
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+# comrak 必须关默认特性：0.55 的 default = ["cli", "syntect-onig", "bon"]，其中
+# syntect-onig 会把 syntect 的 onig（C 依赖）拖进依赖图，wasm 目标直接编译失败
+# （wasm-pack 冒烟实测 cc-rs 找不到 clang）。本 crate 不用 comrak 的 CLI / bon /
+# syntect 适配器——高亮由下面这份 syntect(default-fancy) 负责，正则后端走纯 Rust
+# 的 fancy-regex，wasm 目标零 C 依赖。
+comrak = { version = "0.55.0", default-features = false }
+# 同理：syntect 禁默认特性，切 fancy-regex 后端。
+# 特性逐项列出而非用 default-fancy：default-fancy 连带 default-syntaxes /
+# default-themes（把 syntect 内置的整套 Sublime 语法/主题 dump 嵌进二进制），
+# 而本 crate 用的是 vendored 的 starry-night 同款 tmLanguage（见 highlight.rs
+# GRAMMAR_ASSETS），主题层在 src/theme.rs 自己实现——两份默认资产都不要，否则
+# wasm 平白多出上百 KB。parsing 已内含 dump-load/dump-create（bincode/flate2）。
+# yaml-load 供 SyntaxDefinition::load_from_str 解析内存里的 sublime-syntax。
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy", "yaml-load"] }
+
+# wasm-opt 的特性开关必须与 rustc 实际发射的指令对齐（WP1 的教训，见
+# pylon-compute/Cargo.toml 同名段落）：rustc 1.82 起为 wasm32-unknown-unknown 默认
+# 打开 bulk-memory 等特性，wasm-pack 0.14 捆绑的旧 wasm-opt 默认特性集更旧，
+# `-O` 直接验证失败（本 crate 冒烟实测同一症状），显式打开即可。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-O",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--enable-multivalue",
+    "--enable-reference-types",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+]

@@ -1,3 +1,14 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// 【冻结基线】迁移前的 TS 流式 markdown 切分引擎（issue #220 WP3）。
+//
+// 出处：`git show 76cbc819^:src/renderers/solid-workbench/chat/streamingMarkdownSplit.ts`
+//（该文件在 76cbc819「切流并删除旧实现」中被整文件删除）。
+// 仅服务 `scripts/compute-parity/` 脚手架的 TS↔wasm 对照，**不在任何生产路径**。
+// **不要修改本文件的实现逻辑**——它的价值在于忠实代表迁移前行为；
+// 要修切分逻辑请改 Rust 计算核（src-tauri/pylon-compute/src/streaming/split.rs）。
+// 原文件无任何 import，逐字节原样取出（仅加本头注）。
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * streamingMarkdownSplit — 流式 markdown 增量渲染的稳定/不稳定切分（纯函数）。
  *

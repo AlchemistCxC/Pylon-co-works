@@ -121,7 +121,7 @@ describe('bootstrapApplication', () => {
     }
     const pending = bootstrapApplication(deps)
     // I14-W6：hydrateDomains 可为 async，bootstrap 经 await——fetchAgents 在下一
-    // 微任务才被调用；先让出当前微任务再 resolve，保持"fetch resolve 前已取消"语义
+    // 微任务才被调用；先让出当前微任务再 resolve，保持"fetch resolve 前已取消"语义。
     await Promise.resolve()
     resolveFetch([{ id: 'peri', name: 'Peri' }])
     expect(await pending).toBe('cancelled')

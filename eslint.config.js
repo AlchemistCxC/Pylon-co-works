@@ -5,7 +5,9 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-solid-smoke', 'node_modules', 'src-tauri'] },
+  // src/wasm：wasm-pack 生成物（glue JS + d.ts），参数名是 Rust 的 snake_case，
+  // 与本仓 naming-convention 无关；它与 dist/ 同类，属构建产物，不参与 lint。
+  { ignores: ['dist', 'dist-solid-smoke', 'node_modules', 'src-tauri', 'src/wasm'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
