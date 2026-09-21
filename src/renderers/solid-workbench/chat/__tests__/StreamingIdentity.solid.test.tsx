@@ -12,7 +12,11 @@ import { MarkdownContent } from '../MarkdownContent.solid.tsx'
  *
  * 注意：waitFor 回调返回 null 会直接 resolve(null)（不轮询），
  * 必须以 throw 表达"未就绪"。
+ * 预算依据：等待对象是 MarkdownContent 的 createResource 解析与 Solid 调度器
+ * 刷帧（微任务级，常态 <50ms）；2s 是满载并发下的调度抖动余量（#175
+ * maxWorkers=50% 已消除 paging 冻结根因），原 5s 是 P91 retry 退役期的粗放放宽。
  */
+const FLUSH_BUDGET = { timeout: 2_000 }
 describe('C00 streaming root identity (1000 chunks)', () => {
   it('keeps stable heading identity across 1000 tail appends', async () => {
     // 初始即含一个已完成块边界；此后 1000 chunk 全部落在 unstable 尾块内
@@ -23,7 +27,7 @@ describe('C00 streaming root identity (1000 chunks)', () => {
       const found = result.container.querySelector('h1')
       if (!found) throw new Error('h1 not mounted yet')
       return found
-    }, { timeout: 5000 })
+    }, FLUSH_BUDGET)
     expect(headingBefore.textContent).toBe('稳定标题')
 
     for (let i = 0; i < 1000; i += 1) {
@@ -32,7 +36,7 @@ describe('C00 streaming root identity (1000 chunks)', () => {
 
     await waitFor(() => {
       if (!result.container.textContent?.includes('chunk-999')) throw new Error('tail not flushed')
-    }, { timeout: 5000 })
+    }, FLUSH_BUDGET)
     const headingAfter = result.container.querySelector('h1')!
     // stable 段 DOM 身份不变——1000 chunk 零 remount
     expect(headingAfter).toBe(headingBefore)
@@ -45,13 +49,13 @@ describe('C00 streaming root identity (1000 chunks)', () => {
       const found = result.container.querySelector('.term-plain-text')
       if (!found) throw new Error('paragraph not mounted yet')
       return found
-    }, { timeout: 5000 })
+    }, FLUSH_BUDGET)
     for (let i = 0; i < 1000; i += 1) {
       setText(current => `${current} 第${i}句`)
     }
     await waitFor(() => {
       if (!result.container.textContent?.includes('第999句')) throw new Error('tail not flushed')
-    }, { timeout: 5000 })
+    }, FLUSH_BUDGET)
     const paragraphAfter = result.container.querySelector('.term-plain-text')!
     expect(paragraphAfter).toBe(paragraphBefore)
   })

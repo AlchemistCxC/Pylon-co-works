@@ -203,7 +203,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(projectWorkbench([...startedEvents, completion]).document, {
       ownerKey: 'owner-preview', generation: 1,
     })
-    await waitFor(() => expect(screen.getByRole('status', { name: '工具：读取文件，已完成' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('status', { name: '工具：读取文件，已完成' })).toBeInTheDocument())
     expect(host.querySelector('[data-activity-id="tool-between"]')).toBe(tool)
     expect(tool.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(host.querySelectorAll('[data-activity-id="tool-between"]')).toHaveLength(1)
@@ -297,7 +297,7 @@ describe('mountSolidWorkbench', () => {
       fireEvent.wheel(viewport, { deltaY: -100 })
       model.top = 100
       fireEvent.scroll(viewport)
-      expect(await screen.findByRole('button', { name: '回到底部' })).toBeTruthy()
+      expect(await screen.findByRole('button', { name: '回到底部' })).toBeInTheDocument()
       scrollIntoView.mockClear()
 
       services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '用户上滚后的新输出', time: '10:00', running: true }] })
@@ -310,7 +310,7 @@ describe('mountSolidWorkbench', () => {
       expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
       // The rail action remains available as an explicit endpoint control after
       // follow mode is restored; subsequent output should auto-follow again.
-      expect(screen.getByRole('button', { name: '回到底部' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '回到底部' })).toBeInTheDocument()
 
       scrollIntoView.mockClear()
       scrollTo.mockClear()
@@ -1148,12 +1148,14 @@ describe('mountSolidWorkbench', () => {
   it('挂载完整 fixture shell，复用 Message/Tool/Task/Generation renderer', async () => {
     const { host } = mountPreview()
 
-    expect(screen.getByLabelText('Solid Agent Workbench')).toBeTruthy()
+    expect(screen.getByLabelText('Solid Agent Workbench')).toBeInTheDocument()
     expect(host.querySelector('[data-renderer="solid"]')?.getAttribute('data-preview')).toBe('true')
-    expect(await screen.findByRole('heading', { name: '迁移结果' }, { timeout: 5_000 })).toBeTruthy()
-    expect(screen.getByText('Read')).toBeTruthy()
-    expect(host.querySelector('.task-tree')).toBeTruthy()
-    expect(host.querySelector('.term-spinner')).toBeTruthy()
+    // 预算依据：等待对象是 fixture shell 动态 import + 首帧渲染（ms 级）；2s 覆盖
+    // 满载并发抖动，原 5s 是 P91 期粗放放宽（#175 已消除满载 paging 根因）。
+    expect(await screen.findByRole('heading', { name: '迁移结果' }, { timeout: 2_000 })).toBeInTheDocument()
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(host.querySelector('.task-tree')).toBeInTheDocument()
+    expect(host.querySelector('.term-spinner')).toBeInTheDocument()
     expect(host.querySelector('.control-center')?.getAttribute('data-control-center')).toBe('production')
     expect(host.querySelector('.pet-companion')?.getAttribute('data-fixture')).toBe('pending')
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
@@ -1169,7 +1171,7 @@ describe('mountSolidWorkbench', () => {
     // 2026-09-15：模型/思考强度/权限/用量四控件常态显示；其余旧状态控件在活跃会话里仍然收起。
     expect([...row.querySelectorAll('[data-widget-id]')]
       .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens'])
-    expect(row.querySelector('.cc-widget-separator')).toBeTruthy()
+    expect(row.querySelector('.cc-widget-separator')).toBeInTheDocument()
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {
@@ -1184,7 +1186,7 @@ describe('mountSolidWorkbench', () => {
       rightInset: 80,
     })
 
-    await waitFor(() => expect(screen.getByText('历史回放 · 只读')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('历史回放 · 只读')).toBeInTheDocument())
     expect(host.firstElementChild).toBe(root)
     expect(host.querySelector('.control-center')).toBeNull()
     expect(host.firstElementChild?.getAttribute('style')).toContain('--right-panel-inset: 80px')
@@ -1194,16 +1196,16 @@ describe('mountSolidWorkbench', () => {
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveAttribute('data-control-center', 'production')
-    expect(screen.getByRole('img', { name: 'Pylon Agent' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'Pylon Agent' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
-    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '开始新会话' })).toBeNull()
     expect(screen.queryByRole('button', { name: '添加附件' })).toBeNull()
     expect(screen.queryByLabelText('输入快捷键提示')).toBeNull()
     expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.querySelectorAll('.input-textarea')).toHaveLength(1)
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, replayReadonly: false })
-    await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).toBeInTheDocument())
     expect(host.querySelector('.control-center')).toBe(emptyState)
     expect(host.firstElementChild).toBe(root)
   })
@@ -1310,7 +1312,7 @@ describe('mountSolidWorkbench', () => {
     // 乙：空态只留输入栏；发送按钮（注册轨）与四个状态控件都不渲染
     expect([...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))).toEqual(['input'])
     expect(emptyState.querySelector('.cc-send-button')).toBeNull()
-    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '消息输入' })).toBeInTheDocument()
     // 戊：状态行三个槽位无任何控件（容器折叠的前提；实机高度实测见报告）
     expect(emptyState.querySelectorAll('.cc-status-secondary > *, .cc-status-primary > *, .cc-actions > *')).toHaveLength(0)
     expect(host.querySelector('.cc-widget-separator')).toBeNull()
@@ -1484,7 +1486,7 @@ describe('mountSolidWorkbench', () => {
     })
     const brand = host.querySelector<HTMLElement>('.solid-workbench-empty-brand')!
     const mark = brand.querySelector<SVGSVGElement>('.pylon-mark')!
-    expect(viewport.closest('[data-chat-viewport="empty"]')).toBeTruthy()
+    expect(viewport.closest('[data-chat-viewport="empty"]')).toBeInTheDocument()
     expect(brand).toHaveClass('agent-empty-state')
     expect(mark).toHaveAttribute('viewBox', '0 0 64 64')
     expect(mark.querySelector('.pylon-mark-frame')).toHaveAttribute('d', 'M32 7 53 19v26L32 57 11 45V19Z')
@@ -1498,7 +1500,7 @@ describe('mountSolidWorkbench', () => {
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true })
     const modelTrigger = await screen.findByRole('button', { name: /deepseek-v4-flash/ })
     fireEvent.click(modelTrigger)
-    expect(screen.getByRole('listbox', { name: '模型列表' })).toBeTruthy()
+    expect(screen.getByRole('listbox', { name: '模型列表' })).toBeInTheDocument()
 
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'created-session', preview: true })
     services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
@@ -1540,12 +1542,12 @@ describe('mountSolidWorkbench', () => {
     services.runtime.update({ messages: [{ id: 'm-paused', role: 'assistant', sender: 'peri', content: '暂停期间的新文本', time: '10:00', running: true }], tokenCount: 99 })
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-    expect(host.querySelector('[data-paused="true"]')).toBeTruthy()
+    expect(host.querySelector('[data-paused="true"]')).toBeInTheDocument()
     expect(screen.queryByText('暂停期间的新文本')).toBeNull()
 
     lifecycle.resume()
-    await waitFor(() => expect(screen.getByText('暂停期间的新文本')).toBeTruthy())
-    expect(host.querySelector('[data-paused="false"]')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('暂停期间的新文本')).toBeInTheDocument())
+    expect(host.querySelector('[data-paused="false"]')).toBeInTheDocument()
   })
 
   it('preview 不暴露真实停止按钮，destroy 幂等并清空 DOM', () => {
@@ -1565,7 +1567,7 @@ describe('mountSolidWorkbench', () => {
     theme.inputSubmitButtonMode = 'inline'
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
     expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
@@ -1575,12 +1577,12 @@ describe('mountSolidWorkbench', () => {
     theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     // 刀4：legacy `send` 已从名单删除（0 残留守卫）
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
     // 2026-09-14：模型控件常态显示，且遵循 placements 权威 —— 此处已从
     // status-secondary 移到 actions 槽，故应出现在 actions 而非状态槽。
-    expect(host.querySelector('.cc-actions [data-widget-id="model"]')).toBeTruthy()
+    expect(host.querySelector('.cc-actions [data-widget-id="model"]')).toBeInTheDocument()
     expect(host.querySelector('.cc-status-secondary [data-widget-id="model"], .cc-status-primary [data-widget-id="model"]')).toBeNull()
 
     lifecycle.update({
@@ -1601,14 +1603,14 @@ describe('mountSolidWorkbench', () => {
     theme.ccHidden = ['cc-send-button']
     services.appearance.setTheme(theme)
 
-    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     // 刀4：隐藏项记在注册轨 id 上；legacy `send` 已不存在（0 残留守卫）
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
     expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     services.appearance.setTheme(theme)
-    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeTruthy())
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
   })
 
@@ -1623,7 +1625,7 @@ describe('mountSolidWorkbench', () => {
     })
     fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
 
-    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeInTheDocument()
     fireEvent.pointerMove(window, { clientX: 34, clientY: 12, pointerId: 1 })
     fireEvent.pointerUp(window, { pointerId: 1 })
 
@@ -1653,7 +1655,7 @@ describe('mountSolidWorkbench', () => {
     const { host, services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-    expect(await screen.findByRole('toolbar', { name: '中控控件工具栏' })).toBeTruthy()
+    expect(await screen.findByRole('toolbar', { name: '中控控件工具栏' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '隐藏 模型' }))
     await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toContain('model'))
     expect(host.querySelector('[data-widget-id="model"]')).toHaveClass('cc-hidden')
@@ -1684,7 +1686,7 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ slot: 'actions', order: 7, offsetX: 12 }))
     expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
     expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle')
-    expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeTruthy()
+    expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeInTheDocument()
   })
 
   it('属性面板数字输入清空时保留上次有效值', async () => {
@@ -1778,7 +1780,7 @@ describe('mountSolidWorkbench', () => {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
-    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: '模型 属性' })).toBeNull()
@@ -1920,8 +1922,8 @@ describe('mountSolidWorkbench', () => {
       envelope(9, { type: 'assist.file-suggestions', files: ['src/a.ts'] }),
     ]).document
     services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
-    await waitFor(() => expect(screen.getByText('canonical answer')).toBeTruthy())
-    expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('canonical answer')).toBeInTheDocument())
+    expect(host.querySelector('[data-activity-count="1"]')).toBeInTheDocument()
     expect(host.querySelector('[data-has-usage="true"]')).toBeNull()
     expect(screen.queryByLabelText('会话用量')).toBeNull()
     expect(screen.queryByLabelText('会话预算')).toBeNull()
@@ -1932,9 +1934,9 @@ describe('mountSolidWorkbench', () => {
     expect(host.textContent).not.toContain('↓ 8 tokens')
     // S11：用量控件常态显示为按钮型胶囊，但旧的 usage surface（会话用量标签 / ↓ N tokens）仍未回归；
     // 且它是只读显示 —— 不得渲染成可点击控件。
-    expect(host.querySelector('[data-widget-id="tokens"] .cc-usage-pill')).toBeTruthy()
+    expect(host.querySelector('[data-widget-id="tokens"] .cc-usage-pill')).toBeInTheDocument()
     expect(host.querySelector('[data-widget-id="tokens"] button')).toBeNull()
-    expect(screen.getByText('canonical warning')).toBeTruthy()
+    expect(screen.getByText('canonical warning')).toBeInTheDocument()
   })
 
   it('同一 error 事实只渲染一个可见错误 surface', async () => {
@@ -2104,8 +2106,8 @@ describe('mountSolidWorkbench', () => {
 
     services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
 
-    expect(await screen.findByRole('region', { name: 'Diff：/src/production.ts' })).toBeTruthy()
-    expect(await screen.findByRole('alert', { name: 'LSP error：semicolon expected' })).toBeTruthy()
+    expect(await screen.findByRole('region', { name: 'Diff：/src/production.ts' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert', { name: 'LSP error：semicolon expected' })).toBeInTheDocument()
     expect(host.querySelector('[data-content-kind="content.diff"] [data-renderer-slot-id="builtin.solid.content.base"]')
       ?? host.querySelector('[data-content-kind="content.diff"]')).not.toBeNull()
     expect(host.querySelector('[data-content-kind="diagnostic.lsp"]')).not.toBeNull()
@@ -2487,8 +2489,8 @@ describe('mountSolidWorkbench', () => {
 
     services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
 
-    expect(await screen.findByRole('button', { name: /Thought for 2\.4s/ })).toBeTruthy()
-    expect(await screen.findByText('provider_policy')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /Thought for 2\.4s/ })).toBeInTheDocument()
+    expect(await screen.findByText('provider_policy')).toBeInTheDocument()
     expect(host.querySelector('[data-content-kind="content.reasoning"]')).not.toBeNull()
     expect(host.querySelector('[data-content-kind="content.redacted-reasoning"]')).not.toBeNull()
   })
@@ -2508,8 +2510,8 @@ describe('mountSolidWorkbench', () => {
 
     services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
 
-    expect(await screen.findByText('fallback-spec.md')).toBeTruthy()
-    expect(await screen.findByText('fallback document body')).toBeTruthy()
+    expect(await screen.findByText('fallback-spec.md')).toBeInTheDocument()
+    expect(await screen.findByText('fallback document body')).toBeInTheDocument()
     expect(host.querySelector('[data-part-kind="document"]')).not.toBeNull()
     expect(host.textContent).not.toContain('Unsupported content kind: document')
   })
@@ -2612,7 +2614,7 @@ describe('mountSolidWorkbench', () => {
       },
     })]).document, { ownerKey: 'owner-preview', generation: 1 })
 
-    expect(await screen.findByText('Plugin approval surface')).toBeTruthy()
+    expect(await screen.findByText('Plugin approval surface')).toBeInTheDocument()
     expect(host.querySelector('.interaction-card')).toBeNull()
   })
 
@@ -2665,7 +2667,7 @@ describe('mountSolidWorkbench', () => {
       },
     })]).document, { ownerKey: 'owner-preview', generation: 1 })
 
-    expect(await screen.findByText('Plugin secret surface')).toBeTruthy()
+    expect(await screen.findByText('Plugin secret surface')).toBeInTheDocument()
     expect(pluginSnapshot).not.toContain(credential)
     expect(pluginSnapshot).toContain('valueRedacted')
   })

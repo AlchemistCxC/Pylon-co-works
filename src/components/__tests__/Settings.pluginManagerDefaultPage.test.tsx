@@ -49,7 +49,10 @@ describe('plugin manager default page (P53)', () => {
     expect(heading).toBeInTheDocument()
     // 面板区块存在（aria-label 挂在 DOM 面板 overview 区；宿主基础页的授权卡不在默认页里）。
     // P91 C2：默认 1s waitFor 预算是全量负载下的 flake 根因（单跑必绿，非产品缺陷）——
-    // 重启动 afterEach 卸载叠加全量并行时序，预算放宽到 ≥4s。
+    // 重启动 afterEach 卸载叠加全量并行时序，预算放宽到 4s（#228 批次F 复核后保留）。
+    // 回收条件（满足其一即回收至默认 1s）：
+    //   1) 插件管理页暴露确定性 ready 信号（如 bootstrap 贡献注册完成事件），用例改等该信号；
+    //   2) afterEach 的重启动/卸载链路收敛为可等待钩子后，全量连跑 5 轮默认预算 0 超时。
     await vi.waitFor(() => {
       expect(screen.getByLabelText('插件概览')).toBeInTheDocument()
     }, { timeout: 4_000 })

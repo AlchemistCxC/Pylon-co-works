@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest'
+import { expect } from 'vitest'
 
 // #220：计算核在测试宿主里必须**同步**可用（切分、揭示引擎、投影折叠的调用点全是
 // 同步上下文），所以在任何测试文件求值前预初始化 wasm。node:* 只出现在 scripts/
@@ -16,17 +17,79 @@ afterEach(() => {
 })
 
 // 阶段 0（报告 §2.3.9）：测试结束断言无未处理 Promise rejection。
-// 每个测试文件（setup 每文件执行）注册收集器，afterAll 断言；意外 console.error
-// 先收集并打印，阶段 8 错误分层后再转硬断言（现有代码存在预期的 console.error）。
+// 每个测试文件（setup 每文件执行）注册收集器，afterAll 断言。
 const unhandledRejections: unknown[] = []
 const onUnhandledRejection = (reason: unknown): void => { unhandledRejections.push(reason) }
 process.on('unhandledRejection', onUnhandledRejection)
 
-const consoleErrors: unknown[] = []
+// #228 批次F（2026-09-22）：console.error 分层从「全局容忍」收窄为「白名单容忍」。
+// 全量盘点（bunx vitest run）：75 次 console.error，全部出自下列 36 个文件，分三类：
+//   A 错误路径契约——产品把失败写入 console.error 正是用例断言的可见上报链路
+//     （错误中心、渲染边界、事务回滚、网关写回、Agent 切换/探测失败等）；
+//   B node 环境噪音——canonical feed 兜底监听注册在无 window/Tauri 的 node 工程
+//     里失败（「注册 canonical feed user 兜底监听失败 …」）。根因是产品侧注册无
+//     环境守卫（src/infrastructure/events/canonicalEventFeed.ts:241 一带）；
+//   C Renderer Suite fatal 回退链——「Renderer Suite 回退失败 …（自动重试 N/M）」
+//     是回退机制的过程日志，用例正是断言该回退行为。
+// 白名单外文件出现任何 console.error 一律 fail（fail 消息带首条原文，便于定性）。
+// 回收计划：B 类在产品注册处补 `typeof window`/Tauri 可用性守卫后逐文件移出；
+// A/C 类在产品改走诊断通道上报后移出；**名单清零后删除整个白名单机制**，
+// afterAll 对 console.error 无条件 throw（即原「阶段 8 硬断言」，届时本注释一并删除）。
+const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
+  // B 类：canonical feed 兜底监听注册在 node 环境失败的噪音
+  'src/__tests__/replay/livenessAuthority.test.ts',
+  'src/__tests__/replay/agentWorkbenchSession.batch.test.ts',
+  'src/__tests__/replay/agentWorkbenchSession.rebindIndicator.test.ts',
+  'src/__tests__/replay/agentWorkbenchSession.snapshotBridge.test.ts',
+  'src/__tests__/replay/documentLayer.test.ts',
+  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
+  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
+  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.emptyStateFirstPrompt.test.ts',
+  'src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.test.tsx',
+  // C 类：Renderer Suite fatal 回退链过程日志（含少量 B 类注册噪音）
+  'src/sheets/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
+  'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
+  // A 类：错误路径契约
+  'src/__tests__/identityStore.hydration.test.ts',
+  'src/__tests__/replay/canonicalEventFeed.test.ts',
+  'src/application/transactions/__tests__/applyWorkspaceLayoutChange.test.ts',
+  'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
+  'src/components/chat/__tests__/messageRenderBoundary.test.tsx',
+  'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
+  'src/components/settings/__tests__/GatewayRiskPanel.test.tsx',
+  'src/components/settings/__tests__/PluginManager.test.tsx',
+  'src/components/__tests__/ErrorCenter.test.tsx',
+  'src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx',
+  'src/components/__tests__/SheetErrorBoundary.test.tsx',
+  'src/domains/theme/__tests__/customPresetApply.test.ts',
+  'src/infrastructure/acp/__tests__/interactionRejectionController.test.ts',
+  'src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx',
+  'src/renderers/solid-workbench/__tests__/workbenchHostPort.errorCenter.test.ts',
+  'src/renderers/solid-workbench/__tests__/workbenchHostPort.test.ts',
+  'src/sheets/file/__tests__/FileTabView.readonly.test.tsx',
+  'src/sheets/file/__tests__/gitPanelAcceptance.test.tsx',
+  'src/sheets/gateway/__tests__/gatewayRouteSave.integration.test.tsx',
+  'src/sheets/gateway/__tests__/gatewaySheetView.ui.test.tsx',
+  'src/sheets/__tests__/OverviewSheetView.visual.test.tsx',
+  'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.test.tsx',
+  'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.test.tsx',
+  'src/workspace-sheets/__tests__/sheetTabStripAgentSwitch.test.tsx',
+  'src/workspace-sheets/__tests__/workspaceStore.integration.test.ts',
+]
+
+const consoleErrors: unknown[][] = []
 const originalConsoleError = console.error
 console.error = (...args: unknown[]) => {
   consoleErrors.push(args)
   originalConsoleError(...args)
+}
+
+function currentTestFile(): string {
+  // expect.getState().testPath 是正式入口；__vitest_worker__.filepath 是同值的
+  // worker 全局，作兜底（两者都归一化为 '/' 分隔再与白名单做 endsWith 匹配）。
+  const state = expect.getState() as { testPath?: string }
+  const raw = state.testPath ?? (globalThis as { __vitest_worker__?: { filepath?: string } }).__vitest_worker__?.filepath ?? ''
+  return raw.replaceAll('\\', '/')
 }
 
 afterAll(() => {
@@ -38,7 +101,17 @@ afterAll(() => {
   vi.resetModules()
   process.removeListener('unhandledRejection', onUnhandledRejection)
   if (consoleErrors.length > 0) {
-    console.log(`[setup] 本测试文件出现 ${consoleErrors.length} 次 console.error（阶段 8 前仅记录）`)
+    const file = currentTestFile()
+    const whitelisted = EXPECTED_CONSOLE_ERROR_FILES.some(entry => file.endsWith(entry))
+    if (whitelisted) {
+      console.log(`[setup] ${file}: ${consoleErrors.length} 次 console.error（白名单内，仅记录）`)
+    } else {
+      const first = JSON.stringify(consoleErrors[0])
+      throw new Error(
+        `${file} 出现 ${consoleErrors.length} 次白名单外的 console.error（#228 批次F 起硬断言）。`
+        + `先修产品侧错误；确属预期的错误路径契约时，把本文件登记进 vitest.setup.ts 的 EXPECTED_CONSOLE_ERROR_FILES 并注明分类。首条：${first}`,
+      )
+    }
   }
   if (unhandledRejections.length > 0) {
     console.error(`[setup] 检测到 ${unhandledRejections.length} 个未处理的 Promise rejection`)

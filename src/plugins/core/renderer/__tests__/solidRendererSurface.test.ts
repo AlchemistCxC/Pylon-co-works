@@ -42,7 +42,9 @@ describe('Solid semantic RenderSurface', () => {
     const error = vi.fn()
     const unsubscribe = surface.on('error', error)
     const handle = surface.mount(container, snapshot(0), appearance, commands)
-    await vi.waitFor(() => expect(container.textContent).toContain('chunk-0'), { timeout: 5000 })
+    // 预算依据：等待对象是 createSolidSurface 动态 import renderer 模块后的首次
+    // 挂载刷帧（ms 级）；2s 覆盖满载并发抖动，原 5s 是 P91 期粗放放宽（#175 已消除满载 paging 根因）。
+    await vi.waitFor(() => expect(container.textContent).toContain('chunk-0'), { timeout: 2_000 })
     const root = container.firstElementChild
     expect(root).not.toBeNull()
 
