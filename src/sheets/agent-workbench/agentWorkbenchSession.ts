@@ -153,9 +153,13 @@ function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly Wo
     })
     if (normalized.events.length !== 1) return perChunk()
     const semantic = normalized.events[0]!
-    if (semantic.event.type !== expectedType) return perChunk()
-    if (expectedType === 'message.delta' && semantic.event.role !== 'assistant') return perChunk()
-    parts.push(...semantic.event.parts)
+    // 期望类型按字面量分支判定（TS 对联合类型变量的比较不收窄 event 联合）。
+    if (expectedType === 'message.delta') {
+      if (semantic.event.type !== 'message.delta' || semantic.event.role !== 'assistant') return perChunk()
+    } else if (semantic.event.type !== 'reasoning.delta') {
+      return perChunk()
+    }
+    parts.push(...(semantic.event.parts ?? []))
     if (Object.keys(semantic.identity).length > 0) lastIdentity = semantic.identity
   }
   return [Object.freeze(createWorkbenchEnvelope({
