@@ -297,3 +297,47 @@ function equals(a: unknown, b: unknown): boolean {
   if (keysA.length !== keysB.length) return false
   return keysA.every(key => Object.hasOwn(recordB, key) && equals(recordA[key], recordB[key]))
 }
+
+// ── 边界编组：`parseMarkdown` 的**出口形状**（#220 收口轮补的门禁盲区） ─────────────
+//
+// 原有两条断言都看不见「边界怎么编组」：Rust 侧快照走 `serde_json`（纯对象），
+// 现场解析走产品路径（`normalizeNode` 会把 `Map` 归一成对象）。于是**`properties` 被
+// 编成 JS `Map` 这件事在这道门禁里是隐形的**——直到脚手架拿「边界原始产物」逐字节比对
+// 才暴露：`JSON.stringify(properties)` 得到 `{}`，链接丢 href、代码块丢 language
+// class、任务列表丢 checked。这里直接钉边界产物：`properties` 必须是**普通对象**，
+// 且关键元素带对了键。
+describe('220 WP4 · parseMarkdown 边界编组（properties 必须是普通对象）', () => {
+  const boundaryCases: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+    ['[链接](https://example.com)', 'a', ['href']],
+    ['```ts\nconst x = 1\n```', 'code', ['className']],
+    ['- [x] 已完成', 'input', ['type', 'checked', 'disabled']],
+    ['![图](https://example.com/a.png)', 'img', ['src', 'alt']],
+  ]
+
+  it('properties 是普通对象（不是 Map）且带对关键键', async () => {
+    const { loadMarkdownCompute } = await import('../../../../infrastructure/compute/markdownCompute.ts')
+    const compute = await loadMarkdownCompute()
+    for (const [markdown, tagName, expectedKeys] of boundaryCases) {
+      const tree = compute.parseMarkdown(markdown) as { children?: unknown[] }
+      const found: Record<string, unknown>[] = []
+      const walk = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return
+        const record = node as { tagName?: string; properties?: unknown; children?: unknown[] }
+        if (record.tagName === tagName && record.properties !== undefined) {
+          found.push(record.properties as Record<string, unknown>)
+        }
+        for (const child of record.children ?? []) walk(child)
+      }
+      walk(tree)
+      expect(found.length, `${markdown} 应含 <${tagName}>`).toBeGreaterThan(0)
+      for (const properties of found) {
+        // Map 会被 JSON.stringify 抹成 {}，所以「序列化后非空」等价于「真的是普通对象且有键」。
+        expect(Object.getPrototypeOf(properties), `${markdown} 的 properties 应是普通对象`).toBe(Object.prototype)
+        for (const key of expectedKeys) {
+          expect(properties, `${markdown} 的 <${tagName}> 缺 ${key}`).toHaveProperty(key)
+        }
+        expect(JSON.parse(JSON.stringify(properties))).toEqual(properties)
+      }
+    }
+  })
+})

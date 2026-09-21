@@ -294,6 +294,19 @@ fn issue(path: Vec<Value>, code: &str, expected: &str, value: &Value) -> SchemaI
 }
 
 /// TS `issue(path, code, expected, value[key])` 在键缺席（undefined）时的形态：
+/// 记录项某键的类型校验失败：**按实际值报 `received`**，键缺席才报 "undefined"。
+///
+/// TS 侧所有校验都写成 `issue(path, code, expected, value[key])`——`value[key]` 在键
+/// 缺席时是 `undefined`、类型不对时是那个值本身。用「布尔判定 + 恒报 undefined」会
+/// 把「类型不对」误报成「缺席」（例如 `{ kind: 'text', text: 123 }` 应报
+/// `received: "number"`，不是 `"undefined"`）。
+fn issue_at(record: &Map<String, Value>, key: &str, code: &str, expected: &str) -> SchemaIssue {
+    match record.get(key) {
+        Some(value) => issue(path_of(&[key]), code, expected, value),
+        None => issue_undefined(path_of(&[key]), code, expected),
+    }
+}
+
 /// received = "undefined"。与「键存在但为 null」的 received = "null" 严格区分。
 fn issue_undefined(path: Vec<Value>, code: &str, expected: &str) -> SchemaIssue {
     SchemaIssue {
@@ -1664,32 +1677,21 @@ fn parse_unknown(value: &Map<String, Value>) -> SchemaResult<Value> {
         .and_then(Value::as_str)
         .is_some_and(|s| !s.is_empty());
     if !original_type_ok {
-        issues.push(issue_undefined(
-            path_of(&["originalType"]),
+        issues.push(issue_at(
+            value,
+            "originalType",
             "type.string",
             "non-empty string",
         ));
     }
     if !value.get("summary").is_some_and(Value::is_string) {
-        issues.push(issue_undefined(
-            path_of(&["summary"]),
-            "type.string",
-            "string",
-        ));
+        issues.push(issue_at(value, "summary", "type.string", "string"));
     }
     if !value.get("raw").is_some_and(is_json_value) {
-        issues.push(issue_undefined(
-            path_of(&["raw"]),
-            "json.invalid",
-            "JSON value",
-        ));
+        issues.push(issue_at(value, "raw", "json.invalid", "JSON value"));
     }
     if !value.get("truncated").is_some_and(Value::is_boolean) {
-        issues.push(issue_undefined(
-            path_of(&["truncated"]),
-            "type.boolean",
-            "boolean",
-        ));
+        issues.push(issue_at(value, "truncated", "type.boolean", "boolean"));
     }
     if let Some(truncation) = value.get("truncation") {
         if !is_valid_truncation(truncation) {
@@ -1752,7 +1754,7 @@ pub fn parse_content_part(value: &Value) -> SchemaResult<Value> {
     }
     if is_text_kind(kind) {
         if !record.get("text").is_some_and(Value::is_string) {
-            issues.push(issue_undefined(path_of(&["text"]), "type.string", "string"));
+            issues.push(issue_at(record, "text", "type.string", "string"));
         }
     } else if matches!(kind, "image" | "audio" | "video") {
         match record.get("source") {

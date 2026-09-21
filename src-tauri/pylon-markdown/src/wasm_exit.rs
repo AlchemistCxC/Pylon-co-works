@@ -22,11 +22,20 @@ pub fn markdown_engine_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// markdown 文本 → 渲染模型（结构化值，serde_wasm_bindgen 直转）。
+/// markdown 文本 → 渲染模型（结构化值）。
+///
+/// **必须 `serialize_maps_as_objects(true)`**：`properties` 是 `BTreeMap`，而
+/// serde_wasm_bindgen 默认把它编成 JS **`Map`**——于是 `JSON.stringify(node.properties)`
+/// 得到 `{}`、按对象读 `properties.href` 得到 `undefined`。表现就是「链接丢 href、
+/// 代码块丢 language class、任务列表丢 checked」，而且**只有在消费方忘了把 Map 归一成
+/// 对象时才暴露**（TS 侧曾靠 `normalizeNode` 兜着，所以本地测试一直是绿的）。
+/// 渲染模型里 `properties` 的语义就是普通对象，边界就该是普通对象。
 #[wasm_bindgen(js_name = parseMarkdown)]
 pub fn parse_markdown(text: &str) -> Result<JsValue, JsError> {
+    use serde::Serialize;
     let model: RenderNode = crate::parser::parse_markdown(text);
-    serde_wasm_bindgen::to_value(&model)
+    model
+        .serialize(&serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true))
         .map_err(|error| JsError::new(&format!("渲染模型序列化失败: {error}")))
 }
 

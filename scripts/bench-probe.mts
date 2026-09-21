@@ -19,6 +19,7 @@ import { createWorkbenchEnvelope } from '../src/domains/workbench/events/workben
 import type { WorkbenchEventEnvelope } from '../src/domains/workbench/events/workbenchEventSchema.ts'
 import {
   createProjector,
+  encodeProjectorFrame,
   foldIntoProjector,
   readProjectorBoundaryCrossings,
   resetProjectorBoundaryCrossings,
@@ -136,6 +137,17 @@ if (caseName === 'cold-ts') {
   const started = performance.now()
   for (const frame of frames) projector.appendBatch(frame)
   result = { ms: performance.now() - started, shape: 'encode-loop' }
+} else if (caseName === 'fold-only') {
+  // 单帧折入 N 条，只读 wasm 内部分段（decode / project / patch 序列化）——
+  // 用来判断剩余时间有多少在折叠本体、多少在 JS 侧编组与物化。
+  const projector = createProjector(SESSION_ID)
+  const frame = encodeProjectorFrame(events)
+  const started = performance.now()
+  projector.appendBatch(frame)
+  const total = performance.now() - started
+  const phases = JSON.parse(projector.foldPhases()) as { decodeMs: number, projectMs: number, patchJsonMs: number }
+  console.log(`[fold-only n=${total && events.length}] appendBatch 合计 ${total.toFixed(1)}ms = decode ${phases.decodeMs.toFixed(1)} + project ${phases.projectMs.toFixed(1)} + patch ${phases.patchJsonMs.toFixed(1)}`)
+  result = { ms: total, shape: 'fold-only' }
 } else {
   throw new Error(`未知 case：${caseName}`)
 }

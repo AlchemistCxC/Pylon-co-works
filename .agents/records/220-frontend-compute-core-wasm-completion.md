@@ -615,3 +615,72 @@ TS 仍是唯一实现」的最后状态——**要拿 main 的 TS 基线，一�
 原为 `3*2 + 1*2 = 8`（假设每次折叠都读全量），现为 `1*2 + 1*2 + 2*1 = 6`——
 冷启动/外置文档 2 次、本核产出 1 次。这是**契约变更**（热路径不再读全量），
 不是弱化：注释里写清了口径。其余断言未动。
+
+---
+
+## 21. 用户脚手架（`scripts/compute-parity/`）首轮对照：16 → 9 mismatch，并修掉一个真缺陷
+
+仓库主为本次收口写了 TS↔wasm 对照脚手架（`scripts/compute-parity/`：harness + 8 套件 +
+冻结基线 + 覆盖门）。首轮判词：**175 项：ok 157 / known-diff 2 / mismatch 16**。
+
+### 脚手架侧三处阻塞（我已修，供作者确认）
+
+1. `scripts/compute-parity/suites/eventsSuite.ts`：`stableJson` 从 `../index.ts` 引入，而它
+   在 `../harness.ts` —— vitest 的解析宽松所以只在非 vitest 入口暴露：**bun/node 直接
+   `SyntaxError`**（`compute-parity-bench.mts` 是 node 入口，等于性能对照跑不起来）。
+2. `scripts/compute-parity/suites/projectorSuite.ts` 的 `range-scale` 用例 `build()` 多包一层
+   （`[[[ranges,1,1]]]`）⇒ 解构出的 `ranges` 是数字，`oldCoverageMerge` 抛
+   `1 is not iterable`，整轮对照中断。
+3. `scripts/compute-parity.test.mts` 缺 `@vitest-environment jsdom`：markdown 的 TS 基线
+   （旧 unified 管线）经 `decode-named-character-reference` 的 dom 变体读 `document`，
+   在 node 环境下 `ReferenceError: document is not defined`。根 `vitest.config.ts` 按该注释分环境。
+
+### 计算核侧：一个**真缺陷**（脚手架抓到的，仓库内门禁当时是瞎的）
+
+`parseMarkdown` 用 `serde_wasm_bindgen::to_value` 直转，而 `properties` 是 `BTreeMap`——
+serde_wasm_bindgen 默认把它编成 JS **`Map`**。后果：`JSON.stringify(node.properties)` 得到 `{}`、
+按对象读 `properties.href` 得到 `undefined`，即**链接丢 href、代码块丢 language class、
+任务列表丢 checked**。产品路径只因为 TS 侧有 `normalizeNode` 把 Map 归一成对象才没炸，
+而仓库内的 markdown parity 门禁两侧都看不到「边界怎么编组」（Rust 快照走 serde_json = 纯对象；
+现场解析走产品路径 = 已被归一），所以**这道门禁对它是隐形的**。
+
+修法两处：
+- `wasm_exit.rs`：`parseMarkdown` 改 `Serializer::new().serialize_maps_as_objects(true)`
+  （`PropValue` 无 null，不存在 `to_boundary_json` 那条 null 保真顾虑）；
+- `markdownComputeParity.test.ts` 补一组**边界编组**断言：直接取 `parseMarkdown` 的原始出口，
+  断言 `properties` 原型是 `Object.prototype`、链接/代码/任务列表带对关键键
+  （Map 会被 stringify 抹成 `{}`，所以「序列化后非空」等价于「真是普通对象且有键」）。
+
+### 计算核侧：一处 `received` 误报
+
+`projectorParseContentPart`：输入 `{ kind: 'text', text: 123 }` 时 TS 报 `received: "number"`，
+Rust 报 `"undefined"`——5 处校验写成「布尔判定 + 恒报 undefined」，把「类型不对」误报成「缺席」。
+新增 `issue_at(record, key, ...)`：键存在按实际值报、缺席才报 undefined（与 TS
+`issue(..., value[key])` 同义）。`parse_unknown` 的 originalType/summary/raw/truncated 四处同修。
+
+### 结果与剩余
+
+**175 项：ok 157 → 164 / mismatch 16 → 9**（known-diff 仍是 2：脚注、高亮 js-sample——按预期）。
+
+剩余 9 条我分了三类（**其中 7 条看起来是脚手架侧的形状/归一缺口，需作者定契约**）：
+
+| 类 | case | 现象 | 我的判断 |
+| --- | --- | --- | --- |
+| 形状归一缺口 | `mergeAdjacentDeltaChunks` ×3 | TS 全返 `{index,kind:'event'}`；wasm 返 `{index,kind:'batchRow',row}` | TS 基线返的是旧内部形状、wasm 返的是 wire 形状；套件该在 `normalize` 里对齐（harness 已有该钩子） |
+| 形状归一缺口 | `expandTurnUnitRows` ×1 | TS `[{index,kind}]` vs wasm `[{event}]` | 同上 |
+| 形状归一缺口 | `projectorCoalesce*Parts` ×2 | TS 返裸 parts 数组；wasm 返 `{changed,parts}` | Rust 出口带诊断位；`normalize` 取 `.parts` 即可 |
+| 需作者判 | `effectiveCanonicalProjectionEvents` ×1 | TS `[{index:0..5,sequence:1}]`（全部同序）vs wasm 过滤后的真实序列 | TS 基线像是枚举全部输入；要确认哪边是旧 TS 的真实语义 |
+| **计算核侧（待查）** | `projectWorkbench(paged) / idempotent-refold` ×1 | 文档在 @5274 分歧：TS 该位是 `message.delta`(user) 条目，wasm 是 `reasoning.delta` 条目 | **这条是我该继续查的**：分页重折的终态与旧 TS legacy 基线不一致 |
+| 表征差异（应列 known-diff） | `splitStreamingMarkdown(prefix-scan) / growing-source` ×1 | 偏移 45 处 TS 给孤立代理 `\ud83d`、wasm 给 U+FFFD | JS 字符串可表示孤立代理、Rust UTF-8 不可——spec/§3 已记录该表征差异；建议进 scaffold 的 known-diff 并注明原因 |
+
+**注意**：`bun run test` 现在会因脚手架那 9 条 mismatch 而红（它是仓库主新加的门禁文件，
+未由我提交）。我的改动本身在 `bun run test` 里除该文件外全绿。
+
+### 本轮性能侧（③-a/③-b 之外的第三轮）
+
+- `SemanticEnvelope.event` / `TimelineEntry.data` 改 **`Arc<Value>`**：信封与 timeline 条目共享
+  同一棵事件树，逐事件的深拷变成引用计数。native `project_batch(20000)`：97 → **69.6ms**。
+- `TimelineEntry` 手工 `Serialize`（键序按字典序，与 `to_value()` 的 BTreeMap 一致）+
+  `TimelinePatch.entry` 持 `TimelineEntry`：**收批不再建 20k 个中间 JSON 树**，
+  收批 29.5 → **4.3ms**；`project_batch` → **44.4ms**（本轮起点 130ms，−66%）。
+  键序契约由 `timeline_entry_serialize_tests` 逐字节钉死（含小数 sequence）。

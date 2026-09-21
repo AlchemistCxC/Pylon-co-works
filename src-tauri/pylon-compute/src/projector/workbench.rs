@@ -39,6 +39,7 @@
 //!   内容，parity 断言用结构等值（toEqual）。
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -231,7 +232,8 @@ pub struct SemanticEnvelope {
     /// （provider/importId/sourceOrdinal/orderConfidence/collectionComplete/synthetic）。
     pub provenance_extra: Option<Map<String, Value>>,
     pub coverage: Option<(f64, f64)>,
-    pub event: Value,
+    /// 事件载荷（见 `TimelineEntry::data` 的共享所有权说明）。
+    pub event: Arc<Value>,
 }
 
 impl SemanticEnvelope {
@@ -240,7 +242,7 @@ impl SemanticEnvelope {
     /// 不要写成 `SemanticEnvelope { event, ..self.clone() }`：结构体更新语法会先把
     /// `event` 整棵树也克隆一份再被覆盖掉——逐事件折叠里那是一次纯浪费的深拷贝
     /// （20k delta 的同 harness 对照里，这类按事件树克隆是折叠比 TS 慢的主因之一）。
-    fn with_event(&self, event: Value) -> SemanticEnvelope {
+    fn with_event(&self, event: Arc<Value>) -> SemanticEnvelope {
         SemanticEnvelope {
             event_type: self.event_type.clone(),
             sequence: self.sequence,
@@ -334,7 +336,40 @@ pub struct TimelineEntry {
     pub title: Option<Value>,
     pub summary: Option<Value>,
     pub stream_boundary: Option<bool>,
-    pub data: Value,
+    /// 事件载荷。**共享所有权**：条目与投影核内的信封指向同一棵树，
+    /// 于是「建条目」与「收批序列化」都不必深拷它（冷批 20k 条实测这两处各占几十毫秒）。
+    pub data: Arc<Value>,
+}
+
+/// `TimelineEntry` 的 JSON 形状：与 `to_value()` **逐字节一致**（键序按字典序——条目 JSON
+/// 会被逐字节比较），但**不建中间 `Value` 树**：`data` 由 serde 直接写出。
+///
+/// 成本差别很大：`to_value()` 每条目建一个 `Map`（BTreeMap + 每字段一次 String 分配）
+/// 并把 `data` 整棵树深拷一遍；冷批 20k 条的「收批」实测 29ms，占折叠+收批的 45%。
+impl serde::Serialize for TimelineEntry {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        // 键序 = 字典序（`serde_json::Map` 默认是 BTreeMap，`to_value()` 的产物就是这个序）。
+        map.serialize_entry("data", &*self.data)?;
+        map.serialize_entry("eventId", &self.event_id)?;
+        map.serialize_entry("id", &self.id)?;
+        map.serialize_entry("kind", self.kind)?;
+        map.serialize_entry("sequence", &js_number_value(self.sequence))?;
+        if let Some(status) = &self.status {
+            map.serialize_entry("status", status)?;
+        }
+        if let Some(boundary) = self.stream_boundary {
+            map.serialize_entry("streamBoundary", &boundary)?;
+        }
+        if let Some(summary) = &self.summary {
+            map.serialize_entry("summary", summary)?;
+        }
+        if let Some(title) = &self.title {
+            map.serialize_entry("title", title)?;
+        }
+        map.end()
+    }
 }
 
 impl TimelineEntry {
@@ -356,7 +391,7 @@ impl TimelineEntry {
         if let Some(boundary) = self.stream_boundary {
             object.insert("streamBoundary".to_string(), Value::Bool(boundary));
         }
-        object.insert("data".to_string(), self.data.clone());
+        object.insert("data".to_string(), (*self.data).clone());
         Value::Object(object)
     }
 }
@@ -662,7 +697,7 @@ impl WorkbenchDocument {
             .into_iter()
             .map(|index| TimelinePatch {
                 index,
-                entry: self.timeline[index].to_value(),
+                entry: self.timeline[index].clone(),
             })
             .collect();
         let dirty = changes.dirty_slices;
@@ -817,7 +852,9 @@ pub struct MessagePatch {
 #[serde(rename_all = "camelCase")]
 pub struct TimelinePatch {
     pub index: usize,
-    pub entry: Value,
+    /// 持 `TimelineEntry` 而不是 `Value`：克隆它是 Arc 计数 +1（见 `TimelineEntry::data`），
+    /// 序列化走上面的手工 `Serialize`（不建中间树）。
+    pub entry: TimelineEntry,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -887,7 +924,7 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
         .enumerate()
         .map(|(index, entry)| TimelinePatch {
             index,
-            entry: entry.to_value(),
+            entry: entry.clone(),
         })
         .collect();
     // session 面是低频小对象：整面携带（status/stopReason/model/mode/commands/
@@ -2604,7 +2641,7 @@ fn reduce_tool(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
     }
     node.insert("orphan".to_string(), Value::Bool(false));
     // C04 终态幂等 + 活动位置是创建时事实（progress 不移动卡片）。
-    node.insert("data".to_string(), event.clone());
+    node.insert("data".to_string(), event.as_ref().clone());
     node.insert(
         "sequence".to_string(),
         js_number_value(
@@ -3619,8 +3656,10 @@ pub fn reduce_workbench_event(
     ensure_projectable(envelope)?;
     // C12：secret-bearing interaction 在进入任何投影面前统一剥敏。
     let effective_event = if envelope.event_type.starts_with("interaction.") {
-        redact_interaction_event(&envelope.event)
+        Arc::new(redact_interaction_event(&envelope.event))
     } else {
+        // Arc 克隆 = 引用计数 +1：信封与 timeline 条目共享同一棵事件树，
+        // 逐事件不再深拷（冷批 20k 条实测「建条目」与「收批序列化」各占几十毫秒）。
         envelope.event.clone()
     };
     let effective = envelope.with_event(effective_event);
@@ -3901,7 +3940,7 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
             _ => None,
         }),
         coverage,
-        event,
+        event: Arc::new(event),
     })
 }
 
@@ -4173,7 +4212,7 @@ mod tests {
             provenance_trust: if origin == 0 { 0 } else { 1 },
             provenance_extra: None,
             coverage,
-            event,
+            event: Arc::new(event),
         }
     }
 
@@ -6073,7 +6112,7 @@ mod projection_index_tests {
             provenance_trust: 0,
             provenance_extra: None,
             coverage: None,
-            event,
+            event: Arc::new(event),
         }
     }
 
@@ -6254,6 +6293,25 @@ mod projection_index_tests {
             let effective = item.with_event(item.event.clone());
             reduce_reasoning(doc, &effective);
         });
+
+        // 分段：折叠本体 vs 收批（记账产出 patch 里逐条 `to_value()` 的序列化）。
+        let mut doc3 = create_workbench_document("session-probe4");
+        let items: Vec<SemanticEnvelope> = (0..total).map(make).collect();
+        doc3.begin_batch();
+        let started = Instant::now();
+        for item in &items {
+            reduce_workbench_event(&mut doc3, item).expect("fold");
+        }
+        let fold_only = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let patch = doc3.finish_batch();
+        let finish = started.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[ablate] 6 折叠本体 {:.1}ms / 收批(含 to_value) {:.1}ms（{} timeline upsert）",
+            fold_only,
+            finish,
+            patch.timeline_upserts.len()
+        );
     }
 
     /// 窗口查询必须与「逐条扫全表」判据逐字等价——这是那处 Θ(N·T) → Θ(log T + 窗口)
@@ -6517,7 +6575,7 @@ mod change_ledger_tests {
             provenance_trust: 0,
             provenance_extra: None,
             coverage,
-            event,
+            event: Arc::new(event),
         }
     }
 
@@ -6626,14 +6684,7 @@ mod change_ledger_tests {
         patch
             .timeline_upserts
             .iter()
-            .filter_map(|patch| {
-                let event_id = patch
-                    .entry
-                    .get("eventId")
-                    .and_then(Value::as_str)?
-                    .to_string();
-                Some((event_id, patch.entry.clone()))
-            })
+            .map(|patch| (patch.entry.event_id.clone(), patch.entry.to_value()))
             .collect()
     }
 
@@ -6780,6 +6831,85 @@ mod change_ledger_tests {
         assert!(
             second.applied_event_ids_appended.is_empty(),
             "重复批带了 applied ids"
+        );
+    }
+}
+
+#[cfg(test)]
+mod timeline_entry_serialize_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn entry(
+        status: Option<Value>,
+        title: Option<Value>,
+        summary: Option<Value>,
+        boundary: Option<bool>,
+        data: Value,
+    ) -> TimelineEntry {
+        TimelineEntry {
+            id: "id-1".to_string(),
+            sequence: 7.0,
+            event_id: "evt-1".to_string(),
+            kind: "message",
+            status,
+            title,
+            summary,
+            stream_boundary: boundary,
+            data: Arc::new(data),
+        }
+    }
+
+    /// 手工 `Serialize` 必须与 `to_value()` **逐字节**一致——**键序**也在内：文档与条目的
+    /// JSON 会被逐字节比较（例如 appliedRanges 的「分两次折 == 一次折」），而 `to_value()`
+    /// 走的是 `serde_json::Map`（BTreeMap ⇒ 字典序）。这条断言是那处改写的唯一守卫。
+    #[test]
+    fn manual_serialize_matches_to_value_byte_for_byte() {
+        let cases = [
+            entry(None, None, None, None, json!({ "type": "message.delta" })),
+            entry(
+                Some(Value::String("done".to_string())),
+                Some(Value::String("标题".to_string())),
+                Some(Value::String("摘要".to_string())),
+                Some(true),
+                json!({ "type": "tool.completed", "result": { "z": 1, "a": [1, 2, 3] } }),
+            ),
+            entry(
+                Some(Value::Null),
+                None,
+                Some(json!({ "nested": { "b": 2, "a": 1 } })),
+                Some(false),
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": "x" }] }),
+            ),
+            // 非整数值与 0：数字序列化口径（`js_number_value`）也要一致。
+            entry(
+                None,
+                None,
+                None,
+                None,
+                json!({ "type": "usage.updated", "percent": 0 }),
+            ),
+        ];
+        for (index, case) in cases.iter().enumerate() {
+            let direct = serde_json::to_string(case).expect("serialize");
+            let via_value = serde_json::to_string(&case.to_value()).expect("serialize value");
+            assert_eq!(direct, via_value, "第 {index} 个条目两侧 JSON 不一致");
+        }
+        // 序列化后的键序确实是字典序（而不是结构体声明序）。
+        let serialized = serde_json::to_string(&cases[1]).expect("serialize");
+        let data_at = serialized.find("\"data\"").expect("data 键");
+        let event_at = serialized.find("\"eventId\"").expect("eventId 键");
+        assert!(data_at < event_at, "键序应为字典序：{serialized}");
+    }
+
+    /// 小数 sequence 与整数 sequence 的序列化都要与 `to_value()` 一致。
+    #[test]
+    fn manual_serialize_matches_fractional_sequence() {
+        let mut case = entry(None, None, None, None, json!({}));
+        case.sequence = 7.5;
+        assert_eq!(
+            serde_json::to_string(&case).expect("serialize"),
+            serde_json::to_string(&case.to_value()).expect("serialize value")
         );
     }
 }
