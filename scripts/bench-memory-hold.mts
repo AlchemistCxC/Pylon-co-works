@@ -77,8 +77,17 @@ const kib = (bytes: number): string => `${(bytes / 1024).toFixed(0)}KiB`
 
 const pad = (text: string, width: number) => String(text).padEnd(width)
 
+/** 核线性内存（高水位；只涨不跌，分配器不归还）。 */
+function linearBytes(): number {
+  const memory = (globalThis as Record<string, unknown>)['__pylon_compute_wasm_module__memory']
+  return memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0
+}
+// 折任何东西**之前**的线性内存起点。高水位只涨不跌，所以下面报的终点里，预热那一轮
+// 也计在内——两个端点都写出来，读者才能判断有多少归因于被测量的 workload。
+const linearAtLoad = linearBytes()
+
 // ── TS 侧：建文档 → 强制 GC → 量 ────────────────────────────────────────────
-projectTs(events.slice(0, Math.max(1, Math.floor(events.length / 10)))) // 预热
+projectTs(events.slice(0, Math.max(1, Math.floor(events.length / 10)))) // 预热（JIT/首载）
 collect()
 const tsBaseline = retained()
 const tsHeapBaseline = heapOnly()
@@ -98,11 +107,7 @@ const wasmDocument = JSON.parse(projector.document()) as { timeline: unknown[] }
 collect()
 const wasmBothRetained = retained() - wasmBaseline
 const wasmBothHeap = heapOnly() - wasmHeapBaseline
-// 核线性内存：高水位、常驻不归还（装载基线 1.13MiB 是核自身代码+静态数据）。
-const wasmLinear = (() => {
-  const memory = (globalThis as Record<string, unknown>)['__pylon_compute_wasm_module__memory']
-  return memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0
-})()
+const wasmLinear = linearBytes()
 if (wasmDocument.timeline.length !== events.length) throw new Error(`wasm 形状异常：${wasmDocument.timeline.length}`)
 
 console.log(`持有成本对照（shape=${shape}，${events.length} 个信封）`)
@@ -110,6 +115,14 @@ console.log(`  两侧文档形状：TS timeline ${tsDocument.timeline.length} / 
 console.log('  ' + pad('量', 40) + pad('retained 合计', 16) + 'heapUsed')
 console.log('  ' + pad('① TS：文档（JS 对象树，只有一份）', 40) + pad(mib(tsRetained), 16) + mib(tsHeap))
 console.log('  ' + pad('② wasm：核内文档 + JS 物化文档', 40) + pad(mib(wasmBothRetained), 16) + mib(wasmBothHeap))
-console.log('  ' + pad('③ wasm：其中核线性内存（常驻不归还）', 40) + pad(mib(wasmLinear), 16) + '—')
+console.log('  ' + pad('③ wasm：核线性内存（分配器峰值保留）', 40) + pad(mib(wasmLinear), 16) + '—')
 console.log(`\n  ② / ① = ${(wasmBothRetained / tsRetained).toFixed(2)}×    ③ / ① = ${(wasmLinear / tsRetained).toFixed(2)}×`)
-console.log(`  核线性内存里 1.13MiB 是装载基线，本 workload 净增 ${kib(wasmLinear - 1179648)}`)
+console.log(
+  `  核线性内存：折任何东西之前 ${mib(linearAtLoad)} → 跑完本 workload 后 ${mib(wasmLinear)}`
+  + `（+${kib(wasmLinear - linearAtLoad)}，含预热那一轮）`,
+)
+console.log(
+  '  读法：② 是**稳态持有**（核 + JS 物化文档两份，直接可比 ① 的那一份）；③ 是分配器的'
+  + '**峰值保留**——说的是「保留了这么多线性地址空间」，未触碰的页未必变成驻留内存，'
+  + '所以别把 ③ 当 RSS 读。',
+)
