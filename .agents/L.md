@@ -383,6 +383,26 @@
 
 ---
 
+[2026-09-21 10] [Bolide/B] [#223 · 预设组装 刀1]
+
+**开工：预设组装刀1——区域引用表（`zoneRefs`）+ 装配路径倒置为「逐区域装配」**（行为零变化）。施工单 `E:\Acode\FILES\任务\预设修正\预设组装\01-施工单-刀1-区域引用表与装配倒置.md`（规范 v1.0 已定稿）；分支 **`feat/preset-assemble.1`**（基于 `origin/main @ 5e251b40`，已解上游跟踪）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/presets/types.ts`（`GlobalPreset` 加可选 `zoneRefs`）
+- `src/presets/builtin.ts`（10 套 `RAW_GLOBAL_PRESETS` 显式写出 5 项 `zoneRefs`；`DEFAULT_PRESETS` 本刀**不加**）
+- `src/domains/theme/presetReducer.ts`（新增 `requireZoneRefs` / `assertZoneSliceOwnership` / `assembleGlobalPresetReducer`；既有 `setGlobalPresetReducer` 保留为参考实现）
+- `src/application/transactions/applyGlobalPreset.ts`（plan 带上 `zoneRefs` + `profileTokens`；引用表展开成逐区域条目）
+- `src/store.ts`（**只动 `setGlobalPreset` 与 `resetTheme` 这两个预设 action**，其余一行不动）
+- **新增**测试文件（`src/__tests__/` 下的预设组装专项，只增不改）
+- 文档：本文件
+
+**我不碰**：`src/zones/zonePresetPool.ts` 与 `src/zones/pickZoneFields.ts`（只复用其导出，**一行不改**）、`src/themeFieldDefs.ts`、`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/completion.ts`、`src/components/Settings.tsx` 与 `src/components/settings/TemplateLibrary.tsx`（UI 一行不改）、契约快照 JSON（只由脚本重拍）、`src/renderers/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**约束（复审据此把关）**：行为**零变化**——全量测试 files/passed/failed 三数同改造前、契约快照 `--write` 后 `git diff` 行数为 0、10 套预设字段值逐字段等于前置备份；**只新增测试，不改既有行为测试**；**不 bump 任何版本号**（`THEME_SCHEMA_VERSION` / `CC_LAYOUT_SCHEMA_VERSION` 都不动）。前置备份已落仓外 `E:\Acode\FILES\任务\预设修正\备份\预设组装-前存档-20260921\`。
+
+---
+
 [2026-09-21 09] [Miyaki Kumo] [#218]
 
 **开工：issue218（webview2-mcp 上下文瘦身）。** 在 `Ru5t/Reflector` 上施工。本轮文件域，请勿改写、勿连带提交：
