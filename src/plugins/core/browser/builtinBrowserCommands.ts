@@ -70,6 +70,19 @@ function wait(milliseconds: number): Promise<void> {
 }
 
 /**
+ * browser.ensure 就绪轮询预算：40 次 × 50ms ≈ 2s，覆盖 Browser Sheet WebView
+ * 挂载与首次启动。
+ *
+ * 事件化评估（issue #228 批次E）：后端已有 `pylon:browser-status` 推送
+ * （BrowserSheetView.tsx 已订阅），但它是「状态变更广播」而非带终态闩锁的
+ * 就绪信号——命令层在 Sheet 挂载前运行，纯订阅会漏掉订阅前已发生的终态迁移，
+ * 安全改法需要「先订阅 → 初查 → 超时竞速」三段式 + 测试事件 mock，属独立
+ * issue 面积；故保留轮询、仅常量化预算。
+ */
+const BROWSER_READY_POLL_INTERVAL_MS = 50
+const BROWSER_READY_POLL_MAX_ATTEMPTS = 40
+
+/**
  * 打开/聚焦 Browser Sheet，并等待其活动视图完成首次启动。
  *
  * Browser 的原生 bounds 由 Sheet DOM 测量后提供，不能在 command registry
@@ -84,8 +97,12 @@ async function ensureBrowserSheet(initialUrl?: string): Promise<Record<string, u
   store.focusSheet(sheetId)
 
   let status = record(await transport.invoke('browser_status'))
-  for (let attempt = 0; attempt < 40 && status.phase !== 'ready' && status.phase !== 'error'; attempt += 1) {
-    await wait(50)
+  for (
+    let attempt = 0;
+    attempt < BROWSER_READY_POLL_MAX_ATTEMPTS && status.phase !== 'ready' && status.phase !== 'error';
+    attempt += 1
+  ) {
+    await wait(BROWSER_READY_POLL_INTERVAL_MS)
     status = record(await transport.invoke('browser_status'))
   }
 

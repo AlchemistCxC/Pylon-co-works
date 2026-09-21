@@ -852,11 +852,10 @@ pub(crate) fn parse_canonical_event(
     value: &serde_json::Value,
 ) -> Result<CanonicalEventRow, EventError> {
     let mut problems: Vec<String> = Vec::new();
-    if !value.is_object() {
-        problems.push("event 必须是对象".into());
-        return Err(EventError::Invalid(problems.join("; ")));
-    }
-    let obj = value.as_object().expect("checked object");
+    let obj = match value.as_object() {
+        Some(obj) => obj,
+        None => return Err(EventError::Invalid("event 必须是对象".into())),
+    };
     let get_str = |key: &str| obj.get(key).and_then(|v| v.as_str()).map(str::to_owned);
     let get_i64 = |key: &str| obj.get(key).and_then(|v| v.as_i64());
 
@@ -934,28 +933,73 @@ pub(crate) fn parse_canonical_event(
         problems.push("local-observed 只能 authoritative，其他来源只能 unverified".into());
     }
 
-    if !problems.is_empty() {
-        return Err(EventError::Invalid(problems.join("; ")));
-    }
+    // 校验与提取在此收口：模式匹配本身是「全部必填字段都通过校验」的编译期
+    // 证据——任一必填字段缺席，或存在不带 Option 的域校验问题（rawPayload/
+    // provenance/正整数域），都会落入 `_` 分支携带完整问题列表；守卫
+    // `problems.is_empty()` 保证 All-Some 但校验失败的输入同样走 Invalid。
+    // 成功路径直接携带强类型值，不再有「校验通过后逐字段 expect 解包」的
+    // 隐式耦合（原 11 处 `expect("checked")`）。
+    let (
+        event_id,
+        profile_id,
+        agent_id,
+        local_session_id,
+        client_generation,
+        sequence,
+        occurred_at,
+        received_at,
+        event_type,
+        payload_version,
+    ) = match (
+        event_id,
+        profile_id,
+        agent_id,
+        local_session_id,
+        client_generation,
+        sequence,
+        occurred_at,
+        received_at,
+        event_type,
+        payload_version,
+    ) {
+        (
+            Some(event_id),
+            Some(profile_id),
+            Some(agent_id),
+            Some(local_session_id),
+            Some(client_generation),
+            Some(sequence),
+            Some(occurred_at),
+            Some(received_at),
+            Some(event_type),
+            Some(payload_version),
+        ) if problems.is_empty() => (
+            event_id,
+            profile_id,
+            agent_id,
+            local_session_id,
+            client_generation,
+            sequence,
+            occurred_at,
+            received_at,
+            event_type,
+            payload_version,
+        ),
+        _ => return Err(EventError::Invalid(problems.join("; "))),
+    };
 
-    let event_id = event_id.expect("checked");
-    let profile_id = profile_id.expect("checked");
-    let agent_id = agent_id.expect("checked");
-    let local_session_id = local_session_id.expect("checked");
     // owner_key = JSON 数组序列化（禁冒号拼接——source 可含冒号，与 toCanonicalOwnerKey 同纪律）。
     let owner_key =
         pylon_canonical_types::canonical_owner_key(&profile_id, &agent_id, &local_session_id)
             .map_err(|e| EventError::Invalid(format!("owner_key 序列化失败: {e}")))?;
     // rule 1：event_id = owner_key#sequence 确定性推导（禁 content 哈希）。
-    let expected_id =
-        pylon_canonical_types::canonical_event_id(&owner_key, sequence.expect("checked"));
+    let expected_id = pylon_canonical_types::canonical_event_id(&owner_key, sequence);
     if event_id != expected_id {
         return Err(EventError::Invalid(format!(
             "eventId 与 owner+sequence 推导不一致: 期望 {expected_id}，实际 {event_id}"
         )));
     }
 
-    let event_type = event_type.expect("checked");
     let interaction_payload = event_type.starts_with("interaction.");
     let (
         raw_payload,
@@ -978,12 +1022,12 @@ pub(crate) fn parse_canonical_event(
         agent_id,
         local_session_id,
         remote_session_id,
-        client_generation: client_generation.expect("checked"),
-        sequence: sequence.expect("checked"),
-        occurred_at: occurred_at.expect("checked"),
-        received_at: received_at.expect("checked"),
+        client_generation,
+        sequence,
+        occurred_at,
+        received_at,
         event_type,
-        payload_version: payload_version.expect("checked"),
+        payload_version,
         identity: obj.get("identity").cloned(),
         typed_payload: obj
             .get("typedPayload")
@@ -1191,7 +1235,11 @@ fn flush_delta_run(
         return;
     }
     let first_sequence = chunks[0].sequence;
-    let last = chunks.last().expect("run is non-empty");
+    // 不可达分支：上方 `chunks.len() < 2` 已早退，此处 run 至少两行、last 必存在。
+    let Some(last) = chunks.last() else {
+        out.extend(chunks);
+        return;
+    };
     let last_sequence = last.sequence;
     let last_event_id = last.event_id.clone();
     let folded_count = chunks.len();

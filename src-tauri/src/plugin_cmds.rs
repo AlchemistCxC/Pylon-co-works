@@ -838,7 +838,15 @@ fn install_at(
     match commit_stage_at(root, &staged.operation_id) {
         Ok(result) => Ok(result),
         Err(error) => {
-            let _ = abort_stage_at(root, &staged.operation_id);
+            // 回滚失败不改控制流（原错误继续上抛），但必须留下观测痕迹：
+            // 残留的 staging 目录/事务日志会由后续 recover 流程或人工清理。
+            if let Err(rollback_error) = abort_stage_at(root, &staged.operation_id) {
+                tracing::warn!(
+                    operation_id = %staged.operation_id,
+                    error = %rollback_error,
+                    "plugin stage rollback failed; staging artifacts may remain"
+                );
+            }
             Err(error)
         }
     }
@@ -890,9 +898,33 @@ fn stage_at(
             fs::rename(&staging, &target).map_err(|e| PluginError::Transaction(e.to_string()))
         })();
         if let Err(error) = result {
-            let _ = fs::remove_dir_all(&staging);
-            let _ = fs::remove_dir_all(&target);
-            let _ = fs::remove_file(journal_path(root, &op));
+            // 清理失败不改控制流（原错误继续上抛），仅告警留痕：残留路径
+            // 交由下次 stage 的 overwrite 或人工清理处理。
+            if let Err(remove_error) = fs::remove_dir_all(&staging) {
+                tracing::warn!(
+                    operation_id = %op,
+                    path = %staging.display(),
+                    error = %remove_error,
+                    "plugin staging cleanup failed"
+                );
+            }
+            if let Err(remove_error) = fs::remove_dir_all(&target) {
+                tracing::warn!(
+                    operation_id = %op,
+                    path = %target.display(),
+                    error = %remove_error,
+                    "plugin staging cleanup failed"
+                );
+            }
+            let journal = journal_path(root, &op);
+            if let Err(remove_error) = fs::remove_file(&journal) {
+                tracing::warn!(
+                    operation_id = %op,
+                    path = %journal.display(),
+                    error = %remove_error,
+                    "plugin staging cleanup failed"
+                );
+            }
             return Err(error);
         }
     }

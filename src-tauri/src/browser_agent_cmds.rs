@@ -1074,6 +1074,13 @@ pub(crate) async fn browser_agent_read_network(
     }
 }
 
+/// browser.agent-wait 的条件轮询间隔。250ms 是「页面状态变化的可感知延迟」
+/// 与「轮询本身对 WebView 的打扰（每次一轮 eval/状态读取）」之间的折中；
+/// 上层预算由调用方的 timeout_ms（默认 8s、封顶 30s）控制。
+/// 后续方向：改为 CDP 事件订阅（Page.loadEventFired / DOM 变更 / 网络空闲
+/// 推送）消除轮询——涉及 cdp 模块事件管线改造，属独立 issue 面积。
+const PAGE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_agent_wait(
     state: tauri::State<'_, AppState>,
@@ -1163,7 +1170,7 @@ pub(crate) async fn browser_agent_wait(
                 )
                 .await);
             }
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            tokio::time::sleep(PAGE_SETTLE_POLL).await;
         },
         driver::WaitUntil::Selector => {
             let Some(selector) = selector else {
@@ -1200,7 +1207,7 @@ pub(crate) async fn browser_agent_wait(
                     )
                     .await);
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                tokio::time::sleep(PAGE_SETTLE_POLL).await;
             }
         }
         driver::WaitUntil::NetworkIdle => {
@@ -1270,7 +1277,7 @@ pub(crate) async fn browser_agent_wait(
                         )
                         .await);
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    tokio::time::sleep(PAGE_SETTLE_POLL).await;
                 }
             }
             #[cfg(not(windows))]
