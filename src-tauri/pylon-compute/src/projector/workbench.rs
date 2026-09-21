@@ -45,9 +45,9 @@ use serde_json::{Map, Value};
 use wasm_bindgen::prelude::*;
 
 use super::content_part::{
-    canonicalize_js_numbers, coalesce_adjacent_display_text_parts,
+    append_parts_with_merge, canonicalize_js_numbers, coalesce_adjacent_display_text_parts,
     coalesce_adjacent_reasoning_parts, create_unknown_content_part, js_number_of, js_string_of,
-    js_trim, parse_content_part,
+    js_trim, merge_display_text_pair, merge_reasoning_pair, parse_content_part,
 };
 use super::coverage;
 use super::goal_model;
@@ -779,14 +779,13 @@ fn is_record_value(value: &Value) -> bool {
 /// timeline 派生读数的增量缓存（#205 的位）。
 ///
 /// `terminal_sequence` 是「已扫过的 timeline 前缀里终态 session 条目的最大 sequence」。
-/// 增量延展成立的两个前提都已在代码里核对过：
-/// 1. 条目一旦建立就**不可变**——`kind` 与 `data` 都不再被改写（`update_timeline` 只动
-///    `status`/`title`/`summary`/`stream_boundary`，而 `is_terminal_session_entry` 读的是
-///    `kind` 与 `data`）；
-/// 2. 折叠过程中 timeline **只增不减**（无 retain/remove/sort；乱序兜底走
-///    `insert_by_sequence` 仍保持 sequence 升序）。
-/// 因此只需看过新增的后缀。`scanned > timeline.len()`（timeline 被重建或缩短）时缓存
-/// 整份作废，重扫——这是唯一的失效路径，且是保守方向。
+/// 增量延展成立的两个前提都已在代码里核对过：条目一旦建立就**不可变**——`kind` 与
+/// `data` 都不再被改写（`update_timeline` 只动
+/// `status`/`title`/`summary`/`stream_boundary`，而 `is_terminal_session_entry` 读的是
+/// `kind` 与 `data`）；折叠过程中 timeline **只增不减**（无 retain/remove/sort，
+/// 乱序兜底走 `insert_by_sequence` 仍保持 sequence 升序）。因此只需看过新增的后缀。
+/// `scanned > timeline.len()`（timeline 被重建或缩短）时缓存整份作废、重扫——
+/// 这是唯一的失效路径，且是保守方向。
 #[derive(Debug, Clone, Default)]
 pub struct TimelineCache {
     scanned: usize,
@@ -1601,33 +1600,20 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
     // 折入而不是丢弃，live 文档与 sequence 有序重放对齐；终态本身不复活。
     if !terminal {
         if let Some(index) = previous_index {
-            let (
-                previous_role,
-                previous_running,
-                previous_sequence,
-                previous_content,
-                previous_parts,
-            ) = {
+            // 只取标量与判据需要的字段：`content`/`parts` 是累计量，逐事件克隆它们
+            // 就是 Θ(N²)（下面的合并改成就地下沉，不需要累积值）。
+            let (previous_role, previous_running, previous_sequence) = {
                 let previous = &document.messages[index];
-                (
-                    previous.role == role,
-                    previous.running,
-                    previous.sequence,
-                    previous.content.clone(),
-                    previous.parts.clone(),
-                )
+                (previous.role == role, previous.running, previous.sequence)
             };
             if previous_role
                 && !previous_running
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
-                let folded_parts = concat_parts(&previous_parts, &parts);
-                let merged_parts =
-                    coalesce_adjacent_display_text_parts(&folded_parts).unwrap_or(folded_parts);
                 let message = &mut document.messages[index];
-                message.content = format!("{previous_content}{content}");
-                message.parts = Value::Array(merged_parts);
+                message.content.push_str(&content);
+                append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
                 return;
             }
         }
@@ -1667,23 +1653,26 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
     }
     if append {
         let index = document.messages.len() - 1;
-        let previous = document.messages[index].clone();
-        let folded_parts = concat_parts(&previous.parts, &parts);
-        let merged_parts =
-            coalesce_adjacent_display_text_parts(&folded_parts).unwrap_or(folded_parts);
         let identity_is_present = !envelope
             .identity
             .to_value()
             .as_object()
             .expect("identity")
             .is_empty();
+        // 只在需要回退时才取上一份身份：整份 `message.clone()` 含累计 content/parts，
+        // 逐事件做即 Θ(N²)。
+        let fallback_identity = if identity_is_present {
+            None
+        } else {
+            Some(document.messages[index].identity.clone())
+        };
         let message = &mut document.messages[index];
-        message.content = format!("{}{}", previous.content, content);
-        message.parts = Value::Array(merged_parts);
+        message.content.push_str(&content);
+        append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
         message.identity = if identity_is_present {
             envelope.identity.to_value()
         } else {
-            previous.identity
+            fallback_identity.expect("非空身份已排除")
         };
         message.sequence = envelope.sequence;
         message.running = !terminal && !imported_history;
@@ -1717,15 +1706,24 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
     }
 }
 
-fn concat_parts(left: &Value, right: &Value) -> Vec<Value> {
-    let mut out = Vec::new();
-    if let Some(items) = left.as_array() {
-        out.extend(items.iter().cloned());
+/// 就地把 `incoming` 的部件下沉进 `target`（`target` 已是合并态）。
+///
+/// 取代「`concat_parts` 出累计数组 + `coalesce_*` 整份重建」：后者每事件 O(累计)
+/// ——`#205` 的线性化在部件层缺的就是这一块（护栏用例 20k delta 实测 62s / 预算 2.5s）。
+fn append_parts_in_place(
+    target: &mut Value,
+    incoming: &Value,
+    merge_one: fn(&mut Value, &Value) -> bool,
+) {
+    let Some(items) = incoming.as_array() else {
+        // 非数组按 TS 的 `concat` 语义忽略（防御性，信封校验保证数组）。
+        return;
+    };
+    if !target.is_array() {
+        *target = Value::Array(Vec::new());
     }
-    if let Some(items) = right.as_array() {
-        out.extend(items.iter().cloned());
-    }
-    out
+    let slot = target.as_array_mut().expect("just ensured");
+    append_parts_with_merge(slot, items, merge_one);
 }
 
 fn find_correlated_user_echo(
@@ -1889,20 +1887,12 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
     // 乱序收敛：journal-earlier delta 折入已封口 reasoning 段。
     if envelope.event_type == "reasoning.delta" {
         if let Some(index) = previous_index {
-            let (
-                previous_is_reasoning,
-                previous_running,
-                previous_sequence,
-                previous_content,
-                previous_parts,
-            ) = {
+            let (previous_is_reasoning, previous_running, previous_sequence) = {
                 let previous = &document.messages[index];
                 (
                     previous.role == "reasoning",
                     previous.running,
                     previous.sequence,
-                    previous.content.clone(),
-                    previous.parts.clone(),
                 )
             };
             if previous_is_reasoning
@@ -1911,14 +1901,13 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
-                let folded_parts =
-                    concat_parts(&previous_parts, &Value::Array(reasoning_parts.clone()));
-                let merged_parts = coalesce_adjacent_reasoning_parts(&folded_parts)
-                    .map(Value::Array)
-                    .unwrap_or(Value::Array(folded_parts));
                 let message = &mut document.messages[index];
-                message.content = format!("{previous_content}{content}");
-                message.parts = merged_parts;
+                message.content.push_str(&content);
+                append_parts_in_place(
+                    &mut message.parts,
+                    &Value::Array(reasoning_parts.clone()),
+                    merge_reasoning_pair,
+                );
                 return;
             }
         }
@@ -1977,32 +1966,34 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
     let running_next = envelope.event_type == "reasoning.delta" && envelope.provenance_origin != 2;
     if append {
         let index = document.messages.len() - 1;
-        let previous = document.messages[index].clone();
-        let folded_parts = concat_parts(&previous.parts, &Value::Array(reasoning_parts.clone()));
-        let merged_parts = if redacted {
-            parts.clone()
-        } else {
-            coalesce_adjacent_reasoning_parts(&folded_parts)
-                .map(Value::Array)
-                .unwrap_or(Value::Array(folded_parts))
-        };
-        let message = &mut document.messages[index];
-        message.content = if redacted {
-            content
-        } else {
-            format!("{}{}", previous.content, content)
-        };
-        message.parts = merged_parts;
-        message.identity = if !envelope
+        let identity_is_present = !envelope
             .identity
             .to_value()
             .as_object()
             .expect("identity")
-            .is_empty()
-        {
+            .is_empty();
+        let fallback_identity = if identity_is_present {
+            None
+        } else {
+            Some(document.messages[index].identity.clone())
+        };
+        let message = &mut document.messages[index];
+        if redacted {
+            // 剥敏段是**替换**而不是追加：整段换掉，语义不变。
+            message.content = content;
+            message.parts = parts.clone();
+        } else {
+            message.content.push_str(&content);
+            append_parts_in_place(
+                &mut message.parts,
+                &Value::Array(reasoning_parts.clone()),
+                merge_reasoning_pair,
+            );
+        }
+        message.identity = if identity_is_present {
             envelope.identity.to_value()
         } else {
-            previous.identity
+            fallback_identity.expect("非空身份已排除")
         };
         message.sequence = envelope.sequence;
         message.running = running_next;
@@ -5681,6 +5672,46 @@ mod projection_index_tests {
         document.timeline.iter().any(|entry| {
             entry.sequence > after && entry.sequence < before && is_text_stream_boundary(entry)
         })
+    }
+
+    /// 诊断探针（默认 ignore）：把批量折叠按阶段计时，用来定位 Θ(N²) 落点。
+    /// 跑法：`cargo test -p pylon-compute --lib batch_fold_phase_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore = "诊断用，按需手动跑"]
+    fn batch_fold_phase_probe() {
+        use std::time::Instant;
+        let total = 20_000usize;
+        let mut journal = Vec::with_capacity(total);
+        journal.push(envelope(1.0, json!({ "type": "message.started", "role": "user", "parts": [{ "kind": "text", "text": "长思考" }] })));
+        for index in 0..total {
+            journal.push(envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            ));
+        }
+        let mut document = create_workbench_document("session-probe");
+        let started = Instant::now();
+        let patch = project_batch(&mut document, journal).expect("batch");
+        let batch_ms = started.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[probe] project_batch({total}) = {batch_ms:.1}ms, patch upserts = {}",
+            patch.message_upserts.len()
+        );
+
+        // 对照：同样的事件逐条 reduce（单事件路径），看是否也慢。
+        let mut per_event = create_workbench_document("session-probe");
+        let started = Instant::now();
+        for index in 0..total {
+            let item = envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            );
+            reduce_workbench_event(&mut per_event, &item).expect("reduce");
+        }
+        println!(
+            "[probe] per-event reduce = {:.1}ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     /// 窗口查询必须与「逐条扫全表」判据逐字等价——这是那处 Θ(N·T) → Θ(log T + 窗口)

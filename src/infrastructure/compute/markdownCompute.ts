@@ -12,11 +12,13 @@
 //   尾块，禁止每拍全文过界。
 // - `highlightBlock`：整块代码进、行数组 span 出（github `pl-*` 类名链）。逐行过界禁止。
 //
-// 两种宿主的装载路径与 `pylonCompute.ts` 相同（浏览器走 glue 默认 `init()`，Node
-// 自读字节；glue 的 init 有就绪守卫，并发安全）。消费点（渲染模型解析、代码高亮）
-// 本就是异步形态，这里保持 Promise 装载即可。
+// 装载：**环境无关**的那半在 `wasmRuntime.ts`，测试宿主由 `scripts/wasmPreload.ts`
+// 预初始化；浏览器走 glue 自己的 fetch 路径。产品源码里因此没有 `node:*`，也不依赖
+// `@types/node`。消费点（渲染模型解析、代码高亮）本就是异步形态，这里保持 Promise 装载。
 
 import init, * as glue from '../../wasm/pylon-markdown/pylon_markdown.js'
+
+import { createComputeRuntime } from './wasmRuntime.ts'
 
 /** 整块代码的高亮结果：每行一组 span（不含行尾换行；换行由消费方按行拼）。 */
 export interface HighlightSpan {
@@ -40,40 +42,19 @@ export interface MarkdownCompute {
   markdownEngineVersion(): string
 }
 
-const WASM_ARTIFACT = 'pylon_markdown_bg.wasm'
+const runtime = createComputeRuntime('pylon-markdown', glue, () => init())
 
 let loading: Promise<MarkdownCompute> | undefined
 let loaded: MarkdownCompute | undefined
 
-function isNodeRuntime(): boolean {
-  // 不看 `document`：jsdom 测试环境里 document 存在但运行时仍是 Node，
-  // 必须走自读字节路径而不是 fetch。
-  return typeof process !== 'undefined' && !!process.versions?.node
-}
-
-async function instantiate(): Promise<void> {
-  if (isNodeRuntime()) {
-    const [{ readFile }, { fileURLToPath }] = await Promise.all([
-      import('node:fs/promises'),
-      import('node:url'),
-    ])
-    const here = import.meta.url
-    const artifactUrl = `${here.slice(0, here.lastIndexOf('/') + 1)}../../wasm/pylon-markdown/${WASM_ARTIFACT}`
-    await init({ module_or_path: await readFile(fileURLToPath(artifactUrl)) })
-    return
-  }
-  await init()
-}
-
 /**
- * 装载 markdown 计算核（幂等；glue 的 init 有就绪守卫，与其他装载方并发安全）。
- * 失败时不吞异常：调用方要么让请求红，要么自己决定降级，装载层不替它们做
- * 「静默退回 TS 实现」这种决定。
+ * 装载 markdown 计算核（幂等）。失败时不吞异常：调用方要么让请求红，要么自己
+ * 决定降级，装载层不替它们做「静默退回 TS 实现」这种决定。
  */
 export function loadMarkdownCompute(): Promise<MarkdownCompute> {
   if (loaded) return Promise.resolve(loaded)
-  loading ??= instantiate().then(() => {
-    loaded = glue as unknown as MarkdownCompute
+  loading ??= runtime.whenReady().then(() => {
+    loaded = runtime.glue() as unknown as MarkdownCompute
     return loaded
   })
   return loading

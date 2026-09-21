@@ -174,3 +174,62 @@ Rust kernel；不动渲染 DOM 层。`src/components/chat/starryCore.ts` **刻�
 - 另有一段环境事故：施工中途 G: 盘写满，两个并行 agent 各自被阻塞过；我清理了自己在
   `/tmp` 的产物（约 400 MB）与 `target/debug/incremental`（6.7 GB，纯增量编译缓存，
   删后 cargo 自行重建）。**未删除任何用户的 target 内容与非本任务的临时文件。**
+
+---
+
+## 收口轮（2026-09-21，用户批准「Node 那半移出产品源码」后追加）
+
+### 改动
+
+| 文件 | 范围 | 性质 |
+| --- | --- | --- |
+| `src/infrastructure/compute/wasmRuntime.ts` | 环境无关的装载门：浏览器走 glue 的 fetch；测试宿主预初始化后以 **glue 命名空间对象**为键登记 | 新增 |
+| `scripts/wasmPreload.ts` | 测试侧读盘 + `initSync` 预初始化（`node:*` 只在这里），跨测试文件只缓存编译好的 `WebAssembly.Module` | 新增 |
+| `vitest.setup.ts` | 每个测试文件求值前预初始化（`setupFiles` 语义） | 修改 |
+| `src/infrastructure/compute/{pylonCompute,streamingCompute,markdownCompute,projectorCompute}.ts` | 去掉各自内联的 `node:*` / `isNodeRuntime` / `readWasmBytes`，改走装载门 | 修改 |
+| `src-tauri/pylon-compute/src/projector/{content_part,workbench}.rs` | 增量下沉：只合并新产生的相邻对 + 文本就地 `push_str`；四处站点改用它，删掉已死的 `concat_parts` | 修改 |
+| `scripts/bench-compute-boundary.mts` | 新增场景 D（护栏形态）与批大小规模曲线；**必须用 Node 跑**（见下） | 修改 |
+
+### 修掉的缺陷
+
+1. **产品源码里的 node 耦合**：前端门禁 job 在干净检出上 `TS2307: Cannot find module 'node:fs'`
+   / `TS2591: Cannot find name 'process'`。根因是三个装载器把「从磁盘读 wasm」——一个
+   **测试环境的关切**——写进了浏览器目标源码。现产品侧零 `node:*`
+   （`src` 下仅剩既存的 `css04/typographyRegression.ts` 测试侧文件，它自带 `.d.ts` 垫片）。
+2. **浏览器路径真 bug**：投影装载器在**导入期**调 `glue.projectorEventTypes()`。测试宿主因
+   导入期 `initSync` 而没暴露它，浏览器里 glue 尚未初始化 ⇒ 导入即抛。改为懒建。
+3. **投影折叠的 Θ(N²)**（护栏用例 20k delta：CI 5566ms → **461ms**，预算 2500ms）：
+   ① 消息 content 用 `format!("{prev}{cur}")` 逐事件整份复制累计文本；② parts 数组用
+   `concat_parts` + `coalesce_*` 每事件整份重建；③ 合并时逐对 `format!` 复制累计部件文本。
+   修法见上表；等价性由 `incremental_sink_tests`（40 种子 × 6 种分批 × 两族规则 vs
+   「整份重建」参考实现 + 累计文本逐字节 + 空批 no-op）守。
+
+### 一处宿主假象（照实记录，避免后人据此改计算核）
+
+单帧事件数 → `appendBatch` 耗时：Node 5k:29ms / 10k:202ms / 12k:262ms / 14k:283ms（线性）；
+Bun 5k:34ms / 10k:56ms / **12k:11997ms / 14k:37808ms**（悬崖）。差异在 wasm 线性内存增长：
+Bun 在堆约 270MB 处每次 `memory.grow` 都要搬运整块线性内存。Rust 单测 `project_batch(20000)`
+= 0.37s，说明折叠本身线性。测试（vitest/Node）与生产（Chromium）都不在 Bun 上跑——
+**基准脚本必须 `node scripts/bench-compute-boundary.mts`**。我此前用 `bun` 跑出的 60s+ 数字
+是宿主假象，已在脚本注释里写明。
+
+### 收口后证据（Node 宿主）
+
+- `cargo test -p pylon-compute -p pylon-markdown -p pylon-canonical-types --lib`
+  → 164 / 32 / 9 passed，0 failed（+1 ignored 诊断探针）
+- `bun run test` → Test Files 621 passed / Tests 4685 passed | 1 todo，0 failed
+- `bun run build` exit 0；`check:canonical-types` / `check:docs` / `check:deps` / `lint` /
+  `check:bundle`（wasm gzip 1,211,696 / 预算 1,450,000）全通过
+- `cargo fmt --all --check` 通过；`cargo clippy -p pylon-compute --lib --tests` 0 warning
+- 基准（`node scripts/bench-compute-boundary.mts --quick`）：冷装载 10k 页级 batch
+  **479.8ms** vs 逐事件 117,942ms（**245.8×**）；突刺 400 → 6.2ms vs 121.8ms（19.6×）；
+  场景 D（20k 单帧）编码 103 + 折叠 606 + 物化 28 = **737ms**（护栏预算 2500ms）
+
+### 仍未解（本轮新增两条）
+
+7. **「不得慢于原生 TS」的同形态对照未做**：护栏用例注释记录迁移前约 0.2s、现 0.46s
+   （约 2.3×）。注意那是**逐事件喂法**（纪律禁止的形态）下的对照；生产的页级喂法是
+   10k/480ms。要做同形态对照，需要把迁移前的 TS 折叠 harness 从 git 历史里取出跑一遍
+   ——属未完成项。
+8. **大单帧的批大小敏感**：Node 下线性但堆会涨到约 280MB；生产按页（~1000）喂，
+   落在曲线线性段，但「解码即折叠、不整页物化」仍是更稳的形态（未做）。

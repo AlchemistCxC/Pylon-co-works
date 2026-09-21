@@ -2338,3 +2338,218 @@ mod tests {
         assert_eq!(js_number_to_string(0.1), "0.1");
     }
 }
+
+// ── 增量下沉（#205 线性化在部件层的对位物） ───────────────────────────────────
+//
+// `coalesce_*` 是「整数组重建」语义：每事件 `concat` 出累计数组再整份合并，代价
+// O(累计) ⇒ 冷重放 Θ(N²)，而且它逐对合并时用 `format!("{prev}{cur}")` 复制累计文本，
+// 那是同一处的第二个 Θ(N²)。下面三个函数给出**等价但增量**的形态：
+// 只处理新产生的相邻对，且文本就地 `push_str`。
+
+/// 把 `incoming` 就地下沉进**已合并态**的 `existing`。
+///
+/// 与 `coalesce_*(concat(existing, incoming))` 等价：合并规则只看相邻两项，而
+/// `existing` 已无相邻可并对，故新增的可并对只会出现在「旧末项 × 新首项」与
+/// `incoming` 内部。于是每事件只付 O(新增)。
+pub fn append_parts_with_merge(
+    existing: &mut Vec<Value>,
+    incoming: &[Value],
+    merge_one: fn(&mut Value, &Value) -> bool,
+) {
+    for part in incoming {
+        if let Some(previous) = existing.last_mut() {
+            if merge_one(previous, part) {
+                continue;
+            }
+        }
+        existing.push(part.clone());
+    }
+}
+
+/// `coalesce_adjacent_display_text_parts` 的**单对**规则：并入成功返回 true。
+/// 这一族按 TS 的 `{ ...previous, kind, text }` 保形，故除 kind/text 外字段原样留着。
+pub fn merge_display_text_pair(previous: &mut Value, part: &Value) -> bool {
+    if !(is_display_text_part(previous) && is_display_text_part(part)) {
+        return false;
+    }
+    let previous_kind = part_kind(previous).unwrap_or("").to_string();
+    let kind = if previous_kind == "markdown" || part_kind(part) == Some("markdown") {
+        "markdown"
+    } else {
+        "text"
+    };
+    let incoming = part_text(part).unwrap_or("").to_string();
+    if let Some(object) = previous.as_object_mut() {
+        match object.get_mut("text") {
+            Some(Value::String(text)) => text.push_str(&incoming),
+            _ => {
+                object.insert("text".to_string(), Value::String(incoming));
+            }
+        }
+        object.insert("kind".to_string(), Value::String(kind.to_string()));
+    }
+    true
+}
+
+/// `coalesce_adjacent_reasoning_parts` 的**单对**规则：并入成功返回 true。
+/// 与 display 族不同，这一族是**重建对象**（未知字段被丢弃），且 language 只在两侧
+/// 一致时保留——这里用 `retain` 收敛到同样的键集合（serde_json 的 Map 是字典序，
+/// 键序与原实现一致）。
+pub fn merge_reasoning_pair(previous: &mut Value, part: &Value) -> bool {
+    if !(is_reasoning_text_part(previous) && is_reasoning_text_part(part)) {
+        return false;
+    }
+    let previous_kind = part_kind(previous).unwrap_or("").to_string();
+    let current_kind = part_kind(part).unwrap_or("").to_string();
+    let kind = if previous_kind == "reasoning" || current_kind == "reasoning" {
+        "reasoning"
+    } else if previous_kind == "thinking" || current_kind == "thinking" {
+        "thinking"
+    } else if previous_kind == "markdown" || current_kind == "markdown" {
+        "markdown"
+    } else {
+        "text"
+    };
+    let previous_language = previous.get("language").cloned();
+    let language = if previous_language.as_ref() == part.get("language") {
+        previous_language
+    } else {
+        None
+    };
+    let incoming = part_text(part).unwrap_or("").to_string();
+    if let Some(object) = previous.as_object_mut() {
+        match object.get_mut("text") {
+            Some(Value::String(text)) => text.push_str(&incoming),
+            _ => {
+                object.insert("text".to_string(), Value::String(incoming));
+            }
+        }
+        object.insert("kind".to_string(), Value::String(kind.to_string()));
+        retain_reasoning_shape(object);
+        match language {
+            Some(language) => {
+                object.insert("language".to_string(), language);
+            }
+            None => {
+                object.remove("language");
+            }
+        }
+    }
+    true
+}
+
+/// 推理族的键集合收敛（重建对象语义）：只留 kind / text / language。
+fn retain_reasoning_shape(object: &mut Map<String, Value>) {
+    object.retain(|key, _| key == "kind" || key == "text" || key == "language");
+}
+
+#[cfg(test)]
+mod incremental_sink_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 确定性伪随机（线性同余）：用例要可按种子复现，不引 rand 依赖。
+    fn next(seed: &mut u64) -> u64 {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *seed >> 33
+    }
+
+    /// 造一段「可能相邻同类」的部件序列：同族连排与异族交错都要出现，
+    /// 否则测不到「只在交界处合并」这条等价性。
+    fn random_parts(seed: &mut u64, length: usize) -> Vec<Value> {
+        let kinds = ["text", "markdown", "thinking", "reasoning", "code", "ansi"];
+        let mut out = Vec::with_capacity(length);
+        for index in 0..length {
+            let kind = kinds[(next(seed) % kinds.len() as u64) as usize];
+            let mut object = Map::new();
+            object.insert("kind".to_string(), Value::String(kind.to_string()));
+            object.insert(
+                "text".to_string(),
+                Value::String(format!("{kind}-{index};")),
+            );
+            // language 只有部分部件带，用来测 reasoning 族的「两侧一致才保留」。
+            if next(seed).is_multiple_of(3) {
+                object.insert("language".to_string(), Value::String("rust".to_string()));
+            }
+            // 噪声字段：display 族保形、reasoning 族丢弃——两条规则的分野点。
+            if next(seed).is_multiple_of(4) {
+                object.insert("limit".to_string(), json!(index));
+            }
+            out.push(Value::Object(object));
+        }
+        out
+    }
+
+    /// 参考实现：**整数组重建**语义（`concat` 后整份 coalesce），即被下沉版取代的那条路。
+    fn reference(existing: &[Value], incoming: &[Value], reasoning: bool) -> Vec<Value> {
+        let mut folded: Vec<Value> = existing.to_vec();
+        folded.extend(incoming.iter().cloned());
+        let merged = if reasoning {
+            coalesce_adjacent_reasoning_parts(&folded)
+        } else {
+            coalesce_adjacent_display_text_parts(&folded)
+        };
+        merged.unwrap_or(folded)
+    }
+
+    /// 增量下沉必须与「整份重建」逐值等价——这是把 Θ(N²) 换成 O(新增) 的正确性前提。
+    /// 用例覆盖：任意切分点（把同一序列按不同长度分批下沉）、同族连排、异族交错、
+    /// language/噪声字段的有无、以及空批。
+    #[test]
+    fn incremental_sink_matches_full_rebuild() {
+        for seed in 1..=40u64 {
+            let mut state = seed;
+            let sequence = random_parts(&mut state, 24);
+            for chunk in 1..=6usize {
+                for reasoning in [false, true] {
+                    let merge_one: fn(&mut Value, &Value) -> bool = if reasoning {
+                        merge_reasoning_pair
+                    } else {
+                        merge_display_text_pair
+                    };
+                    let mut in_place: Vec<Value> = Vec::new();
+                    let mut rebuilt: Vec<Value> = Vec::new();
+                    for slice in sequence.chunks(chunk) {
+                        append_parts_with_merge(&mut in_place, slice, merge_one);
+                        rebuilt = reference(&rebuilt, slice, reasoning);
+                    }
+                    assert_eq!(
+                        Value::Array(in_place.clone()),
+                        Value::Array(rebuilt),
+                        "seed={seed} chunk={chunk} reasoning={reasoning}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 累计文本必须**逐字节**等于逐段拼接——`push_str` 取代 `format!` 后最容易错的就是它。
+    #[test]
+    fn incremental_sink_accumulates_text_byte_exactly() {
+        let mut accumulated: Vec<Value> = Vec::new();
+        let mut expected = String::new();
+        for index in 0..64 {
+            let part = json!({ "kind": "text", "text": format!("段{index}-") });
+            expected.push_str(&format!("段{index}-"));
+            append_parts_with_merge(
+                &mut accumulated,
+                std::slice::from_ref(&part),
+                merge_display_text_pair,
+            );
+        }
+        assert_eq!(accumulated.len(), 1, "同族连排应合成一个部件");
+        assert_eq!(part_text(&accumulated[0]).unwrap_or(""), expected);
+    }
+
+    /// 空批与非法入参不得改变已合并态（防御路径）。
+    #[test]
+    fn incremental_sink_is_noop_on_empty() {
+        let mut accumulated = vec![json!({ "kind": "text", "text": "a" })];
+        append_parts_with_merge(&mut accumulated, &[], merge_display_text_pair);
+        assert_eq!(accumulated.len(), 1);
+        let merged = coalesce_adjacent_display_text_parts(&accumulated);
+        assert!(merged.is_none(), "已合并态不应再产生可合并对");
+    }
+}

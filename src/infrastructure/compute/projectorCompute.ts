@@ -20,18 +20,17 @@
 //   diagnostics/systemErrors 按长度判等），appliedEventIds/appliedRanges 冻结。
 //   这既是公开契约（runtime 的 memo 链靠引用稳定），也让幂等折叠恒等返回原文档。
 //
-// 装载模型：**Node 宿主（vitest，含 jsdom）在模块导入时同步初始化 wasm**
-// （`initSync` + `readFileSync`，编译产物挂在 globalThis 上跨测试文件复用），
-// 因此行为测试可以同步调用折叠出口；浏览器宿主异步初始化（glue 的 fetch 分支），
-// 同步调用方在就绪前会得到显式报错，会话层在 `bind` 首行
-// `await whenProjectorComputeReady()` 后才开折叠。Vite 生产构建 target 是
-// es2020（不支持 TLA），这是不用顶层 await 的原因。装载失败不吞异常。
+// 装载模型：**环境无关**的那半在 `wasmRuntime.ts`——测试宿主（vitest / bun）由
+// `scripts/wasmPreload.ts` 预初始化，因此行为测试可以同步调用折叠出口；浏览器走
+// glue 的 fetch 分支，同步调用方在就绪前得到显式报错，会话层在 `bind` 首行
+// `await whenProjectorComputeReady()` 后才开折叠。产品源码里没有 `node:*`（重构前
+// 这里内联的 `node:fs` 让前端门禁 job 在干净检出上直接 TS2307），也不用顶层 await
+// （Vite 生产构建 target 是 es2020，TLA 会让 esbuild 转译阶段失败）。装载失败不吞异常。
+/// <reference types="node" />
 
-// node:* 走**默认导入**：vite 的 browser-external 桩只有 default 导出，具名导入
-// 会让 rollup 构建直接失败；属性访问只发生在 Node 分支内，浏览器永不触达。
-import nodeFs from 'node:fs'
-import nodeUrl from 'node:url'
 import __wbgInit, * as glueNamespace from '../../wasm/pylon-compute/pylon_compute.js'
+
+import { createComputeRuntime } from './wasmRuntime.ts'
 import type {
   WorkbenchDocument,
   WorkbenchProjectionDiagnostic,
@@ -67,68 +66,28 @@ export interface ProjectorFoldPage {
   readonly document: WorkbenchDocument
 }
 
-const WASM_ARTIFACT = 'pylon_compute_bg.wasm'
-/** vitest 的 forks 池在同进程内跨测试文件复用 globalThis：编译好的 Module 只产一次。 */
-const WASM_MODULE_CACHE_KEY = '__pylon_projector_wasm_module__'
-
-function isNodeRuntime(): boolean {
-  // jsdom/happy-dom 宿主里 document 存在但 process.versions 不存在；真实浏览器
-  // 两者皆无。以 process.versions.node 为准才能在 DOM 化的 vitest 环境走文件读取。
-  return typeof process !== 'undefined' && !!process.versions?.node
-}
-
-function readWasmBytes(): Buffer {
-  const candidates: string[] = []
-  // 第一候选：从本模块 URL 推导（对 Node 直跑/浏览器构建都成立；vitest 的
-  // vite 管线可能产出非标准 URL，new URL/fileURLToPath 任一失败即跳过）。
-  try {
-    candidates.push(nodeUrl.fileURLToPath(new URL(`../../wasm/pylon-compute/${WASM_ARTIFACT}`, import.meta.url).href))
-  } catch {
-    /* 退下一候选 */
-  }
-  // 兜底：vitest/bun 的 cwd 恒为仓库根（`bun run test` / `bunx vitest` 入口）。
-  candidates.push(`src/wasm/pylon-compute/${WASM_ARTIFACT}`)
-  let lastError: unknown
-  for (const candidate of candidates) {
-    try {
-      return nodeFs.readFileSync(candidate)
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('wasm 产物读取失败')
-}
-
-function compiledWasmModule(): WebAssembly.Module {
-  const cache = globalThis as Record<string, WebAssembly.Module | undefined>
-  const cached = cache[WASM_MODULE_CACHE_KEY]
-  if (cached) return cached
-  const compiled = new WebAssembly.Module(new Uint8Array(readWasmBytes()))
-  cache[WASM_MODULE_CACHE_KEY] = compiled
-  return compiled
-}
-
-let ready: Promise<void>
-if (isNodeRuntime()) {
-  glueNamespace.initSync({ module: compiledWasmModule() })
-  ready = Promise.resolve()
-} else {
-  ready = Promise.resolve(__wbgInit()).then(() => undefined)
-}
-
-/** wasm 计算核就绪；Node 宿主恒已就绪（模块导入时同步初始化）。 */
-export function whenProjectorComputeReady(): Promise<void> {
-  return ready
-}
-
 const glue = glueNamespace as unknown as ProjectorGlue
+const runtime = createComputeRuntime('pylon-compute（投影）', glue, () => __wbgInit())
 
-// 事件类型 → 帧内 typeIndex。词表以 wasm 出口为单源（跨语言契约的 Rust 方向，
-// 见 dev-standards「Rust/WASM 计算核」），TS 侧由 parity 测试与
-// WORKBENCH_SEMANTIC_EVENT_TYPES 钉死等价。
-const typeIndexByEvent = new Map<string, number>(
-  glue.projectorEventTypes().map((name, index) => [name, index]),
-)
+/** wasm 计算核就绪。测试宿主由前置预初始化，因此同步已就绪。 */
+export function whenProjectorComputeReady(): Promise<void> {
+  return runtime.whenReady()
+}
+
+/**
+ * 事件类型 → 帧内 typeIndex。词表以 wasm 出口为单源（跨语言契约的 Rust 方向，
+ * 见 dev-standards「Rust/WASM 计算核」），TS 侧由 parity 测试与
+ * `WORKBENCH_SEMANTIC_EVENT_TYPES` 钉死等价。
+ *
+ * **懒建**：这不是可选的优化——在导入期调用 wasm 出口，浏览器宿主会在 glue 尚未
+ * 初始化时炸（`wasm` 未定义）。测试宿主之所以没暴露它，是因为预初始化把 wasm
+ * 变成了导入期就已就绪。
+ */
+let typeIndexCache: Map<string, number> | undefined
+function typeIndexes(): Map<string, number> {
+  typeIndexCache ??= new Map(glue.projectorEventTypes().map((name, index) => [name, index]))
+  return typeIndexCache
+}
 
 const MESSAGE_ROLES = ['user', 'assistant', 'system', 'tool', 'reasoning', 'developer', 'unknown'] as const
 const PROVENANCE_ORIGINS = ['local-observed', 'optimistic-local', 'recovery-import', 'migration', 'plugin'] as const
@@ -171,7 +130,7 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
   }
 
   const encoded = envelopes.map(envelope => {
-    const typeIndex = typeIndexByEvent.get(envelope.event.type)
+    const typeIndex = typeIndexes().get(envelope.event.type)
     if (typeIndex === undefined) throw new Error(`事件类型不在投影词表内：${envelope.event.type}`)
 
     const event = envelope.event as unknown as Record<string, unknown>

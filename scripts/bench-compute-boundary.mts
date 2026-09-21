@@ -16,14 +16,20 @@
 //   node scripts/build-wasm.mjs        # 前置：确保产物存在
 //   bun scripts/bench-compute-boundary.mts [--quick]
 
+// 本脚本不经 vitest（`bun scripts/...` 直跑），因此自己完成测试侧预初始化：
+// 产品源码只保留浏览器那条 fetch 路径，Node 侧读盘 + initSync 在 wasmPreload 里。
+import { preloadComputeWasm } from './wasmPreload.ts'
+
+preloadComputeWasm()
+
 import {
   createProjector,
   encodeProjectorFrame,
   readProjectorBoundaryCrossings,
   resetProjectorBoundaryCrossings,
-} from '../src/infrastructure/compute/projectorCompute'
-import { createWorkbenchEnvelope } from '../src/domains/workbench/events/workbenchEventSchema'
-import type { WorkbenchEventEnvelope, WorkbenchSemanticEvent } from '../src/domains/workbench/events/workbenchEventSchema'
+} from '../src/infrastructure/compute/projectorCompute.ts'
+import { createWorkbenchEnvelope } from '../src/domains/workbench/events/workbenchEventSchema.ts'
+import type { WorkbenchEventEnvelope, WorkbenchSemanticEvent } from '../src/domains/workbench/events/workbenchEventSchema.ts'
 
 const SESSION_ID = 'bench-session'
 const RECORDED_AT = '2026-09-21T00:00:00.000Z'
@@ -258,6 +264,59 @@ async function main(): Promise<void> {
     `  物化耗时：每页一次 ${perPageMaterialize.materializeMs.toFixed(1)}ms / 末尾一次 ${onceMaterialize.materializeMs.toFixed(1)}ms` +
       `（${(perPageMaterialize.materializeMs / Math.max(1, onceMaterialize.materializeMs)).toFixed(2)}×）`,
   )
+
+  console.log('\n── 场景 D · 性能护栏的形态（#205 的规模护栏用例） ──')
+  {
+    // 复刻 `src/__tests__/replay/projectionLinearization.test.ts` 的护栏输入：
+    // 一条用户消息 + N 条带 coverage 的 reasoning delta（全折进同一条 reasoning 消息）。
+    // 该测试的预算写死在测试里（20k 必须 < 2.5s），所以这里按**分段计时**定位成本落点。
+    const total = 20_000
+    const journal: Envelope[] = [envelope(1, { type: 'message.started', role: 'user', parts: [{ kind: 'text', text: '长思考' }] }, { messageId: 'user-perf' })]
+    for (let index = 0; index < total; index += 1) {
+      journal.push(createWorkbenchEnvelope({
+        sessionId: SESSION_ID,
+        sequence: index + 2,
+        recordedAt: RECORDED_AT,
+        source: { provider: 'peri', sourceId: `wire-${index + 2}` },
+        identity: { messageId: 'thought-perf' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        coverage: [index + 2, index + 2],
+        event: { type: 'reasoning.delta', parts: [{ kind: 'thinking', text: `第${index}段` }] },
+      }))
+    }
+    // 规模曲线：同一形状按批大小递进。**必须是 Node 宿主跑**
+    // （`node scripts/bench-compute-boundary.mts`；vitest 也是 Node）。
+    // 2026-09-21 实测对照：
+    //   Node  ：5k:30ms  10k:202ms  12k:262ms  14k:269ms —— 线性，堆 209→279MB
+    //   Bun   ：5k:34ms  10k:56ms   12k:11997ms 14k:37808ms —— 11k 之后进入悬崖
+    // 差异在 wasm 线性内存增长：Bun 在堆约 270MB 处每次 `memory.grow` 都要搬运整块
+    // 线性内存，代价按秒计。**这不是计算核的问题**（Rust 单测 `project_batch(20000)`
+    // 只要 0.37s），测试与生产都不在 Bun 上跑；本脚本此前用 `bun` 跑出的 60s+ 数字
+    // 是宿主假象，别据此改计算核。
+    {
+      const curve = [5000, 10_000, 12_000, 14_000]
+      const points: string[] = []
+      for (const size of curve) {
+        const slice = journal.slice(0, size)
+        const probe = createProjector(SESSION_ID)
+        const [probeFrame] = time(() => encodeProjectorFrame(slice))
+        const [, probeFold] = time(() => probe.appendBatch(probeFrame))
+        const memory = (globalThis as Record<string, unknown>).__pylon_compute_wasm_module__memory as
+          | WebAssembly.Memory
+          | undefined
+        const heapMb = memory ? (memory.buffer.byteLength / 1024 / 1024).toFixed(1) : '?'
+        points.push(`${size}:${probeFold.toFixed(0)}ms(帧${probeFrame.length}B/堆${heapMb}MB)`)
+      }
+      console.log(`  [诊断] 批大小 → appendBatch 耗时: ${points.join('  ')}`)
+    }
+    resetProjectorBoundaryCrossings()
+    const projector = createProjector(SESSION_ID)
+    const [frame, encodeMs] = time(() => encodeProjectorFrame(journal))
+    const [, foldMs] = time(() => projector.appendBatch(frame))
+    const [, documentMs] = time(() => projector.document())
+    console.log(`  编码 ${encodeMs.toFixed(1)}ms / 折叠 ${foldMs.toFixed(1)}ms / 物化 ${documentMs.toFixed(1)}ms / 过界 ${readProjectorBoundaryCrossings()} 次`)
+    console.log(`  护栏预算 2500ms（测试写死）→ 本核折算 ${(encodeMs + foldMs + documentMs).toFixed(1)}ms`)
+  }
 
   console.log('\n判据：')
   console.log('  · 「页级 batch」是否显著优于「逐事件」——若否，纪律 1 需要按数字修订。')

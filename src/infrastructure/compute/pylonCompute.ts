@@ -7,15 +7,12 @@
 // 产物位置：`src/wasm/pylon-compute/`，由 `scripts/build-wasm.mjs` 生成（不入库，
 // vitest 的 globalSetup 与 `bun run build:wasm` 都会确保它存在）。
 //
-// 两种宿主都要能装载（issue 的「浏览器预览模式必须继续可用」约束）：
-// - 浏览器 / Vite：wasm-bindgen 的 `--target web` glue 用 `new URL(..., import.meta.url)`
-//   取 wasm，Vite 会把它接成资源 URL，直接 `init()` 即可。
-// - Node（vitest）：`fetch` 拿不到 `file:` URL，因此这里自己读字节喂给
-//   `WebAssembly.instantiate`。**刻意不用 `new URL(字面量, import.meta.url)`**——
-//   Vite/vitest 的静态重写会把那个字面量换成资源路径，Node 分支就再也还原不出文件
-//   路径；改成字符串拼接后重写不匹配，语义在两种宿主下都稳定。
+// 装载：**环境无关**的那半在 `wasmRuntime.ts`——浏览器走 glue 的 fetch 路径，
+// 测试宿主由 `scripts/wasmPreload.ts` 预初始化。产品源码里因此没有 `node:*`。
 
 import init, * as glue from '../../wasm/pylon-compute/pylon_compute.js'
+
+import { createComputeRuntime } from './wasmRuntime.ts'
 
 /** 计算核的 canonical 出口（与 Rust 侧 `pylon_compute::canonical` 一一对应）。 */
 export interface PylonCompute {
@@ -33,28 +30,10 @@ export interface PylonCompute {
   nextEventSequence(previous?: number | null): number
 }
 
-const WASM_ARTIFACT = 'pylon_compute_bg.wasm'
+const runtime = createComputeRuntime('pylon-compute', glue, () => init())
 
 let loading: Promise<PylonCompute> | undefined
 let loaded: PylonCompute | undefined
-
-function isNodeRuntime(): boolean {
-  return typeof document === 'undefined' && typeof process !== 'undefined' && !!process.versions?.node
-}
-
-async function instantiate(): Promise<void> {
-  if (!isNodeRuntime()) {
-    await init()
-    return
-  }
-  const [{ readFile }, { fileURLToPath }] = await Promise.all([
-    import('node:fs/promises'),
-    import('node:url'),
-  ])
-  const here = import.meta.url
-  const artifactUrl = `${here.slice(0, here.lastIndexOf('/') + 1)}../../wasm/pylon-compute/${WASM_ARTIFACT}`
-  await init({ module_or_path: await readFile(fileURLToPath(artifactUrl)) })
-}
 
 /**
  * 装载计算核（幂等）。失败时**不吞异常**：调用方要么让测试红，要么自己决定降级，
@@ -62,8 +41,8 @@ async function instantiate(): Promise<void> {
  */
 export function loadPylonCompute(): Promise<PylonCompute> {
   if (loaded) return Promise.resolve(loaded)
-  loading ??= instantiate().then(() => {
-    loaded = glue as unknown as PylonCompute
+  loading ??= runtime.whenReady().then(() => {
+    loaded = runtime.glue() as unknown as PylonCompute
     return loaded
   })
   return loading
