@@ -4785,6 +4785,14 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
 /// （后者是生产路径的做法，见 streaming 的 `tick(now)`）。此处只服务诊断读数。
 #[cfg(target_arch = "wasm32")]
 fn diag_now_ms() -> f64 {
+    // **刻意用 `Date::now()`（毫秒级）而不是 `performance.now()`**：本函数每次 `appendBatch`
+    // 要调 4 次，实测走 `js_sys::Reflect` 取 `performance.now` 每次约 1.7µs ⇒ 给热路径加
+    // ~7µs/调用（appendBatch 14.5 → 21µs，+45%）；缓存函数句柄的版本更糟（`this` 传
+    // undefined ⇒ 每次抛异常，异常过界代价把 appendBatch 抬到 **247µs**，16×）。
+    //
+    // ⇒ **诊断时钟的精度不能拿热路径来换。** 单事件帧的三相位因此读成 0.00，这是已知限制；
+    // 要真拿 µs 级相位，正确做法是**按需开启采样**（只在基准里翻一个标志位，生产路径零成本），
+    // 而不是让每次折叠都付。live 的「核内 vs 核外」拆分目前靠整段减法反推（#220 §30）。
     js_sys::Date::now()
 }
 

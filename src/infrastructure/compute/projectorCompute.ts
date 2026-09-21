@@ -112,6 +112,18 @@ function mergeByIndex<T>(
   afterLength: number,
 ): readonly T[] {
   if (upserts.length === 0) return previous
+  // **纯追加快路径**：一条 upsert、落在末尾、长度只加一 —— 这正是 live 逐事件折叠的常态。
+  // 走慢路径时它也要按 `afterLength` 逐元素过一遍带分支的循环，N=2000 时实测 ~13µs/次，
+  // 占 live 全程的 **41%**（#220 §30 子 agent 调查的消融结论）。`[...previous, v]` 走 V8
+  // 的数组克隆快路径。
+  //
+  // 等价性：慢路径在 `index < previous.length` 上恒 `next.index !== index`（唯一那条
+  // upsert 的下标就是 `previous.length`）⇒ 逐位照抄；最后一位写 value ⇒ 与快路径同结果。
+  const only = upserts[0]
+  if (upserts.length === 1 && only !== undefined
+    && afterLength === previous.length + 1 && only.index === previous.length) {
+    return Object.freeze([...previous, only.value])
+  }
   const out = new Array<T>(afterLength)
   let upsertAt = 0
   let previousAt = 0
