@@ -528,3 +528,30 @@ TS 侧 `foldIntoProjector` 改为**把 patch 应用到上一份 JS 文档**，�
 4. 分段要分「wasm 内部」与「JS 侧」——本轮为此加了 `PylonProjector.foldPhases()` 诊断出口
    （批量入口内 4 个时钟，把 decode/project/patch 序列化分开）。
 5. 逐事件 live 路径要单独一类，别和冷装载混：两者成本结构不同（前者每事件一次全量读）。
+
+### 19. main 的 TS 计算实现清单 —— 各退到哪个提交、怎么取回（给基准脚手架）
+
+退役提交是 **`76cbc819`**（"切流并删除旧实现"），它的父提交 **`76cbc819^`** 就是「实现已进 Rust、
+TS 仍是唯一实现」的最后状态——**要拿 main 的 TS 基线，一律从这个提交取**。
+
+| 计算面 | 文件 | 退役形态 | 取回方式 |
+| --- | --- | --- | --- |
+| WP2 投影折叠 | `src/domains/workbench/workbenchProjector.ts`（1626 行） | 改写为 410 行薄壳 | **已取回**：`git show 76cbc819^:src/domains/workbench/workbenchProjector.ts` → 现落 `src/domains/workbench/__baselineOldProjector.ts`（冻结基线，文件头注明不在生产路径、差距收口后与对照脚本一并删） |
+| WP3 流式切分 | `src/renderers/solid-workbench/chat/streamingMarkdownSplit.ts` | **整文件删除** | `git show 76cbc819^:src/renderers/solid-workbench/chat/streamingMarkdownSplit.ts` |
+| WP3 揭示预算引擎 | `src/renderers/solid-workbench/streamingDisplayScheduler.ts`（783 行） | 改写（预算数学与镜像搬走，编排留下） | `git show 76cbc819^:...` —— 该文件的**旧版整份**即基线 |
+| WP4 markdown 解析 | `src/renderers/solid-workbench/chat/markdownRenderModel.ts`（548 行） | 解析管线换 wasm | `git show 76cbc819^:...`（unified/remark 管线，依赖仍在 package.json） |
+| WP4 代码高亮 | `src/components/chat/codeHighlight.ts` | 引擎换 wasm | `git show 76cbc819^:...`；其 TS 基线驱动 `src/components/chat/starryCore.ts` **仍在树里**（按 issue 回退期条款保留），可直接 import |
+| 事件层纯规则 | `src/domains/events/*.ts`、`src/infrastructure/events/canonicalEventBatch.ts` | **未删**（Rust 侧是并行实现） | 直接 import 现文件即可 |
+
+**取回时的注意**：这些文件之间的相对 import 仍成立（都还在树里），所以把旧文件放到**同目录**
+（像我给投影做的那样加 `__baseline` 前缀）即可用；不要改它们的内容（价值就在于逐字节等于 main）。
+
+**还差的对照面**（本轮未做，脚手架可一并覆盖）：
+- WP3：`splitStreamingMarkdownBlocks` / `splitOpenCodeFenceTail`（纯函数，对照容易）
+  与揭示预算引擎（`streamingDisplayScheduler` 的 `revealBudget`/`interpolateSnapshot` 族，
+  需要按旧文件的测试夹具驱动）。
+- WP4：`parseMarkdown`（unified+remark-gfm → 渲染模型）与 `highlightBlock`（starry-night
+  整块高亮）——两者都有现成的 parity 语料（`src-tauri/pylon-markdown/parity/corpus.json`，
+  117 markdown + 12 高亮），可直接复用做性能语料。
+- 边界本身（帧编码/解码、patch、`document()`）**没有 TS 对位**，它是迁移新增的，
+  只能给绝对值与「每次调用 / 每事件的过界成本」。
