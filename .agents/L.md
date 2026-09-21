@@ -464,3 +464,21 @@
 - 文档：`.agents/records/`、本文件；issue #228 回写
 
 **我不碰（硬禁区）**：中控区 `src/renderers/solid-workbench/input/**` 与一切 `*ControlCenter*`；预设系统 `src/presets/**`、`src/zones/**`、`src/customPresets*`、`src/themeFieldDefs.ts`、`src/themePresetState.ts`、`src/domains/theme/presetReducer.ts`；**#204③/#226 在途三件**（workbenchProjector/workbenchRuntime/agentWorkbenchSession）；**#36 在途域**（`src/cli/pylonCliService.ts`、`src/cli/pylonCliBridge.ts`、`src/cli/__tests__/pylonCliService.test.ts`、`src-tauri/src/permission.rs`、`docs/说明书/Pylon-CLI-命令表.md`）；`tools/webview2-mcp/**`。⚠️ 与 #155 T3 备阶段（session/**、dispatcher/**、scripts/compute-parity/**）的重叠：批次D/E 将拆 `session/event_repo.rs` 与 `dispatcher/mod.rs`——T3 未开工前我先做，开工前会在此对表。全程 pathspec 提交；Rust 构建一律 `CARGO_TARGET_DIR=D:/pylon-acceptance-target`（G 盘 99% 满）。
+
+---
+
+[2026-09-22 01] [Miyaki Kumo] [#229 + #230]
+
+**开工：#229（CLI 纯数字 positional 拒收）+ #230（interaction list 投影私有交互）——#36 验收遗留，同支顺延施工。** 分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/cli/pylonCliService.ts`（stringArg/optionalString 标量宽松化；respond 支持 values/text）
+- `src/cli/__tests__/pylonCliService.test.ts`
+- `src-tauri/src/permission.rs`（interaction_list 扩投私有交互）
+- `src-tauri/src/private_interaction.rs`（store 增 enqueued_at + snapshot）
+- `src-tauri/src/dispatcher/mod.rs`（仅私有交互 insert 处补 enqueued_at 赋值，一行）
+- `src-tauri/src/bin/pylon-fake-agent.rs`（新增 interact-proactive 场景，test-agent feature）
+- `docs/说明书/Pylon-CLI-命令表.md`、`.agents/records/`、本文件
+
+**我不碰**：`src-tauri/src/bin/pylon-cli.rs`（壳层 parse_value 类型化是有意设计，#229 修 TS 侧）；#204③/#226/#155T3 与 #36 之外的全部域。
