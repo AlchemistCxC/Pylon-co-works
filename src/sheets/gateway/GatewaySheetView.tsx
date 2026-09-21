@@ -118,7 +118,7 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
       },
     )
     if (!result.ok) {
-      // G3：命令缺失 → blocked（「待后端」分支可达）；锁中毒/回读 mismatch 明确展示
+      // 命令缺失（旧版二进制）→ blocked；锁中毒/回读 mismatch 明确展示
       if (result.kind === 'blocked') setWriteStatus({ kind: 'blocked' })
       else if (result.kind === 'mismatch') {
         setWriteStatus({ kind: 'lock-poisoned' })
@@ -448,7 +448,7 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
             <button type="button" className={TEMPLATE_BTN_PRIMARY} onClick={() => void saveRoute()}>保存</button>
           </div>
           {formError && <div className={TREE_ERROR} role="alert">{formError}</div>}
-          {writeStatus.kind === 'blocked' && <p className={HINT} role="status">待后端：update_agents_config 命令尚未提供</p>}
+          {writeStatus.kind === 'blocked' && <p className={HINT} role="status">后端命令不可用：update_agents_config（请检查应用版本）</p>}
           {writeStatus.kind === 'lock-poisoned' && <p className="file-section-hint gateway-error-reference" role="status">网关配置回读不一致，详情见右下角错误中心</p>}
           {writeStatus.kind === 'error' && <p className="file-section-hint gateway-error-reference" role="status">网关配置保存失败，详情见右下角错误中心</p>}
           {writeStatus.kind === 'ok' && <p className={HINT} role="status">已保存并重载</p>}

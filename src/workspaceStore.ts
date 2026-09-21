@@ -124,7 +124,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     // 迁移写回失败不能让 hydrate 抛错；内存仍返回迁移后的 v2 状态
     try {
       if (result.migrated) persistSheetStateV2(localStorage, { ...result.state, agentStates: result.state.agentStates }, layout)
-    } catch { /* 静默 */ }
+    } catch {
+      // 可忽略：写回失败只是延迟持久化——内存已是迁移后 v2 状态（下方立即返回），
+      // 后续任意 commitWorkspaceMutation 会重新写盘，失败时经 lastPersistError 可见；
+      // persistSheetStateV2 自身已把存储异常收敛为 false 返回，此 catch 仅兜底
+      // 其余意外异常，避免 zustand set（hydrate）中途抛错。
+    }
     return {
       workspaceSheets: result.state,
       sheetAgentStates: result.state.agentStates,

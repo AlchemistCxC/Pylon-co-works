@@ -7,9 +7,9 @@
  *
  * I12-A-BE-01 契约冻结：catalog/instances 只读 typed client 面（镜像
  * gateway/catalog.rs、gateway/instance.rs 的 camelCase wire 形状；secret 只暴露
- * credentialStatus/credentialRef，无任何凭据值字段）。命令由 BE-02 生命周期
- * 接线注册；调用未注册命令会收到 "unknown command" 结构化错误
- * （gatewayContracts classifyGatewayWriteError 分类为 blocked）。
+ * credentialStatus/credentialRef，无任何凭据值字段）。命令已由生命周期接线注册
+ * （lib.rs invoke_handler）；若运行旧版二进制，调用未注册命令会收到 not found
+ * 错误（gatewayContracts classifyGatewayWriteError 分类为 blocked）。
  */
 import type { ClientTransport } from '../acp/agentClient'
 import { normalizeGatewaySessions, normalizeGatewayStatus } from './gatewayContracts'

@@ -16,6 +16,7 @@
  */
 import type { GatewayRouteReset } from '../../infrastructure/tauri/gatewayContracts'
 import { isGatewayRouteReset } from '../../infrastructure/tauri/gatewayContracts'
+import { errorCode, errorMessage } from '../../infrastructure/tauri/errorPayload'
 import type { TransactionResult } from './transactionResult'
 
 export interface GatewayRouteShape {
@@ -168,10 +169,13 @@ export async function saveGatewayRouteTransaction(
     await deps.saveRoutes({ scope: 'gateway', config: { gateway: { routes: routes.map(gatewayRouteToConfigEntry) } } })
   } catch (error) {
     deps.reportError('保存网关配置', error)
-    const message = error instanceof Error ? error.message : String(error)
-    // G3：命令缺失（后端未提供）→ blocked，UI 显示「待后端」（报告 5B）
-    if (/command not found/i.test(message)) {
-      return { ok: false, kind: 'blocked', message: '待后端：update_agents_config 命令尚未提供', cause: error }
+    // 后端已提供 update_agents_config（lifecycle/config_cmds.rs，lib.rs invoke_handler
+    // 已注册）——blocked 仅保留给真·命令缺失（旧版二进制）。区分依据：业务失败是
+    // PylonError 结构化 DTO（恒带 code，见 errorPayload.ts）；命令缺失是 IPC 层纯
+    // 字符串（无 code），消息含 not found / unknown command。
+    const message = errorMessage(error)
+    if (errorCode(error) === null && /not ?found|unknown command|no such command/i.test(message)) {
+      return { ok: false, kind: 'blocked', message: '后端命令不可用：update_agents_config', cause: error }
     }
     return { ok: false, kind: 'transport', message: '保存网关配置失败', cause: error }
   }

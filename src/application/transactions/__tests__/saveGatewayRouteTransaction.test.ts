@@ -75,7 +75,7 @@ describe('saveGatewayRouteTransaction', () => {
     if (!result.ok) expect(result.kind).toBe('transport')
   })
 
-  it('命令缺失（Command not found）→ blocked「待后端」（G3）', async () => {
+  it('命令缺失（Command not found）→ blocked「后端命令不可用」', async () => {
     const { deps } = createDeps({
       saveRoutes: async () => { throw new Error('Command not found: update_agents_config') },
     })
@@ -83,8 +83,17 @@ describe('saveGatewayRouteTransaction', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.kind).toBe('blocked')
-      expect(result.message).toContain('待后端')
+      expect(result.message).toContain('后端命令不可用')
     }
+  })
+
+  it('业务失败（结构化 DTO 带 code）不误判 blocked → transport', async () => {
+    const { deps } = createDeps({
+      saveRoutes: async () => { throw { code: 'config_invalid', message: 'gateway route invalid' } },
+    })
+    const result = await saveGatewayRouteTransaction({ source: 'qq:group:3', agentId: 'peri' }, deps)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.kind).toBe('transport')
   })
 
   it('reload 失败 → mismatch（磁盘已更新、运行态仍旧）', async () => {
