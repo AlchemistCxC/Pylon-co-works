@@ -46,6 +46,7 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.emptyStateFirstPrompt.test.ts',
   'src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.test.tsx',
+  'src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.test.tsx',
   // C 类：Renderer Suite fatal 回退链过程日志（含少量 B 类注册噪音）
   'src/sheets/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
   'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
