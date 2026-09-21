@@ -555,3 +555,63 @@ TS 仍是唯一实现」的最后状态——**要拿 main 的 TS 基线，一�
   117 markdown + 12 高亮），可直接复用做性能语料。
 - 边界本身（帧编码/解码、patch、`document()`）**没有 TS 对位**，它是迁移新增的，
   只能给绝对值与「每次调用 / 每事件的过界成本」。
+
+---
+
+## 20. ③-b 落地：patch 自足 + 热路径不再读全量文档（live 90× → 3.6×）
+
+调查（§18）指出 live 的成本几乎全在「每事件一次全量 `document()` 读」；本轮把那条路拆掉。
+
+### 改动
+
+**Rust 侧**
+1. `ChangeSet` 增加**低频切片脏位**（`Slice` 枚举 9 项）：activities / interactions / extensions /
+   assist / diagnostics / plan / goal / lifecycle / systemErrors。这些切片整面重发即可，
+   但**必须在脏时随 patch 下发**——因为消费方不再靠 `document()` 拿全量兜底，漏标 = 读到陈旧切片。
+   12 处写点逐个标记（`refresh_orphans` 只在真正改写 `orphan` 时标，避免每事件标记整表）。
+2. `WorkbenchPatch` 增加：`timelineLength` / `messageLength`（供消费方精确合并）、
+   9 个 `Option<...>` 切片（脏才带），并把 `timeline_upserts` 改成**带下标**的
+   `TimelinePatch { index, entry }`（与 `MessagePatch` 对称）——合并必须知道下标。
+3. `diff_patches`（测试用参考实现）同步产出新字段（切片按「与批前不同」判脏），
+   于是 §19 的等价性断言自然覆盖到切片：**记账产出必须覆盖参考产出**。
+
+**TS 侧**
+4. `applyPatch`：把 patch 应用到**上一份文档**上，产出新文档（新增 `mergeByIndex` 做下标精确合并，
+   一个循环同时处理追加/替换/中插三种情形）。
+5. `foldIntoProjector` 只在「上一份文档就是本核产出」时走 `applyPatch`；否则回退到
+   **原来的全量物化**（`materializePage`，从 git 取回）——两条路径的收口语义一致。
+
+### 实测（一进程一配置）
+
+| case | ③-a 后 | **③-b 后** | TS | 比值 |
+| --- | --- | --- | --- | --- |
+| cold 20k 1000/页 | 620.4ms | **219.8ms** | 27.2ms | **8.1×**（原 26.7×） |
+| live 2k 逐事件 | 3713ms | **189.5ms** | 52.7ms | **3.6×**（原 90×） |
+
+### 两条被测试拦下的契约（都不是新契约，是既有语义）
+
+1. **文档 JSON 的键序**：`appliedRanges.test.ts` 有一条「分两次折 == 一次折」的**逐字节**
+   JSON 比较；文档的 JSON 形状此前由 wasm 产出（serde_json 的 Map 是 BTreeMap ⇒ 字典序），
+   而我在 `applyPatch` 里按可读顺序写字面量 ⇒ 键序不同 ⇒ 该断言红。
+   处理：`applyPatch` 的字面量**刻意取字典序**并注明原因（不要为好看调整字段顺序）。
+2. **切片引用必须稳定**：`mountSolidWorkbench` 的「payload/appearance 全等时跳过 surface.update」
+   浅比较门要求「未触碰的切片沿用上一份引用，且全切片引用相等时恒等返回上一份对象」。
+   我最初的 `coldMaterialize` 每次都 spread 一个新对象 ⇒ mount 后多出一次 update ⇒
+   追加 interaction 那一步的断言红。处理：**恢复原来的全量物化作为兜底路径**，
+   它天然具备这套引用复用语义；`applyPatch` 也做同样的恒等收口。
+   → 这条也解释了为什么「不读全量文档」不能简单替换全部路径：**渲染门的浅比较依赖那条
+   路径的引用复用行为**，两者必须共存（本核产出走 patch，其他走全量物化）。
+
+### 一处必须先排掉的坑（否则会静默出错）
+
+`resolveEntry` 对**外置文档**（宿主手工构造、池里认不出）会起一个**空核**并把该文档当 `base`
+传进来。此时把 patch 应用到 `previous` 上会把「外置内容」与「空核的增量」混成一份既不是 A
+也不是 B 的文档。因此热路径用 `state.lastDocument === previous` 把「本核自己的产出」与
+「外借的文档」分开——前者才允许 applyPatch。
+
+### 测试处置（本轮改了 1 处既有断言）
+
+`src/infrastructure/compute/__tests__/projectorCompute.test.ts` 的**过界计数**断言：
+原为 `3*2 + 1*2 = 8`（假设每次折叠都读全量），现为 `1*2 + 1*2 + 2*1 = 6`——
+冷启动/外置文档 2 次、本核产出 1 次。这是**契约变更**（热路径不再读全量），
+不是弱化：注释里写清了口径。其余断言未动。

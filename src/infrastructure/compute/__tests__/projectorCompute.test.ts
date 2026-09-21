@@ -131,8 +131,11 @@ describe('池化纯函数折叠（document-in/out 兼容层）', () => {
     expect(chained.messages.map(message => message.content)).toEqual(batched.messages.map(message => message.content))
     expect(chained.appliedEventIds).toEqual(batched.appliedEventIds)
     expect(chained.activities.map(activity => activity.id)).toEqual(batched.activities.map(activity => activity.id))
-    // 3 次单事件折叠 = 3 页 × 2 穿越；整页折叠只有 1 页 × 2。
-    expect(readProjectorBoundaryCrossings()).toBe(3 * 2 + 1 * 2)
+    // 穿越口径（#220 ③-b 之后）：热路径不再每次折叠都读全量文档。
+    // - 冷启动 / 外置文档：`appendBatch` + `document()` = 2 次（下面是「整页折叠」与
+    //   「链式首次以手工构造的文档为 base」两种情况，都属外置 ⇒ 各 2 次）；
+    // - 上一份文档就是本核产出时：只走 `appendBatch` = 1 次（链式折入的后两次）。
+    expect(readProjectorBoundaryCrossings()).toBe(1 * 2 + 1 * 2 + 2 * 1)
   })
 
   it('会话句柄与池化折叠同源：同一页产出同一文档', () => {

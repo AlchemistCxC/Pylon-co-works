@@ -60,9 +60,123 @@ export interface ProjectorPatch {
   revision: number
   appliedEventIdsAppended: string[]
   appliedRanges: [number, number][]
-  timelineUpserts: unknown[]
-  messageUpserts: { index: number; message: unknown }[]
+  /** 带下标：消费方据此把 upsert 精确合并进上一份数组（追加/替换/中插同一套）。 */
+  timelineUpserts: readonly { index: number, entry: unknown }[]
+  messageUpserts: readonly { index: number, message: unknown }[]
   session: unknown
+  /** 批后长度——合并时区分「插入」与「替换」的依据。 */
+  timelineLength: number
+  messageLength: number
+  /** 低频切片：**仅在脏时携带**；缺省表示沿用上一份引用（结构性共享的落点）。 */
+  activities?: readonly unknown[]
+  interactions?: readonly unknown[]
+  extensions?: readonly unknown[]
+  assist?: unknown
+  diagnostics?: readonly unknown[]
+  plan?: unknown
+  goal?: unknown
+  lifecycle?: unknown
+  systemErrors?: readonly unknown[]
+}
+
+/**
+ * 下标序 upsert 与上一份数组的**精确合并**。
+ *
+ * `afterLength` 是批后长度，用来区分三种情况，同一个循环即可，无需知道本次是哪一种：
+ * - **纯追加**：upsert 的 index 落在 `previous.length` 之后 ⇒ 前半段照抄上一份；
+ * - **就地替换**：index 在上一份范围内 ⇒ 取 upsert，且**不推进**上一份游标（那一位已被替换）；
+ * - **尾部之后的中插**（乱序回放页）：index 夹在中间 ⇒ 取 upsert、不推进游标 ⇒ 后续元素整体后移。
+ */
+function mergeByIndex<T>(
+  previous: readonly T[],
+  upserts: readonly { index: number, value: T }[],
+  afterLength: number,
+): readonly T[] {
+  if (upserts.length === 0) return previous
+  const out = new Array<T>(afterLength)
+  let upsertAt = 0
+  let previousAt = 0
+  for (let index = 0; index < afterLength; index += 1) {
+    const next = upserts[upsertAt]
+    if (next !== undefined && next.index === index) {
+      out[index] = next.value
+      upsertAt += 1
+    } else {
+      out[index] = previous[previousAt] as T
+      previousAt += 1
+    }
+  }
+  return Object.freeze(out)
+}
+
+/** 低频切片：patch 带了就用新的，没带就沿用上一份引用。 */
+function sliceOf<T>(carried: T | undefined, previous: T): T {
+  return carried === undefined ? previous : carried
+}
+
+/**
+ * 把 patch 应用到**上一份文档**上——热路径唯一的物化方式。
+ *
+ * 取代旧的「每折叠一次 `document()` 全量读 + 按启发式决定切片复用」：那次全量读是
+ * Θ(文档) 的 JSON 序列化+parse+重建，逐事件折叠时就是 Θ(N²)（实测 1000 次
+ * `document()`+parse = 1512ms ≈ live 总耗时）。现在边界只走一次 patch，且**要不要换切片
+ * 由 Rust 侧的写点记账给出**（不再靠事件类型猜）。
+ */
+function applyPatch(
+  state: ProjectorState,
+  previous: WorkbenchDocument,
+  patch: ProjectorPatch,
+): WorkbenchDocument {
+  const sessionJson = JSON.stringify(patch.session)
+  // **键序刻意取字典序**：文档的 JSON 形状此前由 wasm 侧产出（`document()` 的 serde_json
+  // Map 是 BTreeMap ⇒ 字典序），而仓库里有逐字节比较文档 JSON 的断言（例如 appliedRanges
+  // 的「分两次折 == 一次折」）。冷路径（`coldMaterialize`）沿用 Rust 产出物，热路径若在这
+  // 里按可读顺序写字面量，同一条断言就会因为键序不同而红——那不是行为差异，是键序差异。
+  // 所以不要为了字面量好看而调整下面的字段顺序。
+  const next = {
+    activities: sliceOf(patch.activities, previous.activities) as WorkbenchDocument['activities'],
+    appliedEventIds: patch.appliedEventIdsAppended.length === 0
+      ? previous.appliedEventIds
+      : Object.freeze([...previous.appliedEventIds, ...patch.appliedEventIdsAppended]),
+    appliedRanges: rangesEqual(patch.appliedRanges, previous.appliedRanges)
+      ? previous.appliedRanges
+      : freezeAppliedRanges(patch.appliedRanges),
+    assist: sliceOf(patch.assist, previous.assist) as WorkbenchDocument['assist'],
+    diagnostics: sliceOf(patch.diagnostics, previous.diagnostics) as WorkbenchDocument['diagnostics'],
+    extensions: sliceOf(patch.extensions, previous.extensions) as WorkbenchDocument['extensions'],
+    goal: sliceOf(patch.goal, previous.goal) as WorkbenchDocument['goal'],
+    interactions: sliceOf(patch.interactions, previous.interactions) as WorkbenchDocument['interactions'],
+    lifecycle: sliceOf(patch.lifecycle, previous.lifecycle) as WorkbenchDocument['lifecycle'],
+    messages: mergeByIndex(
+      previous.messages,
+      patch.messageUpserts.map(upsert => ({
+        index: upsert.index,
+        value: upsert.message as WorkbenchDocument['messages'][number],
+      })),
+      patch.messageLength,
+    ),
+    plan: sliceOf(patch.plan, previous.plan) as WorkbenchDocument['plan'],
+    revision: patch.revision,
+    session: state.lastSessionJson === sessionJson
+      ? previous.session
+      : patch.session as WorkbenchDocument['session'],
+    sessionId: previous.sessionId,
+    systemErrors: sliceOf(patch.systemErrors, previous.systemErrors) as WorkbenchDocument['systemErrors'],
+    timeline: mergeByIndex(
+      previous.timeline,
+      patch.timelineUpserts.map(upsert => ({
+        index: upsert.index,
+        value: upsert.entry as WorkbenchDocument['timeline'][number],
+      })),
+      patch.timelineLength,
+    ),
+  } satisfies WorkbenchDocument
+  state.lastSessionJson = sessionJson
+  // 幂等折叠（重复事件/已覆盖区间）：全部切片引用相等 ⇒ 恒等返回上一份文档。
+  for (const key of Object.keys(next) as (keyof WorkbenchDocument)[]) {
+    if (next[key] !== previous[key]) return next
+  }
+  return previous
 }
 
 /** 一次页级折叠的边界产物：增量 patch + 物化后的完整 JS 文档。 */
@@ -257,6 +371,31 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
 
 // ── 物化（结构共享） ─────────────────────────────────────────────────────────
 
+
+function rangesEqual(
+  left: readonly (readonly [number, number])[],
+  right: readonly (readonly [number, number])[],
+): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index++) {
+    if (left[index]![0] !== right[index]![0] || left[index]![1] !== right[index]![1]) return false
+  }
+  return true
+}
+
+function freezeAppliedRanges(
+  ranges: readonly (readonly [number, number])[],
+): readonly (readonly [number, number])[] {
+  return Object.freeze(ranges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number]))
+}
+
+/** 投影核句柄的内部状态：wasm 实例 + 最近一次物化产物（结构共享的基准）。 */
+export interface ProjectorState {
+  readonly projector: PylonProjectorInstance
+  lastDocument?: WorkbenchDocument
+  lastSessionJson?: string
+}
+
 type UncoveredSlice = 'activities' | 'interactions' | 'extensions' | 'diagnostics'
   | 'systemErrors' | 'plan' | 'goal' | 'lifecycle' | 'assist'
 
@@ -304,22 +443,6 @@ function uncoveredSlicesTouched(eventTypes: readonly string[]): Set<UncoveredSli
   return touched
 }
 
-function rangesEqual(
-  left: readonly (readonly [number, number])[],
-  right: readonly (readonly [number, number])[],
-): boolean {
-  if (left.length !== right.length) return false
-  for (let index = 0; index < left.length; index++) {
-    if (left[index]![0] !== right[index]![0] || left[index]![1] !== right[index]![1]) return false
-  }
-  return true
-}
-
-function freezeAppliedRanges(
-  ranges: readonly (readonly [number, number])[],
-): readonly (readonly [number, number])[] {
-  return Object.freeze(ranges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number]))
-}
 
 /** 投影核句柄的内部状态：wasm 实例 + 最近一次物化产物（结构共享的基准）。 */
 export interface ProjectorState {
@@ -328,6 +451,14 @@ export interface ProjectorState {
   lastSessionJson?: string
 }
 
+/**
+ * **兜底物化**：上一份文档不是本投影核自己的产出（冷启动、外置文档、池重建）时走这里。
+ *
+ * 它必须付一次 `document()` 全量读；但它同时承担一条**渲染契约**：未触碰的切片要沿用
+ * 上一份的**引用**，且全切片引用相等时恒等返回上一份对象——渲染门的浅比较依赖这一点
+ * （`mountSolidWorkbench` 的「payload/appearance 全等时跳过 update」）。
+ * 本核自己的产出走 `applyPatch`（只过界一次、不读全量），两条路径的收口语义一致。
+ */
 function materializePage(
   state: ProjectorState,
   base: WorkbenchDocument | undefined,
@@ -423,10 +554,24 @@ export function foldIntoProjector(
   base?: WorkbenchDocument,
 ): ProjectorFoldPage {
   const patch = JSON.parse(state.projector.appendBatch(encodeProjectorFrame(envelopes))) as ProjectorPatch
-  const fresh = JSON.parse(state.projector.document()) as WorkbenchDocument
-  // 过界计数在 createProjector 的包装层完成（两次调用 = 2 次），此处不再自增。
-  const eventTypes = envelopes.map(envelope => envelope.event.type)
-  const document = materializePage(state, base ?? state.lastDocument, fresh, patch, eventTypes)
+  const previous = base ?? state.lastDocument
+  // **热路径只过界一次**：patch 已带齐增量（timeline/messages 下标 upsert + 脏切片整面），
+  // 因此不必再 `document()` 全量读。
+  //
+  // 但只有「上一份文档**就是本投影核自己的产出**」时才能把 patch 应用到它上面：patch 的
+  // 下标 upsert 与脏切片都是相对**核内状态**的。`resolveEntry` 对外置文档（宿主手工构造后
+  // 写入、池里认不出）会起一个**空核**并把该文档当 `base` 传进来——那种情况必须全量读，
+  // 否则会把外置内容与核内增量混成一份既不是 A 也不是 B 的文档。
+  const appliesToOwnOutput = previous !== undefined && state.lastDocument === previous
+  const document = appliesToOwnOutput
+    ? applyPatch(state, previous, patch)
+    : materializePage(
+        state,
+        previous,
+        JSON.parse(state.projector.document()) as WorkbenchDocument,
+        patch,
+        envelopes.map(envelope => envelope.event.type),
+      )
   state.lastDocument = document
   return { patch, document }
 }

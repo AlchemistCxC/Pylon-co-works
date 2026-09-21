@@ -537,6 +537,30 @@ fn ensure_projectable(envelope: &SemanticEnvelope) -> Result<(), String> {
 /// `update_timeline`（条目）与各处 message 写点，各自标记下标。
 ///
 /// 不计入 wire/patch（`to_value` 不读它）。
+/// 低频切片：整面重发即可（高频的 timeline/messages 走下标 upsert）。
+///
+/// 这些切片由低频归约器改写，逐条 upsert 不值得；但**消费方不能再靠 `document()`
+/// 拿全量文档**（那是每折叠一次的 Θ(文档) 读取），所以它们必须在脏时随 patch 下发。
+/// 漏标 = 消费方读到陈旧切片，因此每一处写点都要标。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slice {
+    Activities,
+    Interactions,
+    Extensions,
+    Assist,
+    Diagnostics,
+    Plan,
+    Goal,
+    Lifecycle,
+    SystemErrors,
+}
+
+impl Slice {
+    const fn bit(self) -> u16 {
+        1 << (self as u16)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ChangeSet {
     messages_before: usize,
@@ -544,6 +568,8 @@ pub struct ChangeSet {
     applied_ids_before: usize,
     dirty_messages: Vec<usize>,
     dirty_timeline: Vec<usize>,
+    /// 低频切片的脏位（见 [`Slice`]）。
+    dirty_slices: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -584,7 +610,14 @@ impl WorkbenchDocument {
             applied_ids_before: self.applied_event_ids.len(),
             dirty_messages: Vec::new(),
             dirty_timeline: Vec::new(),
+            dirty_slices: 0,
         };
+    }
+
+    /// 标记某个低频切片被写过（见 [`Slice`]）。**每一处切片写点都要标**——漏标会让
+    /// 消费方读到陈旧切片，而它现在不再靠 `document()` 拿全量文档兜底。
+    pub(crate) fn mark_slice(&mut self, slice: Slice) {
+        self.changes.dirty_slices |= slice.bit();
     }
 
     /// 标记某个 message 被就地写过（幂等；去重在 `finish_batch`）。
@@ -627,8 +660,13 @@ impl WorkbenchDocument {
         timeline_indexes.dedup();
         let timeline_upserts = timeline_indexes
             .into_iter()
-            .map(|index| self.timeline[index].to_value())
+            .map(|index| TimelinePatch {
+                index,
+                entry: self.timeline[index].to_value(),
+            })
             .collect();
+        let dirty = changes.dirty_slices;
+        let if_dirty = |slice: Slice| dirty & slice.bit() != 0;
         WorkbenchPatch {
             revision: self.revision,
             applied_event_ids_appended: self.applied_event_ids[changes.applied_ids_before..]
@@ -637,6 +675,17 @@ impl WorkbenchDocument {
             timeline_upserts,
             message_upserts,
             session: self.session.to_value(),
+            timeline_length: self.timeline.len(),
+            message_length: self.messages.len(),
+            activities: if_dirty(Slice::Activities).then(|| self.activities.clone()),
+            interactions: if_dirty(Slice::Interactions).then(|| self.interactions.clone()),
+            extensions: if_dirty(Slice::Extensions).then(|| self.extensions.clone()),
+            assist: if_dirty(Slice::Assist).then(|| self.assist.clone()),
+            diagnostics: if_dirty(Slice::Diagnostics).then(|| self.diagnostics.clone()),
+            plan: if_dirty(Slice::Plan).then(|| self.plan.clone()),
+            goal: if_dirty(Slice::Goal).then(|| self.goal.clone()),
+            lifecycle: if_dirty(Slice::Lifecycle).then(|| self.lifecycle.clone()),
+            system_errors: if_dirty(Slice::SystemErrors).then(|| self.system_errors.clone()),
         }
     }
 }
@@ -762,15 +811,47 @@ pub struct MessagePatch {
 
 /// 增量 patch：只携带变化的行。timeline 按 eventId upsert；messages 按下标
 /// upsert（含追加）；appliedRanges 量小全量携带；session 面携带当前值。
+/// timeline 行的增量：**带下标**，让消费方能把 upsert 精确合并进上一份数组
+/// （纯追加 / 就地下标替换 / 尾部之后的中插三种都靠它区分）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelinePatch {
+    pub index: usize,
+    pub entry: Value,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkbenchPatch {
     pub revision: f64,
     pub applied_event_ids_appended: Vec<String>,
     pub applied_ranges: coverage::CoverageRanges,
-    pub timeline_upserts: Vec<Value>,
+    pub timeline_upserts: Vec<TimelinePatch>,
     pub message_upserts: Vec<MessagePatch>,
     pub session: Value,
+    /// 批后长度——让消费方把下标序 upsert **精确合并**进上一份数组
+    /// （区分「插入」与「替换」，中插也适用）。
+    pub timeline_length: usize,
+    pub message_length: usize,
+    /// 低频切片：**仅在脏时携带**（`None` = 消费方沿用上一份引用）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activities: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactions: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assist: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_errors: Option<Vec<Value>>,
 }
 
 /// **参考实现**：从「批前/批后两份文档」推 patch。
@@ -803,10 +884,17 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
                 .get(entry.event_id.as_str())
                 .is_none_or(|before_entry| **before_entry != **entry)
         })
-        .map(TimelineEntry::to_value)
+        .enumerate()
+        .map(|(index, entry)| TimelinePatch {
+            index,
+            entry: entry.to_value(),
+        })
         .collect();
     // session 面是低频小对象：整面携带（status/stopReason/model/mode/commands/
     // options/usage），消费方整面覆盖即可，不做字段级 diff。
+    // 低频切片按「与批前不同即携带」判脏——这正是记账版所要求的**覆盖**语义：
+    // 记账版按写点标记（可能多带「标了但没变」的切片），但绝不可少带。
+    let changed = |differ: bool| differ;
     WorkbenchPatch {
         revision: after.revision,
         applied_event_ids_appended: after.applied_event_ids[before.applied_event_ids.len()..]
@@ -815,6 +903,22 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
         timeline_upserts,
         message_upserts,
         session: after.session.to_value(),
+        timeline_length: after.timeline.len(),
+        message_length: after.messages.len(),
+        activities: changed(after.activities != before.activities)
+            .then(|| after.activities.clone()),
+        interactions: changed(after.interactions != before.interactions)
+            .then(|| after.interactions.clone()),
+        extensions: changed(after.extensions != before.extensions)
+            .then(|| after.extensions.clone()),
+        assist: changed(after.assist != before.assist).then(|| after.assist.clone()),
+        diagnostics: changed(after.diagnostics != before.diagnostics)
+            .then(|| after.diagnostics.clone()),
+        plan: changed(after.plan != before.plan).then(|| after.plan.clone()),
+        goal: changed(after.goal != before.goal).then(|| after.goal.clone()),
+        lifecycle: changed(after.lifecycle != before.lifecycle).then(|| after.lifecycle.clone()),
+        system_errors: changed(after.system_errors != before.system_errors)
+            .then(|| after.system_errors.clone()),
     }
 }
 
@@ -1326,6 +1430,7 @@ fn add_diagnostic(
     if let Some(data) = data {
         diagnostic.insert("data".to_string(), data.clone());
     }
+    document.mark_slice(Slice::Diagnostics);
     document.diagnostics.push(Value::Object(diagnostic));
     update_timeline(
         document,
@@ -1344,6 +1449,7 @@ fn refresh_orphans(document: &mut WorkbenchDocument) {
         .filter_map(|activity| activity.get("id").and_then(Value::as_str))
         .map(str::to_string)
         .collect();
+    let mut dirty_activities = false;
     for activity in &mut document.activities {
         let parent_id = match activity.get("parentId").and_then(Value::as_str) {
             Some(parent_id) => parent_id,
@@ -1351,10 +1457,15 @@ fn refresh_orphans(document: &mut WorkbenchDocument) {
         };
         let orphan = !ids.contains(parent_id);
         if activity.get("orphan") != Some(&Value::Bool(orphan)) {
+            dirty_activities = true;
             if let Some(object) = activity.as_object_mut() {
                 object.insert("orphan".to_string(), Value::Bool(orphan));
             }
         }
+    }
+    // 借用在循环里结束，标记放到循环之后（`mark_slice` 要 `&mut document`）。
+    if dirty_activities {
+        document.mark_slice(Slice::Activities);
     }
 }
 
@@ -1677,6 +1788,7 @@ fn reduce_interaction(document: &mut WorkbenchDocument, envelope: &SemanticEnvel
                     filled.insert("reason".to_string(), reason.clone());
                 }
             }
+            document.mark_slice(Slice::Interactions);
             document.interactions[index] = Value::Object(filled);
             return;
         }
@@ -1723,6 +1835,7 @@ fn reduce_interaction(document: &mut WorkbenchDocument, envelope: &SemanticEnvel
     document
         .interactions
         .retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
+    document.mark_slice(Slice::Interactions);
     document.interactions.push(Value::Object(interaction));
 }
 
@@ -2569,7 +2682,10 @@ fn upsert_activity(document: &mut WorkbenchDocument, next: Value) {
             .position(|item| item.get("id").and_then(Value::as_str) == Some(id.as_str()))
     });
     match index {
-        None => document.activities.push(next),
+        None => {
+            document.mark_slice(Slice::Activities);
+            document.activities.push(next);
+        }
         Some(index) => {
             let item = &document.activities[index];
             // TS：`{ ...item, ...next, parentId: next.parentId ?? item.parentId }`。
@@ -2585,6 +2701,7 @@ fn upsert_activity(document: &mut WorkbenchDocument, next: Value) {
                 Some(parent_id) => merged.insert("parentId".to_string(), parent_id),
                 None => merged.remove("parentId"),
             };
+            document.mark_slice(Slice::Activities);
             document.activities[index] = Value::Object(merged);
         }
     }
@@ -2621,6 +2738,7 @@ fn reduce_diagnostic(document: &mut WorkbenchDocument, envelope: &SemanticEnvelo
             0,
         );
         if let Some(normalized) = normalized.filter(|value| !value.is_null()) {
+            with_error.mark_slice(Slice::SystemErrors);
             with_error.system_errors.push(normalized);
         }
     }
@@ -3226,6 +3344,7 @@ fn reduce_activity(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope
     upsert_activity(document, projected);
     // narrow 诊断在节点落位后追加（TS：diagnostics 数组尾拼）。
     for diagnostic in narrow_diagnostics {
+        document.mark_slice(Slice::Diagnostics);
         document.diagnostics.push(diagnostic);
     }
 }
@@ -3264,6 +3383,7 @@ fn reduce_plan(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
         return;
     }
     if let Some(next) = goal_model::apply_plan_event(&document.plan, event) {
+        document.mark_slice(Slice::Plan);
         document.plan = next;
     }
 }
@@ -3289,6 +3409,7 @@ fn reduce_goal(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
         return;
     }
     if let Some(next) = goal_model::apply_goal_events(&document.goal, event) {
+        document.mark_slice(Slice::Goal);
         document.goal = next;
     }
 }
@@ -3300,6 +3421,7 @@ fn reduce_lifecycle(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         &envelope.event,
         &|raw: &Value| normalize_normalized_error(raw, 0),
     ) {
+        document.mark_slice(Slice::Lifecycle);
         document.lifecycle = next;
     }
 }
@@ -3307,6 +3429,7 @@ fn reduce_lifecycle(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
 /// C14：assist 事件投影进易逝 slice，不污染 transcript。
 fn reduce_assist(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
     let event = &envelope.event;
+    document.mark_slice(Slice::Assist);
     let assist = &mut document.assist;
     match envelope.event_type.as_str() {
         "assist.prediction" => {
@@ -3378,6 +3501,7 @@ fn reduce_extension(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
             break;
         }
     }
+    document.mark_slice(Slice::Extensions);
     document.extensions.insert(index, extension);
 }
 
@@ -6502,9 +6626,13 @@ mod change_ledger_tests {
         patch
             .timeline_upserts
             .iter()
-            .filter_map(|value| {
-                let event_id = value.get("eventId").and_then(Value::as_str)?.to_string();
-                Some((event_id, value.clone()))
+            .filter_map(|patch| {
+                let event_id = patch
+                    .entry
+                    .get("eventId")
+                    .and_then(Value::as_str)?
+                    .to_string();
+                Some((event_id, patch.entry.clone()))
             })
             .collect()
     }
@@ -6561,6 +6689,34 @@ mod change_ledger_tests {
                     "message #{index} 被漏带（{label}）"
                 );
             }
+            // 低频切片：参考实现按「与批前不同」判脏，记账版按写点标记 ⇒ 账本必须覆盖参考。
+            // 漏带切片 = 消费方读到陈旧切片（它现在不再靠 `document()` 兜底）。
+            macro_rules! assert_slice_covers {
+                ($name:literal, $ledger:expr, $reference:expr) => {
+                    if $reference.is_some() {
+                        assert_eq!(
+                            $ledger.as_ref(),
+                            $reference.as_ref(),
+                            "切片 {} 被漏带（{label}）",
+                            $name
+                        );
+                    }
+                };
+            }
+            assert_slice_covers!("activities", ledger.activities, reference.activities);
+            assert_slice_covers!("interactions", ledger.interactions, reference.interactions);
+            assert_slice_covers!("extensions", ledger.extensions, reference.extensions);
+            assert_slice_covers!("assist", ledger.assist, reference.assist);
+            assert_slice_covers!("diagnostics", ledger.diagnostics, reference.diagnostics);
+            assert_slice_covers!("plan", ledger.plan, reference.plan);
+            assert_slice_covers!("goal", ledger.goal, reference.goal);
+            assert_slice_covers!("lifecycle", ledger.lifecycle, reference.lifecycle);
+            assert_slice_covers!(
+                "systemErrors",
+                ledger.system_errors,
+                reference.system_errors
+            );
+
             // 反向钉住「不膨胀」：记账按被标记的下标逐条记，故多带只可能是常量级增量。
             assert!(
                 ledger.timeline_upserts.len() <= reference.timeline_upserts.len() + 2,
