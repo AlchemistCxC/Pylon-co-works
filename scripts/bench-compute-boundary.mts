@@ -182,9 +182,20 @@ async function main(): Promise<void> {
   const burstSize = quick ? 400 : 500
 
   console.log(`（每形态取 ${REPEATS} 轮中位数；过界次数由边界包装层计数）`)
-  // 预热：让 wasm 实例化、帧编组与折叠路径都先跑过一遍 JIT，再开始计量。
-  runPerEvent('warmup', pageOf(synthesizeJournal(200), 0, 200))
-  resetProjectorBoundaryCrossings()
+  // 预热必须**按测量尺度**做：200 事件的预热不足以为 1 万规模的折叠路径定型，
+  // 首轮形态曾因此虚高 6×（同一形态先后跑出 3223ms / 518ms）。这里把两条批量路径
+  // 与逐事件路径都在 2000 事件规模上先跑一遍，再开始计量。
+  {
+    const warmJournal = pageOf(synthesizeJournal(2000), 0, 2000)
+    const warmPages: Envelope[][] = []
+    for (let index = 0; index < warmJournal.length; index += PAGE_SIZE) {
+      warmPages.push(pageOf(warmJournal, index, PAGE_SIZE))
+    }
+    runPageBatch('warmup-batch', warmPages, { materializePerPage: false })
+    runPageBatch('warmup-batch-page-materialize', warmPages, { materializePerPage: true })
+    runPerEvent('warmup-per-event', warmJournal)
+    resetProjectorBoundaryCrossings()
+  }
 
   console.log('\n── 场景 A · 冷装载：页级 batch vs 逐事件 ──')
   const all = synthesizeJournal(Math.max(...coldSizes) + burstSize)
@@ -192,13 +203,18 @@ async function main(): Promise<void> {
     const journal = all.slice(0, size)
     const pages: Envelope[][] = []
     for (let index = 0; index < journal.length; index += PAGE_SIZE) pages.push(pageOf(journal, index, PAGE_SIZE))
-    return [
+    const rows: Measurement[] = [
       median(`${size} · 页级 batch（${PAGE_SIZE}/页，末尾物化一次）`, REPEATS, () =>
         runPageBatch('cold-batch', pages, { materializePerPage: false })),
       median(`${size} · 页级 batch（每页物化一次）`, REPEATS, () =>
         runPageBatch('cold-batch-page-materialize', pages, { materializePerPage: true })),
-      median(`${size} · 逐事件（纪律禁止，作对照）`, REPEATS, () => runPerEvent('cold-per-event', journal)),
     ]
+    // 逐事件只在小规模上跑：它的每次过界都要整份 clone + diff（Θ(N²)），
+    // 10 万规模下实测需要数小时——这个「跑不完」本身就是纪律 1 的论据。
+    if (size === Math.min(...coldSizes)) {
+      rows.push(median(`${size} · 逐事件（纪律禁止，作对照）`, REPEATS, () => runPerEvent('cold-per-event', journal)))
+    }
+    return rows
   }).flat()
   report(cold)
   const coldBatch = cold[0]!

@@ -38,6 +38,8 @@
 //!   以 serde_json Map（字典序）承载，TS 侧对象是插入序——仅影响键序不影响
 //!   内容，parity 断言用结构等值（toEqual）。
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 use serde_json::{Map, Value};
 use wasm_bindgen::prelude::*;
@@ -436,6 +438,10 @@ pub struct WorkbenchDocument {
     pub session_id: String,
     pub revision: f64,
     pub applied_event_ids: Vec<String>,
+    /// `applied_event_ids` 的成员位（#205 的对位物）。TS 侧是 `Set`，移植成 `Vec` 后
+    /// 幂等判据的 `contains` 退化成 Θ(N) 线性扫——它落在**每个**事件上，于是冷重放
+    /// 又回到 Θ(N²)。只服务成员判据，不进 wire/patch（`to_value` 不读它）。
+    pub applied_event_id_set: HashSet<String>,
     pub applied_ranges: coverage::CoverageRanges,
     pub timeline: Vec<TimelineEntry>,
     pub messages: Vec<WorkbenchMessage>,
@@ -460,6 +466,7 @@ pub fn create_workbench_document(session_id: &str) -> WorkbenchDocument {
         session_id: session_id.to_string(),
         revision: 0.0,
         applied_event_ids: Vec::new(),
+        applied_event_id_set: HashSet::new(),
         applied_ranges: Vec::new(),
         timeline: Vec::new(),
         messages: Vec::new(),
@@ -3240,7 +3247,7 @@ pub fn reduce_workbench_event(
         if coverage::is_span_covered(&document.applied_ranges, start, end) {
             return Ok(());
         }
-    } else if document.applied_event_ids.contains(&envelope.event_id) {
+    } else if document.applied_event_id_set.contains(&envelope.event_id) {
         return Ok(());
     }
     // C12：secret-bearing interaction 在进入任何投影面前统一剥敏。
@@ -3257,9 +3264,12 @@ pub fn reduce_workbench_event(
     insert_by_sequence(&mut document.timeline, entry);
     document.revision = document.revision.max(envelope.sequence);
     if let Some((start, end)) = span {
-        document.applied_ranges = coverage::merge_coverage(&document.applied_ranges, start, end);
+        coverage::merge_coverage_in_place(&mut document.applied_ranges, start, end);
     } else {
         document.applied_event_ids.push(envelope.event_id.clone());
+        document
+            .applied_event_id_set
+            .insert(envelope.event_id.clone());
     }
     reduce_semantic_event(document, &effective)?;
     refresh_orphans(document);
@@ -5598,5 +5608,136 @@ mod tests {
             .filter_map(|item| item.get("sequence").and_then(Value::as_f64))
             .collect();
         assert_eq!(sequences, vec![2.0, 9.0]);
+    }
+}
+
+#[cfg(test)]
+mod projection_index_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 与 `tests::envelope_with` 同形的本地构造（那个 helper 是兄弟模块私有的）。
+    fn envelope(sequence: f64, event: Value) -> SemanticEnvelope {
+        SemanticEnvelope {
+            event_type: event
+                .get("type")
+                .and_then(Value::as_str)
+                .expect("type")
+                .to_string(),
+            sequence,
+            event_id: format!(
+                "wb-index-{sequence}-{}",
+                event.get("type").and_then(Value::as_str).unwrap_or("")
+            ),
+            session_id: "session-index".to_string(),
+            recorded_at: "2026-09-21T00:00:00.000Z".to_string(),
+            occurred_at: None,
+            identity: Identity {
+                turn_id: None,
+                message_id: Some("msg-1".to_string()),
+                tool_call_id: None,
+                task_id: None,
+                run_id: None,
+                interaction_id: None,
+            },
+            source: EventSource {
+                provider: "peri".to_string(),
+                source_id: format!("wire-1-{sequence}"),
+                agent_id: None,
+                parent_agent_id: None,
+            },
+            provenance_origin: 0,
+            provenance_trust: 0,
+            provenance_extra: None,
+            coverage: None,
+            event,
+        }
+    }
+
+    /// 混合 timeline：文本 delta、tool 条目、终态 session 条目、reasoning 交错，
+    /// 覆盖窗口查询要分辨的三类谓词。
+    fn mixed_document(event_count: usize) -> WorkbenchDocument {
+        let mut document = create_workbench_document("session-index");
+        for sequence in 1..=event_count {
+            let event = match sequence % 7 {
+                0 => {
+                    json!({ "type": "tool.started", "tool": { "toolCallId": format!("tool-{sequence}") } })
+                }
+                3 => json!({ "type": "session.completed", "status": "completed" }),
+                5 => {
+                    json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": "x" }] })
+                }
+                _ => {
+                    json!({ "type": "message.delta", "role": "assistant", "parts": [{ "kind": "text", "text": "y" }] })
+                }
+            };
+            reduce_workbench_event(&mut document, &envelope(sequence as f64, event))
+                .expect("reduce");
+        }
+        document
+    }
+
+    fn text_boundary_scan(document: &WorkbenchDocument, after: f64, before: f64) -> bool {
+        document.timeline.iter().any(|entry| {
+            entry.sequence > after && entry.sequence < before && is_text_stream_boundary(entry)
+        })
+    }
+
+    /// 窗口查询必须与「逐条扫全表」判据逐字等价——这是那处 Θ(N·T) → Θ(log T + 窗口)
+    /// 改写的正确性前提，也是本文件里唯一守得住它的东西。
+    #[test]
+    fn sequence_window_query_matches_full_scan() {
+        let document = mixed_document(120);
+        for after in [0.0, 1.0, 2.5, 17.0, 60.0, 119.0, 120.0, 200.0] {
+            for before in [0.0, 1.0, 18.0, 18.5, 61.0, 120.0, 121.0, 500.0] {
+                assert_eq!(
+                    any_entry_in_sequence_window(&document, after, before, is_text_stream_boundary),
+                    text_boundary_scan(&document, after, before),
+                    "文本流边界窗口 {after}..{before}"
+                );
+                assert_eq!(
+                    any_entry_in_sequence_window(&document, after, before, |entry| entry.kind
+                        == "tool"),
+                    document.timeline.iter().any(|entry| entry.sequence > after
+                        && entry.sequence < before
+                        && entry.kind == "tool"),
+                    "tool 窗口 {after}..{before}"
+                );
+            }
+        }
+    }
+
+    /// 增量缓存的终态 fence 必须等于整条扫描的结果——缓存的两条前提（条目
+    /// kind/data 构建后不可变、timeline 只增不减）在归约过程中被反复使用。
+    #[test]
+    fn cached_terminal_fence_matches_full_scan() {
+        let mut document = create_workbench_document("session-index-fence");
+        for sequence in 1..=80 {
+            let event = if sequence % 11 == 0 {
+                json!({ "type": "session.completed", "status": "completed" })
+            } else {
+                json!({ "type": "message.delta", "role": "assistant", "parts": [{ "kind": "text", "text": "z" }] })
+            };
+            reduce_workbench_event(&mut document, &envelope(sequence as f64, event))
+                .expect("reduce");
+            let cached = terminal_session_sequence(&mut document);
+            let full = document
+                .timeline
+                .iter()
+                .filter(|entry| is_terminal_session_entry(entry))
+                .map(|entry| entry.sequence)
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!(cached, full, "终态 fence 在 sequence {sequence} 处不一致");
+        }
+        // timeline 被缩短（重建的一种）时缓存必须作废重扫，而不是继续返回旧的最大值。
+        document.timeline.truncate(10);
+        let rescanned = terminal_session_sequence(&mut document);
+        let expected = document
+            .timeline
+            .iter()
+            .filter(|entry| is_terminal_session_entry(entry))
+            .map(|entry| entry.sequence)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert_eq!(rescanned, expected, "缩短 timeline 后缓存未作废");
     }
 }
