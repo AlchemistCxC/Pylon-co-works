@@ -293,3 +293,39 @@ parity 与行为测试，性能上尚未达到迁移前水平。**这是本轮�
 因此本 PR 的状态是：**功能已切流、正确性有证据；性能未达迁移前水平，护栏仍红。**
 按用户的「不得慢于原生 TypeScript」判据，本 PR 尚不满足完工条件；出路是把第 9 条的
 三条优化做掉（去 `Value` / 去深拷全量 diff / 结构化编组），而不是调预算或删护栏。
+
+### 11. 性能收口第一轮：把 11.28× 拆成「Rust 折叠」与「边界」两段（量到了，未收口）
+
+按仓库主裁决（选 1：在本 PR 内继续收口）做的第一轮。**先把差距拆开量，再动手**——
+用的是 `batch_fold_phase_probe`（`#[ignore]` 诊断探针）与 `bench-ts-vs-wasm`：
+
+| 量 | 测值 | 说明 |
+| --- | --- | --- |
+| 迁移前 TS 折叠（同 harness） | **26–28 ms** | 整条管线，无进程边界 |
+| 迁移后 wasm 折叠（同 harness） | **315–317 ms** | 11.28–12.0× |
+| ↳ 其中 Rust `project_batch(20000)`，**release** | **130 ms** | 折叠本体 |
+| ↳ 其中边界 + JS 侧（帧编码 ~70–100ms + `document()` JSON 往返 + `materializePage`） | **~185 ms** | 由 315 − 130 得出 |
+| ↳ 同探针 **debug** profile | 318 ms | **别拿 debug 数当对照**：wasm 走 release |
+
+所以差距是**两段各占一半量级**，不是单点：
+
+1. **Rust 折叠 130ms = 6.5µs/事件**（release）。事件形状是 O(1) 工作量，6.5µs 说明按事件的
+   分配仍然重：每事件 2 次 `event` 树克隆（`with_event` 的字段复制 + `timeline_entry` 的
+   `data`）+ 约 8 次字符串分配 + `identity.to_value()` 建对象。这正是「① 去 `Value` 改定型
+   结构体」要解决的东西——结构性改造，动的是 `WorkbenchDocument` 的数据模型、
+   patch 产出与序列化三处。
+2. **边界 ~185ms**：帧编码（把 20k 事件写成 5.3MB 紧凑列式）+ `document()` 的全量 JSON
+   序列化 + JS 侧 `JSON.parse` + `materializePage` 结构共享重建。这是「③ 结构化编组 /
+   真切片 patch」的靶子；`document()` 会在每次 `foldIntoProjector` 被调用（**含单事件折叠**），
+   所以它同时是实时路径的常数开销。
+
+**本轮实际落地的一处优化**：`reduce_workbench_event` 里
+`SemanticEnvelope { event, ..envelope.clone() }` 会**连 `event` 一起克隆再覆盖**——逐事件
+折叠里是一次纯浪费的整棵树复制。已由 `SemanticEnvelope::with_event`（只克隆其余字段）
+取代。**诚实结论：这处在 JS 侧实测落在噪声内（317 vs 315ms），不是瓶颈**，但它是无谓
+工作，保留清理。它**没有**改变 11× 的量级——差距要上面两条结构性改造才动得了。
+
+**未收口**：目标是把 315ms 打到 28ms 以下，需要同时 ① 把 Rust 折叠从 130ms 压到 ~30ms
+以下（要求每事件分配降一个数量级）与 ③ 把边界 185ms 压到接近 0（patch 真切片 + 结构化
+编组，不再每次 `document()` 全量 JSON）。两者都超出「一处微调」的量级，各自需要一轮
+独立改造 + parity 复验。护栏（2500ms 预算）在 CI 上仍会红，直到 ①+③ 落地。

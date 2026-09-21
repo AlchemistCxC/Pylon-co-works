@@ -235,6 +235,29 @@ pub struct SemanticEnvelope {
 }
 
 impl SemanticEnvelope {
+    /// 以另一份事件的 `Value` 重建信封，**只克隆 `event` 之外的字段**。
+    ///
+    /// 不要写成 `SemanticEnvelope { event, ..self.clone() }`：结构体更新语法会先把
+    /// `event` 整棵树也克隆一份再被覆盖掉——逐事件折叠里那是一次纯浪费的深拷贝
+    /// （20k delta 的同 harness 对照里，这类按事件树克隆是折叠比 TS 慢的主因之一）。
+    fn with_event(&self, event: Value) -> SemanticEnvelope {
+        SemanticEnvelope {
+            event_type: self.event_type.clone(),
+            sequence: self.sequence,
+            event_id: self.event_id.clone(),
+            session_id: self.session_id.clone(),
+            recorded_at: self.recorded_at.clone(),
+            occurred_at: self.occurred_at.clone(),
+            identity: self.identity.clone(),
+            source: self.source.clone(),
+            provenance_origin: self.provenance_origin,
+            provenance_trust: self.provenance_trust,
+            provenance_extra: self.provenance_extra.clone(),
+            coverage: self.coverage,
+            event,
+        }
+    }
+
     /// `envelope.occurredAt ?? envelope.recordedAt`（消息 time 字段与时长基准）。
     fn occurred_or_recorded(&self) -> &str {
         self.occurred_at.as_deref().unwrap_or(&self.recorded_at)
@@ -3247,10 +3270,7 @@ pub fn reduce_workbench_event(
     } else {
         envelope.event.clone()
     };
-    let effective = SemanticEnvelope {
-        event: effective_event,
-        ..envelope.clone()
-    };
+    let effective = envelope.with_event(effective_event);
     let entry = timeline_entry(&effective);
     insert_by_sequence(&mut document.timeline, entry);
     document.revision = document.revision.max(envelope.sequence);
