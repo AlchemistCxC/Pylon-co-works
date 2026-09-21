@@ -504,3 +504,27 @@
 - 本文件（追加声明）
 
 **我不碰**：一切既有文件（含他人在途域）；统计为只读扫描（`git ls-files` + 读文件），不改任何源码。
+
+---
+
+[2026-09-22 05] [批次F 会话] [#228 批次F · 测试偿还（vitest 侧）]
+
+**开工：#228 批次F（console.error 白名单收窄 / 5s waitFor 定性 / 4s 预算回收条件注释 / coverage ratchet / 松断言机械替换 / scripts legacy 迁移）。本轮只编辑不提交（用户指令），全程无 git add/commit。** 文件域（与 #228 总声明「测试侧」一致，请勿改写）：
+
+- `vitest.setup.ts`（console.error 收集器翻白名单硬断言）、`vitest.config.ts`（仅 coverage 阈值 ratchet 与注释）
+- 批次F 点名测试文件：`src/renderers/solid-workbench/chat/__tests__/{StreamingIdentity,MessageRow,ReasoningStates,issue5.reasoningSegmentation}.solid.test.tsx`、`src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`、`src/plugins/core/renderer/__tests__/solidRendererSurface.test.ts`、`src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx`、`src/sheets/file/__tests__/FileViewHost.save.test.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`、`scripts/test-replay-state.test.mts`
+- 本文件（本条目）
+
+**我不碰**：硬禁区与 #204③/#226 在途域原样（`src/domains/workbench/**`、`src/__tests__/replay/**`、`src/sheets/agent-workbench/**`、中控区 `input/**`、预设系统）；已观察到 #204③/#226 对 workbenchProjector/workbenchRuntime 的在途改动会让 `mountSolidWorkbench.solid.test.tsx` 个别用例红（HEAD 干净快照全绿），归因证据在本批次报告，非本会话产物。
+
+---
+
+（#221 已随分支提交 `84d4cfb0` 交付并回写 issue，在途条目移除；见 `.agents/records/221-highlight-dom-lifecycle.md` 与 PR #227 评论。L.md 本条目按共享树纪律全程未提交——本文件仍载有 #228 批次F 的未提交条目，由其会话处置。）
+
+**我不碰**：`src/components/chat/codeHighlight.ts`、`starryCore.ts`、`src/infrastructure/compute/**`、`src-tauri/**`、`streamingDisplayScheduler.ts`、中控区、预设系统、他人在途域（同上）。
+
+---
+
+[2026-09-22 06] [Miyaki Kumo] [#228 进展：六批次全部落地]
+
+**A/B/C/D/E/F 十三笔功能提交已在 `Ru5t/Reflector`（`027ad83c..HEAD`），门禁全绿（vitest 622 文件/4678 用例、cargo test 1344、clippy 基线零新增、build 全链、生产产物排除 demo/mockTauri），开发记录 `.agents/records/228-tech-debt-paydown.md`。** 即将推送开 PR。文件域声明不变；**dispatcher 拆分仍延后**（#229/#230 条目在 L.md 期间不碰该文件），FileTabView 状态机与 CodeBlock 计时器接入两笔已定位为后续（见记录未解问题 2/3）。
