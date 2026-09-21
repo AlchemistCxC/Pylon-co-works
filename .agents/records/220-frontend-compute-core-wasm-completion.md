@@ -1186,3 +1186,70 @@ patch 传输总量 **1.0MiB / 2001 事件**（此前 **36.3MiB**，**36× 少**�
 
 ⇒ **纯 TS 实现的文档内存明显更低**，且对象越多差距越大（`serde_json::Value` 结构成本）。
 路线 A 只消掉**过界传输**（36.3MiB → 1.0MiB），不消核内的那份文档；要动那一份仍是「① 去 `Value`」。
+
+## 27. live `MessagePatch` 紧凑追加形态落地（§24.3 路线 A 收口，19 点档）
+
+用户裁决到位（「把不属于计算核的那一个事件解决一下」即放行 §24.3 的**建议 A**），
+路线 A 本轮完工。spec：`.agents/spec/220-live-message-patch-incremental.md`。
+
+### 27.1 契约
+
+`MessagePatch` 变双形态（互斥、恰有一者）：
+
+- **全量** `{index, message}`：任意变更（settle/替换/批内追加区），既有形态不变。
+- **紧凑** `{index, append}`：本批对一条**既有**消息只做了一次纯文本追加——
+  `{contentTail, lastPart?, pushedParts?, identity?, sequence?, running?}`。
+  `lastPart` 是 `textTail`（文本尾巴 + kind 覆写；language 仅 reasoning 收敛携带，
+  `null` = 移除）或 `rewritten`（末部件整值，表达力兜底）。
+
+**判据在写点自证，不靠事后 diff**：四个追加写点（message/reasoning 的主追加与乱序收敛）
+改走 `mark_message_append(index, flavor, mutate)`——变更前 O(1) 预扫描（content/parts 长度、
+末部件标量、标量指纹），闭包原地变更，变更后从前后差重建记录。任一表达力条件不满足
+（同批第二次变更、批内 push 后 append（TS 无批前基准）、reasoning 重建丢自有键、
+指纹出圈）即**静默降级全量**——降级只回到今天的形态，语义恒对。
+
+TS 侧 `applyPatch` 对 `append` 条目就地应用（`applyMessageAppend`）：content 字符串拼接
+（cons-string 摊销 O(1)）、parts 浅拷贝只碰末部件、标量按 presence 覆写。展开保留上一份
+键序，wire 键序本就字典序 ⇒ 逐字节 JSON 断言不受影响。紧凑条目缺批前基准 = 契约破坏，
+抛错而非静默陈旧读。
+
+### 27.2 等价性证据
+
+- Rust `change_ledger_tests`：`resolved_messages` 把紧凑条目对批前消息**应用后**与
+  `diff_patches` 参考值逐字节比对——「记账 ⊇ diff」不变量在紧凑形态下继续成立
+  （该应用逻辑是 TS `applyMessageAppend` 的 JSON 层镜像）。
+- 新增 5 个 Rust 单测：流式 delta 产紧凑形态且应用后等值、二换单事件降全量、
+  批内 push+append 降全量、kind 翻转走 TextTail.kind、reasoning 自有键降 Rewritten。
+- TS 侧新增 3 个边界测试（`projectorCompute.test.ts`）：逐事件折叠产 append 形态且与
+  整页折叠收敛同一文档、kind 翻转生效、不合族部件走 pushedParts 且与全量等值。
+- 未漂移的标量不下发（如 started 后 running 恒 true）——省字节的正确行为，测试钉住。
+
+### 27.3 读数（bench 新增「场景 E · live 逐事件」：回合流 + §24.2 同形长流，n=2000）
+
+| 形状 | 指标 | 改前 | 改后 | 变化 |
+| --- | --- | --- | --- | --- |
+| 长流（§24.2 同形） | patch 总字节 | 82.02MB | **1.10MB** | **74×** |
+| 长流 | 生产 live | 402.99µs/ev | **24.63µs/ev** | **16.4×** |
+| 长流 | ② appendBatch / ③ parse | 276.05 / 77.94µs | 7.08 / 2.34µs | −97% |
+| 回合流 | patch 总字节 | 2.38MB | 1.97MB | 1.2× |
+| 回合流 | 生产 live | 95.96µs/ev | **32.02µs/ev** | 3.0× |
+
+字节量是确定性判据；耗时单进程单轮、供方向参考。与 §26.3 的独立复测（WIP 合成态
+31.24µs / 1.0MiB）互相印证。**Θ(N²) 已消**：长流 patch 尺寸不再随消息长度增长。
+回合流剩余 ~1KB/事件主要是 session 面整携带 + timeline 条目，属 patch DTO 其余维度，
+不在本路线靶内。
+
+### 27.4 门禁
+
+`cargo test -p pylon-compute` 181 通过（含新增 5）；clippy/fmt 干净；`bun run test`
+623 文件 / 4698 通过 | 1 todo（含并行会话同树落地的 CSP/竞态/内存三项，联合验证）；
+`tsc -b` 0 错；`eslint src/` 仅剩既存 RightRailHost warning；parity 2/2 通过；
+`check:bundle` wasm 段 PASS（841KB，预算内）。
+
+### 27.5 协作记账（同树并行）
+
+本轮施工期间，另一会话在同一工作树施工 #220 的 CSP/竞态/内存三事（`8339e966`…`9a8ecec5`），
+其 `d2af1a43` 按 AGENTS §2.1 声明绕开了本轮的在途 workbench.rs（当时正处于「缺 index 字段」
+的编译红状态），全程 pathspec、未触碰本路线文件域；其 §26.3 基准与本路线互为独立复测。
+`scripts/bench-live-probe.mts`、`src-tauri/pylon-compute/src/projector/value_memory_probe.rs`
+两份未跟踪文件归对方所有，本轮未触碰、未提交。

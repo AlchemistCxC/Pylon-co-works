@@ -41,6 +41,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use serde::ser::{SerializeMap, SerializeSeq};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use wasm_bindgen::prelude::*;
@@ -215,6 +216,195 @@ impl EventSource {
     }
 }
 
+/// 热路径事件载荷：帧 `parts_mode == 1` 的单文本部件形态（`{type, [role], parts:[{kind,text}]}`）。
+///
+/// **为什么单独成型**（#220「去 `Value`」，2026-09-21 裁决）：`Value` 的每个对象是一棵
+/// `BTreeMap`，一条 reasoning delta 的事件树要 6 个节点 + 5~6 次 `String` 分配。实测
+/// （`value_memory_probe`，delta 形 2001 条）**`TimelineEntry.data` 占整份文档内存的 67%**
+/// ——1.36MB / 678B 每条——而定长形态只要一个 kind 槽 + 一段文本。
+///
+/// 只覆盖 `parts_mode == 1` 且无 `role` 以外的额外键、无 `reason`、无 extra/富 provenance
+/// 的那一种；其余事件（字段集开放的 provider 载荷必须保真，K14）一律走 `Other`。
+#[derive(Debug, Clone)]
+pub struct TextPartPayload {
+    /// 与 wire 一致的事件类型（词表里的 `&'static str`，不分配）。
+    pub event_type: &'static str,
+    /// 部件类型（`TEXT_PART_KINDS` 里的 `&'static str`）。
+    pub kind: &'static str,
+    /// 文本本体——整个载荷里唯一逐事件变化的东西。
+    pub text: String,
+    /// `message.*` 才有；`reasoning.*` 无 role 键。
+    pub role: Option<&'static str>,
+    /// 惰性 `Value` 镜像，**只服务冷路径**的 `get(key)`（那些调用点读的是 role/parts 这类
+    /// 非文本字段）。热归约器走 `text_of_single_part()`，永远不碰它 ⇒ 稳态内存不会因为
+    /// 「有人可能读」而退回 `Value` 树。序列化走手写 `Serialize`，同样不碰它。
+    mirror: std::cell::OnceCell<Value>,
+}
+
+impl TextPartPayload {
+    pub fn new(
+        event_type: &'static str,
+        kind: &'static str,
+        text: String,
+        role: Option<&'static str>,
+    ) -> Self {
+        Self {
+            event_type,
+            kind,
+            text,
+            role,
+            mirror: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// `Value` 镜像（首次调用时建一次，之后借出）。键序按字典序，与 wire 一致。
+    fn mirror(&self) -> &Value {
+        self.mirror.get_or_init(|| {
+            let mut part = Map::new();
+            part.insert("kind".to_string(), Value::String(self.kind.to_string()));
+            part.insert("text".to_string(), Value::String(self.text.clone()));
+            let mut event = Map::new();
+            event.insert("parts".to_string(), Value::Array(vec![Value::Object(part)]));
+            if let Some(role) = self.role {
+                event.insert("role".to_string(), Value::String(role.to_string()));
+            }
+            event.insert(
+                "type".to_string(),
+                Value::String(self.event_type.to_string()),
+            );
+            Value::Object(event)
+        })
+    }
+}
+
+/// 事件载荷：热路径定长形态 + 冷路径 `Value`（`Arc` 共享，条目与信封同一棵树）。
+#[derive(Debug, Clone)]
+pub enum EventPayload {
+    TextPart(TextPartPayload),
+    /// 其余一切事件的完整载荷。
+    Other(Arc<Value>),
+}
+
+impl EventPayload {
+    /// 该载荷在文档/patch 里的 JSON 形状。键序**必须**与 `Value`（`BTreeMap`）一致：
+    /// 外层 parts → role → type，内层部件 kind → text。文档 JSON 会被逐字节比较。
+    pub fn to_value(&self) -> Value {
+        match self {
+            EventPayload::TextPart(payload) => payload.mirror().clone(),
+            EventPayload::Other(value) => (**value).clone(),
+        }
+    }
+
+    /// 与 `Value::get` **同签名**的读（`Option<&Value>`），于是既有 40 余处调用点零改动。
+    ///
+    /// 热形态首次调用会建一次 `Value` 镜像并缓存（见 `TextPartPayload::mirror`）；热归约器
+    /// 走定长访问器、不碰这里，所以镜像在热路径上恒不落地。
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        match self {
+            EventPayload::Other(value) => value.get(key),
+            EventPayload::TextPart(payload) => payload.mirror().get(key),
+        }
+    }
+
+    /// 事件类型（两形态都有，零分配）。
+    pub fn event_type(&self) -> &str {
+        match self {
+            EventPayload::TextPart(payload) => payload.event_type,
+            // 词表保证其它形态的 event 一定带 string type；退空串与
+            // `string_value(...).unwrap_or_default()` 的旧口径一致。
+            EventPayload::Other(value) => value
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// 单文本部件的文本（热形态**零分配**；冷形态回退到 `parts` 抽取）。
+    pub fn text_of_single_part(&self) -> Option<&str> {
+        match self {
+            EventPayload::TextPart(payload) => Some(payload.text.as_str()),
+            EventPayload::Other(_) => None,
+        }
+    }
+
+    /// role（热形态零分配）。
+    pub fn role_str(&self) -> Option<&str> {
+        match self {
+            EventPayload::TextPart(payload) => payload.role,
+            EventPayload::Other(value) => value.get("role").and_then(Value::as_str),
+        }
+    }
+
+    /// 冷形态的底层 `Value`；热形态返回 `None`（调用方据 `to_value()` 自行合成）。
+    pub fn as_other(&self) -> Option<&Arc<Value>> {
+        match self {
+            EventPayload::TextPart(_) => None,
+            EventPayload::Other(value) => Some(value),
+        }
+    }
+
+    /// 是否是「字段集开放的完整载荷」——需要逐字段保真的处理（脱敏、schema 校验）据此分流。
+    pub fn is_full_value(&self) -> bool {
+        matches!(self, EventPayload::Other(_))
+    }
+}
+
+impl PartialEq for EventPayload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (EventPayload::Other(left), EventPayload::Other(right)) => left == right,
+            (EventPayload::TextPart(left), EventPayload::TextPart(right)) => {
+                left.event_type == right.event_type
+                    && left.kind == right.kind
+                    && left.text == right.text
+                    && left.role == right.role
+            }
+            // 跨形态：按 JSON 语义比（镜像按需建，只在真的比到才付）。
+            _ => self.to_value() == other.to_value(),
+        }
+    }
+}
+
+impl serde::Serialize for EventPayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            EventPayload::Other(value) => value.serialize(serializer),
+            EventPayload::TextPart(payload) => {
+                // 手写而不是 derive：键序要与 `Value`（BTreeMap，字典序）逐字节一致。
+                let mut map = serializer.serialize_map(Some(if payload.role.is_some() { 3 } else { 2 }))?;
+                map.serialize_entry("parts", &TextPartOnly(payload))?;
+                if let Some(role) = payload.role {
+                    map.serialize_entry("role", role)?;
+                }
+                map.serialize_entry("type", payload.event_type)?;
+                map.end()
+            }
+        }
+    }
+}
+
+/// `[{kind, text}]` 的写出装置（键序 kind → text，与 `Value` 的 BTreeMap 一致）。
+struct TextPartOnly<'a>(&'a TextPartPayload);
+
+impl serde::Serialize for TextPartOnly<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(1))?;
+        sequence.serialize_element(&TextPartPair(self.0))?;
+        sequence.end()
+    }
+}
+
+struct TextPartPair<'a>(&'a TextPartPayload);
+
+impl serde::Serialize for TextPartPair<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("kind", self.0.kind)?;
+        map.serialize_entry("text", &self.0.text)?;
+        map.end()
+    }
+}
+
 /// 已解码的 semantic envelope（event 已重建为 JSON 对象）。
 #[derive(Debug, Clone)]
 pub struct SemanticEnvelope {
@@ -232,8 +422,8 @@ pub struct SemanticEnvelope {
     /// （provider/importId/sourceOrdinal/orderConfidence/collectionComplete/synthetic）。
     pub provenance_extra: Option<Map<String, Value>>,
     pub coverage: Option<(f64, f64)>,
-    /// 事件载荷（见 `TimelineEntry::data` 的共享所有权说明）。
-    pub event: Arc<Value>,
+    /// 事件载荷（见 [`EventPayload`]：热路径定长、冷路径 `Arc<Value>` 共享）。
+    pub event: EventPayload,
 }
 
 impl SemanticEnvelope {
@@ -242,7 +432,7 @@ impl SemanticEnvelope {
     /// 不要写成 `SemanticEnvelope { event, ..self.clone() }`：结构体更新语法会先把
     /// `event` 整棵树也克隆一份再被覆盖掉——逐事件折叠里那是一次纯浪费的深拷贝
     /// （20k delta 的同 harness 对照里，这类按事件树克隆是折叠比 TS 慢的主因之一）。
-    fn with_event(&self, event: Arc<Value>) -> SemanticEnvelope {
+    fn with_event(&self, event: EventPayload) -> SemanticEnvelope {
         SemanticEnvelope {
             event_type: self.event_type.clone(),
             sequence: self.sequence,
@@ -336,9 +526,9 @@ pub struct TimelineEntry {
     pub title: Option<Value>,
     pub summary: Option<Value>,
     pub stream_boundary: Option<bool>,
-    /// 事件载荷。**共享所有权**：条目与投影核内的信封指向同一棵树，
-    /// 于是「建条目」与「收批序列化」都不必深拷它（冷批 20k 条实测这两处各占几十毫秒）。
-    pub data: Arc<Value>,
+    /// 事件载荷。热路径是定长形态、冷路径是**共享所有权**的 `Arc<Value>`（条目与信封
+    /// 指向同一棵树，建条目与收批都不深拷）。见 [`EventPayload`] 的内存账。
+    pub data: EventPayload,
 }
 
 /// `TimelineEntry` 的 JSON 形状：与 `to_value()` **逐字节一致**（键序按字典序——条目 JSON
@@ -351,7 +541,7 @@ impl serde::Serialize for TimelineEntry {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
         // 键序 = 字典序（`serde_json::Map` 默认是 BTreeMap，`to_value()` 的产物就是这个序）。
-        map.serialize_entry("data", &*self.data)?;
+        map.serialize_entry("data", &self.data)?;
         map.serialize_entry("eventId", &self.event_id)?;
         map.serialize_entry("id", &self.id)?;
         map.serialize_entry("kind", self.kind)?;
@@ -391,7 +581,7 @@ impl TimelineEntry {
         if let Some(boundary) = self.stream_boundary {
             object.insert("streamBoundary".to_string(), Value::Bool(boundary));
         }
-        object.insert("data".to_string(), (*self.data).clone());
+        object.insert("data".to_string(), self.data.to_value());
         Value::Object(object)
     }
 }
@@ -670,15 +860,60 @@ impl ActivityIndex {
     }
 }
 
+/// 本批单条 message 的变更记账：全量（任意变化）或紧凑（单次纯追加，live 热路径）。
+///
+/// 紧凑形态只在本批**首记**且为追加写点时成立；任何第二次变更（含批内 push 后再 append、
+/// settle 标记）都升级为 [`MessageChange::Full`]——降级的代价只是回到全量形态，绝不影响语义。
+#[derive(Debug, Clone)]
+pub(crate) enum MessageChange {
+    Full(usize),
+    Append(MessageAppendPatch),
+}
+
+impl MessageChange {
+    fn index(&self) -> usize {
+        match self {
+            MessageChange::Full(index) => *index,
+            MessageChange::Append(record) => record.index,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ChangeSet {
     messages_before: usize,
     timeline_before: usize,
     applied_ids_before: usize,
-    dirty_messages: Vec<usize>,
+    dirty_messages: Vec<MessageChange>,
     dirty_timeline: Vec<usize>,
     /// 低频切片的脏位（见 [`Slice`]）。
     dirty_slices: u16,
+}
+
+impl ChangeSet {
+    /// 记一条 message 变更。追加记录落在「本批新推的消息」上时直接降级全量——
+    /// TS 侧对那条消息没有批前基准，尾巴无从拼接。
+    fn record_message(&mut self, change: MessageChange) {
+        let index = change.index();
+        let change = match change {
+            MessageChange::Append(record) if record.index >= self.messages_before => {
+                MessageChange::Full(record.index)
+            }
+            other => other,
+        };
+        match self
+            .dirty_messages
+            .iter_mut()
+            .find(|entry| entry.index() == index)
+        {
+            Some(entry) => {
+                if !matches!(entry, MessageChange::Full(_)) {
+                    *entry = MessageChange::Full(index);
+                }
+            }
+            None => self.dirty_messages.push(change),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -740,10 +975,34 @@ impl WorkbenchDocument {
         self.activity_index.position(&self.activities, id, kind)
     }
 
-    /// 标记某个 message 被就地写过（幂等；去重在 `finish_batch`）。
+    /// 标记某个 message 被就地写过（幂等；去重在 `record_message`）。任意变更走这里。
     pub(crate) fn mark_message(&mut self, index: usize) {
-        if !self.changes.dirty_messages.contains(&index) {
-            self.changes.dirty_messages.push(index);
+        self.changes.record_message(MessageChange::Full(index));
+    }
+
+    /// 记录一次「纯追加」message 变更并执行 `mutate`（live 逐事件热路径的紧凑形态）。
+    ///
+    /// 变更前做 O(1) 预扫描（content/parts 长度、末部件标量、标量指纹），变更后从前后差
+    /// 重建紧凑记录；表达力任一不满足（见 [`append_record_of`]）即降级全量。`mutate` 须返回
+    /// 本次下沉的 incoming 部件数——`append_parts_*_in_place` 是「合并进末部件或推入」语义，
+    /// 推入数对不上即说明发生过合并。
+    pub(crate) fn mark_message_append(
+        &mut self,
+        index: usize,
+        flavor: PartsMergeFlavor,
+        mutate: impl FnOnce(&mut WorkbenchMessage) -> usize,
+    ) {
+        let before = append_probe(&self.messages[index]);
+        let incoming_count = mutate(&mut self.messages[index]);
+        match append_record_of(
+            index,
+            &self.messages[index],
+            &before,
+            flavor,
+            incoming_count,
+        ) {
+            Some(record) => self.changes.record_message(MessageChange::Append(record)),
+            None => self.changes.record_message(MessageChange::Full(index)),
         }
     }
 
@@ -761,16 +1020,29 @@ impl WorkbenchDocument {
     /// 「本产出 ⊇ diff 产出」这条不变量。
     pub(crate) fn finish_batch(&mut self) -> WorkbenchPatch {
         let changes = std::mem::take(&mut self.changes);
-        let mut message_indexes: Vec<usize> =
-            (changes.messages_before..self.messages.len()).collect();
-        message_indexes.extend(changes.dirty_messages.iter().copied());
-        message_indexes.sort_unstable();
-        message_indexes.dedup();
-        let message_upserts = message_indexes
+        // 批内追加区没有「批前基准」，恒全量；脏条目按记账形态下发。升序是 TS
+        // `mergeByIndex` 的不变量（按 index 单调推进游标），同 index 全量优先（去重保留首项）。
+        let mut message_changes: Vec<MessageChange> = (changes.messages_before
+            ..self.messages.len())
+            .map(MessageChange::Full)
+            .collect();
+        message_changes.extend(changes.dirty_messages.iter().cloned());
+        message_changes
+            .sort_by_key(|change| (change.index(), matches!(change, MessageChange::Append(_))));
+        message_changes.dedup_by(|left, right| left.index() == right.index());
+        let message_upserts = message_changes
             .into_iter()
-            .map(|index| MessagePatch {
-                index,
-                message: self.messages[index].to_value(),
+            .map(|change| match change {
+                MessageChange::Full(index) => MessagePatch {
+                    index,
+                    append: None,
+                    message: Some(self.messages[index].to_value()),
+                },
+                MessageChange::Append(record) => MessagePatch {
+                    index: record.index,
+                    append: Some(record),
+                    message: None,
+                },
             })
             .collect();
         let mut timeline_indexes: Vec<usize> =
@@ -925,10 +1197,244 @@ impl WorkbenchDocument {
 
 // ── 增量 patch DTO（边界输出；粒度待 mock 实测定，spec 未决问题 4） ──────────
 
+/// 单条 message 的 upsert，两种形态互斥、恰有一者：
+/// - **全量** `message`：任意变更（settle、替换、批内追加区等）。
+/// - **紧凑** `append`：本批对该消息只做了一次纯文本追加（live 逐事件热路径）——
+///   过界字节从 Θ(累计) 降到 O(尾巴)，TS 侧对上一份消息就地应用（记录 §24.2：
+///   每事件重发整条累计消息占 live 逐事件路径 98% 的字节）。
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessagePatch {
     pub index: usize,
-    pub message: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub append: Option<MessageAppendPatch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<Value>,
+}
+
+/// 纯追加的紧凑描述。TS 侧应用语义（`applyMessageAppend`）：
+/// `content += contentTail`；末部件按 `lastPart` 收敛、`pushedParts` 追加；
+/// `identity`/`sequence`/`running` 缺席即沿用上一份。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageAppendPatch {
+    /// 记账排序用；wire 上由 [`MessagePatch::index`] 承载，不重复序列化。
+    #[serde(skip)]
+    pub index: usize,
+    pub content_tail: String,
+    /// 末部件的收敛描述；缺席 = 末部件未被触碰。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_part: Option<LastPartPatch>,
+    /// 本次推入的新部件（最终态，原样追加）。空即缺席。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pushed_parts: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<Value>,
+    /// `js_number_value` 产物——与全量形态同口径（整数化 f64）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running: Option<bool>,
+}
+
+/// 末部件收敛的两种表达：
+/// - `textTail`：末部件 = 旧值 + text 追加尾巴（+ kind/language 覆写）。
+///   TS 侧 `text = (text ?? '') + tail`，故「旧值无 text 字段」也由此表达。
+/// - `rewritten`：末部件整体替换为最终值。表达力兜底——reasoning 重建会丢
+///   kind/text/language 之外的键，TextTail 表达不了时（低频）走这里。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "mode", rename_all = "camelCase")]
+pub enum LastPartPatch {
+    TextTail {
+        tail: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        /// 仅 reasoning 收敛携带：`Some(Some(v))` = 置值，`Some(None)` = 移除字段，
+        /// `None` = 不触碰（display 保形合并从不改 language）。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        language: Option<Option<String>>,
+    },
+    Rewritten {
+        value: Value,
+    },
+}
+
+/// 追加写点的部件合并族别——决定末部件收敛的紧凑表达力（见 [`LastPartPatch`]）。
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PartsMergeFlavor {
+    /// `merge_display_text_pair`：保形合并（保留未知字段，只改写 kind/text）。
+    Display,
+    /// `merge_reasoning_pair`：重建合并（retain 只留 kind/text/language）。
+    Reasoning,
+}
+
+/// `mark_message_append` 的变更前快照：只取 O(1) 标量，绝不克隆 content/parts。
+struct AppendProbe {
+    content_len: usize,
+    parts_len: usize,
+    last_part: Option<LastPartProbe>,
+    scalars: MessageScalarFingerprint,
+}
+
+struct LastPartProbe {
+    /// 末部件 text 的字节长度（text 缺席即 0——`TextTail` 语义下 TS 侧 `(text ?? '') + tail`
+    /// 与之等价）。
+    text_len: usize,
+    /// 键集合 ⊆ {kind, text, language}——reasoning 重建合并不改丢键的前提。
+    reasoning_shaped: bool,
+}
+
+/// append 写点声明只动 content/parts/identity/sequence/running；其余标量
+/// 任一漂移即放弃紧凑形态（写点演进时漏改这里只会降级，不会错）。
+#[derive(Debug, Clone, PartialEq)]
+struct MessageScalarFingerprint {
+    id: String,
+    segment_id: String,
+    role: String,
+    source: Value,
+    identity: Value,
+    sequence: f64,
+    running: bool,
+    time: String,
+    optimistic: Option<bool>,
+    thought_duration_ms: Option<f64>,
+    redacted: Option<bool>,
+    redacted_reason: Option<String>,
+    thought_started_at_ms: Option<f64>,
+}
+
+impl MessageScalarFingerprint {
+    fn take(message: &WorkbenchMessage) -> Self {
+        Self {
+            id: message.id.clone(),
+            segment_id: message.segment_id.clone(),
+            role: message.role.clone(),
+            source: message.source.clone(),
+            identity: message.identity.clone(),
+            sequence: message.sequence,
+            running: message.running,
+            time: message.time.clone(),
+            optimistic: message.optimistic,
+            thought_duration_ms: message.thought_duration_ms,
+            redacted: message.redacted,
+            redacted_reason: message.redacted_reason.clone(),
+            thought_started_at_ms: message.thought_started_at_ms,
+        }
+    }
+}
+
+fn append_probe(message: &WorkbenchMessage) -> AppendProbe {
+    let last_part = message
+        .parts
+        .as_array()
+        .and_then(|items| items.last())
+        .map(|part| {
+            let reasoning_shaped = part.as_object().is_none_or(|object| {
+                object
+                    .keys()
+                    .all(|key| key == "kind" || key == "text" || key == "language")
+            });
+            let text_len = part.get("text").and_then(Value::as_str).map_or(0, str::len);
+            LastPartProbe {
+                text_len,
+                reasoning_shaped,
+            }
+        });
+    AppendProbe {
+        content_len: message.content.len(),
+        parts_len: message.parts.as_array().map_or(0, Vec::len),
+        last_part,
+        scalars: MessageScalarFingerprint::take(message),
+    }
+}
+
+/// 从前后差重建紧凑记录；`None` = 表达力不满足，降级全量。
+///
+/// 合并判据：`append_parts_*_in_place` 只会「合并进批前末部件」或「尾部推入」，
+/// 故发生合并 ⟺ 推入后数组比「批前长度 + incoming 数」短；被合并的批前末部件
+/// 固定在 `[批前长度 - 1]`，推入的部分从 `[批前长度..]` 原样取最终态。
+fn append_record_of(
+    index: usize,
+    message: &WorkbenchMessage,
+    before: &AppendProbe,
+    flavor: PartsMergeFlavor,
+    incoming_count: usize,
+) -> Option<MessageAppendPatch> {
+    if message.content.len() < before.content_len {
+        return None;
+    }
+    let after = MessageScalarFingerprint::take(message);
+    // 指纹出圈（写点动了声明之外的字段）→ 全量；identity/sequence/running 是
+    // 追加写点声明内的合法漂移，单独比对后进记录。
+    let stable_matched = after.id == before.scalars.id
+        && after.segment_id == before.scalars.segment_id
+        && after.role == before.scalars.role
+        && after.source == before.scalars.source
+        && after.time == before.scalars.time
+        && after.optimistic == before.scalars.optimistic
+        && after.thought_duration_ms == before.scalars.thought_duration_ms
+        && after.redacted == before.scalars.redacted
+        && after.redacted_reason == before.scalars.redacted_reason
+        && after.thought_started_at_ms == before.scalars.thought_started_at_ms;
+    if !stable_matched {
+        return None;
+    }
+    let parts = message.parts.as_array()?;
+    let merged_into_last = incoming_count > 0 && parts.len() < before.parts_len + incoming_count;
+    let last_part = if !merged_into_last {
+        None
+    } else {
+        // 合并只可能发生在批前末部件上（`existing.last_mut()`），故批前长度 ≥ 1。
+        let probe = before.last_part.as_ref()?;
+        let final_last = parts.get(before.parts_len.checked_sub(1)?)?;
+        Some(match flavor {
+            PartsMergeFlavor::Display => LastPartPatch::TextTail {
+                tail: text_tail_of(final_last, probe.text_len)?,
+                kind: kind_of(final_last),
+                language: None,
+            },
+            PartsMergeFlavor::Reasoning => {
+                if probe.reasoning_shaped {
+                    LastPartPatch::TextTail {
+                        tail: text_tail_of(final_last, probe.text_len)?,
+                        kind: kind_of(final_last),
+                        // reasoning 收敛的 language 只会是「保留原值」或「移除」，两种
+                        // 状态都显式下发，TS 侧照做即可。
+                        language: Some(match final_last.get("language") {
+                            Some(Value::String(language)) => Some(language.clone()),
+                            Some(_) => return None,
+                            None => None,
+                        }),
+                    }
+                } else {
+                    // 批前末部件带 kind/text/language 之外的键——重建合并会丢键，
+                    // 紧凑尾巴表达不了，整值下发（低频：插件富部件才可能）。
+                    LastPartPatch::Rewritten {
+                        value: final_last.clone(),
+                    }
+                }
+            }
+        })
+    };
+    Some(MessageAppendPatch {
+        index,
+        content_tail: message.content[before.content_len..].to_string(),
+        last_part,
+        pushed_parts: parts.get(before.parts_len..)?.to_vec(),
+        identity: (after.identity != before.scalars.identity).then(|| after.identity.clone()),
+        sequence: (after.sequence != before.scalars.sequence)
+            .then(|| js_number_value(after.sequence)),
+        running: (after.running != before.scalars.running).then_some(after.running),
+    })
+}
+
+fn text_tail_of(final_last: &Value, before_text_len: usize) -> Option<String> {
+    let text = final_last.get("text")?.as_str()?;
+    text.get(before_text_len..).map(str::to_string)
+}
+
+fn kind_of(part: &Value) -> Option<String> {
+    part.get("kind").and_then(Value::as_str).map(str::to_string)
 }
 
 /// 增量 patch：只携带变化的行。timeline 按 eventId upsert；messages 按下标
@@ -992,7 +1498,8 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
         .filter(|(index, message)| before.messages.get(*index) != Some(*message))
         .map(|(index, message)| MessagePatch {
             index,
-            message: message.to_value(),
+            append: None,
+            message: Some(message.to_value()),
         })
         .collect();
     let before_timeline: std::collections::HashMap<&str, &TimelineEntry> = before
@@ -1313,12 +1820,9 @@ fn is_terminal_session_entry(entry: &TimelineEntry) -> bool {
     if entry.kind != "session" {
         return false;
     }
-    let data = match entry.data.as_object() {
-        Some(data) => data,
-        None => return false,
-    };
-    data.get("type").and_then(Value::as_str) == Some("session.completed")
-        || data
+    entry.data.get("type").and_then(Value::as_str) == Some("session.completed")
+        || entry
+            .data
             .get("status")
             .and_then(Value::as_str)
             .is_some_and(|status| {
@@ -2201,10 +2705,11 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
-                document.mark_message(index);
-                let message = &mut document.messages[index];
-                message.content.push_str(&content);
-                append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
+                document.mark_message_append(index, PartsMergeFlavor::Display, |message| {
+                    message.content.push_str(&content);
+                    append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
+                    parts.as_array().map_or(0, Vec::len)
+                });
                 return;
             }
         }
@@ -2252,17 +2757,18 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
         } else {
             Some(document.messages[index].identity.clone())
         };
-        document.mark_message(index);
-        let message = &mut document.messages[index];
-        message.content.push_str(&content);
-        append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
-        message.identity = if identity_is_present {
-            envelope.identity.to_value()
-        } else {
-            fallback_identity.expect("非空身份已排除")
-        };
-        message.sequence = envelope.sequence;
-        message.running = !terminal && !imported_history;
+        document.mark_message_append(index, PartsMergeFlavor::Display, |message| {
+            message.content.push_str(&content);
+            append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
+            message.identity = if identity_is_present {
+                envelope.identity.to_value()
+            } else {
+                fallback_identity.expect("非空身份已排除")
+            };
+            message.sequence = envelope.sequence;
+            message.running = !terminal && !imported_history;
+            parts.as_array().map_or(0, Vec::len)
+        });
     } else {
         let (id, segment_id) = message_identity_for(envelope);
         let merged_parts = match parts.as_array() {
@@ -2517,10 +3023,15 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
-                document.mark_message(index);
-                let message = &mut document.messages[index];
-                message.content.push_str(&content);
-                append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
+                document.mark_message_append(index, PartsMergeFlavor::Reasoning, |message| {
+                    message.content.push_str(&content);
+                    append_parts_slice_in_place(
+                        &mut message.parts,
+                        parts_slice,
+                        merge_reasoning_pair,
+                    );
+                    parts_slice.len()
+                });
                 return;
             }
         }
@@ -2585,31 +3096,45 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         } else {
             Some(document.messages[index].identity.clone())
         };
-        document.mark_message(index);
-        let message = &mut document.messages[index];
         if redacted {
-            // 剥敏段是**替换**而不是追加：整段换掉，语义不变。
+            // 剥敏段是**替换**而不是追加：整段换掉，语义不变（全量形态）。
+            document.mark_message(index);
+            let message = &mut document.messages[index];
             message.content = content;
             message.parts = parts_owned();
-        } else {
-            message.content.push_str(&content);
-            append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
-        }
-        message.identity = if identity_is_present {
-            envelope.identity.to_value()
-        } else {
-            fallback_identity.expect("非空身份已排除")
-        };
-        message.sequence = envelope.sequence;
-        message.running = running_next;
-        if let Some(duration) = duration_ms {
-            message.thought_duration_ms = Some(duration);
-        }
-        if redacted {
+            message.identity = if identity_is_present {
+                envelope.identity.to_value()
+            } else {
+                fallback_identity.expect("非空身份已排除")
+            };
+            message.sequence = envelope.sequence;
+            message.running = running_next;
+            if let Some(duration) = duration_ms {
+                message.thought_duration_ms = Some(duration);
+            }
             message.redacted = Some(true);
-        }
-        if let Some(reason) = event.get("reason").and_then(Value::as_str) {
-            message.redacted_reason = Some(reason.to_string());
+            if let Some(reason) = event.get("reason").and_then(Value::as_str) {
+                message.redacted_reason = Some(reason.to_string());
+            }
+        } else {
+            document.mark_message_append(index, PartsMergeFlavor::Reasoning, |message| {
+                message.content.push_str(&content);
+                append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
+                message.identity = if identity_is_present {
+                    envelope.identity.to_value()
+                } else {
+                    fallback_identity.expect("非空身份已排除")
+                };
+                message.sequence = envelope.sequence;
+                message.running = running_next;
+                if let Some(duration) = duration_ms {
+                    message.thought_duration_ms = Some(duration);
+                }
+                if let Some(reason) = event.get("reason").and_then(Value::as_str) {
+                    message.redacted_reason = Some(reason.to_string());
+                }
+                parts_slice.len()
+            });
         }
     } else {
         let (id, segment_id) = message_identity_for(envelope);
@@ -2851,7 +3376,7 @@ fn reduce_tool(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
     }
     node.insert("orphan".to_string(), Value::Bool(false));
     // C04 终态幂等 + 活动位置是创建时事实（progress 不移动卡片）。
-    node.insert("data".to_string(), event.as_ref().clone());
+    node.insert("data".to_string(), event.to_value());
     node.insert(
         "sequence".to_string(),
         js_number_value(
@@ -2991,7 +3516,8 @@ fn reduce_diagnostic(document: &mut WorkbenchDocument, envelope: &SemanticEnvelo
             document.system_errors.push(normalized);
         }
     }
-    add_diagnostic(document, envelope, &code, &message, &level, Some(event));
+    let event_value = event.to_value();
+    add_diagnostic(document, envelope, &code, &message, &level, Some(&event_value));
 }
 
 fn reduce_session(
@@ -3090,7 +3616,9 @@ fn reduce_usage(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
             .usage
             .as_ref()
             .and_then(|usage| usage.get("budget").filter(|value| value.is_object()));
-        let budget = session_surface::normalize_budget_snapshot(&envelope.event, previous_budget);
+        // 冷事件（usage.updated 必带 usage 额外键 ⇒ 一律 Other），就地物化一次可接受。
+        let event_value = envelope.event.to_value();
+        let budget = session_surface::normalize_budget_snapshot(&event_value, previous_budget);
         // TS：`{ ...document.session.usage, budget }` —— usage 缺席时从空对象起。
         let mut usage: Map<String, Value> = document
             .session
@@ -3620,7 +4148,8 @@ fn reduce_plan(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
         );
         return;
     }
-    if let Some(next) = goal_model::apply_plan_event(&document.plan, event) {
+    let event_value = event.to_value();
+    if let Some(next) = goal_model::apply_plan_event(&document.plan, &event_value) {
         document.mark_slice(Slice::Plan);
         document.plan = next;
     }
@@ -3646,7 +4175,8 @@ fn reduce_goal(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
         );
         return;
     }
-    if let Some(next) = goal_model::apply_goal_events(&document.goal, event) {
+    let event_value = event.to_value();
+    if let Some(next) = goal_model::apply_goal_events(&document.goal, &event_value) {
         document.mark_slice(Slice::Goal);
         document.goal = next;
     }
@@ -3654,9 +4184,10 @@ fn reduce_goal(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
 
 /// C13：lifecycle 事件经 domain reducer 收敛；恢复成功不删除历史事实。
 fn reduce_lifecycle(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    let event_value = envelope.event.to_value();
     if let Some(next) = lifecycle_model::apply_lifecycle_event(
         &document.lifecycle,
-        &envelope.event,
+        &event_value,
         &|raw: &Value| normalize_normalized_error(raw, 0),
     ) {
         document.mark_slice(Slice::Lifecycle);
@@ -3820,13 +4351,15 @@ fn reduce_semantic_event(
                 .get("summary")
                 .cloned()
                 .unwrap_or_else(|| Value::String(String::new()));
+            // event.unknown 是冷事件（必带 originalType/summary/raw ⇒ 完整载荷），就地物化一次。
+            let unknown_event_value = envelope.event.to_value();
             add_diagnostic(
                 document,
                 envelope,
                 "event.unknown",
                 &summary,
                 &Value::String("warning".to_string()),
-                Some(&envelope.event),
+                Some(&unknown_event_value),
             );
             Ok(())
         }
@@ -3857,7 +4390,12 @@ pub fn reduce_workbench_event(
     ensure_projectable(envelope)?;
     // C12：secret-bearing interaction 在进入任何投影面前统一剥敏。
     let effective_event = if envelope.event_type.starts_with("interaction.") {
-        Arc::new(redact_interaction_event(&envelope.event))
+        match envelope.event.as_other() {
+            // interaction 事件必带 interactionId/request ⇒ 恒为完整载荷，借内层 Value 免一次深拷。
+            Some(value) => EventPayload::Other(Arc::new(redact_interaction_event(value))),
+            // 定长形态里只有 {type, [role], parts}，没有可剥敏的字段 ⇒ 剥敏是恒等。
+            None => envelope.event.clone(),
+        }
     } else {
         // Arc 克隆 = 引用计数 +1：信封与 timeline 条目共享同一棵事件树，
         // 逐事件不再深拷（冷批 20k 条实测「建条目」与「收批序列化」各占几十毫秒）。
@@ -4141,7 +4679,7 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
             _ => None,
         }),
         coverage,
-        event: Arc::new(event),
+        event: EventPayload::Other(Arc::new(event)),
     })
 }
 
@@ -4332,6 +4870,10 @@ pub fn projector_event_types() -> Result<JsValue, JsError> {
 // ── 原生单测：对齐 `src/domains/workbench/__tests__/workbenchProjector*.test.ts`
 //    中落在已移植归约器上的断言 ──
 #[cfg(test)]
+#[path = "value_memory_probe.rs"]
+mod value_memory_probe;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
@@ -4413,7 +4955,7 @@ mod tests {
             provenance_trust: if origin == 0 { 0 } else { 1 },
             provenance_extra: None,
             coverage,
-            event: Arc::new(event),
+            event: EventPayload::Other(Arc::new(event)),
         }
     }
 
@@ -4577,7 +5119,7 @@ mod tests {
             .iter()
             .find(|entry| entry.kind == "interaction")
             .expect("interaction entry");
-        assert!(entry.data["request"].get("password").is_none());
+        assert!(entry.data.get("request").expect("request").get("password").is_none());
     }
 
     #[test]
@@ -5360,12 +5902,12 @@ mod tests {
         assert_eq!(envelopes.len(), 2);
         assert_eq!(envelopes[0].event_type, "message.delta");
         assert_eq!(
-            envelopes[0].event["parts"],
+            envelopes[0].event.to_value()["parts"],
             Value::Array(vec![json!({"kind": "text", "text": "hello"})])
         );
         assert_eq!(envelopes[1].event_type, "tool.started");
         assert_eq!(
-            envelopes[1].event["tool"]["toolCallId"],
+            envelopes[1].event.to_value()["tool"]["toolCallId"],
             Value::String("tool-9".into())
         );
         assert_eq!(envelopes[1].identity.turn_id.as_deref(), Some("turn-9"));
@@ -6313,7 +6855,7 @@ mod projection_index_tests {
             provenance_trust: 0,
             provenance_extra: None,
             coverage: None,
-            event: Arc::new(event),
+            event: EventPayload::Other(Arc::new(event)),
         }
     }
 
@@ -6970,7 +7512,7 @@ mod change_ledger_tests {
             provenance_trust: 0,
             provenance_extra: None,
             coverage,
-            event: Arc::new(event),
+            event: EventPayload::Other(Arc::new(event)),
         }
     }
 
@@ -7083,12 +7625,88 @@ mod change_ledger_tests {
             .collect()
     }
 
-    fn messages_by_index(patch: &WorkbenchPatch) -> HashMap<usize, Value> {
+    /// patch → (index, 应用到批前消息后的最终值)。紧凑 append 条目按 TS
+    /// `applyMessageAppend` 的同语义在 JSON 层重建，与全量条目统一参与覆盖比对。
+    fn resolved_messages(
+        patch: &WorkbenchPatch,
+        before: &WorkbenchDocument,
+    ) -> HashMap<usize, Value> {
         patch
             .message_upserts
             .iter()
-            .map(|entry| (entry.index, entry.message.clone()))
+            .map(|entry| {
+                // 紧凑条目才需要批前基准（判据保证其 index < 批前长度）；
+                // 全量条目自带终值，批内新增的消息在 `before` 里没有下标。
+                let value = match (&entry.append, &entry.message) {
+                    (Some(append), _) => {
+                        apply_append_to_value(before.messages[entry.index].to_value(), append)
+                    }
+                    (None, Some(message)) => message.clone(),
+                    _ => panic!("message upsert 既无 append 也无 message"),
+                };
+                (entry.index, value)
+            })
             .collect()
+    }
+
+    /// TS `applyMessageAppend` 的测试侧镜像（JSON 层）：content += tail、末部件收敛、
+    /// pushed 追加、标量按 presence 覆写。
+    fn apply_append_to_value(mut message: Value, append: &MessageAppendPatch) -> Value {
+        let object = message.as_object_mut().expect("message is object");
+        let content = object.get("content").and_then(Value::as_str).unwrap_or("");
+        object.insert(
+            "content".into(),
+            Value::String(content.to_string() + &append.content_tail),
+        );
+        let mut parts = object
+            .get("parts")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        if let Some(array) = parts.as_array_mut() {
+            if let Some(last_part) = &append.last_part {
+                match last_part {
+                    LastPartPatch::TextTail {
+                        tail,
+                        kind,
+                        language,
+                    } => {
+                        if let Some(last) = array.last_mut().and_then(Value::as_object_mut) {
+                            let text = last.get("text").and_then(Value::as_str).unwrap_or("");
+                            last.insert("text".into(), Value::String(text.to_string() + tail));
+                            if let Some(kind) = kind {
+                                last.insert("kind".into(), Value::String(kind.clone()));
+                            }
+                            match language {
+                                Some(Some(language)) => {
+                                    last.insert("language".into(), Value::String(language.clone()));
+                                }
+                                Some(None) => {
+                                    last.remove("language");
+                                }
+                                None => {}
+                            }
+                        }
+                    }
+                    LastPartPatch::Rewritten { value } => {
+                        if let Some(last) = array.last_mut() {
+                            *last = value.clone();
+                        }
+                    }
+                }
+            }
+            array.extend(append.pushed_parts.iter().cloned());
+        }
+        object.insert("parts".into(), parts);
+        if let Some(identity) = &append.identity {
+            object.insert("identity".into(), identity.clone());
+        }
+        if let Some(sequence) = &append.sequence {
+            object.insert("sequence".into(), sequence.clone());
+        }
+        if let Some(running) = &append.running {
+            object.insert("running".into(), Value::Bool(*running));
+        }
+        message
     }
 
     /// 记账 patch 与 `diff_patches` 的语义等价：**前者必须覆盖后者**。多带「被标记而值未变」
@@ -7127,12 +7745,12 @@ mod change_ledger_tests {
                     "timeline 条目 {event_id} 被漏带（{label}）"
                 );
             }
-            let ledger_messages = messages_by_index(&ledger);
-            for (index, value) in messages_by_index(&reference) {
+            let ledger_messages = resolved_messages(&ledger, &before);
+            for (index, value) in resolved_messages(&reference, &before) {
                 assert_eq!(
                     ledger_messages.get(&index),
                     Some(&value),
-                    "message #{index} 被漏带（{label}）"
+                    "message #{index} 被漏带或紧凑应用不等值（{label}）"
                 );
             }
             // 低频切片：参考实现按「与批前不同」判脏，记账版按写点标记 ⇒ 账本必须覆盖参考。
@@ -7228,6 +7846,194 @@ mod change_ledger_tests {
             "重复批带了 applied ids"
         );
     }
+
+    /// 逐事件流式折叠：第二条消息之后的 delta 必须产「紧凑追加」形态，
+    /// 且应用后与全量值逐字节相等（TS `applyMessageAppend` 的同语义镜像）。
+    #[test]
+    fn streaming_delta_emits_compact_append_form() {
+        let mut document = create_workbench_document("session-append");
+        let started = envelope(
+            1.0,
+            json!({"type": "message.started", "role": "assistant", "parts": [{"kind": "text", "text": "头"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let patch = fold_batch(&mut document, &[started]);
+        // 批内追加区（新消息）→ 全量。
+        assert!(patch.message_upserts[0].message.is_some());
+        let before_value = document.messages[0].to_value();
+
+        let delta = envelope(
+            2.0,
+            json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "text", "text": "尾"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let patch = fold_batch(&mut document, &[delta]);
+        assert_eq!(patch.message_upserts.len(), 1);
+        let upsert = &patch.message_upserts[0];
+        assert_eq!(upsert.index, 0);
+        assert!(upsert.message.is_none(), "流式 delta 必须走紧凑形态");
+        let append = upsert.append.as_ref().expect("append form");
+        assert_eq!(append.content_tail, "尾");
+        let applied = apply_append_to_value(before_value, append);
+        assert_eq!(
+            applied,
+            document.messages[0].to_value(),
+            "紧凑应用后须与全量等值"
+        );
+    }
+
+    /// 同一批两次变更同一条消息 →「单次纯追加」前提破坏，降级全量。
+    #[test]
+    fn second_append_in_same_batch_degrades_to_full() {
+        let mut document = create_workbench_document("session-append");
+        let started = envelope(
+            1.0,
+            json!({"type": "message.started", "role": "assistant"}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        fold_batch(&mut document, &[started]);
+        let first = envelope(
+            2.0,
+            json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "text", "text": "第一段"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let second = envelope(
+            3.0,
+            json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "text", "text": "第二段"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let patch = fold_batch(&mut document, &[first, second]);
+        assert_eq!(patch.message_upserts.len(), 1);
+        assert!(
+            patch.message_upserts[0].append.is_none(),
+            "二换单事件必须降级全量"
+        );
+        assert_eq!(
+            patch.message_upserts[0]
+                .message
+                .as_ref()
+                .expect("full form")["content"],
+            json!("第一段第二段")
+        );
+    }
+
+    /// 批内先 push 再 append：TS 侧对那条消息没有批前基准 → 全量。
+    #[test]
+    fn append_after_push_in_same_batch_is_full() {
+        let mut document = create_workbench_document("session-append");
+        let started = envelope(
+            1.0,
+            json!({"type": "message.started", "role": "assistant"}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let delta = envelope(
+            2.0,
+            json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "text", "text": "尾"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let patch = fold_batch(&mut document, &[started, delta]);
+        assert_eq!(patch.message_upserts.len(), 1);
+        assert!(
+            patch.message_upserts[0].append.is_none(),
+            "批内 push 后 append 必须全量"
+        );
+    }
+
+    /// display 合并的 kind 翻转（text→markdown）由 TextTail 的 kind 字段表达。
+    #[test]
+    fn kind_flip_is_carried_by_text_tail() {
+        let mut document = create_workbench_document("session-append");
+        let started = envelope(
+            1.0,
+            json!({"type": "message.started", "role": "assistant", "parts": [{"kind": "text", "text": "头"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        fold_batch(&mut document, &[started]);
+        let before_value = document.messages[0].to_value();
+        let markdown = envelope(
+            2.0,
+            json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "markdown", "text": "# 标题"}]}),
+            json!({"turnId": "t1", "messageId": "m1"}),
+            None,
+        );
+        let patch = fold_batch(&mut document, &[markdown]);
+        let append = patch.message_upserts[0]
+            .append
+            .as_ref()
+            .expect("append form");
+        match append.last_part.as_ref().expect("last part") {
+            LastPartPatch::TextTail {
+                tail,
+                kind,
+                language,
+            } => {
+                assert_eq!(tail, "# 标题");
+                assert_eq!(kind.as_deref(), Some("markdown"));
+                assert_eq!(*language, None, "display 合并不触碰 language");
+            }
+            other => panic!("expected textTail, got {other:?}"),
+        }
+        let applied = apply_append_to_value(before_value, append);
+        assert_eq!(applied, document.messages[0].to_value());
+    }
+
+    /// reasoning 重建合并丢批前末部件的自有键时，TextTail 表达不了 → Rewritten 整值。
+    #[test]
+    fn reasoning_merge_with_foreign_key_degrades_last_part_to_rewritten() {
+        let mut document = create_workbench_document("session-append");
+        document.messages.push(WorkbenchMessage {
+            id: "m1".to_string(),
+            segment_id: "s1".to_string(),
+            role: "reasoning".to_string(),
+            content: "x".to_string(),
+            parts: json!([{"kind": "reasoning", "text": "x", "custom": "keep"}]),
+            identity: json!({}),
+            source: json!({}),
+            sequence: 1.0,
+            running: true,
+            time: "2026-09-21T00:00:00.000Z".to_string(),
+            optimistic: None,
+            thought_duration_ms: None,
+            redacted: None,
+            redacted_reason: None,
+            thought_started_at_ms: None,
+        });
+        document.begin_batch();
+        document.mark_message_append(0, PartsMergeFlavor::Reasoning, |message| {
+            message.content.push('y');
+            let incoming = vec![json!({"kind": "thinking", "text": "y"})];
+            append_parts_slice_in_place(&mut message.parts, &incoming, merge_reasoning_pair);
+            incoming.len()
+        });
+        let patch = document.finish_batch();
+        let append = patch.message_upserts[0]
+            .append
+            .as_ref()
+            .expect("append form");
+        match append.last_part.as_ref().expect("last part") {
+            LastPartPatch::Rewritten { value } => {
+                // 重建语义：custom 被丢弃，kind 收敛回 reasoning。
+                assert_eq!(value, &json!({"kind": "reasoning", "text": "xy"}));
+            }
+            other => panic!("expected rewritten, got {other:?}"),
+        }
+    }
+
+    fn fold_batch(document: &mut WorkbenchDocument, stream: &[SemanticEnvelope]) -> WorkbenchPatch {
+        document.begin_batch();
+        for event in stream {
+            reduce_workbench_event(document, event).expect("fold");
+        }
+        document.finish_batch()
+    }
 }
 
 #[cfg(test)]
@@ -7251,7 +8057,7 @@ mod timeline_entry_serialize_tests {
             title,
             summary,
             stream_boundary: boundary,
-            data: Arc::new(data),
+            data: EventPayload::Other(Arc::new(data)),
         }
     }
 

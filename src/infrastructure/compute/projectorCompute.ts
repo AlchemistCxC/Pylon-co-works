@@ -55,6 +55,25 @@ interface ProjectorGlue {
   projectorEventTypes(): string[]
 }
 
+/** 单条 message upsert 的紧凑追加形态（Rust `MessageAppendPatch`，camelCase）。 */
+export interface ProjectorMessageAppend {
+  contentTail: string
+  lastPart?:
+    | { mode: 'textTail', tail: string, kind?: string, language?: string | null }
+    | { mode: 'rewritten', value: unknown }
+  pushedParts?: readonly unknown[]
+  identity?: unknown
+  sequence?: unknown
+  running?: boolean
+}
+
+/** 单条 message upsert：`append`（紧凑追加）与 `message`（全量）互斥、恰有一者。 */
+export interface ProjectorMessageUpsert {
+  index: number
+  message?: unknown
+  append?: ProjectorMessageAppend
+}
+
 /** `appendBatch` 返回的增量 patch DTO（Rust `WorkbenchPatch`，camelCase）。 */
 export interface ProjectorPatch {
   revision: number
@@ -62,7 +81,7 @@ export interface ProjectorPatch {
   appliedRanges: [number, number][]
   /** 带下标：消费方据此把 upsert 精确合并进上一份数组（追加/替换/中插同一套）。 */
   timelineUpserts: readonly { index: number, entry: unknown }[]
-  messageUpserts: readonly { index: number, message: unknown }[]
+  messageUpserts: readonly ProjectorMessageUpsert[]
   session: unknown
   /** 批后长度——合并时区分「插入」与「替换」的依据。 */
   timelineLength: number
@@ -115,6 +134,69 @@ function sliceOf<T>(carried: T | undefined, previous: T): T {
 }
 
 /**
+ * 紧凑追加形态 → 完整消息。生产路径每事件一次（live 逐事件折叠），必须保持 O(尾巴)：
+ * content 用字符串拼接（V8 cons-string，摊销 O(1)），parts 浅拷贝只碰末部件。
+ * 展开保留上一份的键序——全量形态的键序是 wire 的字典序，紧凑链式应用不破坏它
+ * （`applyPatch` 的逐字节 JSON 断言依赖这一点，见其头注）。
+ */
+function applyMessageAppend(
+  previous: WorkbenchDocument['messages'][number],
+  append: ProjectorMessageAppend,
+): WorkbenchDocument['messages'][number] {
+  let parts: readonly unknown[] = previous.parts
+  const pushed = append.pushedParts ?? []
+  if (append.lastPart !== undefined) {
+    const array = parts as readonly unknown[]
+    const lastIndex = array.length - 1
+    const tail = append.lastPart.mode === 'rewritten'
+      ? append.lastPart.value
+      : applyLastPartTextTail(array[lastIndex], append.lastPart)
+    parts = [...array.slice(0, lastIndex), tail, ...pushed]
+  } else if (pushed.length > 0) {
+    parts = [...parts, ...pushed]
+  }
+  return {
+    ...previous,
+    content: previous.content + append.contentTail,
+    parts,
+    ...(append.identity !== undefined ? { identity: append.identity } : {}),
+    ...(append.sequence !== undefined ? { sequence: append.sequence } : {}),
+    ...(append.running !== undefined ? { running: append.running } : {}),
+  } as WorkbenchDocument['messages'][number]
+}
+
+/** 末部件文本尾巴 + kind/language 覆写。`language: null` 表示移除该字段。 */
+function applyLastPartTextTail(part: unknown, delta: { tail: string, kind?: string, language?: string | null }): unknown {
+  const next = { ...(part as Record<string, unknown>) }
+  next.text = typeof next.text === 'string' ? next.text + delta.tail : delta.tail
+  if (delta.kind !== undefined) next.kind = delta.kind
+  if (delta.language !== undefined) {
+    if (delta.language === null) delete next.language
+    else next.language = delta.language
+  }
+  return next
+}
+
+/** 单条 message upsert → 完整消息值；紧凑形态对上一份消息就地应用。 */
+function messageUpsertValue(
+  previous: WorkbenchDocument['messages'][number] | undefined,
+  upsert: ProjectorMessageUpsert,
+): WorkbenchDocument['messages'][number] {
+  if (upsert.append === undefined) {
+    if (upsert.message === undefined) {
+      throw new Error('message upsert 既无 append 也无 message——patch DTO 契约破坏')
+    }
+    return upsert.message as WorkbenchDocument['messages'][number]
+  }
+  // Rust 侧判据保证紧凑条目的 index 落在批前区间内；缺失即跨语言契约失配，
+  // 静默吞掉会把丢内容变成无声陈旧读，必须炸出来。
+  if (previous === undefined) {
+    throw new Error(`message append 缺批前基准（index=${upsert.index}）——patch DTO 契约破坏`)
+  }
+  return applyMessageAppend(previous, upsert.append)
+}
+
+/**
  * 把 patch 应用到**上一份文档**上——热路径唯一的物化方式。
  *
  * 取代旧的「每折叠一次 `document()` 全量读 + 按启发式决定切片复用」：那次全量读是
@@ -151,7 +233,7 @@ function applyPatch(
       previous.messages,
       patch.messageUpserts.map(upsert => ({
         index: upsert.index,
-        value: upsert.message as WorkbenchDocument['messages'][number],
+        value: messageUpsertValue(previous.messages[upsert.index], upsert),
       })),
       patch.messageLength,
     ),

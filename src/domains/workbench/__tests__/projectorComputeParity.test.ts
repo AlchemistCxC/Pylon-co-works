@@ -34,7 +34,8 @@ interface ProjectorPatch {
   appliedEventIdsAppended: string[]
   appliedRanges: [number, number][]
   timelineUpserts: unknown[]
-  messageUpserts: { index: number; message: unknown }[]
+  /** 紧凑 append 与全量 message 互斥（Rust MessagePatch）；此测试只读字段形态。 */
+  messageUpserts: { index: number; message?: unknown; append?: unknown }[]
   session: unknown
 }
 

@@ -25,6 +25,7 @@ preloadComputeWasm()
 import {
   createProjector,
   encodeProjectorFrame,
+  foldIntoProjector,
   readProjectorBoundaryCrossings,
   resetProjectorBoundaryCrossings,
 } from '../src/infrastructure/compute/projectorCompute.ts'
@@ -316,6 +317,71 @@ async function main(): Promise<void> {
     const [, documentMs] = time(() => projector.document())
     console.log(`  编码 ${encodeMs.toFixed(1)}ms / 折叠 ${foldMs.toFixed(1)}ms / 物化 ${documentMs.toFixed(1)}ms / 过界 ${readProjectorBoundaryCrossings()} 次`)
     console.log(`  护栏预算 2500ms（测试写死）→ 本核折算 ${(encodeMs + foldMs + documentMs).toFixed(1)}ms`)
+  }
+
+  console.log('\n── 场景 E · live 逐事件（每事件一拍，n=2000，§24.2 的账复测） ──')
+  const liveSegments: { label: string, journal: Envelope[] }[] = [
+    // 回合流：贴近真实会话（每回合 24 段 delta，消息长不过几百字）。
+    { label: '回合流', journal: synthesizeJournal(2000) },
+    // 长流：§24.2 同形——全部 delta 折进同一条消息，patch 过界字节 Θ(N²) 的放大镜。
+    {
+      label: '长流  ',
+      journal: (() => {
+        const out: Envelope[] = [
+          envelope(1, { type: 'message.started', role: 'assistant' }, { turnId: 'turn-1', messageId: 'asst-long' }),
+        ]
+        for (let index = 0; index < 1999; index += 1) {
+          out.push(envelope(index + 2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: `第 ${index} 段回答文本，长度约三十个字符。` }] }, { turnId: 'turn-1', messageId: 'asst-long' }))
+        }
+        return out
+      })(),
+    },
+  ]
+  for (const { label, journal: live } of liveSegments) {
+    // 分段同 §24.2：① 帧编码 ② wasm appendBatch（含 patch 字节记账）
+    // ③ JSON.parse(patch) ④ 生产 live 全路径（encode+append+parse+applyPatch）。
+    // ①②③ 各用独立投影核（状态只前进一次），④ 是生产消费方的真实调用形态。
+    resetProjectorBoundaryCrossings()
+    let encodeUs = 0
+    const encodeProbe = createProjector(SESSION_ID)
+    for (const item of live) {
+      const [frame, ms] = time(() => encodeProjectorFrame([item]))
+      encodeUs += ms * 1000
+      encodeProbe.appendBatch(frame)
+    }
+    resetProjectorBoundaryCrossings()
+    let appendMs = 0
+    let patchBytes = 0
+    const patches: string[] = []
+    const appendProbe = createProjector(SESSION_ID)
+    for (const item of live) {
+      const frame = encodeProjectorFrame([item])
+      const [patch, ms] = time(() => appendProbe.appendBatch(frame))
+      appendMs += ms
+      patchBytes += patch.length
+      patches.push(patch)
+    }
+    let parseMs = 0
+    for (const patch of patches) {
+      const [, ms] = time(() => JSON.parse(patch))
+      parseMs += ms
+    }
+    resetProjectorBoundaryCrossings()
+    const liveState = { projector: createProjector(SESSION_ID) }
+    let liveMs = 0
+    for (const item of live) {
+      const [, ms] = time(() => foldIntoProjector(liveState, [item]))
+      liveMs += ms
+    }
+    const per = (totalMs: number) => ((totalMs * 1000) / live.length).toFixed(2)
+    console.log(
+      `  [${label}] ① 编码 ${per(encodeUs / 1000)}µs/ev · ② appendBatch ${per(appendMs)}µs/ev · ` +
+        `③ JSON.parse ${per(parseMs)}µs/ev · ④ 生产 live ${per(liveMs)}µs/ev`,
+    )
+    console.log(
+      `  [${label}] patch 总字节 ${(patchBytes / 1024 / 1024).toFixed(2)}MB / ${live.length} 事件` +
+        `（中位事件 ${(patchBytes / live.length).toFixed(0)}B）· 过界 ${readProjectorBoundaryCrossings()} 次`,
+    )
   }
 
   console.log('\n判据：')

@@ -146,3 +146,60 @@ describe('池化纯函数折叠（document-in/out 兼容层）', () => {
     expect(sessionFolded.session.status).toBe(pooled.session.status)
   })
 })
+
+describe('MessagePatch 紧凑追加形态（live 逐事件热路径）', () => {
+  const started = envelope(1, { type: 'message.started', role: 'assistant', parts: [{ kind: 'text', text: '头' }] }, { messageId: 'm-1' })
+
+  it('逐事件 delta 折叠下发 append 形态，且与整页折叠收敛到同一文档', () => {
+    const deltas = Array.from({ length: 8 }, (_, index) => textDelta(index + 2, `第${index}段`))
+    // 逐事件：每拍一帧（生产 live 的调用形态）。
+    const state: ProjectorState = { projector: createProjector(SESSION) }
+    const patches = [foldIntoProjector(state, [started]).patch]
+    for (const delta of deltas) patches.push(foldIntoProjector(state, [delta]).patch)
+    // 对照：同一批事件整页折一次。
+    const whole = foldIntoProjector({ projector: createProjector(SESSION) }, [started, ...deltas]).document
+    expect(state.lastDocument?.messages.map(message => message.content)).toEqual(whole.messages.map(message => message.content))
+    // 新消息（批内追加区）走全量；其后每拍 delta 走紧凑形态。
+    expect(patches[0]!.messageUpserts[0]).toHaveProperty('message')
+    for (const [index, patch] of patches.slice(1).entries()) {
+      const upsert = patch.messageUpserts[0]!
+      expect(upsert.message).toBeUndefined()
+      expect(upsert.append).toBeDefined()
+      expect(upsert.append!.contentTail).toBe(`第${index}段`)
+      expect(upsert.append!.sequence).toBeDefined()
+      // running 自 started 起就是 true 且未变：指纹判据不下发未漂移的标量（省字节的正确行为）。
+      expect(upsert.append!.running).toBeUndefined()
+    }
+  })
+
+  it('textTail 携带 kind 覆写：text→markdown 翻转与文本追加同时生效', () => {
+    const state: ProjectorState = { projector: createProjector(SESSION) }
+    foldIntoProjector(state, [started])
+    foldIntoProjector(state, [textDelta(2, '正文')])
+    const patch = foldIntoProjector(state, [envelope(3, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text: '# 标题' }] }, { messageId: 'm-1' })]).patch
+    const lastPart = patch.messageUpserts[0]!.append!.lastPart!
+    expect(lastPart.mode).toBe('textTail')
+    if (lastPart.mode === 'textTail') {
+      expect(lastPart.tail).toBe('# 标题')
+      expect(lastPart.kind).toBe('markdown')
+    }
+    expect(state.lastDocument?.messages[0]?.parts[0]).toMatchObject({ kind: 'markdown', text: '头正文# 标题' })
+  })
+
+  it('不合族部件走 pushedParts，紧凑应用与全量形态等值', () => {
+    const events = [
+      started,
+      textDelta(2, '正文'),
+      envelope(3, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'code', text: 'let x = 1' }] }, { messageId: 'm-1' }),
+      textDelta(4, '结尾'),
+    ]
+    const state: ProjectorState = { projector: createProjector(SESSION) }
+    for (const event of events) foldIntoProjector(state, [event])
+    const pushedPatch = foldIntoProjector({ projector: createProjector(SESSION) }, [events[2]!]).patch
+    // 单事件核没有批前消息 → 全量形态（这里只关心值本身）；等值锚定靠下面的整页对照。
+    expect(pushedPatch.messageUpserts[0]).toBeDefined()
+    const whole = foldIntoProjector({ projector: createProjector(SESSION) }, events).document
+    expect(state.lastDocument?.messages[0]?.parts).toEqual(whole.messages[0]?.parts)
+    expect(state.lastDocument?.messages[0]?.content).toBe(whole.messages[0]?.content)
+  })
+})
