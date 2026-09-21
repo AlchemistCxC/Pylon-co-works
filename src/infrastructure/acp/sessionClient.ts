@@ -8,6 +8,7 @@ import { ClientTransport } from './agentClient'
 import { normalizePersistedSessions, type PersistedSessionSummary } from '../../domains/overview/persistedSessions'
 import type { CancelPromptPayload } from './chatClient'
 import type { DurableSessionOwner } from '../../domains/session/owner.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export interface NewSessionPayload {
   /** OWNER-02：目标 owner agentId（new_session 在指定 agent 的 runtime 建会话） */
@@ -112,10 +113,6 @@ function finiteNonNegativeInteger(value: unknown): number | null {
 function finitePositiveInteger(value: unknown): number | null {
   const parsed = finiteNonNegativeInteger(value)
   return parsed !== null && parsed > 0 ? parsed : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** 字符串字段：非空字符串才接受（空串与其它类型一律丢弃，不伪造值）。 */

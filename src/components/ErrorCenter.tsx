@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import { clearErrors, dismissError, useErrors, type ErrorEntry } from '../errorCenter'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
+import { safeJson } from '../utils/safeJson.ts'
 
 function recoveryLabel(kind: NonNullable<ErrorEntry['recovery']>['kind']): string {
   return {
@@ -33,14 +34,6 @@ function formatTime(value: number): string {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return '时间未知'
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-function safeJson(value: unknown): string {
-  try {
-    const serialized = JSON.stringify(value, null, 2)
-    if (typeof serialized !== 'string') return '[详情不可用]'
-    return serialized.length <= 8_192 ? serialized : `${serialized.slice(0, 8_192)}\n…（详情已截断）`
-  } catch { return '[详情不可用]' }
 }
 
 function actionLabel(entry: ErrorEntry): string {
@@ -94,7 +87,7 @@ function ErrorTechnicalDetails({ entry }: { entry: ErrorEntry }) {
         {entry.count > 1 && <div><dt>最近发生</dt><dd>{formatTime(entry.lastAt)} · {entry.count} 次</dd></div>}
       </dl>
       {entry.technicalMessage && <pre className="error-center-technical">{entry.technicalMessage}</pre>}
-      {entry.metadata && <pre className="error-center-technical">{safeJson(entry.metadata)}</pre>}
+      {entry.metadata && <pre className="error-center-technical">{safeJson(entry.metadata, { fallback: '[详情不可用]', maxChars: 8_192, truncationSuffix: '\n…（详情已截断）' })}</pre>}
     </details>
   )
 }

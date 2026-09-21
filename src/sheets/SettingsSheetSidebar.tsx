@@ -16,6 +16,7 @@ import { useWorkspaceStore } from '../workspaceStore.ts'
 import { readPinned, writePinned, PINNED_LIMIT, safeStorage } from '../components/settings/settingsChromeState.ts'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useSettingsContributionCatalog } from '../components/settings/useSettingsContributionCatalog.ts'
+import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
 
 /**
  * Settings Sheet 左栏导航（#154 阶段 4：一二级同栏分层）。
@@ -143,8 +144,7 @@ export default function SettingsSheetSidebar({ sheet, state }: WorkspaceViewProp
                             const target = document.querySelector(`[data-group-anchor="${CSS.escape(group.label)}"]`)
                             target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
                             // O-2：高亮脉冲 1.2s（prefers-reduced-motion 时 CSS 端自动禁用动画）
-                            target?.classList.add('settings-anchor-pulse')
-                            setTimeout(() => target?.classList.remove('settings-anchor-pulse'), 1200)
+                            pulseSettingsAnchor(target)
                           })
                         }}>
                         {group.label}

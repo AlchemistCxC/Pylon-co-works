@@ -3,6 +3,7 @@ import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../co
 import { coalesceAdjacentDisplayTextParts } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
 import { ToolContentPart } from '../ToolInvocationCard.solid.tsx'
+import { isRecord } from '../../../../utils/wireGuards.ts'
 
 export function SolidWorkflowActivityCard(props: {
   activity: WorkbenchActivityNode
@@ -108,10 +109,6 @@ export function SolidWorkflowActivityCard(props: {
       </Show>
     </div>
   </section>
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {

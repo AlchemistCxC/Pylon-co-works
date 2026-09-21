@@ -1,14 +1,20 @@
 import { create } from 'zustand'
 import { CORE_COMMAND_SET_PLUGIN_ID } from './contracts/agentCommandSet.ts'
-import { loadSessions, normalizeSessions, persistSessionsWithUnresolved, SESSION_SCHEMA_VERSION, type LegacySession, type OwnerHints } from './sessionPersistence'
-import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_ENVELOPE_VERSION, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
+import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION, type LegacySession, type OwnerHints } from './sessionPersistence'
+import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
 import { clearSessionUiState } from './components/chat/sessionUiState'
 import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { selectUserDataRepository, type UserDataRepository } from './userDataRepository'
 import { resolveUnresolvedSessionTransaction } from './app/bootstrap/resolveUnresolvedSessionTransaction'
-import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
+import {
+  canMutateIdentityDomain,
+  hasBackend,
+  persistFlag,
+  persistMergingUnresolved,
+  updateIdentityCacheMeta,
+} from './identityPersistence.ts'
+import { createIdentityBackendSync, userDataRepository } from './identityBackendSync.ts'
 import {
   mergePluginNamespace,
   type PluginDataPlane,
@@ -22,15 +28,19 @@ import type { AgentEntry } from './domains/agent/agentEntry.ts'
 
 export type { AgentEntry } from './domains/agent/agentEntry.ts'
 
-const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
+// #228 批次D：持久化与后端同步切至独立模块；以下 re-export 保持既有公开 import 面
+// （消费方仍从 identityStore 取这些名字，零改动）。
+export { IDENTITY_CACHE_META_KEY } from './identityPersistence.ts'
+export { flushIdentityBackend, refreshSessionsBackend } from './identityBackendSync.ts'
 
 /**
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。
  *
  * 承载：profiles / activeProfileId / sessions / users / agents / activeAgent。
- * 持久化由 identity persistence boundary 管理（sessions 由 sessionPersistence 独立管理）。
- * 跨域联动（profile/session/agent 变化同步 workspace 与 runtime）在本 store 组合 action 内
- * 经 getState 调用其他域 store。
+ * 持久化由 identityPersistence（localStorage cache meta / mutation 守卫 / merge-unresolved
+ * 写盘）管理（sessions 由 sessionPersistence 独立管理）；Tauri SQLite 后端写穿由
+ * identityBackendSync 管理。跨域联动（profile/session/agent 变化同步 workspace 与 runtime）
+ * 在本 store 组合 action 内经 getState 调用其他域 store。
  */
 
 export interface Profile {
@@ -108,51 +118,6 @@ export interface IdentityPersistenceState {
   sessions: IdentityBackendStatus
 }
 
-export const IDENTITY_CACHE_META_KEY = 'pylon-identity-cache-meta:v1'
-
-interface IdentityCacheMeta {
-  version: 1
-  profiles: { revision: number; state: 'clean' | 'pending' | 'stale' }
-  sessions: { revision: number; state: 'clean' | 'pending' | 'stale' }
-}
-
-function updateIdentityCacheMeta(
-  domain: keyof IdentityPersistenceState,
-  state: IdentityCacheMeta['profiles']['state'],
-  revision?: number,
-): void {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(IDENTITY_CACHE_META_KEY) ?? 'null') as Partial<IdentityCacheMeta> | null
-    const fallback = { revision: 0, state: 'stale' as const }
-    const current: IdentityCacheMeta = {
-      version: 1,
-      profiles: parsed?.profiles?.revision !== undefined ? parsed.profiles as IdentityCacheMeta['profiles'] : fallback,
-      sessions: parsed?.sessions?.revision !== undefined ? parsed.sessions as IdentityCacheMeta['sessions'] : fallback,
-    }
-    current[domain] = { revision: revision ?? current[domain].revision, state }
-    localStorage.setItem(IDENTITY_CACHE_META_KEY, JSON.stringify(current))
-  } catch {
-    // Cache metadata 失败不能改变 SQLite authority 或让业务 mutation 抛错。
-  }
-}
-
-function canMutateIdentityDomain(
-  persistence: IdentityPersistenceState,
-  ...domains: Array<keyof IdentityPersistenceState>
-): boolean {
-  return !hasBackend() || domains.every(domain => persistence[domain] !== 'degraded-readonly')
-}
-
-/**
- * CR-001：mutation 持久化必须保留 unresolved 现场——state.sessions 只含已解析子集，
- * 直接 persistSessions 会用子集覆盖存储、永久丢失未决 legacy 会话。写盘前把
- * sessionHydration.unresolved（不补 agentId）并入 envelope，下次 load 重新推断。
- */
-function persistMergingUnresolved(sessions: Session[], turns: Turn[], hydration: SessionHydrationState | null): boolean {
-  const unresolved = hydration?.kind === 'needs-owner-resolution' ? hydration.unresolved : []
-  return persistSessionsWithUnresolved(localStorage, sessions, unresolved, turns)
-}
-
 interface IdentityStoreState {
   profiles: Profile[]
   activeProfileId: string
@@ -201,12 +166,6 @@ const DEFAULT_PROFILES: Profile[] = [
   { id: 'default', name: 'Default', persona: '', model: '' },
   { id: 'local', name: 'Local', persona: '', model: '' },
 ]
-
-/** 报告 1C L1：写盘结果 → 配置未保存状态（失败设提示；成功且旧错则清空） */
-function persistFlag(success: boolean, prevError: string | null): string | null {
-  if (!success) return '配置未能保存到本地存储'
-  return prevError ? null : prevError
-}
 
 export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   profiles: DEFAULT_PROFILES,
@@ -792,6 +751,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   }),
 }))
 
+// #228 批次D：后端写穿装配自 identityBackendSync 工厂——经 accessor 注入本 store 的
+// 读写通道，模块间无运行时循环依赖。签名与原模块内函数逐字一致。
+const syncIdentityToBackend = createIdentityBackendSync({
+  getState: () => useIdentityStore.getState(),
+  setState: patch => useIdentityStore.setState(patch),
+})
+
 registerPluginSessionDataPort({
   getSessionNamespace: (sessionId, pluginId, plane) => {
     const session = useIdentityStore.getState().sessions.find(candidate => candidate.id === sessionId)
@@ -810,82 +776,6 @@ registerPluginSessionDataPort({
   ),
 })
 
-// ── I14-W5：后端 user store 写穿（Tauri 模式） ──
-// composition root 选择：Tauri 走后端 versioned store；browser 模式 null（不经本仓库）。
-const userDataRepository: UserDataRepository | null = selectUserDataRepository()
-
-/**
- * 等待全部身份写穿链落定（关闭前 flush / 测试收敛）；browser 模式为 no-op。
- * hydrateFromLocal 等路径的写穿是 fire-and-forget，调用方需要确定性落库时显式 flush。
- */
-export async function flushIdentityBackend(): Promise<void> {
-  await userDataRepository?.flush()
-}
-
-/** 删除会话等外部后端事务完成后，刷新 sessions revision baseline。 */
-export async function refreshSessionsBackend(): Promise<void> {
-  await userDataRepository?.load('sessions')
-}
-
 // I14-W6：mutation 序号——每次 identity mutation 递增；async hydration 在 load 前捕获、
 // 读回落地前比对：期间有 mutation → 丢弃过期读回（旧 response 不覆盖新 mutation）。
 let identityMutationSeq = 0
-
-/**
- * I14-W5：把当前 identity 状态（profiles/activeProfileId/sessions + unresolved）写穿到
- * 后端 versioned user store。读 getState() 最新状态（调用方在 set() 应用后经
- * queueMicrotask 触发）；browser 模式直接跳过（localStorage 仍是主存储，W6 再接读回）。
- * 后端失败可见上报（reportRuntimeError → ErrorCenter），localStorage 写盘不受影响。
- */
-function syncIdentityToBackend(
-  domains: Array<keyof IdentityPersistenceState> = ['profiles', 'sessions'],
-): void {
-  if (!userDataRepository) return
-  const state = useIdentityStore.getState()
-  const unresolved = state.sessionHydration?.kind === 'needs-owner-resolution' ? state.sessionHydration.unresolved : []
-  const handleError = (domain: 'profiles' | 'sessions', error: unknown): void => {
-    updateIdentityCacheMeta(domain, 'stale')
-    useIdentityStore.setState(current => ({
-      lastPersistError: 'SQLite 用户数据同步失败；已切换为只读，请重试恢复',
-      identityPersistence: { ...current.identityPersistence, [domain]: 'degraded-readonly' },
-    }))
-    reportRuntimeError(`同步用户数据到后端失败（${domain}）`, error, undefined, {
-      key: `identity:sync:${domain}`, scope: { kind: 'app', id: 'identity' }, source: 'identity.sync',
-      recovery: { kind: 'open-runtime-log' },
-    })
-  }
-  if (domains.includes('profiles') && state.identityPersistence.profiles !== 'degraded-readonly') {
-    updateIdentityCacheMeta('profiles', 'pending')
-    void userDataRepository.save('profiles', {
-      version: PROFILE_ENVELOPE_VERSION,
-      profiles: state.profiles,
-      activeProfileId: state.activeProfileId,
-    }).then((revision) => {
-      updateIdentityCacheMeta('profiles', 'clean', revision)
-      useIdentityStore.setState(current => ({
-        lastPersistError: current.identityPersistence.sessions === 'degraded-readonly' ? current.lastPersistError : null,
-        identityPersistence: { ...current.identityPersistence, profiles: 'ready' },
-      }))
-      resolveRuntimeErrors({ key: 'identity:sync:profiles' })
-    }).catch((error) => {
-      handleError('profiles', error)
-    })
-  }
-  if (domains.includes('sessions') && state.identityPersistence.sessions !== 'degraded-readonly') {
-    updateIdentityCacheMeta('sessions', 'pending')
-    void userDataRepository.save('sessions', {
-      version: SESSION_SCHEMA_VERSION,
-      sessions: [...state.sessions, ...unresolved],
-      turns: state.turns,
-    }).then((revision) => {
-      updateIdentityCacheMeta('sessions', 'clean', revision)
-      useIdentityStore.setState(current => ({
-        lastPersistError: current.identityPersistence.profiles === 'degraded-readonly' ? current.lastPersistError : null,
-        identityPersistence: { ...current.identityPersistence, sessions: 'ready' },
-      }))
-      resolveRuntimeErrors({ key: 'identity:sync:sessions' })
-    }).catch((error) => {
-      handleError('sessions', error)
-    })
-  }
-}

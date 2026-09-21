@@ -6,10 +6,7 @@ import {
   BrowserAgentToolError,
   createBrowserAgentClient,
 } from '../../../infrastructure/tauri/browserAgentClient.ts'
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
+import { record } from '../../../utils/wireGuards.ts'
 
 function requiredText(value: unknown, key: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 必须是非空字符串`)

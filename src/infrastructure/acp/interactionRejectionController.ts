@@ -1,4 +1,5 @@
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export interface InteractionRejection {
   provider: string
@@ -15,9 +16,6 @@ export interface InteractionRejection {
 export interface InteractionRejectionControllerDeps {
   listen: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined

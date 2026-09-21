@@ -3,8 +3,8 @@ import { useWorkspaceStore } from '../../../workspaceStore.ts'
 import { useRightRailStore } from '../../../rightRailStore.ts'
 import { applyWorkspaceLayoutChange } from '../../../application/transactions/applyWorkspaceLayoutChange.ts'
 import { sidebarBlockCollapseStore } from '../../../domains/workbench/sidebarBlockCollapse.ts'
+import { record } from '../../../utils/wireGuards.ts'
 
-function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function id(input: Record<string, unknown>): string { if (typeof input.sheetId !== 'string' || !input.sheetId.trim()) throw new Error('sheetId 必须是非空字符串'); return input.sheetId.trim() }
 function boolean(value: unknown, key: string): boolean { if (typeof value !== 'boolean') throw new Error(`${key} 必须是 boolean`); return value }
 

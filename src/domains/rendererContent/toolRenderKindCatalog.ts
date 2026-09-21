@@ -9,6 +9,7 @@ import type { RenderKindDefinition } from '../../plugin-runtime/renderers/render
 import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { isJsonValue } from '../workbench/content/contentPartSchema.ts'
 import { isValidNormalizedErrorInput } from '../workbench/lifecycle/lifecycleModel.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 /** Canonical shared tool presentation schema. The legacy Kind schemas below
  * remain addressable so existing `kind.tool.*` overrides are not discarded. */
@@ -143,7 +144,3 @@ export const BUILTIN_TOOL_RENDER_KINDS: readonly RenderKindDefinition[] = Object
   settings: toolSettings(id),
   validateInput: isToolInvocationSnapshotInput,
 } satisfies RenderKindDefinition)))
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}

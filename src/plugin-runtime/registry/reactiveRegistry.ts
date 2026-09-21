@@ -9,6 +9,7 @@ import type {
   RegistryTransaction,
 } from './types.ts'
 import { notifyRegistryListener } from './registryBatch.ts'
+import { createDeferrableDisposable } from '../../utils/deferrableDisposable.ts'
 
 const DEFAULT_PRIORITY = 1000
 const LAYER_ORDER: Record<RegistryLayer, number> = {
@@ -182,7 +183,7 @@ export class ReactiveRegistryStore<T> implements ReactiveRegistry<T> {
         const item = {
           entry: createEntry(owner, value, options),
           cancelled: false,
-          proxy: undefined as unknown as AsyncDisposable,
+          proxy: createDeferrableDisposable(),
         }
         item.proxy = {
           dispose: () => {

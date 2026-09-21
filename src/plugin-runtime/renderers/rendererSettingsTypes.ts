@@ -5,6 +5,7 @@
  * contributes data; the host validates it once and every settings surface
  * consumes the same frozen representation.
  */
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export type ChoicePresentation = 'select' | 'radio' | 'segmented'
 export type MultiChoicePresentation = 'checklist' | 'listbox'
@@ -171,10 +172,6 @@ const OPTION_TARGET_PATTERN = /^(?:kind|suite|slot)\.[A-Za-z0-9_.%~-]+\.[A-Za-z0
 
 function fail(message: string): never {
   throw new Error(`Renderer settings schema 无效：${message}`)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isSerializable(value: unknown, seen = new Set<unknown>()): value is RendererSettingValue {

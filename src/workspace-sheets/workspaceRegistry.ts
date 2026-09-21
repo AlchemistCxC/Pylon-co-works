@@ -9,6 +9,7 @@ import type { AsyncDisposable } from '../plugin-runtime/registry/types.ts'
 import type { SheetInput } from './sheetTypes.ts'
 import type { WorkspaceLaunchOption, WorkspaceTypeDefinition } from './workspaceTypes.ts'
 import { notifyRegistryListener } from '../plugin-runtime/registry/registryBatch.ts'
+import { createDeferrableDisposable } from '../utils/deferrableDisposable.ts'
 
 export interface WorkspaceRegistryEntry {
   readonly ownerPluginId: string
@@ -140,7 +141,7 @@ export class WorkspaceRegistryStore {
         const item = {
           entry,
           cancelled: false,
-          proxy: undefined as unknown as AsyncDisposable,
+          proxy: createDeferrableDisposable(),
         }
         item.proxy = {
           dispose: () => {

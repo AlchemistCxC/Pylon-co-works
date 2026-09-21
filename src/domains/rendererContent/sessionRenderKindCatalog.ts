@@ -2,6 +2,7 @@ import type { RenderKindDefinition } from '../../plugin-runtime/renderers/render
 import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import type { JsonValue } from '../workbench/events/workbenchEventSchema.ts'
 import type { AssistSnapshot, BudgetSnapshot, SessionCommand, SessionConfigOption, UsageSnapshot } from '../workbench/session/sessionSurface.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 const USAGE_SETTINGS = Object.freeze({
   schemaVersion: 1,
@@ -71,10 +72,6 @@ const DEFAULT_BUDGET_TOKENS = Object.freeze({ warningPalette: 'semantic', warnin
 const DEFAULT_CONFIG_TOKENS = Object.freeze({ layout: 'list', showUnknown: true })
 const DEFAULT_COMMAND_TOKENS = Object.freeze({ density: 'comfortable' })
 const DEFAULT_ASSIST_TOKENS = Object.freeze({ opacity: 1, showFiles: true, fileSuggestionMaxCount: 5, acceptKey: 'enter' })
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function nonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
