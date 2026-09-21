@@ -408,3 +408,18 @@
 - 文档：`.agents/records/220-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`
 
 **仍未取到的证据**：① `check:all` 全绿——本机 `check:rust` 需编译主 crate，而 G: 盘曾 100% 满（我已清 `target/debug/incremental` 腾出约 7 GB），CI 侧 rust-test/rust-shadow 当时仍 pending；② 实机（webview2-mcp）性能前后对比未做，目前只有 mock 基准数字。`docs/说明书/Pylon-项目架构参考.md` 的 WASM 一节**仍未加**——该文件 #217 也声明过，请其确认归属后补，我不擅自动它。
+
+[2026-09-21 19] [Miyaki Kumo] [#220]（续，同一条目）
+
+**在途冲突声明**：本轮回到工作树时发现 `src-tauri/pylon-compute/src/projector/workbench.rs`（+491 行）与 `scripts/bench-compute-boundary.mts`（+66）、未跟踪的 `scripts/probe-longstream.tmp.mts` 有**他人（或仓库主自己）的在途改动**，内容是 `MessageAppendPatch` / `MessageChange::Full` 的增量消息补丁（= 记录 §24.3 的路线 A）。该文件当前**编译不过**（同一处先后报 `no field index on MessageAppendPatch` 与 `unexpected closing delimiter`，说明正在写），连带 `bun run test` 的 globalSetup 与 `build:wasm` 一起红。
+
+**我按 AGENTS §2.1 绕开**：不 abort、不 stage、不 commit 对方任何文件，也不去「顺手修好」那个未完成的类型——那是对方的设计现场。我的改动只落下列自有文件（已按 pathspec 单独提交）：
+
+- `src/infrastructure/compute/projectorCompute.ts`（同步出口经装载门取 glue）
+- `src/app/bootstrap/bootstrapApplication.ts` + `__tests__/bootstrapApplication.test.ts`（新增 `warmComputeCores` 步；**一处既有用例的让出次数由 1 改 2，断言未改**，理由在用例注释里）
+- `src/App.tsx`（供上 `warmComputeCores: () => whenProjectorComputeReady()`）
+- `src/renderers/solid-workbench/builtinSolidRendererSuite.ts`（`prepare` 同址等投影核）
+- `src/infrastructure/compute/__tests__/wasmRuntime.test.ts`（装载门契约，新增）
+- `scripts/bench-memory-hold.mts`（TS vs wasm 同 workload 持有成本对照，新增）
+
+**待对方收工后我还要做**：① 重跑 `bun run test`（现在被上面的编译错误挡住，我最后一次全绿是 19:07 的 622 文件 / 4690 用例）；② 重编 release + 换 `F:\A-I\Platform\Pylon` 的 exe，复验「首次开 agent sheet 不再抛 `__wbindgen_export`」。在此之前**别动 `workbench.rs`**——我们两边会打架。
