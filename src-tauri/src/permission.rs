@@ -693,6 +693,9 @@ pub(crate) async fn get_approval_mode(
 
 /// CLI 增强：遍历全部 runtime 的挂起权限请求快照（含应答所需完整 identity）。
 /// provider 由 agent_id 反查 agents 配置（与 dispatcher emit 同源）。
+/// 条目携带 `kind`（respond 必传词项）：pending_permissions 只存
+/// request_permission 条目（协议适配层归一为 "approval"），故恒为该值——
+/// CLI 侧透传，不自行硬编码（#36：`permission` 是漂移词项，会被门禁拒绝）。
 #[tauri::command]
 pub(crate) async fn interaction_list(
     state: tauri::State<'_, AppState>,
@@ -714,6 +717,7 @@ pub(crate) async fn interaction_list(
             items.push(serde_json::json!({
                 "provider": provider,
                 "agentId": agent_id,
+                "kind": "approval",
                 "requestId": request_id.to_string(),
                 "sessionId": permission.session_id,
                 "toolCallId": permission.tool_call_id,
@@ -869,6 +873,36 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
 mod tests {
     use super::*;
     use crate::runtime::AgentRuntime;
+
+    /// #36：interaction_list 投影 `kind` 恒为 "approval"——CLI respond 透传该
+    /// 字段（不再硬编码 'permission'）；该字段被移除时此测试必红（防契约回退）。
+    #[test]
+    fn interaction_list_projects_kind_for_cli_respond_passthrough() {
+        use tauri::Manager;
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_runtime("a1", AgentRuntime::new_disconnected())
+            .build();
+        state
+            .runtimes
+            .get("a1")
+            .expect("runtime 已注入")
+            .pending_permissions
+            .lock()
+            .expect("pending 锁必须可用")
+            .insert(crate::acp::RequestId::Number(7), parsed(2));
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let items = tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(interaction_list(app.state::<crate::AppState>()))
+            .expect("interaction_list 必须成功");
+        let item = &items["items"][0];
+        assert_eq!(item["kind"], "approval");
+        assert_eq!(item["requestId"], "7");
+        assert_eq!(item["clientGeneration"], 2);
+    }
 
     fn request_params() -> serde_json::Value {
         serde_json::json!({

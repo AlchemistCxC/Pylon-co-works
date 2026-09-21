@@ -134,10 +134,13 @@ export interface ApprovalControlPort {
   set(mode: string): Promise<void>
 }
 
-/** interaction list 条目（respond 所需完整 identity + 展示字段）。 */
+/** interaction list 条目（respond 所需完整 identity + 展示字段）。
+ *  `kind` 是 respond 必传的应答词项，来自后端投影（权限请求恒为 "approval"，
+ *  见 permission.rs interaction_list）——透传，禁止硬编码（#36）。 */
 export interface InteractionItem {
   provider: string
   agentId: string
+  kind: string
   requestId: string
   sessionId: string
   toolCallId: string
@@ -229,8 +232,22 @@ function commandArguments(args: Record<string, unknown>): Record<string, unknown
   return forwarded
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** 错误文本归一（#36）：Tauri 命令 reject 的是 PylonError 序列化出的结构化
+ *  对象 `{code, message}`，不是 Error 实例——裸 String(obj) 得到 "[object Object]"，
+ *  真实失败原因（kind 门禁、revision 冲突等）全部丢失。优先取结构化 message，
+ *  其余对象受控 JSON 序列化兜底。pylonCliBridge 的 native 回包同用此实现。 */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message !== '') return message
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
 }
 
 function isHotSwapMode(value: unknown): value is HotSwapMode {
@@ -498,7 +515,7 @@ export class PylonCliService {
             sessionId: found.sessionId,
             toolCallId: found.toolCallId || null,
             clientGeneration: found.clientGeneration,
-          }, 'permission', { optionId })
+          }, found.kind, { optionId })
           return { requestId, optionId, responded: true }
         })
       // ── 第二批：注册表工作区 CRUD / 会话配置 / 导出 ──
