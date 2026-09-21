@@ -738,7 +738,12 @@ pub(crate) async fn interaction_list(
             }));
         }
         for (request_id, pending_private) in runtime.private_interactions.snapshot() {
-            items.push(private_interaction_item(&provider, &agent_id, request_id, &pending_private));
+            items.push(private_interaction_item(
+                &provider,
+                &agent_id,
+                request_id,
+                &pending_private,
+            ));
         }
     }
     Ok(serde_json::json!({ "items": items }))
@@ -777,11 +782,9 @@ fn private_interaction_item(
             vec!["accept", "declined", "cancel"],
         ),
         PrivateBridge::GrokExitPlan => {
-            let (plan, tool_call) = crate::acp::adapter::private_ext::parse_exit_plan(
-                pending.bridge,
-                &pending.params,
-            )
-            .unwrap_or_default();
+            let (plan, tool_call) =
+                crate::acp::adapter::private_ext::parse_exit_plan(pending.bridge, &pending.params)
+                    .unwrap_or_default();
             (
                 "Exit plan".to_string(),
                 plan,
@@ -1026,12 +1029,18 @@ mod tests {
             ..base
         };
         let owner = PrivateInteractionOwner::default();
-        owner.insert(crate::acp::RequestId::Number(11), elicitation).unwrap();
-        owner.insert(crate::acp::RequestId::String("e2".into()), exit_plan).unwrap();
+        owner
+            .insert(crate::acp::RequestId::Number(11), elicitation)
+            .unwrap();
+        owner
+            .insert(crate::acp::RequestId::String("e2".into()), exit_plan)
+            .unwrap();
         for (request_id, pending) in owner.snapshot() {
             let item = private_interaction_item("peri-fallback", "a1", request_id, &pending);
             let option_ids = || {
-                item["options"].as_array().expect("options 数组")
+                item["options"]
+                    .as_array()
+                    .expect("options 数组")
                     .iter()
                     .map(|o| o["optionId"].as_str().expect("optionId"))
                     .collect::<Vec<_>>()

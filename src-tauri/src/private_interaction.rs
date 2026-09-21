@@ -65,7 +65,12 @@ impl PrivateInteractionOwner {
     pub(crate) fn snapshot(&self) -> Vec<(RequestId, PendingPrivateInteraction)> {
         self.pending
             .lock()
-            .map(|pending| pending.iter().map(|(id, item)| (id.clone(), item.clone())).collect())
+            .map(|pending| {
+                pending
+                    .iter()
+                    .map(|(id, item)| (id.clone(), item.clone()))
+                    .collect()
+            })
             .unwrap_or_default()
     }
     #[cfg(test)]
