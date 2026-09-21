@@ -596,6 +596,80 @@ impl Slice {
     }
 }
 
+/// `activities` 的派生索引：id → 下标，以及 `refresh_orphans` 的判据输入（id 集合）。
+///
+/// 三处查询都在**每个事件**上跑，而它们要的答案只取决于 `activities` 本身：
+/// - `upsert_activity` / tool 与 activity 归约器的「上一条同 id 节点」定位（原为线性扫）；
+/// - `refresh_orphans` 的 id 集合（原为**逐事件**重建一份全量 HashSet，每个 id 一次
+///   `String` 分配 ⇒ 冷重放 Θ(N²)）。
+///
+/// TS 侧的 `refreshOrphans(document, providedIds)` 就是同一条优化（#205：调用方按
+/// activities 数组同一性缓存 id 集合，命中即免重建）。Rust 侧数组是就地改写的，没有
+/// 「数组同一性」可用，因此改用**写版本戳**：任何可能改动 id / parentId / parentId
+/// 存在性的写入都递增版本，索引与 orphan 修正各自记下自己跟到的版本。
+///
+/// 不进 wire/patch（`to_value` 不读它）。
+#[derive(Debug, Clone)]
+pub struct ActivityIndex {
+    /// `activities` 的写版本。`refresh_orphans` 自己写 `orphan` 不递增——那不改
+    /// id 与 parentId，派生结果与它无关。
+    version: u64,
+    /// 索引（id 集合 / 下标表）跟到的版本。
+    settled_version: u64,
+    /// `orphan` 修正跟到的版本。
+    orphans_settled: u64,
+    ids: std::collections::HashSet<String>,
+    indexes: std::collections::HashMap<String, Vec<usize>>,
+}
+
+impl ActivityIndex {
+    fn new() -> Self {
+        // `version` 从 1 起：首次 `refresh_orphans` 必须真的跑一遍（0 == settled 会误跳过）。
+        Self {
+            version: 1,
+            settled_version: 0,
+            orphans_settled: 0,
+            ids: std::collections::HashSet::new(),
+            indexes: std::collections::HashMap::new(),
+        }
+    }
+
+    /// 记一次 `activities` 写入（新增或就地合并）。
+    fn touch(&mut self) {
+        self.version += 1;
+    }
+
+    /// 索引是否已跟到当前版本；不是则重建。
+    fn sync(&mut self, activities: &[Value]) {
+        if self.settled_version == self.version {
+            return;
+        }
+        self.ids.clear();
+        self.indexes.clear();
+        for (index, activity) in activities.iter().enumerate() {
+            if let Some(id) = activity.get("id").and_then(Value::as_str) {
+                self.ids.insert(id.to_string());
+                self.indexes.entry(id.to_string()).or_default().push(index);
+            }
+        }
+        self.settled_version = self.version;
+    }
+
+    /// 同 id（且可选同 `kind`）的**首个**节点下标——与原来的 `activities.iter().position(...)`
+    /// 逐字同语义。同 id 出现多次时逐候选判 kind，因此「id 相同、kind 不同」的相邻节点
+    /// 不会互相遮蔽。
+    fn position(&self, activities: &[Value], id: &str, kind: Option<&str>) -> Option<usize> {
+        let candidates = self.indexes.get(id)?;
+        match kind {
+            None => candidates.first().copied(),
+            Some(kind) => candidates
+                .iter()
+                .copied()
+                .find(|index| activities[*index].get("kind").and_then(Value::as_str) == Some(kind)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ChangeSet {
     messages_before: usize,
@@ -632,6 +706,10 @@ pub struct WorkbenchDocument {
     /// timeline 派生读数的增量缓存（#205 的对位物）。不是投影语义的一部分，
     /// 也不进 wire/patch（`to_value` 不读它）。
     pub timeline_cache: TimelineCache,
+    /// `activities` 的派生索引与 orphan 修正版本（见 [`ActivityIndex`]）。不进 wire/patch。
+    pub activity_index: ActivityIndex,
+    /// timeline 的 `eventId` → 下标索引（见 [`TimelineIndex`]）。不进 wire/patch。
+    pub timeline_index: TimelineIndex,
     /// 本批变更记账（见 [`ChangeSet`]）。同样不进 wire/patch。
     pub changes: ChangeSet,
 }
@@ -653,6 +731,13 @@ impl WorkbenchDocument {
     /// 消费方读到陈旧切片，而它现在不再靠 `document()` 拿全量文档兜底。
     pub(crate) fn mark_slice(&mut self, slice: Slice) {
         self.changes.dirty_slices |= slice.bit();
+    }
+
+    /// `activities` 里同 id（且可选同 kind）的首个节点下标——先按需把派生索引补齐。
+    /// 语义与 `activities.iter().position(...)` 逐字相同（[`ActivityIndex::position`]）。
+    fn activity_position(&mut self, id: &str, kind: Option<&str>) -> Option<usize> {
+        self.activity_index.sync(&self.activities);
+        self.activity_index.position(&self.activities, id, kind)
     }
 
     /// 标记某个 message 被就地写过（幂等；去重在 `finish_batch`）。
@@ -754,6 +839,8 @@ pub fn create_workbench_document(session_id: &str) -> WorkbenchDocument {
         lifecycle: lifecycle_model::empty_lifecycle_state(),
         system_errors: Vec::new(),
         timeline_cache: TimelineCache::default(),
+        activity_index: ActivityIndex::new(),
+        timeline_index: TimelineIndex::default(),
         changes: ChangeSet::default(),
     }
 }
@@ -1105,6 +1192,62 @@ fn is_record_value(value: &Value) -> bool {
     value.is_object()
 }
 
+/// `update_timeline` 的定位索引：`eventId` → 条目下标。
+///
+/// 该函数在 message/tool/diagnostic 的沉降路径上每次折叠都被调用，原实现是**全表线性扫**
+/// （找 `event_id` 相等的条目）⇒ 冷重放 Θ(N²)。TS 基线同样是 Θ(N)（`items.map(item =>
+/// item.eventId === eventId ? … : item)`），所以这不是移植引入的复杂度，但它是本文件里
+/// 剩下最贵的扫描，且完全可以 O(1)。
+///
+/// **同一 `eventId` 出现多次时**（覆盖区间喂法不做 eventId 去重，理论上可能）该 id 记入
+/// `ambiguous`，`lookup` 对它返回 `None`，调用方退回全表扫描——于是「更新所有同 id 条目」
+/// 的语义逐字不变，索引只加速**唯一 id**（现实数据里的全部）。
+///
+/// 不进 wire/patch（`to_value` 不读它）。
+#[derive(Debug, Clone, Default)]
+pub struct TimelineIndex {
+    positions: std::collections::HashMap<String, usize>,
+    ambiguous: std::collections::HashSet<String>,
+}
+
+impl TimelineIndex {
+    /// 记一次已发生的插入。`position` 是插入后的下标；追加（`position` 是末尾）走 O(1)，
+    /// 中插会让其后所有下标平移，整表重建（乱序兜底，低频）。
+    fn note_insert(&mut self, position: usize, timeline: &[TimelineEntry]) {
+        if position + 1 == timeline.len() {
+            let entry_id = timeline[position].event_id.clone();
+            if self.positions.insert(entry_id.clone(), position).is_some() {
+                self.ambiguous.insert(entry_id);
+            }
+            return;
+        }
+        self.rebuild(timeline);
+    }
+
+    /// 整表重建（中插后下标平移，无法局部修正）。
+    fn rebuild(&mut self, timeline: &[TimelineEntry]) {
+        self.positions.clear();
+        self.ambiguous.clear();
+        for (index, entry) in timeline.iter().enumerate() {
+            if self
+                .positions
+                .insert(entry.event_id.clone(), index)
+                .is_some()
+            {
+                self.ambiguous.insert(entry.event_id.clone());
+            }
+        }
+    }
+
+    /// 唯一 id 的下标；未登记或该 id 有重复时返回 `None`（调用方退回全表扫描）。
+    fn lookup(&self, event_id: &str) -> Option<usize> {
+        if self.ambiguous.contains(event_id) {
+            return None;
+        }
+        self.positions.get(event_id).copied()
+    }
+}
+
 /// timeline 派生读数的增量缓存（#205 的位）。
 ///
 /// `terminal_sequence` 是「已扫过的 timeline 前缀里终态 session 条目的最大 sequence」。
@@ -1206,10 +1349,16 @@ fn is_text_stream_boundary(entry: &TimelineEntry) -> bool {
         || entry.kind == "interaction"
 }
 
-fn insert_by_sequence(timeline: &mut Vec<TimelineEntry>, entry: TimelineEntry) {
-    match timeline.last() {
-        Some(last) if last.sequence <= entry.sequence => timeline.push(entry),
+/// 按 sequence 升序插入，并同步 `TimelineIndex`（`update_timeline` 的定位索引）。
+/// 索引的维护点只有这一处——`document.timeline` 的插入全在这里。
+fn insert_by_sequence(document: &mut WorkbenchDocument, entry: TimelineEntry) {
+    let position = match document.timeline.last() {
+        Some(last) if last.sequence <= entry.sequence => {
+            document.timeline.push(entry);
+            document.timeline.len() - 1
+        }
         _ => {
+            let timeline = &document.timeline;
             let mut low = 0usize;
             let mut high = timeline.len();
             while low < high {
@@ -1220,9 +1369,13 @@ fn insert_by_sequence(timeline: &mut Vec<TimelineEntry>, entry: TimelineEntry) {
                     high = middle;
                 }
             }
-            timeline.insert(low, entry);
+            document.timeline.insert(low, entry);
+            low
         }
-    }
+    };
+    document
+        .timeline_index
+        .note_insert(position, &document.timeline);
 }
 
 fn timeline_entry(envelope: &SemanticEnvelope) -> TimelineEntry {
@@ -1269,6 +1422,27 @@ fn timeline_entry(envelope: &SemanticEnvelope) -> TimelineEntry {
     }
 }
 
+fn apply_timeline_patch(
+    entry: &mut TimelineEntry,
+    status: &Option<Value>,
+    title: &Option<Value>,
+    summary: &Option<Value>,
+    stream_boundary: Option<Option<bool>>,
+) {
+    if status.is_some() {
+        entry.status = status.clone();
+    }
+    if title.is_some() {
+        entry.title = title.clone();
+    }
+    if summary.is_some() {
+        entry.summary = summary.clone();
+    }
+    if let Some(boundary) = stream_boundary {
+        entry.stream_boundary = boundary;
+    }
+}
+
 fn update_timeline(
     document: &mut WorkbenchDocument,
     event_id: &str,
@@ -1277,22 +1451,37 @@ fn update_timeline(
     summary: Option<Value>,
     stream_boundary: Option<Option<bool>>,
 ) {
+    // 唯一 id 走索引（O(1)）；重复 id 或未登记退回全表扫描，语义与旧实现逐字相同。
+    // 命中还要**自校验**：索引只在 `insert_by_sequence` 里维护，而 timeline 存在被整体
+    // 重建/缩短的路径（`TimelineCache` 头注记的那条）——下标越界或指向别的条目就退回扫描，
+    // 于是「索引陈旧」只会丢掉加速，不会读错条目、也不会 panic。
+    let indexed = document.timeline_index.lookup(event_id).filter(|index| {
+        document
+            .timeline
+            .get(*index)
+            .is_some_and(|entry| entry.event_id == event_id)
+    });
+    if let Some(index) = indexed {
+        document.mark_timeline(index);
+        apply_timeline_patch(
+            &mut document.timeline[index],
+            &status,
+            &title,
+            &summary,
+            stream_boundary,
+        );
+        return;
+    }
     for index in 0..document.timeline.len() {
         if document.timeline[index].event_id == event_id {
             document.mark_timeline(index);
-            let entry = &mut document.timeline[index];
-            if status.is_some() {
-                entry.status = status.clone();
-            }
-            if title.is_some() {
-                entry.title = title.clone();
-            }
-            if summary.is_some() {
-                entry.summary = summary.clone();
-            }
-            if let Some(boundary) = stream_boundary {
-                entry.stream_boundary = boundary;
-            }
+            apply_timeline_patch(
+                &mut document.timeline[index],
+                &status,
+                &title,
+                &summary,
+                stream_boundary,
+            );
         }
     }
 }
@@ -1479,31 +1668,51 @@ fn add_diagnostic(
     );
 }
 
+/// 刷新 `activities` 的孤儿标记（`parentId` 指向不存在的 activity ⇒ `orphan: true`）。
+///
+/// 输出是 `activities` 的纯函数（只看 id 集合与各节点的 parentId），因此**版本未变即整段跳过**：
+/// 这条早退是必须的，它在 `reduce_workbench_event` 的尾巴上逐事件被调用，而逐事件重建
+/// id 集合（每个 id 一次 `String` 分配）会把冷重放压回 Θ(N²)。等价于 TS 侧
+/// `refreshOrphans(document, providedIds)` 的 id 集合缓存（#205）。
 fn refresh_orphans(document: &mut WorkbenchDocument) {
-    let ids: std::collections::HashSet<String> = document
-        .activities
-        .iter()
-        .filter_map(|activity| activity.get("id").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-    let mut dirty_activities = false;
-    for activity in &mut document.activities {
-        let parent_id = match activity.get("parentId").and_then(Value::as_str) {
-            Some(parent_id) => parent_id,
-            None => continue,
-        };
-        let orphan = !ids.contains(parent_id);
-        if activity.get("orphan") != Some(&Value::Bool(orphan)) {
-            dirty_activities = true;
-            if let Some(object) = activity.as_object_mut() {
-                object.insert("orphan".to_string(), Value::Bool(orphan));
+    document.activity_index.sync(&document.activities);
+    if document.activity_index.orphans_settled == document.activity_index.version {
+        return;
+    }
+    // 两段式：先只读一遍定出要改的下标，再逐个 `as_object_mut`。合成一段就得把
+    // parentId 先 `to_string()` 出来借开冲突，代价是逐事件 O(活动数) 次分配——
+    // 那正是这条路径上最贵的东西。
+    let mut dirty_indexes: Vec<usize> = Vec::new();
+    {
+        let activities = &document.activities;
+        let ids = &document.activity_index.ids;
+        for (index, activity) in activities.iter().enumerate() {
+            let Some(parent_id) = activity.get("parentId").and_then(Value::as_str) else {
+                continue;
+            };
+            if activity.get("orphan") != Some(&Value::Bool(!ids.contains(parent_id))) {
+                dirty_indexes.push(index);
             }
         }
     }
-    // 借用在循环里结束，标记放到循环之后（`mark_slice` 要 `&mut document`）。
-    if dirty_activities {
-        document.mark_slice(Slice::Activities);
+    if dirty_indexes.is_empty() {
+        document.activity_index.orphans_settled = document.activity_index.version;
+        return;
     }
+    for index in dirty_indexes {
+        let orphan = match document.activities[index]
+            .get("parentId")
+            .and_then(Value::as_str)
+        {
+            Some(parent_id) => !document.activity_index.ids.contains(parent_id),
+            None => continue,
+        };
+        if let Some(object) = document.activities[index].as_object_mut() {
+            object.insert("orphan".to_string(), Value::Bool(orphan));
+        }
+    }
+    document.activity_index.orphans_settled = document.activity_index.version;
+    document.mark_slice(Slice::Activities);
 }
 
 // ── 归一化错误（lifecycleModel.normalizeNormalizedError 对齐） ────────────────
@@ -1868,10 +2077,14 @@ fn reduce_interaction(document: &mut WorkbenchDocument, envelope: &SemanticEnvel
     if let Some(reason) = reason {
         interaction.insert("reason".to_string(), reason);
     }
+    // 落地口径（与 TS `[...document.interactions.filter(item => item.id !== id), interaction]`
+    // 同序）：移除同 id 的旧条目，再追加到末尾。原本写成「`position` 扫一遍定位 +
+    // `retain` 再扫一遍删除」——两次全表扫，这里仍只保留一次定位（结果需要 previous 字段），
+    // 删除改走 `remove(已知下标)` 的单趟 memmove。
     interaction.insert("sequence".to_string(), js_number_value(envelope.sequence));
-    document
-        .interactions
-        .retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
+    if let Some(index) = previous_index {
+        document.interactions.remove(index);
+    }
     document.mark_slice(Slice::Interactions);
     document.interactions.push(Value::Object(interaction));
 }
@@ -2524,10 +2737,7 @@ fn reduce_tool(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
         .map(|error| normalize_normalized_error(error, 0))
         .unwrap_or(None)
         .filter(|value| !value.is_null());
-    let previous_index = document.activities.iter().position(|node| {
-        node.get("id").and_then(Value::as_str) == Some(id.as_str())
-            && node.get("kind").and_then(Value::as_str) == Some("tool")
-    });
+    let previous_index = document.activity_position(&id, Some("tool"));
     if previous_index.is_none() {
         settle_superseded_running_messages(document, None);
         update_timeline(
@@ -2712,16 +2922,12 @@ fn merge_tool_activity(previous: Option<&Value>, next: &Value) -> Option<Value> 
 
 fn upsert_activity(document: &mut WorkbenchDocument, next: Value) {
     let next_id = next.get("id").and_then(Value::as_str).map(str::to_string);
-    let index = next_id.and_then(|id| {
-        document
-            .activities
-            .iter()
-            .position(|item| item.get("id").and_then(Value::as_str) == Some(id.as_str()))
-    });
+    let index = next_id.and_then(|id| document.activity_position(&id, None));
     match index {
         None => {
             document.mark_slice(Slice::Activities);
             document.activities.push(next);
+            document.activity_index.touch();
         }
         Some(index) => {
             let item = &document.activities[index];
@@ -2740,6 +2946,8 @@ fn upsert_activity(document: &mut WorkbenchDocument, next: Value) {
             };
             document.mark_slice(Slice::Activities);
             document.activities[index] = Value::Object(merged);
+            // 就地合并可能换掉 parentId（孤儿判据的输入）⇒ 索引与 orphan 都要重算。
+            document.activity_index.touch();
         }
     }
 }
@@ -2761,7 +2969,11 @@ fn reduce_diagnostic(document: &mut WorkbenchDocument, envelope: &SemanticEnvelo
         .and_then(Value::as_str)
         .unwrap_or("diagnostic.notice")
         .to_string();
-    let mut with_error = document.clone();
+    // TS 基线写的是 `let withError = ... { ...document, systemErrors: [...] }`——那是
+    // **浅展开**（数组与内层对象共享引用），等价于「在原文档上加一条 systemError」。
+    // 移植时写成了 `document.clone()`（**整份深拷**）再整体搬回，于是每个 diagnostic
+    // 事件都付一次 Θ(文档) 的深拷（含全部 message/timeline/Value 树）⇒ 冷重放 Θ(N²)。
+    // 就地等价改写：调用方持有 `&mut`，且与 TS 一样不存在「失败回滚」需求。
     if level.as_str() == Some("error") && code != "turn.failed" && code != "provider.error" {
         let normalized = normalize_normalized_error(
             &serde_json::json!({
@@ -2775,19 +2987,11 @@ fn reduce_diagnostic(document: &mut WorkbenchDocument, envelope: &SemanticEnvelo
             0,
         );
         if let Some(normalized) = normalized.filter(|value| !value.is_null()) {
-            with_error.mark_slice(Slice::SystemErrors);
-            with_error.system_errors.push(normalized);
+            document.mark_slice(Slice::SystemErrors);
+            document.system_errors.push(normalized);
         }
     }
-    add_diagnostic(
-        &mut with_error,
-        envelope,
-        &code,
-        &message,
-        &level,
-        Some(event),
-    );
-    *document = with_error;
+    add_diagnostic(document, envelope, &code, &message, &level, Some(event));
 }
 
 fn reduce_session(
@@ -3128,10 +3332,7 @@ fn reduce_activity(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope
         .get("result")
         .filter(|value| value.is_object())
         .cloned();
-    let previous_index = document.activities.iter().position(|item| {
-        item.get("id").and_then(Value::as_str) == Some(id.as_str())
-            && item.get("kind").and_then(Value::as_str) == Some("activity")
-    });
+    let previous_index = document.activity_position(&id, Some("activity"));
     let previous: Option<&Value> = previous_index.map(|index| &document.activities[index]);
     let status = activity_lifecycle_status(&envelope.event_type, &patch, previous);
     let activity_kind = string_value(activity.get("kind"))
@@ -3664,7 +3865,7 @@ pub fn reduce_workbench_event(
     };
     let effective = envelope.with_event(effective_event);
     let entry = timeline_entry(&effective);
-    insert_by_sequence(&mut document.timeline, entry);
+    insert_by_sequence(document, entry);
     document.revision = document.revision.max(envelope.sequence);
     if let Some((start, end)) = span {
         coverage::merge_coverage_in_place(&mut document.applied_ranges, start, end);
@@ -6193,7 +6394,7 @@ mod projection_index_tests {
                 json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
             );
             let entry = timeline_entry(&item);
-            insert_by_sequence(&mut doc.timeline, entry);
+            insert_by_sequence(&mut doc, entry);
         }
         println!(
             "[probe] 仅建条目+入 timeline = {:.1}ms",
@@ -6210,7 +6411,7 @@ mod projection_index_tests {
             );
             let effective = item.with_event(item.event.clone());
             let entry = timeline_entry(&effective);
-            insert_by_sequence(&mut doc2.timeline, entry);
+            insert_by_sequence(&mut doc2, entry);
         }
         println!(
             "[probe] 含 with_event（信封复制）= {:.1}ms",
@@ -6261,11 +6462,11 @@ mod projection_index_tests {
         ablate("0 只建信封（harness 基线）", total, &make, |_, _| {});
         ablate("1 + timeline_entry + insert", total, &make, |item, doc| {
             let entry = timeline_entry(item);
-            insert_by_sequence(&mut doc.timeline, entry);
+            insert_by_sequence(doc, entry);
         });
         ablate("2 + reduce_semantic_event", total, &make, |item, doc| {
             let entry = timeline_entry(item);
-            insert_by_sequence(&mut doc.timeline, entry);
+            insert_by_sequence(doc, entry);
             let effective = item.with_event(item.event.clone());
             let _ = reduce_semantic_event(doc, &effective);
         });
@@ -6275,7 +6476,7 @@ mod projection_index_tests {
             &make,
             |item, doc| {
                 let entry = timeline_entry(item);
-                insert_by_sequence(&mut doc.timeline, entry);
+                insert_by_sequence(doc, entry);
                 let effective = item.with_event(item.event.clone());
                 let _ = reduce_semantic_event(doc, &effective);
                 refresh_orphans(doc);
@@ -6335,6 +6536,200 @@ mod projection_index_tests {
                     "tool 窗口 {after}..{before}"
                 );
             }
+        }
+    }
+
+    /// `TimelineIndex` 的定位必须等于全表扫描——它是 `update_timeline` 的 O(1) 快路径，
+    /// 而那条快路径的语义前提是「同 eventId 唯一」。覆盖区间喂法不做 eventId 去重，所以
+    /// 这里**故意**造出重复 id，钉死「重复即退回全表扫描、语义不变」。
+    #[test]
+    fn timeline_index_lookup_matches_full_scan() {
+        let mut document = create_workbench_document("session-index-timeline");
+        // 顺序插入 + 乱序中插（中插会让其后下标平移，是索引唯一需要整表重建的路径）。
+        for sequence in [3.0, 1.0, 4.0, 2.0, 9.0, 7.0, 8.0, 6.0, 5.0, 10.0] {
+            insert_by_sequence(
+                &mut document,
+                timeline_entry(&envelope(sequence, json!({ "type": "diagnostic.notice" }))),
+            );
+        }
+        // 重复 id：索引必须拒绝加速（否则只会更新一条，而全表扫描更新全部）。
+        let shared = document.timeline[0].event_id.clone();
+        for sequence in [11.0, 12.0] {
+            let mut duplicate =
+                timeline_entry(&envelope(sequence, json!({ "type": "diagnostic.notice" })));
+            duplicate.event_id = shared.clone();
+            insert_by_sequence(&mut document, duplicate);
+        }
+
+        for id in document
+            .timeline
+            .iter()
+            .map(|entry| entry.event_id.clone())
+            .collect::<Vec<_>>()
+        {
+            let scan: Vec<usize> = document
+                .timeline
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.event_id == id)
+                .map(|(index, _)| index)
+                .collect();
+            let indexed = document.timeline_index.lookup(&id);
+            if scan.len() == 1 {
+                assert_eq!(indexed, Some(scan[0]), "唯一 id {id} 的索引位");
+            } else {
+                assert_eq!(
+                    indexed,
+                    None,
+                    "重复 id {id} 必须不加速（{} 条）",
+                    scan.len()
+                );
+            }
+        }
+        assert_eq!(document.timeline_index.lookup("不存在的 id"), None);
+    }
+
+    /// `update_timeline` 走快路径与走全表扫描必须产出同一份 timeline——同 id 唯一时
+    /// 两者逐字段等同，这是索引可用的前提。
+    #[test]
+    fn update_timeline_fast_path_matches_full_scan() {
+        let mut indexed = create_workbench_document("session-index-a");
+        let mut scanned = create_workbench_document("session-index-b");
+        for sequence in [1.0, 2.0, 3.0, 5.0, 4.0] {
+            let item = envelope(sequence, json!({ "type": "diagnostic.notice" }));
+            reduce_workbench_event(&mut indexed, &item).expect("reduce");
+            reduce_workbench_event(&mut scanned, &item).expect("reduce");
+        }
+        let target = indexed.timeline[1].event_id.clone();
+        // 索引侧：命中快路径；扫描侧：把索引清空逼它走全表扫描。
+        update_timeline(
+            &mut indexed,
+            &target,
+            Some(Value::String("warning".to_string())),
+            Some(Value::String("标题".to_string())),
+            Some(Value::String("摘要".to_string())),
+            Some(Some(true)),
+        );
+        scanned.timeline_index = TimelineIndex::default();
+        update_timeline(
+            &mut scanned,
+            &target,
+            Some(Value::String("warning".to_string())),
+            Some(Value::String("标题".to_string())),
+            Some(Value::String("摘要".to_string())),
+            Some(Some(true)),
+        );
+        assert_eq!(
+            indexed
+                .timeline
+                .iter()
+                .map(TimelineEntry::to_value)
+                .collect::<Vec<_>>(),
+            scanned
+                .timeline
+                .iter()
+                .map(TimelineEntry::to_value)
+                .collect::<Vec<_>>(),
+            "快路径与全表扫描的 timeline 必须逐字段相同"
+        );
+    }
+
+    /// `ActivityIndex.position` 必须等于 `activities.iter().position(...)`：同 id 多节点时
+    /// 逐候选判 kind（「id 相同、kind 不同」的节点不得互相遮蔽）。
+    #[test]
+    fn activity_index_position_matches_linear_scan() {
+        let mut document = create_workbench_document("session-index-activity");
+        for (id, kind) in [
+            ("a", "tool"),
+            ("a", "activity"),
+            ("b", "activity"),
+            ("c", "tool"),
+            ("b", "tool"),
+        ] {
+            upsert_activity(
+                &mut document,
+                json!({ "id": id, "kind": kind, "title": format!("{id}-{kind}") }),
+            );
+        }
+        for id in ["a", "b", "c", "d"] {
+            for kind in [None, Some("tool"), Some("activity")] {
+                let linear = document.activities.iter().position(|node| {
+                    node.get("id").and_then(Value::as_str) == Some(id)
+                        && kind.is_none_or(|kind| {
+                            node.get("kind").and_then(Value::as_str) == Some(kind)
+                        })
+                });
+                assert_eq!(
+                    document.activity_position(id, kind),
+                    linear,
+                    "activities 定位 {id}/{kind:?}"
+                );
+            }
+        }
+    }
+
+    /// `refresh_orphans` 的版本早退必须等于「每次全量重算」：output 只取决于 id 集合与各节点
+    /// parentId，版本未变就跳过是精确的（不是近似）。
+    #[test]
+    fn orphan_refresh_skip_matches_full_recompute() {
+        let mut document = create_workbench_document("session-index-orphan");
+        let journal: Vec<SemanticEnvelope> = vec![
+            envelope(
+                1.0,
+                json!({ "type": "activity.started", "activityId": "child", "activity": { "kind": "subagent", "parentId": "parent" } }),
+            ),
+            envelope(
+                2.0,
+                json!({ "type": "activity.started", "activityId": "parent", "activity": { "kind": "team" } }),
+            ),
+            envelope(
+                3.0,
+                json!({ "type": "activity.started", "activityId": "dangling", "activity": { "kind": "delegation", "parentId": "team-9" } }),
+            ),
+            envelope(
+                4.0,
+                json!({ "type": "activity.progress", "activityId": "dangling", "activity": { "kind": "delegation", "parentId": "still-missing" } }),
+            ),
+            envelope(
+                5.0,
+                json!({ "type": "tool.started", "tool": { "toolCallId": "t-1", "parentActivityId": "missing" } }),
+            ),
+            envelope(
+                6.0,
+                json!({ "type": "tool.started", "tool": { "toolCallId": "t-2", "parentActivityId": "child" } }),
+            ),
+            envelope(
+                7.0,
+                json!({ "type": "message.delta", "role": "user", "parts": [{ "kind": "text", "text": "x" }] }),
+            ),
+        ];
+        for item in &journal {
+            reduce_workbench_event(&mut document, item).expect("reduce");
+            let skipped = document
+                .activities
+                .iter()
+                .map(|node| node.get("orphan").cloned())
+                .collect::<Vec<_>>();
+            // 参考实现：无条件全量重算（版本早退关掉）。
+            document.activity_index.orphans_settled = u64::MAX;
+            for index in 0..document.activities.len() {
+                let parent_id = document.activities[index]
+                    .get("parentId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                if let Some(parent_id) = parent_id {
+                    let orphan = !document.activity_index.ids.contains(&parent_id);
+                    if let Some(object) = document.activities[index].as_object_mut() {
+                        object.insert("orphan".to_string(), Value::Bool(orphan));
+                    }
+                }
+            }
+            let recomputed = document
+                .activities
+                .iter()
+                .map(|node| node.get("orphan").cloned())
+                .collect::<Vec<_>>();
+            assert_eq!(skipped, recomputed, "orphan 早退结果与全量重算不一致");
         }
     }
 

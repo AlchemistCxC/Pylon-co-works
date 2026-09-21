@@ -736,3 +736,144 @@ Rust 报 `"undefined"`——5 处校验写成「布尔判定 + 恒报 undefined�
    12–152× 的比值主要是编组，改完应回到同一量级。
 2. **① 折叠去 `Value`**：projector 5–8× 的端到端比值（生产真实路径）主要在这里。
 3. **高亮** 1.4–3.8×：syntect vs starry-night 的引擎差异，量级小（<1ms），可后置。
+
+---
+
+## 23. 性能收口第三轮：投影折叠的 Θ(N²) 扫描点（mixed-m 5.8× → 1.2×）
+
+用户 2026-09-21 裁决「跑一轮 benchmark + 全面调查剩余性能较差项」。先复跑量门槛，
+再把每个红数**拆到函数**，最后按拆出来的账动手。
+
+### 复跑（baseline，未改代码）
+
+`bunx vite-node scripts/compute-parity-bench.mts`（scale=m，每侧 3 轮中位数，175 case）：
+`parity 断言 175 项：ok 172 / known-diff 3 / mismatch 0`。分域摘要与 §22 同形；
+projector 域 1 快 / 17 慢，`mixed-m` 42.70 → 223ms（5.22×）是其中绝对值最大的一行。
+
+### 调查：三段拆分（每层都用可复现的探针，不靠印象）
+
+**① 先把「宿主帧编码」从「wasm 计算」里摘出来。** 新写一次性探针
+（`scripts/bench-decompose.mts`，已删）对 events 域的批出口分别量
+「只编码 / 编码+wasm / 预编码后的 wasm」：
+
+| pair · case | 只编码 | 预编码后 wasm | ts | 说明 |
+| --- | --- | --- | --- | --- |
+| `mergeAdjacentDeltaChunks · byte-cap-2002` | **15.23ms** | 6.21ms | 0.51ms | 编码占 71% |
+| `canonicalBatchSpanOf · batch-scale` | **3.62ms** | 0.17ms | 0.03ms | 编码 ≈ 全部 |
+| `projectCanonicalMessages · conversations-scale` | 0.91ms | 1.64ms | 0.09ms | 编码是少数 |
+| `projectToolProjectionsFromBatch · tools-scale` | 1.07ms | 0.33ms | 0.03ms | 编码占多数 |
+
+⇒ **脚手架 events 套件的 wasm 侧把 `frameOf(...)`（JS 侧 PYPB 编码）算进了计时**，
+那几个 12–152× 里有一截是**宿主编码**而非计算核。**并且 events 层根本没切流**：
+`canonicalEventSink.ts` / `canonicalEventBatch.ts` 仍 import TS 实现
+（`src/infrastructure/compute/` 里也没有 events 桥），所以这些比值量的是**尚未接线**
+的路径。这条要如实写进结论，不能当成「计算核慢 152×」对外描述。
+
+**② 投影端到端按相位拆。** 用 `foldPhases()` 诊断出口（decode / project / patchJson）
+加 JS 侧分段：
+
+| case | N | 宿主编码 | appendBatch（核内 project） | document 物化 | e2e | ts | 比值 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `delta-m` | 2001 | 7.85ms | 7.73（**project 仅 2ms**） | 2.42 | 19.49 | 3.34 | 5.84× |
+| `mixed-m` | 2251 | 7.88ms | 213.08（**project 225ms**） | 4.01 | 233.21 | 39.98 | 5.83× |
+
+⇒ delta 与 mixed 的成本结构完全不同：delta 是**边界主导**（编码 7.9 + patch 串 400KiB
+的过界+parse），mixed 是**折叠主导**（2251 事件 225ms = 100µs/事件）。
+
+**③ 折叠里逐事件类型隔离（native release 探针，`mixed_journal_probe`，已删）。**
+复刻脚手架 `mixedJournal` 的逐事件形状，2000 条单类各测一遍：
+
+| 单类（2000 条） | 耗时 | µs/事件 | 结果形状 |
+| --- | --- | --- | --- |
+| `diagnostic.notice` | **2246.7ms** | **1123** | messages 0 / timeline 2000 |
+| `tool.started`（独立 id） | 291.2ms | 145.6 | activities 2000 |
+| `interaction.requested`（独立 id） | 32.6ms | 16.3 | interactions 2000 |
+| `message.delta`（独立 id） | 15.6ms | 7.8 | messages 2000 |
+| `reasoning.delta` | 3.8ms | 1.9 | messages 1 |
+| `session.status-updated` | 2.6ms | 1.3 | — |
+| `message.completed` | 2.1ms | 1.0 | — |
+
+mixed 全量随规模翻倍、每事件成本翻倍（50/100/200/400 blocks → 35/58/112/230 µs/事件）
+⇒ **确认 Θ(N²)**。往函数里挂临时计数器（原子计数「全表扫描步数」，跑完已删）读出
+mixed-400 的 6.65M 步里：`update_timeline` 全表扫 ≈1.4M 步、`settle_superseded` ≈0.85M 步、
+`refresh_orphans` 活动数×事件数 ≈4.0M 步。
+
+### 定位到的四个根因（都在 Rust 侧，且都不是「新设计」）
+
+1. **`reduce_diagnostic` 整份 `document.clone()`**（`workbench.rs`）。TS 基线写的是
+   `{ ...document, systemErrors: [...] }`——**浅展开**；移植成 Rust 后写成深拷再
+   `*document = with_error` 搬回，于是**每个 diagnostic 事件付一次 Θ(文档) 深拷**
+   （全部 message/timeline/Value 树）。这是 §18 从 `project_batch` 里摘掉的那个模式，
+   在归约器里活了下来。⇒ 就地改写（调用方持 `&mut`，无回滚需求）。
+2. **`refresh_orphans` 逐事件重建 id 集合**（每个 id 一次 `String` 分配），且**逐事件全表
+   遍历 activities**。TS 的 `refreshOrphans(document, providedIds)` 本就有 id 集合缓存
+   （#205 的对位物），移植时漏了。⇒ 加 `ActivityIndex`（写版本戳 + id 集合 + id→下标表），
+   版本未变整段跳过；顺带把「id 相同、kind 不同」的逐候选判定保留（不合并语义）。
+3. **`update_timeline` 全表线性扫 `event_id`**：在 message/tool/diagnostic 的沉降路径上
+   每次折叠都调，⇒ Θ(N²)。⇒ 加 `TimelineIndex`（eventId→下标）；**重复 id 记 `ambiguous`
+   并退回全表扫描**，于是「更新所有同 id 条目」的语义逐字不变。命中还自校验
+   （下标越界或指向别的条目即退回），因为 timeline 存在被整体重建/缩短的路径——
+   索引陈旧只丢加速，不读错条目。
+4. **`upsert_activity` / tool 与 activity 归约器的 `activities.iter().position(...)`**
+   与 **`reduce_interaction` 的「`position` + `retain`」两次全表扫**。⇒ 前者走
+   `ActivityIndex::position`；后者删掉重复的那趟（`remove(已知下标)` 取代 `retain`）。
+
+### 结果（同一 harness、同一输入、逐字节等量工作）
+
+native release 折叠（探针读数，2000/2251 事件量级）：
+
+| 量 | 改前 | 改后 |
+| --- | --- | --- |
+| `[mixed] blocks=200`（2251 事件） | 253.2ms（112.5µs/事件） | **26.4ms（11.7µs/事件）** |
+| `[mixed] blocks=400`（4501 事件） | 1036.2ms（230.2µs/事件） | **87.1ms（19.4µs/事件）** |
+| `[单类] diagnostic.notice` ×2000 | 2246.7ms | **7.4ms**（−99.7%） |
+| `[单类] tool.started` ×2000 | 291.2ms | 407.3ms → 见下 |
+
+> `tool.started` 在「先加索引」那一步反而涨到 407ms：`refresh_orphans` 的改写一开始引入
+> 了**逐节点 `parent_id.to_string()`**（为借开 `&mut` 冲突），等于逐事件 O(活动数) 次分配。
+> 改成两段式（只读一遍定下标，再逐个 `as_object_mut`）后回到 407→**203µs/事件**。
+> 剩下的仍是 O(活动数)/事件——但**TS 基线同样是 Θ(N)**（`activities.map` 每次全扫且每次都
+> 分配一个新数组），所以这条是「与基线同复杂度、常数更优」，不是回退。照实记着。
+
+wasm 端到端（脚手架，scale=m，每侧 3 轮中位数）：
+
+| case | 改前 wasm | 改前比值 | 改后 wasm | **改后比值** |
+| --- | --- | --- | --- | --- |
+| `projectWorkbench(fold) mixed-m` | 223ms | 5.22× | **49.2ms** | **1.18×** |
+| `projectWorkbench(paged) paged-replay-m` | 26.5ms | 5.55× | **10.0ms** | **2.25×** |
+| `projectWorkbench(fold) mixed-s` | 2.58ms | 6.59× | 2.02ms | 4.31× |
+| `projectWorkbench(paged) paged-replay-s` | 1.54ms | 8.68× | 1.14ms | 6.70× |
+| `projectWorkbench(fold) coverage-disorder` | 0.08ms | 11.59× | 0.07ms | 9.20× |
+| `projectWorkbench(fold) delta-m` | 20.0ms | 7.67× | 20.3ms | 5.72×（TS 侧本次读数 3.55ms，抖动） |
+
+**mixed-m 的 5.8× 是这一轮真正的收口**（生产真实入口、绝对值最大）。delta-m 未动：
+它的账在**边界**（宿主编码 7.9ms + 400KiB patch 串的过界与 `JSON.parse`），不在折叠
+（核内 project 仅 2ms），属下一轮的结构性改造（patch 走二进制编组）。
+
+### 复验
+
+- `cargo test -p pylon-compute --lib` → **176 passed**（+4 条新等价性测试），0 failed
+- 新增测试（都守这一轮的三处索引/缓存，有牙）：
+  - `timeline_index_lookup_matches_full_scan`：**故意造重复 eventId**，钉死「唯一才加速、
+    重复退回扫描」；含乱序中插（索引唯一的整表重建路径）
+  - `update_timeline_fast_path_matches_full_scan`：清空索引逼扫描侧，两侧 timeline 逐字段相同
+  - `activity_index_position_matches_linear_scan`：含 `a/tool` 与 `a/activity` 的遮蔽用例
+  - `orphan_refresh_skip_matches_full_recompute`：把版本戳顶成 `u64::MAX` 强制全量重算，
+    与早退结果逐节点比对
+- `bun run test` → `Test Files 622 passed`、`Tests 4688 passed | 1 todo`，0 failed
+- `bunx vitest run scripts/compute-parity.test.mts` → 2/2 passed，`ok 172 / known-diff 3 / mismatch 0`
+- `bunx tsc -b` exit 0；`bunx eslint src/` 0 error（1 条既存 warning，在
+  `RightRailHost.tsx`，非本轮文件）；`cargo fmt --all --check` 通过；
+  `cargo clippy -p pylon-compute --lib --tests` 0 warning
+- 改动面：`src-tauri/pylon-compute/src/projector/workbench.rs` 单文件（+265/−73）
+
+### 仍未做（下一轮的账，按拆出来的数字排序）
+
+1. **events 层没有切流**（`canonicalEventSink` 仍用 TS）+ 该域 wasm 出口的宿主编码被计进
+   比值。要么切流时一并把 `frameOf` 移出计时，要么明确它量的是待接线路径。
+2. **边界二段**：宿主帧编码 3.4µs/事件（`encodeProjectorFrame`，已是分块池 + Int32 槽表，
+   剩下的账在逐字段 `TextEncoder.encode` 分配）+ patch 走 JSON 字符串（400–812KiB 的
+   Rust→JS 拷贝 + `JSON.parse`）。这是 delta-m 5.7× 的全部来源。
+3. **① 折叠去 `Value`**：mixed-m 已到 1.18×，剩下的绝对量是逐事件 base cost（约 7µs/事件）
+   与 wasm dlmalloc 相对 native 的 ~1.45×（native 26.4ms vs wasm 核内 42ms）。
+4. **高亮 1.4–3.8×**：syntect vs starry-night 引擎级差异，绝对值 <1ms。
