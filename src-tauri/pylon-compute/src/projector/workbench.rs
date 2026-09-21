@@ -456,6 +456,96 @@ impl SessionSurfaceState {
 /// `session.usage|commands|options` 用 JSON 对象透传——TS 侧这些节点是结构化
 /// 字面量且字段集开放（未知 provider 字段必须保活可见，K14），投影核只做字段
 /// 读写，用 Value 建模才能逐字段保真。
+/// 语义事件类型词表（`reduce_semantic_event` 的判别式）。
+///
+/// 单独列出来是为了让**批量入口能在动 document 之前**判定整页可投影性——页级原子性
+/// 因此不再需要「整份文档深拷 + 失败回滚」。测试 `semantic_vocabulary_matches_dispatch`
+/// 钉死它与 dispatch 的 match 一致，避免两处漂移。
+pub const SEMANTIC_EVENT_TYPES: &[&str] = &[
+    "message.started",
+    "message.delta",
+    "message.completed",
+    "reasoning.delta",
+    "reasoning.completed",
+    "reasoning.redacted",
+    "tool.started",
+    "tool.progress",
+    "tool.completed",
+    "tool.failed",
+    "activity.started",
+    "activity.progress",
+    "activity.completed",
+    "activity.failed",
+    "activity.cancelled",
+    "interaction.requested",
+    "interaction.resolved",
+    "interaction.expired",
+    "usage.updated",
+    "budget.warning",
+    "plan.replaced",
+    "plan.entry-updated",
+    "goal.updated",
+    "goal.cleared",
+    "lifecycle.retrying",
+    "lifecycle.compact-started",
+    "lifecycle.compact-completed",
+    "lifecycle.rewind-preview",
+    "lifecycle.rewind-completed",
+    "lifecycle.suspended",
+    "lifecycle.recovered",
+    "diagnostic.updated",
+    "diagnostic.notice",
+    "session.started",
+    "session.commands-updated",
+    "session.config-updated",
+    "session.model-updated",
+    "session.mode-updated",
+    "session.status-updated",
+    "session.completed",
+    "assist.prediction",
+    "assist.file-suggestions",
+    "assist.queued-command",
+    "extension.event",
+    "event.unknown",
+];
+
+/// 该语义类型是否可投影。
+pub fn is_projectable(event_type: &str) -> bool {
+    SEMANTIC_EVENT_TYPES.contains(&event_type)
+}
+
+/// 词表外的语义类型：**整页拒绝**（与 `reduce_semantic_event` 的防御分支同文案）。
+///
+/// 经 `decode_frame` 进不来（按 typeIndex 拒绝），故正常路径恒通过；它存在是为了把
+/// 「可投影性」判定挪到任何 document 变更之前。
+fn ensure_projectable(envelope: &SemanticEnvelope) -> Result<(), String> {
+    if is_projectable(&envelope.event_type) {
+        Ok(())
+    } else {
+        Err(format!(
+            "semantic 事件 {} 不在投影词表内，已拒绝投影",
+            envelope.event_type
+        ))
+    }
+}
+
+/// 本批的变更记账——取代「每批量整份 `document.clone()` + 全量 `diff_patches`」。
+///
+/// `diff_patches` 的成本是 **Θ(文档规模)**，与本次喂了多少事件无关；冷装载只调一次尚可，
+/// 而 live 路径**每事件调一次** ⇒ Θ(N)/事件 ⇒ 整体 Θ(N²)，正是本 issue 要消灭的复杂度。
+/// 改为折叠过程中记账：`timeline` 只增不减，新增即尾部区间；就地改写只发生在
+/// `update_timeline`（条目）与各处 message 写点，各自标记下标。
+///
+/// 不计入 wire/patch（`to_value` 不读它）。
+#[derive(Debug, Clone, Default)]
+pub struct ChangeSet {
+    messages_before: usize,
+    timeline_before: usize,
+    applied_ids_before: usize,
+    dirty_messages: Vec<usize>,
+    dirty_timeline: Vec<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkbenchDocument {
     pub session_id: String,
@@ -481,6 +571,74 @@ pub struct WorkbenchDocument {
     /// timeline 派生读数的增量缓存（#205 的对位物）。不是投影语义的一部分，
     /// 也不进 wire/patch（`to_value` 不读它）。
     pub timeline_cache: TimelineCache,
+    /// 本批变更记账（见 [`ChangeSet`]）。同样不进 wire/patch。
+    pub changes: ChangeSet,
+}
+
+impl WorkbenchDocument {
+    /// 开一批：记下「批前长度」，清空本批脏标记。新增区间由长度差给出。
+    pub(crate) fn begin_batch(&mut self) {
+        self.changes = ChangeSet {
+            messages_before: self.messages.len(),
+            timeline_before: self.timeline.len(),
+            applied_ids_before: self.applied_event_ids.len(),
+            dirty_messages: Vec::new(),
+            dirty_timeline: Vec::new(),
+        };
+    }
+
+    /// 标记某个 message 被就地写过（幂等；去重在 `finish_batch`）。
+    pub(crate) fn mark_message(&mut self, index: usize) {
+        if !self.changes.dirty_messages.contains(&index) {
+            self.changes.dirty_messages.push(index);
+        }
+    }
+
+    /// 标记某个既有 timeline 条目被就地改写（只有 `update_timeline` 会做）。
+    pub(crate) fn mark_timeline(&mut self, index: usize) {
+        if !self.changes.dirty_timeline.contains(&index) {
+            self.changes.dirty_timeline.push(index);
+        }
+    }
+
+    /// 收批：按记账产出 patch，并重置记账。
+    ///
+    /// 与旧的 `diff_patches` **不逐字节相等**但语义等价：可能多带「被标记而值未变」的条目
+    /// （重复下发同一内容对消费方是 no-op），绝不会少带——`change_ledger_tests` 断言
+    /// 「本产出 ⊇ diff 产出」这条不变量。
+    pub(crate) fn finish_batch(&mut self) -> WorkbenchPatch {
+        let changes = std::mem::take(&mut self.changes);
+        let mut message_indexes: Vec<usize> =
+            (changes.messages_before..self.messages.len()).collect();
+        message_indexes.extend(changes.dirty_messages.iter().copied());
+        message_indexes.sort_unstable();
+        message_indexes.dedup();
+        let message_upserts = message_indexes
+            .into_iter()
+            .map(|index| MessagePatch {
+                index,
+                message: self.messages[index].to_value(),
+            })
+            .collect();
+        let mut timeline_indexes: Vec<usize> =
+            (changes.timeline_before..self.timeline.len()).collect();
+        timeline_indexes.extend(changes.dirty_timeline.iter().copied());
+        timeline_indexes.sort_unstable();
+        timeline_indexes.dedup();
+        let timeline_upserts = timeline_indexes
+            .into_iter()
+            .map(|index| self.timeline[index].to_value())
+            .collect();
+        WorkbenchPatch {
+            revision: self.revision,
+            applied_event_ids_appended: self.applied_event_ids[changes.applied_ids_before..]
+                .to_vec(),
+            applied_ranges: self.applied_ranges.clone(),
+            timeline_upserts,
+            message_upserts,
+            session: self.session.to_value(),
+        }
+    }
 }
 
 /// TS `createWorkbenchDocument`。
@@ -512,6 +670,7 @@ pub fn create_workbench_document(session_id: &str) -> WorkbenchDocument {
         lifecycle: lifecycle_model::empty_lifecycle_state(),
         system_errors: Vec::new(),
         timeline_cache: TimelineCache::default(),
+        changes: ChangeSet::default(),
     }
 }
 
@@ -614,6 +773,12 @@ pub struct WorkbenchPatch {
     pub session: Value,
 }
 
+/// **参考实现**：从「批前/批后两份文档」推 patch。
+///
+/// 热路径已改为按 [`ChangeSet`] 记账产出 patch（成本 Θ(本页) 而非 Θ(文档规模)）；
+/// 本函数保留给 `change_ledger_tests` 做等价性断言——「记账产出必须覆盖本函数的产出」。
+/// 它只用于测试，故 `cfg(test)`，避免在发行构建里留下无人调用的全量 diff。
+#[cfg(test)]
 fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> WorkbenchPatch {
     let message_upserts = after
         .messages
@@ -971,8 +1136,10 @@ fn update_timeline(
     summary: Option<Value>,
     stream_boundary: Option<Option<bool>>,
 ) {
-    for entry in &mut document.timeline {
-        if entry.event_id == event_id {
+    for index in 0..document.timeline.len() {
+        if document.timeline[index].event_id == event_id {
+            document.mark_timeline(index);
+            let entry = &mut document.timeline[index];
             if status.is_some() {
                 entry.status = status.clone();
             }
@@ -1068,9 +1235,12 @@ fn settle_superseded_running_messages(
     if !has_superseded {
         return;
     }
-    for message in &mut document.messages {
-        if message.running && Some(message.role.as_str()) != continuing_role {
-            message.running = false;
+    for index in 0..document.messages.len() {
+        if document.messages[index].running
+            && Some(document.messages[index].role.as_str()) != continuing_role
+        {
+            document.mark_message(index);
+            document.messages[index].running = false;
         }
     }
 }
@@ -1136,9 +1306,10 @@ fn add_diagnostic(
         TERMINAL_SESSION_STATUSES.contains(&document.session.status.to_lowercase().as_str());
     let transition_to_error = failed_turn && !already_terminal;
     if transition_to_error {
-        for message_item in &mut document.messages {
-            if message_item.running {
-                message_item.running = false;
+        for index in 0..document.messages.len() {
+            if document.messages[index].running {
+                document.mark_message(index);
+                document.messages[index].running = false;
             }
         }
         document.session.status = "error".to_string();
@@ -1648,6 +1819,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
             redacted_reason: None,
             thought_started_at_ms: None,
         };
+        document.mark_message(duplicate_index);
         document.messages[duplicate_index] = replacement;
         return;
     }
@@ -1666,6 +1838,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
+                document.mark_message(index);
                 let message = &mut document.messages[index];
                 message.content.push_str(&content);
                 append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
@@ -1716,6 +1889,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
         } else {
             Some(document.messages[index].identity.clone())
         };
+        document.mark_message(index);
         let message = &mut document.messages[index];
         message.content.push_str(&content);
         append_parts_in_place(&mut message.parts, &parts, merge_display_text_pair);
@@ -1856,6 +2030,7 @@ fn settle_text_segment(document: &mut WorkbenchDocument, envelope: &SemanticEnve
     if !document.messages[index].running {
         return;
     }
+    document.mark_message(index);
     let message = &mut document.messages[index];
     message.running = false;
     message.sequence = envelope.sequence;
@@ -1955,6 +2130,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                     if let Some(reason) = event.get("reason").and_then(Value::as_str) {
                         secured.redacted_reason = Some(reason.to_string());
                     }
+                    document.mark_message(index);
                     document.messages[index] = secured;
                 }
                 return;
@@ -1978,6 +2154,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                 && text_stream_continues(document, previous_sequence, envelope.sequence)
                 && envelope.sequence < previous_sequence.max(terminal_session_sequence(document))
             {
+                document.mark_message(index);
                 let message = &mut document.messages[index];
                 message.content.push_str(&content);
                 append_parts_slice_in_place(&mut message.parts, parts_slice, merge_reasoning_pair);
@@ -2045,6 +2222,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
         } else {
             Some(document.messages[index].identity.clone())
         };
+        document.mark_message(index);
         let message = &mut document.messages[index];
         if redacted {
             // 剥敏段是**替换**而不是追加：整段换掉，语义不变。
@@ -2143,6 +2321,7 @@ fn settle_reasoning_segment(document: &mut WorkbenchDocument, envelope: &Semanti
     {
         return;
     }
+    document.mark_message(index);
     let message = &mut document.messages[index];
     message.running = false;
     message.sequence = envelope.sequence;
@@ -2490,15 +2669,17 @@ fn reduce_session(
         .unwrap_or(previous_status);
     let settles_messages = TERMINAL_SESSION_STATUSES.contains(&next_status.to_lowercase().as_str());
     if settles_messages {
-        for message in &mut document.messages {
-            if !message.running {
+        for index in 0..document.messages.len() {
+            if !document.messages[index].running {
                 continue;
             }
-            message.running = false;
-            if message.role == "reasoning" {
-                if let Some(started) = message.thought_started_at_ms {
+            document.mark_message(index);
+            document.messages[index].running = false;
+            if document.messages[index].role == "reasoning" {
+                if let Some(started) = document.messages[index].thought_started_at_ms {
                     if let Some(completed) = completed_at.filter(|value| value.is_finite()) {
-                        message.thought_duration_ms = Some((completed - started).max(0.0));
+                        document.messages[index].thought_duration_ms =
+                            Some((completed - started).max(0.0));
                     }
                 }
             }
@@ -3308,6 +3489,10 @@ pub fn reduce_workbench_event(
     } else if document.applied_event_id_set.contains(&envelope.event_id) {
         return Ok(());
     }
+    // 先判可投影性，**再动 document**：折叠路径因此不会「动了一半才失败」，批量入口也就不必
+    // 为了回滚而整份 `document.clone()`（那是每批量 Θ(文档) 成本的一半）。
+    // 放在幂等判据之后，是为了保留「重复事件直接跳过」的既有语义。
+    ensure_projectable(envelope)?;
     // C12：secret-bearing interaction 在进入任何投影面前统一剥敏。
     let effective_event = if envelope.event_type.starts_with("interaction.") {
         redact_interaction_event(&envelope.event)
@@ -3348,15 +3533,20 @@ pub fn project_batch(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| left.event_id.as_bytes().cmp(right.event_id.as_bytes()))
     });
-    let before = document.clone();
+    // 页级原子性：**先判定整页可投影性**，再动 document。于是不再需要
+    // `let before = document.clone()`（整份深拷）来兜「动了一半才失败」，
+    // 也不必在收尾做全量 `diff_patches`——那两者的成本都是 Θ(文档规模)，与本次喂了
+    // 多少事件无关；冷装载只调一次尚可，live 路径每事件调一次就是 Θ(N)/事件 ⇒ Θ(N²)。
+    // 现在每批量只按记账产出 patch：成本 Θ(本页)。
     for envelope in &sorted {
-        // 事务性：中途失败 → 回滚整页，document 不动。
-        if let Err(error) = reduce_workbench_event(document, envelope) {
-            *document = before;
-            return Err(error);
-        }
+        ensure_projectable(envelope)?;
     }
-    Ok(diff_patches(&before, document))
+    document.begin_batch();
+    for envelope in &sorted {
+        // 预检已保证不会失败；此处的 `?` 是防御分支（`reduce_semantic_event` 的 Err 不可达）。
+        reduce_workbench_event(document, envelope)?;
+    }
+    Ok(document.finish_batch())
 }
 
 // ── 帧解码（纯内层；编码器在 TS 侧 parity 测试） ─────────────────────────────
@@ -6149,5 +6339,291 @@ mod text_slice_equivalence_tests {
             );
             assert_eq!(via_slice, via_value, "seed={seed}");
         }
+    }
+}
+
+#[cfg(test)]
+mod change_ledger_tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn envelope(
+        sequence: f64,
+        event: Value,
+        identity: Value,
+        coverage: Option<(f64, f64)>,
+    ) -> SemanticEnvelope {
+        let identity_object = identity.as_object().cloned().unwrap_or_default();
+        let get = |key: &str| {
+            identity_object
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        SemanticEnvelope {
+            event_type: event
+                .get("type")
+                .and_then(Value::as_str)
+                .expect("type")
+                .to_string(),
+            sequence,
+            event_id: format!(
+                "ledger-{sequence}-{}",
+                event.get("type").and_then(Value::as_str).unwrap_or("")
+            ),
+            session_id: "session-ledger".to_string(),
+            recorded_at: "2026-09-21T00:00:00.000Z".to_string(),
+            occurred_at: None,
+            identity: Identity {
+                turn_id: get("turnId"),
+                message_id: get("messageId"),
+                tool_call_id: get("toolCallId"),
+                task_id: get("taskId"),
+                run_id: get("runId"),
+                interaction_id: get("interactionId"),
+            },
+            source: EventSource {
+                provider: "peri".to_string(),
+                source_id: format!("wire-{sequence}"),
+                agent_id: None,
+                parent_agent_id: None,
+            },
+            provenance_origin: 0,
+            provenance_trust: 0,
+            provenance_extra: None,
+            coverage,
+            event,
+        }
+    }
+
+    /// 一条覆盖全部变形点的流：追加文本段、就地改同一条 reasoning（content + parts）、
+    /// 工具往返（走 `update_timeline`）、整表 `running=false`（session 终态），
+    /// 以及一条重复事件（应被幂等跳过、不产 upsert）。
+    fn full_stream() -> Vec<SemanticEnvelope> {
+        let mut all: Vec<SemanticEnvelope> = Vec::new();
+        let mut sequence = 0.0_f64;
+        let mut push = |all: &mut Vec<SemanticEnvelope>,
+                        event: Value,
+                        identity: Value,
+                        coverage: Option<(f64, f64)>| {
+            sequence += 1.0;
+            let at = sequence;
+            all.push(envelope(at, event, identity, coverage));
+        };
+        push(
+            &mut all,
+            json!({ "type": "message.started", "role": "user", "parts": [{ "kind": "text", "text": "问" }] }),
+            json!({ "messageId": "u1", "turnId": "t1" }),
+            None,
+        );
+        push(
+            &mut all,
+            json!({ "type": "message.completed", "role": "user" }),
+            json!({ "messageId": "u1", "turnId": "t1" }),
+            None,
+        );
+        push(
+            &mut all,
+            json!({ "type": "message.started", "role": "assistant" }),
+            json!({ "messageId": "a1", "turnId": "t1" }),
+            None,
+        );
+        for index in 0..6 {
+            push(
+                &mut all,
+                json!({ "type": "message.delta", "role": "assistant", "parts": [{ "kind": "text", "text": format!("段{index}") }] }),
+                json!({ "messageId": "a1", "turnId": "t1" }),
+                None,
+            );
+            push(
+                &mut all,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("想{index}") }] }),
+                json!({ "messageId": "r1", "turnId": "t1" }),
+                None,
+            );
+        }
+        push(
+            &mut all,
+            json!({ "type": "tool.started", "tool": { "toolCallId": "tool-1", "title": "Read" } }),
+            json!({ "toolCallId": "tool-1", "turnId": "t1" }),
+            None,
+        );
+        push(
+            &mut all,
+            json!({ "type": "tool.progress", "progress": { "percent": 40 } }),
+            json!({ "toolCallId": "tool-1", "turnId": "t1" }),
+            None,
+        );
+        push(
+            &mut all,
+            json!({ "type": "tool.completed", "result": { "ok": true } }),
+            json!({ "toolCallId": "tool-1", "turnId": "t1" }),
+            None,
+        );
+        let duplicate = all[3].clone();
+        all.push(duplicate);
+        push(
+            &mut all,
+            json!({ "type": "message.completed", "role": "assistant" }),
+            json!({ "messageId": "a1", "turnId": "t1" }),
+            None,
+        );
+        push(
+            &mut all,
+            json!({ "type": "session.completed", "status": "completed" }),
+            json!({}),
+            None,
+        );
+        all
+    }
+
+    /// 折入组合：非零前缀 × 各种批大小，外加冷批（前缀 0）与 live 粒度（1 条一批）。
+    fn scenarios() -> Vec<(usize, Vec<SemanticEnvelope>)> {
+        let all = full_stream();
+        let mut out: Vec<(usize, Vec<SemanticEnvelope>)> = Vec::new();
+        for prefix in [0usize, 5, 12, all.len() - 4] {
+            for batch_size in [1usize, 3, 7, usize::MAX] {
+                let end = if batch_size == usize::MAX {
+                    all.len()
+                } else {
+                    (prefix + batch_size).min(all.len())
+                };
+                if prefix >= end {
+                    continue;
+                }
+                out.push((prefix, all[prefix..end].to_vec()));
+            }
+        }
+        out
+    }
+
+    fn timeline_by_event_id(patch: &WorkbenchPatch) -> HashMap<String, Value> {
+        patch
+            .timeline_upserts
+            .iter()
+            .filter_map(|value| {
+                let event_id = value.get("eventId").and_then(Value::as_str)?.to_string();
+                Some((event_id, value.clone()))
+            })
+            .collect()
+    }
+
+    fn messages_by_index(patch: &WorkbenchPatch) -> HashMap<usize, Value> {
+        patch
+            .message_upserts
+            .iter()
+            .map(|entry| (entry.index, entry.message.clone()))
+            .collect()
+    }
+
+    /// 记账 patch 与 `diff_patches` 的语义等价：**前者必须覆盖后者**。多带「被标记而值未变」
+    /// 的条目对消费方是 no-op；少带就是陈旧读——宁可多带，绝不可少带。
+    #[test]
+    fn ledger_patch_covers_diff_patch() {
+        let stream = full_stream();
+        for (prefix, batch) in scenarios() {
+            let mut document = create_workbench_document("session-ledger");
+            for event in &stream[..prefix] {
+                reduce_workbench_event(&mut document, event).expect("prefix");
+            }
+            let before = document.clone();
+            document.begin_batch();
+            for event in &batch {
+                ensure_projectable(event).expect("projectable");
+                reduce_workbench_event(&mut document, event).expect("fold");
+            }
+            let ledger = document.finish_batch();
+            let reference = diff_patches(&before, &document);
+
+            let label = format!("prefix={prefix} batch={}", batch.len());
+            assert_eq!(ledger.revision, reference.revision, "{label}");
+            assert_eq!(
+                ledger.applied_event_ids_appended, reference.applied_event_ids_appended,
+                "{label}"
+            );
+            assert_eq!(ledger.applied_ranges, reference.applied_ranges, "{label}");
+            assert_eq!(ledger.session, reference.session, "{label}");
+
+            let ledger_timeline = timeline_by_event_id(&ledger);
+            for (event_id, value) in timeline_by_event_id(&reference) {
+                assert_eq!(
+                    ledger_timeline.get(&event_id),
+                    Some(&value),
+                    "timeline 条目 {event_id} 被漏带（{label}）"
+                );
+            }
+            let ledger_messages = messages_by_index(&ledger);
+            for (index, value) in messages_by_index(&reference) {
+                assert_eq!(
+                    ledger_messages.get(&index),
+                    Some(&value),
+                    "message #{index} 被漏带（{label}）"
+                );
+            }
+            // 反向钉住「不膨胀」：记账按被标记的下标逐条记，故多带只可能是常量级增量。
+            assert!(
+                ledger.timeline_upserts.len() <= reference.timeline_upserts.len() + 2,
+                "timeline upsert 膨胀：{} vs {}（{label}）",
+                ledger.timeline_upserts.len(),
+                reference.timeline_upserts.len()
+            );
+            assert!(
+                ledger.message_upserts.len() <= reference.message_upserts.len() + 2,
+                "message upsert 膨胀：{} vs {}（{label}）",
+                ledger.message_upserts.len(),
+                reference.message_upserts.len()
+            );
+        }
+    }
+
+    /// 词表与 dispatch 的 match 必须同源——两处漂移会让「预检通过但归约器拒绝」或反之。
+    #[test]
+    fn semantic_vocabulary_matches_dispatch() {
+        for event_type in SEMANTIC_EVENT_TYPES {
+            let mut document = create_workbench_document("session-vocab");
+            let item = envelope(1.0, json!({ "type": event_type }), json!({}), None);
+            assert!(
+                reduce_semantic_event(&mut document, &item).is_ok(),
+                "{event_type} 在词表内，但 dispatch 拒绝了它"
+            );
+        }
+        for outsider in ["", "nope", "message.", "Message.delta", "session.unknown"] {
+            let mut document = create_workbench_document("session-vocab");
+            let item = envelope(1.0, json!({ "type": outsider }), json!({}), None);
+            assert!(
+                reduce_semantic_event(&mut document, &item).is_err(),
+                "{outsider} 不在词表内，但 dispatch 接受了它"
+            );
+        }
+    }
+
+    /// 幂等：同一批喂两次，第二次不得产任何 upsert（记账也不该积累）。
+    #[test]
+    fn duplicate_batch_produces_no_upserts() {
+        let stream = full_stream();
+        let mut document = create_workbench_document("session-ledger");
+        document.begin_batch();
+        for event in &stream {
+            reduce_workbench_event(&mut document, event).expect("first");
+        }
+        let _ = document.finish_batch();
+        document.begin_batch();
+        for event in &stream {
+            reduce_workbench_event(&mut document, event).expect("second");
+        }
+        let second = document.finish_batch();
+        assert!(
+            second.timeline_upserts.is_empty(),
+            "重复批带了 timeline upsert"
+        );
+        assert!(
+            second.message_upserts.is_empty(),
+            "重复批带了 message upsert"
+        );
+        assert!(
+            second.applied_event_ids_appended.is_empty(),
+            "重复批带了 applied ids"
+        );
     }
 }
