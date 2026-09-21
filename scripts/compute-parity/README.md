@@ -88,6 +88,17 @@ JS `Map` 的 BTreeMap 深转回普通对象（与 `pylon-markdown/src/wasm_exit.
 2. 编组变体出口（`*Json`）与诊断出口（`markdownEngineVersion`）在 `EXEMPT_EXPORTS`。
 3. 改帧格式：`fixtures/eventsFrame.ts`（PYPB v1）与生产 parity 测试要一起改。
 
+## 口径提醒：events 域尚未接线
+
+`events` 域的批量出口（`mergeAdjacentDeltaChunks` / `canonicalBatchSpanOf` /
+`projectCanonicalMessages` / `projectToolProjectionsFromBatch` …）**在生产里还没接线** ——
+`src/infrastructure/events/canonicalEventSink.ts` 与 `canonicalEventBatch.ts` 仍 import TS 实现。
+所以本域比值量的是**待接线路径**，不代表当前生产收益/成本。
+
+另：这些 pair 的 wasm 侧在计时 lambda 内调用 `encodeEventsFrame`，即**宿主帧编码也计入
+「wasm 侧」**。该编码器已于 2026-09-21 按生产技术重写（`encodeInto` + 分块池 + Int32 槽表 +
+i64 拆字，见其头注），并做过**新旧逐字节对照（17 帧 0 差异）**；但读数时仍应记得这一段不是计算核。
+
 ## 已下线的比较面（2026-09-21 裁决）
 
 `parseMarkdown` / `highlightBlock` / `scopeForLanguage` 的 TS 基线（`baselines/oldMarkdownParsePipeline.ts`、
