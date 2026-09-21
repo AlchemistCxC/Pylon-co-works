@@ -313,7 +313,14 @@ impl RevealEngine {
         }
         // 未武装的窗口（平滑流）或已过期的窗口（被节流的后台定时器）在这里重启，
         // 倒计时不会退化成"这一帧揭示剩余全部"。
-        if !(self.catch_up_deadline > now) {
+        // 写成 `partial_cmp != Greater` 而不是 `deadline <= now`：这必须与 JS 的
+        // `!(deadline > now)` 逐字同义，而 NaN 下两者会翻转（NaN 参与比较时 `<=`
+        // 为假、`!(>)` 为真）。契约把 NaN 视为"窗口未武装"，故保留否定形式。
+        if self
+            .catch_up_deadline
+            .partial_cmp(&now)
+            .is_none_or(|ordering| ordering != core::cmp::Ordering::Greater)
+        {
             self.catch_up_deadline = now + self.max_reveal_lag_ms;
             self.catch_up_windows += 1;
         }

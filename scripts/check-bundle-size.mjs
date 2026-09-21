@@ -31,13 +31,20 @@ const CHUNK_BUDGET = 450_000
 const TOTAL_GZIP_BUDGET = 1_615_000
 
 // #220：wasm 产物独立预算。此前 dist/assets 里的 .wasm 完全无人记账
-// （starry-night 的 onig 473,155 B raw / 161,144 B gzip 一直静默躺在总额之外）。
-// 定标依据（2026-09-21 实测，`#220` 施工期）：
-//   onig-CwjCXqnP.wasm          473,155 B raw / 161,144 B gzip（既存）
-//   pylon_compute_bg-*.wasm      50,939 B raw /  22,790 B gzip（计算核，WP2 接线后才进产物）
-// 合计 183,934 B gzip。按 200,000 定标，留约 8% 余量。
-// WP4（comrak + syntect 高亮）预计显著抬高这一项，届时按实产物重定标。
-const WASM_TOTAL_GZIP_BUDGET = 200_000
+// （starry-night 的 onig 473,151 B raw / 161,144 B gzip 一直静默躺在总额之外）。
+// 定标依据（2026-09-21 实测，`#220` 施工期，`node scripts/build-wasm.mjs` + gzip(9)）：
+//   onig-CwjCXqnP.wasm           473,151 B raw / 162,421 B gzip（既存，starry-night）
+//   pylon_compute_bg.wasm        817,965 B raw / 296,113 B gzip（WP2 投影核 + WP3 流式核）
+//   pylon_markdown_bg.wasm     2,873,112 B raw / 904,589 B gzip（WP4 comrak + vendored 语法）
+//   两侧 glue JS                                                 /  12,240 B gzip
+// 合计约 1,375,363 B gzip。按 1,450,000 定标，留约 5% 余量。
+//
+// **这一档值得单独盯**：wasm 总量已接近 js 总额（1,615,000）的量级，而其中 904,589 B
+// 是 pylon-markdown 的 vendored tmLanguage 语法（14 份，压缩前 711,931 B minified）。
+// 降体积的正路是**按语言惰性取语法**（首次高亮某语言时才加载该语言的语法资产），
+// 那需要把高亮路径改成「语法就绪后再整块过界」的两段式；本 WP 未做，故先如实记账。
+// 若后续不接受这个量级，请以惰性语法为方向立项，而不是继续抬预算。
+const WASM_TOTAL_GZIP_BUDGET = 1_450_000
 
 if (!exists(distDir)) {
   console.error('dist/assets 不存在——请先 npm run build')

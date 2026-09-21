@@ -555,8 +555,8 @@ mod tests {
         ];
         let items = merge(events);
         assert_eq!(items.len(), 4);
-        for index in 0..4 {
-            assert!(matches!(items[index], BatchItem::Event { index: got } if got == index));
+        for (position, item) in items.iter().enumerate() {
+            assert!(matches!(item, BatchItem::Event { index: got } if *got == position));
         }
     }
 
@@ -570,8 +570,8 @@ mod tests {
         ];
         let items = merge(events);
         assert_eq!(items.len(), 3);
-        for index in 0..3 {
-            assert!(matches!(items[index], BatchItem::Event { index: got } if got == index));
+        for (position, item) in items.iter().enumerate() {
+            assert!(matches!(item, BatchItem::Event { index: got } if *got == position));
         }
     }
 
@@ -616,8 +616,8 @@ mod tests {
         // 40k CJK ≈ 120KB JSON（超过 48KiB 预算）→ 单条保持原事件；
         // 后续小 delta 自成 run 但单条不合并。
         assert_eq!(items.len(), 3);
-        for index in 0..3 {
-            assert!(matches!(items[index], BatchItem::Event { index: got } if got == index));
+        for (position, item) in items.iter().enumerate() {
+            assert!(matches!(item, BatchItem::Event { index: got } if *got == position));
         }
     }
 
