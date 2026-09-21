@@ -77,7 +77,11 @@ for (const base of ['examples', 'src/plugins/product/packages']) {
 }
 
 const nativeCommands = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
-const nativeStore = readFileSync(join(root, 'src-tauri/src/plugin_cmds.rs'), 'utf8')
+// #228 批次D 后 plugin_cmds 分家为目录子模块；守卫语义不变——对全部 .rs 拼接面做旧命令负向断言。
+const nativeStore = walk(join(root, 'src-tauri/src/plugin_cmds'))
+  .filter(path => path.endsWith('.rs'))
+  .map(path => readFileSync(path, 'utf8'))
+  .join('\n')
 for (const command of [
   'plugin_state_get', 'plugin_state_set', 'plugin_list_installed',
   'plugin_read_installed', 'plugin_read_source', 'plugin_install', 'plugin_uninstall',
