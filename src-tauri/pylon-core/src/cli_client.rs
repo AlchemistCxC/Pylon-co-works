@@ -66,15 +66,30 @@ pub async fn invoke_running_kernel(
     #[cfg(windows)]
     let stream = {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        // 管道服务端可能尚未就绪：指数退避重试（50ms 起步、×2、封顶 800ms），
+        // 总连接窗口仍约 5s。最后一次错误原样进入返回值，附带尝试次数与
+        // 耗时便于诊断（中途错误仅用于驱动退避）。
+        const CONNECT_DEADLINE: Duration = Duration::from_secs(5);
+        const BACKOFF_INITIAL_MS: u64 = 50;
+        const BACKOFF_MAX_MS: u64 = 800;
+        let started = tokio::time::Instant::now();
+        let deadline = started + CONNECT_DEADLINE;
+        let mut backoff_ms = BACKOFF_INITIAL_MS;
+        let mut attempts: u32 = 0;
         loop {
+            attempts += 1;
             match ClientOptions::new().open(WINDOWS_PIPE_NAME) {
                 Ok(client) => break client,
-                Err(error) if tokio::time::Instant::now() < deadline => {
-                    let _ = error;
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                Err(error) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(format!(
+                            "connect {WINDOWS_PIPE_NAME} failed after {attempts} attempt(s) in {}ms: {error}",
+                            started.elapsed().as_millis()
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = (backoff_ms * 2).min(BACKOFF_MAX_MS);
                 }
-                Err(error) => return Err(format!("connect {WINDOWS_PIPE_NAME} failed: {error}")),
             }
         }
     };

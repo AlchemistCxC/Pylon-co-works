@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import type { PluginIdentity } from '../plugin-runtime/pluginIdentity.ts'
 import type { AsyncDisposable } from '../plugin-runtime/registry/types.ts'
 import { notifyRegistryListener } from './registryBatch.ts'
+import { createDeferrableDisposable } from '../utils/deferrableDisposable.ts'
 
 export interface Disposable { dispose: () => void }
 export interface ApplicationContribution { id: string; component: ComponentType }
@@ -105,7 +106,7 @@ export function createApplicationRuntime(): ApplicationRuntime {
         register: contribution => {
           if (settled) throw new Error(`Application transaction 已结算：${owner.key}`)
           const entry = Object.freeze({ ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key, contribution: normalize(contribution) })
-          const item = { entry, cancelled: false, proxy: undefined as unknown as AsyncDisposable }
+          const item = { entry, cancelled: false, proxy: createDeferrableDisposable() }
           item.proxy = { dispose: () => {
             if (item.cancelled) return
             item.cancelled = true

@@ -33,11 +33,6 @@ pub struct ReplayCapture {
     _active_replay: ActiveReplayRegistration,
 }
 
-/// Compatibility name retained for callers that still refer to the old handle
-/// type; new code must construct captures through `begin_replay_capture`.
-#[allow(dead_code)]
-pub type ReplayHandles = ReplayCapture;
-
 struct ActiveReplayRegistration {
     request_id: u64,
     requests: Arc<Mutex<HashMap<u64, String>>>,

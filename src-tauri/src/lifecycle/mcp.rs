@@ -15,8 +15,10 @@ pub(crate) fn mcp_persist_path(state: &AppState) -> Result<std::path::PathBuf, S
     Ok(crate::paths::mcp_persist_path(state.data_dirs()?))
 }
 
-/// 原子写 MCP 配置：临时文件 + rename，中断不留半截 JSON。
-/// 写失败只 warn，不阻断主流程（尽力持久化）。
+/// 原子写 MCP 配置：唯一临时文件 + rename，中断不留半截 JSON。经 agent_config
+/// 正身 [`crate::agent_config::AtomicWriteOptions`] 收敛（issue #228 批次D）。
+/// 历史行为保留：不 fsync 临时文件（best-effort 持久化）。写失败只 warn，
+/// 不阻断主流程。
 pub(crate) fn persist_mcp_if_possible(state: &AppState, servers: &[crate::mcp::McpServerConfig]) {
     let path = match mcp_persist_path(state) {
         Ok(path) => path,
@@ -32,30 +34,11 @@ pub(crate) fn persist_mcp_if_possible(state: &AppState, servers: &[crate::mcp::M
             return;
         }
     };
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            tracing::warn!("create MCP persist directory failed: {error}");
-            return;
-        }
-    }
-    // 审查修复：唯一 temp（pid+时间戳）——并发 set_mcp_servers 不得互相截断写坏
-    let unique = path.with_file_name(format!(
-        ".{}.{}.{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("mcp"),
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0),
-    ));
-    let result = (|| {
-        std::fs::write(&unique, json.as_bytes())
-            .map_err(|error| format!("write temporary MCP config failed: {error}"))?;
-        std::fs::rename(&unique, &path)
-            .map_err(|error| format!("commit MCP config failed: {error}"))
-    })();
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(&unique);
+    if let Err(error) = crate::agent_config::write_file_atomically(
+        &path,
+        json.as_bytes(),
+        crate::agent_config::AtomicWriteOptions::best_effort_data_file(),
+    ) {
         tracing::warn!("persist MCP config failed: {error}");
     }
 }

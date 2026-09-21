@@ -3,8 +3,11 @@ import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it } from 'vitest'
 
-// P91 C 批 retry 退役后全量并发下的预算放宽：揭示链（P89 调度器心跳）在满载
-// worker 上可超 waitFor 默认 1s——根因是预算不是产品（同 pluginManagerDefaultPage 先例）。
+// 预算放宽（P91 C 批 retry 退役期设定，#228 批次F 复核后保留）：揭示链（P89 调度器
+// 心跳）在满载 worker 上可超 waitFor 默认 1s——根因是并发环境不是产品（同
+// pluginManagerDefaultPage 先例）。回收条件（满足其一即回收至默认 1s）：
+//   1) 揭示/发布链暴露确定性 flush 或调度器 tick 钩子，用例改为显式驱动揭示；
+//   2) 批次E 流式揭示链根因修复落地后，全量连跑 5 轮默认预算 0 超时。
 const REVEAL_BUDGET = { timeout: 4_000 }
 import { ReasoningBlock } from '../MessageRow.solid.tsx'
 import { mountSolidWorkbench } from '../../mountSolidWorkbench.solid.tsx'

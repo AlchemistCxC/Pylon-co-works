@@ -134,10 +134,13 @@ export interface ApprovalControlPort {
   set(mode: string): Promise<void>
 }
 
-/** interaction list 条目（respond 所需完整 identity + 展示字段）。 */
+/** interaction list 条目（respond 所需完整 identity + 展示字段）。
+ *  `kind` 是 respond 必传的应答词项，来自后端投影（权限请求恒为 "approval"，
+ *  见 permission.rs interaction_list）——透传，禁止硬编码（#36）。 */
 export interface InteractionItem {
   provider: string
   agentId: string
+  kind: string
   requestId: string
   sessionId: string
   toolCallId: string
@@ -195,18 +198,27 @@ function record(value: unknown): Record<string, unknown> {
     : {}
 }
 
+/** CLI 壳（pylon-cli.rs parse_value）按 JSON 类型化所有 token：纯数字
+ *  positional/flag 值以 number 到达。字符串参数按 O27 标量宽松化先例无损
+ *  收编（#229），壳层类型化设计不动。 */
+function scalarString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
 function stringArg(args: Record<string, unknown>, key: string, position?: number): string {
-  const direct = args[key]
-  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  const direct = scalarString(args[key])
+  if (direct) return direct
   const positionals = Array.isArray(args.positionals) ? args.positionals : []
   const positional = position === undefined ? undefined : positionals[position]
-  if (typeof positional === 'string' && positional.trim()) return positional.trim()
+  const positionalString = scalarString(positional)
+  if (positionalString) return positionalString
   throw new Error(`${key} 必须是非空字符串`)
 }
 
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
-  const value = args[key]
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return scalarString(args[key])
 }
 
 function positiveInteger(value: unknown, fallback: number, maximum = Number.MAX_SAFE_INTEGER): number {
@@ -229,8 +241,22 @@ function commandArguments(args: Record<string, unknown>): Record<string, unknown
   return forwarded
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** 错误文本归一（#36）：Tauri 命令 reject 的是 PylonError 序列化出的结构化
+ *  对象 `{code, message}`，不是 Error 实例——裸 String(obj) 得到 "[object Object]"，
+ *  真实失败原因（kind 门禁、revision 冲突等）全部丢失。优先取结构化 message，
+ *  其余对象受控 JSON 序列化兜底。pylonCliBridge 的 native 回包同用此实现。 */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message !== '') return message
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
 }
 
 function isHotSwapMode(value: unknown): value is HotSwapMode {
@@ -484,12 +510,29 @@ export class PylonCliService {
       case 'interaction respond':
         return this.mutate(command, options.signal, async () => {
           const requestId = stringArg(args, 'requestId', 0)
-          const optionId = optionalString(args, 'optionId') ?? stringArg(args, 'optionId', 1)
+          const positionals = Array.isArray(args.positionals) ? args.positionals : []
+          const optionId = optionalString(args, 'optionId') ?? scalarString(positionals[1])
+          // #230：ask-user/elicitation 类自由作答——values（questionId→label 表）
+          // 或 text（单值/feedback），经 --args JSON 传入。
+          const values = args.values === undefined ? undefined : record(args.values)
+          if (args.values !== undefined && (typeof args.values !== 'object' || Array.isArray(args.values))) {
+            throw new Error('values 必须是对象（questionId → label/label 数组）')
+          }
+          const text = optionalString(args, 'text')
           const items = (await this.ports.interactions.list()).items
           const found = items.find(item => item.requestId === requestId)
           if (!found) throw new Error(`挂起交互不存在（已应答/超时）：${requestId}`)
-          if (!found.options.some(option => option.optionId === optionId)) {
+          if (optionId !== undefined && found.options.length > 0
+            && !found.options.some(option => option.optionId === optionId)) {
             throw new Error(`非法 optionId：${optionId}（可用：${found.options.map(option => option.optionId).join(', ')}）`)
+          }
+          if (optionId === undefined && values === undefined && !text) {
+            // ask-user（options 为空）的 declined 与 ask-user 之外的白名单动作
+            // 都经 optionId 表达；三者皆缺则无合法应答形状。
+            throw new Error('必须提供 optionId，或携带 values / text 的自由作答')
+          }
+          if (optionId !== undefined && found.options.length === 0 && optionId !== 'declined') {
+            throw new Error(`非法 optionId：${optionId}（此类交互仅支持 declined 或 values/text 自由作答）`)
           }
           await this.ports.interactions.respond({
             provider: found.provider,
@@ -498,8 +541,8 @@ export class PylonCliService {
             sessionId: found.sessionId,
             toolCallId: found.toolCallId || null,
             clientGeneration: found.clientGeneration,
-          }, 'permission', { optionId })
-          return { requestId, optionId, responded: true }
+          }, found.kind, { optionId, text, values })
+          return { requestId, optionId: optionId ?? null, responded: true }
         })
       // ── 第二批：注册表工作区 CRUD / 会话配置 / 导出 ──
       case 'workspace registry list':

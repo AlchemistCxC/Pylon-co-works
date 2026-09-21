@@ -6,9 +6,7 @@ import { useStore } from '../../../store.ts'
 import { buildExportPayload, preflightImportPayload } from '../../../configExportImport.ts'
 import { activateInterfaceMode } from '../../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore.ts'
-
-function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
-function text(value: unknown, key: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 必须是非空字符串`); return value.trim() }
+import { record, text } from '../../../utils/wireGuards.ts'
 
 export function createBuiltinShellCommandDefinitions(): CommandDefinition[] {
   const base = 600

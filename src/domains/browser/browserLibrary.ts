@@ -6,6 +6,7 @@
  * library data, so keeping them in a versioned local store makes the same contract
  * work in Tauri and the iframe preview without leaking cookies or page storage.
  */
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export interface HistoryEntry {
   readonly id: string
@@ -64,10 +65,6 @@ export const MAX_CONSOLE_ENTRIES = 300
 
 export function createEmptyBrowserLibrary(): BrowserLibrary {
   return { version: 1, history: [], bookmarks: [], downloads: [], console: [] }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function nonEmptyString(value: unknown): string | undefined {

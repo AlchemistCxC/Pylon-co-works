@@ -1,8 +1,11 @@
 /**
- * #81 L1：canonicalRowToWorkbench 的 batch 行展开测试。
- * - batch 行按 seqSpan 展开重建 sub-envelope（eventId = owner#(seqSpan[0]+i)）⇒
- *   appliedEventIds 与逐 chunk 存储逐一相同、文档逐字节相等；
- * - live 路径（sink 发布合并行）与逐 chunk 发布的文档一致；
+ * #81 L1 → #226：canonicalRowToWorkbench 的 batch 行展开测试。
+ * - #226 起 batch 行按**段级**展开（一行一个 run 信封，coverage=[seqStart,seqEnd]）：
+ *   消息面（role/content/identity/sequence/running/time）与 appliedRanges 和逐 chunk
+ *   存储**逐字节一致**；timeline 按聚合行粒度对应（每条聚合行一个条目，sequence =
+ *   跨度末位，kind 与逐 chunk 展开同序列条目一致）——timeline 不再逐 chunk 逐字节
+ *   相等，这正是 #226 的目的（信封数随折叠比下降）；
+ * - live 路径（sink 发布合并行）与逐 chunk 发布的消息面一致；
  * - 形状损坏的 batch 行退回单行归一（event.unknown，raw 不丢，不崩溃）。
  */
 import { describe, expect, it } from 'vitest'
@@ -10,6 +13,7 @@ import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch'
 import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
 import type { Session } from '../../identityStore.ts'
+import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
@@ -73,8 +77,16 @@ async function bindWith(rows: readonly unknown[]) {
   return snapshot
 }
 
-describe('agentWorkbenchSession batch 展开（#81 L1）', () => {
-  it('replay：batch 行展开的 appliedEventIds 与文档和逐 chunk 存储逐字节一致', async () => {
+/** 渲染相关的消息面（不含渲染键 id/segmentId/sourceId——#226 起聚合行用 run 级键）。 */
+function comparableMessages(document: WorkbenchDocument | undefined) {
+  return document?.messages.map(message => ({
+    role: message.role, content: message.content, identity: message.identity,
+    sequence: message.sequence, running: message.running, time: message.time,
+  }))
+}
+
+describe('agentWorkbenchSession batch 展开（#81 L1 → #226）', () => {
+  it('replay：batch 段级展开的消息面/appliedRanges 与逐 chunk 逐字节一致，timeline 按聚合行对应', async () => {
     const wires = [
       rawUser('问题'),
       rawThinking('思考'),
@@ -92,14 +104,19 @@ describe('agentWorkbenchSession batch 展开（#81 L1）', () => {
     const fromChunks = await bindWith(perChunk)
     const fromBatch = await bindWith(merged)
 
-    expect(JSON.stringify(fromBatch.document)).toBe(JSON.stringify(fromChunks.document))
+    expect(comparableMessages(fromBatch.document)).toEqual(comparableMessages(fromChunks.document))
     // #81 L2：journal 信封改按 appliedRanges 覆盖幂等（appliedEventIds 只留非 journal 信封）
     expect(fromBatch.document?.appliedEventIds).toEqual(fromChunks.document?.appliedEventIds)
     expect(fromBatch.document?.appliedRanges).toEqual([[1, 8]])
     expect(fromChunks.document?.appliedRanges).toEqual([[1, 8]])
+    // #226：每条聚合行一个 timeline 条目（sequence = 跨度末位），kind 与逐 chunk 展开
+    // 在同一 sequence 上的条目一致（run 末条即它替换的那条）。
+    const chunkKindBySequence = new Map(fromChunks.document?.timeline.map(entry => [entry.sequence, entry.kind]))
+    expect(fromBatch.document?.timeline.map(entry => ({ sequence: entry.sequence, kind: entry.kind })))
+      .toEqual(merged.map(row => ({ sequence: row.sequence, kind: chunkKindBySequence.get(row.sequence) })))
   })
 
-  it('live：sink 发布的合并行经订阅展开后，文档与逐 chunk 发布一致', async () => {
+  it('live：sink 发布的合并行经订阅展开后，消息面与逐 chunk 发布一致', async () => {
     const wires = [rawText('你'), rawText('好'), rawText('世界')]
     const perChunk = chunkRows(wires)
     const [batch] = mergeAdjacentDeltaChunks(perChunk)
@@ -119,7 +136,7 @@ describe('agentWorkbenchSession batch 展开（#81 L1）', () => {
 
     const fromChunks = await buildLive(perChunk)
     const fromBatch = await buildLive([batch])
-    expect(JSON.stringify(fromBatch.document)).toBe(JSON.stringify(fromChunks.document))
+    expect(comparableMessages(fromBatch.document)).toEqual(comparableMessages(fromChunks.document))
     expect(fromBatch.document?.messages.some(message => message.role === 'assistant' && message.content === '你好世界')).toBe(true)
   })
 
@@ -133,6 +150,21 @@ describe('agentWorkbenchSession batch 展开（#81 L1）', () => {
     const snapshot = await bindWith([rawUser('q') as unknown, corrupt, rawDone() as unknown].slice(0, 2))
     expect(snapshot.document?.diagnostics.some(item => item.code === 'canonical.journal.malformed')).toBe(true)
     expect(snapshot.status).toBe('degraded')
+  })
+
+  it('#226 回退：chunk 归一偏离 batch 期望形状时整行退回逐 chunk 展开（不丢语义）', async () => {
+    // 聚合行形状自洽，但 rawPayload[0] 归一为 tool.started（≠ message.delta）——
+    // 段级展开必须整体退回逐 chunk，工具卡与文本都不得丢失。
+    const corrupt: CanonicalConversationEvent = {
+      ...chunkRows([rawText('a')])[0],
+      eventType: 'assistant.text.delta.batch',
+      typedPayload: { text: 'a', foldedCount: 2, seqSpan: [1, 2] },
+      rawPayload: [rawToolStart('tool-9'), rawText('a')],
+    }
+    const snapshot = await bindWith([corrupt])
+    expect(snapshot.document?.activities.some(activity => activity.id === 'tool-9')).toBe(true)
+    expect(snapshot.document?.messages.some(message => message.role === 'assistant' && message.content === 'a')).toBe(true)
+    expect(snapshot.document?.diagnostics.some(item => item.code === 'canonical.journal.malformed')).toBe(false)
   })
 })
 

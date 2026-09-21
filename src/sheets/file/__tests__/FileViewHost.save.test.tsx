@@ -50,11 +50,11 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
   it('打开文件直接进入 CodeMirror 编辑态，并可切换回只读；truncated 时禁用编辑', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     await waitForFileEditor('const x = 1')
-    expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退出编辑' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
-    expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
   })
 
   it('truncated 文件：编辑按钮禁用（内容不完整不可编辑）', async () => {
@@ -114,8 +114,8 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await screen.findByText(/磁盘文件已被外部修改/)
     expect(invoke).toHaveBeenCalledWith('write_workspace_text', expect.objectContaining({ force: false }))
     expect(fileEditorView().state.doc.toString()).toBe('const x = 2')
-    expect(screen.getByRole('button', { name: '覆盖保存' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '重新加载' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '覆盖保存' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument()
   })
 
   it('覆盖保存：force=true 显式跳过基线检查，成功后冲突条消失', async () => {
@@ -163,7 +163,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }))
     await waitFor(() => expect(invoke.mock.calls.filter(([cmd]) => cmd === 'read_workspace_text').length).toBeGreaterThan(readsBefore))
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
-    expect(screen.getByText('const x = 1')).toBeTruthy()
+    expect(screen.getByText('const x = 1')).toBeInTheDocument()
     expect(screen.queryByText(/磁盘文件已被外部修改/)).toBeNull()
   })
 
@@ -172,9 +172,9 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await waitForFileEditor('const x = 1')
     await editAndType()
     await screen.findByText(/未保存/)
-    expect(screen.getByText('+1 −1 未保存')).toBeTruthy()
-    expect(screen.getByText('变更预览')).toBeTruthy()
-    expect(screen.getByText('1 additions · 1 deletions')).toBeTruthy()
+    expect(screen.getByText('+1 −1 未保存')).toBeInTheDocument()
+    expect(screen.getByText('变更预览')).toBeInTheDocument()
+    expect(screen.getByText('1 additions · 1 deletions')).toBeInTheDocument()
     expect(fileEditorView().state.doc.toString()).toBe('const x = 2')
   })
 
@@ -220,7 +220,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
 
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
     expect(screen.queryByText(/未保存/)).toBeNull()
-    expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '退出编辑' })).toBeInTheDocument()
   })
 
   it('旧 workspace 的迟到保存结果不能污染新 workspace 的保存状态', async () => {
@@ -263,7 +263,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await act(async () => { write.resolve(readTextResult('const x = 2')); await write.promise })
 
     expect(editor.state.doc.toString()).toBe('const x = 3')
-    expect(screen.getByText(/未保存/)).toBeTruthy()
-    expect(screen.getByText('+1 −1 未保存')).toBeTruthy()
+    expect(screen.getByText(/未保存/)).toBeInTheDocument()
+    expect(screen.getByText('+1 −1 未保存')).toBeInTheDocument()
   })
 })

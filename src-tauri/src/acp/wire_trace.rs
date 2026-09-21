@@ -289,12 +289,6 @@ impl AcpWireHub {
         self.record(WireDirection::AgentToPylon, message);
     }
 
-    /// Compatibility-neutral snapshot name used by transcript/replay code.
-    #[allow(dead_code)]
-    pub fn records(&self) -> Vec<WireRecord> {
-        self.snapshot()
-    }
-
     /// Take one coherent snapshot and export it. Callers that also expose
     /// ordinal metadata must use this seam so body and metadata cannot drift
     /// across concurrent ring-buffer writes.

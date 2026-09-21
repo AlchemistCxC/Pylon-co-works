@@ -174,7 +174,7 @@ flowchart TB
     end
 
     subgraph NATIVEPLUGIN[Native plugin package/process modules]
-      PLUGINCMD[plugin_cmds.rs<br/>inspect/stage/commit/rollback/uninstall/resource]
+      PLUGINCMD[plugin_cmds/<br/>inspect/stage/commit/rollback/uninstall/resource]
       PKGSTATE[package state + transaction journal]
       PROCSUP[PluginProcessSupervisor]
       PROCJSON[plugin process JSON-RPC pending/log/restart]
@@ -416,7 +416,7 @@ flowchart TB
 | 当前 Solid | `src/renderers/solid-workbench/*` |
 | canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
 | 外部包 Web 链 | `packageInstallationService.ts` → `packagePluginRuntime.ts` → `src/infrastructure/plugins/pluginPackageClient.ts` |
-| Rust package/process | `src-tauri/src/plugin_cmds.rs`、`src-tauri/src/plugin_process/mod.rs` |
+| Rust package/process | `src-tauri/src/plugin_cmds/`、`src-tauri/src/plugin_process/mod.rs` |
 | Rust Kernel / IPC | `src-tauri/src/lib.rs`、`lifecycle/*`、`acp/*`、`dispatcher/*`、`session/*` |
 | 唯一持久化事实 | `src-tauri/src/session/event_repo.rs`、`persistence_bootstrap.rs`、`src/infrastructure/events/*` |
 

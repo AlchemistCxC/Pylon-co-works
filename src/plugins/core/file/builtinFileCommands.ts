@@ -2,10 +2,8 @@ import type { CommandDefinition } from '../../../plugin-runtime/commands/command
 import { useIdentityStore } from '../../../identityStore.ts'
 import { workspaceTargetFromSession } from '../../../domains/workspace/workspaceTarget.ts'
 import { builtinFileProvider, builtinGitProvider } from './builtinFileWorkbench.ts'
+import { record } from '../../../utils/wireGuards.ts'
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
 function text(value: unknown, key: string, optional = false): string {
   if (optional && (value === undefined || value === null)) return ''
   if (typeof value !== 'string' || (!optional && !value.trim())) throw new Error(`${key} 必须是字符串${optional ? '' : '且不能为空'}`)

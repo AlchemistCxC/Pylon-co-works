@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
-import { PylonCliService, createPylonCliTool, type InteractionItem, type PylonCliServicePorts } from '../pylonCliService.ts'
+import { PylonCliService, createPylonCliTool, errorMessage, type InteractionItem, type PylonCliServicePorts } from '../pylonCliService.ts'
 
 function harness(overrides: Partial<PylonCliServicePorts> = {}) {
   const identity = createPluginIdentity('demo.plugin', 'run-1')
@@ -266,10 +266,10 @@ describe('PylonCliService typed command surface', () => {
     await expect(service.execute({ command: 'approval get' })).resolves.toEqual({ mode: 'default' })
     await expect(service.execute({ command: 'approval set', args: { mode: 'auto' } })).resolves.toEqual({ mode: 'auto' })
     expect(approval.set).toHaveBeenCalledWith('auto')
-    // interaction respond：requestId 解析 + optionId 校验 + identity 透传
+    // interaction respond：requestId 解析 + optionId 校验 + identity/kind 透传
     interactions.list.mockResolvedValueOnce({
       items: [{
-        provider: 'peri', agentId: 'a1', requestId: 'req-9', sessionId: 's-1',
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: 'req-9', sessionId: 's-1',
         toolCallId: 'tc-1', clientGeneration: 2, title: '写文件', prompt: 'path=x',
         options: [{ optionId: 'allow_once' }, { optionId: 'reject_once' }],
         requestedAt: '2026-08-23T00:00:00Z', deadlineMs: 300000,
@@ -279,19 +279,146 @@ describe('PylonCliService typed command surface', () => {
       .resolves.toMatchObject({ operationId: 'op-2', result: { requestId: 'req-9', responded: true } })
     expect(interactions.respond).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'peri', requestId: 'req-9', clientGeneration: 2 }),
-      'permission',
+      'approval',
       { optionId: 'allow_once' },
     )
     // 非法 optionId 拒绝
     interactions.list.mockResolvedValueOnce({
       items: [{
-        provider: 'peri', agentId: 'a1', requestId: 'req-9', sessionId: 's-1',
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: 'req-9', sessionId: 's-1',
         toolCallId: 'tc-1', clientGeneration: 2, title: '', prompt: '',
         options: [{ optionId: 'allow_once' }], requestedAt: '', deadlineMs: 0,
       }],
     })
     await expect(service.execute({ command: 'interaction respond', args: { positionals: ['req-9', 'bogus'] } }))
       .rejects.toThrow(/非法 optionId/)
+  })
+
+  it('interaction respond passes the projected kind through instead of hardcoding (#36)', async () => {
+    const { service, interactions } = harness()
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: 'req-1', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { positionals: ['req-1', 'allow_once'] } })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'req-1' }),
+      'approval',
+      { optionId: 'allow_once' },
+    )
+  })
+
+  it('accepts numeric positionals/flags as strings for string-typed args (#229)', async () => {
+    const { service, interactions } = harness()
+    // CLI 壳 parse_value 把纯数字 token 发成 JSON number——照抄列表 id 走
+    // positional 必须可用（#229 前：requestId 必须是非空字符串）。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: '7', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }, { optionId: 'reject_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { positionals: [7, 'allow_once'] } })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: '7' }),
+      'approval',
+      { optionId: 'allow_once' },
+    )
+    // flag 数字形式同样宽松化。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: '7', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { requestId: 7, optionId: 'allow_once' } })
+    expect(interactions.respond).toHaveBeenCalledTimes(2)
+  })
+
+  it('interaction respond answers private interactions via values/text without optionId (#230)', async () => {
+    const { service, interactions } = harness()
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: 'Ask user', prompt: 'choice:Pick one',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({
+      command: 'interaction respond',
+      args: { requestId: 'q-1', values: { choice: 'A' } },
+    })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'q-1' }),
+      'ask-user',
+      { optionId: undefined, text: undefined, values: { choice: 'A' } },
+    )
+    // options 为空的私有交互：declined 是唯一合法 optionId。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: '', prompt: '',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { requestId: 'q-1', optionId: 'declined' } })
+    expect(interactions.respond).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'q-1' }),
+      'ask-user',
+      { optionId: 'declined', text: undefined, values: undefined },
+    )
+    // 三者皆缺 → fail-closed。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'elicitation', requestId: 'e-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: 'Elicitation', prompt: '',
+        options: [{ optionId: 'accept' }, { optionId: 'declined' }, { optionId: 'cancel' }],
+        requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { requestId: 'e-1' } }))
+      .rejects.toThrow(/必须提供 optionId/)
+    // 空白名单传非法 optionId → 拒绝。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: '', prompt: '',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { requestId: 'q-1', optionId: 'bogus' } }))
+      .rejects.toThrow(/仅支持 declined/)
+  })
+
+  it('surfaces structured backend errors instead of [object Object] (#36)', async () => {
+    const { service, interactions } = harness()
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'req-2', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'accept' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    // Tauri reject 的是 PylonError 序列化对象（{code,message}），不是 Error 实例。
+    const backendError = { code: 'protocol_error', message: 'interaction response unsupported: kind=ask-user' }
+    interactions.respond.mockRejectedValueOnce(backendError)
+    const tool = createPylonCliTool(service)
+    await expect(tool.execute({ command: 'interaction respond', args: { positionals: ['req-2', 'accept'] } }))
+      .resolves.toEqual({
+        ok: false,
+        error: { code: 'pylon_cli_error', message: 'interaction response unsupported: kind=ask-user' },
+      })
+    // errorMessage 归一化的直接契约：Error / 结构化对象 / 无 message 对象 / 原始值
+    expect(errorMessage(new Error('boom'))).toBe('boom')
+    expect(errorMessage({ code: 'x', message: 'reason' })).toBe('reason')
+    expect(errorMessage({ code: 'x' })).toBe('{"code":"x"}')
+    expect(errorMessage('plain')).toBe('plain')
+    expect(errorMessage(null)).toBe('null')
   })
 
   it('aborts an in-flight session send through operation cancel', async () => {

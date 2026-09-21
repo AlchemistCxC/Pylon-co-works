@@ -118,7 +118,7 @@ async fn real_agent_prompt_round_trip() {
         )
         .expect("prepare prompt");
     let mut response_rx = rpc.send_keep_rx().await.expect("prompt 必须写入 stdin");
-    let outcome = crate::acp::wait_prompt_with_cancel(
+    let outcome = crate::acp::wait_prompt_with_recovery(
         &mut response_rx,
         std::time::Duration::from_secs(30),
         std::time::Duration::from_secs(120),
@@ -130,6 +130,7 @@ async fn real_agent_prompt_round_trip() {
                 .await
                 .map_err(|e| e.to_string())
         },
+        || async {},
     )
     .await;
     match outcome {
@@ -209,7 +210,7 @@ async fn hermes_configured_profile_real_prompt_round_trip() {
         )
         .expect("prepare prompt");
     let mut response_rx = rpc.send_keep_rx().await.expect("prompt 必须写入 stdin");
-    let outcome = crate::acp::wait_prompt_with_cancel(
+    let outcome = crate::acp::wait_prompt_with_recovery(
         &mut response_rx,
         std::time::Duration::from_secs(30),
         std::time::Duration::from_secs(120),
@@ -221,6 +222,7 @@ async fn hermes_configured_profile_real_prompt_round_trip() {
                 .await
                 .map_err(|e| e.to_string())
         },
+        || async {},
     )
     .await;
     match outcome {

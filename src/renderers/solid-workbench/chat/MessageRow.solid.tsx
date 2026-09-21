@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
+import { ErrorBoundary, Show, createEffect, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
 import { createScrollUserIntent } from '../../../components/chat/scrollUserIntent.ts'
@@ -7,6 +7,7 @@ import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { createFrameTask } from '../frameTask.ts'
+import { createCopyFeedback } from '../../../utils/copyFeedback.ts'
 
 export interface SolidMessageRowProps {
   renderMessage: RenderMessage
@@ -82,17 +83,11 @@ export function AssistantContent(props: {
   streaming?: boolean
   semanticContent?: JSX.Element
 }) {
-  const [copied, setCopied] = createSignal(false)
-  let copiedTimer: number | undefined
-  onCleanup(() => {
-    if (copiedTimer !== undefined) window.clearTimeout(copiedTimer)
-  })
+  const { copied, markCopied } = createCopyFeedback()
 
   const copy = () => {
     void navigator.clipboard?.writeText(props.text).catch(() => {})
-    setCopied(true)
-    if (copiedTimer !== undefined) window.clearTimeout(copiedTimer)
-    copiedTimer = window.setTimeout(() => setCopied(false), 2000)
+    markCopied()
   }
 
   return (

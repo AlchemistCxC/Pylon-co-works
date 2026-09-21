@@ -16,6 +16,7 @@ import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { reloadAgentsTransaction } from '../application/transactions/reloadAgentsTransaction.ts'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
@@ -487,10 +488,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
       }
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       const group = target?.closest('[data-group-anchor], .renderer-settings-group, .set-group')
-      if (group instanceof HTMLElement) {
-        group.classList.add('settings-anchor-pulse')
-        setTimeout(() => group.classList.remove('settings-anchor-pulse'), 1200)
-      }
+      if (group instanceof HTMLElement) pulseSettingsAnchor(group)
     })
   }
   // F1 边界修复：section → 所属 domain 反查（SETTINGS_DOMAINS 单一真值派生）

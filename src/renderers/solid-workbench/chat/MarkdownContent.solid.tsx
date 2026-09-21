@@ -1,8 +1,9 @@
 import { Dynamic } from 'solid-js/web'
-import { For, Index, Show, createEffect, createMemo, createResource, createSignal, untrack, type JSX } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js'
 import { highlightCode } from '../../../components/chat/codeHighlight.ts'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
+import { scheduleHighlightJob, trackCodeBlockVisibility } from './codeBlockDomLifecycle.ts'
 import {
   getMarkdownRenderModel,
   peekMarkdownRenderModel,
@@ -331,19 +332,62 @@ function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {
 
 function CodeBlock(props: { language?: string; code: string }) {
   const lines = () => props.code.split('\n')
-  const [highlighted] = createResource(
-    () => ({ language: props.language || 'text', code: props.code }),
-    input => highlightCode(input.language, input.code).catch(() => null),
-  )
-  const highlightedLines = () => highlighted()?.split('\n').map(line => sanitizeHtml(line || '&nbsp;'))
+  // #221：行 HTML 缓存 + 视口外降级。lineHtmls 持有 sanitize 后的每行高亮串（与旧
+  // 路径同口径，逐字节一致）；降级只清 `.term-code-text` 的 span 树换成纯文本行，
+  // `.term-code-line > .term-code-gutter + .term-code-text` 骨架与行高两侧恒定。
+  // 无 IntersectionObserver 的宿主（测试/旧内核）走 onMount 即高亮的现状时序。
+  const [lineHtmls, setLineHtmls] = createSignal<readonly string[] | null>(null)
+  const [demoted, setDemoted] = createSignal(false)
+  let root: HTMLDivElement | undefined
+  let releaseLifecycle: (() => void) | undefined
+  let exited = false
+  let disposed = false
+
+  const requestHighlight = () => {
+    if (lineHtmls() !== null) {
+      setDemoted(false)
+      return
+    }
+    const language = props.language || 'text'
+    const code = props.code
+    scheduleHighlightJob(async () => {
+      const html = await highlightCode(language, code).catch(() => null)
+      if (disposed) return
+      setLineHtmls(html === null ? [] : html.split('\n').map(line => sanitizeHtml(line || '&nbsp;')))
+      // 在途期间块已出圈：结果入缓存但不解除降级，重进视口时走缓存恢复。
+      if (!exited) setDemoted(false)
+    })
+  }
+
+  onMount(() => {
+    if (typeof IntersectionObserver === 'undefined' || root === undefined) {
+      requestHighlight()
+      return
+    }
+    const handle = trackCodeBlockVisibility(root, {
+      onEnter: () => {
+        exited = false
+        requestHighlight()
+      },
+      onExit: () => {
+        exited = true
+        if (lineHtmls() !== null && (lineHtmls()?.length ?? 0) > 0) setDemoted(true)
+      },
+    })
+    releaseLifecycle = handle?.release
+  })
+  onCleanup(() => {
+    disposed = true
+    releaseLifecycle?.()
+  })
 
   return (
-    <div class="term-code-block">
+    <div class="term-code-block" ref={root}>
         <For each={lines()}>{(line, index) => (
           <div class="term-code-line">
             <span class="term-code-gutter">│ </span>
             <Show
-              when={highlightedLines()?.[index()]}
+              when={demoted() ? undefined : lineHtmls()?.[index()]}
               fallback={<span class="term-code-text">{line || '\u00a0'}</span>}
             >
               {html => <span class="term-code-text" innerHTML={html()} />}

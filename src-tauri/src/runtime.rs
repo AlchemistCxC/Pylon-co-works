@@ -21,12 +21,19 @@ use crate::session::SessionInfo;
 /// `source` is only unique within one Agent runtime. Keeping `agent_id` as a
 /// separate field prevents two agents that use the same source string from
 /// being treated as the same workspace/session.
+///
+/// 仅测试消费（#228）：生产会话键即裸 `source`（`AgentRuntime.sessions`），
+/// owner 维度路由由 `session::owner`（`SessionOwner`/`DurableSessionOwner`）
+/// 承担；本类型仅剩 §5.8 互转测试（owner `as_context_key`）引用。生产重新
+/// 采用 context key 或契约收敛裁除时落定去留并摘除 `#[cfg(test)]`。
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AgentContextKey {
     pub(crate) agent_id: String,
     pub(crate) source: String,
 }
 
+#[cfg(test)]
 impl AgentContextKey {
     pub(crate) fn new(agent_id: impl Into<String>, source: impl Into<String>) -> Self {
         Self {

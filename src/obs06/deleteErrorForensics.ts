@@ -20,7 +20,7 @@
  * 全链路 DEV-only：生产 tree-shake 零暴露，与 OBS-04/05 同一隔离模式。
  */
 
-import { sanitizeExportValue, resolveSessionIdentity, collectSqliteSection, collectLocalStorageSection } from '../obs04/threeSourceExport'
+import { sanitizeExportValue, resolveSessionIdentity, collectSqliteSection, collectLocalStorageSection } from '../domains/export/threeSourceExport'
 import { toCanonicalOwnerKey } from '../domains/events/eventSchema'
 import { narrowPathValues } from '../obs05/coldStartSnapshot'
 

@@ -80,7 +80,7 @@ export default function WorkspaceSearchPanel({ target, provider, onOpenResult }:
         </button>
       </div>
       <div className="file-panel-heading"><span>RESULTS</span><span className="file-panel-count">{results.length}</span></div>
-      {status.kind === 'blocked' && <p className="file-section-hint" role="status">待后端：workspace_search 命令尚未提供，无法搜索</p>}
+      {status.kind === 'blocked' && <p className="file-section-hint" role="status">后端命令不可用：workspace_search（请检查应用版本）</p>}
       {status.kind === 'error' && <div className="file-tree-error" role="alert">{status.message}</div>}
       {status.kind === 'searching' && <p className="file-section-hint">正在搜索…</p>}
       {status.kind === 'idle' && query.trim() && results.length === 0 && <p className="file-section-hint">没有匹配结果</p>}

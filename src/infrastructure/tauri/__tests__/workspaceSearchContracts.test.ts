@@ -23,7 +23,7 @@ describe('normalizeWorkspaceSearchResults 宽容归一', () => {
 })
 
 describe('classifyWorkspaceSearchError 三路径', () => {
-  it('missing 命令 → blocked（待后端）', () => {
+  it('missing 命令 → blocked（后端命令不可用）', () => {
     expect(classifyWorkspaceSearchError(new Error('Command not found: workspace_search'))).toEqual({ kind: 'blocked' })
     expect(classifyWorkspaceSearchError('workspace_search 不存在')).toEqual({ kind: 'blocked' })
   })

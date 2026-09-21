@@ -4,6 +4,7 @@ import { createUnknownContentPart, type ContentPart } from '../../../../domains/
 import type { ToolInvocationSnapshot } from '../../../../domains/workbench/workbenchProjector.ts'
 import { ToolObjectInspector } from './ToolObjectInspector.solid.tsx'
 import { classifyResourceTarget, resourceRange, type RenderResourceTarget } from './resourceTarget.ts'
+import { isRecord } from '../../../../utils/wireGuards.ts'
 
 export function ToolBody(props: {
   snapshot: ToolInvocationSnapshot
@@ -586,8 +587,4 @@ function openTarget(commands: RenderCommandPort | undefined, target: unknown): v
 function copy(commands: RenderCommandPort | undefined, text: string): void {
   if (!can(commands, 'clipboard.write')) return
   void commands?.execute({ type: 'clipboard.write', payload: { text } })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

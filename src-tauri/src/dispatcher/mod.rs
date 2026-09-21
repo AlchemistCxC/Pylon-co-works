@@ -339,6 +339,8 @@ type PermissionLock =
 /// answered with a JSON-RPC error so the provider cannot wait until its own timeout.
 /// The helper intentionally accepts only summary fields; params are never emitted back
 /// to the UI because interaction payloads may contain commands, paths, or credentials.
+// clippy 2026-09-22：10 参均为独立拒绝摘要入参（window/acp/provider/agent_id/method/
+// request_id/params/reason_code/rpc_code/message），语义互不分组，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn reject_interaction_request<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -1017,11 +1019,18 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
         return true;
     }
     let first = &pending[0];
-    let owner = first
-        .input
-        .owner
-        .clone()
-        .expect("persisted batch has owner");
+    // 不变量：本函数只消费 persist_canonical=true 的批次，而 routing::decide 的
+    // 该判定要求 owner.is_some()（routing.rs）。此保证未经类型系统携带、理论可
+    // 违约 ⇒ 走可观测错误路径而非 panic（原 expect("persisted batch has owner")）。
+    let Some(owner) = first.input.owner.clone() else {
+        tracing::error!(
+            code = "event_batch_owner_missing",
+            agent_id,
+            source = %first.input.source,
+            "persisted batch entry reached flush without a durable owner"
+        );
+        return true;
+    };
     let owner_key = owner.key().ok();
     let generation = first.input.generation;
     if pending.iter().any(|item| {
@@ -1127,6 +1136,9 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
     true
 }
 
+// clippy 2026-09-22：参数为各锁/上下文的按引用透传（window/gateway/sessions/
+// binding_health/pet/update_channels/generation），与 flush_pending_canonical 同一
+// 调用点形态，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -1271,18 +1283,18 @@ async fn handle_session_update<R: tauri::Runtime>(
             tracing::warn!("ACP notification rejected for stale session {}", peri_id);
             return true;
         }
-        let current = items.get(&source).is_some_and(|session| {
-            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-        });
-        if !current {
+        // 单次查表替代「is_some_and 校验后再 expect 取值」：None 与映射不匹配
+        // 一样按过期通知拒绝（原 expect("current mapping checked")，锁内无
+        // TOCTOU，语义不变）。
+        let Some(session) = items.get(&source) else {
+            tracing::warn!("ACP notification rejected for stale session {}", peri_id);
+            return true;
+        };
+        if !session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation) {
             tracing::warn!("ACP notification rejected for stale session {}", peri_id);
             return true;
         }
-        durable_owner = match items
-            .get(&source)
-            .expect("current mapping checked")
-            .durable_owner(agent_id, &source)
-        {
+        durable_owner = match session.durable_owner(agent_id, &source) {
             Ok(owner) => owner,
             Err(error) => {
                 tracing::error!(
@@ -1295,9 +1307,7 @@ async fn handle_session_update<R: tauri::Runtime>(
                 return true;
             }
         };
-        let replay_loading = items
-            .get(&source)
-            .is_some_and(|session| session.replay_loading);
+        let replay_loading = session.replay_loading;
         let input = routing::RoutingInput {
             source: source.clone(),
             remote_session_id: peri_id.clone(),
@@ -1977,40 +1987,42 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     .and_then(serde_json::Value::as_str)
                     == Some("user_message_chunk");
             }
-            if !flush_batch && !pending_batch.is_empty() {
+            if !flush_batch {
                 let session_id = raw
                     .params
                     .as_ref()
                     .and_then(|params| params.get("sessionId"))
                     .and_then(serde_json::Value::as_str);
-                let pending = pending_batch
-                    .first()
-                    .expect("non-empty pending batch has first item");
-                flush_batch = session_id != Some(pending.input.remote_session_id.as_str());
-                if !flush_batch {
-                    let current_owner_key = session_id.and_then(|session_id| {
-                        sessions.lock().ok().and_then(|items| {
-                            items.iter().find_map(|(source, session)| {
-                                if session.peri_id == session_id && session.generation == generation
-                                {
-                                    session
-                                        .durable_owner(&agent_id, source)
-                                        .ok()
-                                        .flatten()
-                                        .and_then(|owner| owner.key().ok())
-                                } else {
-                                    None
-                                }
+                // `first()` 与 `is_empty()` 互为镜像：None 即空批次，跳过同主
+                // 比对即可（原 expect("non-empty pending batch has first item")）。
+                if let Some(pending) = pending_batch.first() {
+                    flush_batch = session_id != Some(pending.input.remote_session_id.as_str());
+                    if !flush_batch {
+                        let current_owner_key = session_id.and_then(|session_id| {
+                            sessions.lock().ok().and_then(|items| {
+                                items.iter().find_map(|(source, session)| {
+                                    if session.peri_id == session_id
+                                        && session.generation == generation
+                                    {
+                                        session
+                                            .durable_owner(&agent_id, source)
+                                            .ok()
+                                            .flatten()
+                                            .and_then(|owner| owner.key().ok())
+                                    } else {
+                                        None
+                                    }
+                                })
                             })
-                        })
-                    });
-                    flush_batch = current_owner_key.as_deref()
-                        != pending
-                            .input
-                            .owner
-                            .as_ref()
-                            .and_then(|owner| owner.key().ok())
-                            .as_deref();
+                        });
+                        flush_batch = current_owner_key.as_deref()
+                            != pending
+                                .input
+                                .owner
+                                .as_ref()
+                                .and_then(|owner| owner.key().ok())
+                                .as_deref();
+                    }
                 }
             }
             if flush_batch && !pending_batch.is_empty() {
@@ -2263,6 +2275,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             .unwrap_or_default()
                             .to_string();
                         if !session_id.is_empty() {
+                            let arrived_at = crate::time::Timestamp::now();
                             let _ = private_interactions.insert(
                                 request_id.clone(),
                                 crate::private_interaction::PendingPrivateInteraction {
@@ -2274,6 +2287,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     params: params.clone(),
                                     question_specs,
                                     client_generation: generation,
+                                    enqueued_at: arrived_at,
                                 },
                             );
                             let interaction_event = serde_json::json!({
@@ -2292,19 +2306,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     crate::acp::interaction_queue::InteractionQueueEntry {
                                         request_id: request_id.to_string(),
                                         method: method.to_string(),
-                                        kind: match bridge {
-                                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
-                                                "approval".to_string()
-                                            }
-                                            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
-                                                "elicitation".to_string()
-                                            }
-                                            _ => "ask-user".to_string(),
-                                        },
+                                        kind: bridge.queue_kind().to_string(),
                                         session_id,
                                         agent_id: agent_id.clone(),
                                         client_generation: generation,
-                                        enqueued_at: crate::time::Timestamp::now(),
+                                        enqueued_at: arrived_at,
                                         event: interaction_event.clone(),
                                         state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                                     },

@@ -49,7 +49,8 @@ async function documentOf(rows: readonly CanonicalConversationEvent[]) {
   const snapshot = {
     messages: document!.messages.map(message => ({ role: message.role, content: message.content })),
     appliedEventIds: [...document!.appliedEventIds],
-    timeline: document!.timeline.map(entry => entry.eventId),
+    appliedRanges: document!.appliedRanges.map(range => [range[0], range[1]] as readonly [number, number]),
+    timeline: document!.timeline.map(entry => ({ sequence: entry.sequence, eventId: entry.eventId, kind: entry.kind })),
   }
   runtime.destroy()
   return snapshot
@@ -63,7 +64,19 @@ describe('文档层 · 多种存储形态 bind 出同一份文档', () => {
       const perChunk = chunkRows(scenario.wires)
       const expected = await documentOf(perChunk)
 
-      expect(await documentOf(mergeAdjacentDeltaChunks(perChunk)), '聚合形态').toEqual(expected)
+      // #226：聚合形态按段级展开——消息面/appliedRanges/appliedEventIds 与逐 chunk 一致；
+      // timeline 按聚合行粒度收缩（每条聚合行一个条目，sequence=跨度末位，kind 与逐
+      // chunk 展开在同一 sequence 上的条目一致）。eventId/条目数不再逐字节相等，此即
+      // #226 的目的（信封数随折叠比下降）。
+      const mergedRows = mergeAdjacentDeltaChunks(perChunk)
+      const batch = await documentOf(mergedRows)
+      expect(batch.messages, '聚合形态消息面').toEqual(expected.messages)
+      expect(batch.appliedRanges, '聚合形态 appliedRanges').toEqual(expected.appliedRanges)
+      expect(batch.appliedEventIds, '聚合形态 appliedEventIds').toEqual(expected.appliedEventIds)
+      const chunkKindBySequence = new Map(expected.timeline.map(entry => [entry.sequence, entry.kind]))
+      expect(batch.timeline.map(entry => ({ sequence: entry.sequence, kind: entry.kind })), '聚合形态 timeline 跨度对应')
+        .toEqual(mergedRows.map(row => ({ sequence: row.sequence, kind: chunkKindBySequence.get(row.sequence) })))
+
       expect(await documentOf(toUnitRows(perChunk, { keepCovered: true })), '单元未裁剪混合形态').toEqual(expected)
     })
 

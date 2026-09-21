@@ -10,7 +10,7 @@ import {
   collectLocalStorageSection,
   collectReplaySection,
   collectSqliteSection,
-} from '../../../obs04/threeSourceExport.ts'
+} from '../../../domains/export/threeSourceExport.ts'
 
 function createBuiltinExportSource(kind: 'localStorage' | 'sqlite' | 'replay'): ExportSource {
   const pluginId = `core.export.${kind}`

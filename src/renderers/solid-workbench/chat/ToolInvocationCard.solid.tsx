@@ -20,6 +20,7 @@ import { isStructuredContentKind, SolidStructuredContent } from './content/Struc
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { capitalizeToolName } from '../../../components/chat/toolPresentationModel.ts'
+import { safeJson } from '../../../utils/safeJson.ts'
 import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'
 import { buildToolRenderModel } from '../../../domains/tool/toolPresentation.ts'
 
@@ -256,12 +257,7 @@ function metadata(snapshot: ToolInvocationSnapshot): string {
 
 function safeRawSummary(value: unknown): string {
   const safe = createUnknownContentPart('tool.raw', value, { maxRawBytes: 8 * 1024 })
-  return safeJson(safe.raw)
-}
-
-function safeJson(value: unknown): string {
-  try { return JSON.stringify(value, null, 2) }
-  catch { return '[unavailable]' }
+  return safeJson(safe.raw, { fallback: '[unavailable]' })
 }
 
 function formatDuration(value: number | undefined): string {

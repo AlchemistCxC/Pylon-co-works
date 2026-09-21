@@ -342,6 +342,33 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('#204③：refresh 后 foldLog 以 journal 权威集替换——被拒回滚保留 refresh 时代事实', async () => {
+    const active = session('session-foldlog-replace', 'local:foldlog-replace')
+    const userRow = message(1, 'user', 'hello')
+    let rows: readonly unknown[] = [userRow]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-foldlog-reject',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    // refresh 让 journal 长出 assistant 行——foldLog 必须被这份新权威集整体替换，
+    // 而不是继续钉住 bind 时代的旧信封实例（#204③ 前它还被回滚重折当作源）。
+    rows = [userRow, message(2, 'assistant', 'world')]
+    await service.refresh(active)
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+
+    await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
+    // 回滚整页重折源 = refresh 集：被拒乐观行消失，refresh 时代的 journal 事实全保留。
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
   it('生产 appearance 命令经 Zustand adapter 写回主题权威', () => {
     const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
     try {

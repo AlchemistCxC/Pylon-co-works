@@ -13,7 +13,7 @@
  */
 
 import { IS_TAURI } from '../infrastructure/tauri/env'
-import { exportThreeSourcesForSession, type ThreeSourceArtifact } from './threeSourceExport'
+import { exportThreeSourcesForSession, type ThreeSourceArtifact } from '../domains/export/threeSourceExport'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 
@@ -41,7 +41,7 @@ export function installObs04DevTrigger(): void {
 
   const api: Obs04ConsoleApi = {
     __pylonExportThreeSources: async (sessionId) => {
-      const { downloadThreeSourceArtifact } = await import('./threeSourceExport')
+      const { downloadThreeSourceArtifact } = await import('../domains/export/threeSourceExport')
       const target = resolveSessionId(sessionId)
       if (!target) throw new Error('no session to export: pass an explicit sessionId (see listSessions())')
       const artifact = await api.collect(target)

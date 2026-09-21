@@ -182,7 +182,7 @@ describe('AgentSheetView renderer mode context', () => {
       { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
     ).event)
 
-    expect(await screen.findByText('base slot answer')).toBeTruthy()
+    expect(await screen.findByText('base slot answer')).toBeInTheDocument()
     expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
   })
 
@@ -269,7 +269,7 @@ describe('AgentSheetView renderer mode context', () => {
         { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
       ).event)
 
-      expect(await screen.findByText('tool overlay: tool-overlay-c04 / FutureTool / /workspace/future.data')).toBeTruthy()
+      expect(await screen.findByText('tool overlay: tool-overlay-c04 / FutureTool / /workspace/future.data')).toBeInTheDocument()
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-tool-slot="true"]')).toBeNull())
@@ -380,10 +380,10 @@ describe('AgentSheetView renderer mode context', () => {
         event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'link', url: 'https://example.com/guide', title: 'Guide' }] },
       }))
 
-      expect(await screen.findByText('link overlay: https://example.com/guide')).toBeTruthy()
+      expect(await screen.findByText('link overlay: https://example.com/guide')).toBeInTheDocument()
       await registration.dispose()
       await waitFor(() => expect(container.querySelector('[data-production-link-slot="true"]')).toBeNull())
-      expect(await screen.findByText('Guide')).toBeTruthy()
+      expect(await screen.findByText('Guide')).toBeInTheDocument()
       expect(container.querySelector('[data-content-kind="content.link"] .term-link-card')).not.toBeNull()
       expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
       expect(destroyed).toHaveBeenCalled()
@@ -547,7 +547,7 @@ describe('AgentSheetView renderer mode context', () => {
       ])))
       // P91 C2：真实 250ms 等待改为 waitFor 可观察条件——健康实例保持挂载且宿主仍指向本 suite。
       await waitFor(() => {
-        expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
+        expect(screen.getByText('healthy-suite-v1')).toBeInTheDocument()
         expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
       })
       expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
@@ -626,7 +626,7 @@ describe('AgentSheetView renderer mode context', () => {
       // sheet state，那条路径断了，改用文件内既有的 activeSession 切换写法。
       view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-2' }} />)
 
-      await waitFor(() => expect(screen.getByText('old-owned-draft')).toBeTruthy())
+      await waitFor(() => expect(screen.getByText('old-owned-draft')).toBeInTheDocument())
     } finally {
       releaseCandidate()
       await candidateRegistration.dispose()
@@ -703,7 +703,7 @@ describe('AgentSheetView renderer mode context', () => {
     await registration.dispose()
 
     await waitFor(() => expect(container.querySelector('[data-production-slot-overlay="true"]')).toBeNull())
-    expect(await screen.findByText('slot answer')).toBeTruthy()
+    expect(await screen.findByText('slot answer')).toBeInTheDocument()
   })
 
   it('targeted content.reasoning Slot receives normalized payload and owner cleanup restores C01 base Slot', async () => {
@@ -739,12 +739,12 @@ describe('AgentSheetView renderer mode context', () => {
         { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
       ).event)
 
-      expect(await screen.findByText('reasoning overlay: normalized thought payload')).toBeTruthy()
+      expect(await screen.findByText('reasoning overlay: normalized thought payload')).toBeInTheDocument()
       expect(container.querySelector('[data-message-role="reasoning"]')).not.toBeNull()
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-reasoning-slot="true"]')).toBeNull())
-      expect(await screen.findByText('正在思考…')).toBeTruthy()
+      expect(await screen.findByText('正在思考…')).toBeInTheDocument()
       expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
     } finally {
       await registration.dispose()
@@ -874,13 +874,13 @@ describe('AgentSheetView renderer mode context', () => {
         },
       }))
 
-      expect(await screen.findByText('document overlay: canonical-spec.md')).toBeTruthy()
+      expect(await screen.findByText('document overlay: canonical-spec.md')).toBeInTheDocument()
       expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-document-slot="true"]')).toBeNull())
-      expect(await screen.findByText('canonical-spec.md')).toBeTruthy()
-      expect(await screen.findByText('safe document body')).toBeTruthy()
+      expect(await screen.findByText('canonical-spec.md')).toBeInTheDocument()
+      expect(await screen.findByText('safe document body')).toBeInTheDocument()
       expect(container.querySelector('[data-content-kind="content.document"] [data-part-kind="document"]')).not.toBeNull()
     } finally {
       await registration.dispose()
@@ -1015,7 +1015,7 @@ describe('AgentSheetView renderer mode context', () => {
         },
       }))
 
-      expect(await screen.findByText('media overlay: 覆盖图')).toBeTruthy()
+      expect(await screen.findByText('media overlay: 覆盖图')).toBeInTheDocument()
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-media-slot="true"]')).toBeNull())
@@ -1065,11 +1065,11 @@ describe('AgentSheetView renderer mode context', () => {
         { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:content-slot' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
       )
       publishPluginEvent(normalizedContentEvent.event)
-      expect(await screen.findByText(/content slot:\s*part payload/, {}, { timeout: 5_000 })).toBeTruthy()
+      expect(await screen.findByText(/content slot:\s*part payload/, {}, { timeout: 5_000 })).toBeInTheDocument()
       expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
       await registration.dispose()
       await waitFor(() => expect(container.querySelector('[data-production-content-slot="true"]')).toBeNull())
-      expect(await screen.findByText('part payload')).toBeTruthy()
+      expect(await screen.findByText('part payload')).toBeInTheDocument()
     } finally {
       await registration.dispose()
     }
@@ -1122,13 +1122,13 @@ describe('AgentSheetView renderer mode context', () => {
         },
       }))
 
-      expect(await screen.findByText('plan slot: task-1 / dependency / Production goal / 12')).toBeTruthy()
+      expect(await screen.findByText('plan slot: task-1 / dependency / Production goal / 12')).toBeInTheDocument()
       await registration.dispose()
 
       await waitFor(() => expect(screen.queryByText('plan slot: task-1 / dependency / Production goal / 12')).toBeNull())
       screen.getByRole('button', { name: /1 任务.*1 阻塞/ }).click()
-      expect(await screen.findByRole('treeitem', { name: /Wire plan.*已阻塞/ })).toBeTruthy()
-      expect(screen.getByRole('status', { name: /目标：Production goal.*进行中/ })).toBeTruthy()
+      expect(await screen.findByRole('treeitem', { name: /Wire plan.*已阻塞/ })).toBeInTheDocument()
+      expect(screen.getByRole('status', { name: /目标：Production goal.*进行中/ })).toBeInTheDocument()
       expect(destroyed).toHaveBeenCalled()
       const handles = destroyed.mock.calls.map(call => call[0])
       expect(new Set(handles).size).toBe(handles.length)
@@ -1170,7 +1170,7 @@ describe('AgentSheetView renderer mode context', () => {
       expect(region).toHaveAttribute('data-density', 'compact')
       expect(region).toHaveAttribute('data-connector-style', 'dashed')
       expect(region.style.getPropertyValue('--plan-indent')).toBe('28px')
-      expect(screen.getByRole('treeitem', { name: /Stable plan state/ })).toBeTruthy()
+      expect(screen.getByRole('treeitem', { name: /Stable plan state/ })).toBeInTheDocument()
       expect(container.querySelector('.task-tree-priority')).toBeNull()
       expect(container.querySelector('.goal-card-budget')).toBeNull()
 
@@ -1189,8 +1189,8 @@ describe('AgentSheetView renderer mode context', () => {
         expect(container.querySelector('.goal-card-budget')).toHaveAttribute('aria-valuenow', '25')
       })
       expect(screen.getByRole('region', { name: '计划与目标' })).toBe(region)
-      expect(screen.getByText('Stable plan state')).toBeTruthy()
-      expect(screen.getByText('Stable goal')).toBeTruthy()
+      expect(screen.getByText('Stable plan state')).toBeInTheDocument()
+      expect(screen.getByText('Stable goal')).toBeInTheDocument()
     } finally {
       settings.reset()
     }
@@ -1230,11 +1230,11 @@ describe('AgentSheetView renderer mode context', () => {
         event: { type: 'diagnostic.notice', level: 'error', code: 'agent_connection_timeout', message: '连接失败' },
       }))
 
-      expect(await screen.findByText('system error slot: 连接失败 / retry')).toBeTruthy()
+      expect(await screen.findByText('system error slot: 连接失败 / retry')).toBeInTheDocument()
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-system-error-slot="true"]')).toBeNull())
-      expect(await screen.findByRole('alert', { name: '系统错误：连接失败' })).toBeTruthy()
+      expect(await screen.findByRole('alert', { name: '系统错误：连接失败' })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
       expect(destroyed).toHaveBeenCalled()
       const handles = destroyed.mock.calls.map(call => call[0])
@@ -1374,7 +1374,7 @@ describe('AgentSheetView renderer mode context', () => {
         { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
       ).event)
 
-      expect(await screen.findByText('secondary-slot')).toBeTruthy()
+      expect(await screen.findByText('secondary-slot')).toBeInTheDocument()
       expect(screen.queryByLabelText('React Workbench fatal fallback')).toBeNull()
       view.unmount()
       await waitFor(() => expect(secondaryUnsubscribed).toHaveBeenCalledTimes(2))
@@ -1419,7 +1419,7 @@ describe('AgentSheetView renderer mode context', () => {
       view.rerender(<AgentSheetView sheet={sheet({})} ctx={{ ...ctx, activeSession: 'session-2' }} />)
 
       await waitFor(() => expect(prepareCount).toBe(2), { timeout: 5_000 })
-      expect(await screen.findByText('update-failing-suite')).toBeTruthy()
+      expect(await screen.findByText('update-failing-suite')).toBeInTheDocument()
       expect(screen.queryByLabelText('Solid Agent Workbench')).toBeNull()
       expect(destroyed).toHaveBeenCalledOnce()
     } finally {

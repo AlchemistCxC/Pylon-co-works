@@ -1,8 +1,9 @@
 /**
  * 导出证据源契约（施工方案书 v3 §M7）：export.source 扩展点。
  *
- * 契约层不 import domains；运行时采集经 obs04/threeSourceExport（legacy 查询面）。
- * 插件贡献的 source 在 activate/deactivate 时同步进 legacy registry。
+ * 契约层不 import domains；运行时采集经 domains/export/threeSourceExport（legacy 查询面，
+ * #228 批次B 自 src/obs04/ 下沉）。插件贡献的 source 在 activate/deactivate 时同步进
+ * legacy registry。
  */
 
 /** export.source 扩展点 id。 */

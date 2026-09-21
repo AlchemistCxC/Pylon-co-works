@@ -3,6 +3,7 @@ import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rend
 import { isJsonValue, parseContentPart } from '../workbench/content/contentPartSchema.ts'
 import { isActivityStatus } from '../workbench/events/workbenchEventSchema.ts'
 import { TERMINAL_LOG_DEFAULT_TOKENS, TERMINAL_LOG_SETTINGS } from './textRenderKindCatalog.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export function isProcessActivitySnapshotInput(input: unknown): boolean {
   if (!isRecord(input)
@@ -265,10 +266,6 @@ export function isBackgroundTaskActivitySnapshotInput(input: unknown): boolean {
     if (input[key] !== undefined && typeof input[key] !== 'boolean') return false
   }
   return true
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 const ACTIVITY_METRIC_KEYS: ReadonlySet<string> = new Set(['toolCount', 'taskCount', 'durationMs', 'costUsd'])

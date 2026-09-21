@@ -1,18 +1,23 @@
 /**
- * OBS-04：P2 三源导出取证工具（方案书任务表 OBS-04，§11 完成判据 #5）。
+ * 三源导出取证工具（原 OBS-04，#228 批次B 自 src/obs04/ 下沉到 domains）。
  *
- * 目的：对同一会话导出 ACP replay / SQLite / localStorage 三份原始数据，供 P2
- * （会话 Replay 与工具渲染损坏，方案书 §1.3）定位"具体由哪一层触发损坏"。
+ * 目的：对同一会话导出 ACP replay / SQLite / localStorage 三份原始数据，供会话导出
+ * 扩展点（contracts/exportSource.ts 的 `export.source`）与 P2 取证（会话 Replay 与
+ * 工具渲染损坏）定位"具体由哪一层触发损坏"。
+ *
+ * 接线（生产 / DEV 两条路径，同一实现）：
+ * - 生产：三个 collect* 采集器经 src/plugins/core/export/builtinExportSources.ts 包装为
+ *   core.export.* 插件 source，由产品 workspace 插件统一登记。
+ * - DEV 取证钩子：完整三源工件组装（exportThreeSourcesForSession / downloadThreeSourceArtifact）
+ *   仅由 src/obs04/devTrigger.ts 挂载（import.meta.env.DEV 守卫，生产构建 tree-shake）。
  *
  * 纪律（方案书 §2 阶段 M0）：
  * - 只读取证：不修改任何业务语义；三源全部经只读路径采集。
- * - 隔离生产路径：本模块仅由 DEV 钩子挂载（devTrigger.ts，import.meta.env.DEV 守卫，
- *   生产构建 tree-shake）；不接入任何生产 UI。
  * - 脱敏导出：镜像 Rust `sanitize.rs` 的 Strip 语义——敏感 key（rawInput/rawOutput/
  *   prompt/persona/headers/env/authorization/password/cookie/credential，以及含
  *   token/apikey/api_key/secret 的键名）整体剔除；字符串值含 secret 形态（分隔符变体 /
  *   sk-、ghp_、xoxb-、akia、eyj 前缀）整体 [REDACTED]。保留工具身份字段（toolCallId/
- *   title/kind/status/tool name）作为 P2 证据；聊天正文保留（仅 secret 形态值被
+ *   title/kind/status/tool name）作为取证证据；聊天正文保留（仅 secret 形态值被
  *   REDACTED）。
  *
  * 三源 join 键（explorer 调查确认）：
@@ -28,14 +33,14 @@
  *   replay       = arrivalSeq（canonicalNormalizer 的 sequence = index+1）
  */
 
-import { messageStorageKey, parseMessageSnapshot } from '../components/chat/messagePersistence.ts'
-import type { Message } from '../components/chat/messageTypes.ts'
-import { readChatReplayTrace } from '../components/chat/chatReplayTrace.ts'
-import { normalizeRawEvent, type CanonicalNormalizeResult } from '../domains/events/canonicalNormalizer.ts'
-import { toCanonicalOwnerKey } from '../domains/events/eventSchema.ts'
-import type { CanonicalEventPage, CanonicalEventRow } from '../infrastructure/events/canonicalEventRepository.ts'
-import type { ExportSource } from '../contracts/exportSource.ts'
-import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import type { Message } from '../../components/chat/messageTypes.ts'
+import { readChatReplayTrace } from '../../components/chat/chatReplayTrace.ts'
+import { normalizeRawEvent, type CanonicalNormalizeResult } from '../events/canonicalNormalizer.ts'
+import { toCanonicalOwnerKey } from '../events/eventSchema.ts'
+import type { CanonicalEventPage, CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { ExportSource } from '../../contracts/exportSource.ts'
+import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 
 export function listExportSources(): ExportSource[] {
   return getPluginServiceRegistry().list<ExportSource>('export')

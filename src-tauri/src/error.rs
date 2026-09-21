@@ -21,8 +21,7 @@ pub enum PylonError {
     },
     /// OWNER-01（§5.8）：owner runtime 不存在（agent 未配置/未启动/未知）时返回，
     /// 禁止 fallback 到另一个 active runtime。agent_id 保留用于诊断（不落日志原文）。
-    /// dead_code（预期）：契约卡 API——OWNER-02 起命令层显式 agentId 路由消费。
-    #[allow(dead_code)]
+    /// OWNER-02 已落地：`session::owner::resolve_agent_runtime` 构造（#228 摘过期豁免）。
     #[error("agent runtime unavailable for agent: {agent_id}")]
     AgentRuntimeUnavailable { agent_id: String },
     #[error("no active agent configured")]

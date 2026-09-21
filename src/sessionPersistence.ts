@@ -219,6 +219,8 @@ function parseStoredSessions(raw: string | null, profiles: PersistedProfile[], h
     const parsed: unknown = JSON.parse(raw)
     return parseEnvelope(parsed) ? normalizeSessions(parsed, profiles, hints) : { kind: 'corrupt', message: '会话数据损坏：未知 envelope' }
   } catch {
+    // 可忽略 error 对象本身：JSON.parse 只会抛 SyntaxError，损坏输入无法修复，
+    // 细节无消费方——归一为 corrupt 结果上抛即为完整故障上报，不留静默丢错。
     return { kind: 'corrupt', message: '会话数据损坏：JSON 解析失败' }
   }
 }
@@ -258,6 +260,8 @@ export function persistSessionsWithUnresolved(
     storage.setItem(SESSION_STORAGE_KEY, serializeSessions([...sessions, ...unresolved], turns))
     return true
   } catch {
+    // 存储不可用/写满：与 persistSessions 同理，返回 false 交调用方提升为可见状态
+    //（CR-001 场景下保留 unresolved 现场的原始数据仍在盘上，未被破坏）
     return false
   }
 }

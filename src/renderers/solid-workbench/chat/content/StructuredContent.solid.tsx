@@ -3,6 +3,7 @@ import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts
 import { parseContentPart, type ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 import { classifyResourceTarget, resourceRange } from '../tool/resourceTarget.ts'
+import { isRecord } from '../../../../utils/wireGuards.ts'
 
 export type StructuredContentKind = 'content.location' | 'content.progress' | 'content.list' | 'content.key-value' | 'content.json' | 'content.tool-use' | 'content.tool-result'
 
@@ -214,4 +215,3 @@ function open(commands: RenderCommandPort | undefined, payload: ReturnType<typeo
   if (!can(commands, 'resource.open')) return
   void commands?.execute({ type: 'resource.open', payload })
 }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }

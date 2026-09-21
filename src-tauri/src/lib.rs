@@ -1308,6 +1308,7 @@ pub fn run() {
     let agents = match loaded.agents {
         Ok(agents) => agents,
         Err(error) => {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             eprintln!("Pylon agent configuration error: {error}");
             HashMap::new()
         }
@@ -1316,6 +1317,7 @@ pub fn run() {
         Ok(Some(id)) => id,
         Ok(None) => String::new(),
         Err(error) => {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             eprintln!("Pylon agent configuration error: {error}");
             String::new()
         }
@@ -1326,6 +1328,7 @@ pub fn run() {
     let prism = match PrismClient::from_env() {
         Ok(client) => client,
         Err(error) => {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             eprintln!("Pylon Prism client unavailable: {error}");
             PrismClient::unavailable(error)
         }
@@ -1345,6 +1348,7 @@ pub fn run() {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
         Err(error) => {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             eprintln!("Pylon runtime initialization failed: {error}");
             return;
         }
@@ -1358,6 +1362,7 @@ pub fn run() {
         let gateway = Arc::new(match gateway_result {
             Ok(config) => GatewayCore::from_config(config),
             Err(error) => {
+                // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
                 eprintln!("Pylon gateway configuration error: {error}");
                 GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
             }
@@ -1383,6 +1388,7 @@ pub fn run() {
                         }
                     }
                     Err(error) => {
+                        // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
                         eprintln!("Pylon ACP agent unavailable: {error}");
                         if let Ok(mut state) = default_runtime.agent_runtime.lock() {
                             state.status = AgentLifecycleStatus::Error;
@@ -1392,6 +1398,7 @@ pub fn run() {
                     }
                 }
             } else {
+                // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
                 eprintln!("Pylon has no configured Agent; start in disconnected mode");
             }
         }

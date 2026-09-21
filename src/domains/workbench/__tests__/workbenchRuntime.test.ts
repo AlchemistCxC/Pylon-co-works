@@ -26,6 +26,8 @@ it('reuses message projections across metadata changes and interleaved owners wi
   const changed = mergeWorkbenchRuntimeSnapshot(first, { document: { ...document,
     messages: document.messages.map(message => ({ ...message, running: false })),
   } })
+  // #204③：legacy messages 派生改为**按需门控**（宿主 legacy 字段非空才派生）；
+  // 本用例宿主非空 ⇒ 派生行为与此前一致：内容变化产生新数组，running 状态随之落定。
   expect(changed.messages).not.toBe(first.messages)
   expect(changed.generating).toBe(false)
   source.destroy()

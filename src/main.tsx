@@ -9,11 +9,14 @@ import './index.css'
 // Tailwind v4 utilities 基线（TW 施工书 20260914）：无 preflight，@theme inline
 // 只读消费 index.css token；必须在 index.css 之后引入。
 import './styles/tailwind.css'
-// 浏览器模式假 Tauri 后端（静态演示全景）。必须在 env.ts（IS_TAURI）求值之后安装：
-// 本文件静态 import 已全部求值（App → env.ts 已冻结 IS_TAURI=false），此刻装 globals 安全。
-import { installMockTauri } from './demo/mockTauri'
-
-installMockTauri()
+// 浏览器模式假 Tauri 后端（静态演示全景）——开发脚手架，仅 DEV 构建动态加载（生产
+// import.meta.env.DEV 恒 false，分支 tree-shake，生产 bundle 不携带 demo/mockTauri）。
+// 安装时序语义不变：动态 import 发生在本文件全部静态 import 求值之后（App → env.ts 的
+// IS_TAURI 已冻结为 false），此刻装 globals 安全——比原来的静态 import + 顶层调用更晚，
+// env.ts 的冻结前提依然满足。同 obs04~07/css01 的 DEV-only 动态加载模式。
+if (import.meta.env.DEV) {
+  void import('./demo/mockTauri').then(module => module.installMockTauri())
+}
 
 // OBS-04：P2 三源导出取证控制台钩子——仅 DEV 构建动态加载（生产 import.meta.env.DEV 恒
 // false，分支 tree-shake，零暴露）；内部再按 IS_TAURI 守卫，浏览器 mock 模式 no-op。

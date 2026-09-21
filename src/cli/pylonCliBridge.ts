@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../infrastructure/tauri/env.ts'
 import { getPylonCliService, getPylonCliTool } from './pylonCliRuntime.ts'
+import { errorMessage } from './pylonCliService.ts'
 
 interface CliFrontendRequest {
   requestId: string
@@ -36,7 +37,7 @@ async function install(): Promise<() => void> {
       result => invoke('pylon_cli_respond', { requestId: request.requestId, result }),
       error => invoke('pylon_cli_respond', {
         requestId: request.requestId,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       }),
     ).catch(error => console.error('Pylon CLI response failed', error))
       .finally(() => controllers.delete(request.requestId))

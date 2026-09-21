@@ -1,5 +1,6 @@
 import type { RenderKindDefinition } from '../../plugin-runtime/renderers/rendererTypes.ts'
 import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 const INTERACTION_SETTINGS = Object.freeze({
   schemaVersion: 1,
@@ -65,10 +66,6 @@ const SENSITIVE_INTERACTION_DEFAULT_TOKENS = Object.freeze({
   presentation: 'inline', maxWidth: 720, countdownStyle: 'compact',
   warningColor: 'var(--warning, #d29922)', showProviderMetadata: true,
 })
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 export function isInteractionSnapshotInput(input: unknown): boolean {
   if (!isRecord(input) || typeof input.id !== 'string' || typeof input.sequence !== 'number') return false

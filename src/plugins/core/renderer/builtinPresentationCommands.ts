@@ -4,8 +4,8 @@ import { applyPresentationProfile } from '../../../application/transactions/appl
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
 import { useStore } from '../../../store.ts'
 import type { PresentationProfileRegistryEntry } from '../../../plugin-runtime/presentation/presentationProfileTypes.ts'
+import { record } from '../../../utils/wireGuards.ts'
 
-function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function id(value: unknown, key: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 必须是非空字符串`); return value.trim() }
 function profileDescriptor(entry: PresentationProfileRegistryEntry) {
   return { id: entry.contributionId, pluginId: entry.ownerPluginId, label: entry.value.label, description: entry.value.description, family: entry.value.family, order: entry.value.order, tokens: entry.value.tokens, assets: entry.value.assets }

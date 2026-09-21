@@ -23,6 +23,17 @@ use crate::acp::ManagedChild;
 const MAX_WRITE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 
+/// 进程退出轮询间隔（stop 等待回路与 spawn_monitor 监视线程共用）。
+///
+/// 忙轮询评估结论（issue #228 批次E）：换 `tokio::process::Child::wait()` /
+/// 退出事件回调需要整体重设计——`ManagedChild` 持 `std::process::Child`，
+/// stdin/stdout/stderr 为同步流并被写行/读行线程直接消费；迁 tokio 需改流
+/// 所有权（`into_std` 或全链路 async 化）、Windows Job Object 句柄挂接路径
+/// 与重启监视线程生命周期，改动面远超单点替换。`ManagedChild::
+/// spawn_exit_watcher`（OpenProcess+WaitForSingleObject，仅 Windows）是现有
+/// 的事件化基础，跨平台补齐后可作替换方向。故暂以 20ms 轮询维持现状。
+const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ProcessStatus {
@@ -512,7 +523,7 @@ impl PluginProcessSupervisor {
             if matches!(status, ProcessStatus::Exited | ProcessStatus::Failed) {
                 return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(EXIT_POLL_INTERVAL).await;
         }
         self.kill(&app, process_id)
     }
@@ -786,7 +797,7 @@ fn json_rpc_id(value: &Value) -> Option<String> {
 
 fn spawn_monitor<R: tauri::Runtime>(app: AppHandle<R>, record: Arc<ProcessRecord>) {
     std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(EXIT_POLL_INTERVAL);
         let status = match record.child.lock() {
             Ok(mut child) if child.has_child() => child.try_wait(),
             Ok(_) => return,

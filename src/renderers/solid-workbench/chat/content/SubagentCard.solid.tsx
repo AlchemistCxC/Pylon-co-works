@@ -3,6 +3,7 @@ import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../../../
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderSemanticCommand } from '../../../../contracts/messageRenderer.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
 import { ToolContentPart } from '../ToolInvocationCard.solid.tsx'
+import { isRecord } from '../../../../utils/wireGuards.ts'
 
 /**
  * C09：子代理/委派/团队活动卡（Solid）。
@@ -214,10 +215,6 @@ export function SolidSubagentCard(props: {
       </Show>
     </section>
   )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function nonEmptyString(value: unknown): string | undefined {

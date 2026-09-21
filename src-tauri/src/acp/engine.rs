@@ -15,9 +15,9 @@
 //! 4. 入站分发走**非类型化** `Dispatch<UntypedMessage, UntypedMessage>`：handler 内
 //!    只做转发，不做同步阻塞（施工书 §3 第 9 条）。
 //!
-//! A1a 步骤 5–7 接线前，本模块仅供测试与后续接线使用（`allow(dead_code)`）。
-
-#![allow(dead_code)]
+//! A1a 步骤 5–7 已接线：`AcpClient::connect_with_logs`（acp/client.rs）经
+//! [`spawn_sdk_engine`] 把本模块接入生产路径——SDK 是唯一后端，legacy 传输
+//! 已删除（原「接线前仅供测试」的模块级 `allow(dead_code)` 已随之摘除）。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -32,7 +32,7 @@ use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatE
 use super::client::{ClassifiedMessage, NotificationInbox};
 use super::error::AcpError;
 use super::wire_trace::{AcpWireCapture, AcpWireHub, WireDirection};
-use super::{AcpKind, RawMessage};
+use super::RawMessage;
 use std::future::Future;
 
 /// 入站 broadcast 容量（Kernel/replay 扇出；A1c 从 transport.rs 迁入）。
@@ -482,8 +482,6 @@ impl ResponderHandle {
 pub(crate) struct SdkEngineConfig {
     /// 连接名（SDK 日志用）。
     pub name: String,
-    /// 连接所属 client 代际（wire capture 用，与 legacy 一致）。
-    pub client_generation: u64,
     pub wire: Arc<AcpWireHub>,
 }
 
@@ -504,7 +502,7 @@ pub(crate) async fn send_keep_rx_prepared(
     let pylon_id = prepared.id;
     let sdk = prepared.sdk;
     // A1b：把 SDK 的响应回调转回 `oneshot::Receiver<RawMessage>`，
-    // 让 `wait_prompt_with_cancel` 的双超时/cancel/settle 机制原样复用。
+    // 让 `wait_prompt_with_recovery` 的双超时/cancel/settle 机制原样复用。
     let (ready_tx, ready_rx) = oneshot::channel();
     sdk.outbound
         .send(SdkOutbound::RequestKeepRx {
@@ -685,31 +683,6 @@ pub(crate) fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
     }
 }
 
-/// 把一条 SDK 非类型化消息还原为 Pylon 入站帧（`Response` 返回 `None`，
-/// 由 handler 内的 `ResponseRouter` 处理）。
-pub(crate) fn classify_untyped(
-    message: Dispatch<UntypedMessage, UntypedMessage>,
-) -> Option<ClassifiedMessage> {
-    let (method, params) = match message {
-        Dispatch::Request(request, _responder) => {
-            (request.method().to_string(), request.params().clone())
-        }
-        Dispatch::Notification(notification) => (
-            notification.method().to_string(),
-            notification.params().clone(),
-        ),
-        Dispatch::Response(_, _) => return None,
-    };
-    Some(ClassifiedMessage::live(RawMessage {
-        id: None,
-        kind: super::AcpKind::from_method(Some(&method)),
-        method: Some(method),
-        result: None,
-        params: Some(params),
-        error: None,
-    }))
-}
-
 /// SDK wire request id → Pylon `RequestId`（null/absent → None）。
 fn sdk_request_id_to_pylon(
     id: &agent_client_protocol::schema::v1::RequestId,
@@ -780,6 +753,9 @@ fn publish_inbound(
 ///
 /// 拓扑：`sdk_end <-> inspect_left  ==bridge==  inspect_right <-> child_end`。
 /// `child_end` 由调用方接到子进程字节流（`ConnectTo`）。
+/// 仅测试消费：生产拓扑（`spawn_sdk_engine`）的 child 侧不走独立 duplex 通道，
+/// 由 `ConnectTo::into_channel_and_future` 直接给出。
+#[cfg(test)]
 pub(crate) fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
     let (sdk_end, inspect_left) = Channel::duplex();
     let (inspect_right, child_end) = Channel::duplex();
@@ -1007,26 +983,20 @@ pub(crate) fn spawn_sdk_client(
 /// 出站队列容量（有界；满时调用方拿到 `ConnectionClosed` 而不是无限堆积）。
 const OUTBOUND_CHAN_CAP: usize = 256;
 
-/// SDK 引擎构造产物（backend + 本连接 wire capture）。
-pub(crate) struct SdkEngineHandles {
-    pub(crate) backend: SdkBackend,
-    pub(crate) wire: Arc<AcpWireCapture>,
-}
-
 /// 用 SDK 连接已由 Pylon spawn 的子进程（D1=①）。
 ///
 /// 进程归属不变：子进程仍由 `ManagedChild`（Windows Job Object）持有；本函数只接
 /// 协议栈：std 管道 → `tokio::process::ChildStdin/Stdout::from_std`（非阻塞 + 注册
 /// runtime）→ `compat` → `ByteStreams` → 观测桥 → SDK client。
+/// client 代际由调用方在 `wire`（`AcpWireCapture` correlation）内携带，不再单独传参。
 pub(crate) fn spawn_sdk_engine(
     agent: &crate::agent_config::AgentDef,
-    client_generation: u64,
     stdin: std::process::ChildStdin,
     stdout: std::process::ChildStdout,
     wire: Arc<AcpWireCapture>,
     crashed: Arc<AtomicBool>,
     crashed_watch: watch::Sender<bool>,
-) -> Result<SdkEngineHandles, AcpError> {
+) -> Result<SdkBackend, AcpError> {
     let stdin = tokio::process::ChildStdin::from_std(stdin)
         .map_err(|error| AcpError::Child(format!("sdk engine stdin setup failed: {error}")))?;
     let stdout = tokio::process::ChildStdout::from_std(stdout)
@@ -1084,7 +1054,6 @@ pub(crate) fn spawn_sdk_engine(
     let join = spawn_sdk_client(
         SdkEngineConfig {
             name: agent.name.clone(),
-            client_generation,
             wire: wire.clone(),
         },
         relay,
@@ -1098,19 +1067,16 @@ pub(crate) fn spawn_sdk_engine(
         pending_requests.clone(),
     );
 
-    Ok(SdkEngineHandles {
-        backend: SdkBackend {
-            outbound: outbound_tx,
-            next_id: Arc::new(AtomicU64::new(1)),
-            inbound: NotificationInbox::new(updates_rx, control_rx),
-            telemetry,
-            replay_events,
-            active_replay_requests,
-            pending_requests,
-            shutdown: shutdown_tx,
-            join: Some(join),
-        },
-        wire,
+    Ok(SdkBackend {
+        outbound: outbound_tx,
+        next_id: Arc::new(AtomicU64::new(1)),
+        inbound: NotificationInbox::new(updates_rx, control_rx),
+        telemetry,
+        replay_events,
+        active_replay_requests,
+        pending_requests,
+        shutdown: shutdown_tx,
+        join: Some(join),
     })
 }
 
@@ -1126,7 +1092,6 @@ mod tests {
     fn engine_config() -> SdkEngineConfig {
         SdkEngineConfig {
             name: "pylon-engine-test".to_string(),
-            client_generation: 1,
             wire: AcpWireHub::new(
                 RuntimeCorrelation {
                     agent_id: "test".into(),
@@ -1397,7 +1362,7 @@ mod tests {
         let update = |index: u64| {
             ClassifiedMessage::live(RawMessage {
                 id: None,
-                kind: super::AcpKind::SessionUpdate,
+                kind: super::super::AcpKind::SessionUpdate,
                 method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
                 result: None,
                 params: Some(serde_json::json!({"sessionId": "s-1", "update": {"index": index}})),
@@ -1423,7 +1388,7 @@ mod tests {
             .await
             .expect("crash frame must be queued")
             .expect("control channel must stay open");
-        assert_eq!(crash.raw.kind, super::AcpKind::Crashed);
+        assert_eq!(crash.raw.kind, super::super::AcpKind::Crashed);
         assert_eq!(
             crash.raw.params.as_ref().unwrap()["reason"],
             serde_json::json!("overloaded")
@@ -1446,7 +1411,7 @@ mod tests {
         let update = |index: u64| {
             ClassifiedMessage::live(RawMessage {
                 id: None,
-                kind: super::AcpKind::SessionUpdate,
+                kind: super::super::AcpKind::SessionUpdate,
                 method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
                 result: None,
                 params: Some(serde_json::json!({"sessionId": "s-1", "update": {"index": index}})),
@@ -1459,7 +1424,7 @@ mod tests {
         // 洪泛未消费时，permission 请求必须立即可读（控制通道）。
         let request = ClassifiedMessage::live(RawMessage {
             id: Some(super::super::RequestId::String("perm-1".to_string())),
-            kind: super::AcpKind::PermissionRequest,
+            kind: super::super::AcpKind::PermissionRequest,
             method: Some("session/request_permission".to_string()),
             result: None,
             params: Some(serde_json::json!({"sessionId": "s-1"})),
@@ -1470,7 +1435,10 @@ mod tests {
             .await
             .expect("control frame must bypass the update flood")
             .expect("control channel must stay open");
-        assert_eq!(control_frame.raw.kind, super::AcpKind::PermissionRequest);
+        assert_eq!(
+            control_frame.raw.kind,
+            super::super::AcpKind::PermissionRequest
+        );
         assert_eq!(control_frame.ingress_seq, 3, "优先级不改写 ingress 序列");
 
         // 普通 lane 数据未动：第一帧仍在 inbox。
@@ -1760,7 +1728,7 @@ mod tests {
         let update = |index: u64| {
             ClassifiedMessage::live(RawMessage {
                 id: None,
-                kind: super::AcpKind::SessionUpdate,
+                kind: super::super::AcpKind::SessionUpdate,
                 method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
                 result: None,
                 params: Some(serde_json::json!({
@@ -1847,7 +1815,10 @@ pub enum RequestId {
 
 impl RequestId {
     /// 从 wire JSON value 原样解析（保留 variant）；null/absent/布尔/浮点 → None。
-    /// stdout reader 用它替换 `as_u64()` 窄化——string/null/absent 形态不再丢失。
+    ///
+    /// 仅测试消费（#228）：生产侧的 legacy stdout reader 已于 A1c 删除，现仅
+    /// golden_trace_tests 用它做 wire 回放断言；reader 重现时摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub fn from_json_value(value: &serde_json::Value) -> Option<RequestId> {
         match value {
             serde_json::Value::Number(n) => n.as_u64().map(RequestId::Number),
@@ -1895,19 +1866,6 @@ impl PreparedRpc {
     /// 发送 + 等待匹配响应（超时值来自协议配置）。
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
         super::engine::complete_prepared(self).await
-    }
-}
-
-impl RawMessage {
-    pub(crate) fn connection_closed() -> Self {
-        Self {
-            id: None,
-            method: None,
-            kind: AcpKind::Response,
-            result: None,
-            params: None,
-            error: Some(serde_json::json!("ACP connection closed")),
-        }
     }
 }
 
@@ -1967,37 +1925,10 @@ pub enum CancelSettleResolution {
 ///   不设整轮绝对墙钟。一个回合可以包含任意多个分析、思考和工具步骤，
 ///   每个步骤都必须分别获得完整的超时窗口。
 ///
-/// 任一判死后进入 cancel + settle（与旧路径一致）。
-#[allow(dead_code)]
-pub async fn wait_prompt_with_cancel<F, Fut>(
-    rx: &mut oneshot::Receiver<RawMessage>,
-    cancel_settle_timeout: std::time::Duration,
-    idle_timeout: std::time::Duration,
-    first_token_timeout: std::time::Duration,
-    last_activity: impl Fn() -> Option<std::time::Instant>,
-    cancel: F,
-) -> PromptWaitOutcome
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<(), String>>,
-{
-    wait_prompt_with_recovery(
-        rx,
-        cancel_settle_timeout,
-        idle_timeout,
-        first_token_timeout,
-        last_activity,
-        cancel,
-        || async {},
-    )
-    .await
-}
-
-/// Variant of [`wait_prompt_with_cancel`] that can force-clean a wedged child
-/// after cancellation failed to settle.  The recovery callback is deliberately
-/// supplied by the caller so the generic ACP layer does not know about any
-/// provider-specific process policy.  Non-Hermes callers continue to use the
-/// wrapper above and therefore retain the historical behavior.
+/// 任一判死后进入 cancel + settle。`force_kill` 在 cancel 后仍未 settle 时给
+/// 调用方一次进程树强清机会（Windows 上观察到的 Hermes/MSYS 死锁）；回调由
+/// 调用方显式传入，本层不感知 provider 进程策略——非 Hermes 调用方传 no-op
+/// `|| async {}`（原 `wait_prompt_with_cancel` 薄包装无独有语义，已并入本参数删除）。
 pub async fn wait_prompt_with_recovery<F, Fut, K, KF>(
     rx: &mut oneshot::Receiver<RawMessage>,
     cancel_settle_timeout: std::time::Duration,

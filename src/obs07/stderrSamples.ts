@@ -24,7 +24,7 @@
  * （取证需保留 wire 原始形态，直接核验 hub 内容）。
  */
 
-import { sanitizeExportValue } from '../obs04/threeSourceExport'
+import { sanitizeExportValue } from '../domains/export/threeSourceExport'
 import { narrowPathValues } from '../obs05/coldStartSnapshot'
 
 /** 单 agent 样本上限 / 指纹上限（防工件膨胀，取证够用）。 */

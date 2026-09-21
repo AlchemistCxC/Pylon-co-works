@@ -156,10 +156,12 @@ describe('SolidMessageRow', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false')
     await fireEvent.click(button)
     expect(button.getAttribute('aria-expanded')).toBe('true')
-    // 正文经 C00 MarkdownContent 异步渲染，等待出现
+    // 正文经 C00 MarkdownContent 异步渲染，等待出现。预算依据：等待对象是
+    // createResource 解析 + Solid 刷帧（微任务级，常态 <50ms，本文件其余 waitFor
+    // 用默认 1s 均稳定通过）；2s 覆盖满载并发抖动，原 5s 是 P91 期粗放放宽。
     await waitFor(() => {
       if (!result.container.textContent?.includes('第二行')) throw new Error('markdown not flushed')
-    }, { timeout: 5000 })
+    }, { timeout: 2_000 })
   })
 
   it('reasoning duration normalizes rounded seconds across the minute boundary', () => {

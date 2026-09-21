@@ -16,6 +16,7 @@ import {
 } from '../../infrastructure/events/canonicalEventBatch.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type SessionEvent, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import {
   createWorkbenchDocument,
@@ -107,10 +108,19 @@ function normalizeCanonicalRowToEnvelopes(
 }
 
 /**
- * #81 L1：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
- * 按跨度逐 chunk 展开重建：sub-envelope 的 sequence = seqSpan[0]+i、eventId =
- * owner#(seqSpan[0]+i)，coverage = [sequence, sequence]（journal 权威）。
- * 形状损坏的 batch 行退回单行归一（产出 event.unknown，raw 不丢）。
+ * #81 L1 → #226：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
+ * 展开。归一规则**不另起第二套**：仍逐 chunk 过 `normalizeAgentEvent`（方言/扩展归一原样
+ * 生效），但只收割语义 parts 与 identity，随后把整段 run 合成**一个**段级信封——对齐
+ * `turn.unit` delta-run 段的形状（coverage=[seqStart, seqEnd]、sourceId=`ownerKey#seqEnd`）。
+ *
+ * 与逐 chunk 展开的投影终态逐字节等价：
+ * - run 内 sequence 相邻 ⇒ chunk 之间不存在 timeline 边界条目 ⇒ fold 决策单次求值等价；
+ * - parts 拼接满足结合律 ⇒ 投影器一次性 coalesce 与逐 chunk 增量 coalesce 终态一致；
+ * - message identity 终态 = 末个非空 chunk（append 覆盖语义）；time/occurredAt 取行值
+ *   （= 首 chunk，`buildBatchRow` 保留首条时间戳）。
+ * 收益：per-chunk 的信封冻结、投影归约与单点 coverage 全部消失——冷重放信封数随
+ * 折叠比（最高 2000×）下降。任一 chunk 归一偏离期望形状（方言跨界/多事件/角色不符）
+ * → 整行退回逐 chunk 展开，raw 保真不丢。
  */
 function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly WorkbenchEventEnvelope[] {
   const ownerKey = toCanonicalOwnerKey(event.owner)
@@ -118,12 +128,53 @@ function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly Wo
   if (!chunks) {
     return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
   }
-  const first = canonicalBatchSpanOf(event)![0]
-  return chunks.flatMap((raw, index) => {
-    const sequence = first + index
+  const span = canonicalBatchSpanOf(event)!
+  const perChunk = (): readonly WorkbenchEventEnvelope[] => chunks.flatMap((raw, index) => {
+    const sequence = span[0] + index
     const eventId = `${ownerKey}#${sequence}`
     return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId, [sequence, sequence])
   })
+  const provider = event.provenance?.provider ?? event.owner.agentId
+  const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
+  const expectedType = event.eventType === 'assistant.text.delta.batch' ? 'message.delta' : 'reasoning.delta'
+  const parts: ContentPart[] = []
+  let lastIdentity: WorkbenchEventEnvelope['identity'] | undefined
+  for (let index = 0; index < chunks.length; index += 1) {
+    const sequence = span[0] + index
+    const normalized = normalizeAgentEvent(chunks[index], {
+      provider,
+      sessionId: event.owner.localSessionId,
+      sourceId: `${ownerKey}#${sequence}`,
+      sequence,
+      recordedAt: event.receivedAt,
+      occurredAt: event.occurredAt,
+      agentId: event.owner.agentId,
+      provenance,
+    })
+    if (normalized.events.length !== 1) return perChunk()
+    const semantic = normalized.events[0]!
+    // 期望类型按字面量分支判定（TS 对联合类型变量的比较不收窄 event 联合）。
+    if (expectedType === 'message.delta') {
+      if (semantic.event.type !== 'message.delta' || semantic.event.role !== 'assistant') return perChunk()
+    } else if (semantic.event.type !== 'reasoning.delta') {
+      return perChunk()
+    }
+    parts.push(...(semantic.event.parts ?? []))
+    if (Object.keys(semantic.identity).length > 0) lastIdentity = semantic.identity
+  }
+  return [Object.freeze(createWorkbenchEnvelope({
+    sessionId: event.owner.localSessionId,
+    sequence: span[1],
+    recordedAt: event.receivedAt,
+    occurredAt: event.occurredAt,
+    source: { provider, sourceId: `${ownerKey}#${span[1]}` },
+    identity: Object.freeze({ ...event.identity, ...(lastIdentity ?? {}) }),
+    provenance,
+    coverage: [span[0], span[1]],
+    event: expectedType === 'message.delta'
+      ? { type: 'message.delta', role: 'assistant', parts }
+      : { type: 'reasoning.delta', parts },
+  }))]
 }
 
 /**
@@ -1076,6 +1127,13 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
         // 行同判幂等，整页重折即收敛。
         if (refreshMalformedCount > 0) journalDiagnosticCount = refreshMalformedCount
+        // #204③：foldLog 以本次 journal 权威集**整体替换**。此前 log 永远保留 bind 时代
+        // 的旧信封实例——refresh 重建文档后它们不再与文档共享事件对象，等于把一整份
+        // 旧事件图钉在内存里（大会话的主要留存浪费之一）。替换后 log 的信封与文档
+        // timeline 共享同一语义事件对象（仅余信封壳），且被拒回滚的整页重折源恰好
+        // 就是这份 journal 权威集（未提交的乐观行由 withPendingOptimistic 随后补入）。
+        foldLog = []
+        foldLogIds.clear()
         const projected = foldPage(
           bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh],
           current,

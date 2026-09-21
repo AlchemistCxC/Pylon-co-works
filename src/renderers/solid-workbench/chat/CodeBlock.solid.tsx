@@ -1,6 +1,7 @@
-import { Show, createResource, createSignal } from 'solid-js'
+import { Show, createEffect, createResource, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { findOversizeFoldPoint } from '../../../domains/rendererContent/textContentContracts.ts'
 import { highlightCode } from '../../../components/chat/codeHighlight.ts'
+import { scheduleHighlightJob, trackCodeBlockVisibility } from './codeBlockDomLifecycle.ts'
 
 export interface SolidCodeBlockProps {
   code: string
@@ -49,11 +50,81 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   }
   const collapse = () => setExtraChars(0)
 
-  const [highlighted] = createResource(
-    () => isMultiLine() ? { language: props.language || 'text', code: visibleCode() } : undefined,
-    input => highlightCode(input.language, input.code).catch(() => null),
+  // #221：行 HTML 缓存 + 视口外降级（与 markdown 路径同一机制）。缓存键对齐
+  // visibleCode 快照——#208 步进展开使代码前进时缓存失配，重取；过期在途结果丢弃。
+  // 本路径 HTML 不经 sanitize（现状口径）。gated（宿主有 IntersectionObserver）时
+  // 高亮改由观察器驱动：进圈才取、出圈降级、展开步进仅圈内重取；无观察器宿主
+  // （测试/旧内核）保留 createResource 现状时序，行为逐字节不变。
+  const gatedLifecycle = typeof IntersectionObserver !== 'undefined'
+  const [lineHtmls, setLineHtmls] = createSignal<readonly string[] | null>(null)
+  const [demoted, setDemoted] = createSignal(false)
+  let highlightedFor: string | undefined
+  let root: HTMLDivElement | undefined
+  let releaseLifecycle: (() => void) | undefined
+  let exited = false
+  let disposed = false
+
+  const requestHighlight = () => {
+    if (!isMultiLine()) return
+    const code = visibleCode()
+    if (lineHtmls() !== null && highlightedFor === code) {
+      setDemoted(false)
+      return
+    }
+    highlightedFor = code
+    const language = props.language || 'text'
+    scheduleHighlightJob(async () => {
+      const html = await highlightCode(language, code).catch(() => null)
+      if (disposed || highlightedFor !== code) return
+      setLineHtmls(html === null ? [] : html.split('\n'))
+      if (!exited) setDemoted(false)
+    })
+  }
+
+  createResource(
+    () => !gatedLifecycle && isMultiLine() ? { language: props.language || 'text', code: visibleCode() } : undefined,
+    input => highlightCode(input.language, input.code).catch(() => null).then(html => {
+      if (disposed) return html
+      setLineHtmls(html === null ? [] : html.split('\n'))
+      if (!exited) setDemoted(false)
+      return html
+    }),
   )
-  const highlightedLines = () => highlighted()?.split('\n')
+
+  // 展开步进（visibleCode 前进）在圈内的重取；首跑只记账——首亮由观察器 onEnter 驱动，
+  // 历史重放时圈外块因此根本不发起高亮（级联消失的根）。
+  let lastTrackedCode: string | undefined
+  createEffect(() => {
+    if (!gatedLifecycle) return
+    const code = visibleCode()
+    const previous = lastTrackedCode
+    lastTrackedCode = code
+    untrack(() => {
+      if (previous === undefined) return
+      if (!isMultiLine() || exited) return
+      if (lineHtmls() !== null && highlightedFor === code) return
+      requestHighlight()
+    })
+  })
+
+  onMount(() => {
+    if (!gatedLifecycle || root === undefined) return
+    const handle = trackCodeBlockVisibility(root, {
+      onEnter: () => {
+        exited = false
+        requestHighlight()
+      },
+      onExit: () => {
+        exited = true
+        if (lineHtmls() !== null && (lineHtmls()?.length ?? 0) > 0) setDemoted(true)
+      },
+    })
+    releaseLifecycle = handle?.release
+  })
+  onCleanup(() => {
+    disposed = true
+    releaseLifecycle?.()
+  })
 
   const copy = () => {
     if (props.onCopy) props.onCopy(props.code)
@@ -64,7 +135,7 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   }
 
   return (
-    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'}>
+    <div ref={root} class="term-code-block" data-language={props.language ?? 'text'} data-folded={folded() ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'}>
       <Show when={props.showLanguage !== false || props.showCopyButton !== false}>
         <div class="term-code-head">
           <Show when={props.showLanguage !== false}><span class="term-code-lang">{props.language ?? 'text'}</span></Show>
@@ -84,7 +155,7 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
             {/* R-B1 契约：每行内容 span 都带 term-code-text（长行软折与缩进保留挂在它上面）。
                 此前回退/高亮两条分支都没带这个类——流式块自带该类，所以缺口只暴露在 code 部件路径上。 */}
             <Show
-              when={highlightedLines()?.[index]}
+              when={demoted() ? undefined : lineHtmls()?.[index]}
               fallback={<span class="term-code-text">{line || '\u00a0'}</span>}
             >
               {html => <span class="term-code-text" innerHTML={html()} />}

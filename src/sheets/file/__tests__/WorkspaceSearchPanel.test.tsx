@@ -6,7 +6,7 @@ import type { FileProvider } from '../../../plugin-runtime/file-workbench/fileWo
 import type { WorkspaceTarget } from '../../../domains/workspace/workspaceTarget.ts'
 
 // 下沉自 scripts/test-workspace-search.mts（P91 A2）：搜索面板接线行为——
-// 只经 provider.search 消费正式命令；missing 明确「待后端」；结果经 normalize。
+// 只经 provider.search 消费正式命令；missing 明确「后端命令不可用」阻塞态；结果经 normalize。
 
 const target: WorkspaceTarget = { sessionId: 's1', agentId: 'peri', source: 'local:x' }
 
@@ -41,12 +41,12 @@ describe('WorkspaceSearchPanel 搜索流', () => {
     expect(onOpenResult).toHaveBeenCalledWith('src/a.ts', 12)
   })
 
-  it('命令缺失：明确「待后端」阻塞态', async () => {
+  it('命令缺失：明确「后端命令不可用」阻塞态', async () => {
     const search = vi.fn(async () => { throw new Error('Command not found: workspace_search') })
     render(<WorkspaceSearchPanel target={target} provider={makeProvider(search)} onOpenResult={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('工作区搜索'), { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: '搜索' }))
-    await waitFor(() => expect(screen.getByText(/待后端/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/后端命令不可用/)).toBeInTheDocument())
   })
 
   it('无 provider 或空查询时不触发搜索', () => {

@@ -337,7 +337,7 @@ export default function App() {
     if (!IS_TAURI) return
     const win = getCurrentWindow()
     const saved = loadWindowSize(localStorage)
-    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(() => {})
+    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(error => console.warn('恢复上次窗口尺寸失败', error))
     let timer: number | null = null
     let disposed = false
     const unlisten = win.onResized(({ payload }) => {

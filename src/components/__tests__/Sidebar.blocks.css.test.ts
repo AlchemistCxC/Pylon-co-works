@@ -189,6 +189,16 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(body('.session-actions')).toMatch(/pointer-events:\s*none/)
   })
 
+  it('淡出侧必须弃权命中面：meta 恒为 pointer-events:none（#204①）', () => {
+    // opacity<1（含 0）创建 stacking context，画进 positioned 层（step 8），高于普通
+    // in-flow grid item（step 5）——交叉淡出期间 DOM 靠后的 .session-actions 被透明的
+    // meta 整层压住，实机 elementsFromPoint 栈顶即 .session-meta，齿轮点了没反应。
+    // 门控只能落在「淡出侧自己弃权」，DOM 顺序救不了；也因此必须是无条件的基础规则：
+    // hover:none 分支（meta 永久 opacity:0）与 120ms 过渡中间态同样被它覆盖。
+    const meta = body('.session-meta')
+    expect(meta).toMatch(/pointer-events:\s*none/)
+  })
+
   it('会话行动作的显形门控在**容器**上，按钮自身不得再叠第二层', () => {
     // opacity 作用于整个子树：容器 opacity:0 时，只给按钮提 opacity 救不了——
     // 旧断言检查的「按钮自带三层门控」正是「会话设置不可见」的根因之一。

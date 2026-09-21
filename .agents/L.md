@@ -387,79 +387,7 @@
 
 ---
 
-[2026-09-21 04] [Miyaki Kumo] [#220]
-**开工：issue220（前端计算核下沉 Rust/WASM，WP1–WP4）。** 在 `Ru5t/Reflector` 上施工（开工时工作树干净，已 ff 到 `github/main` `5e251b40`；本人 #218 条目已随 PR #219 合入 main，按「只留在途」移除）。spec：`.agents/spec/220-frontend-compute-core-wasm.md`；ADR：`.agents/decisions/0018-frontend-compute-core-rust-wasm.md`。本轮文件域，请勿改写、勿连带提交：
-
-- 新增 crate：`src-tauri/pylon-canonical-types/**`、`src-tauri/pylon-compute/**`、`wasm-markdown/**`
-- `src-tauri/Cargo.toml`（workspace members）
-- `src-tauri/src/session/event_repo.rs`（改用 canonical 类型单源，**只动类型引用，不动存储/事务逻辑**）
-- 前端计算核消费者：`src/domains/workbench/workbenchProjector.ts`、`src/domains/workbench/content/contentPartSchema.ts`、`src/domains/workbench/normalizers/**`、`src/domains/events/**`、`src/infrastructure/events/canonicalEventBatch.ts`、`src/renderers/solid-workbench/{streamingDisplayScheduler.ts,chat/streamingMarkdownSplit.ts,chat/markdownRenderModel.ts}`、`src/components/chat/{codeHighlight.ts,starryCore.ts}`
-- 门禁：`scripts/check-*.mjs`（新增 wasm parity 差分脚本、`check-bundle-size.mjs` 加 wasm 记账）、`package.json`（`check:frontend` 增 wasm 步骤）
-- 文档：`docs/说明书/Pylon-项目架构参考.md`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`、`.agents/records/`、`.agents/decisions/`、本文件
-
-**不碰**：插件四样契约（`RenderKindDefinition`/`RendererSlotContribution`/`RenderSurface`/fallback/documentSchema）、`src/plugins/**`、Suite 接缝、IPC wire 与持久化格式、`src-tauri/src/session/event_repo.rs` 的存储与事务语义（只换类型来源）、`src-tauri/src/dispatcher/**`、他人一切文件域。
-
-**工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
-
-**与他域的交接（开工后观测到 #217 正在同一工作树施工）**：我在 04:01 观测到 `src-tauri/src/session/{model.rs,prompt.rs}` 正在被 #217 改写（263 行新增，纯追加、未被我的 `cargo fmt --all` 改动）。**我全程不碰这三个文件与 `runtime.rs`**；我的 `src-tauri/src/session/event_repo.rs` 改动与本域之外的 Rust 侧不交叉。**两处声明重叠，需留意**：`docs/说明书/Pylon-项目架构参考.md` 与 `.agents/records/`（#217 也声明了这两处）——我只在我自己的记录文件与说明书「前端计算核」一节落笔，不删改 #217 的活性段落。另：`src-tauri/Cargo.lock` 我因新增依赖而改写，若 #217 也加依赖，合并时按「两边都保留」处理。
-
-**范围扩至 WP2–WP4 + 旧实现退役（2026-09-21 11 起）**：#217 已自行提交（`22b57d0e`/`d6806da7`/`516954ee`）并从本文件移除其条目，工作树不再有他人在途改动，冲突面消失。新增文件域：
-
-- 新增 crate/模块：`src-tauri/pylon-markdown/**`（WP4，含 `gen/` 资产生成器与 `parity/` 差分工具）、`src-tauri/pylon-compute/src/{events,projector,streaming}/`
-- 前端计算核消费者：`src/domains/workbench/**`、`src/renderers/solid-workbench/**`、`src/components/chat/**`、`src/sheets/agent-workbench/**`、`src/infrastructure/compute/**`
-- 门禁与基准：`scripts/{build-wasm.mjs,check-bundle-size.mjs,bench-compute-boundary.mts,audit-maintenance.mts}`、`.github/workflows/ci.yml`、`package.json`、`tsconfig.json`、`eslint.config.js`、`vitest.config.ts`
-- 文档：`.agents/records/220-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`
-
-**仍未取到的证据**：① `check:all` 全绿——本机 `check:rust` 需编译主 crate，而 G: 盘曾 100% 满（我已清 `target/debug/incremental` 腾出约 7 GB），CI 侧 rust-test/rust-shadow 当时仍 pending；② 实机（webview2-mcp）性能前后对比未做，目前只有 mock 基准数字。`docs/说明书/Pylon-项目架构参考.md` 的 WASM 一节**仍未加**——该文件 #217 也声明过，请其确认归属后补，我不擅自动它。
-
-[2026-09-21 19] [Miyaki Kumo] [#220]（续，同一条目）
-
-**在途冲突声明**：本轮回到工作树时发现 `src-tauri/pylon-compute/src/projector/workbench.rs`（+491 行）与 `scripts/bench-compute-boundary.mts`（+66）、未跟踪的 `scripts/probe-longstream.tmp.mts` 有**他人（或仓库主自己）的在途改动**，内容是 `MessageAppendPatch` / `MessageChange::Full` 的增量消息补丁（= 记录 §24.3 的路线 A）。该文件当前**编译不过**（同一处先后报 `no field index on MessageAppendPatch` 与 `unexpected closing delimiter`，说明正在写），连带 `bun run test` 的 globalSetup 与 `build:wasm` 一起红。
-
-**我按 AGENTS §2.1 绕开**：不 abort、不 stage、不 commit 对方任何文件，也不去「顺手修好」那个未完成的类型——那是对方的设计现场。我的改动只落下列自有文件（已按 pathspec 单独提交）：
-
-- `src/infrastructure/compute/projectorCompute.ts`（同步出口经装载门取 glue）
-- `src/app/bootstrap/bootstrapApplication.ts` + `__tests__/bootstrapApplication.test.ts`（新增 `warmComputeCores` 步；**一处既有用例的让出次数由 1 改 2，断言未改**，理由在用例注释里）
-- `src/App.tsx`（供上 `warmComputeCores: () => whenProjectorComputeReady()`）
-- `src/renderers/solid-workbench/builtinSolidRendererSuite.ts`（`prepare` 同址等投影核）
-- `src/infrastructure/compute/__tests__/wasmRuntime.test.ts`（装载门契约，新增）
-- `scripts/bench-memory-hold.mts`（TS vs wasm 同 workload 持有成本对照，新增）
-
-**（已解除）** 对方收工、仓库主随后裁决**投影与 events 回退 TS、wasm 只留 markdown + 流式**；本条目涉及的两个 crate 模块已删，冲突面随之消失。结算见 ADR-0018 修订 1 与记录 §31。
-
----
-
-[2026-09-21 20] [Miyaki Kumo] [#220]（路线 A 收口——对 [2026-09-21 19] 条目的回复）
-
-**workbench.rs 的增量补丁改造（= §24.3 路线 A）已完工**，你留的 ①② 可以做了：
-
-- 最终树上 `bun run test` 已由本轮跑过：623 文件 / 4698 通过 | 1 todo（含你的 CSP/竞态/
-  内存三项，联合验证）。`cargo test -p pylon-compute` 181 通过，clippy/fmt/tsc/eslint/
-  parity/bundle 全绿。你 §26.3 观察到的「路线 A 新引入的 ~10.8µs TS 侧成本」即
-  `applyMessageAppend` + 文档重建的最终形态，读数见记录 §27.3（长流 live 402.99→24.63µs、
-  patch 82.02→1.10MB；回合流 95.96→32.02µs）。
-- 本轮提交文件域：`workbench.rs`、`projectorCompute.ts`（在你的装载门改动之上叠加，两者
-  已在 19:24 的全量跑里联合验证）、两份测试、`bench-compute-boundary.mts`（新增场景 E）、
-  记录 §27、本文件。
-- `scripts/bench-live-probe.mts`、`value_memory_probe.rs` 两份未跟踪文件仍归你，我未触碰。
-
----
-
-[2026-09-21 22] [Miyaki Kumo] [#220 · streaming 边界收口]
-
-**开工：wasm 保留面（流式）的性能/内存边界收口**——① 揭示出口 tail 化（`TickOutcome.rows` 由「整条已揭示前缀」改「本拍增量尾巴」，JS 侧追加；O(全文)/拍 → O(尾)/拍）；② 切分新增「块边界 UTF-16 偏移数组」出口（热路径不再整组 stable 块字符串过界，旧出口保留）；③ `RevealEngine` 增量 UTF-16 计数（消掉每拍/每 push 的整串 `encode_utf16`）；④ 杂项（围栏 CRLF 守卫、消费侧行文本缓存）。用户已裁决放行（跨语言契约变更）。
-
-**我方本轮文件域（请勿改写、勿连带提交）**：
-
-- `src-tauri/pylon-compute/src/streaming/{split,budget}.rs`（含 Rust 单测）
-- `src/infrastructure/compute/streamingCompute.ts`
-- `src/renderers/solid-workbench/streamingDisplayScheduler.ts`
-- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`
-- `src/renderers/solid-workbench/__tests__/streamingComputeParity.test.ts`（S1 契约形态更新）
-- `scripts/compute-parity/suites/streamingSplitSuite.ts`、`streamingBudgetSuite.ts`（tail 形态适配 + 长流新 pair）
-- 文档：`.agents/spec/220-streaming-boundary-delta.md`（gitignore）、`.agents/records/220-streaming-boundary-delta.md`（**新增独立记录**——220-completion 记录有 §31 未提交改动，我写进去会造成连带提交）、本文件
-
-**不碰**：§31 回退施工的全部在途文件（workbenchProjector / agentWorkbenchSession / bootstrap / App / scaffold `harness.ts`+`index.ts` / `check-bundle-size.mjs` 等）；`github/main` 合并因 App.tsx 等重叠**推迟**到回退收工后；三个旧切分出口（`splitStreamingMarkdownBlocks` / `splitStreamingMarkdown` / `findLastStableBlockBoundary`）保留不删（parity 与既有测试钉着）。
+（#220 前端计算核 wasm 化（含 scope 收窄回退与 streaming 边界收口）已随 PR #222 合入 main（5d5b164a），在途条目移除；内容见 git 历史与 .agents/records/220-*.md。）
 
 ---
 
@@ -474,3 +402,129 @@
 - `.agents/records/218-mcp-context-slimming.md`（开发记录，新增）
 
 **不碰**：`tools/webview2-mcp/src/cdp/**`、`jsscript.rs`、`args.rs`、`error.rs`、`main.rs`；他人一切文件域。L.md 旧条目不动（归档归各 issue 负责人）。
+
+---
+
+[2026-09-21 15] [Miyaki Kumo] [#204①]
+
+**开工：左栏会话设置点不动（#204 已重开，仅症状①——命中面修复；②③已随 PR #207 收口）。** spec 见 `.agents/spec/issue-204-session-settings-hit-surface.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css`（仅 `.session-tail`/`.session-meta` 一节与 `@media (hover:none)` 行）
+- `src/components/__tests__/Sidebar.blocks.css.test.ts`（追加「淡出侧弃权命中面」契约断言）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/components/Sidebar.tsx`、`src/components/sidebar/**`、`src/App.tsx`、其余全部源码与首方样式；`src-tauri/**` 源码（实机验收只构建不改动）。构建产物一律不提交。
+
+---
+
+[2026-09-21 17] [Miyaki Kumo] [#204③投影层 + #226 + #155T3]
+
+**开工：#204③ 投影/事件层收口 + #226 batch 行段级展开（+ #155 T3 内核写侧聚合备阶段）。** spec 见 `.agents/spec/issue-226-projection-live-batch-fold.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/workbench/workbenchProjector.ts`、`src/domains/workbench/workbenchRuntime.ts`
+- `src/sheets/agent-workbench/agentWorkbenchSession.ts`
+- `src/__tests__/replay/**`、`src/domains/workbench/__tests__/**`（新增/同步用例）
+- 阶段 D（另 spec）：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`、`scripts/compute-parity/**`
+- 文档：`docs/说明书/Pylon-项目架构参考.md`、`.agents/records/`、`.agents/decisions/`（T3 ADR）、本文件
+
+**我不碰**：`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 与 `src/components/__tests__/Sidebar.blocks.css.test.ts`（#204① 在途域）；其余全部源码。
+
+---
+
+[2026-09-22 00] [Miyaki Kumo] [#36]
+
+**开工：issue36（CLI `interaction respond` kind 契约不一致 + 错误 `[object Object]`）。** spec 见 `.agents/spec/issue-36-cli-interaction-kind-contract.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/cli/pylonCliService.ts`（kind 透传 + `errorMessage` 归一化导出）
+- `src/cli/pylonCliBridge.ts`（错误归一化复用）
+- `src/cli/__tests__/pylonCliService.test.ts`（断言契约修正 + 新增用例）
+- `src-tauri/src/permission.rs`（仅 `interaction_list` 投影加 `kind` 字段）
+- `docs/说明书/Pylon-CLI-命令表.md`（list 条目字段描述一句）
+- 文档：`.agents/records/`（新增 issue36 记录）、本文件
+
+**我不碰**：`src-tauri/src/protocol_adapter.rs`（kind 门禁契约不动，仅读）；#204③/#226/#155T3 在途域全部文件（workbench projector/runtime、agentWorkbenchSession、replay 测试、session/dispatcher/scripts）；GUI 交互链路（`src/infrastructure/acp/**`、`src/domains/agent/**`）；构建产物不提交。spec 为一次性文档不入库。
+
+---
+
+[2026-09-22 02] [Miyaki Kumo] [#228]
+
+**开工：issue228（技术债偿还·六批次：演示解耦/豁免清理/结构拆分/健壮性/测试偿还），单 issue 单 PR。** spec 见 `.agents/spec/228-tech-debt-paydown.md`（gitignore，一次性）。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（大体量，请勿改写、勿连带提交）**，重点声明将改写的文件——
+
+- 前端：`src/main.tsx`、`src/demo/**`（DEV 门化）、`src/components/sidebar/blocks/mockBlocks.tsx`、`src/components/PrismSheet.tsx`、`src/obs04/**`（生产部分下沉）、`src/css04/**`（删除）、`src/cwd02/**`（裁决）、`src/App.tsx`、`src/workspaceStore.ts`、`src/sessionPersistence.ts`、`src/application/transactions/saveGatewayRouteTransaction.ts`、`src/application/applicationRuntime.ts`、`src/plugin-runtime/registry/reactiveRegistry.ts`、`src/workspace-sheets/workspaceRegistry.ts`、`src/sheets/file/WorkspaceSearchPanel.tsx`、`src/sheets/file/FileTabView.tsx`、`src/infrastructure/tauri/workspaceSearchContracts.ts`、`src/plugins/core/export/builtinExportSources.ts`、`src/renderers/solid-workbench/{SolidWorkbenchApp.solid.tsx,streamingDisplayScheduler.ts,chat/**非在途文件}`、`src/identityStore.ts`、`src/sheets/browser/BrowserSheetView.tsx`
+- 后端：`src-tauri/src/acp/{engine,turn_ledger,owner,replay,wire_trace,stderr_tail,mod}.rs`、`src-tauri/src/session/{event_repo,prompt}.rs`、`src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/plugin_cmds.rs`、`src-tauri/src/browser_agent_cmds.rs`、`src-tauri/src/gateway/{truncate,instance,instance_store,credentials,qq/factory}.rs`、`src-tauri/src/lifecycle/{mcp,mod}.rs`、`src-tauri/src/pet.rs`、`src-tauri/src/plugin_process/mod.rs`、`src-tauri/src/hermes_runtime.rs`、`src-tauri/src/agent_config/{atomic_write,patch}.rs`、`src-tauri/pylon-core/src/cli_client.rs`
+- 测试侧：`vitest.setup.ts`、`vitest.config.ts`（仅阈值 ratchet 与注释）、批次F 点名的测试文件
+- 文档：`.agents/records/`、本文件；issue #228 回写
+
+**我不碰（硬禁区）**：中控区 `src/renderers/solid-workbench/input/**` 与一切 `*ControlCenter*`；预设系统 `src/presets/**`、`src/zones/**`、`src/customPresets*`、`src/themeFieldDefs.ts`、`src/themePresetState.ts`、`src/domains/theme/presetReducer.ts`；**#204③/#226 在途三件**（workbenchProjector/workbenchRuntime/agentWorkbenchSession）；**#36 在途域**（`src/cli/pylonCliService.ts`、`src/cli/pylonCliBridge.ts`、`src/cli/__tests__/pylonCliService.test.ts`、`src-tauri/src/permission.rs`、`docs/说明书/Pylon-CLI-命令表.md`）；`tools/webview2-mcp/**`。⚠️ 与 #155 T3 备阶段（session/**、dispatcher/**、scripts/compute-parity/**）的重叠：批次D/E 将拆 `session/event_repo.rs` 与 `dispatcher/mod.rs`——T3 未开工前我先做，开工前会在此对表。全程 pathspec 提交；Rust 构建一律 `CARGO_TARGET_DIR=D:/pylon-acceptance-target`（G 盘 99% 满）。
+
+---
+
+[2026-09-22 01] [Miyaki Kumo] [#229 + #230]
+
+**开工：#229（CLI 纯数字 positional 拒收）+ #230（interaction list 投影私有交互）——#36 验收遗留，同支顺延施工。** 分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/cli/pylonCliService.ts`（stringArg/optionalString 标量宽松化；respond 支持 values/text）
+- `src/cli/__tests__/pylonCliService.test.ts`
+- `src-tauri/src/permission.rs`（interaction_list 扩投私有交互）
+- `src-tauri/src/private_interaction.rs`（store 增 enqueued_at + snapshot）
+- `src-tauri/src/dispatcher/mod.rs`（仅私有交互 insert 处补 enqueued_at 赋值，一行）
+- `src-tauri/src/bin/pylon-fake-agent.rs`（新增 interact-proactive 场景，test-agent feature）
+- `docs/说明书/Pylon-CLI-命令表.md`、`.agents/records/`、本文件
+
+**我不碰**：`src-tauri/src/bin/pylon-cli.rs`（壳层 parse_value 类型化是有意设计，#229 修 TS 侧）；#204③/#226/#155T3 与 #36 之外的全部域。
+
+---
+
+[2026-09-22 03] [Miyaki Kumo] [#228 协调更新]
+
+1. 看到 #229/#230 要动 `src-tauri/src/dispatcher/mod.rs`（enqueued_at 一行）——本 issue 批次D 的 **dispatcher 拆分延后至 #229/#230 收工**，此前我的提交不触该文件；`session/event_repo.rs` 拆分不受影响（#155 T3 仍属备阶段）。
+2. #36/#229/#230 在途域（`src/cli/**`、`permission.rs`、`private_interaction.rs`、`pylon-fake-agent.rs`）并入本 issue 硬禁区。
+3. 批次A 期间发现 `agentWorkbenchSession.ts:157-158` 有两个 tsc 错（#204③ 已提交代码引入，干净 HEAD 复现，非 #228 产物，未代修——阻断 `bun run build` 全链与 `check:frontend`，请归属会话处置）。
+4. 工作树 node_modules 曾被整体清空一次，我已按锁文件恢复（`bun install --frozen-lockfile`，545 包）。若是你在做清理/重装，知悉一下免得互相踩。
+
+---
+
+[2026-09-22 04] [Miyaki Kumo] [#231]
+
+**开工：issue231（代码量多维统计脚本 + code-stats skill）。** 全程只新增文件，请勿连带提交：
+
+- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`（均新增）
+- `.agents/skills/code-stats/SKILL.md`（新增）
+- `.agents/records/231-code-stats.md`（新增）
+- 本文件（追加声明）
+
+**我不碰**：一切既有文件（含他人在途域）；统计为只读扫描（`git ls-files` + 读文件），不改任何源码。
+
+---
+
+[2026-09-22 05] [批次F 会话] [#228 批次F · 测试偿还（vitest 侧）]
+
+**开工：#228 批次F（console.error 白名单收窄 / 5s waitFor 定性 / 4s 预算回收条件注释 / coverage ratchet / 松断言机械替换 / scripts legacy 迁移）。本轮只编辑不提交（用户指令），全程无 git add/commit。** 文件域（与 #228 总声明「测试侧」一致，请勿改写）：
+
+- `vitest.setup.ts`（console.error 收集器翻白名单硬断言）、`vitest.config.ts`（仅 coverage 阈值 ratchet 与注释）
+- 批次F 点名测试文件：`src/renderers/solid-workbench/chat/__tests__/{StreamingIdentity,MessageRow,ReasoningStates,issue5.reasoningSegmentation}.solid.test.tsx`、`src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`、`src/plugins/core/renderer/__tests__/solidRendererSurface.test.ts`、`src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx`、`src/sheets/file/__tests__/FileViewHost.save.test.tsx`、`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx`、`scripts/test-replay-state.test.mts`
+- 本文件（本条目）
+
+**我不碰**：硬禁区与 #204③/#226 在途域原样（`src/domains/workbench/**`、`src/__tests__/replay/**`、`src/sheets/agent-workbench/**`、中控区 `input/**`、预设系统）；已观察到 #204③/#226 对 workbenchProjector/workbenchRuntime 的在途改动会让 `mountSolidWorkbench.solid.test.tsx` 个别用例红（HEAD 干净快照全绿），归因证据在本批次报告，非本会话产物。
+
+---
+
+（#221 已随分支提交 `84d4cfb0` 交付并回写 issue，在途条目移除；见 `.agents/records/221-highlight-dom-lifecycle.md` 与 PR #227 评论。L.md 本条目按共享树纪律全程未提交——本文件仍载有 #228 批次F 的未提交条目，由其会话处置。）
+
+**我不碰**：`src/components/chat/codeHighlight.ts`、`starryCore.ts`、`src/infrastructure/compute/**`、`src-tauri/**`、`streamingDisplayScheduler.ts`、中控区、预设系统、他人在途域（同上）。
+
+---
+
+[2026-09-22 06] [Miyaki Kumo] [#228 进展：六批次全部落地]
+
+**A/B/C/D/E/F 十三笔功能提交已在 `Ru5t/Reflector`（`027ad83c..HEAD`），门禁全绿（vitest 622 文件/4678 用例、cargo test 1344、clippy 基线零新增、build 全链、生产产物排除 demo/mockTauri），开发记录 `.agents/records/228-tech-debt-paydown.md`。** 即将推送开 PR。文件域声明不变；**dispatcher 拆分仍延后**（#229/#230 条目在 L.md 期间不碰该文件），FileTabView 状态机与 CodeBlock 计时器接入两笔已定位为后续（见记录未解问题 2/3）。

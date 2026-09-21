@@ -150,6 +150,9 @@ struct Config {
     permission_params: Option<Value>,
     /// permission-proactive：initialize 应答后、发出请求前的延迟。
     permission_delay_ms: u64,
+    /// interact-proactive（#230）：主动请求的方法名（如 elicitation/create），
+    /// id/params 复用 --permission-id / --permission-params。
+    proactive_method: Option<String>,
     /// permission-proactive：initialize 之外的行的处置——落 trace（静默）或回 {}。
     post_init_respond: bool,
     /// 收到的请求行落盘文件（收到即逐行 flush；写入范围由 trace_mode 限定）。
@@ -208,6 +211,7 @@ impl Config {
          \x20 flood                  initialize 应答后连发 --chunks 条 update 再退出\n\
          \x20 stream | prompt-error | replay-load   b10/b11 流式/错误注入/回放装载\n\
          \x20 permission-proactive   initialize 后主动 request_permission（--permission-id/params）\n\
+         \x20 interact-proactive      initialize 后主动发任意 client request（#230：--proactive-method，id/params 复用 permission 旗标）\n\
          \x20 set-config-option      #97 session/set_config_option 应答矩阵（--mode）\n\
          \x20 empty | session-capable | revive-echo | revive-load | resume-only\n\
          \x20 fork | rebind             #98 fork 执行链 / revive 后 identity 变化的 rebind\n\
@@ -242,6 +246,7 @@ impl Config {
             permission_id: None,
             permission_params: None,
             permission_delay_ms: 0,
+            proactive_method: None,
             post_init_respond: false,
             trace_file: None,
             trace_mode: TraceMode::PostInit,
@@ -310,6 +315,7 @@ impl Config {
                         .parse()
                         .map_err(|_| format!("{flag} expects a number"))?
                 }
+                "--proactive-method" => config.proactive_method = Some(value(&mut index, flag)?),
                 "--post-init-respond" => config.post_init_respond = true,
                 "--trace-file" => config.trace_file = Some(value(&mut index, flag)?),
                 "--trace-mode" => {
@@ -637,6 +643,24 @@ impl FakeAgent {
                     Self::write_frame(out, &Self::response(&id, Some(json!({})), None));
                 }
                 // trace 已在 write_trace 以 post-init 范围落盘（静默模式不回包）。
+                Flow::Continue
+            }
+            // ── #230：任意 client request 主动桥（elicitation/create 等）——
+            // CLI interaction list/respond 私有交互链路的 native 验收源。──
+            "interact-proactive" => {
+                if method == "initialize" {
+                    Self::write_frame(out, &Self::response(&id, Some(json!({})), None));
+                    Self::sleep_ms(config.permission_delay_ms);
+                    let proactive = json!({
+                        "jsonrpc": "2.0",
+                        "id": config.permission_id.clone().unwrap_or(json!(5)),
+                        "method": config.proactive_method.clone().unwrap_or_else(|| "elicitation/create".to_string()),
+                        "params": config.permission_params.clone().unwrap_or(Value::Null),
+                    });
+                    Self::write_frame(out, &proactive);
+                } else if config.post_init_respond {
+                    Self::write_frame(out, &Self::response(&id, Some(json!({})), None));
+                }
                 Flow::Continue
             }
             // ── #97：session/set_config_option 五模式矩阵 ──

@@ -1,6 +1,7 @@
 import { For, Show, createSignal } from 'solid-js'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import { classifyResourceTarget, isUriLike } from './resourceTarget.ts'
+import { isRecord } from '../../../../utils/wireGuards.ts'
 
 const LONG_STRING_LENGTH = 220
 
@@ -162,8 +163,4 @@ function copy(commands: RenderCommandPort | undefined, text: string): void {
 function open(commands: RenderCommandPort | undefined, target: { path: string } | { uri: string }): void {
   if (!can(commands, 'resource.open')) return
   void commands?.execute({ type: 'resource.open', payload: target })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

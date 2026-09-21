@@ -25,8 +25,7 @@ pub mod plan_policy;
 pub mod question_policy;
 pub mod terminal_policy;
 pub mod terminal_runtime;
-#[allow(unused_imports)]
-pub use capabilities::{CapabilityRegistry, CapabilityState};
+pub use capabilities::CapabilityRegistry;
 pub use client::*;
 pub use error::*;
 
@@ -46,7 +45,6 @@ mod stderr;
 mod stderr_tail;
 pub(crate) use stderr_tail::StderrTail;
 mod state;
-#[allow(unused_imports)]
 pub use state::{AcpSessionState, AcpStateDelta};
 pub(crate) mod turn_ledger;
 pub(crate) use turn_ledger::{
@@ -54,8 +52,6 @@ pub(crate) use turn_ledger::{
     TurnLedger, TurnTerminalCause,
 };
 pub(crate) mod wire_trace;
-#[cfg(test)]
-pub(crate) use engine::wait_prompt_with_cancel;
 pub(crate) use engine::{
     wait_prompt_with_recovery, CancelSettleResolution, PreparedRpc, PromptTimeoutKind,
     PromptWaitOutcome,

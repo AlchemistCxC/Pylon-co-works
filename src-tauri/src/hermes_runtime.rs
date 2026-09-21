@@ -464,12 +464,17 @@ fn run_probe(bash: &Path, args: &[&str], path: &OsStr, home: Option<&Path>) -> R
                 });
             }
             Ok(None) if Instant::now() >= deadline => {
+                // 本函数运行在 spawn_blocking 线程（select_and_probe → caller :136），
+                // 阻塞式探测是有意设计。kill/wait 的返回值刻意丢弃是正确姿态：
+                // kill 失败最坏产生一个至进程自行退出的僵尸窗口，wait 在同线程
+                // 紧随 kill 完成回收；探测路径没有其它回收点，无需重试。
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("预检超过 {} 秒", BASH_PROBE_TIMEOUT.as_secs()));
             }
             Ok(None) => std::thread::sleep(BASH_PROBE_POLL),
             Err(error) => {
+                // 同上：状态查询异常时 kill+wait 就地回收，失败仅影响本次探测。
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("检查进程状态失败: {error}"));

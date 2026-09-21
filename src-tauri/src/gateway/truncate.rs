@@ -23,8 +23,8 @@ const FENCE_CLOSE: &str = "\n```";
 /// - 切点优先换行 → 空格 → 硬切，避免切断单词/行；
 /// - 长度按字符（`char`）计。
 ///
-/// B10 deliver 发送管线尚未接线，暂与 route.rs/dedup.rs 占位文件一致标 allow；
-/// 网关发送队列落地调用后移除。
+/// B10 deliver：已接入发送管线——`gateway/mod.rs` deliver_all 出站投递按
+/// `adapter.max_message_len()` 分段投递。
 pub fn truncate_message(content: &str, max_length: usize) -> Vec<String> {
     if char_len(content) <= max_length {
         return vec![content.to_string()];

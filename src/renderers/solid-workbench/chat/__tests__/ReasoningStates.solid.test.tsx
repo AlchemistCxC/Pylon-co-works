@@ -68,10 +68,12 @@ describe('C01 ReasoningBlock states', () => {
     const result = row({ content: '# 标题思考\n\n- 要点**加粗**', running: false })
     const button = result.getByRole('button')
     await fireEvent.click(button)
-    // MarkdownContent 异步解析，等待 h1 出现（复用 C00 语义标签，非纯文本行）
+    // MarkdownContent 异步解析，等待 h1 出现（复用 C00 语义标签，非纯文本行）。
+    // 预算依据：等待对象是 createResource 解析 + Solid 刷帧（微任务级，常态 <50ms，
+    // 本文件其余 waitFor 用默认 1s 均稳定通过）；2s 覆盖满载并发抖动，原 5s 是 P91 期粗放放宽。
     await waitFor(() => {
       if (!result.container.querySelector('.term-h1')) throw new Error('markdown not parsed yet')
-    }, { timeout: 5000 })
+    }, { timeout: 2_000 })
     expect(result.container.querySelectorAll('.term-reasoning-line')).toHaveLength(0)
   })
 

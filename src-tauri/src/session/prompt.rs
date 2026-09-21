@@ -386,6 +386,8 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
 /// A2：流式版本 send_message——前端必携 Channel（on_update），注册后走 Channel
 /// 推送（A3 跳过广播）。其余语义与 send_message 完全一致；旧命令 send_message
 /// 保留为非流式兼容路径（无 Channel 参数）。
+// clippy 2026-09-22：send_message 流式变体，同为 IPC 契约签名（2 Tauri 注入 +
+// 9 业务参数 + on_update Channel），不可折叠。
 #[allow(clippy::too_many_arguments)]
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
@@ -541,9 +543,6 @@ async fn prepare_prompt_blocks<R: tauri::Runtime>(
     } else {
         prompt_content
     };
-    // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
-    // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
-    // 是 deref coercion 的惯用写法，allow 保留。
     // G1-04 + E-11：附件限制按 runtime 归属 agent 协议配置解析（平台 ingest 绑定
     // agent ≠ GUI active agent 时精确归属，缺省 = 现状 8/10MB，wire 不变）；
     // 未注册 runtime（测试直构形态）回退 active agent（原 G1-04 行为）。
@@ -551,8 +550,7 @@ async fn prepare_prompt_blocks<R: tauri::Runtime>(
         Some(agent) => crate::agent_config::AttachmentLimits::from_agent(&agent),
         None => crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
     };
-    #[allow(clippy::needless_borrow)]
-    let prompt_blocks = crate::acp::prompt_blocks(prompt_text, &attachment_paths, limits)?;
+    let prompt_blocks = crate::acp::prompt_blocks(prompt_text, attachment_paths, limits)?;
     flow.message_round = message_round;
     flow.inject_activated = inject_activated;
     flow.prompt_blocks = prompt_blocks;
@@ -1195,7 +1193,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         Duration::from_secs(first_token_timeout_secs),
         liveness_activity,
         move || async move {
-            // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
+            // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
             acp_for_cancel
                 .lock()
                 .await

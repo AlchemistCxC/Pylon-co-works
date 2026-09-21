@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { Bot, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Clock3, Code2, Download, Globe2, Minus, Plus, RefreshCw, RotateCcw, Search, Send, X } from 'lucide-react'
+import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Minus, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react'
 import { browserReducer, createBrowserState } from '../../domains/browser/browserState.ts'
 import {
   appendConsole,
@@ -27,79 +27,27 @@ import { getPylonCliService } from '../../cli/pylonCliRuntime.ts'
 import { hasTauriRuntime, isBrowserMockRuntime, IS_TAURI, type TauriWindow } from '../../infrastructure/tauri/env.ts'
 import { reportRuntimeError } from '../../runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
+import { BROWSER_PHASE_LABELS, type BrowserPageSnapshot, type BrowserSnapshot, type BrowserToolId } from './browserSheetTypes.ts'
+import { BrowserToolPanel } from './BrowserToolPanel.tsx'
+import { BrowserSidebar } from './BrowserSidebar.tsx'
+import { BrowserTabStrip } from './BrowserTabStrip.tsx'
+import { BrowserViewport } from './BrowserViewport.tsx'
 
 /**
  * BrowserSheetView — browser 壳（W4-03）。
  *
  * 纯状态机 idle/starting/ready/error + WebView bounds/导航控制；子 WebView 由后端创建并嵌入 viewport。
  * Sheet 卸载时调用 browser_close，确保 WebView2 子进程随 sheet 生命周期回收。
+ *
+ * #228 批次 D：工具面板 / 左列 / 标签条 / 预览容器拆分至 BrowserToolPanel /
+ * BrowserSidebar / BrowserTabStrip / BrowserViewport（纯搬移，行为与默认导出不变）；
+ * 地址栏工具条与缩放行留在本文件（BrowserSheet.css.test 门禁锁定其载体）。
  */
-interface BrowserSnapshot {
-  instanceId: number
-  phase: 'idle' | 'starting' | 'ready' | 'error'
-  url?: string | null
-  title?: string | null
-  error?: string | null
-  zoomPercent: number
-  activeTabId: number | null
-  tabs: BrowserTabSnapshot[]
-  /** 原生子 WebView 当前是否可见；开发预览固定为 true。 */
-  visible?: boolean
-  /** browser preview only; desktop WebView snapshots omit this field. */
-  runtime?: 'tauri-webview' | 'iframe-preview'
-}
-
-interface BrowserTabSnapshot {
-  id: number
-  url?: string | null
-  title?: string | null
-}
-
-/**
- * #116 子项 4：phase 是前端状态机枚举（本文件顶层 interface），直接插值会把
- * `ready` 这类内部值送到地址栏与左侧栏——同一条工具栏的按钮文案已是中文。
- * 仅做展示映射，`data-phase` 属性保留原枚举值供选择器与测试使用。
- */
-const BROWSER_PHASE_LABELS: Record<BrowserSnapshot['phase'], string> = {
-  idle: '空闲',
-  starting: '启动中',
-  ready: '就绪',
-  error: '异常',
-}
-
-interface BrowserPageLink {
-  index?: number
-  text?: string
-  href?: string
-  target?: string | null
-  download?: boolean
-  downloadName?: string | null
-}
-
-interface BrowserPageSnapshot {
-  runtime?: string
-  tabId?: number
-  url?: string
-  title?: string | null
-  text?: string
-  links?: BrowserPageLink[]
-  [key: string]: unknown
-}
 
 const DEFAULT_ZOOM_PERCENT = 90
 const MIN_ZOOM_PERCENT = 50
 const MAX_ZOOM_PERCENT = 200
 const ZOOM_STEP = 10
-type BrowserToolId = 'history' | 'bookmarks' | 'downloads' | 'console' | 'agent'
-
-// Browser library tools are backed by the local library + explicit host commands.
-const TOOL_ITEMS = [
-  { id: 'agent', label: 'Agent', icon: Bot },
-  { id: 'history', label: '历史', icon: Clock3 },
-  { id: 'bookmarks', label: '书签', icon: Bookmark },
-  { id: 'downloads', label: '下载', icon: Download },
-  { id: 'console', label: '控制台', icon: Code2 },
-] as const
 
 export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const [state, dispatch] = useReducer(browserReducer, undefined, createBrowserState)
@@ -567,35 +515,12 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
 
   return (
     <div className={`browser-sheet ${sidebarCollapsed ? 'browser-sidebar-collapsed' : ''} flex flex-1 min-w-0 min-h-0 overflow-hidden text-text font-[family-name:var(--font)] bg-[var(--global-bg-color,var(--bg))]`} data-browser-mode={browserPreview ? 'preview' : 'runtime'}>
-      {/* #154：左列几何归布局层的 .sidebar。原先这里是硬编码 156px / 折叠 42px，
-          标题栏轨道却是 240px——实测两条分割线错开 84px，正是用户报的「浏览器
-          Sheet 分割线对不齐」。内部仍在折叠态适配的类（justify-center 等）保留，
-          它们只影响内容排布，不再影响宽度。 */}
-      <aside className="sidebar browser-sidebar flex min-h-0 flex-col bg-[color-mix(in_srgb,var(--bg-panel)_82%,transparent)]">
-        <div className={`browser-sidebar-head min-h-[36px] flex items-center px-3 border-b border-border max-[720px]:justify-center max-[720px]:px-0 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}>
-          {!sidebarCollapsed && <span className="browser-sidebar-title text-text-dim font-bold text-[10px] font-[family-name:var(--mono)] tracking-[.12em] max-[720px]:hidden">TOOLS</span>}
-        </div>
-        <nav className="browser-tool-list flex flex-col gap-[2px] py-2 px-1.5 max-[720px]:px-[5px]" aria-label="浏览器工具栏">
-          {TOOL_ITEMS.map(item => {
-            const Icon = item.icon
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`browser-tool-item flex min-h-[34px] items-center gap-2 px-2 border border-transparent rounded-[4px] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent max-[720px]:justify-center max-[720px]:px-0 ${sidebarCollapsed ? 'justify-center px-0' : ''} ${activeTool === item.id ? 'border-[color-mix(in_srgb,var(--accent)_45%,var(--border))] text-text bg-bg-active' : 'border-transparent text-text-dim bg-transparent hover:text-text hover:bg-bg-hover'}`}
-                onClick={() => chooseTool(item.id)}
-                title={item.label}
-                aria-label={item.label}
-                aria-pressed={activeTool === item.id}
-              >
-                <Icon size={18} aria-hidden="true" />
-                {!sidebarCollapsed && <span className="text-[12px] max-[720px]:hidden">{item.label}</span>}
-              </button>
-            )
-          })}
-        </nav>
-        {!sidebarCollapsed && <div className={`browser-sidebar-note mt-auto py-2.5 px-3 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5] max-[720px]:hidden ${sidebarCollapsed ? 'hidden' : ''}`}>WebView 会话<br /><span className="text-text-dim">{BROWSER_PHASE_LABELS[snapshot.phase]}</span></div>}
-      </aside>
+      <BrowserSidebar
+        sidebarCollapsed={sidebarCollapsed}
+        activeTool={activeTool}
+        onSelectTool={chooseTool}
+        phase={snapshot.phase}
+      />
       <main className="browser-main flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden">
         {/* 保留语义节点供旧主题/可访问性选择器兼容；视觉上 Browser Sheet 不再重复显示
             BROWSER + Browser 两层标题，浏览器 chrome 直接成为主区入口。 */}
@@ -607,21 +532,11 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
           <span className="browser-status" data-phase={snapshot.phase}>{snapshot.phase}</span>
         </div>
         {snapshot.tabs.length > 0 && (
-          <div className="browser-tab-strip flex min-w-0 min-h-9 shrink-0 items-stretch gap-[3px] m-0 pt-1 px-2 overflow-x-auto border-0 border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_88%,var(--global-bg-color)_12%)] [scrollbar-width:thin]" role="tablist" aria-label="浏览器标签">
-            {snapshot.tabs.map(tab => {
-              const active = snapshot.activeTabId === tab.id
-              return (
-                <div key={tab.id} className={`browser-tab flex min-w-[112px] max-w-[240px] basis-[190px] shrink grow-0 items-center border border-transparent border-b-0 text-text-dim bg-transparent max-[720px]:min-w-[100px] ${active ? 'border-[color-mix(in_srgb,var(--accent)_46%,var(--border))] text-text bg-bg-active shadow-[inset_0_-2px_var(--accent)]' : 'hover:text-text hover:bg-bg-hover'}`}>
-                  <button type="button" className="browser-tab-select flex min-w-0 h-[30px] flex-1 items-center gap-1.5 pt-0 pr-1 pb-0 pl-[9px] overflow-hidden border-0 text-inherit bg-transparent font-[family-name:var(--font)] text-[11px] cursor-pointer" role="tab" aria-selected={active} onClick={() => void tabCommand('select', tab.id)} title={tab.title || tab.url || '新标签'}>
-                    <Globe2 size={13} aria-hidden="true" />
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">{browserTabLabel(tab)}</span>
-                  </button>
-                  <button type="button" className="browser-tab-close grid w-[26px] h-[26px] shrink-0 basis-[26px] place-items-center border border-transparent rounded-[4px] text-text-placeholder bg-transparent cursor-pointer hover:border-border hover:text-text hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent" onClick={() => void tabCommand('close', tab.id)} aria-label={`关闭 ${browserTabLabel(tab)}`}><X size={12} /></button>
-                </div>
-              )
-            })}
-            <button type="button" className="browser-tab-new self-center mr-0.5 mb-1 ml-px grid w-[26px] h-[26px] shrink-0 basis-[26px] place-items-center border border-transparent rounded-[4px] text-text-placeholder bg-transparent cursor-pointer hover:border-border hover:text-text hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent" onClick={() => void tabCommand('new')} aria-label="新建浏览器标签"><Plus size={14} /></button>
-          </div>
+          <BrowserTabStrip
+            tabs={snapshot.tabs}
+            activeTabId={snapshot.activeTabId}
+            onTabCommand={tabCommand}
+          />
         )}
         <div className="browser-toolbar flex shrink-0 min-w-0 min-h-[44px] items-center gap-1 m-0 py-1.5 px-2 border-0 border-b border-border rounded-none bg-bg-panel max-[720px]:px-[5px]" aria-label="浏览器导航栏">
           <button type="button" className="browser-toolbar-button grid w-[30px] h-[30px] shrink-0 basis-[30px] place-items-center border border-transparent rounded-[4px] text-text-dim bg-transparent cursor-pointer enabled:hover:text-text enabled:hover:bg-bg-hover disabled:opacity-[0.35] disabled:cursor-not-allowed" onClick={() => void browserCommand('browser_back')} disabled={snapshot.phase !== 'ready'} aria-label="后退"><ChevronLeft size={18} /></button>
@@ -705,295 +620,17 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
             onSendAskAi={() => void sendAskAi()}
           />
         )}
-        <div ref={viewportRef} className="browser-viewport relative flex flex-1 min-w-0 min-h-0 items-stretch justify-stretch overflow-hidden border-0 rounded-none bg-bg-panel">
-          {browserPreview && snapshot.phase === 'ready' && snapshot.url && snapshot.url !== 'about:blank' && (
-            <iframe
-              key={`${snapshot.activeTabId ?? 'tab'}:${snapshot.url}:${previewRevision}`}
-              className="browser-preview-frame block w-full h-full flex-1 border-0 bg-white"
-              src={browserPreviewUrl(snapshot.url)}
-              title={snapshot.title || snapshot.url}
-              referrerPolicy="no-referrer"
-            />
-          )}
-          <div className={`browser-empty-state absolute inset-0 flex items-center justify-center flex-col gap-2 w-auto p-[var(--ui-space-7)] border-0 rounded-none text-text-dim bg-bg-panel text-center ${snapshot.phase === 'ready' ? 'invisible pointer-events-none' : ''}`} role="status">
-            <div className="browser-empty-mark grid w-[46px] h-[46px] place-items-center mb-2 border border-[color-mix(in_srgb,var(--accent)_42%,var(--border))] rounded-full text-accent bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-panel))] font-bold text-[22px] font-[family-name:var(--mono)]" aria-hidden="true">◌</div>
-            <strong className="text-text text-[15px]">{browserPreview ? '输入网址开始浏览' : '浏览器会话尚未启动'}</strong>
-            <span className="max-w-[520px] text-[12px] leading-[1.5]">{browserPreview ? '开发预览加载真实网页；桌面端会切换为嵌入式 WebView2。' : '启动后，完整 WebView 将占据主工作区。'}</span>
-            <span className="browser-empty-note mt-2 text-text-placeholder font-[family-name:var(--mono)] text-[10px] leading-[1.5]">{browserPreview ? 'preview runtime · 不伪装成桌面 WebView' : 'WebView2 子进程由 Browser Sheet 生命周期管理'}</span>
-            <div className="browser-actions flex gap-[var(--ui-space-2)] mt-[var(--ui-space-4)]"><button type="button" className="template-apply" onClick={() => void start()} disabled={snapshot.phase === 'starting'}>新建标签</button></div>
-          </div>
-        </div>
+        <BrowserViewport
+          viewportRef={viewportRef}
+          browserPreview={browserPreview}
+          snapshot={snapshot}
+          previewRevision={previewRevision}
+          onStart={() => void start()}
+        />
         {state.error && <div className="file-tree-error browser-error" role="alert">{state.error}</div>}
       </main>
     </div>
   )
-}
-
-interface BrowserToolPanelProps {
-  activeTool: BrowserToolId
-  library: BrowserLibrary
-  pageSnapshot: BrowserPageSnapshot | null
-  consoleFilter: 'all' | ConsoleEntry['level']
-  onConsoleFilterChange: (value: 'all' | ConsoleEntry['level']) => void
-  onClose: () => void
-  onClear: (collection: 'history' | 'bookmarks' | 'downloads' | 'console') => void
-  onNavigate: (url: string) => void
-  onDownload: (url: string, filename?: string) => void
-  onInspect: () => void
-  downloadUrlInput: string
-  onDownloadUrlInputChange: (value: string) => void
-  browserPreview: boolean
-  agentSettings: BrowserAgentSettingsView | null
-  agentClaim: { mode?: string; holder?: string | null } | null
-  agentOps: BrowserAgentOp[]
-  agentBlocklistDraft: string
-  onAgentBlocklistDraftChange: (value: string) => void
-  agentBusy: boolean
-  agentError: string | null
-  pageChangedAt: number | null
-  askAiDraft: string
-  onAskAiDraftChange: (value: string) => void
-  canSendAskAi: boolean
-  onRefreshAgent: () => void
-  onAgentModeChange: (mode: 'off' | 'readonly' | 'full') => void
-  onAgentAdFilterChange: (enabled: boolean) => void
-  onAgentBlocklistSave: () => void
-  onBuildAskAi: () => void
-  onSendAskAi: () => void
-}
-
-function BrowserToolPanel({
-  activeTool,
-  library,
-  pageSnapshot,
-  consoleFilter,
-  onConsoleFilterChange,
-  onClose,
-  onClear,
-  onNavigate,
-  onDownload,
-  onInspect,
-  downloadUrlInput,
-  onDownloadUrlInputChange,
-  browserPreview,
-  agentSettings,
-  agentClaim,
-  agentOps,
-  agentBlocklistDraft,
-  onAgentBlocklistDraftChange,
-  agentBusy,
-  agentError,
-  pageChangedAt,
-  askAiDraft,
-  onAskAiDraftChange,
-  canSendAskAi,
-  onRefreshAgent,
-  onAgentModeChange,
-  onAgentAdFilterChange,
-  onAgentBlocklistSave,
-  onBuildAskAi,
-  onSendAskAi,
-}: BrowserToolPanelProps) {
-  const labels: Record<BrowserToolId, string> = { history: '历史', bookmarks: '书签', downloads: '下载', console: '控制台', agent: 'Agent' }
-  const clearable = activeTool === 'agent' ? 'console' : activeTool
-  return (
-    <section className="browser-tool-panel flex shrink-0 min-h-0 max-h-[250px] flex-col border-b border-border bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)]" aria-label={`${labels[activeTool]}面板`}>
-      <header className="browser-tool-panel-head flex min-h-[34px] items-center gap-2 px-2.5 border-b border-border">
-        <strong className="text-text text-[12px]">{labels[activeTool]}</strong>
-        <div className="browser-tool-panel-actions flex items-center gap-[5px] ml-auto">
-          {activeTool === 'console' && <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onInspect}>刷新快照</button>}
-          {activeTool === 'agent' && <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onRefreshAgent} disabled={agentBusy}>刷新状态</button>}
-          <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={() => onClear(clearable)} disabled={library[clearable].length === 0}>清空</button>
-          <button type="button" className="browser-panel-close grid w-6 place-items-center p-0 min-h-6 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer hover:border-accent hover:text-text" onClick={onClose} aria-label={`关闭${labels[activeTool]}面板`}><X size={14} /></button>
-        </div>
-      </header>
-
-      {activeTool === 'history' && (
-        <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
-          {library.history.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无浏览记录</p>}
-          {library.history.map(entry => (
-            <button key={entry.id} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onNavigate(entry.url)}>
-              <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.title || entry.url}</span>
-              <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{entry.url} · {formatBrowserTime(entry.visitedAt)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {activeTool === 'bookmarks' && (
-        <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
-          {library.bookmarks.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无书签；点击地址栏旁的书签图标添加。</p>}
-          {library.bookmarks.map(entry => (
-            <button key={entry.id} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onNavigate(entry.url)}>
-              <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.title || entry.url}</span>
-              <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{entry.url} · {formatBrowserTime(entry.createdAt)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {activeTool === 'downloads' && (
-        <div className="browser-download-panel min-h-0 overflow-hidden">
-          <form className="browser-download-form flex gap-[5px] pt-1.5 px-2 pb-[3px]" onSubmit={event => { event.preventDefault(); if (downloadUrlInput.trim()) { onDownload(downloadUrlInput); onDownloadUrlInputChange('') } }}>
-            <input
-              value={downloadUrlInput}
-              onChange={event => onDownloadUrlInputChange(event.target.value)}
-              placeholder="粘贴 http(s) 下载地址"
-              aria-label="下载地址"
-              inputMode="url"
-              className="min-w-0 flex-1 h-[26px] px-[7px] border border-border rounded-[3px] text-text bg-bg-input font-[family-name:var(--mono)] text-[10px] focus:border-accent focus:outline-none"
-            />
-            <button type="submit" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" disabled={!downloadUrlInput.trim()}>开始</button>
-          </form>
-          {pageSnapshot?.links?.some(link => link.download && typeof link.href === 'string') && (
-            <div className="browser-discovered-downloads">
-              <span className="browser-library-caption block mx-1 mt-[5px] mb-0.5 text-text-dim text-[10px]">当前页面的下载链接</span>
-              {pageSnapshot.links.filter(link => link.download && typeof link.href === 'string').map((link, index) => (
-                <button key={`${link.href}-${index}`} type="button" className="browser-library-item flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover" onClick={() => onDownload(link.href!, link.downloadName ?? undefined)}>
-                  <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{link.text || link.downloadName || link.href}</span>
-                  <span className="browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap">{link.href}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="browser-library-list min-h-0 overflow-auto py-1 px-2">
-            {library.downloads.length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无下载记录</p>}
-            {library.downloads.map(entry => (
-              <div key={entry.id} className="browser-library-item browser-download-entry flex w-full flex-col gap-0.5 my-0.5 px-[7px] py-1.5 border border-transparent text-text bg-transparent cursor-pointer text-left hover:border-border hover:bg-bg-hover">
-                <span className="browser-library-item-title overflow-hidden text-text text-[11px] text-ellipsis whitespace-nowrap">{entry.filename || entry.url}</span>
-                <span className={`browser-library-item-meta overflow-hidden text-text-dim font-[family-name:var(--mono)] text-[10px] text-ellipsis whitespace-nowrap ${entry.status === 'started' ? 'text-[var(--tool-ok)]' : 'text-[var(--tool-err,var(--danger))]'}`} data-status={entry.status}>{entry.status === 'started' ? '已发起' : '失败'} · {entry.url} · {formatBrowserTime(entry.startedAt)}</span>
-                {entry.error && <span className="browser-library-item-error text-[var(--tool-err,var(--danger))]">{entry.error}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeTool === 'console' && (
-        <div className="browser-console-panel min-h-0 overflow-hidden">
-          <div className="browser-console-toolbar flex items-center gap-2.5 py-1 px-2 text-text-dim text-[10px]">
-            <label className="inline-flex items-center gap-1">级别
-              <select className="h-[23px] border border-border rounded-[3px] text-text bg-bg-input text-[10px]" value={consoleFilter} onChange={event => onConsoleFilterChange(event.target.value as 'all' | ConsoleEntry['level'])} aria-label="控制台级别">
-                <option value="all">全部</option><option value="info">信息</option><option value="success">成功</option><option value="error">错误</option>
-              </select>
-            </label>
-            {pageSnapshot && <span className="browser-console-snapshot ml-auto text-text-placeholder font-[family-name:var(--mono)]">快照：{pageSnapshot.links?.length ?? 0} links · {(pageSnapshot.text?.length ?? 0).toLocaleString()} chars</span>}
-          </div>
-          <div className="browser-console-list min-h-0 overflow-auto py-1 px-2">
-            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).length === 0 && <p className="browser-library-empty mx-1 mt-3.5 mb-0 text-text-placeholder text-[11px]">暂无操作记录</p>}
-            {library.console.filter(entry => consoleFilter === 'all' || entry.level === consoleFilter).map(entry => (
-              <div key={entry.id} className={`browser-console-entry grid grid-cols-[76px_130px_minmax(0,1fr)] gap-[7px] items-baseline py-1 px-[5px] border-b border-[color-mix(in_srgb,var(--border)_55%,transparent)] text-[10px] ${entry.level === 'error' ? 'text-[var(--tool-err,var(--danger))]' : entry.level === 'success' ? 'text-[var(--tool-ok)]' : ''}`} data-level={entry.level}>
-                <span className="browser-console-time text-text-placeholder font-[family-name:var(--mono)] text-[9px]">{formatBrowserTime(entry.at)}</span>
-                <code className="text-text font-[family-name:var(--mono)] text-[10px]">{entry.command}</code>
-                {entry.detail && <span className="browser-console-detail min-w-0 overflow-hidden text-text-dim text-ellipsis whitespace-nowrap">{entry.detail}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeTool === 'agent' && (
-        <div className="browser-agent-panel min-h-0 overflow-auto py-1.5 px-2" aria-label="Agent 浏览器授权面板">
-          {browserPreview && <p className="browser-agent-note mx-1 mb-2 text-text-placeholder text-[10px]">开发预览不支持 Agent 浏览器控制；请在桌面端使用。</p>}
-          {agentError && <p className="browser-agent-error mx-1 mb-2 text-[var(--tool-err,var(--danger))] text-[10px]" role="alert">{agentError}</p>}
-          {pageChangedAt && <p className="browser-agent-page-changed mx-1 mb-2 text-[var(--tool-run)] text-[10px]">页面已更新（{formatBrowserTime(pageChangedAt)}）——Agent 下一次操作前建议重新 browser_snapshot。</p>}
-          <div className="browser-agent-access grid grid-cols-[70px_minmax(0,1fr)] items-center gap-2 mb-2">
-            <label className="text-text-dim text-[10px]" htmlFor="browser-agent-mode">授权档位</label>
-            <select
-              id="browser-agent-mode"
-              className="h-[26px] border border-border rounded-[3px] text-text bg-bg-input text-[10px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              value={agentSettings?.defaultMode ?? 'readonly'}
-              onChange={event => onAgentModeChange(event.target.value as 'off' | 'readonly' | 'full')}
-              disabled={agentBusy || !agentSettings}
-              aria-label="Agent 浏览器授权档位"
-            >
-              <option value="off">off · 关闭（不注入工具）</option>
-              <option value="readonly">readonly · 只读（默认）</option>
-              <option value="full">full · 完整（写操作）</option>
-            </select>
-          </div>
-          <div className="browser-agent-adfilter grid grid-cols-[70px_minmax(0,1fr)] items-center gap-2 mb-2">
-            <label className="text-text-dim text-[10px]" htmlFor="browser-agent-adfilter">广告过滤</label>
-            <span className="inline-flex items-center gap-2">
-              <input
-                id="browser-agent-adfilter"
-                type="checkbox"
-                className="accent-accent cursor-pointer disabled:cursor-not-allowed"
-                checked={agentSettings?.adFilterEnabled ?? true}
-                onChange={event => onAgentAdFilterChange(event.target.checked)}
-                disabled={agentBusy || !agentSettings}
-              />
-              <span className="text-text-placeholder text-[10px]">拦截广告/追踪请求（CDP）</span>
-            </span>
-          </div>
-          <div className="browser-agent-blocklist mb-2">
-            <label className="browser-library-caption block mx-1 mb-0.5 text-text-dim text-[10px]" htmlFor="browser-agent-blocklist">Agent 导航域名黑名单（每行一个，后缀匹配）</label>
-            <textarea
-              id="browser-agent-blocklist"
-              className="min-h-[52px] w-full resize-y border border-border rounded-[3px] p-[6px] text-text bg-bg-input font-[family-name:var(--mono)] text-[10px] focus:border-accent focus:outline-none disabled:opacity-40"
-              value={agentBlocklistDraft}
-              onChange={event => onAgentBlocklistDraftChange(event.target.value)}
-              placeholder={'bank.cn\ninternal.corp'}
-              disabled={agentBusy || !agentSettings}
-            />
-            <div className="flex items-center gap-2 mt-1">
-              <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onAgentBlocklistSave} disabled={agentBusy || !agentSettings}>保存黑名单</button>
-              <span className="text-text-placeholder text-[10px]">当前 claim：{agentClaim?.holder ? <code className="text-text font-[family-name:var(--mono)]">{agentClaim.holder}</code> : '空闲（写操作由首个请求的会话自动持有；你的手动操作立即抢占）'}</span>
-            </div>
-          </div>
-          <div className="browser-agent-askai mb-2 border-t border-border pt-2">
-            <span className="browser-library-caption block mx-1 mb-1 text-text-dim text-[10px]">问 AI 关于当前页面</span>
-            <div className="flex items-center gap-2 mb-1">
-              <button type="button" className="browser-panel-action min-h-6 px-[7px] py-0.5 border border-border rounded-[3px] text-text-dim bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:text-text disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onBuildAskAi}>生成上下文</button>
-              <button type="button" className="browser-agent-askai-send inline-flex min-h-6 items-center gap-1 px-[7px] py-0.5 border border-accent rounded-[3px] text-text bg-bg-input text-[10px] cursor-pointer enabled:hover:border-accent enabled:hover:bg-bg-hover disabled:opacity-[0.45] disabled:cursor-not-allowed" onClick={onSendAskAi} disabled={!askAiDraft.trim() || agentBusy}><Send size={11} />{canSendAskAi ? '发送到当前会话' : '复制到剪贴板'}</button>
-            </div>
-            <textarea
-              className="min-h-[64px] w-full resize-y border border-border rounded-[3px] p-[6px] text-text bg-bg-input font-[family-name:var(--mono)] text-[10px] focus:border-accent focus:outline-none"
-              value={askAiDraft}
-              onChange={event => onAskAiDraftChange(event.target.value)}
-              placeholder="点击「生成上下文」把当前页面文本组装为会话消息；确认内容后发送。"
-              aria-label="问 AI 消息草稿"
-            />
-          </div>
-          <div className="browser-agent-ops border-t border-border pt-2">
-            <span className="browser-library-caption block mx-1 mb-0.5 text-text-dim text-[10px]">最近 Agent 操作（新到旧）</span>
-            {agentOps.length === 0 && <p className="browser-library-empty mx-1 mt-2 mb-0 text-text-placeholder text-[11px]">暂无记录</p>}
-            {[...agentOps].reverse().map((op, index) => (
-              <div key={`${String(op.atMs ?? 0)}-${String(index)}`} className={`browser-agent-op grid grid-cols-[70px_90px_minmax(0,1fr)] gap-[7px] items-baseline py-1 px-[5px] border-b border-[color-mix(in_srgb,var(--border)_55%,transparent)] text-[10px] ${op.outcome === 'ok' ? '' : 'text-[var(--tool-err,var(--danger))]'}`} data-outcome={op.outcome}>
-                <span className="text-text-placeholder font-[family-name:var(--mono)] text-[9px]">{typeof op.atMs === 'number' ? formatBrowserTime(op.atMs) : ''}</span>
-                <code className="text-text font-[family-name:var(--mono)] text-[10px]">{op.tool}</code>
-                <span className="min-w-0 overflow-hidden text-text-dim text-ellipsis whitespace-nowrap" title={`${String(op.sessionKey ?? '')} ${String(op.summary ?? '')} ${String(op.outcome ?? '')}`}>{op.outcome === 'ok' ? (op.summary || op.outcome) : `${String(op.outcome)}${op.summary ? ` · ${String(op.summary)}` : ''}`}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function formatBrowserTime(value: number): string {
-  try {
-    return new Date(value).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return ''
-  }
-}
-
-function browserTabLabel(tab: BrowserTabSnapshot): string {
-  const title = tab.title?.trim()
-  if (title) return title
-  const rawUrl = tab.url?.trim()
-  if (!rawUrl || rawUrl === 'about:blank') return '新标签'
-  try {
-    return new URL(rawUrl).hostname || rawUrl
-  } catch {
-    return rawUrl
-  }
-}
-
-function browserPreviewUrl(url: string): string {
-  return `/__pylon_browser_proxy?url=${encodeURIComponent(url)}`
 }
 
 // 无状态客户端放模块级：避免组件每渲染重建导致 refreshAgentPanel 身份漂移、

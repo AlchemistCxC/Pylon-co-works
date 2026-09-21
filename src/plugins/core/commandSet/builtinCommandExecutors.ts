@@ -7,15 +7,7 @@ import { setSessionMode } from '../../../components/chat/sessionMode.ts'
 import { createSessionClient } from '../../../infrastructure/acp/sessionClient.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
 import { useWorkspaceStore } from '../../../workspaceStore.ts'
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-function text(value: unknown, key: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 必须是非空字符串`)
-  return value.trim()
-}
+import { record, text } from '../../../utils/wireGuards.ts'
 
 function positional(args: Record<string, unknown>, index: number): unknown {
   return Array.isArray(args.positionals) ? args.positionals[index] : undefined

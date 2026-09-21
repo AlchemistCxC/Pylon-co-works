@@ -186,17 +186,99 @@ pub(crate) fn write_synced_temp(
     kind: &str,
     content: &[u8],
 ) -> Result<PathBuf, std::io::Error> {
+    write_temp_sibling(path, kind, content, true)
+}
+
+/// `write_synced_temp` 的 sync 开关变体：`sync=false` 保留调用方（MCP/pet 的
+/// best-effort 持久化路径）「不 fsync」的历史行为（issue #228 批次D 收敛时点名保留）。
+fn write_temp_sibling(
+    path: &Path,
+    kind: &str,
+    content: &[u8],
+    sync: bool,
+) -> Result<PathBuf, std::io::Error> {
     let temp = unique_sibling(path, kind).map_err(std::io::Error::other)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temp)?;
-    if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+    let result = file
+        .write_all(content)
+        .and_then(|_| if sync { file.sync_all() } else { Ok(()) });
+    if let Err(error) = result {
         drop(file);
         let _ = std::fs::remove_file(&temp);
         return Err(error);
     }
     Ok(temp)
+}
+
+/// 通用原子写选项（issue #228 批次D：非 agent-config 域的原子写收敛到正身单实现）。
+///
+/// 字段用于显式表达各调用方**历史行为差异**（不设 Default，强制调用方具名选择），
+/// 收敛时行为零变化；差异本身是否合理见批次D 报告，不在本次重构内悄悄改写。
+/// 正身 config 域自身语义（fsync 临时文件 + fsync 父目录、不创建父目录）仍由
+/// `write_config_transaction_*` / [`replace_config_with_backup`] 直接组合原语实现，
+/// 不经本结构。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AtomicWriteOptions {
+    /// rename 前 sync 临时文件内容（掉电时已确认写入不丢）。
+    pub(crate) sync_temp: bool,
+    /// 写入前 create_dir_all 父目录（config 域父目录必然存在，故为 false）。
+    pub(crate) create_parents: bool,
+    /// rename 后 sync 父目录（仅 Unix 有实现；Windows 恒 no-op）。
+    pub(crate) sync_parent_dir: bool,
+}
+
+impl AtomicWriteOptions {
+    /// 持久化数据文件语义：fsync 临时文件 + 创建父目录，不 fsync 父目录
+    /// （gateway instance_store / credentials 的历史行为）。
+    pub(crate) fn synced_data_file() -> Self {
+        Self {
+            sync_temp: true,
+            create_parents: true,
+            sync_parent_dir: false,
+        }
+    }
+
+    /// 尽力而为（best-effort）数据文件语义：不 fsync 临时文件、创建父目录
+    /// （lifecycle MCP / pet 的历史行为：写失败只告警不阻断主流程）。
+    pub(crate) fn best_effort_data_file() -> Self {
+        Self {
+            sync_temp: false,
+            create_parents: true,
+            sync_parent_dir: false,
+        }
+    }
+}
+
+/// 通用原子写入口：唯一临时文件（`create_new`，与进程内序号防碰撞）+ 写全 +
+/// 可选 sync + 原子替换（Windows 走 MoveFileExW，含 WRITE_THROUGH）+ 可选父目录
+/// sync；任一步失败清理临时文件、原文件不动。错误一律 [`std::io::Error`]，
+/// 由调用方映射各自的领域错误。
+pub(crate) fn write_file_atomically(
+    path: &Path,
+    content: &[u8],
+    options: AtomicWriteOptions,
+) -> std::io::Result<()> {
+    if options.create_parents {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let temp = write_temp_sibling(path, "tmp", content, options.sync_temp)?;
+    let commit = replace_file(&temp, path).and_then(|_| {
+        if options.sync_parent_dir {
+            sync_parent(path)
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = commit {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(windows)]

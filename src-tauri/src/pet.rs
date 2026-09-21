@@ -4,7 +4,6 @@ pub use pylon_pet_core::{
     AchievementInfo, AiEvent, CosmeticInfo, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome,
 };
 use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Serialize)]
 pub struct PetView<'a> {
@@ -252,37 +251,21 @@ pub fn serialize_state(state: &PetState) -> Result<String, String> {
 /// 自身/其他写盘函数），无死锁风险；未竞争时开销可忽略。
 static STATE_FILE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。
-/// 审查修复：temp 名含 pid+时间戳——get_pet 轮询与 pet_action 可并发，固定 temp 名
-/// 会互相截断写坏（损坏 JSON 被 rename 就位 → 下次启动静默丢档）。
+/// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。经 agent_config
+/// 正身 [`crate::agent_config::AtomicWriteOptions`] 收敛（issue #228 批次D；
+/// 旧内联 temp 生成器删除）。历史行为保留：不 fsync 临时文件（best-effort
+/// 存档路径，与 lifecycle MCP 同源），失败告警后仍返回 Err。
 pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), String> {
     let _write_guard = STATE_FILE_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let unique = {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        path.with_file_name(format!(
-            ".{}.{}.{}.tmp",
-            path.file_name().and_then(|n| n.to_str()).unwrap_or("state"),
-            std::process::id(),
-            now,
-        ))
-    };
-    let result = (|| {
-        std::fs::write(&unique, json).map_err(|e| e.to_string())?;
-        std::fs::rename(&unique, path).map_err(|e| e.to_string())
-    })();
-    // O16：失败清理遗留 temp（对齐 lifecycle.rs MCP 同款）——write/rename 失败
-    // 不再留下半截 `.xxx.tmp` 垃圾文件。
-    if let Err(ref error) = result {
-        let _ = std::fs::remove_file(&unique);
+    if let Err(error) = crate::agent_config::write_file_atomically(
+        path,
+        json.as_bytes(),
+        crate::agent_config::AtomicWriteOptions::best_effort_data_file(),
+    ) {
         tracing::warn!("write state file failed: {error}");
+        return Err(error.to_string());
     }
-    result
+    Ok(())
 }
 
 /// 序列化 + 原子写（Exit 兜底等同步路径；高频路径请用 serialize_state + write_json_atomic 分离）。

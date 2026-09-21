@@ -36,7 +36,7 @@ import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SessionConfig } from '../runtimeStore'
 import type { SessionLiveStats } from '../components/chat/sessionRuntime'
 import type { AgentEntry } from '../identityStore'
-import { sanitizeExportValue, redactAbsolutePath } from '../obs04/threeSourceExport'
+import { sanitizeExportValue, redactAbsolutePath } from '../domains/export/threeSourceExport'
 
 // ============================================================================
 // 工件类型（artifact wire 形状）

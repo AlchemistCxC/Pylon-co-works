@@ -101,14 +101,14 @@ pub(crate) fn env_bootstrap(core: &Arc<GatewayCore>) {
         {
             Ok(client) => client,
             Err(error) => {
-                eprintln!("Pylon QQ HTTP client unavailable: {error}");
+                tracing::warn!("Pylon QQ HTTP client unavailable: {error}");
                 reqwest::Client::new()
             }
         };
         let auth = Arc::new(QqAuth::new(http.clone(), qq_app_id, qq_client_secret));
         let adapter = QqAdapter::new(core.clone(), http.clone(), auth.clone());
         if let Err(error) = core.register(adapter.clone()) {
-            eprintln!("Pylon QQ adapter register failed: {error}");
+            tracing::warn!("Pylon QQ adapter register failed: {error}");
         } else {
             tracing::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
             tokio::spawn(ws::run_ws_loop(http, auth, adapter));

@@ -31,7 +31,8 @@ function testGroup(file: string): 'node' | 'node-shared' | 'react-dom' | 'react-
 }
 
 // 前端测试：
-// - scripts/*.test.mts：历史形态（顶层 assert + console.log），node 环境
+// - scripts/*.test.mts：node 环境（#228 批次F 起全部为 vitest describe/it +
+//   expect 形态，旧 runner 的顶层 assert + console.log 已迁清）
 // - src/**/*.test.{ts,tsx}：组件行为测试；文件内可用环境注释声明 jsdom
 // - Solid renderer 只转换 *.solid.tsx，其他 *.tsx 继续走 React transform
 // 迁移期间保留原 run-frontend-tests.mts runner 作为兼容入口；vitest 为正式门禁。
@@ -76,14 +77,18 @@ export default defineConfig({
       include: ['src/**'],
       exclude: ['src/**/*.test.{ts,tsx}', 'src/components/chat/chatMockData.ts'],
       reporter: ['text', 'json-summary'],
-      // ISSUE-20 W4：从真实基线开始（实测 statements 60.89 / branches 46.73 /
-      // functions 61.32 / lines 63.22），阈值取基线下方留余量避免 flake；
-      // 按 domain 渐进提高，不为追数字写空测试。
+      // #228 批次F ratchet 语义（只升不降）：阈值 = 上次全量实测基线向下取整再留
+      // 1 个百分点余量——防回退，不卡偶发抖动。下次实测（全量绿）高于当前阈值后，
+      // 按同一公式上调；任何情况下不得下调。
+      // 当前基线：2026-09-22 实测（622 文件 / 4670 用例全量 + coverage）
+      // statements 80.48 / branches 73.10 / functions 80.95 / lines 84.12 → 79/72/79/83。
+      // 前值 58/44/59/61 是 ISSUE-20 W4 的旧基线（当时实测 60.89/46.73/61.32/63.22），
+      // 已随覆盖增长 ratchet 上调。
       thresholds: {
-        statements: 58,
-        branches: 44,
-        functions: 59,
-        lines: 61,
+        statements: 79,
+        branches: 72,
+        functions: 79,
+        lines: 83,
       },
     },
   },
