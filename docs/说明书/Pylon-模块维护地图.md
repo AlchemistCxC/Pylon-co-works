@@ -16,8 +16,8 @@
 | 渲染器 | `src/renderers/`；[SolidWorkbenchApp](../../src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx) | 消费 document / appearance / commands；拥有局部 UI 与 DOM 清理，不另建会话数据源 | `vitest run src/renderers`；`check:solid`；实际 UI 检验 |
 | 工作区 UI | `src/sheets/`、`src/workspace-sheets/`、`src/components/` | Sheet 激活、设置与已有组件；agent-workbench 子目录优先归宿主块。chat 含历史编排，迁移前逐个核实 | 对应组件/Sheet 测试；`check:first-party-styles` |
 | CLI | `src/cli/` | 语法和执行适配，复用命令责任方，不重建 session 生命周期 | `vitest run src/cli` |
-| 观测 | `src/obs04/`—`src/obs07/` | 三源导出、冷启动、删除取证、stderr 样本；只读证据，DEV 触发器在 main 动态接入 | `vitest run src/obs04 src/obs05 src/obs06 src/obs07` |
-| 历史策略 | `src/css01/`、`src/css04/`、`src/cwd02/` | 已有布局、样式与 cwd 策略；目录编号本身不是删除或合并的证据 | 各目录测试；样式与边界门禁 |
+| 观测 | `src/obs04/`—`src/obs07/` | 冷启动、删除取证、stderr 样本与三源导出 DEV 触发器；只读证据，触发器在 main 动态接入。#228 起三源采集器下沉 `src/domains/export/`（生产 `core.export.*` 与 DEV 钩子同源） | `vitest run src/domains/export src/obs04 src/obs05 src/obs06 src/obs07` |
+| 历史策略 | `src/css01/` | 已有样式取证基线；目录编号本身不是删除或合并的证据（`src/css04/`、`src/cwd02/` 已作为零引用死代码删除，#228；cwd wire 行为锁迁 `src/infrastructure/acp/__tests__/`） | 各目录测试；样式与边界门禁 |
 | 窄工具 / 演示 | `src/utils/`、`src/demo/` | 窄工具按消费者归属；demo 数据不能当真实 Agent 结果 | 对应工具测试；生产 bundle 检查 |
 | 前端根文件 | `src/*` 的直接文件 | 入口、schema、旧 store / 策略；不吸收新增子目录以掩盖归属缺失 | `lint`、`build` 与消费者测试 |
 | Native ACP | `src-tauri/src/acp/`、`dispatcher/`、`lifecycle/` | 传输、协商、通知路由、实例连接；lifecycle 锁序与 generation 保持一个入口。#98 起：`acp/negotiated.rs` 是能力协商快照唯一真源（canonical 矩阵 + 四态 + 消费者注册表，session 建立/重连探针/agent_status 消费同一份；#110 F2：`list`/`close` 为**双形状**——ACP 标准的 object 与线上旧广告的显式 `true` 都算广告，其它值仍 fail-closed），`acp/interaction_queue.rs` 是 permission/elicitation/question 等 client request 的统一 request-id 队列（FIFO、单一 Active、cancel/timeout/disconnect drain 终态、冷挂载快照），`session/fork.rs` 是 `session/fork` raw RPC 消费者（能力 usable gate + 受限 envelope + parent/child 登记） | Rust ACP / dispatcher / lifecycle 测试；`check:acp-shadow` |

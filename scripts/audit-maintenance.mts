@@ -16,8 +16,11 @@ export const moduleDefinitions = [
   { id: 'renderers', roots: ['src/renderers/'], responsibility: '文档到 UI 的呈现与交互适配；消费 Host Port' },
   { id: 'workspace-ui', roots: ['src/sheets/', 'src/workspace-sheets/', 'src/components/'], responsibility: 'Sheet、设置、工作区与既有组件；chat 目录含待迁移的编排' },
   { id: 'cli', roots: ['src/cli/'], responsibility: 'CLI 语法、执行与领域命令适配' },
-  { id: 'diagnostics', roots: ['src/obs04/', 'src/obs05/', 'src/obs06/', 'src/obs07/'], responsibility: '观测、诊断与导出；历史编号目录需按消费者逐步整理' },
-  { id: 'layout-policy', roots: ['src/css01/', 'src/css04/', 'src/cwd02/'], responsibility: '历史布局、样式和工作目录策略；保留调用语义后再迁移' },
+  // #228 批次B：三源导出采集器自 src/obs04/ 下沉 src/domains/export/（归 domain 根）；
+  // obs04 只剩 DEV 触发器。css04/cwd02 已删除（零引用死代码），cwd wire 行为锁迁
+  // infrastructure/acp/__tests__/。
+  { id: 'diagnostics', roots: ['src/obs04/', 'src/obs05/', 'src/obs06/', 'src/obs07/'], responsibility: '观测与诊断取证（DEV 触发器在 main 动态接入）；三源导出采集已下沉 src/domains/export/' },
+  { id: 'layout-policy', roots: ['src/css01/'], responsibility: '历史样式取证基线；保留调用语义后再迁移' },
   { id: 'shared-utilities', roots: ['src/utils/'], responsibility: '已有窄工具函数；新代码优先归属具体能力模块' },
   { id: 'test-support', roots: ['src/test-utils/'], responsibility: '测试共享支撑（mock 形状、fixture 工厂）；仅被测试代码 import，不进生产构建' },
   { id: 'demo', roots: ['src/demo/'], responsibility: '浏览器演示数据；不得把演示验证当作原生链路证据' },

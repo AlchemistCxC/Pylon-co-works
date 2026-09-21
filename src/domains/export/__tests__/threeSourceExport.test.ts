@@ -21,7 +21,7 @@ import {
   redactAbsolutePath,
   type Obs04Transport,
 } from '../threeSourceExport'
-import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository'
+import type { CanonicalEventRow } from '../../../infrastructure/events/canonicalEventRepository'
 
 function memoryStorage(entries: Record<string, string>): Pick<Storage, 'getItem'> {
   return {

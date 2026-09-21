@@ -7,11 +7,14 @@
  *
  * 原 readFileSync 源码锁与行号级证据登记（file:line）退役——wire 契约改由 typed client
  * 真实 invoke 载荷行为锁定（经 FakeInvoke 传输）。
+ *
+ * #228 批次B：自 src/cwd02/ 迁入（紧贴被锁的 sessionClient）；cwd02 目录随一次性基线
+ * 常量（cwdWireBaseline.ts，迁移已完成、零引用）一并删除，本行为锁保留持续回归价值。
  */
 
 import { describe, expect, it } from 'vitest'
-import { FakeInvoke } from '../../test/fakeInvoke'
-import { createSessionClient } from '../../infrastructure/acp/sessionClient'
+import { FakeInvoke } from '../../../test/fakeInvoke'
+import { createSessionClient } from '../sessionClient'
 
 describe('CWD wire：sessionClient 载荷携 cwd/workspaceId', () => {
   it('new_session 载荷同时携带 cwd 与 workspaceId（命令名 new_session）', async () => {
