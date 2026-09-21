@@ -18,6 +18,9 @@ function createDeps(overrides: Partial<BootstrapDeps> = {}): { deps: Required<Bo
     fetchAgentStatus: async () => { calls.push('status'); return { agentId: 'peri', agent: 'Peri', status: 'connected' } },
     applyAgentStatus: (payload) => { calls.push(`applyStatus:${(payload as { status?: string }).status}`) },
     registerListeners: async () => { calls.push('listen'); return () => { calls.push('dispose') } },
+    // #220：计算核预热（新增 dep）。默认**不记 calls**——既有断言是精确序列，
+    // 「bootstrap 会在继续之前等预热」由下面那条专门的用例守（见「等计算核预热」）。
+    warmComputeCores: async () => {},
     reportError: vi.fn(),
     resolveError: vi.fn(),
     setStatus: vi.fn(),
@@ -94,6 +97,36 @@ describe('bootstrapApplication', () => {
     expect(calls).toEqual(['hydrate', 'fetch', 'apply:1', 'status', 'applyStatus:connected'])
   })
 
+  it('#220 计算核预热：bootstrap 在继续之前等它落定（未落定时不 fetch agents）', async () => {
+    const calls: string[] = []
+    let releaseWarm!: () => void
+    const warmGate = new Promise<void>(resolve => { releaseWarm = resolve })
+    const { deps } = createDeps({
+      hydrateDomains: () => { calls.push('hydrate') },
+      warmComputeCores: async () => { calls.push('warm:start'); await warmGate; calls.push('warm:done') },
+      fetchAgents: async () => { calls.push('fetch'); return [] },
+    })
+    const pending = bootstrapApplication(deps)
+    // 让 hydrate 与预热各自推进到各自的 await，再断言顺序。
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(calls).toEqual(['warm:start', 'hydrate'])
+    let settled = false
+    void pending.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    releaseWarm()
+    expect(await pending).toBe('ready')
+    expect(calls).toEqual(['warm:start', 'hydrate', 'warm:done', 'fetch'])
+  })
+
+  it('#220 计算核预热失败 → degraded（不静默少一半投影）', async () => {
+    const { deps } = createDeps({
+      warmComputeCores: async () => { throw new Error('wasm 装载失败') },
+    })
+    expect(await bootstrapApplication(deps)).toBe('degraded')
+  })
+
   it('非 Tauri（浏览器 demo）不 fetch，直接 ready', async () => {
     const { deps, calls } = createDeps({ isTauri: false })
     expect(await bootstrapApplication(deps)).toBe('ready')
@@ -114,6 +147,7 @@ describe('bootstrapApplication', () => {
       fetchAgentStatus: async () => ({ agentId: 'peri', status: 'connected' }),
       applyAgentStatus: vi.fn(),
       registerListeners: async () => () => {},
+      warmComputeCores: async () => {},
       reportError: vi.fn(),
       resolveError: vi.fn(),
       setStatus: vi.fn(),
@@ -121,7 +155,11 @@ describe('bootstrapApplication', () => {
     }
     const pending = bootstrapApplication(deps)
     // I14-W6：hydrateDomains 可为 async，bootstrap 经 await——fetchAgents 在下一
-    // 微任务才被调用；先让出当前微任务再 resolve，保持"fetch resolve 前已取消"语义
+    // 微任务才被调用；先让出当前微任务再 resolve，保持"fetch resolve 前已取消"语义。
+    // #220 起 bootstrap 多一个 await（等计算核预热落定），fetchAgents 因此晚一个微
+    // 任务被调用 ⇒ 这里让出两次。**断言本身未改**：仍是「fetch resolve 前已取消 ⇒
+    // cancelled 且 applyAgents 不被调用」，改的只是「让出几次」这个时序前提。
+    await Promise.resolve()
     await Promise.resolve()
     resolveFetch([{ id: 'peri', name: 'Peri' }])
     expect(await pending).toBe('cancelled')

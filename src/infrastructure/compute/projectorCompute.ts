@@ -188,6 +188,18 @@ export interface ProjectorFoldPage {
 const glue = glueNamespace as unknown as ProjectorGlue
 const runtime = createComputeRuntime('pylon-compute（投影）', glue, () => __wbgInit())
 
+/**
+ * 已就绪的 glue 命名空间。**同步出口必须经这里取 glue，不要直接用导入的命名空间**。
+ *
+ * 直接 `new glueNamespace.PylonProjector(...)` 会把「计算核还没就绪」暴露成 wasm-bindgen
+ * 内部的 `TypeError: Cannot read properties of undefined (reading '__wbindgen_export')`
+ * ——真机验收（#220 §25.2）就是这么撞上的：一句话看不出是谁没等谁。走 `runtime.glue()`
+ * 则抛本模块自己的可执行错误（与 streaming / markdown 两个装载层同一条约定）。
+ */
+function readyGlue(): ProjectorGlue {
+  return runtime.glue()
+}
+
 /** wasm 计算核就绪。测试宿主由前置预初始化，因此同步已就绪。 */
 export function whenProjectorComputeReady(): Promise<void> {
   return runtime.whenReady()
@@ -204,7 +216,7 @@ export function whenProjectorComputeReady(): Promise<void> {
  */
 let typeIndexCache: Map<string, number> | undefined
 function typeIndexes(): Map<string, number> {
-  typeIndexCache ??= new Map(glue.projectorEventTypes().map((name, index) => [name, index]))
+  typeIndexCache ??= new Map(readyGlue().projectorEventTypes().map((name, index) => [name, index]))
   return typeIndexCache
 }
 
@@ -549,7 +561,9 @@ function materializePage(
  * 否则读数会退化成「只要绕开那个 helper 就永远 0」。
  */
 export function createProjector(sessionId: string): PylonProjectorInstance {
-  const inner = new glue.PylonProjector(sessionId)
+  // 经 `readyGlue()` 而不是直接用导入的命名空间：未就绪时抛本模块的可执行错误，
+  // 而不是 wasm-bindgen 的 `__wbindgen_export` TypeError（见 `readyGlue` 头注）。
+  const inner = new (readyGlue().PylonProjector)(sessionId)
   return {
     appendBatch(frame: Uint8Array): string {
       boundaryCrossings += 1
