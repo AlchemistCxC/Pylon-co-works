@@ -449,3 +449,18 @@
 - 文档：`.agents/records/`（新增 issue36 记录）、本文件
 
 **我不碰**：`src-tauri/src/protocol_adapter.rs`（kind 门禁契约不动，仅读）；#204③/#226/#155T3 在途域全部文件（workbench projector/runtime、agentWorkbenchSession、replay 测试、session/dispatcher/scripts）；GUI 交互链路（`src/infrastructure/acp/**`、`src/domains/agent/**`）；构建产物不提交。spec 为一次性文档不入库。
+
+---
+
+[2026-09-22 02] [Miyaki Kumo] [#228]
+
+**开工：issue228（技术债偿还·六批次：演示解耦/豁免清理/结构拆分/健壮性/测试偿还），单 issue 单 PR。** spec 见 `.agents/spec/228-tech-debt-paydown.md`（gitignore，一次性）。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（大体量，请勿改写、勿连带提交）**，重点声明将改写的文件——
+
+- 前端：`src/main.tsx`、`src/demo/**`（DEV 门化）、`src/components/sidebar/blocks/mockBlocks.tsx`、`src/components/PrismSheet.tsx`、`src/obs04/**`（生产部分下沉）、`src/css04/**`（删除）、`src/cwd02/**`（裁决）、`src/App.tsx`、`src/workspaceStore.ts`、`src/sessionPersistence.ts`、`src/application/transactions/saveGatewayRouteTransaction.ts`、`src/application/applicationRuntime.ts`、`src/plugin-runtime/registry/reactiveRegistry.ts`、`src/workspace-sheets/workspaceRegistry.ts`、`src/sheets/file/WorkspaceSearchPanel.tsx`、`src/sheets/file/FileTabView.tsx`、`src/infrastructure/tauri/workspaceSearchContracts.ts`、`src/plugins/core/export/builtinExportSources.ts`、`src/renderers/solid-workbench/{SolidWorkbenchApp.solid.tsx,streamingDisplayScheduler.ts,chat/**非在途文件}`、`src/identityStore.ts`、`src/sheets/browser/BrowserSheetView.tsx`
+- 后端：`src-tauri/src/acp/{engine,turn_ledger,owner,replay,wire_trace,stderr_tail,mod}.rs`、`src-tauri/src/session/{event_repo,prompt}.rs`、`src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/plugin_cmds.rs`、`src-tauri/src/browser_agent_cmds.rs`、`src-tauri/src/gateway/{truncate,instance,instance_store,credentials,qq/factory}.rs`、`src-tauri/src/lifecycle/{mcp,mod}.rs`、`src-tauri/src/pet.rs`、`src-tauri/src/plugin_process/mod.rs`、`src-tauri/src/hermes_runtime.rs`、`src-tauri/src/agent_config/{atomic_write,patch}.rs`、`src-tauri/pylon-core/src/cli_client.rs`
+- 测试侧：`vitest.setup.ts`、`vitest.config.ts`（仅阈值 ratchet 与注释）、批次F 点名的测试文件
+- 文档：`.agents/records/`、本文件；issue #228 回写
+
+**我不碰（硬禁区）**：中控区 `src/renderers/solid-workbench/input/**` 与一切 `*ControlCenter*`；预设系统 `src/presets/**`、`src/zones/**`、`src/customPresets*`、`src/themeFieldDefs.ts`、`src/themePresetState.ts`、`src/domains/theme/presetReducer.ts`；**#204③/#226 在途三件**（workbenchProjector/workbenchRuntime/agentWorkbenchSession）；**#36 在途域**（`src/cli/pylonCliService.ts`、`src/cli/pylonCliBridge.ts`、`src/cli/__tests__/pylonCliService.test.ts`、`src-tauri/src/permission.rs`、`docs/说明书/Pylon-CLI-命令表.md`）；`tools/webview2-mcp/**`。⚠️ 与 #155 T3 备阶段（session/**、dispatcher/**、scripts/compute-parity/**）的重叠：批次D/E 将拆 `session/event_repo.rs` 与 `dispatcher/mod.rs`——T3 未开工前我先做，开工前会在此对表。全程 pathspec 提交；Rust 构建一律 `CARGO_TARGET_DIR=D:/pylon-acceptance-target`（G 盘 99% 满）。
