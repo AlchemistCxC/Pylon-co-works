@@ -6114,7 +6114,7 @@ mod text_slice_equivalence_tests {
                     _ => json!({ "kind": "text", "text": "" }),
                 });
             }
-            if next(&mut state) % 3 == 0 {
+            if next(&mut state).is_multiple_of(3) {
                 parts.clear();
             }
             let raw = text_from_slice(&parts);
