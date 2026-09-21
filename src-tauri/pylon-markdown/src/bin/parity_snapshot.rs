@@ -57,6 +57,9 @@ fn main() -> ExitCode {
             "language": case.language,
             // None = 引擎声明「不认识该语法」，与 TS 侧 null 同语义。
             "lines": lines,
+            // 行数组出口不含行尾换行；扁平化对齐 starry 的「换行是无类文本」
+            // 语义时需要知道原块是否以换行结尾（diff.mjs 与 vitest 门禁共用）。
+            "endsWithNewline": case.code.ends_with('\n'),
         }));
     }
 

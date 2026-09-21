@@ -813,7 +813,7 @@ fn is_valid_diff_hunk(value: &Value) -> bool {
 const MAX_INLINE_MEDIA_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 
 fn is_padded_base64(value: &str) -> bool {
-    if value.is_empty() || js_utf16_length(value) % 4 != 0 {
+    if value.is_empty() || !js_utf16_length(value).is_multiple_of(4) {
         return false;
     }
     let trimmed = value.trim_end_matches('=');
@@ -861,7 +861,7 @@ fn is_valid_media_mime(kind: &str, value: Option<&Value>) -> bool {
 }
 
 fn is_valid_media_dimension(value: Option<&Value>) -> bool {
-    value.map_or(true, |v| {
+    value.is_none_or(|v| {
         v.as_number().is_some_and(|n| {
             let f = number_as_f64(n);
             f.is_finite() && f > 0.0
@@ -870,7 +870,7 @@ fn is_valid_media_dimension(value: Option<&Value>) -> bool {
 }
 
 fn is_valid_media_duration(value: Option<&Value>) -> bool {
-    value.map_or(true, |v| {
+    value.is_none_or(|v| {
         v.as_number().is_some_and(|n| {
             let f = number_as_f64(n);
             f.is_finite() && f >= 0.0
@@ -981,13 +981,13 @@ fn is_valid_media_content_input(record: &Map<String, Value>, kind: &str) -> bool
         && is_valid_media_duration(record.get("durationMs"))
         && ["alt", "caption", "poster", "transcript"]
             .iter()
-            .all(|key| record.get(*key).map_or(true, Value::is_string))
+            .all(|key| record.get(*key).is_none_or(Value::is_string))
         && !has_forbidden_media_side_channel(record)
 }
 
 /// `isNonEmptyContentLocation`。
 fn is_non_empty_content_location(value: Option<&Value>) -> bool {
-    value.map_or(false, non_empty_string)
+    value.is_some_and(non_empty_string)
 }
 
 fn is_valid_search_result_location(value: &Value) -> bool {
@@ -1247,7 +1247,7 @@ fn is_valid_skill_content_input(value: &Value) -> bool {
         && non_empty_string(record.get("title").unwrap_or(&Value::Null))
         && non_empty_string(record.get("source").unwrap_or(&Value::Null))
         && valid_c15_common(record)
-        && record.get("uri").map_or(true, non_empty_string)
+        && record.get("uri").is_none_or(non_empty_string)
         && has_only_keys(record, &SKILL_CONTENT_KEYS)
 }
 

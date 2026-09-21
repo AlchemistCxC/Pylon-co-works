@@ -16,7 +16,6 @@ use wasm_bindgen::prelude::*;
 
 use crate::highlight::HighlightedLine;
 use crate::model::RenderNode;
-
 /// 引擎版本标记（随 crate 版本走），供 JS 侧诊断与 parity 记录。
 #[wasm_bindgen(js_name = markdownEngineVersion)]
 pub fn markdown_engine_version() -> String {
@@ -39,8 +38,8 @@ pub fn parse_markdown_json(text: &str) -> Result<String, JsError> {
         .map_err(|error| JsError::new(&format!("渲染模型 JSON 序列化失败: {error}")))
 }
 
-/// 整块代码 → 行数组高亮 span。语言未知 / 语法包缺失时返回 `null`
-/// （与 TS 基线 `highlightCode` 返回 null 同语义）。
+/// 整块代码 → 行数组高亮 span（github `pl-*` 类名链，与 TS 基线 hast 叶子同构）。
+/// 语言未知 / 语法包缺失时返回 `null`（与 TS 基线 `highlightCode` 返回 null 同语义）。
 #[wasm_bindgen(js_name = highlightBlock)]
 pub fn highlight_block(code: &str, language: &str) -> Result<Option<JsValue>, JsError> {
     let lines: Option<Vec<HighlightedLine>> =

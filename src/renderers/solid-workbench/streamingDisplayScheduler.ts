@@ -1,6 +1,7 @@
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
-import type { WorkbenchDocument, WorkbenchMessage } from '../../domains/workbench/workbenchProjector.ts'
+import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
+import { streamingCompute } from '../../infrastructure/compute/streamingCompute.ts'
 
 /**
  * Renderer-side pacing defaults.
@@ -172,29 +173,6 @@ interface StreamingDisplayPublication {
   readonly totalUnits?: number
 }
 
-interface PrefixAdvance {
-  readonly value: string
-  /** 本次揭示消费的 UTF-16 单元数（D2：与预算/欠账同量纲） */
-  readonly consumedUnits: number
-}
-
-interface GraphemeSegment {
-  readonly segment: string
-}
-
-interface GraphemeSegmenter {
-  segment(input: string): Iterable<GraphemeSegment>
-}
-
-type IntlWithSegmenter = typeof Intl & {
-  Segmenter?: new (
-    locales?: string | string[],
-    options?: { granularity?: 'grapheme' | 'word' | 'sentence' },
-  ) => GraphemeSegmenter
-}
-
-const graphemeSegmenter = createGraphemeSegmenter()
-
 /**
  * Create a renderer-only latest-wins display scheduler.
  *
@@ -205,6 +183,12 @@ const graphemeSegmenter = createGraphemeSegmenter()
  * finishing mid-turn, a new row, a terminal state, a resume — publishes its
  * structure immediately while the not-yet-revealed text keeps converging under
  * the same bounds.
+ *
+ * 预算数学与文本镜像（D1 摊分、D2 UTF-16 字素计量、追赶窗口、canonical 镜像）
+ * 住在 wasm 计算核（`pylon-compute` 的 `StreamingRevealEngine`，ADR-0018）；本文件
+ * 只保留编排——帧源、replacement flush、终态微任务合并、判据 A/C、prefix 保留、
+ * 诊断环形缓冲——以及把引擎的本拍决策写回快照结构。引擎驱动协议：
+ * reset → (feed → noteBacklog)* → tick*；`now` 一律由 JS 传入（计算核不读时钟）。
  */
 export function createStreamingDisplayScheduler(
   publish: (snapshot: WorkbenchRuntimeSnapshot) => void,
@@ -227,12 +211,32 @@ export function createStreamingDisplayScheduler(
     DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs,
   )
   const updateIntervalMs = 1000 / maxUpdatesPerSecond
-  /** Ticks a full backlog is allowed to take to catch up. */
-  const catchUpTicks = Math.max(1, Math.ceil(maxRevealLagMs / updateIntervalMs))
-  /** Backlog the smooth typing pace already clears within the lag window. */
-  const smoothBacklogCapacity = revealUnitsPerSecond * maxRevealLagMs / 1000
   const now = options.now ?? defaultNow
   const interpolateHistory = options.interpolateHistory === true
+
+  // ── wasm 揭示预算引擎（镜像单写者；追赶窗口与预算读数的权威在这里） ──
+  const engine = new (streamingCompute().StreamingRevealEngine)({
+    maxUpdatesPerSecond,
+    revealUnitsPerSecond,
+    maxRevealUnitsPerTick,
+    maxRevealLagMs,
+  })
+  /** 喂入账本：每个行 key 已喂进引擎镜像的目标文本 UTF-16 长度（只有数字，不是文本镜像）。 */
+  let fedRowUnits = new Map<string, number>()
+  /**
+   * 待执行的整发镜像重建。publishSnapshot 里**只记账不执行**：宿主快照可能是会在
+   * 属性读取时抛错的代理（Host fatal 注入路径），而旧实现的首推/整发路径从不检视
+   * `document`——把重建推迟到 sync/tick（旧实现同样检视快照结构的位置）执行，
+   * 保持对宿主快照的异常暴露面不变。
+   */
+  let pendingWholeReset: { readonly snapshot: WorkbenchRuntimeSnapshot, readonly at: number } | undefined
+
+  const applyPendingWholeReset = () => {
+    if (pendingWholeReset === undefined) return
+    const whole = pendingWholeReset
+    pendingWholeReset = undefined
+    resetEngineToSnapshot(whole.snapshot, whole.at)
+  }
 
   // ── #212 判据 A / C 的两份行集合 ──────────────────────────────
   // `midRevealKeys`：**瞬态**——本调度器推进过、尚未收敛的行。它非空是「非生成态的
@@ -248,10 +252,7 @@ export function createStreamingDisplayScheduler(
   let paused = false
   let disposed = false
   let lastPublishedAt = Number.NEGATIVE_INFINITY
-  let lastTickAt = now()
   let terminalFlushToken: object | undefined
-  /** Start of the window in which the current backlog must be fully revealed. */
-  let catchUpDeadline = Number.NEGATIVE_INFINITY
 
   // ── S1 帧对齐（D-A：隐藏不停发，定时器即心跳）─────────────────
   const requestFrame = options.frame ?? defaultFrameSource()
@@ -269,7 +270,6 @@ export function createStreamingDisplayScheduler(
   let diagnosticsTotalUnits: number | null = null
   let diagnosticsBacklogUnits = 0
   let diagnosticsBudget = 0
-  let diagnosticsCatchUpWindows = 0
   let diagnosticsTerminalPublications = 0
   let diagnosticsFlushes = 0
   let diagnosticsWholePublications = 0
@@ -340,16 +340,64 @@ export function createStreamingDisplayScheduler(
     armTimer(updateIntervalMs)
   }
 
+  /** 当前快照对下「待揭示」流的合并行文本（D3：同 key 跨两列表取更长文本，只算一行）。 */
+  const streamRowsOf = (snapshot: WorkbenchRuntimeSnapshot): Array<{ key: string, text: string }> => {
+    const plans = new Map<string, StreamRowPlan>()
+    collectStreamRowPlans([], snapshot.messages, plans)
+    if (snapshot.document !== undefined) collectStreamRowPlans([], snapshot.document.messages, plans)
+    return [...plans].map(([key, plan]) => ({ key, text: plan.nextText }))
+  }
+
+  /** 整发（whole publication）：引擎镜像整体重建为「全部已揭示」，追赶窗口随之清零。 */
+  const resetEngineToSnapshot = (snapshot: WorkbenchRuntimeSnapshot, at: number) => {
+    const rows = streamRowsOf(snapshot)
+    engine.reset(rows, at)
+    fedRowUnits = new Map(rows.map(row => [row.key, row.text.length]))
+  }
+
   /**
-   * A push that outruns the typing pace starts (or extends) a fixed catch-up
-   * window. Extending it on every such push is what makes the policy a *lag*
-   * bound: continuous fast text keeps the window open while a one-shot burst
-   * drains completely within it.
+   * 从 JS 侧真值（displayed 已揭示前缀 + target 目标文本）重建引擎镜像。
+   * 只在镜像与喂入账本对不上时使用（双列表分叉导致目标文本收缩、或引擎晚到重建）；
+   * 常规增量走 `syncMirrorFromTarget` 的 feed 快路径。
    */
-  const noteBacklog = (snapshot: WorkbenchRuntimeSnapshot) => {
-    if (displayed === undefined) return
-    if (pendingTextUnits(displayed, snapshot) <= smoothBacklogCapacity) return
-    catchUpDeadline = Math.max(catchUpDeadline, now() + maxRevealLagMs)
+  const rebuildMirror = () => {
+    if (displayed === undefined || target === undefined) return
+    const targetRows = streamRowsOf(target)
+    const shownRows = new Map(streamRowsOf(displayed).map(row => [row.key, row.text]))
+    const rows = targetRows.map(row => {
+      const shown = shownRows.get(row.key) ?? ''
+      // 已揭示前缀必须仍是目标的前缀；分叉收缩时保守归零（该行重新按预算揭示）。
+      const revealed = row.text.startsWith(shown) ? shown : ''
+      return { key: row.key, text: revealed }
+    })
+    engine.reset(rows, now())
+    fedRowUnits = new Map(rows.map(row => [row.key, row.text.length]))
+    for (const row of targetRows) {
+      const revealed = fedRowUnits.get(row.key) ?? 0
+      if (row.text.length > revealed) engine.feed(row.key, row.text.slice(revealed))
+      fedRowUnits.set(row.key, row.text.length)
+    }
+  }
+
+  /**
+   * push 之后把引擎镜像同步到新 target：对每个合并行喂「相对上次已喂文本」的增量。
+   * 目标文本收缩（喂入账本对不上）说明镜像分叉，走 `rebuildMirror` 保守重建。
+   */
+  const syncMirrorFromTarget = () => {
+    if (target === undefined) return
+    applyPendingWholeReset()
+    const rows = streamRowsOf(target)
+    for (const row of rows) {
+      if (row.text.length < (fedRowUnits.get(row.key) ?? 0)) {
+        rebuildMirror()
+        return
+      }
+    }
+    for (const row of rows) {
+      const fed = fedRowUnits.get(row.key) ?? 0
+      if (row.text.length > fed) engine.feed(row.key, row.text.slice(fed))
+      fedRowUnits.set(row.key, row.text.length)
+    }
   }
 
   const publishSnapshot = (
@@ -362,16 +410,18 @@ export function createStreamingDisplayScheduler(
     terminalFlushToken = undefined
     displayed = snapshot
     lastPublishedAt = timestamp
-    lastTickAt = timestamp
-    // Publishing the full target means nothing is left to catch up.
-    if (snapshot === target) catchUpDeadline = Number.NEGATIVE_INFINITY
     // S0：只读计数（O(1)，不扇扫）。整发不适用预算，故单位字段记 null，避免伪造读数。
     diagnosticsPublishes += 1
     diagnosticsKind = publication.kind
     if (publication.kind === 'budgeted') diagnosticsBudgetedPublications += 1
     else diagnosticsWholePublications += 1
-    // 整发意味着没有东西在揭示了（结构替换、终态收敛、历史整发都在此清账）。
-    if (publication.kind !== 'budgeted') midRevealKeys.clear()
+    // 整发意味着没有东西在揭示了（结构替换、终态收敛、历史整发都在此清账）：
+    // 瞬态揭示集合清空，引擎镜像待重建（见 pendingWholeReset 的惰性执行说明）。
+    if (publication.kind !== 'budgeted') {
+      midRevealKeys.clear()
+      pendingWholeReset = { snapshot, at: timestamp }
+      fedRowUnits = new Map()
+    }
     diagnosticsMaxUnits = publication.kind === 'budgeted' ? Math.max(0, publication.maxUnits ?? 0) : null
     diagnosticsTotalUnits = publication.kind === 'budgeted' ? Math.max(0, publication.totalUnits ?? 0) : null
     if (Number.isFinite(previousPublicationAt)) {
@@ -395,38 +445,17 @@ export function createStreamingDisplayScheduler(
     armTimer(delay)
   }
 
-  /**
-   * Reveal budget for one tick: the smooth typing pace, raised whenever the
-   * backlog would otherwise outlive its catch-up deadline.
-   */
-  const revealBudget = (timestamp: number): number => {
-    const elapsedSinceTick = Math.max(0, timestamp - lastTickAt)
-    const baseline = Math.max(1, Math.round(
-      revealUnitsPerSecond * Math.max(elapsedSinceTick, updateIntervalMs) / 1000,
-    ))
-    if (displayed === undefined || target === undefined) return Math.min(maxRevealUnitsPerTick, baseline)
-    const backlog = pendingTextUnits(displayed, target)
-    diagnosticsBacklogUnits = backlog
-    if (backlog <= 0) return Math.min(maxRevealUnitsPerTick, baseline)
-    // An unarmed window (smooth stream) or one already elapsed (throttled
-    // background timer) restarts here, so the countdown never degrades into
-    // "reveal everything left in this frame".
-    if (!(catchUpDeadline > timestamp)) {
-      catchUpDeadline = timestamp + maxRevealLagMs
-      diagnosticsCatchUpWindows += 1
-    }
-    const ticksLeft = Math.max(1, Math.ceil((catchUpDeadline - timestamp) / updateIntervalMs))
-    const catchUp = Math.ceil(backlog / Math.min(catchUpTicks, ticksLeft))
-    const budget = Math.min(maxRevealUnitsPerTick, Math.max(baseline, catchUp))
-    diagnosticsBudget = budget
-    return budget
-  }
-
   const tick = () => {
     if (disposed || paused || target === undefined || displayed === undefined) return
     const timestamp = now()
-    const budget = revealBudget(timestamp)
-    lastTickAt = timestamp
+    // 整发记账先行：镜像与 target 对齐后引擎的预算/揭示才有意义。
+    applyPendingWholeReset()
+    // 引擎一拍：预算（含追赶窗口的武装/重开）与逐行揭示决策都在 wasm 侧算完。
+    // 替换类转换在引擎 tick 之后判断：其整发会经 publishSnapshot 重建镜像，
+    // 引擎已推进的揭示状态随之作废，与 TS 基线「先算预算、后判替换」的次序一致。
+    const outcome = engine.tick(timestamp)
+    diagnosticsBacklogUnits = outcome.backlogUnits
+    diagnosticsBudget = outcome.budget
 
     if (requiresReplacementFlush(displayed, target)) {
       clearTimer()
@@ -434,23 +463,51 @@ export function createStreamingDisplayScheduler(
       return
     }
 
-    const projection = interpolateSnapshot(displayed, target, budget)
-    if (!projection.pending) {
-      // `interpolateSnapshot` uses target's non-text fields. Once all text has
-      // caught up, publish the original object to restore every canonical part
-      // and preserve reference identity for unaffected consumers.
+    if (outcome.kind === 'converged') {
+      // 所有文本已收敛：整发目标对象（恢复 canonical 各字段与引用身份）。
       clearTimer()
-      catchUpDeadline = Number.NEGATIVE_INFINITY
       midRevealKeys.clear()
       if (displayed !== target) publishSnapshot(target, timestamp)
       return
     }
 
-    replaceKeySet(midRevealKeys, projection.pendingKeys)
-    publishSnapshot(projection.snapshot, timestamp, {
+    // budgeted：把引擎的本拍决策写回两个列表（D3：同 key 共用同一决策）。
+    const plans = pendingRowPlans(displayed, target)
+    const decisions = new Map<string, string>()
+    const pendingKeys: string[] = []
+    for (const row of outcome.rows) {
+      decisions.set(row.key, row.value)
+      const planNextLength = plans.get(row.key)?.nextText.length
+      if (planNextLength !== undefined && row.value.length < planNextLength) pendingKeys.push(row.key)
+    }
+    if (pendingKeys.length === 0) {
+      clearTimer()
+      midRevealKeys.clear()
+      if (displayed !== target) publishSnapshot(target, timestamp)
+      return
+    }
+
+    replaceKeySet(midRevealKeys, pendingKeys)
+    const legacyMessages = applyRowDecisions(displayed.messages, target.messages, decisions)
+    const documentMessages = applyRowDecisions(
+      displayed.document?.messages ?? [],
+      target.document?.messages ?? [],
+      decisions,
+    )
+    const document = target.document
+      ? {
+          ...target.document,
+          messages: documentMessages as WorkbenchDocument['messages'],
+        } as WorkbenchDocument
+      : undefined
+    publishSnapshot({
+      ...target,
+      messages: legacyMessages,
+      ...(document ? { document } : {}),
+    }, timestamp, {
       kind: 'budgeted',
-      maxUnits: projection.advancedMaxUnits,
-      totalUnits: projection.advancedTotalUnits,
+      maxUnits: outcome.advancedMaxUnits,
+      totalUnits: outcome.advancedTotalUnits,
     })
     schedule()
   }
@@ -491,11 +548,13 @@ export function createStreamingDisplayScheduler(
     // 而且每一拍的新前缀都会走静态路径整段重解析（R2）。
     if (pending && !interpolateHistory && snapshot.generating !== true && midRevealKeys.size === 0) {
       clearTimer()
-      catchUpDeadline = Number.NEGATIVE_INFINITY
       diagnosticsHistoryPublications += 1
       publishSnapshot(snapshot)
       return
     }
+
+    // 此后的路径都可能有后续 tick（终态合并的微任务 tick 也在内）：先把镜像喂到 target。
+    syncMirrorFromTarget()
 
     if (isTerminalFlush(displayed, snapshot, pending)) {
       // The finished state has to land now (summary, elapsed, running=false),
@@ -513,14 +572,16 @@ export function createStreamingDisplayScheduler(
       // stale. Non-streaming changes should stay responsive; while a stream is
       // active they still respect the same cadence, so a burst of usage/tool
       // updates cannot create an independent render storm.
-      catchUpDeadline = Number.NEGATIVE_INFINITY
+      // 追赶窗口的清零由引擎在自己收敛（converged tick）时完成；这里不重复清，
+      // 过期窗口在引擎的预算计算里会照常重开，不会退化成「一帧倒完整块」。
       const activeStream = hasActiveTextStream(snapshot)
       if (!activeStream || now() - lastPublishedAt >= updateIntervalMs) publishOnDue()
       else schedule()
       return
     }
 
-    noteBacklog(snapshot)
+    // 一次 push 的欠账超过平滑容量时开/延长追赶窗口（读数与窗口状态都在引擎里）。
+    engine.noteBacklog(now())
     if (now() - lastPublishedAt >= updateIntervalMs) tick()
     else schedule()
   }
@@ -578,7 +639,8 @@ export function createStreamingDisplayScheduler(
       publishSnapshot(target)
       return
     }
-    noteBacklog(target)
+    syncMirrorFromTarget()
+    engine.noteBacklog(now())
     tick()
   }
 
@@ -588,6 +650,9 @@ export function createStreamingDisplayScheduler(
     terminalFlushToken = undefined
     clearTimer()
     clearFrame()
+    engine.free()
+    fedRowUnits = new Map()
+    pendingWholeReset = undefined
     target = undefined
     displayed = undefined
   }
@@ -608,7 +673,7 @@ export function createStreamingDisplayScheduler(
       lastPublicationTotalUnits: diagnosticsTotalUnits,
       lastBacklogUnits: diagnosticsBacklogUnits,
       lastBudget: diagnosticsBudget,
-      catchUpWindows: diagnosticsCatchUpWindows,
+      catchUpWindows: engine.catchUpWindows(),
       terminalPublications: diagnosticsTerminalPublications,
       flushes: diagnosticsFlushes,
       wholePublications: diagnosticsWholePublications,
@@ -706,25 +771,8 @@ function hasPendingTextGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
-  // D3：与 pendingTextUnits 同一口径（归并双列表），避免两处判据分叉。
+  // D3：与引擎欠账同一口径（归并双列表），避免两处判据分叉。
   return pendingRowPlans(current, next).size > 0
-}
-
-/**
- * Cheap size of the not-yet-revealed text, used only to size the catch-up
- * budget. It counts UTF-16 units (never grapheme clusters) on purpose: the
- * budget must not pay for segmenting the entire backlog on every tick.
- * D3：双列表同源时按 id+role 归并，同一行只计费一次。
- */
-function pendingTextUnits(
-  current: WorkbenchRuntimeSnapshot,
-  next: WorkbenchRuntimeSnapshot,
-): number {
-  let total = 0
-  for (const plan of pendingRowPlans(current, next).values()) {
-    total += plan.nextText.length - plan.previousText.length
-  }
-  return total
 }
 
 /** 一行待揭示文本的计费/决策单元（D3：同 id+role 出现在两个列表时只算一行）。 */
@@ -762,7 +810,7 @@ function collectStreamRowPlans(
 /**
  * 当前快照对下所有待揭示行的归并集合。
  * 注：`current.document` 缺失而 `next.document` 存在属于整发转换（`requiresReplacementFlush`），
- * 不会走到插值；此处与 `interpolateSnapshot` 保持同一条件，避免两处判据分叉。
+ * 不会走到插值；此处与预算决策的应用保持同一条件，避免两处判据分叉。
  */
 function pendingRowPlans(
   current: WorkbenchRuntimeSnapshot,
@@ -783,8 +831,6 @@ function pendingRowPlans(
 export function streamingRowKey(id: string, role: string): string {
   return `${id}\u0000${role}`
 }
-
-const EMPTY_ROW_KEYS: readonly string[] = Object.freeze([])
 
 function replaceKeySet(target: Set<string>, source: readonly string[]): void {
   target.clear()
@@ -908,88 +954,16 @@ function isStreamMessage(message: DisplayMessage): boolean {
   return message.role === 'assistant' || message.role === 'reasoning'
 }
 
-interface SnapshotProjection {
-  readonly snapshot: WorkbenchRuntimeSnapshot
-  readonly pending: boolean
-  readonly advancedMaxUnits: number
-  readonly advancedTotalUnits: number
-  /** #212 判据 A：本拍结束时仍未收敛的行 key（`pending` 为假时为空）。 */
-  readonly pendingKeys: readonly string[]
-}
-
-/** 一行的本拍决策：揭示到的前缀 + 该行分到的预算（供两列表短暂分叉时回落）。 */
-interface RowDecision {
-  readonly value: string
-  readonly perRow: number
-}
-
-function interpolateSnapshot(
-  current: WorkbenchRuntimeSnapshot,
-  target: WorkbenchRuntimeSnapshot,
-  budget: number,
-): SnapshotProjection {
-  const plans = pendingRowPlans(current, target)
-  if (plans.size === 0) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0, pendingKeys: EMPTY_ROW_KEYS }
-
-  // D1：递减预算——逐行决策一次，任何一次发布的**聚合**新增不超过 budget。
-  // budget ≥ 行数 时每行至少分到 1；budget < 行数 时末尾行本拍分到 0（不饿死：下一拍重算）。
-  const decisions = new Map<string, RowDecision>()
-  const pendingKeys: string[] = []
-  let remaining = Math.max(0, Math.floor(budget))
-  let rowsLeft = plans.size
-  let advancedMaxUnits = 0
-  let advancedTotalUnits = 0
-  let pending = false
-  for (const [key, plan] of plans) {
-    const perRow = rowsLeft > 1 ? Math.max(1, Math.floor(remaining / rowsLeft)) : remaining
-    const advanced = advancePrefix(plan.previousText, plan.nextText, perRow)
-    decisions.set(key, { value: advanced.value, perRow })
-    advancedTotalUnits += advanced.consumedUnits
-    if (advanced.consumedUnits > advancedMaxUnits) advancedMaxUnits = advanced.consumedUnits
-    remaining = Math.max(0, remaining - advanced.consumedUnits)
-    rowsLeft -= 1
-    if (advanced.value.length < plan.nextText.length) {
-      pending = true
-      pendingKeys.push(key)
-    }
-  }
-
-  if (!pending) return { snapshot: target, pending: false, advancedMaxUnits: 0, advancedTotalUnits: 0, pendingKeys: EMPTY_ROW_KEYS }
-
-  const legacyMessages = applyRowDecisions(current.messages, target.messages, decisions)
-  const documentMessages = applyRowDecisions(
-    current.document?.messages ?? [],
-    target.document?.messages ?? [],
-    decisions,
-  )
-  const document = target.document
-    ? {
-        ...target.document,
-        messages: documentMessages as readonly WorkbenchMessage[],
-      } as WorkbenchDocument
-    : undefined
-  return {
-    snapshot: {
-      ...target,
-      messages: legacyMessages,
-      ...(document ? { document } : {}),
-    },
-    pending: true,
-    advancedMaxUnits,
-    advancedTotalUnits,
-    pendingKeys,
-  }
-}
-
 /**
  * 把本拍决策写回一个列表：同一 id+role 的行共用同一决策（D3），
  * 因此两列表同源时不会各自推进一次，聚合也不会翻倍。
- * 决策不是该行目标文本的前缀时（两列表短暂分叉）用该行自己的预算回落推进，绝不整发。
+ * 决策对某列表不可用（双列表短暂分叉，见 `resolveListValue`）时该列表本拍保守不动，
+ * 绝不整发、不回退。
  */
 function applyRowDecisions<T extends DisplayMessage>(
   current: readonly T[],
   target: readonly T[],
-  decisions: ReadonlyMap<string, RowDecision>,
+  decisions: ReadonlyMap<string, string>,
 ): readonly T[] {
   if (decisions.size === 0 || current === target) return target
   const currentById = new Map(current.map(message => [message.id, message]))
@@ -1000,11 +974,8 @@ function applyRowDecisions<T extends DisplayMessage>(
     if (decision === undefined) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
-    // 决策可用时两列表得到**同一**前缀；否则回落为本行预算（不整发、不回退）。
-    const value = isDecisionUsable(previousText, decision.value, message.content)
-      ? decision.value
-      : advancePrefix(previousText, message.content, decision.perRow).value
-    if (value === message.content) return message
+    const value = resolveListValue(previousText, decision, message.content)
+    if (value === undefined || value === message.content) return message
     changed = true
     const parts = partialTextParts(message.parts, value)
     return {
@@ -1016,9 +987,17 @@ function applyRowDecisions<T extends DisplayMessage>(
   return changed ? messages : target
 }
 
-/** 决策可用于该行：必须是该行目标文本的前缀，且不得让该行回退。 */
-function isDecisionUsable(previousText: string, value: string, targetText: string): boolean {
-  return value.length >= previousText.length && targetText.startsWith(value)
+/**
+ * 决策对单个列表的可用性。决策是**合并目标文本**（两列表取更长）的揭示前缀：
+ * - 本列表目标包含整个决策 ⇒ 两列表得到同一前缀（常态）；
+ * - 本列表目标短于决策（另一列表暂时领先）⇒ 截到本列表自己的目标——它仍是决策的
+ *   前缀，而已揭示的 canonical 前缀只会更长，不会让任何新文本提前上屏；
+ * - 其余（回退/收缩类异常）⇒ `undefined`，该列表本拍保持不动。
+ */
+function resolveListValue(previousText: string, value: string, targetText: string): string | undefined {
+  if (value.length >= previousText.length && targetText.startsWith(value)) return value
+  if (value.length > targetText.length && targetText.startsWith(previousText)) return targetText
+  return undefined
 }
 
 function partialTextParts(
@@ -1048,42 +1027,4 @@ function partialTextParts(
     if (remaining <= 0) break
   }
   return clipped
-}
-
-function advancePrefix(current: string, target: string, budget: number): PrefixAdvance {
-  if (current === target) return { value: current, consumedUnits: 0 }
-  if (!target.startsWith(current)) return { value: target, consumedUnits: 0 }
-  const remaining = target.slice(current.length)
-  if (!remaining || budget <= 0) return { value: current, consumedUnits: 0 }
-
-  // D2：记账量纲 = UTF-16 单元（与欠账/预算一致），步进单位 = 字素（不切开字素）。
-  // 于是 astral 文本（1 字素 = 2+ 单元）也不会超预算，代价是最多少用一个字素的余量。
-  let codeUnits = 0
-  if (graphemeSegmenter) {
-    for (const item of graphemeSegmenter.segment(remaining)) {
-      const next = codeUnits + item.segment.length
-      if (next > budget) break
-      codeUnits = next
-    }
-  } else {
-    // `for…of` iterates Unicode code points (not UTF-16 halves), which is a
-    // safe fallback for older WebView implementations without Segmenter.
-    for (const item of remaining) {
-      const next = codeUnits + item.length
-      if (next > budget) break
-      codeUnits = next
-    }
-  }
-  return { value: current + remaining.slice(0, codeUnits), consumedUnits: codeUnits }
-}
-
-function createGraphemeSegmenter(): GraphemeSegmenter | undefined {
-  if (typeof Intl === 'undefined') return undefined
-  const Segmenter = (Intl as IntlWithSegmenter).Segmenter
-  if (!Segmenter) return undefined
-  try {
-    return new Segmenter(undefined, { granularity: 'grapheme' })
-  } catch {
-    return undefined
-  }
 }

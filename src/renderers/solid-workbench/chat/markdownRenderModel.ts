@@ -4,6 +4,7 @@ import {
   noteMarkdownParseGrafted,
   noteMarkdownParseSkipped,
 } from './markdownParseCounters.ts'
+import { loadMarkdownCompute } from '../../../infrastructure/compute/markdownCompute.ts'
 
 export type MarkdownRenderNode = MarkdownRoot | MarkdownElement | MarkdownText
 
@@ -51,6 +52,17 @@ const settledModels = new Map<string, MarkdownRoot>()
 /** 被取代而跳过解析时返回的空模型：调用方必然丢弃它，因此内容不参与渲染。 */
 const SKIPPED_MARKDOWN_ROOT: MarkdownRoot = { type: 'root', children: [] }
 
+/**
+ * 未配对代理项 → U+FFFD。计算核边界是 UTF-8（WebIDL DOMString 转换语义）：孤立代理
+ * 过界即被替换为 U+FFFD，而 graft 在 JS 串上运算会原样保留——两侧必须看到同一份文本，
+ * 因此在渲染模型入口**先归一再**参与缓存键、graft 与解析。
+ */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u
+
+function normalizeUnpairedSurrogates(markdown: string): string {
+  return UNPAIRED_SURROGATE.test(markdown) ? markdown.replace(UNPAIRED_SURROGATE, '\uFFFD') : markdown
+}
+
 export interface MarkdownRenderModelOptions {
   /**
    * P57 S3-A11：`{ cache: false }` 绕过 LRU（流式增长尾块的中间态文本永不复用，
@@ -74,9 +86,11 @@ export interface MarkdownRenderModelOptions {
 
 /** 取一次文本的渲染模型（命中 LRU 时复用 pending promise，不重解析）。 */
 export function getMarkdownRenderModel(
-  markdown: string,
+  rawMarkdown: string,
   options: MarkdownRenderModelOptions = {},
 ): Promise<MarkdownRoot> {
+  // 边界归一（见 normalizeUnpairedSurrogates）：缓存键、graft 与解析看到同一份文本。
+  const markdown = normalizeUnpairedSurrogates(rawMarkdown)
   const cached = renderModelCache.get(markdown)
   if (cached) {
     renderModelCache.delete(markdown)
@@ -145,7 +159,7 @@ export function clearMarkdownRenderModelCache(): void {
  * （P57 S3-A11），不得因同文本曾在别处解析过就复用。
  */
 export function peekMarkdownRenderModel(markdown: string): MarkdownRoot | undefined {
-  return settledModels.get(markdown)
+  return settledModels.get(normalizeUnpairedSurrogates(markdown))
 }
 
 /**
@@ -196,7 +210,7 @@ const LINE_DELTA = /^(\n{1,2})([^\n]+)$/
 const PLAIN_LINE = /^[A-Za-z0-9\u0080-\u{10FFFF}][A-Za-z0-9\u0080-\u{10FFFF} ]*$/u
 /** 行首列表标记：子弹符或有序序号 + 空格。 */
 const LIST_MARKER = /^(?:([-*+])|(\d+)([.)])) /
-/** 模型里的换行分隔文本节点（remark-rehype 的排版产物）。 */
+/** 模型里的换行分隔文本节点（解析器的排版产物，与 hast 基线同构）。 */
 const TEXT_NEWLINE: MarkdownText = { type: 'text', value: '\n' }
 
 /** 允许作为 graft 落点的祖先元素：追加纯文本不会改变这些容器的语义（表格单元格同理）。 */
@@ -302,7 +316,12 @@ function graftMarkdownModel(baseText: string, baseModel: MarkdownRoot, text: str
   // CommonMark 会剥掉块内容的末尾空白（`The ` 解析出来是 `The`），拼接时同样剥掉，
   // 否则与整段重解析差一个空格——差分测试逮到过这一条。纯空白差量因此不产生任何内容。
   const appended = core.replace(/\s+$/u, '')
-  if (appended.length === 0) return baseModel
+  if (appended.length === 0) {
+    // 但「裸列表标记 + 空白」例外：计算核（comrak）里 `1.` 是段落、`1. ` 才是列表——
+    // 空白激活了新块，基座模型不可复用，回退整段重解析（差分测试逮到过这一条）。
+    if (/(?:^|\n)[ \t]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]*$/.test(effectiveBase)) return null
+    return baseModel
+  }
   if (trailingNewlines > 0) return null // 已经换行：追加的文字属于新的一行，不是延长旧叶子
   if (!effectiveBase.endsWith(leaf.value)) return null
   if (EXTENDABLE_PUNCTUATION.test(leaf.value.slice(-LEAF_GUARD_WINDOW))) return null
@@ -408,9 +427,9 @@ interface GraftSpine {
 /**
  * 取「最右内容叶子」的脊线：每层从后往前找第一个**非纯空白文本**的子节点。
  *
- * 为什么要跳过纯空白文本节点：remark-rehype 会在列表项之间与列表结尾补 `"\n"` 文本节点，
- * 它们是结构分隔符而不是内容落点——追加进去会把文字塞进分隔符里（差分测试逮到过这一条）。
- * 最右内容叶子不是文本节点（如以 `<hr>`/`<img>` 收尾）时返回 null。
+ * 为什么要跳过纯空白文本节点：解析器（hast 基线形状，计算核逐字段同构）会在列表项之间
+ * 与列表结尾补 `"\n"` 文本节点，它们是结构分隔符而不是内容落点——追加进去会把文字塞进
+ * 分隔符里（差分测试逮到过这一条）。最右内容叶子不是文本节点（如以 `<hr>`/`<img>` 收尾）时返回 null。
  */
 function rightmostSpine(model: MarkdownRoot): GraftSpine | null {
   const chain: GraftChainStep[] = []
@@ -478,10 +497,10 @@ async function buildMarkdownRenderModel(
 ): Promise<MarkdownRoot> {
   // #148：已被取代的请求，其结果必被调用方丢弃（`createResource` 只在 `pr === p` 时提交），
   // 这里让出一次微任务再复查判据——一 tick 内多次发布（token 级切片、终态重发、resume）时，
-  // 中间态就在这一步被挡下，既不加载模块也不碰解析器。
+  // 中间态就在这一步被挡下，既不装载计算核也不碰解析器。
   //
-  // 放在动态 import **之前**：判据只读调用方的当前文本，与模块加载无因果；而解析调用链的开销
-  // 在测试环境里大头是模块加载路径（百毫秒量级）而非解析本身（0.2ms 量级），放在 import 之后
+  // 放在计算核装载**之前**：判据只读调用方的当前文本，与装载无因果；而解析调用链的开销
+  // 在测试环境里大头是模块加载路径（百毫秒量级）而非解析本身（0.2ms 量级），放在装载之后
   // 会让跳过的请求仍然付这笔钱。
   if (isCurrent !== undefined) {
     await Promise.resolve()
@@ -491,29 +510,16 @@ async function buildMarkdownRenderModel(
     }
   }
 
-  const [
-    { unified },
-    { default: remarkParse },
-    { default: remarkGfm },
-    { default: remarkRehype },
-  ] = await Promise.all([
-    import('unified'),
-    import('remark-parse'),
-    import('remark-gfm'),
-    import('remark-rehype'),
-  ])
+  // #220 WP4：解析引擎在 Rust 计算核（comrak，`pylon-markdown`）。模型形状与
+  // remark-rehype 的 hast 同构（WP4 parity 门禁逐字段钉死），`normalizeRoot` 保留为
+  // 过界值的形状防线（不信边界值），不再承担语义修正。
+  const { parseMarkdown } = await loadMarkdownCompute()
 
-  const processor = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .use(remarkRehype)
-
-  // 只读成本读数（#148）：只算解析器内耗时，不含模块加载——它是「长单块是否值得进一步优化」的判据。
+  // 只读成本读数（#148）：只算解析器内耗时，不含模块装载——它是「长单块是否值得进一步优化」的判据。
   const startedAt = performance.now()
-  const mdast = processor.parse(markdown)
-  const hast = await processor.run(mdast)
+  const model = normalizeRoot(parseMarkdown(markdown))
   noteMarkdownParseDone({ durationMs: performance.now() - startedAt, textLength: markdown.length })
-  return normalizeRoot(hast)
+  return model
 }
 
 function normalizeRoot(value: unknown): MarkdownRoot {
@@ -538,9 +544,27 @@ function normalizeNode(value: unknown): MarkdownRenderNode[] {
   return [{
     type: 'element',
     tagName: value.tagName,
-    properties: isRecord(value.properties) ? { ...value.properties } : {},
+    properties: normalizeProperties(value.properties),
     children: normalizeChildren(value.children),
   }]
+}
+
+/**
+ * 过界属性值的形状归一。serde_wasm_bindgen 把 Rust 侧的 `BTreeMap` 序列化成 JS
+ * `Map`（serde_json 路径则是普通对象——parity 快照即此形状），这里统一收敛为
+ * 普通对象，嵌套数组元素递归（`PropValue::List` → Array 已由 glue 保证）。
+ */
+function normalizeProperties(value: unknown): Record<string, unknown> {
+  if (value instanceof Map) {
+    return Object.fromEntries([...value].map(([key, property]) => [String(key), normalizePropertyValue(property)]))
+  }
+  if (isRecord(value)) return { ...value }
+  return {}
+}
+
+function normalizePropertyValue(property: unknown): unknown {
+  if (Array.isArray(property)) return property.map(normalizePropertyValue)
+  return property
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

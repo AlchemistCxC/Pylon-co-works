@@ -67,7 +67,9 @@ const PROJECTOR_EVENT_TYPES = [...WORKBENCH_SEMANTIC_EVENT_TYPES, 'event.unknown
 const MESSAGE_ROLES = ['user', 'assistant', 'system', 'tool', 'reasoning', 'developer', 'unknown']
 const PROVENANCE_ORIGINS = ['local-observed', 'optimistic-local', 'recovery-import', 'migration', 'plugin']
 const TEXT_PART_KINDS = ['text', 'markdown', 'code', 'ansi', 'reasoning', 'thinking']
-const FRAME_PAIRS = 17
+/** v2：在 v1 的 17 槽后追加 provenance 富字段 JSON（activity/extension 节点携带完整 provenance）。 */
+const FRAME_PAIRS = 18
+const PROVENANCE_EXTRA_KEYS = ['provider', 'importId', 'sourceOrdinal', 'orderConfidence', 'collectionComplete', 'synthetic'] as const
 
 function encodeFrame(envelopes: readonly WorkbenchEventEnvelope[]): Uint8Array {
   const encoder = new TextEncoder()
@@ -114,6 +116,13 @@ function encodeFrame(envelopes: readonly WorkbenchEventEnvelope[]): Uint8Array {
     }
     const extraJson = Object.keys(extra).length > 0 ? JSON.stringify(extra) : undefined
     const reason = typeof event.reason === 'string' ? (event.reason as string) : undefined
+    // v2 第 18 槽：provenance 可选富字段（origin/trust 走 flags 低 4 位）。
+    const provenanceExtras: Record<string, unknown> = {}
+    const provenance = envelope.provenance as unknown as Record<string, unknown>
+    for (const key of PROVENANCE_EXTRA_KEYS) {
+      if (key in provenance) provenanceExtras[key] = provenance[key]
+    }
+    const provenanceJson = Object.keys(provenanceExtras).length > 0 ? JSON.stringify(provenanceExtras) : undefined
 
     const identity = envelope.identity
     const pairs: (string | undefined)[] = [
@@ -134,6 +143,7 @@ function encodeFrame(envelopes: readonly WorkbenchEventEnvelope[]): Uint8Array {
       reason,
       partsText,
       extraJson,
+      provenanceJson,
     ]
     return { envelope, typeIndex, flags, pairs, slots: undefined as unknown as [number, number][] }
   })
@@ -149,7 +159,7 @@ function encodeFrame(envelopes: readonly WorkbenchEventEnvelope[]): Uint8Array {
   const frame = new Uint8Array(14 + pool.length + eventSectionBytes)
   const view = new DataView(frame.buffer)
   frame.set([0x50, 0x59, 0x50, 0x42]) // "PYPB"
-  view.setUint16(4, 1, true)
+  view.setUint16(4, 2, true)
   view.setUint32(6, encoded.length, true)
   view.setUint32(10, pool.length, true)
   frame.set(Uint8Array.from(pool), 14)
@@ -521,13 +531,121 @@ describe('折叠主干 parity（appendBatch → document）', () => {
     )
   })
 
-  it('fail-closed：未移植事件类型整页拒绝，document 保持不变', () => {
-    const projector = new compute.PylonProjector(SESSION_ID)
-    const usable = [envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'q' }] })]
-    projector.appendBatch(encodeFrame(usable))
-    const before = fromBoundary(projector.document())
-    const usage = envelope(2, { type: 'usage.updated', usage: { inputTokens: 3 } })
-    expect(() => projector.appendBatch(encodeFrame([usage]))).toThrow(/未迁移/)
-    expect(fromBoundary(projector.document())).toEqual(before)
+  it('usage/plan/goal（原 fail-closed 事件）两侧逐字段一致', () => {
+    // WP2 补全前的行为是整页拒绝（/未迁移/）；现在这些事件与 TS 基线同判。
+    const envelopes = [
+      envelope(1, { type: 'usage.updated', usage: { inputTokens: 12, outputTokens: 8, contextUsed: 25, contextLimit: 100, calls: -1, futureCounter: 7 } }),
+      envelope(2, { type: 'budget.warning', used: 900, limit: 1000, threshold: 'warning', percent: 90 }),
+      envelope(3, { type: 'plan.replaced', entries: [
+        { id: 'a', content: '第一步', status: 'completed' },
+        { id: 'b', content: '第二步', status: 'in_progress', activeForm: '正在第二步' },
+      ] }),
+      envelope(4, { type: 'plan.entry-updated', entry: { id: 'b', content: '第二步', status: 'blocked', blockedReason: '等待审批' } }),
+      envelope(5, { type: 'goal.updated', goal: { goalId: 'g-1', objective: '完成渲染引擎', status: 'active', tokenBudget: 5000, tokensUsed: 120 } }),
+      envelope(6, { type: 'goal.cleared', goalId: 'g-1' }),
+    ]
+    expect(projectBoth(envelopes)).toEqual(
+      projectWorkbench(envelopes, { initialDocument: createWorkbenchDocument(SESSION_ID) }).document,
+    )
+  })
+
+  it('session commands/options/usage 字段与 TS sessionSurface 归一化一致', () => {
+    const envelopes = [
+      envelope(1, {
+        type: 'session.commands-updated',
+        commands: [{ id: 'compact', name: '/compact', description: '压缩上下文', inputHint: '[focus]', availability: true, capability: 'compact', future: 'kept' }],
+      }),
+      envelope(2, {
+        type: 'session.config-updated',
+        options: [{ id: 'temperature', label: 'Temperature', value: { providerScale: 'adaptive' }, valueType: 'provider.custom', editable: true, schema: { type: 'object' }, version: 3, future: 'kept' }],
+      }),
+      // 空列表不宣告 → 不清空既有候选面。
+      envelope(3, { type: 'session.config-updated', options: [] }),
+      envelope(4, { type: 'session.status-updated', status: 'running', usage: { contextUsed: 25, contextLimit: 100, currency: 'USD', futureCounter: 9, calls: -1 } }),
+      envelope(5, { type: 'session.completed', stopReason: 'end_turn', usage: { contextUsed: 60 } }),
+    ]
+    expect(projectBoth(envelopes)).toEqual(
+      projectWorkbench(envelopes, { initialDocument: createWorkbenchDocument(SESSION_ID) }).document,
+    )
+  })
+
+  it('lifecycle/assist 事件与 TS 状态机一致', () => {
+    const envelopes = [
+      envelope(1, { type: 'lifecycle.retrying', attempt: 1, maxAttempts: 3, delayMs: 1000, error: { technicalMessage: 'boom', recoverability: 'retry', retryAfterMs: 2000, classification: 'network' } }),
+      envelope(2, { type: 'lifecycle.compact-started', strategy: 'rolling', tokensBefore: 1000 }),
+      envelope(3, { type: 'lifecycle.compact-completed', tokensBefore: 1000, tokensAfter: 300 }),
+      envelope(4, { type: 'lifecycle.rewind-preview', files: [{ path: 'a.ts' }], summary: '三处改动' }),
+      envelope(5, { type: 'lifecycle.rewind-completed' }),
+      envelope(6, { type: 'lifecycle.suspended', reason: '等待输入' }),
+      envelope(7, { type: 'lifecycle.recovered', source: 'agent-import', importedEvents: 42 }),
+      envelope(8, { type: 'assist.prediction', placeholder: '继续修复', actions: [{ id: 'accept', label: '接受' }] }),
+      envelope(9, { type: 'assist.prediction', actions: [] }),
+      envelope(10, { type: 'assist.file-suggestions', files: ['src/a.ts', 'src/b.ts'] }),
+      envelope(11, { type: 'assist.queued-command', command: '/compact' }),
+      envelope(12, { type: 'assist.queued-command', command: '' }),
+    ]
+    expect(projectBoth(envelopes)).toEqual(
+      projectWorkbench(envelopes, { initialDocument: createWorkbenchDocument(SESSION_ID) }).document,
+    )
+  })
+
+  it('activity C09/C10 家族（rich 字段/终态幂等/畸形 parts/合成 provenance）与 TS 一致', () => {
+    const envelopes = [
+      envelope(1, {
+        type: 'activity.started', activityId: 'sub-1',
+        activity: {
+          kind: 'subagent', semanticKind: 'activity.subagent', title: 'Explore repo',
+          parentId: 'tool-1', depth: 2, role: 'explorer', model: 'ox-alpha-free', provider: 'opencode-go',
+          goal: 'find all call sites', capabilities: ['fs', 'search'],
+        },
+      }, { taskId: 'sub-1' }),
+      envelope(2, {
+        type: 'activity.progress', activityId: 'sub-1',
+        patch: { progress: { completed: 3, total: 5 }, usage: { inputTokens: 1200, outputTokens: 340 }, files: ['src/a.ts'] },
+      }, { taskId: 'sub-1' }),
+      envelope(3, {
+        type: 'activity.progress', activityId: 'sub-1',
+        patch: { metrics: { toolCount: 4, durationMs: 900 }, execution: { mode: 'remote', background: true }, tools: [{ id: 'tool-4' }], tasks: [{ id: 'task-2' }] },
+      }, { taskId: 'sub-1' }),
+      envelope(4, {
+        type: 'activity.completed', activityId: 'sub-1',
+        result: { completedAt: '2026-08-23T06:00:03.000Z', output: [{ kind: 'text', text: 'done' }] },
+      }, { taskId: 'sub-1' }),
+      // 终态后迟到 progress：只补缺不回退。
+      envelope(5, { type: 'activity.progress', activityId: 'sub-1', patch: { progress: { completed: 9, total: 5 } } }, { taskId: 'sub-1' }),
+      // 畸形 parts → bounded unknown + warning 诊断。
+      envelope(6, {
+        type: 'activity.completed', activityId: 'sub-malformed',
+        activity: { kind: 'subagent' },
+        result: { parts: [{ kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }], exitCode: 0 }, { kind: 'terminal', streams: [{ stream: 'stdin', text: 'unsafe' }] }] },
+      }, { taskId: 'sub-2' }),
+      // 孤儿 → 父节点后到解除。
+      envelope(7, { type: 'activity.started', activityId: 'sub-orphan', activity: { kind: 'delegation', parentId: 'team-9', title: 'delegate' } }, { taskId: 'sub-3' }),
+      envelope(8, { type: 'activity.started', activityId: 'team-9', activity: { kind: 'team', title: 'Ops' } }),
+      // 词表外 status 降级 unknown。
+      envelope(9, { type: 'activity.progress', activityId: 'sub-teleport', patch: { kind: 'subagent', status: 'teleporting' } }),
+      // C10：killed/timeout 终止证据 + 合成 provenance。
+      envelope(10, { type: 'activity.started', activityId: 'bg-1', activity: { kind: 'background-task', title: 'nightly index' } }),
+      envelope(11, {
+        type: 'activity.failed', activityId: 'bg-1', reason: 'connection lost',
+      }, {}, { origin: 'plugin', trust: 'unverified', orderConfidence: 'observed', synthetic: { reason: 'terminal response observed' } }),
+    ]
+    expect(projectBoth(envelopes)).toEqual(
+      projectWorkbench(envelopes, { initialDocument: createWorkbenchDocument(SESSION_ID) }).document,
+    )
+  })
+
+  it('extension.event 与 TS durable slice 一致（payload/fallback/source/provenance 全携带）', () => {
+    const envelopes = [
+      envelope(1, {
+        type: 'extension.event', kind: 'plugin.demo/result',
+        payload: { status: 'completed', summary: 'done' },
+        fallback: [{ kind: 'unknown', originalType: 'plugin.demo/result', summary: 'unknown plugin event', raw: { status: 'completed' }, truncated: false }],
+      }),
+      envelope(2, { type: 'extension.event', kind: 'a.b', payload: [1, 2, 3], fallback: [] }),
+    ]
+    expect(projectBoth(envelopes)).toEqual(
+      projectWorkbench(envelopes, { initialDocument: createWorkbenchDocument(SESSION_ID) }).document,
+    )
   })
 })

@@ -71,12 +71,57 @@ function compare(kind, rustCases, tsCases, pick) {
 }
 
 compare('markdown', rust.markdown, ts.markdown, item => item.model)
-// 高亮两侧形状不同名但同构：TS tokens = (className join, text) 扁平序列；
-// Rust lines → 扁平化成 (scopeStack join ' ', text)。语法体系不同（github css class
-// vs TextMate scope 栈），逐 token 不等是预期，报告用于差异清单举证。
+
+// 高亮：两侧现在都是 (classes 链, text) 扁平 token 序列。TS 侧 flattenTokens 产
+// `{scope: 类名链 join ' ', text}`；Rust 侧行数组按同一形状扁平化。
+//
+// 差异：starry 的 hast 构建会把**换行符**作为 root 下的无类文本节点追加，相邻的
+// 无类文本会跨行合并成一个 text 节点；Rust 的行数组形状无法表达跨行合并。因此
+// Rust 扁平化时按 starry 的 appendText 语义在行间插入 '\n'：
+//   - 前行末 token 无类 且 次行首 token 无类 → 合并（text 中补 '\n'）；
+//   - 仅一侧无类 → '\n' 并入无类一侧；
+//   - 两侧皆有类 → 插入独立的无类 '\n' token。
+// 末行以换行结尾时同样补一个（或并入）无类 '\n' token。此规则与 vitest 门禁
+// （markdownComputeParity.test.ts 的 flattenRustLines）保持一致，两边改要一起改。
 function flattenRustLines(item) {
   if (!item.lines) return null
-  return item.lines.flatMap(line => line.spans).map(span => ({ scope: span.scopeStack.join(' '), text: span.text }))
+  const toToken = span => ({
+    scope: (span.classes ?? []).join(' '),
+    text: span.text,
+  })
+  const rows = item.lines.map(line => line.spans.map(toToken))
+  const out = []
+  for (const row of rows) {
+    if (out.length === 0) {
+      out.push(...row)
+      continue
+    }
+    const last = out[out.length - 1]
+    const first = row[0]
+    const lastPlain = last && last.scope === ''
+    const firstPlain = first && first.scope === ''
+    if (lastPlain && firstPlain) {
+      last.text += '\n' + first.text
+      out.push(...row.slice(1))
+    } else if (lastPlain) {
+      last.text += '\n'
+      out.push(...row)
+    } else if (firstPlain) {
+      out.push({ scope: '', text: '\n' + first.text }, ...row.slice(1))
+    } else {
+      out.push({ scope: '', text: '\n' }, ...row)
+    }
+  }
+  // 块以换行结尾：补上 starry 追加的最后一个换行文本节点（并入无类尾 token）。
+  if (item.endsWithNewline) {
+    const last = out[out.length - 1]
+    if (last && last.scope === '') {
+      last.text += '\n'
+    } else {
+      out.push({ scope: '', text: '\n' })
+    }
+  }
+  return out
 }
 compare('highlight', rust.highlight, ts.highlight, item => item.lines ? flattenRustLines(item) : item.tokens)
 

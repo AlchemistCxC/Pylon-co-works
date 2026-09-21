@@ -20,8 +20,14 @@ serde-wasm-bindgen = "0.6"
 # syntect 适配器——高亮由下面这份 syntect(default-fancy) 负责，正则后端走纯 Rust
 # 的 fancy-regex，wasm 目标零 C 依赖。
 comrak = { version = "0.55.0", default-features = false }
-# 同理：syntect 禁默认特性（default-onig），切 fancy-regex 后端。
-syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+# 同理：syntect 禁默认特性，切 fancy-regex 后端。
+# 特性逐项列出而非用 default-fancy：default-fancy 连带 default-syntaxes /
+# default-themes（把 syntect 内置的整套 Sublime 语法/主题 dump 嵌进二进制），
+# 而本 crate 用的是 vendored 的 starry-night 同款 tmLanguage（见 highlight.rs
+# GRAMMAR_ASSETS），主题层在 src/theme.rs 自己实现——两份默认资产都不要，否则
+# wasm 平白多出上百 KB。parsing 已内含 dump-load/dump-create（bincode/flate2）。
+# yaml-load 供 SyntaxDefinition::load_from_str 解析内存里的 sublime-syntax。
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy", "yaml-load"] }
 
 # wasm-opt 的特性开关必须与 rustc 实际发射的指令对齐（WP1 的教训，见
 # pylon-compute/Cargo.toml 同名段落）：rustc 1.82 起为 wasm32-unknown-unknown 默认

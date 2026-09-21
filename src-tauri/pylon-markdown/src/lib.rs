@@ -13,8 +13,12 @@
 //!   `MarkdownRenderNode` 逐字段同形状（serde JSON 即 parity 比对面）。
 //! - [`parser`]：comrak（GFM 扩展）→ 渲染模型。对齐目标是 remark-rehype 的
 //!   hast 投影形状，不是 comrak 的 HTML 输出。
+//! - [`tm_language`]：tmLanguage JSON → syntect 可加载的 sublime-syntax 转换器
+//!   （vendored 语法 = TS 基线 starry-night 同款，D3/D5 收口的基础设施）。
+//! - [`theme`]：vscode-textmate 主题匹配算法移植 + starry github 类名表
+//!   （D2 收口：scope 栈 → `pl-*` 类名）。
 //! - [`highlight`]：syntect（`fancy-regex` 后端，无 onig C 依赖）整块高亮，
-//!   产 scope 栈 + 主题样式的行数组 span。
+//!   产 github `pl-*` 类名链的行数组 span。
 //!
 //! 迁移期纪律：TS 基线与本 crate 只允许作为 parity 差分并存（差异清单见
 //! `parity/` 与 vitest `markdownComputeParity.test.ts`），parity 绿后 TS 退役。
@@ -22,4 +26,6 @@
 pub mod highlight;
 pub mod model;
 pub mod parser;
+pub mod theme;
+pub mod tm_language;
 pub mod wasm_exit;

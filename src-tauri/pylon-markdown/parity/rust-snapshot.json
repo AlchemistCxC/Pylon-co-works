@@ -2,2833 +2,1068 @@
   "generator": "pylon-markdown 0.2.4-Rev (parity_snapshot)",
   "highlight": [
     {
+      "endsWithNewline": true,
       "id": "rust",
       "language": "rust",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.function.rust",
-                "storage.type.function.rust"
+              "classes": [
+                "pl-k"
               ],
               "text": "fn"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.function.rust"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "entity.name.function.rust"
+              "classes": [
+                "pl-en"
               ],
               "text": "main"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.function.parameters.rust",
-                "punctuation.section.parameters.begin.rust"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.function.rust",
-                "meta.function.parameters.rust",
-                "punctuation.section.parameters.end.rust"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "punctuation.section.block.begin.rust"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "() {"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
+              "classes": [],
               "text": "    "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "storage.type.rust"
+              "classes": [
+                "pl-k"
               ],
               "text": "let"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
-              "text": " x"
+              "classes": [],
+              "text": " "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "punctuation.separator.rust"
+              "classes": [
+                "pl-smi"
+              ],
+              "text": "x"
+            },
+            {
+              "classes": [
+                "pl-k"
               ],
               "text": ":"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "storage.type.rust"
+              "classes": [
+                "pl-k"
               ],
               "text": "u32"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "keyword.operator.rust"
+              "classes": [
+                "pl-k"
               ],
               "text": "="
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "constant.numeric.integer.decimal.rust"
+              "classes": [
+                "pl-c1"
               ],
               "text": "1"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "punctuation.terminator.rust"
-              ],
-              "text": ";"
+              "classes": [],
+              "text": "; "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
+              "classes": [
+                "pl-c"
               ],
-              "text": " "
-            },
-            {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "comment.line.double-slash.rust",
-                "punctuation.definition.comment.rust"
-              ],
-              "text": "//"
-            },
-            {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
-              ],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "comment.line.double-slash.rust"
-              ],
-              "text": " answer\n"
+              "text": "// answer"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
+              "classes": [],
               "text": "    "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "support.macro.rust"
+              "classes": [
+                "pl-en"
               ],
               "text": "println!"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "punctuation.section.group.begin.rust"
-              ],
+              "classes": [],
               "text": "("
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "string.quoted.double.rust",
-                "punctuation.definition.string.begin.rust"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "string.quoted.double.rust",
-                "constant.other.placeholder.rust"
+              "classes": [
+                "pl-s"
               ],
               "text": "{}"
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "string.quoted.double.rust",
-                "punctuation.definition.string.end.rust"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "punctuation.separator.rust"
-              ],
-              "text": ","
+              "classes": [],
+              "text": ", "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust"
+              "classes": [
+                "pl-smi"
               ],
-              "text": " x"
+              "text": "x"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "meta.group.rust",
-                "punctuation.section.group.end.rust"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "punctuation.terminator.rust"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": ");"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust",
-                "meta.function.rust",
-                "meta.block.rust",
-                "punctuation.section.block.end.rust"
-              ],
+              "classes": [],
               "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.rust"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "ts",
       "language": "ts",
-      "lines": null
+      "lines": [
+        {
+          "spans": [
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": "const"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-c1"
+              ],
+              "text": "answer"
+            },
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": ":"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-c1"
+              ],
+              "text": "number"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": "="
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-c1"
+              ],
+              "text": "42"
+            },
+            {
+              "classes": [],
+              "text": ";"
+            }
+          ]
+        },
+        {
+          "spans": [
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": "function"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-en"
+              ],
+              "text": "f"
+            },
+            {
+              "classes": [],
+              "text": "<"
+            },
+            {
+              "classes": [
+                "pl-en"
+              ],
+              "text": "T"
+            },
+            {
+              "classes": [],
+              "text": ">("
+            },
+            {
+              "classes": [
+                "pl-v"
+              ],
+              "text": "a"
+            },
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": ":"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-en"
+              ],
+              "text": "T"
+            },
+            {
+              "classes": [],
+              "text": ")"
+            },
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": ":"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-en"
+              ],
+              "text": "T"
+            },
+            {
+              "classes": [],
+              "text": " { "
+            },
+            {
+              "classes": [
+                "pl-k"
+              ],
+              "text": "return"
+            },
+            {
+              "classes": [],
+              "text": " "
+            },
+            {
+              "classes": [
+                "pl-smi"
+              ],
+              "text": "a"
+            },
+            {
+              "classes": [],
+              "text": "; }"
+            }
+          ]
+        }
+      ]
     },
     {
+      "endsWithNewline": true,
       "id": "js",
       "language": "js",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "storage.type.function.js"
-              ],
-              "text": "function"
+              "classes": [],
+              "text": "function f() { "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "entity.name.function.js"
-              ],
-              "text": "f"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "punctuation.section.group.begin.js"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "punctuation.section.group.end.js"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "meta.function.declaration.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "punctuation.section.block.js"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "keyword.control.flow.js"
+              "classes": [
+                "pl-k"
               ],
               "text": "return"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "constant.numeric.js"
+              "classes": [
+                "pl-c1"
               ],
               "text": "1"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "punctuation.terminator.statement.js"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "punctuation.section.block.js"
-              ],
-              "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "; }"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "storage.type.js"
+              "classes": [
+                "pl-k"
               ],
               "text": "const"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "variable.other.readwrite.js",
-                "entity.name.function.js"
+              "classes": [
+                "pl-c1"
               ],
               "text": "g"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "keyword.operator.assignment.js"
+              "classes": [
+                "pl-k"
               ],
               "text": "="
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js"
-              ],
-              "text": " "
+              "classes": [],
+              "text": " (x) "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "punctuation.section.group.begin.js"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "variable.parameter.function.js"
-              ],
-              "text": "x"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "punctuation.section.group.end.js"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "meta.function.declaration.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.function.declaration.js",
-                "storage.type.function.arrow.js"
+              "classes": [
+                "pl-k"
               ],
               "text": "=>"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js"
-              ],
-              "text": " "
+              "classes": [],
+              "text": " x "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "variable.other.readwrite.js"
-              ],
-              "text": "x"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "keyword.operator.arithmetic.js"
+              "classes": [
+                "pl-k"
               ],
               "text": "*"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "meta.block.js",
-                "constant.numeric.js"
+              "classes": [
+                "pl-c1"
               ],
               "text": "2"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js",
-                "punctuation.terminator.statement.js"
-              ],
+              "classes": [],
               "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.js"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "python",
       "language": "python",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.python",
-                "meta.function.python",
-                "storage.type.function.python"
+              "classes": [
+                "pl-k"
               ],
               "text": "def"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python",
-                "meta.function.python"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.python",
-                "meta.function.python",
-                "entity.name.function.python",
-                "meta.generic-name.python"
+              "classes": [
+                "pl-en"
               ],
               "text": "main"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python",
-                "meta.function.parameters.python",
-                "punctuation.section.parameters.begin.python"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python",
-                "meta.function.parameters.python",
-                "punctuation.section.parameters.end.python"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python",
-                "meta.function.python",
-                "punctuation.section.function.begin.python"
-              ],
-              "text": ":"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "():"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python"
-              ],
+              "classes": [],
               "text": "    "
             },
             {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
+              "classes": [
+                "pl-c"
               ],
-              "scopeStack": [
-                "source.python",
-                "comment.line.number-sign.python",
-                "punctuation.definition.comment.python"
-              ],
-              "text": "#"
-            },
-            {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
-              ],
-              "scopeStack": [
-                "source.python",
-                "comment.line.number-sign.python"
-              ],
-              "text": " comment\n"
+              "text": "# comment"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python"
-              ],
+              "classes": [],
               "text": "    "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.python",
-                "keyword.control.flow.return.python"
+              "classes": [
+                "pl-k"
               ],
               "text": "return"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python",
-                "constant.numeric.integer.decimal.python"
+              "classes": [
+                "pl-c1"
               ],
               "text": "1"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.python"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "go",
       "language": "go",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.go",
-                "meta.function.declaration.go",
-                "storage.type.go"
+              "classes": [
+                "pl-k"
               ],
               "text": "func"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.declaration.go"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.go",
-                "meta.function.declaration.go",
-                "entity.name.function.go"
+              "classes": [
+                "pl-en"
               ],
               "text": "main"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.parameters.go",
-                "meta.group.go",
-                "punctuation.definition.group.begin.go"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.parameters.go",
-                "meta.group.go",
-                "punctuation.definition.group.end.go"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "punctuation.definition.block.begin.go"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "() {"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
+              "classes": [],
               "text": "    "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "meta.initialization.short.go",
-                "variable.other.go"
+              "classes": [
+                "pl-smi"
               ],
               "text": "x"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "meta.initialization.short.go"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "meta.initialization.short.go",
-                "keyword.operator.initialize.go"
+              "classes": [
+                "pl-k"
               ],
               "text": ":="
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "constant.numeric.integer.decimal.go"
+              "classes": [
+                "pl-c1"
               ],
               "text": "1"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
-              "text": "    _ "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "keyword.operator.assignment.go"
-              ],
-              "text": "="
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go"
-              ],
-              "text": " x\n"
+              "classes": [],
+              "text": "    _ = x"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go",
-                "meta.function.go",
-                "meta.block.go",
-                "punctuation.definition.block.end.go"
-              ],
+              "classes": [],
               "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.go"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "c",
       "language": "c",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c",
-                "keyword.control.import.include.c"
-              ],
-              "text": "#include"
+              "classes": [],
+              "text": "#"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c"
+              "classes": [
+                "pl-k"
               ],
+              "text": "include"
+            },
+            {
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c",
-                "string.quoted.other.lt-gt.include.c",
-                "punctuation.definition.string.begin.c"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "<"
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c",
-                "string.quoted.other.lt-gt.include.c"
+              "classes": [
+                "pl-s"
               ],
               "text": "stdio.h"
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c",
-                "string.quoted.other.lt-gt.include.c",
-                "punctuation.definition.string.end.c"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": ">"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.preprocessor.include.c"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c",
-                "storage.type.c"
+              "classes": [
+                "pl-k"
               ],
               "text": "int"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "entity.name.function.c"
+              "classes": [
+                "pl-en"
               ],
               "text": "main"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.parameters.c",
-                "meta.group.c",
-                "punctuation.section.group.begin.c"
-              ],
+              "classes": [],
               "text": "("
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c",
-                "meta.function.parameters.c",
-                "meta.group.c",
-                "storage.type.c"
+              "classes": [
+                "pl-k"
               ],
               "text": "void"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.parameters.c",
-                "meta.group.c",
-                "punctuation.section.group.end.c"
-              ],
-              "text": ")"
+              "classes": [],
+              "text": ") { "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c",
-                "punctuation.section.block.begin.c"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c",
-                "keyword.control.c"
+              "classes": [
+                "pl-k"
               ],
               "text": "return"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c",
-                "constant.numeric.c"
+              "classes": [
+                "pl-c1"
               ],
               "text": "0"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c",
-                "punctuation.terminator.c"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c",
-                "meta.function.c",
-                "meta.block.c",
-                "punctuation.section.block.end.c"
-              ],
-              "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "; }"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "cpp",
       "language": "cpp",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++",
-                "keyword.control.import.include.c++"
-              ],
-              "text": "#include"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++",
-                "string.quoted.other.lt-gt.include.c++",
-                "punctuation.definition.string.begin.c++"
-              ],
-              "text": "<"
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++",
-                "string.quoted.other.lt-gt.include.c++"
-              ],
-              "text": "vector"
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++",
-                "string.quoted.other.lt-gt.include.c++",
-                "punctuation.definition.string.end.c++"
-              ],
-              "text": ">"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.preprocessor.include.c++"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "#include <vector>"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c++",
-                "storage.type.c"
-              ],
-              "text": "int"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#795da3",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "entity.name.function.c++"
-              ],
-              "text": "main"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.parameters.c++",
-                "meta.group.c++",
-                "punctuation.section.group.begin.c++"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.parameters.c++",
-                "meta.group.c++",
-                "punctuation.section.group.end.c++"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.section.block.begin.c++"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": " std"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.accessor.c++"
-              ],
-              "text": "::"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": "vector"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.section.generic.begin.c++"
-              ],
-              "text": "<"
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "storage.type.c"
-              ],
-              "text": "int"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.section.generic.end.c++"
-              ],
-              "text": ">"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": " v"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.terminator.c++"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "keyword.control.c++"
-              ],
-              "text": "return"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": " v"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.accessor.dot.c++"
-              ],
-              "text": "."
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "meta.method-call.c++",
-                "variable.function.member.c++"
-              ],
-              "text": "size"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "meta.method-call.c++",
-                "meta.group.c++",
-                "punctuation.section.group.begin.c++"
-              ],
-              "text": "("
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "meta.method-call.c++",
-                "meta.group.c++",
-                "punctuation.section.group.end.c++"
-              ],
-              "text": ")"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.terminator.c++"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++",
-                "meta.function.c++",
-                "meta.block.c++",
-                "punctuation.section.block.end.c++"
-              ],
-              "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.c++"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "int main() { std::vector<int> v; return v.size(); }"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "css",
       "language": "css",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.selector.css",
-                "entity.other.attribute-name.class.css",
-                "punctuation.definition.entity.css"
+              "classes": [
+                "pl-e"
               ],
-              "text": "."
+              "text": ".term-p"
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.selector.css",
-                "entity.other.attribute-name.class.css"
-              ],
-              "text": "term-p"
+              "classes": [],
+              "text": " { "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.selector.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "punctuation.section.property-list.css"
-              ],
-              "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-name.css",
-                "support.type.property-name.css"
+              "classes": [
+                "pl-c1"
               ],
               "text": "color"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "punctuation.separator.key-value.css"
-              ],
-              "text": ":"
+              "classes": [],
+              "text": ": "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-value.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-value.css",
-                "support.constant.color.w3c-standard-color-name.css"
+              "classes": [
+                "pl-c1"
               ],
               "text": "red"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "punctuation.terminator.rule.css"
-              ],
-              "text": ";"
+              "classes": [],
+              "text": "; "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-name.css",
-                "support.type.property-name.css"
+              "classes": [
+                "pl-c1"
               ],
               "text": "margin"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "punctuation.separator.key-value.css"
-              ],
-              "text": ":"
+              "classes": [],
+              "text": ": "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-value.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "meta.property-value.css",
-                "constant.numeric.css"
+              "classes": [
+                "pl-c1"
               ],
               "text": "0"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "meta.property-list.css",
-                "punctuation.terminator.rule.css"
-              ],
-              "text": ";"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css",
-                "punctuation.section.property-list.css"
-              ],
-              "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.css"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": "; }"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "json",
       "language": "json",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "punctuation.section.dictionary.begin.json"
-              ],
+              "classes": [],
               "text": "{"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json"
-              ],
+              "classes": [],
               "text": "  "
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
+              "classes": [
+                "pl-ent"
               ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json",
-                "punctuation.definition.string.begin.json"
-              ],
-              "text": "\""
+              "text": "\"a\""
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json"
-              ],
-              "text": "a"
+              "classes": [],
+              "text": ": "
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json",
-                "punctuation.definition.string.end.json"
-              ],
-              "text": "\""
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "punctuation.separator.dictionary.key-value.json"
-              ],
-              "text": ":"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "constant.numeric.json"
+              "classes": [
+                "pl-c1"
               ],
               "text": "1"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "punctuation.separator.dictionary.pair.json"
-              ],
+              "classes": [],
               "text": ","
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json"
-              ],
+              "classes": [],
               "text": "  "
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
+              "classes": [
+                "pl-ent"
               ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json",
-                "punctuation.definition.string.begin.json"
-              ],
-              "text": "\""
+              "text": "\"b\""
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json"
-              ],
-              "text": "b"
+              "classes": [],
+              "text": ": ["
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.key.json",
-                "string.quoted.double.json",
-                "punctuation.definition.string.end.json"
-              ],
-              "text": "\""
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "punctuation.separator.dictionary.key-value.json"
-              ],
-              "text": ":"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json",
-                "punctuation.section.array.begin.json"
-              ],
-              "text": "["
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json",
-                "constant.language.json"
+              "classes": [
+                "pl-c1"
               ],
               "text": "true"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json",
-                "punctuation.separator.array.json"
-              ],
-              "text": ","
+              "classes": [],
+              "text": ", "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#0086b3",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json",
-                "constant.language.json"
+              "classes": [
+                "pl-c1"
               ],
               "text": "null"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json",
-                "meta.structure.array.json",
-                "punctuation.section.array.end.json"
-              ],
+              "classes": [],
               "text": "]"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "meta.structure.dictionary.value.json"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json",
-                "meta.structure.dictionary.json",
-                "punctuation.section.dictionary.end.json"
-              ],
+              "classes": [],
               "text": "}"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.json"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "yaml",
       "language": "yaml",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "string.unquoted.plain.out.yaml",
-                "entity.name.tag.yaml"
+              "classes": [
+                "pl-ent"
               ],
               "text": "key"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "punctuation.separator.key-value.mapping.yaml"
-              ],
-              "text": ":"
+              "classes": [],
+              "text": ": "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "string.unquoted.plain.out.yaml"
+              "classes": [
+                "pl-s"
               ],
               "text": "value"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "string.unquoted.plain.out.yaml",
-                "entity.name.tag.yaml"
+              "classes": [
+                "pl-s"
               ],
-              "text": "list"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "punctuation.separator.key-value.mapping.yaml"
-              ],
-              "text": ":"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "\n"
+              "text": "list:"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "  "
+              "classes": [],
+              "text": "  - "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "punctuation.definition.block.sequence.item.yaml"
-              ],
-              "text": "-"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "string.unquoted.plain.out.yaml"
+              "classes": [
+                "pl-s"
               ],
               "text": "a"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "\n"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "  "
+              "classes": [],
+              "text": "  - "
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "punctuation.definition.block.sequence.item.yaml"
-              ],
-              "text": "-"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml",
-                "string.unquoted.plain.out.yaml"
+              "classes": [
+                "pl-s"
               ],
               "text": "b"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.yaml"
-              ],
-              "text": "\n"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "sh",
       "language": "sh",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
+              "classes": [
+                "pl-c"
               ],
-              "scopeStack": [
-                "source.shell",
-                "comment.line.number-sign.shell",
-                "punctuation.definition.comment.begin.shell"
-              ],
-              "text": "#"
-            },
-            {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
-              ],
-              "scopeStack": [
-                "source.shell",
-                "comment.line.number-sign.shell"
-              ],
-              "text": "!/bin/sh"
-            },
-            {
-              "fgHex": "#969896",
-              "fontStyle": [
-                "ITALIC"
-              ],
-              "scopeStack": [
-                "source.shell",
-                "comment.line.number-sign.shell"
-              ],
-              "text": "\n"
+              "text": "#!/bin/sh"
             }
           ]
         },
         {
           "spans": [
             {
-              "fgHex": "#62a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.shell",
-                "support.function.echo.shell"
+              "classes": [
+                "pl-c1"
               ],
               "text": "echo"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.arguments.shell"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.arguments.shell",
-                "string.quoted.double.shell",
-                "punctuation.definition.string.begin.shell"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.arguments.shell",
-                "string.quoted.double.shell"
+              "classes": [
+                "pl-s"
               ],
               "text": "hello"
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.arguments.shell",
-                "string.quoted.double.shell",
-                "punctuation.definition.string.end.shell"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#a71d5d",
-              "fontStyle": [
-                "BOLD"
-              ],
-              "scopeStack": [
-                "source.shell",
-                "keyword.operator.logical.pipe.shell"
+              "classes": [
+                "pl-k"
               ],
               "text": "|"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell"
-              ],
-              "text": " "
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.shell",
-                "variable.function.shell"
-              ],
-              "text": "grep"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell",
-                "meta.function-call.arguments.shell"
-              ],
-              "text": " h"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "source.shell"
-              ],
-              "text": "\n"
+              "classes": [],
+              "text": " grep h"
             }
           ]
         }
       ]
     },
     {
+      "endsWithNewline": true,
       "id": "html",
       "language": "html",
       "lines": [
         {
           "spans": [
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.begin.html"
-              ],
+              "classes": [],
               "text": "<"
             },
             {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "entity.name.tag.block.any.html"
+              "classes": [
+                "pl-ent"
               ],
               "text": "div"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html"
-              ],
+              "classes": [],
               "text": " "
             },
             {
-              "fgHex": "#795da3",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "meta.attribute-with-value.class.html",
-                "entity.other.attribute-name.class.html"
+              "classes": [
+                "pl-e"
               ],
               "text": "class"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "meta.attribute-with-value.class.html",
-                "punctuation.separator.key-value.html"
-              ],
+              "classes": [],
               "text": "="
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "meta.attribute-with-value.class.html",
-                "string.quoted.double.html",
-                "punctuation.definition.string.begin.html"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "meta.attribute-with-value.class.html",
-                "string.quoted.double.html",
-                "meta.class-name.html"
+              "classes": [
+                "pl-s"
               ],
               "text": "a"
             },
             {
-              "fgHex": "#183691",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "meta.attribute-with-value.class.html",
-                "string.quoted.double.html",
-                "punctuation.definition.string.end.html"
+              "classes": [
+                "pl-s",
+                "pl-pds"
               ],
               "text": "\""
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.end.html"
-              ],
-              "text": ">"
+              "classes": [],
+              "text": "><"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.begin.html"
-              ],
-              "text": "<"
-            },
-            {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "entity.name.tag.block.any.html"
+              "classes": [
+                "pl-ent"
               ],
               "text": "p"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.end.html"
-              ],
-              "text": ">"
+              "classes": [],
+              "text": ">text</"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic"
-              ],
-              "text": "text"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.begin.html"
-              ],
-              "text": "</"
-            },
-            {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "entity.name.tag.block.any.html"
+              "classes": [
+                "pl-ent"
               ],
               "text": "p"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.end.html"
-              ],
-              "text": ">"
+              "classes": [],
+              "text": "></"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.begin.html"
-              ],
-              "text": "</"
-            },
-            {
-              "fgHex": "#63a35c",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "entity.name.tag.block.any.html"
+              "classes": [
+                "pl-ent"
               ],
               "text": "div"
             },
             {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic",
-                "meta.tag.block.any.html",
-                "punctuation.definition.tag.end.html"
-              ],
+              "classes": [],
               "text": ">"
-            },
-            {
-              "fgHex": "#323232",
-              "fontStyle": [],
-              "scopeStack": [
-                "text.html.basic"
-              ],
-              "text": "\n"
             }
           ]
         }

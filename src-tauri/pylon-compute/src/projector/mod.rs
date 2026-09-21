@@ -8,6 +8,13 @@
 //!   `mergeCoverage` / `mergeCoverageInPlace` 家族（ADR-0016 的 span 占用语义；
 //!   `src/domains/workbench/coverage/` 目录是 provider 覆盖审计矩阵（静态清单），
 //!   不是投影计算，不在计算核范围）
+//! - [`session_surface`] ← `session/sessionSurface.ts` 的 usage/budget/commands/options
+//!   归一化 + `infrastructure/acp/chatContracts.ts` 的 wire extract 家族
+//! - [`goal_model`] ← `plan/goalModel.ts`（C08 plan/goal 状态机）
+//! - [`lifecycle_model`] ← `lifecycle/lifecycleModel.ts` 的 `applyLifecycleEvent`
+//!   （C13 生命周期状态机；`normalizeNormalizedError` 落在 [`workbench`]）
+//! - [`event_schema`] ← `events/workbenchEventSchema.ts` 的 envelope 构造/迁移/解析
+//!   与 canonical→semantic 投影注册表（journal 读缝，含 fnv1a eventId 派生）
 //! - [`workbench`] ← `workbenchProjector.ts` 的折叠主干（document 状态机 +
 //!   `append(batch)` 批量入口 + 边界 patch DTO）
 //!
@@ -23,17 +30,13 @@
 //!   `extension.event` 两个 schema 类型；两侧由 parity 测试钉死）。
 //! - 批量入口是 `append(batch)`（二进制帧），回放按页合批，不做逐事件 append 循环。
 //! - 热路径（message/reasoning delta）走定长头 + 字串池的文本通道，**零 serde_json**；
-//!   冷事件（tool/diagnostic 等低频富载荷）允许整块 JSON 进池，Rust 侧一次性解析。
+//!   冷事件（tool/diagnostic/usage 等低频富载荷）允许整块 JSON 进池，Rust 侧一次性解析。
 //! - 边界输出走增量 patch（[`workbench::WorkbenchPatch`]），不是全量 WorkbenchDocument。
-//!
-//! # 未移植（fail-closed，见交付说明）
-//!
-//! `activity.*` / `usage.updated` / `budget.warning` / `plan.*` / `goal.*` /
-//! `lifecycle.*` / `assist.*` / `extension.event` 以及 session 事件的
-//! `commands` / `options` / `usage` 字段：这些归约器依赖 goalModel / lifecycleModel /
-//! sessionSurface 等未迁移的 domain 模型。折叠核遇到它们时**报错拒绝**而不是静默
-//! 丢弃或另写一套语义——迁移期宁可红也不许与 TS 基线分叉。
 
 pub mod content_part;
 pub mod coverage;
+pub mod event_schema;
+pub mod goal_model;
+pub mod lifecycle_model;
+pub mod session_surface;
 pub mod workbench;

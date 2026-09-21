@@ -17,7 +17,8 @@ import {
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type SessionEvent, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
-import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchDocument, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import { createSessionProjector, whenProjectorComputeReady, type SessionProjector } from '../../infrastructure/compute/projectorCompute.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import { reduceGenerationActivity } from '../../domains/activity/generationStateMachine.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
@@ -385,6 +386,33 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     envelope: WorkbenchEventEnvelope
   }>>()
 
+  // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
+  // 是其产出的物化视图。foldLog 保留全部已折信封（到达序、按 eventId 去重，与投影
+  // 核幂等判据同口径——refresh 全量重折的 journal 行不会重复入日志），供 reject 回滚
+  // 时「整页重折、剔除被拒乐观信封」重建投影核——wasm 侧没有就地删除已入账事件的出口。
+  let projector: SessionProjector | undefined
+  let foldLog: WorkbenchEventEnvelope[] = []
+  const foldLogIds = new Set<string>()
+  // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
+  // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
+  let journalDiagnosticCount = 0
+
+  const ensureProjector = (): SessionProjector => {
+    projector ??= createSessionProjector(source ?? '')
+    return projector
+  }
+
+  /** 页级折叠：一页信封一帧过界（live 逐帧到达即单事件页；冷装载按 journal 页合批）。 */
+  const foldPage = (envelopes: readonly WorkbenchEventEnvelope[]): WorkbenchDocument => {
+    const projected = ensureProjector().fold(envelopes)
+    for (const envelope of envelopes) {
+      if (foldLogIds.has(envelope.eventId)) continue
+      foldLogIds.add(envelope.eventId)
+      foldLog.push(envelope)
+    }
+    return journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, journalDiagnosticCount) : projected
+  }
+
   /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
    *  source → 该 source 上"仅时钟起点"的 clientMessageId。发送被拒时据此精确撤销，
    *  不误伤同 source 上由外部客户端 echo 启动的回合（issue #68 配套）。 */
@@ -638,7 +666,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
     pendingOptimisticBySource.set(targetSource, existing)
     turnEpoch += 1
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
+    runtime.applyDocument(foldPage([envelope]), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
     updateRuntimeState({
       generating: true,
       generationStart: now,
@@ -668,13 +696,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     if (source !== targetSource) return
     const current = runtime.getSnapshot().document
     if (!current) return
-    const document = {
-      ...current,
-      appliedEventIds: current.appliedEventIds.filter(id => id !== rejected.envelope.eventId),
-      timeline: current.timeline.filter(entry => entry.eventId !== rejected.envelope.eventId),
-      messages: current.messages.filter(message => !(message.optimistic
-        && message.identity.interactionId === clientMessageId)),
-    }
+    // 折叠状态在 wasm 投影核里，没有「就地删除已入账事件」的出口：按「从未发送」
+    // 语义从折叠日志剔除被拒乐观信封后整页重折（一帧过界），重建出的文档替换展示。
+    // 注意这与旧的手工 filter 有一个已登记的角落差异：乐观 user 行在到达序里
+    // settle 过的 running 行不会被还原（重建视角里它从未发生）。
+    const remainingLog = foldLog.filter(item => item !== rejected.envelope)
+    projector = createSessionProjector(source)
+    foldLog = []
+    foldLogIds.clear()
+    const document = foldPage(remainingLog)
     runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
     // P52 D3：发送被拒 = 回合回滚；若无其它在途乐观回合，时钟一并撤销，
     // 后续迟到帧不得经 updateRuntimeState 复活指示器（原 controller 侧由
@@ -696,17 +726,21 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const withPendingOptimistic = (targetSource: string, base: WorkbenchDocument): WorkbenchDocument => {
     const pending = pendingOptimisticBySource.get(targetSource) ?? []
     if (pending.length === 0) return base
-    let document = base
-    const remaining = [] as typeof pending
-    for (const item of pending) {
-      const canonicalMatches = document.messages.filter(message => message.role === 'user'
+    // canonical 回声计数按 base 统计：pending 信封全是 optimistic-local，折叠它们
+    // 不会新增非乐观 user 行，先剪枝再批量折入与逐个计数同判。
+    const candidates = pending.filter(item => {
+      const canonicalMatches = base.messages.filter(message => message.role === 'user'
         && message.content === item.content && message.optimistic !== true).length
-      if (canonicalMatches > item.priorCanonicalMatches) continue
-      const next = reduceWorkbenchEvent(document, item.envelope)
-      if (next.messages.some(message => message.optimistic
-        && message.identity.interactionId === item.clientMessageId)) remaining.push(item)
-      document = next
+      return canonicalMatches <= item.priorCanonicalMatches
+    })
+    let document = base
+    if (candidates.length > 0) {
+      // 剩余 pending 一页折入：bind 重建投影核后是真正入账；refresh 路径里已入账的
+      // 乐观信封按 eventId 幂等跳过（no-op）。存活检查看最终文档的 optimistic 行。
+      document = foldPage(candidates.map(item => item.envelope))
     }
+    const remaining = candidates.filter(item => document.messages.some(message => message.optimistic
+      && message.identity.interactionId === item.clientMessageId))
     if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
     else pendingOptimisticBySource.delete(targetSource)
     return document
@@ -730,7 +764,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       buffered.push(envelope)
       return
     }
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    runtime.applyDocument(foldPage([envelope]), { ownerKey, generation, preserveGeneration: true })
   }
 
   const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
@@ -791,7 +825,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       buffered.push(envelope)
       return
     }
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation, preserveGeneration: true })
+    runtime.applyDocument(foldPage([envelope]), { ownerKey, generation, preserveGeneration: true })
   }
 
   const confirmPendingFromEnvelope = (envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope => {
@@ -831,7 +865,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // #200：loading 期间到达的是 session/load 的**重放历史**帧——不是新回合。
     // 空 journal（#155 T2 重建升级）时 refresh 无终态证据可压住时钟，重放的 user
     // 帧会把历史回合复活成「仍在等待后端响应」的生成态并阻塞发送队列。缓冲帧在
-    // 载入完成后经 projectWorkbench 折叠（不走 applyLive），不会二次开启时钟。
+    // 载入完成后经 wasm 投影核整页折叠（不走 applyLive），不会二次开启时钟。
     // #217：本 source 有内核表态（kernelLivenessBySource.has）时，"采纳实时帧"的
     // 启发式停用——是否在途由内核事实回答，本进程不再从观察物猜（ADR-0017 收敛
     // 推断）。clockOnlyStarts 的记账保留（canonical echo 仍需确认派发意图）。
@@ -858,9 +892,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
     turnClockTouch(envelope.sessionId, envelopeTime)
     if (loading) { buffered.push(envelope); return }
-    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
     const liveness = effectiveLiveness(envelope.sessionId)
-    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), {
+    runtime.applyDocument(foldPage([envelope]), {
       ownerKey,
       generation,
       turnEpoch,
@@ -921,6 +954,7 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
     if (envelopes.length > 0) envelopes.forEach(applyLive)
     else {
       malformedCount += 1
+      journalDiagnosticCount = malformedCount
       if (!loading) {
         const snapshot = runtime.getSnapshot()
         if (snapshot.document) runtime.replaceDocument(withJournalDiagnostic(snapshot.document, malformedCount), {
@@ -991,6 +1025,8 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
     const run = (async () => {
       try {
         const rows = await loadAll(refreshOwnerKey)
+        // 折叠只在 wasm 就绪后进行（Node 导入即就绪；浏览器端在此收敛）。
+        await whenProjectorComputeReady()
         const canonicalDuration = canonicalDurationFromRows(rows)
         const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         // Session switches/rebinds invalidate the result. Do not let a late
@@ -1011,12 +1047,12 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         // the load buffer. Otherwise those events would remain stranded behind
         // the invalidated bind promise.
         const bufferedAtRefresh = buffered
-        const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
         // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
         // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
-        // live 已应用区间完全覆盖者跳过（审核修复：恢复基线的 initialDocument: current）。
-        // #205：无缓冲帧（常见的冷刷新）时直接把有序信封交给投影，省掉一次整集合拷贝。
-        const projected = projectWorkbench(bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh], { initialDocument: current }).document
+        // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
+        // 行同判幂等，整页重折即收敛。
+        if (refreshMalformedCount > 0) journalDiagnosticCount = refreshMalformedCount
+        const projected = foldPage(bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh])
         const reconciled = withPendingOptimistic(refreshSource, projected)
         const document = refreshMalformedCount > 0
           ? withJournalDiagnostic(reconciled, refreshMalformedCount)
@@ -1088,8 +1124,7 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         // already-observed live/session-response events visible even though
         // the canonical reload itself is degraded.
         for (const envelope of bufferedAfterFailure) {
-          const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
-          runtime.applyDocument(reduceWorkbenchEvent(current, envelope), {
+          runtime.applyDocument(foldPage([envelope]), {
             ownerKey: refreshOwnerKey,
             generation: refreshGeneration,
             preserveGeneration: true,
@@ -1119,13 +1154,17 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
     refresh,
     async bind(session: Session | undefined): Promise<void> {
       const nextBindingKey = workbenchSessionBindingKey(session)
+      // 幂等检查保持同步 no-op；折叠出口的就绪等待放在**同步状态前缀之后**：
+      // boundSessionId/source 必须在本函数首个 await 前就位（发送入口的乐观投影
+      // 依赖它们判定「已绑定」），Node 宿主的 wasm 导入即就绪，浏览器端在此补一次
+      // 异步等待，后续 folding 都在就绪之后。
+      if (boundSessionBindingKey === nextBindingKey) return
       // Session objects are recreated for ordinary metadata updates (name,
       // lastReplyAt, autoName) and when canonical replay completes. Rebinding
       // in those cases replaces the whole document and looks like a page
       // refresh. Keep this seam idempotent; explicit identity changes still
       // pass through the normal reload path below. Workspace reloads use the
       // dedicated lifecycle/reload-token seam instead of rebinding here.
-      if (boundSessionBindingKey === nextBindingKey) return
       boundSessionBindingKey = nextBindingKey
       // Invalidate any in-flight refresh for the previous binding. Its own
       // epoch/key guard will make the eventual result a no-op; clearing the
@@ -1145,6 +1184,12 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
       buffered = []
       malformedCount = 0
+      journalDiagnosticCount = 0
+      // 绑定重建换新投影核：折叠状态与随后的空文档 replaceDocument 对齐；
+      // 折叠日志一并清空（journal 重放会重新入日志）。
+      projector = createSessionProjector(session?.source ?? '')
+      foldLog = []
+      foldLogIds.clear()
       loading = Boolean(session)
       // #217：空文档的活性申报走有效权威（内核表态随 source 的 map 跨 rebind 保留；
       // 无表态回退时钟，语义与 #213 一致）。
@@ -1181,7 +1226,11 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       if (!session || !ownerKey) return
       const loadingOwnerKey = ownerKey
       const bindReadEpoch = canonicalReadEpoch
-      await loadAll(loadingOwnerKey).then(rows => {
+      // loadAll 必须**同步**调用：hanging-load 测试在 bind() 返回的同步窗口内
+      // 拿 release 句柄。就绪等待放进回调（Node 宿主导入即就绪，浏览器端在此
+      // 收敛异步初始化），折叠只发生在 wasm 就绪之后。
+      await loadAll(loadingOwnerKey).then(async rows => {
+        await whenProjectorComputeReady()
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
           || canonicalReadEpoch !== bindReadEpoch) return
         const canonicalDuration = canonicalDurationFromRows(rows)
@@ -1211,8 +1260,10 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         }
         collect(rows)
         collect(browserSnapshot)
-        // buffered 为空是冷切会话的常态：此时入参已是有序数组，投影不再复制一份。
-        const projected = projectWorkbench(buffered.length === 0 ? envelopes : [...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
+        // buffered 为空是冷切会话的常态：入参已是有序数组，整页一帧过界
+        //（回放按页合批，边界穿越 2 次，与页内事件数无关）。
+        if (malformedCount > 0) journalDiagnosticCount = malformedCount
+        const projected = foldPage(buffered.length === 0 ? envelopes : [...envelopes, ...buffered])
         const reconciled = withPendingOptimistic(session.source, projected)
         const document = malformedCount > 0 ? withJournalDiagnostic(reconciled, malformedCount) : reconciled
         buffered = []; loading = false
@@ -1272,6 +1323,7 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       if (destroyed) return
       destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear(); ledgerTerminalBySource.clear(); kernelLivenessBySource.clear(); kernelTurnStamps.clear()
+      projector = undefined; foldLog = []; foldLogIds.clear()
     },
   }
 }

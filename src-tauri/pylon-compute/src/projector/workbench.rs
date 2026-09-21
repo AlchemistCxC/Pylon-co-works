@@ -9,7 +9,8 @@
 //! - 批量入口 [`PylonProjector::append_batch`]（wasm）/ [`decode_frame`]（纯内层）
 //!   消费**紧凑列式帧**：`magic "PYPB" | version u16 | eventCount u32 | 字串池` +
 //!   每事件 24B 定长头（sequence f64 | 保留 u64 | typeIndex u32 | flags u32）+
-//!   17 组 (offset,len) 变长段。回放按页合批，一次 `append_batch` 一页。
+//!   18 组 (offset,len) 变长段（v2 末组是 provenance 富字段 JSON）。回放按页合批，
+//!   一次 `append_batch` 一页。
 //! - 热路径（message/reasoning delta）走「单文本部件」通道：定长头 + 池内偏移，
 //!   **零 serde_json**；冷事件（tool / diagnostic / session 等低频富载荷）允许把
 //!   事件字段整块 JSON 进池，Rust 侧一次性解析——serde_json 往返不进热路径。
@@ -21,6 +22,10 @@
 //! - spec 头部原定 `sequence i64 | occurredAtMs i64`；本层改 `f64`：sequence 在
 //!   TS 侧是 number，f64 直传避免 BigInt 化；时间戳由 Rust 侧从 ISO 串解析
 //!   （[`parse_iso_to_ms`]），不要求 JS 预算 ms。
+//! - v2 帧在 v1 的 17 组变长段后追加第 18 组：**provenance 富字段 JSON**
+//!   （provider/importId/sourceOrdinal/orderConfidence/collectionComplete/synthetic）。
+//!   origin/trust 仍走 flags 低 4 位。activity/extension 节点把完整 provenance 写进
+//!   document（C09/C10 可追溯性），v1 槽位装不下这些字段，故升版本。
 //!
 //! # 已知语义缺口（无法逐字复现，见交付清单）
 //!
@@ -29,13 +34,9 @@
 //!   异常输入上可达。
 //! - `Date.parse` 只实现 ISO 形态；无时区的 datetime 按 UTC（JS 按本地时区，
 //!   测试环境 TZ=UTC 时一致）。
-//!
-//! # 未移植（fail-closed）
-//!
-//! `activity.*` / `usage.*` / `budget.warning` / `plan.*` / `goal.*` /
-//! `lifecycle.*` / `assist.*` / `extension.event`，以及 session 事件的
-//! `commands` / `options` / `usage` 字段——对应归约器依赖 goalModel /
-//! lifecycleModel / sessionSurface，尚未迁移。折叠核遇到即报错，绝不静默分叉。
+//! - document 内的开放对象（activity/plan/goal/lifecycle/usage/commands/options）
+//!   以 serde_json Map（字典序）承载，TS 侧对象是插入序——仅影响键序不影响
+//!   内容，parity 断言用结构等值（toEqual）。
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -43,10 +44,13 @@ use wasm_bindgen::prelude::*;
 
 use super::content_part::{
     canonicalize_js_numbers, coalesce_adjacent_display_text_parts,
-    coalesce_adjacent_reasoning_parts, create_unknown_content_part, js_string_of, js_trim,
-    parse_content_part,
+    coalesce_adjacent_reasoning_parts, create_unknown_content_part, js_number_of, js_string_of,
+    js_trim, parse_content_part,
 };
 use super::coverage;
+use super::goal_model;
+use super::lifecycle_model;
+use super::session_surface;
 
 // ── 语义事件词表 ─────────────────────────────────────────────────────────────
 
@@ -221,6 +225,9 @@ pub struct SemanticEnvelope {
     pub source: EventSource,
     pub provenance_origin: u8,
     pub provenance_trust: u8,
+    /// v2 帧第 18 槽：TS `WorkbenchEventProvenance` 的可选富字段
+    /// （provider/importId/sourceOrdinal/orderConfidence/collectionComplete/synthetic）。
+    pub provenance_extra: Option<Map<String, Value>>,
     pub coverage: Option<(f64, f64)>,
     pub event: Value,
 }
@@ -229,6 +236,25 @@ impl SemanticEnvelope {
     /// `envelope.occurredAt ?? envelope.recordedAt`（消息 time 字段与时长基准）。
     fn occurred_or_recorded(&self) -> &str {
         self.occurred_at.as_deref().unwrap_or(&self.recorded_at)
+    }
+
+    /// TS `envelope.provenance` 的完整对象：origin/trust 走 flags，富字段走 v2 槽。
+    pub fn provenance_value(&self) -> Value {
+        let mut object = Map::new();
+        object.insert(
+            "origin".to_string(),
+            Value::String(provenance_origin_name(self.provenance_origin).to_string()),
+        );
+        object.insert(
+            "trust".to_string(),
+            Value::String(provenance_trust_name(self.provenance_trust).to_string()),
+        );
+        if let Some(extra) = &self.provenance_extra {
+            for (key, value) in extra {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        Value::Object(object)
     }
 }
 
@@ -239,6 +265,36 @@ pub fn provenance_origin_name(origin: u8) -> &'static str {
         .get(origin as usize)
         .copied()
         .unwrap_or("local-observed")
+}
+
+/// provenance trust 位序名（bit 3：0 = authoritative，1 = unverified）。
+pub fn provenance_trust_name(trust: u8) -> &'static str {
+    if trust == 0 {
+        "authoritative"
+    } else {
+        "unverified"
+    }
+}
+
+/// TS `ACTIVITY_STATUSES`（workbenchEventSchema）：activity.progress 的 patch.status
+/// 只认这份词表，词表外稳定降级为 unknown（不猜）。
+pub const ACTIVITY_STATUSES: [&str; 12] = [
+    "pending",
+    "starting",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "interrupted",
+    "cancel-requested",
+    "cancelled",
+    "timeout",
+    "blocked",
+    "unknown",
+];
+
+fn is_activity_status(value: &str) -> bool {
+    ACTIVITY_STATUSES.contains(&value)
 }
 
 // ── 文档模型 ─────────────────────────────────────────────────────────────────
@@ -340,11 +396,41 @@ pub struct SessionSurfaceState {
     pub stop_reason: Option<String>,
     pub model: Option<String>,
     pub mode: Option<String>,
+    /// 归一化命令目录（session.commands-updated 整体替换）。
+    pub commands: Vec<Value>,
+    /// 归一化配置项（session.config-updated；空列表不宣告 → 不清空既有候选面）。
+    pub options: Vec<Value>,
+    /// 归一化 usage 快照（含 budget）。
+    pub usage: Option<Value>,
+}
+
+impl SessionSurfaceState {
+    pub fn to_value(&self) -> Value {
+        let mut object = Map::new();
+        object.insert("status".to_string(), Value::String(self.status.clone()));
+        if let Some(stop_reason) = &self.stop_reason {
+            object.insert("stopReason".to_string(), Value::String(stop_reason.clone()));
+        }
+        if let Some(model) = &self.model {
+            object.insert("model".to_string(), Value::String(model.clone()));
+        }
+        if let Some(mode) = &self.mode {
+            object.insert("mode".to_string(), Value::String(mode.clone()));
+        }
+        object.insert("commands".to_string(), Value::Array(self.commands.clone()));
+        object.insert("options".to_string(), Value::Array(self.options.clone()));
+        if let Some(usage) = &self.usage {
+            object.insert("usage".to_string(), usage.clone());
+        }
+        Value::Object(object)
+    }
 }
 
 /// 投影文档（可丢弃）。`activities` / `interactions` / `diagnostics` /
-/// `system_errors` 用 JSON 对象透传——TS 侧这些节点是结构化字面量，投影核只做
-/// 字段读写，用 Value 建模才能逐字段保真。
+/// `system_errors` / `extensions` / `assist` / `plan` / `goal` / `lifecycle` /
+/// `session.usage|commands|options` 用 JSON 对象透传——TS 侧这些节点是结构化
+/// 字面量且字段集开放（未知 provider 字段必须保活可见，K14），投影核只做字段
+/// 读写，用 Value 建模才能逐字段保真。
 #[derive(Debug, Clone)]
 pub struct WorkbenchDocument {
     pub session_id: String,
@@ -355,9 +441,17 @@ pub struct WorkbenchDocument {
     pub messages: Vec<WorkbenchMessage>,
     pub activities: Vec<Value>,
     pub interactions: Vec<Value>,
+    pub extensions: Vec<Value>,
     pub session: SessionSurfaceState,
+    pub assist: Value,
     pub diagnostics: Vec<Value>,
+    pub plan: Value,
+    pub goal: Value,
+    pub lifecycle: Value,
     pub system_errors: Vec<Value>,
+    /// timeline 派生读数的增量缓存（#205 的对位物）。不是投影语义的一部分，
+    /// 也不进 wire/patch（`to_value` 不读它）。
+    pub timeline_cache: TimelineCache,
 }
 
 /// TS `createWorkbenchDocument`。
@@ -371,19 +465,28 @@ pub fn create_workbench_document(session_id: &str) -> WorkbenchDocument {
         messages: Vec::new(),
         activities: Vec::new(),
         interactions: Vec::new(),
+        extensions: Vec::new(),
         session: SessionSurfaceState {
             status: "idle".to_string(),
             stop_reason: None,
             model: None,
             mode: None,
+            commands: Vec::new(),
+            options: Vec::new(),
+            usage: None,
         },
+        assist: serde_json::json!({ "files": [] }),
         diagnostics: Vec::new(),
+        plan: goal_model::empty_plan_state(session_id),
+        goal: goal_model::empty_goal_state(),
+        lifecycle: lifecycle_model::empty_lifecycle_state(),
         system_errors: Vec::new(),
+        timeline_cache: TimelineCache::default(),
     }
 }
 
 /// f64 → JSON number：整值落在安全整数域时输出整数（与 JS number 显示一致）。
-fn js_number_value(value: f64) -> Value {
+pub(super) fn js_number_value(value: f64) -> Value {
     if value.is_finite() && value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0 {
         Value::from(value as i64)
     } else {
@@ -394,23 +497,6 @@ fn js_number_value(value: f64) -> Value {
 impl WorkbenchDocument {
     /// 全量读数（parity / 冷刷新用；边界增量走 [`WorkbenchPatch`]）。
     pub fn to_document_value(&self) -> Value {
-        let mut session = Map::new();
-        session.insert(
-            "status".to_string(),
-            Value::String(self.session.status.clone()),
-        );
-        if let Some(stop_reason) = &self.session.stop_reason {
-            session.insert("stopReason".to_string(), Value::String(stop_reason.clone()));
-        }
-        if let Some(model) = &self.session.model {
-            session.insert("model".to_string(), Value::String(model.clone()));
-        }
-        if let Some(mode) = &self.session.mode {
-            session.insert("mode".to_string(), Value::String(mode.clone()));
-        }
-        session.insert("commands".to_string(), Value::Array(Vec::new()));
-        session.insert("options".to_string(), Value::Array(Vec::new()));
-
         let mut object = Map::new();
         object.insert(
             "sessionId".to_string(),
@@ -456,28 +542,19 @@ impl WorkbenchDocument {
             "interactions".to_string(),
             Value::Array(self.interactions.clone()),
         );
-        object.insert("extensions".to_string(), Value::Array(Vec::new()));
-        object.insert("session".to_string(), Value::Object(session));
-        // EMPTY_ASSIST_SNAPSHOT / 空 plan / goal / lifecycle（未喂对应事件时的
-        // TS 恒定空态；喂到未移植事件会 fail-closed，不会走到带内容的形态）。
-        object.insert("assist".to_string(), serde_json::json!({ "files": [] }));
+        object.insert(
+            "extensions".to_string(),
+            Value::Array(self.extensions.clone()),
+        );
+        object.insert("session".to_string(), self.session.to_value());
+        object.insert("assist".to_string(), self.assist.clone());
         object.insert(
             "diagnostics".to_string(),
             Value::Array(self.diagnostics.clone()),
         );
-        object.insert(
-            "plan".to_string(),
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "revision": 0,
-                "entries": [],
-            }),
-        );
-        object.insert("goal".to_string(), serde_json::json!({}));
-        object.insert(
-            "lifecycle".to_string(),
-            serde_json::json!({ "history": [] }),
-        );
+        object.insert("plan".to_string(), self.plan.clone());
+        object.insert("goal".to_string(), self.goal.clone());
+        object.insert("lifecycle".to_string(), self.lifecycle.clone());
         object.insert(
             "systemErrors".to_string(),
             Value::Array(self.system_errors.clone()),
@@ -533,20 +610,8 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
         })
         .map(TimelineEntry::to_value)
         .collect();
-    let mut session = Map::new();
-    session.insert(
-        "status".to_string(),
-        Value::String(after.session.status.clone()),
-    );
-    if let Some(stop_reason) = &after.session.stop_reason {
-        session.insert("stopReason".to_string(), Value::String(stop_reason.clone()));
-    }
-    if let Some(model) = &after.session.model {
-        session.insert("model".to_string(), Value::String(model.clone()));
-    }
-    if let Some(mode) = &after.session.mode {
-        session.insert("mode".to_string(), Value::String(mode.clone()));
-    }
+    // session 面是低频小对象：整面携带（status/stopReason/model/mode/commands/
+    // options/usage），消费方整面覆盖即可，不做字段级 diff。
     WorkbenchPatch {
         revision: after.revision,
         applied_event_ids_appended: after.applied_event_ids[before.applied_event_ids.len()..]
@@ -554,7 +619,7 @@ fn diff_patches(before: &WorkbenchDocument, after: &WorkbenchDocument) -> Workbe
         applied_ranges: after.applied_ranges.clone(),
         timeline_upserts,
         message_upserts,
-        session: Value::Object(session),
+        session: after.session.to_value(),
     }
 }
 
@@ -689,14 +754,14 @@ fn utc_ms(
 
 // ── 归约器公共小件 ───────────────────────────────────────────────────────────
 
-fn string_value(value: Option<&Value>) -> Option<&str> {
+pub(super) fn string_value(value: Option<&Value>) -> Option<&str> {
     value
         .and_then(Value::as_str)
         .filter(|s| !js_trim(s).is_empty())
 }
 
 /// JS truthy（字符串形态）：非空即可，不 trim（`" "` 在 JS 里为真）。
-fn truthy_string(value: Option<&Value>) -> Option<&str> {
+pub(super) fn truthy_string(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
@@ -704,12 +769,64 @@ fn is_record_value(value: &Value) -> bool {
     value.is_object()
 }
 
-fn terminal_session_sequence(document: &WorkbenchDocument) -> f64 {
-    let mut latest = f64::NEG_INFINITY;
-    for entry in &document.timeline {
-        if is_terminal_session_entry(entry) {
-            latest = latest.max(entry.sequence);
+/// timeline 派生读数的增量缓存（#205 的位）。
+///
+/// `terminal_sequence` 是「已扫过的 timeline 前缀里终态 session 条目的最大 sequence」。
+/// 增量延展成立的两个前提都已在代码里核对过：
+/// 1. 条目一旦建立就**不可变**——`kind` 与 `data` 都不再被改写（`update_timeline` 只动
+///    `status`/`title`/`summary`/`stream_boundary`，而 `is_terminal_session_entry` 读的是
+///    `kind` 与 `data`）；
+/// 2. 折叠过程中 timeline **只增不减**（无 retain/remove/sort；乱序兜底走
+///    `insert_by_sequence` 仍保持 sequence 升序）。
+/// 因此只需看过新增的后缀。`scanned > timeline.len()`（timeline 被重建或缩短）时缓存
+/// 整份作废，重扫——这是唯一的失效路径，且是保守方向。
+#[derive(Debug, Clone, Default)]
+pub struct TimelineCache {
+    scanned: usize,
+    terminal_sequence: Option<f64>,
+}
+
+/// timeline 上「sequence ∈ (after, before) 且满足谓词」的存在性查询。
+///
+/// timeline 恒按 sequence 升序，故先二分定位 `sequence > after` 的起点，再**只在窗口内**
+/// 判谓词——与逐条扫全表逐字等价，代价从 Θ(T) 降到 Θ(log T + 窗口)。这正是 #205 在 TS 侧
+/// 用派生索引消灭的那处 Θ(N·T)：它落在最高频的 delta 上，把冷重放压成 Θ(N²)。
+///
+/// 比 TS 的索引强的一点：谓词在**查询时**求值，所以 `update_timeline` 事后把某个 tool 条目
+/// 标成文本流边界，结果立刻正确——索引方案要靠重建来兜这种情况。
+fn any_entry_in_sequence_window(
+    document: &WorkbenchDocument,
+    after: f64,
+    before: f64,
+    predicate: impl Fn(&TimelineEntry) -> bool,
+) -> bool {
+    let start = document
+        .timeline
+        .partition_point(|entry| entry.sequence <= after);
+    document.timeline[start..]
+        .iter()
+        .take_while(|entry| entry.sequence < before)
+        .any(predicate)
+}
+
+fn terminal_session_sequence(document: &mut WorkbenchDocument) -> f64 {
+    let length = document.timeline.len();
+    if document.timeline_cache.scanned > length {
+        document.timeline_cache = TimelineCache::default();
+    }
+    let scanned = document.timeline_cache.scanned;
+    let mut latest = document
+        .timeline_cache
+        .terminal_sequence
+        .unwrap_or(f64::NEG_INFINITY);
+    if scanned < length {
+        for entry in &document.timeline[scanned..] {
+            if is_terminal_session_entry(entry) {
+                latest = latest.max(entry.sequence);
+            }
         }
+        document.timeline_cache.scanned = length;
+        document.timeline_cache.terminal_sequence = Some(latest);
     }
     latest
 }
@@ -738,11 +855,12 @@ fn text_stream_continues(
     previous_sequence: f64,
     envelope_sequence: f64,
 ) -> bool {
-    !document.timeline.iter().any(|entry| {
-        entry.sequence > previous_sequence
-            && entry.sequence < envelope_sequence
-            && is_text_stream_boundary(entry)
-    })
+    !any_entry_in_sequence_window(
+        document,
+        previous_sequence,
+        envelope_sequence,
+        is_text_stream_boundary,
+    )
 }
 
 fn is_text_stream_boundary(entry: &TimelineEntry) -> bool {
@@ -1016,7 +1134,7 @@ fn normalized_error_text(value: Option<&Value>) -> Option<&str> {
     string_value(value)
 }
 
-pub fn normalize_normalized_error(raw: &Value, depth: usize) -> Option<Value> {
+pub(super) fn normalize_normalized_error(raw: &Value, depth: usize) -> Option<Value> {
     if raw.is_null() {
         return None;
     }
@@ -1341,15 +1459,12 @@ fn reduce_interaction(document: &mut WorkbenchDocument, envelope: &SemanticEnvel
     interaction.insert("status".to_string(), Value::String(status.to_string()));
     // request 由 requested 事件建立；resolved/expired 只带 response/reason。
     if envelope.event_type == "interaction.requested" {
-        match event.get("request") {
-            Some(request) => {
-                interaction.insert(
-                    "request".to_string(),
-                    redact_sensitive_interaction_payload(request),
-                );
-            }
-            // TS：redact(undefined) === undefined → 键不存在。
-            None => {}
+        // TS：redact(undefined) === undefined → 键不存在。
+        if let Some(request) = event.get("request") {
+            interaction.insert(
+                "request".to_string(),
+                redact_sensitive_interaction_payload(request),
+            );
         }
     } else if let Some(index) = previous_index {
         if let Some(request) = document.interactions[index].get("request") {
@@ -1439,7 +1554,7 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
         previous.role == role
             && text_stream_continues(document, previous.sequence, envelope.sequence)
             && (role == "assistant"
-                || (incoming_provider != ""
+                || (!incoming_provider.is_empty()
                     && incoming_provider == provider_identity_key(&previous.identity))
                 || (incoming_provider.is_empty() && previous.running))
     });
@@ -1522,10 +1637,10 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
                 let previous_turn = previous.identity.get("turnId").and_then(Value::as_str);
                 let incoming_turn = envelope.identity.turn_id.as_deref();
                 let previous_provider = provider_identity_key(&previous.identity);
-                let explicit_provider_boundary = incoming_provider != ""
-                    && previous_provider != ""
+                let explicit_provider_boundary = !incoming_provider.is_empty()
+                    && !previous_provider.is_empty()
                     && incoming_provider != previous_provider;
-                let same_or_missing_turn = incoming_turn.map_or(true, |incoming| {
+                let same_or_missing_turn = incoming_turn.is_none_or(|incoming| {
                     previous_turn.is_none_or(|previous| incoming == previous)
                 });
                 if same_or_missing_turn && !explicit_provider_boundary {
@@ -1729,11 +1844,12 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
     let same_terminal_identity = !incoming_provider_identity.is_empty()
         && incoming_provider_identity == previous_provider_identity;
     let has_tool_boundary_between = previous_index.is_some_and(|index| {
-        document.timeline.iter().any(|entry| {
-            entry.sequence > document.messages[index].sequence
-                && entry.sequence < envelope.sequence
-                && entry.kind == "tool"
-        })
+        any_entry_in_sequence_window(
+            document,
+            document.messages[index].sequence,
+            envelope.sequence,
+            |entry| entry.kind == "tool",
+        )
     });
     let append = previous_index.is_some_and(|index| {
         let previous = &document.messages[index];
@@ -1809,7 +1925,7 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
                 let explicit_provider_boundary = !incoming_provider_identity.is_empty()
                     && !previous_provider.is_empty()
                     && incoming_provider_identity != previous_provider;
-                let same_or_missing_turn = incoming_turn.map_or(true, |incoming| {
+                let same_or_missing_turn = incoming_turn.is_none_or(|incoming| {
                     previous_turn.is_none_or(|previous| incoming == previous)
                 });
                 if same_or_missing_turn && !explicit_provider_boundary {
@@ -2280,7 +2396,6 @@ fn reduce_session(
     envelope: &SemanticEnvelope,
 ) -> Result<(), String> {
     let event = &envelope.event;
-    // commands/options/usage 的 fail-closed 已在 validate_envelope 里先于变更完成。
     let completed_at = parse_iso_to_ms(envelope.occurred_or_recorded());
     let previous_status = document.session.status.clone();
     let requested_status = if envelope.event_type == "session.completed" {
@@ -2334,12 +2449,696 @@ fn reduce_session(
     if let Some(mode) = truthy_string(event.get("mode")) {
         document.session.mode = Some(mode.to_string());
     }
+    // TS：`event.commands ? {...}` —— 空数组在 JS 里为真（照常整体替换）。
+    if let Some(commands) = event.get("commands").filter(|value| !value.is_null()) {
+        if let Some(items) = commands.as_array() {
+            document.session.commands = session_surface::normalize_session_commands(items);
+        }
+    }
+    // 空列表什么都没宣告，不得清空 provider 已宣告的候选面（C14 契约：整体替换
+    // 而非合并，因此由这里挡下空列表）。
+    if let Some(options) = event
+        .get("options")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+    {
+        document.session.options = session_surface::normalize_session_config_options(options);
+    }
+    if let Some(usage) = event.get("usage") {
+        // TS：`event.usage !== undefined` —— JSON 键存在即宣告。注意与 reduceUsage
+        // 的差异：session 面只取 `.value`，invalid-field 诊断**不**从这里发
+        // （TS reduceSession 丢弃 invalidFields，只在 usage.updated/budget.warning
+        // 的归约器里发诊断）。
+        let normalized =
+            session_surface::normalize_usage_snapshot(Some(usage), document.session.usage.as_ref());
+        document.session.usage = Some(normalized.value);
+    }
     Ok(())
+}
+
+// ── usage / budget 折叠（C14） ───────────────────────────────────────────────
+
+fn reduce_usage(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    if envelope.event_type == "budget.warning" {
+        let previous_budget = document
+            .session
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.get("budget").filter(|value| value.is_object()));
+        let budget = session_surface::normalize_budget_snapshot(&envelope.event, previous_budget);
+        // TS：`{ ...document.session.usage, budget }` —— usage 缺席时从空对象起。
+        let mut usage: Map<String, Value> = document
+            .session
+            .usage
+            .as_ref()
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        usage.insert("budget".to_string(), budget);
+        document.session.usage = Some(Value::Object(usage));
+        return;
+    }
+    let previous_usage = document.session.usage.clone();
+    let normalized = session_surface::normalize_usage_snapshot(
+        envelope.event.get("usage"),
+        previous_usage.as_ref(),
+    );
+    document.session.usage = Some(normalized.value);
+    for field in normalized.invalid_fields {
+        add_diagnostic(
+            document,
+            envelope,
+            "session.usage.invalid-field",
+            &Value::String(format!("usage field {field} is invalid; retained in raw")),
+            &Value::String("warning".to_string()),
+            envelope.event.get("usage"),
+        );
+    }
+}
+
+// ── activity 折叠（C07/C09/C10，体量最大的收窄层） ───────────────────────────
+
+/// TS `activityLifecycleStatus`：progress 是更新不是状态；patch.status 只认
+/// schema 词表，词表外稳定降级 unknown（不猜）。
+fn activity_lifecycle_status(event_type: &str, patch: &Value, previous: Option<&Value>) -> String {
+    match event_type {
+        "activity.started" => "running".to_string(),
+        "activity.progress" => match string_value(patch.get("status")) {
+            Some(patch_status) => {
+                if is_activity_status(patch_status) {
+                    patch_status.to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            }
+            None => previous
+                .and_then(|node| node.get("status"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| "running".to_string()),
+        },
+        other => other.strip_prefix("activity.").unwrap_or(other).to_string(),
+    }
+}
+
+/// TS `narrowActivityParts`：sourceParts 逐个过 content schema；失败证据转有界
+/// unknown 部件 + warning 诊断（原始形态不进 projection 主路径）。
+fn narrow_activity_parts(
+    value: Option<&Value>,
+    activity_id: &str,
+    envelope: &SemanticEnvelope,
+    activity_family: &str,
+) -> (Option<Vec<Value>>, Vec<Value>) {
+    let Some(value) = value else {
+        return (None, Vec::new());
+    };
+    let source_parts: Vec<Value> = match value.as_array() {
+        Some(items) => items.clone(),
+        None => vec![value.clone()],
+    };
+    let mut parts: Vec<Value> = Vec::new();
+    let mut diagnostics: Vec<Value> = Vec::new();
+    for (part_index, part) in source_parts.iter().enumerate() {
+        match parse_content_part(part) {
+            Ok(parsed) => parts.push(parsed),
+            Err(issues) => {
+                let original_type = part
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("malformed");
+                parts.push(create_unknown_content_part(original_type, part, None));
+                diagnostics.push(serde_json::json!({
+                    "code": format!("activity.{activity_family}.part-malformed"),
+                    "message": format!(
+                        "{activity_family} activity part {part_index} failed content schema validation"
+                    ),
+                    "eventId": envelope.event_id,
+                    "sequence": js_number_value(envelope.sequence),
+                    "level": "warning",
+                    "data": {
+                        "activityId": activity_id,
+                        "partIndex": part_index,
+                        "issues": issues,
+                    },
+                }));
+            }
+        }
+    }
+    // TS 的 coalesce 恒返回数组（未变化时原样返回）。
+    let merged = coalesce_adjacent_display_text_parts(&parts).unwrap_or(parts);
+    (Some(merged), diagnostics)
+}
+
+/// TS `c09RichFields`：子代理/委派/团队 rich 字段收窄——只认 normalized
+/// activity/patch，缺失即 undefined（不猜）。
+fn c09_rich_fields(
+    activity: &Value,
+    patch: &Value,
+    result: Option<&Value>,
+    previous: Option<&Value>,
+) -> Vec<(&'static str, Value)> {
+    let pick_string = |key: &str| -> Option<String> {
+        string_value(activity.get(key))
+            .or_else(|| string_value(patch.get(key)))
+            .or_else(|| string_value(result.and_then(|record| record.get(key))))
+            .or_else(|| {
+                previous
+                    .and_then(|node| node.get(key))
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_string)
+    };
+    let pick_number = |key: &str| -> Option<Value> {
+        // 只认 activity/patch 的 finite number（不带 result、不带 previous）。
+        let value = activity
+            .get(key)
+            .filter(|value| !value.is_null())
+            .or_else(|| patch.get(key).filter(|value| !value.is_null()));
+        value
+            .filter(|value| value.is_number() && js_number_of(value).is_finite())
+            .cloned()
+    };
+    let pick_value = |key: &str| -> Option<Value> {
+        let picked = activity
+            .get(key)
+            .filter(|value| !value.is_null())
+            .or_else(|| patch.get(key).filter(|value| !value.is_null()))
+            .or_else(|| {
+                result
+                    .and_then(|record| record.get(key))
+                    .filter(|value| !value.is_null())
+            });
+        match picked {
+            // TS：`jsonSnapshot(picked) ?? previous[key]` —— picked 为 null 时
+            // jsonSnapshot 产物是 nullish，退回 previous。
+            Some(picked) => Some(picked.clone()),
+            None => previous.and_then(|node| node.get(key)).cloned(),
+        }
+    };
+    let fields: [(&'static str, Option<Value>); 17] = [
+        (
+            "sourceAgentId",
+            pick_string("sourceAgentId").map(Value::String),
+        ),
+        ("description", pick_string("description").map(Value::String)),
+        ("startedAt", pick_string("startedAt").map(Value::String)),
+        ("completedAt", pick_string("completedAt").map(Value::String)),
+        ("depth", pick_number("depth")),
+        ("role", pick_string("role").map(Value::String)),
+        ("model", pick_string("model").map(Value::String)),
+        ("provider", pick_string("provider").map(Value::String)),
+        ("goal", pick_string("goal").map(Value::String)),
+        ("usage", pick_value("usage")),
+        ("metrics", pick_value("metrics")),
+        ("capabilities", pick_value("capabilities")),
+        ("files", pick_value("files")),
+        ("execution", pick_value("execution")),
+        ("tools", pick_value("tools")),
+        ("tasks", pick_value("tasks")),
+        ("metadata", pick_value("metadata")),
+    ];
+    fields
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|value| (key, value)))
+        .collect()
+}
+
+/// C09 活动终态词表（与 mergeToolActivity 同构的幂等合并入口）。
+const ACTIVITY_TERMINAL_STATUSES: [&str; 5] =
+    ["completed", "failed", "interrupted", "cancelled", "timeout"];
+
+/// TS `mergeActivityTerminal`：终态后迟到事件仅补缺字段，不回退状态；
+/// progress 保持首个终态时刻的快照。
+fn merge_activity_terminal(previous: Option<&Value>, next: &Value) -> Option<Value> {
+    let previous = previous?;
+    let previous_status = previous.get("status").and_then(Value::as_str).unwrap_or("");
+    if !ACTIVITY_TERMINAL_STATUSES.contains(&previous_status) {
+        return None;
+    }
+    let mut filled = previous.as_object().expect("activity 是对象").clone();
+    for (key, value) in next.as_object().expect("activity 是对象") {
+        // TS：`if (value === undefined) continue` —— JSON 无 undefined，逐键处理；
+        // 只补 previous 缺失的键（status 恒在 → 恒不被改写）。
+        if !filled.contains_key(key) {
+            filled.insert(key.clone(), value.clone());
+        }
+    }
+    // orphan 是 (id 集合, parentId) 的纯函数：与 refreshOrphans 同口径。
+    let next_orphan = next.get("orphan").and_then(Value::as_bool).unwrap_or(false);
+    let has_parent = previous
+        .get("parentId")
+        .is_some_and(|value| !value.is_null());
+    filled.insert("orphan".to_string(), Value::Bool(next_orphan && has_parent));
+    Some(Value::Object(filled))
+}
+
+fn reduce_activity(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    if TERMINAL_SESSION_STATUSES.contains(&document.session.status.to_lowercase().as_str()) {
+        add_late_event_diagnostic(
+            document,
+            envelope,
+            "late activity event ignored after terminal fence",
+        );
+        return;
+    }
+    let event = &envelope.event;
+    // TS `||`：activityId 空串/缺席 → identity.taskId → eventId。
+    let id = truthy_string(event.get("activityId"))
+        .map(str::to_string)
+        .or_else(|| {
+            envelope
+                .identity
+                .task_id
+                .clone()
+                .filter(|id| !id.is_empty())
+        })
+        .unwrap_or_else(|| envelope.event_id.clone());
+    let activity = event
+        .get("activity")
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    let patch = event
+        .get("patch")
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    let result = event
+        .get("result")
+        .filter(|value| value.is_object())
+        .cloned();
+    let previous_index = document.activities.iter().position(|item| {
+        item.get("id").and_then(Value::as_str) == Some(id.as_str())
+            && item.get("kind").and_then(Value::as_str) == Some("activity")
+    });
+    let previous: Option<&Value> = previous_index.map(|index| &document.activities[index]);
+    let status = activity_lifecycle_status(&envelope.event_type, &patch, previous);
+    let activity_kind = string_value(activity.get("kind"))
+        .or_else(|| string_value(patch.get("kind")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("activityKind"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let family_derived = activity_kind.as_deref().and_then(|kind| {
+        matches!(
+            kind,
+            "process"
+                | "background-task"
+                | "subagent"
+                | "delegation"
+                | "team"
+                | "workflow"
+                | "workflow-phase"
+                | "workflow-agent"
+        )
+        .then(|| format!("activity.{kind}"))
+    });
+    let semantic_kind = string_value(activity.get("semanticKind"))
+        .or_else(|| string_value(patch.get("semanticKind")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("semanticKind"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string)
+        .or(family_derived);
+    // C09/C10：typed 家族的 output/parts 逐个过 content schema；其余家族原样保真。
+    let source_parts = result
+        .as_ref()
+        .and_then(|record| record.get("output"))
+        .filter(|value| !value.is_null())
+        .or_else(|| {
+            result
+                .as_ref()
+                .and_then(|record| record.get("parts"))
+                .filter(|value| !value.is_null())
+        })
+        .or_else(|| patch.get("output").filter(|value| !value.is_null()))
+        .or_else(|| patch.get("parts").filter(|value| !value.is_null()))
+        .or_else(|| activity.get("output").filter(|value| !value.is_null()))
+        .or_else(|| activity.get("parts").filter(|value| !value.is_null()));
+    let is_c09_activity = matches!(
+        activity_kind.as_deref(),
+        Some("subagent") | Some("delegation") | Some("team")
+    );
+    let is_c10_activity = matches!(
+        activity_kind.as_deref(),
+        Some("background-task")
+            | Some("workflow")
+            | Some("workflow-phase")
+            | Some("workflow-agent")
+    );
+    let typed_parts_family =
+        activity_kind.as_deref() == Some("process") || is_c10_activity || is_c09_activity;
+    let strict_parts = if typed_parts_family || semantic_kind.as_deref() == Some("activity.process")
+    {
+        let family = activity_kind.clone().unwrap_or_else(|| {
+            semantic_kind
+                .as_deref()
+                .and_then(|kind| kind.strip_prefix("activity."))
+                .unwrap_or("activity")
+                .to_string()
+        });
+        Some(narrow_activity_parts(source_parts, &id, envelope, &family))
+    } else {
+        None
+    };
+    // TS：
+    //   narrowedParts = strictParts ?? { parts: jsonSnapshot(sourceParts), diagnostics: [] }
+    //   parts          = narrowedParts.parts ?? previous?.parts
+    //   output         = (C09|C10) ? strictParts?.parts ?? previous?.output : previous?.output
+    // narrow 的 parts 在 sourceParts 缺席时为 undefined（→ 退回 previous）；非 typed
+    // 家族的 parts 是 jsonSnapshot 原值克隆（数组外形态也照搬）。
+    let (narrowed_parts, narrow_diagnostics): (Option<Value>, Vec<Value>) = match &strict_parts {
+        Some((parts, diagnostics)) => (
+            parts.as_ref().map(|items| Value::Array(items.clone())),
+            diagnostics.clone(),
+        ),
+        None => (source_parts.cloned(), Vec::new()),
+    };
+    let strict_parts_value: Option<Value> = strict_parts
+        .as_ref()
+        .and_then(|(parts, _)| parts.as_ref().map(|items| Value::Array(items.clone())));
+    let parts = narrowed_parts.or_else(|| previous.and_then(|node| node.get("parts")).cloned());
+    let output = if is_c09_activity || is_c10_activity {
+        strict_parts_value.or_else(|| previous.and_then(|node| node.get("output")).cloned())
+    } else {
+        previous.and_then(|node| node.get("output")).cloned()
+    };
+    let error = if event.get("error").is_some() {
+        event
+            .get("error")
+            .and_then(|value| normalize_normalized_error(value, 0))
+    } else if result
+        .as_ref()
+        .and_then(|record| record.get("error"))
+        .is_some()
+    {
+        result
+            .as_ref()
+            .and_then(|record| record.get("error"))
+            .and_then(|value| normalize_normalized_error(value, 0))
+    } else if patch.get("error").is_some() {
+        patch
+            .get("error")
+            .and_then(|value| normalize_normalized_error(value, 0))
+    } else {
+        previous.and_then(|node| node.get("error")).cloned()
+    };
+    let killed = match patch.get("killed") {
+        Some(value @ Value::Bool(_)) => Some(value.clone()),
+        _ => previous.and_then(|node| node.get("killed")).cloned(),
+    };
+    let timeout = match patch.get("timeout") {
+        Some(value @ Value::Bool(_)) => Some(value.clone()),
+        _ => previous.and_then(|node| node.get("timeout")).cloned(),
+    };
+    let title = string_value(activity.get("title"))
+        .or_else(|| string_value(activity.get("name")))
+        .or_else(|| string_value(patch.get("title")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("title"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let parent_id = string_value(activity.get("parentId"))
+        .or_else(|| string_value(patch.get("parentId")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("parentId"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let process_id = string_value(activity.get("processId"))
+        .or_else(|| string_value(patch.get("processId")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("processId"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let session_of_activity = string_value(activity.get("sessionId"))
+        .or_else(|| string_value(patch.get("sessionId")))
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("sessionId"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
+    let progress = match patch.get("progress") {
+        Some(value) => Some(value.clone()),
+        None => previous
+            .and_then(|node| node.get("progress"))
+            .filter(|value| !value.is_null())
+            .cloned(),
+    };
+    let node_result = if event.get("result").is_some() {
+        event.get("result").cloned()
+    } else if patch.get("result").is_some() {
+        patch.get("result").cloned()
+    } else {
+        previous
+            .and_then(|node| node.get("result"))
+            .filter(|value| !value.is_null())
+            .cloned()
+    };
+    let reason = string_value(event.get("reason"))
+        .map(str::to_string)
+        .or_else(|| {
+            previous
+                .and_then(|node| node.get("reason"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let mut node = Map::new();
+    node.insert("id".to_string(), Value::String(id.clone()));
+    node.insert("kind".to_string(), Value::String("activity".to_string()));
+    node.insert("status".to_string(), Value::String(status));
+    node.insert("orphan".to_string(), Value::Bool(false));
+    // 活动位置是创建时事实（progress 不移动卡片）。
+    node.insert(
+        "sequence".to_string(),
+        js_number_value(
+            previous
+                .and_then(|node| node.get("sequence"))
+                .and_then(Value::as_f64)
+                .unwrap_or(envelope.sequence),
+        ),
+    );
+    if let Some(semantic_kind) = semantic_kind {
+        node.insert("semanticKind".to_string(), Value::String(semantic_kind));
+    }
+    if let Some(activity_kind) = activity_kind {
+        node.insert("activityKind".to_string(), Value::String(activity_kind));
+    }
+    if let Some(title) = title {
+        node.insert("title".to_string(), Value::String(title));
+    }
+    if let Some(parent_id) = parent_id {
+        node.insert("parentId".to_string(), Value::String(parent_id));
+    }
+    if let Some(process_id) = process_id {
+        node.insert("processId".to_string(), Value::String(process_id));
+    }
+    if let Some(session_id) = session_of_activity {
+        node.insert("sessionId".to_string(), Value::String(session_id));
+    }
+    if let Some(progress) = progress {
+        node.insert("progress".to_string(), progress);
+    }
+    if let Some(parts) = parts {
+        node.insert("parts".to_string(), parts);
+    }
+    if let Some(output) = output {
+        node.insert("output".to_string(), output);
+    }
+    if let Some(result) = node_result {
+        node.insert("result".to_string(), result);
+    }
+    if let Some(error) = error {
+        node.insert("error".to_string(), error);
+    }
+    if let Some(killed) = killed {
+        node.insert("killed".to_string(), killed);
+    }
+    if let Some(timeout) = timeout {
+        node.insert("timeout".to_string(), timeout);
+    }
+    if let Some(reason) = reason {
+        node.insert("reason".to_string(), Value::String(reason));
+    }
+    for (key, value) in c09_rich_fields(&activity, &patch, result.as_ref(), previous) {
+        node.insert(key.to_string(), value);
+    }
+    node.insert("provenance".to_string(), envelope.provenance_value());
+    let node = Value::Object(node);
+    let merged = merge_activity_terminal(previous, &node);
+    let projected = merged.as_ref().unwrap_or(&node).clone();
+    upsert_activity(document, projected);
+    // narrow 诊断在节点落位后追加（TS：diagnostics 数组尾拼）。
+    for diagnostic in narrow_diagnostics {
+        document.diagnostics.push(diagnostic);
+    }
+}
+
+// ── plan / goal / lifecycle / assist / extension 折叠 ────────────────────────
+
+/// C08：plan 事件经 domain reducer 收敛进 document.plan；malformed entries 转可见诊断。
+fn reduce_plan(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    let event = &envelope.event;
+    let event_type = envelope.event_type.as_str();
+    if event_type == "plan.replaced"
+        && event.get("entries").is_some()
+        && !event.get("entries").is_some_and(Value::is_array)
+    {
+        add_diagnostic(
+            document,
+            envelope,
+            "plan.malformed",
+            &Value::String("plan.replaced entries is not an array; plan unchanged".to_string()),
+            &Value::String("warning".to_string()),
+            event.get("entries"),
+        );
+        return;
+    }
+    if event_type == "plan.entry-updated"
+        && event.get("entry").is_some_and(|entry| !entry.is_object())
+    {
+        add_diagnostic(
+            document,
+            envelope,
+            "plan.malformed",
+            &Value::String("plan.entry-updated entry is not an object; plan unchanged".to_string()),
+            &Value::String("warning".to_string()),
+            event.get("entry"),
+        );
+        return;
+    }
+    if let Some(next) = goal_model::apply_plan_event(&document.plan, event) {
+        document.plan = next;
+    }
+}
+
+/// C08：goal 事件经 domain reducer 收敛；malformed goal 转可见诊断。
+fn reduce_goal(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    let event = &envelope.event;
+    if envelope.event_type == "goal.updated"
+        && event.get("goal").is_some()
+        && event
+            .get("goal")
+            .and_then(goal_model::normalize_goal_snapshot)
+            .is_none()
+    {
+        add_diagnostic(
+            document,
+            envelope,
+            "goal.malformed",
+            &Value::String("goal.updated payload is not an object; goal unchanged".to_string()),
+            &Value::String("warning".to_string()),
+            event.get("goal"),
+        );
+        return;
+    }
+    if let Some(next) = goal_model::apply_goal_events(&document.goal, event) {
+        document.goal = next;
+    }
+}
+
+/// C13：lifecycle 事件经 domain reducer 收敛；恢复成功不删除历史事实。
+fn reduce_lifecycle(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    if let Some(next) = lifecycle_model::apply_lifecycle_event(
+        &document.lifecycle,
+        &envelope.event,
+        &|raw: &Value| normalize_normalized_error(raw, 0),
+    ) {
+        document.lifecycle = next;
+    }
+}
+
+/// C14：assist 事件投影进易逝 slice，不污染 transcript。
+fn reduce_assist(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    let event = &envelope.event;
+    let assist = &mut document.assist;
+    match envelope.event_type.as_str() {
+        "assist.prediction" => {
+            let mut prediction = Map::new();
+            if let Some(placeholder) = truthy_string(event.get("placeholder")) {
+                prediction.insert(
+                    "placeholder".to_string(),
+                    Value::String(placeholder.to_string()),
+                );
+            }
+            let actions: Vec<Value> = event
+                .get("actions")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            prediction.insert("actions".to_string(), Value::Array(actions));
+            if let Some(record) = assist.as_object_mut() {
+                record.insert("prediction".to_string(), Value::Object(prediction));
+            }
+        }
+        "assist.file-suggestions" => {
+            let files: Vec<Value> = event
+                .get("files")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(record) = assist.as_object_mut() {
+                record.insert("files".to_string(), Value::Array(files));
+            }
+        }
+        _ => {
+            // assist.queued-command：TS `event.command ? { queuedCommand } : {}`。
+            if let Some(command) = truthy_string(event.get("command")) {
+                if let Some(record) = assist.as_object_mut() {
+                    record.insert(
+                        "queuedCommand".to_string(),
+                        Value::String(command.to_string()),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// C15：namespaced extension 事件投影进持久 slice（payload/fallback 保真 +
+/// source/provenance 全携带），按 sequence 插入。
+fn reduce_extension(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
+    let event = &envelope.event;
+    let extension = serde_json::json!({
+        "id": envelope.event_id,
+        "kind": event.get("kind").cloned().unwrap_or(Value::String(String::new())),
+        "payload": event.get("payload").cloned().unwrap_or(Value::Null),
+        "fallback": event
+            .get("fallback")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        "identity": envelope.identity.to_value(),
+        "source": envelope.source.to_value(),
+        "provenance": envelope.provenance_value(),
+        "sequence": js_number_value(envelope.sequence),
+        "time": envelope.occurred_or_recorded().to_string(),
+    });
+    let mut index = document.extensions.len();
+    for (position, item) in document.extensions.iter().enumerate() {
+        let sequence = item.get("sequence").and_then(Value::as_f64).unwrap_or(0.0);
+        if sequence > envelope.sequence {
+            index = position;
+            break;
+        }
+    }
+    document.extensions.insert(index, extension);
 }
 
 // ── 归约主干 ─────────────────────────────────────────────────────────────────
 
-/// `reduceSemanticEvent` 的 dispatch。未移植类型 fail-closed。
+/// `reduceSemanticEvent` 的 dispatch。词表全集（45 项）均有归约器；
+/// 越词表的事件在帧解码层已被 typeIndex 校验拒绝。
 fn reduce_semantic_event(
     document: &mut WorkbenchDocument,
     envelope: &SemanticEnvelope,
@@ -2357,8 +3156,35 @@ fn reduce_semantic_event(
             reduce_tool(document, envelope);
             Ok(())
         }
+        "activity.started" | "activity.progress" | "activity.completed" | "activity.failed"
+        | "activity.cancelled" => {
+            reduce_activity(document, envelope);
+            Ok(())
+        }
         "interaction.requested" | "interaction.resolved" | "interaction.expired" => {
             reduce_interaction(document, envelope);
+            Ok(())
+        }
+        "usage.updated" | "budget.warning" => {
+            reduce_usage(document, envelope);
+            Ok(())
+        }
+        "plan.replaced" | "plan.entry-updated" => {
+            reduce_plan(document, envelope);
+            Ok(())
+        }
+        "goal.updated" | "goal.cleared" => {
+            reduce_goal(document, envelope);
+            Ok(())
+        }
+        "lifecycle.retrying"
+        | "lifecycle.compact-started"
+        | "lifecycle.compact-completed"
+        | "lifecycle.rewind-preview"
+        | "lifecycle.rewind-completed"
+        | "lifecycle.suspended"
+        | "lifecycle.recovered" => {
+            reduce_lifecycle(document, envelope);
             Ok(())
         }
         "diagnostic.updated" | "diagnostic.notice" => {
@@ -2372,6 +3198,14 @@ fn reduce_semantic_event(
         | "session.mode-updated"
         | "session.status-updated"
         | "session.completed" => reduce_session(document, envelope),
+        "assist.prediction" | "assist.file-suggestions" | "assist.queued-command" => {
+            reduce_assist(document, envelope);
+            Ok(())
+        }
+        "extension.event" => {
+            reduce_extension(document, envelope);
+            Ok(())
+        }
         "event.unknown" => {
             let summary = envelope
                 .event
@@ -2388,60 +3222,9 @@ fn reduce_semantic_event(
             );
             Ok(())
         }
-        other => Err(format!(
-            "semantic 事件 {other} 的归约器未迁移到计算核（activity/usage/plan/goal/lifecycle/assist/extension），已 fail-closed"
-        )),
+        // 词表外类型进不到这里（帧解码按 typeIndex 拒绝）；防御性保留 fail-closed。
+        other => Err(format!("semantic 事件 {other} 不在投影词表内，已拒绝投影")),
     }
-}
-
-/// 迁移期 fail-closed 预检：未移植的归约器 / session 事件的未迁移字段，必须在
-/// **任何 document 变更之前**拒绝（单事件与整页共用，保证事务性）。
-fn validate_envelope(envelope: &SemanticEnvelope) -> Result<(), String> {
-    let ported = matches!(
-        envelope.event_type.as_str(),
-        "message.started"
-            | "message.delta"
-            | "message.completed"
-            | "reasoning.delta"
-            | "reasoning.completed"
-            | "reasoning.redacted"
-            | "tool.started"
-            | "tool.progress"
-            | "tool.completed"
-            | "tool.failed"
-            | "interaction.requested"
-            | "interaction.resolved"
-            | "interaction.expired"
-            | "diagnostic.updated"
-            | "diagnostic.notice"
-            | "event.unknown"
-            | "session.started"
-            | "session.model-updated"
-            | "session.mode-updated"
-            | "session.status-updated"
-            | "session.completed"
-    );
-    if !ported {
-        return Err(format!(
-            "semantic 事件 {} 的归约器未迁移到计算核（activity/usage/plan/goal/lifecycle/assist/extension），已 fail-closed",
-            envelope.event_type
-        ));
-    }
-    if envelope.event_type.starts_with("session.") {
-        // sessionSurface（commands/options/usage 归一化）未迁移：fail-closed。
-        for key in ["commands", "options", "usage"] {
-            if envelope
-                .event
-                .get(key)
-                .is_some_and(|value| !value.is_null())
-            {
-                return Err(format!(
-                    "session 事件携带未迁移的 {key} 字段（sessionSurface 归一化未移植），已拒绝投影"
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// `reduceWorkbenchEvent`：单事件折叠（幂等判据 + timeline + 语义归约 + orphan 刷新）。
@@ -2449,9 +3232,6 @@ pub fn reduce_workbench_event(
     document: &mut WorkbenchDocument,
     envelope: &SemanticEnvelope,
 ) -> Result<(), String> {
-    // fail-closed 预检先于任何变更（幂等命中时不做预检：重放旧批次里含未移植
-    // 事件时，已覆盖/已应用的跨度保持幂等语义）。
-    validate_envelope(envelope)?;
     // journal 信封按覆盖区间幂等；非 journal 信封保持 eventId 幂等。
     let span = envelope
         .coverage
@@ -2496,10 +3276,6 @@ pub fn project_batch(
     document: &mut WorkbenchDocument,
     envelopes: Vec<SemanticEnvelope>,
 ) -> Result<WorkbenchPatch, String> {
-    // 事务性：任一事件预检失败 → 整页拒绝，document 不动。
-    for envelope in &envelopes {
-        validate_envelope(envelope)?;
-    }
     let mut sorted = envelopes;
     sorted.sort_by(|left, right| {
         left.sequence
@@ -2509,7 +3285,7 @@ pub fn project_batch(
     });
     let before = document.clone();
     for envelope in &sorted {
-        // 事务性：中途失败（如 session 事件的未迁移字段）→ 回滚整页，document 不动。
+        // 事务性：中途失败 → 回滚整页，document 不动。
         if let Err(error) = reduce_workbench_event(document, envelope) {
             *document = before;
             return Err(error);
@@ -2521,9 +3297,11 @@ pub fn project_batch(
 // ── 帧解码（纯内层；编码器在 TS 侧 parity 测试） ─────────────────────────────
 
 pub const FRAME_MAGIC: [u8; 4] = *b"PYPB";
-pub const FRAME_VERSION: u16 = 1;
+/// v2：在 v1 的 17 组变长段后追加第 18 组 provenance 富字段 JSON
+/// （activity/extension 节点把完整 provenance 写进 document，v1 装不下）。
+pub const FRAME_VERSION: u16 = 2;
 /// 每事件变长段的 (offset,len) 对数。
-pub const FRAME_PAIRS: usize = 17;
+pub const FRAME_PAIRS: usize = 18;
 
 #[derive(Debug)]
 struct FrameReader<'a> {
@@ -2666,6 +3444,7 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
     let part_kind_index = ((flags >> FLAG_PART_KIND_SHIFT) & 0b111) as usize;
     let parts_text = reader.optional_string()?;
     let extra = reader.optional_json()?;
+    let provenance_extra = reader.optional_json()?;
     let coverage = if flags & FLAG_HAS_COVERAGE != 0 {
         let start = reader.f64()?;
         let end = reader.f64()?;
@@ -2730,12 +3509,18 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
         sequence,
         event_id,
         session_id,
-        recorded_at: recorded_at,
+        recorded_at,
         occurred_at,
         identity,
         source,
         provenance_origin: (flags & 0b111) as u8,
         provenance_trust: ((flags >> 3) & 1) as u8,
+        // 槽内只放 TS WorkbenchEventProvenance 的可选富字段（origin/trust 在 flags）。
+        provenance_extra: provenance_extra.and_then(|value| match value {
+            Value::Object(entries) => Some(entries),
+            Value::Null => None,
+            _ => None,
+        }),
         coverage,
         event,
     })
@@ -2953,6 +3738,7 @@ mod tests {
             },
             provenance_origin: origin,
             provenance_trust: if origin == 0 { 0 } else { 1 },
+            provenance_extra: None,
             coverage,
             event,
         }
@@ -3135,8 +3921,8 @@ mod tests {
         );
         let live_document = reduce_all(vec![live]);
         let recovery_document = reduce_all(vec![recovery]);
-        assert_eq!(recovery_document.messages[0].running, false);
-        assert_eq!(live_document.messages[0].running, true);
+        assert!(!recovery_document.messages[0].running);
+        assert!(live_document.messages[0].running);
         assert_eq!(
             recovery_document.messages[0].content,
             live_document.messages[0].content
@@ -3687,27 +4473,79 @@ mod tests {
     }
 
     #[test]
-    fn fail_closed_for_unported_event_types() {
+    fn usage_budget_and_session_fields_project_deterministically() {
+        // 原 fail-closed 分支的替代契约：usage.updated / budget.warning /
+        // session.commands-updated 现在全部真实折叠（对齐 usageBudgetProjection
+        // 与 sessionSurfaceProjection 的既有断言）。
         let mut document = create_workbench_document(SESSION);
         let usage = envelope(
             1.0,
-            json!({"type": "usage.updated", "usage": {"inputTokens": 3}}),
+            json!({"type": "usage.updated", "usage": {"inputTokens": 12, "outputTokens": 8, "contextUsed": 25, "contextLimit": 100, "calls": -1, "futureCounter": 7}}),
         );
-        assert!(reduce_workbench_event(&mut document, &usage).is_err());
-        // 整页拒绝：document 不动。
-        let plan = envelope(2.0, json!({"type": "plan.replaced", "entries": []}));
-        assert!(project_batch(&mut document, vec![plan]).is_err());
-        assert!(document.applied_event_ids.is_empty());
-    }
+        reduce_workbench_event(&mut document, &usage).expect("fold");
+        let session_usage = document.session.usage.as_ref().expect("usage");
+        assert_eq!(session_usage.get("inputTokens"), Some(&json!(12)));
+        assert_eq!(session_usage.get("contextPercent"), Some(&json!(25)));
+        assert_eq!(
+            session_usage.get("raw"),
+            Some(&json!({ "calls": -1, "futureCounter": 7 }))
+        );
+        assert!(document
+            .diagnostics
+            .iter()
+            .any(|item| item.get("code").and_then(Value::as_str)
+                == Some("session.usage.invalid-field")));
 
-    #[test]
-    fn session_commands_field_is_fail_closed() {
-        let mut document = create_workbench_document(SESSION);
-        let commands = envelope(
-            1.0,
-            json!({"type": "session.commands-updated", "commands": [{"name": "/compact"}]}),
+        let budget = envelope(
+            2.0,
+            json!({"type": "budget.warning", "used": 900, "limit": 1000, "threshold": "warning", "percent": 90}),
         );
-        assert!(reduce_workbench_event(&mut document, &commands).is_err());
+        reduce_workbench_event(&mut document, &budget).expect("fold");
+        let budget_value = document
+            .session
+            .usage
+            .as_ref()
+            .unwrap()
+            .get("budget")
+            .cloned();
+        assert_eq!(
+            budget_value.as_ref().and_then(|b| b.get("used")),
+            Some(&json!(900))
+        );
+        assert_eq!(
+            budget_value.as_ref().and_then(|b| b.get("exhausted")),
+            Some(&Value::Bool(false))
+        );
+
+        let commands = envelope(
+            3.0,
+            json!({"type": "session.commands-updated", "commands": [{"id": "compact", "name": "/compact", "future": "kept"}]}),
+        );
+        reduce_workbench_event(&mut document, &commands).expect("fold");
+        assert_eq!(document.session.commands.len(), 1);
+        assert_eq!(
+            document.session.commands[0].get("name"),
+            Some(&json!("/compact"))
+        );
+        // 整页拒绝改为真实投影：batch 与逐事件收敛一致。
+        let mut batched = create_workbench_document(SESSION);
+        project_batch(
+            &mut batched,
+            vec![
+                envelope(1.0, json!({"type": "usage.updated", "usage": {"inputTokens": 1}})),
+                envelope(2.0, json!({"type": "plan.replaced", "entries": [{"id": "a", "content": "第一步", "status": "completed"}]})),
+            ],
+        )
+        .expect("batch");
+        assert_eq!(batched.plan.get("revision"), Some(&json!(1)));
+        assert_eq!(
+            batched
+                .plan
+                .get("entries")
+                .and_then(Value::as_array)
+                .map(|entries| entries.len()),
+            Some(1)
+        );
     }
 
     #[test]
@@ -3787,11 +4625,7 @@ mod tests {
         };
         let empty = (0u32, 0u32);
         // 事件 1：message.delta，role=user（位 7..9 = 0），单文本部件 kind=text。
-        let flags_1 = 0
-            | FLAG_HAS_ROLE
-            | (0 << FLAG_ROLE_SHIFT)
-            | (1 << FLAG_PARTS_MODE_SHIFT)
-            | (0 << FLAG_PART_KIND_SHIFT);
+        let flags_1 = FLAG_HAS_ROLE | (1 << FLAG_PARTS_MODE_SHIFT);
         write_event(
             &mut frame,
             1.0,
@@ -3815,11 +4649,12 @@ mod tests {
                 empty,
                 delta_text,
                 empty,
+                empty,
             ],
             None,
         );
         // 事件 2：tool.started（typeIndex 6），富载荷走 JSON 通道 + extra；
-        // parts 通道缺席（mode 0），turnId 落在 identity 槽位。
+        // parts 通道缺席（mode 0），turnId 落在 identity 槽位，provenance 槽缺席。
         let flags_2 = 0u32;
         write_event(
             &mut frame,
@@ -3844,6 +4679,7 @@ mod tests {
                 empty,
                 empty,
                 (extra_offset, extra_len),
+                empty,
             ],
             None,
         );
@@ -3950,5 +4786,817 @@ mod tests {
         );
         assert_eq!(message["identity"]["turnId"], Value::String("t-1".into()));
         assert_eq!(message["source"]["provider"], Value::String("peri".into()));
+    }
+
+    // ── 以下对齐 src/domains/workbench/__tests__ 的 C08/C09/C10/C13/C14/C15 契约 ──
+
+    fn activity_node<'a>(document: &'a WorkbenchDocument, id: &str) -> &'a Value {
+        document
+            .activities
+            .iter()
+            .find(|node| node.get("id").and_then(Value::as_str) == Some(id))
+            .expect("activity node")
+    }
+
+    #[test]
+    fn plan_and_goal_slices_follow_the_c08_state_machine() {
+        // workbenchProjectorPlan.test.ts：replaced + entry patch 序列。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "plan.replaced", "entries": [
+                    {"id": "a", "content": "第一步", "status": "completed"},
+                    {"id": "b", "content": "第二步", "status": "in_progress", "activeForm": "正在第二步"},
+                ]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "plan.entry-updated", "entry": {"id": "b", "content": "第二步", "status": "blocked", "blockedReason": "等待审批"}}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "plan.entry-updated", "entry": {"id": "b", "content": "第二步", "status": "in_progress"}}),
+            ),
+        ]);
+        let entries: Vec<(String, String)> = document
+            .plan
+            .get("entries")
+            .and_then(Value::as_array)
+            .expect("entries")
+            .iter()
+            .map(|entry| {
+                (
+                    entry["id"].as_str().expect("id").to_string(),
+                    entry["status"].as_str().expect("status").to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                ("a".to_string(), "completed".to_string()),
+                ("b".to_string(), "in_progress".to_string()),
+            ]
+        );
+        let kinds: Vec<&str> = document.timeline.iter().map(|entry| entry.kind).collect();
+        assert_eq!(kinds, vec!["plan", "plan", "plan"]);
+
+        // goal.updated ×2 + cleared → current 消失；assist 归 plan 之外的 kind。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "goal.updated", "goal": {"goalId": "g-1", "objective": "完成渲染引擎", "status": "active", "tokenBudget": 5000, "tokensUsed": 120}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "goal.updated", "goal": {"goalId": "g-1", "status": "blocked", "blockedReason": "预算耗尽"}}),
+            ),
+            envelope(3.0, json!({"type": "goal.cleared", "goalId": "g-1"})),
+            envelope(4.0, json!({"type": "assist.prediction", "actions": []})),
+        ]);
+        assert!(document.goal.get("current").is_none());
+        let kinds: Vec<&str> = document.timeline.iter().map(|entry| entry.kind).collect();
+        assert_eq!(kinds, vec!["plan", "plan", "plan", "assist"]);
+
+        // metadata/accounting 保活（未知字段不静默丢弃，K14）。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "plan.replaced", "entries": [{"id": "m", "content": "扩展任务", "status": "pending", "metadata": {"owner": "peri"}, "futureFlag": true}]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "goal.updated", "goal": {"goalId": "g-m", "objective": "目标", "status": "active", "accounting": {"tokensUsed": 20, "timeUsedSeconds": 12, "providerCredits": 1.5}}}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "plan.entry-updated", "entry": {"id": "m", "content": "扩展任务", "status": "completed", "futureFlag": "reviewed"}}),
+            ),
+        ]);
+        let entry = &document.plan["entries"][0];
+        assert_eq!(
+            entry["metadata"],
+            json!({ "owner": "peri", "futureFlag": "reviewed" })
+        );
+        let accounting = &document.goal["current"]["accounting"];
+        assert_eq!(accounting["tokensUsed"], json!(20));
+        assert_eq!(accounting["timeUsedSeconds"], json!(12));
+        // 未知 accounting 字段进 metadata（tokenBudget 等已知字段不在此列）。
+        assert_eq!(accounting["metadata"]["providerCredits"], json!(1.5));
+
+        // malformed plan/goal → 诊断兜底，不抛错。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "plan.replaced", "entries": "not-an-array"}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "goal.updated", "goal": "not-an-object"}),
+            ),
+        ]);
+        assert_eq!(
+            document
+                .plan
+                .get("entries")
+                .and_then(Value::as_array)
+                .map(Vec::is_empty),
+            Some(true)
+        );
+        assert!(document.goal.get("current").is_none());
+        assert!(document.diagnostics.len() >= 2);
+        // 深等替换的幂等：同样内容重复 replaced 不推 revision。
+        let mut document = create_workbench_document(SESSION);
+        let replaced = envelope(
+            1.0,
+            json!({"type": "plan.replaced", "entries": [{"id": "x", "content": "任务 X", "status": "pending"}]}),
+        );
+        reduce_workbench_event(&mut document, &replaced).expect("fold");
+        let revision_after_first = document.plan.get("revision").cloned().unwrap();
+        reduce_workbench_event(&mut document, &envelope(
+            2.0,
+            json!({"type": "plan.replaced", "entries": [{"id": "x", "content": "任务 X", "status": "pending"}]}),
+        ))
+        .expect("fold");
+        assert_eq!(document.plan.get("revision"), Some(&revision_after_first));
+    }
+
+    #[test]
+    fn lifecycle_slice_projects_retry_chain_and_system_errors() {
+        // workbenchProjectorLifecycle.test.ts：retry → recovered；history 只追加。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "lifecycle.retrying", "attempt": 1, "maxAttempts": 3, "delayMs": 1000, "error": {"technicalMessage": "boom", "recoverability": "retry"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "lifecycle.recovered", "source": "canonical"}),
+            ),
+        ]);
+        assert!(document.lifecycle.get("retry").is_none());
+        let kinds: Vec<&str> = document
+            .lifecycle
+            .get("history")
+            .and_then(Value::as_array)
+            .expect("history")
+            .iter()
+            .map(|item| item["kind"].as_str().expect("kind"))
+            .collect();
+        assert_eq!(kinds, vec!["retry", "recovered"]);
+        let kinds: Vec<&str> = document.timeline.iter().map(|entry| entry.kind).collect();
+        assert_eq!(kinds, vec!["lifecycle", "lifecycle"]);
+
+        // error 级 notice 进 systemErrors（结构化 NormalizedError），info 不进。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "diagnostic.notice", "level": "info", "message": "提示信息"}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "diagnostic.notice", "level": "error", "message": "连接失败", "code": "agent_connection_timeout"}),
+            ),
+        ]);
+        assert_eq!(document.system_errors.len(), 1);
+        assert_eq!(
+            document.system_errors[0].get("code"),
+            Some(&Value::String("agent_connection_timeout".into()))
+        );
+        assert_eq!(
+            document.system_errors[0].get("userSummary"),
+            Some(&Value::String("连接失败".into()))
+        );
+
+        // 终态 status 单调：completed 后的 error 请求不回退。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "message.delta", "role": "assistant", "parts": [{"kind": "text", "text": "partial"}]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "session.status-updated", "status": "completed"}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "session.status-updated", "status": "error"}),
+            ),
+        ]);
+        assert_eq!(document.session.status, "completed");
+        assert!(!document.messages[0].running);
+
+        // 终态后迟到的 provider.error 不改写状态但留下诊断。
+        let document = reduce_all(vec![
+            envelope(1.0, json!({"type": "session.completed"})),
+            envelope(
+                2.0,
+                json!({"type": "diagnostic.notice", "level": "error", "code": "provider.error", "message": "late provider failure"}),
+            ),
+        ]);
+        assert_eq!(document.session.status, "completed");
+        assert!(document
+            .diagnostics
+            .iter()
+            .any(|item| item.get("code").and_then(Value::as_str) == Some("provider.error")));
+
+        // retry error 的未知字段进 metadata（结构化 provider 错误可审计）。
+        let document = reduce_all(vec![envelope(
+            1.0,
+            json!({"type": "lifecycle.retrying", "attempt": 1, "maxAttempts": 2, "delayMs": 500, "error": {
+                "userSummary": "连接失败", "technicalMessage": "ECONNRESET", "code": "provider.error",
+                "provider": "hermes", "recoverability": "retry", "retryAfterMs": 2000, "classification": "network",
+            }}),
+        )]);
+        let retry = document.lifecycle.get("retry").expect("retry");
+        let metadata = &retry["error"]["metadata"];
+        assert_eq!(metadata["retryAfterMs"], json!(2000));
+        assert_eq!(metadata["classification"], json!("network"));
+
+        // live 顺序折叠与整页批量对 lifecycle 深等（重放 == 增量）。
+        let events = vec![
+            envelope(
+                1.0,
+                json!({"type": "lifecycle.compact-started", "strategy": "rolling", "tokensBefore": 1000}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "lifecycle.compact-completed", "tokensBefore": 1000, "tokensAfter": 300}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "lifecycle.suspended", "reason": "等待输入"}),
+            ),
+        ];
+        let live = reduce_all(events.clone());
+        let mut replay = create_workbench_document(SESSION);
+        project_batch(&mut replay, events).expect("batch");
+        assert_eq!(live.lifecycle, replay.lifecycle);
+    }
+
+    #[test]
+    fn usage_context_percent_merges_and_recomputes_across_patches() {
+        // sessionSurfaceProjection.test.ts：首事件派生 25%，部分补丁改计数器后重算 60%。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "usage.updated", "usage": {"contextUsed": 25, "contextLimit": 100}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "usage.updated", "usage": {"contextUsed": 60}}),
+            ),
+        ]);
+        let usage = document.session.usage.as_ref().expect("usage");
+        assert_eq!(usage.get("contextUsed"), Some(&json!(60)));
+        assert_eq!(usage.get("contextLimit"), Some(&json!(100)));
+        assert_eq!(usage.get("contextPercent"), Some(&json!(60)));
+
+        // 显式 percent 是 provider 权威值，不被本地重算覆盖。
+        let document = reduce_all(vec![envelope(
+            1.0,
+            json!({"type": "usage.updated", "usage": {"contextUsed": 10, "contextLimit": 100, "contextPercent": 42}}),
+        )]);
+        let usage = document.session.usage.as_ref().expect("usage");
+        assert_eq!(usage.get("contextPercent"), Some(&json!(42)));
+    }
+
+    #[test]
+    fn session_commands_options_and_assist_follow_the_c14_surface() {
+        // commands/config 归一化 + raw 宽容保留；option 不可写时值退守 raw。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "session.commands-updated", "commands": [
+                    {"id": "compact", "name": "/compact", "description": "压缩上下文", "inputHint": "[focus]", "availability": true, "capability": "compact", "future": "kept"},
+                ]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "session.config-updated", "options": [
+                    {"id": "temperature", "label": "Temperature", "value": {"providerScale": "adaptive"}, "valueType": "provider.custom", "editable": true, "schema": {"type": "object"}, "version": 3, "future": "kept"},
+                ]}),
+            ),
+        ]);
+        let command = &document.session.commands[0];
+        assert_eq!(command.get("id"), Some(&json!("compact")));
+        assert_eq!(command.get("name"), Some(&json!("/compact")));
+        assert_eq!(command.get("description"), Some(&json!("压缩上下文")));
+        assert_eq!(command.get("capability"), Some(&json!("compact")));
+        assert_eq!(command.get("raw"), Some(&json!({ "future": "kept" })));
+        let option = &document.session.options[0];
+        assert_eq!(option.get("id"), Some(&json!("temperature")));
+        assert_eq!(
+            option.get("value"),
+            Some(&json!({ "providerScale": "adaptive" }))
+        );
+        assert_eq!(option.get("valueType"), Some(&json!("provider.custom")));
+        // valueType 非法（provider.custom 不在 boolean/select/enum 集）→ 不可写，
+        // editable 被收窄为 false 且值+类型退守 raw。
+        assert_eq!(option.get("editable"), Some(&Value::Bool(false)));
+        assert_eq!(
+            option.get("raw"),
+            Some(&json!({
+                "future": "kept",
+                "value": { "providerScale": "adaptive" },
+                "valueType": "provider.custom",
+            }))
+        );
+        assert_eq!(option.get("version"), Some(&json!(3)));
+
+        // 空列表不宣告 → 不清空既有候选面。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "session.config-updated", "options": [
+                    {"id": "thinking_effort", "label": "Thinking Effort", "value": "max", "schema": {"options": [{"id": "low", "label": "low"}]}},
+                ]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "session.config-updated", "options": []}),
+            ),
+        ]);
+        let ids: Vec<&str> = document
+            .session
+            .options
+            .iter()
+            .filter_map(|option| option.get("id").and_then(Value::as_str))
+            .collect();
+        assert_eq!(ids, vec!["thinking_effort"]);
+
+        // assist 三事件族投影进易逝 slice，不污染 transcript。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "assist.prediction", "placeholder": "继续修复", "actions": [{"id": "accept", "label": "接受"}]}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "assist.file-suggestions", "files": ["src/a.ts", "src/b.ts"]}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "assist.queued-command", "command": "/compact"}),
+            ),
+        ]);
+        assert_eq!(
+            document.assist,
+            json!({
+                "files": ["src/a.ts", "src/b.ts"],
+                "prediction": { "placeholder": "继续修复", "actions": [{ "id": "accept", "label": "接受" }] },
+                "queuedCommand": "/compact",
+            })
+        );
+        assert!(document.messages.is_empty());
+        let kinds: Vec<&str> = document.timeline.iter().map(|entry| entry.kind).collect();
+        assert_eq!(kinds, vec!["assist", "assist", "assist"]);
+    }
+
+    #[test]
+    fn activity_families_follow_the_c09_c10_contracts() {
+        // started 后的 progress 保持 running（C09）。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "sub-running", "activity": {"kind": "subagent", "title": "Inspect renderer seams"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "sub-running", "patch": {"progress": {"completed": 1, "total": 3}}}),
+            ),
+        ]);
+        assert_eq!(
+            activity_node(&document, "sub-running").get("status"),
+            Some(&json!("running"))
+        );
+
+        // 归一化 status 白名单：词表外降级 unknown。
+        let document = reduce_all(vec![envelope(
+            1.0,
+            json!({"type": "activity.progress", "activityId": "sub-invalid-status", "patch": {"kind": "subagent", "status": "teleporting"}}),
+        )]);
+        assert_eq!(
+            activity_node(&document, "sub-invalid-status").get("status"),
+            Some(&json!("unknown"))
+        );
+
+        // timeout/interrupted 终态不被迟到的 running progress 复活；缺字段可补。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.progress", "activityId": "sub-timeout-terminal", "patch": {"kind": "subagent", "status": "timeout"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "sub-timeout-terminal", "patch": {"status": "running", "description": "late evidence may fill missing fields"}}),
+            ),
+        ]);
+        let node = activity_node(&document, "sub-timeout-terminal");
+        assert_eq!(node.get("status"), Some(&json!("timeout")));
+        assert_eq!(
+            node.get("description"),
+            Some(&json!("late evidence may fill missing fields"))
+        );
+
+        // rich 字段跨事件累积；completed 的 result.completedAt 收窄。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "sub-rich-lifecycle", "activity": {
+                    "kind": "subagent", "sourceAgentId": "agent-parent", "description": "Inspect the renderer registry",
+                    "startedAt": "2026-08-23T06:00:01.000Z",
+                }}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "sub-rich-lifecycle", "patch": {
+                    "metrics": {"toolCount": 4, "taskCount": 2, "durationMs": 900, "costUsd": 0.03},
+                    "execution": {"mode": "remote", "background": true, "worktree": "review/c09", "team": "renderer"},
+                    "tools": [{"id": "tool-4", "status": "completed"}],
+                    "tasks": [{"id": "task-2", "status": "running"}],
+                }}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "activity.completed", "activityId": "sub-rich-lifecycle", "result": {"completedAt": "2026-08-23T06:00:03.000Z"}}),
+            ),
+        ]);
+        let node = activity_node(&document, "sub-rich-lifecycle");
+        assert_eq!(node.get("sourceAgentId"), Some(&json!("agent-parent")));
+        assert_eq!(
+            node.get("description"),
+            Some(&json!("Inspect the renderer registry"))
+        );
+        assert_eq!(
+            node.get("startedAt"),
+            Some(&json!("2026-08-23T06:00:01.000Z"))
+        );
+        assert_eq!(
+            node.get("completedAt"),
+            Some(&json!("2026-08-23T06:00:03.000Z"))
+        );
+        assert_eq!(
+            node.get("metrics"),
+            Some(&json!({"toolCount": 4, "taskCount": 2, "durationMs": 900, "costUsd": 0.03}))
+        );
+        assert_eq!(
+            node.get("execution"),
+            Some(
+                &json!({"mode": "remote", "background": true, "worktree": "review/c09", "team": "renderer"})
+            )
+        );
+        assert_eq!(
+            node.get("tools"),
+            Some(&json!([{ "id": "tool-4", "status": "completed" }]))
+        );
+        assert_eq!(
+            node.get("tasks"),
+            Some(&json!([{ "id": "task-2", "status": "running" }]))
+        );
+
+        // typed 家族 parts 逐个过 schema：畸形证据 → bounded unknown + warning 诊断。
+        let mut completed = envelope(
+            1.0,
+            json!({"type": "activity.completed", "activityId": "sub-malformed-output",
+            "activity": {"kind": "subagent", "title": "Unsafe worker output"},
+            "result": {"parts": [
+                {"kind": "terminal", "streams": [{"stream": "stdout", "text": "kept"}], "exitCode": 0},
+                {"kind": "terminal", "streams": [{"stream": "stdin", "text": "malformed evidence"}]},
+            ]}}),
+        );
+        completed.event_id = "wb-sub-malformed".to_string();
+        let document = reduce_all(vec![completed.clone()]);
+        let node = activity_node(&document, "sub-malformed-output");
+        let parts = node.get("parts").and_then(Value::as_array).expect("parts");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].get("kind"), Some(&json!("terminal")));
+        assert_eq!(parts[1].get("kind"), Some(&json!("unknown")));
+        assert_eq!(parts[1].get("originalType"), Some(&json!("terminal")));
+        assert_eq!(parts[1].get("truncated"), Some(&Value::Bool(false)));
+        let diagnostic = document
+            .diagnostics
+            .iter()
+            .find(|item| {
+                item.get("code").and_then(Value::as_str) == Some("activity.subagent.part-malformed")
+            })
+            .expect("malformed diagnostic");
+        assert_eq!(diagnostic.get("eventId"), Some(&json!("wb-sub-malformed")));
+        assert_eq!(diagnostic.get("level"), Some(&json!("warning")));
+        assert_eq!(
+            diagnostic["data"]["activityId"],
+            json!("sub-malformed-output")
+        );
+        assert_eq!(diagnostic["data"]["partIndex"], json!(1));
+
+        // result.output 归一化为 typed 内容，output 与 parts 同源。
+        let document = reduce_all(vec![envelope(
+            1.0,
+            json!({"type": "activity.completed", "activityId": "sub-output",
+                    "activity": {"kind": "subagent", "title": "Review complete"},
+                    "result": {"output": [{"kind": "text", "text": "No blocking issues found."}]}}),
+        )]);
+        let node = activity_node(&document, "sub-output");
+        assert_eq!(
+            node.get("output"),
+            Some(&json!([{ "kind": "text", "text": "No blocking issues found." }]))
+        );
+        assert_eq!(node.get("output"), node.get("parts"));
+
+        // 终态幂等：迟到 progress 只补缺不回退；rich 字段按 C09 全集累积。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "sub-1", "activity": {
+                    "kind": "subagent", "semanticKind": "activity.subagent", "title": "Explore repo",
+                    "parentId": "tool-1", "depth": 2, "role": "explorer", "model": "ox-alpha-free", "provider": "opencode-go",
+                    "goal": "find all call sites of reduceActivity", "capabilities": ["fs", "search"],
+                }}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "sub-1", "patch": {
+                    "progress": {"completed": 3, "total": 5},
+                    "usage": {"inputTokens": 1200, "outputTokens": 340},
+                    "files": ["src/a.ts", "src/b.ts"],
+                }}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "activity.completed", "activityId": "sub-1", "result": {"summary": "found 12 call sites"}}),
+            ),
+            envelope(
+                4.0,
+                json!({"type": "activity.progress", "activityId": "sub-1", "patch": {"progress": {"completed": 9, "total": 5}}}),
+            ),
+        ]);
+        let node = activity_node(&document, "sub-1");
+        assert_eq!(node.get("status"), Some(&json!("completed")));
+        assert_eq!(node.get("semanticKind"), Some(&json!("activity.subagent")));
+        assert_eq!(node.get("activityKind"), Some(&json!("subagent")));
+        assert_eq!(node.get("parentId"), Some(&json!("tool-1")));
+        assert_eq!(node.get("depth"), Some(&json!(2)));
+        assert_eq!(node.get("role"), Some(&json!("explorer")));
+        assert_eq!(node.get("model"), Some(&json!("ox-alpha-free")));
+        assert_eq!(node.get("provider"), Some(&json!("opencode-go")));
+        assert_eq!(
+            node.get("goal"),
+            Some(&json!("find all call sites of reduceActivity"))
+        );
+        assert_eq!(node.get("capabilities"), Some(&json!(["fs", "search"])));
+        assert_eq!(
+            node.get("progress"),
+            Some(&json!({ "completed": 3, "total": 5 }))
+        );
+        assert_eq!(
+            node.get("usage"),
+            Some(&json!({"inputTokens": 1200, "outputTokens": 340}))
+        );
+        assert_eq!(node.get("files"), Some(&json!(["src/a.ts", "src/b.ts"])));
+        assert_eq!(
+            node.get("result"),
+            Some(&json!({ "summary": "found 12 call sites" }))
+        );
+
+        // 孤儿子代理可见、父节点后到解除 orphan。
+        let document = reduce_all(vec![envelope(
+            1.0,
+            json!({"type": "activity.started", "activityId": "sub-orphan", "activity": {"kind": "delegation", "semanticKind": "activity.delegation", "title": "remote delegate", "parentId": "team-9"}}),
+        )]);
+        assert_eq!(
+            activity_node(&document, "sub-orphan").get("orphan"),
+            Some(&Value::Bool(true))
+        );
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "sub-orphan", "activity": {"kind": "delegation", "semanticKind": "activity.delegation", "title": "remote delegate", "parentId": "team-9"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.started", "activityId": "team-9", "activity": {"kind": "team", "semanticKind": "activity.team", "title": "Ops team"}}),
+            ),
+        ]);
+        assert_eq!(
+            activity_node(&document, "sub-orphan").get("orphan"),
+            Some(&Value::Bool(false))
+        );
+
+        // minimal delegation 不猜层级/身份字段（缺失即 undefined）。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "del-min", "activity": {"kind": "delegation"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.failed", "activityId": "del-min", "reason": "connection lost"}),
+            ),
+        ]);
+        let node = activity_node(&document, "del-min");
+        assert_eq!(
+            node.get("semanticKind"),
+            Some(&json!("activity.delegation"))
+        );
+        assert!(node.get("title").is_none());
+        assert!(node.get("model").is_none());
+        assert!(node.get("goal").is_none());
+        assert!(node.get("parentId").is_none());
+        assert!(node.get("depth").is_none());
+        assert_eq!(node.get("status"), Some(&json!("failed")));
+        assert_eq!(node.get("reason"), Some(&json!("connection lost")));
+
+        // C07 process：身份/进度/输出/终态/provenance 全在活动节点，不进 messages。
+        let mut first = envelope(
+            1.0,
+            json!({"type": "activity.started", "activityId": "activity-1", "activity": {
+                "kind": "process", "semanticKind": "activity.process", "title": "npm test", "parentId": "tool-1",
+                "processId": "proc-1", "sessionId": "shell-1",
+            }}),
+        );
+        first.identity.task_id = Some("activity-1".to_string());
+        let mut third = envelope(
+            3.0,
+            json!({"type": "activity.completed", "activityId": "activity-1", "result": {
+                "parts": [{"kind": "terminal", "streams": [{"stream": "stdout", "text": "passed", "ordinal": 0}], "exitCode": 0}],
+            }}),
+        );
+        third.provenance_origin = 4;
+        third.provenance_trust = 1;
+        third.provenance_extra = Some(
+            serde_json::json!({
+                "orderConfidence": "observed",
+                "synthetic": { "reason": "terminal response observed" },
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        );
+        let document = reduce_all(vec![
+            first,
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "activity-1", "patch": {
+                    "progress": {"completed": 2, "total": 3},
+                    "parts": [{"kind": "log", "source": "runner", "entries": [{"level": "info", "text": "running"}]}],
+                }}),
+            ),
+            third,
+        ]);
+        assert!(document.messages.is_empty());
+        assert_eq!(document.activities.len(), 1);
+        let node = &document.activities[0];
+        assert_eq!(node.get("activityKind"), Some(&json!("process")));
+        assert_eq!(node.get("semanticKind"), Some(&json!("activity.process")));
+        assert_eq!(node.get("title"), Some(&json!("npm test")));
+        assert_eq!(node.get("parentId"), Some(&json!("tool-1")));
+        assert_eq!(node.get("processId"), Some(&json!("proc-1")));
+        assert_eq!(node.get("sessionId"), Some(&json!("shell-1")));
+        assert_eq!(node.get("status"), Some(&json!("completed")));
+        assert_eq!(
+            node.get("progress"),
+            Some(&json!({ "completed": 2, "total": 3 }))
+        );
+        assert_eq!(node["parts"][0]["kind"], json!("terminal"));
+        assert_eq!(node["provenance"]["origin"], json!("plugin"));
+        assert_eq!(
+            node["provenance"]["synthetic"]["reason"],
+            json!("terminal response observed")
+        );
+        assert_eq!(node["provenance"]["orderConfidence"], json!("observed"));
+
+        // C10 workflow：phase 终态不回退、progress 快照保持；metadata 直通。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "wf-1", "activity": {"kind": "workflow", "title": "release pipeline", "metadata": {"phases": ["phase-1", "phase-2"]}}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.started", "activityId": "phase-1", "activity": {"kind": "workflow-phase", "title": "build", "parentId": "wf-1"}}),
+            ),
+            envelope(
+                3.0,
+                json!({"type": "activity.progress", "activityId": "phase-1", "patch": {"progress": {"completed": 2, "total": 4}, "metadata": {"durationMs": 1200}}}),
+            ),
+            envelope(
+                4.0,
+                json!({"type": "activity.completed", "activityId": "phase-1", "result": {"summary": "built"}}),
+            ),
+            envelope(
+                5.0,
+                json!({"type": "activity.progress", "activityId": "phase-1", "patch": {"progress": {"completed": 0, "total": 4}}}),
+            ),
+            envelope(
+                6.0,
+                json!({"type": "activity.started", "activityId": "agent-1", "activity": {"kind": "workflow-agent", "title": "reviewer bot", "parentId": "wf-1", "role": "reviewer", "model": "ox-alpha-free"}}),
+            ),
+            envelope(
+                9.0,
+                json!({"type": "activity.failed", "activityId": "agent-1", "reason": "connection lost"}),
+            ),
+        ]);
+        let wf = activity_node(&document, "wf-1");
+        assert_eq!(wf.get("semanticKind"), Some(&json!("activity.workflow")));
+        assert_eq!(
+            wf.get("metadata"),
+            Some(&json!({ "phases": ["phase-1", "phase-2"] }))
+        );
+        let phase = activity_node(&document, "phase-1");
+        assert_eq!(phase.get("parentId"), Some(&json!("wf-1")));
+        assert_eq!(
+            phase.get("semanticKind"),
+            Some(&json!("activity.workflow-phase"))
+        );
+        assert_eq!(phase.get("status"), Some(&json!("completed")));
+        assert_eq!(
+            phase.get("progress"),
+            Some(&json!({ "completed": 2, "total": 4 }))
+        );
+        let agent = activity_node(&document, "agent-1");
+        assert_eq!(
+            agent.get("semanticKind"),
+            Some(&json!("activity.workflow-agent"))
+        );
+        assert_eq!(agent.get("status"), Some(&json!("failed")));
+        assert_eq!(agent.get("parentId"), Some(&json!("wf-1")));
+        assert_eq!(agent.get("role"), Some(&json!("reviewer")));
+        // 终态后的 killed/timeout 证据保留（C10 termination evidence）。
+        let document = reduce_all(vec![
+            envelope(
+                1.0,
+                json!({"type": "activity.started", "activityId": "bg-evidence", "activity": {"kind": "background-task", "title": "nightly index"}}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "activity.progress", "activityId": "bg-evidence", "patch": {
+                    "usage": {"totalTokens": 420},
+                    "metrics": {"toolCount": 3, "durationMs": 1500},
+                    "result": {"summary": "partial output"},
+                    "killed": true,
+                    "timeout": true,
+                }}),
+            ),
+        ]);
+        let node = activity_node(&document, "bg-evidence");
+        assert_eq!(
+            node.get("result"),
+            Some(&json!({ "summary": "partial output" }))
+        );
+        assert_eq!(node.get("usage"), Some(&json!({ "totalTokens": 420 })));
+        assert_eq!(
+            node.get("metrics"),
+            Some(&json!({ "toolCount": 3, "durationMs": 1500 }))
+        );
+        assert_eq!(node.get("killed"), Some(&Value::Bool(true)));
+        assert_eq!(node.get("timeout"), Some(&Value::Bool(true)));
+        assert!(document.messages.is_empty());
+    }
+
+    #[test]
+    fn extension_events_project_into_a_durable_slice() {
+        // extensionProjection.test.ts：持久 slice 携带 source/provenance，timeline kind=extension。
+        let mut event = envelope(
+            4.0,
+            json!({"type": "extension.event", "kind": "plugin.demo/result", "payload": {"status": "completed", "summary": "done"},
+                "fallback": [{"kind": "unknown", "originalType": "plugin.demo/result", "summary": "unknown plugin event", "raw": {"status": "completed"}, "truncated": false}]}),
+        );
+        event.event_id = "wb-ext-1".to_string();
+        let document = reduce_all(vec![event.clone()]);
+        assert_eq!(document.extensions.len(), 1);
+        let extension = &document.extensions[0];
+        assert_eq!(extension.get("id"), Some(&json!("wb-ext-1")));
+        assert_eq!(extension.get("kind"), Some(&json!("plugin.demo/result")));
+        assert_eq!(extension.get("sequence"), Some(&json!(4)));
+        assert_eq!(
+            extension.get("payload"),
+            Some(&json!({"status": "completed", "summary": "done"}))
+        );
+        assert_eq!(
+            extension.get("source"),
+            Some(&json!({"provider": "peri", "sourceId": event.source.source_id}))
+        );
+        assert_eq!(
+            extension.get("provenance"),
+            Some(&json!({"origin": "local-observed", "trust": "authoritative"}))
+        );
+        assert_eq!(document.timeline[0].kind, "extension");
+        // 按 sequence 插入：晚 sequence 的事件不破坏扩展列表有序性。
+        let document = reduce_all(vec![
+            envelope(
+                9.0,
+                json!({"type": "extension.event", "kind": "a.b", "payload": 1, "fallback": []}),
+            ),
+            envelope(
+                2.0,
+                json!({"type": "extension.event", "kind": "c.d", "payload": 2, "fallback": []}),
+            ),
+        ]);
+        let sequences: Vec<f64> = document
+            .extensions
+            .iter()
+            .filter_map(|item| item.get("sequence").and_then(Value::as_f64))
+            .collect();
+        assert_eq!(sequences, vec![2.0, 9.0]);
     }
 }

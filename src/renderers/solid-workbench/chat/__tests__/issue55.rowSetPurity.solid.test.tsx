@@ -3,7 +3,8 @@ import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
-import { splitStreamingMarkdownBlocks } from '../streamingMarkdownSplit.ts'
+// TS 基线（streamingMarkdownSplit.ts）已随 #220 切流退役：改用 wasm 出口，断言不变。
+import { splitStreamingMarkdownBlocks } from '../../../../infrastructure/compute/streamingCompute.ts'
 
 afterEach(cleanup)
 
@@ -16,10 +17,11 @@ function parseSkeletons(container: HTMLElement): Element[] {
 }
 
 /**
- * 解析落地预算：行内容由异步 markdown 解析产出（动态 import + unified），全量跑时 500+ 个
- * 测试文件争 CPU，实测同一用例的落地耗时 573 / 620 / 1547 / 748 ms（#141，与全量跑并发四次），
- * 跨过了 `waitFor` 的 1s 默认值。故显式给足预算（与 `MarkdownContent.solid.test.tsx` 的异步
- * 解析等待同档）：预算内仍未落地 = 解析真的卡住了，仍然要红。
+ * 解析落地预算：行内容由异步 markdown 解析产出（markdown 计算核 wasm，经
+ * `loadMarkdownCompute` 装载），全量跑时 500+ 个测试文件争 CPU，实测同一用例的落地耗时
+ * 573 / 620 / 1547 / 748 ms（#141，与全量跑并发四次），跨过了 `waitFor` 的 1s 默认值。
+ * 故显式给足预算（与 `MarkdownContent.solid.test.tsx` 的异步解析等待同档）：预算内仍未
+ * 落地 = 解析真的卡住了，仍然要红。
  */
 const MARKDOWN_PARSE_TIMEOUT_MS = 10_000
 

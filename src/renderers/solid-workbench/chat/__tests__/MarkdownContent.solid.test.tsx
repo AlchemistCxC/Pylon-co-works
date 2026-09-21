@@ -5,7 +5,7 @@
  * 工具同源无法捕获 renderer 回归，此测试直接渲染 MarkdownContent 验证 heading class 输出）。
  *
  * 覆盖：`# h1` → h1.term-h1；`###### h6` → h6.term-h6；普通段落不携带 term-h 类。
- * 依赖真实 markdown 解析链（getMarkdownRenderModel：unified + remarkParse/Gfm/Rehype），
+ * 依赖真实 markdown 解析链（#220 后为 wasm 计算核 parseMarkdown，模型与 hast 基线同构），
  * 非 mock——可捕获 allowedTagName 或 headingClass 派生逻辑被改的回归。
  */
 
@@ -49,8 +49,15 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     const h1 = await waitFor(() => screen.getByRole('heading', { level: 1 }))
     expect(h1).toBeTruthy()
     expect(screen.getByText('第一段已完成')).toBeTruthy()
-    // 代码块内容与增长尾部都应出现
-    expect(screen.getByText(/const x = 1/)).toBeTruthy()
+    // 代码块内容与增长尾部都应出现。高亮自 #220 起在测试环境同样真实工作
+    // （wasm highlightBlock，旧 starry 引擎在 vitest 里装载 oniguruma 失败而回退
+    // 纯文本），代码行被拆成 pl-* span——testing-library 的 getByText 只看直接
+    // 文本节点，这里改按行的 textContent 断言同一内容完整性。
+    await waitFor(() => {
+      const line = [...document.querySelectorAll('.term-code-text')]
+        .find(node => node.textContent?.includes('const x = 1'))
+      expect(line).toBeTruthy()
+    })
     expect(screen.getByText('正在增长的新段落')).toBeTruthy()
   })
 

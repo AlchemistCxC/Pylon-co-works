@@ -1,32 +1,17 @@
-// 仅类型导入（编译期擦除），运行时零开销：starry-night 核心（vscode-textmate /
-// oniguruma wasm 加载器）与 hast-util-to-html 直到首块代码真正高亮时才按需加载，
-// 避免把高亮引擎拖进主 chunk。
-// S1-CSP：onig.wasm 本地化（?url 让 vite 打包为 asset）——starry-night 默认
-// fetch('https://esm.sh/vscode-oniguruma@2/release/onig.wasm') 是远程 CDN 依赖
-// （断网/墙内高亮挂 + 被 CSP connect-src 拦截），getOnigurumaUrlFetch 指向本地。
-import type { createStarryNight, Grammar } from '@wooorm/starry-night'
-import type { toHtml } from 'hast-util-to-html'
-import onigWasmUrl from 'vscode-oniguruma/release/onig.wasm?url'
+// 代码高亮的计算核出口层——issue #220 WP4 切流后的形态。
+//
+// 高亮引擎在 Rust 计算核（`src-tauri/pylon-markdown` 的 `highlight_block`，syntect +
+// 同源 vendored 语法 + github `pl-*` 类名链，与原 starry-night 基线逐 token parity）。
+// 边界约定（spec「边界约定」第 3 条，用户裁决）：**整块代码进、行数组出**——逐行过界
+// 禁止。本文件保留的是宿主侧的编排：语言→scope 映射门、provider 注册面（`highlightCode`
+// 优先走已注册 provider）、结果缓存与并发去重，以及把行数组拼回消费方契约的 HTML 串。
+//
+// 产物装载见 `infrastructure/compute/markdownCompute.ts`（Promise 形态；调用点本就异步）。
+import { loadMarkdownCompute, type HighlightedLine } from '../../infrastructure/compute/markdownCompute.ts'
 import { resolveCodeHighlightProvider } from '../../domains/rendererContent/rendererContentRegistry.ts'
 
-type StarryCore = {
-  createStarryNight: typeof createStarryNight
-  toHtml: typeof toHtml
-}
-
-let corePromise: Promise<StarryCore> | null = null
-
-// 经 starryCore 包装模块动态导入：包根直接动态 import 会连带全部语法集，
-// 包装模块的具名 re-export 可被 rollup tree-shake，只带核心引擎（textmate/oniguruma）。
-// 显式 .ts 扩展名：Node（legacy 测试 runner）与 Vite 均可解析。
-function loadCore(): Promise<StarryCore> {
-  if (!corePromise) {
-    corePromise = import('./starryCore.ts')
-      .then(({ createStarryNight: create, toHtml: toHtmlFn }) => ({ createStarryNight: create, toHtml: toHtmlFn }))
-  }
-  return corePromise
-}
-
+// 语言别名 → TextMate scope。这是**同步门**：未知语言不穿越计算核直接回落 null
+// （行为测试钉住映射表本身）；映射的 wasm 侧同表由 WP4 parity 钉死。
 const LANGUAGE_SCOPES: Record<string, string> = {
   js: 'source.js', javascript: 'source.js', jsx: 'source.js',
   ts: 'source.ts', typescript: 'source.ts', tsx: 'source.tsx',
@@ -39,24 +24,6 @@ const LANGUAGE_SCOPES: Record<string, string> = {
   html: 'text.html.basic', markup: 'text.html.basic',
 }
 
-const GRAMMAR_LOADERS: Record<string, () => Promise<{ default: Grammar }>> = {
-  'source.js': () => import('@wooorm/starry-night/source.js'),
-  'source.ts': () => import('@wooorm/starry-night/source.ts'),
-  'source.tsx': () => import('@wooorm/starry-night/source.tsx'),
-  'source.python': () => import('@wooorm/starry-night/source.python'),
-  'source.rust': () => import('@wooorm/starry-night/source.rust'),
-  'source.go': () => import('@wooorm/starry-night/source.go'),
-  'source.java': () => import('@wooorm/starry-night/source.java'),
-  'source.c': () => import('@wooorm/starry-night/source.c'),
-  'source.c++': () => import('@wooorm/starry-night/source.c++'),
-  'source.css': () => import('@wooorm/starry-night/source.css'),
-  'source.json': () => import('@wooorm/starry-night/source.json'),
-  'source.yaml': () => import('@wooorm/starry-night/source.yaml'),
-  'source.shell': () => import('@wooorm/starry-night/source.shell'),
-  'text.html.basic': () => import('@wooorm/starry-night/text.html.basic'),
-}
-
-const highlighters = new Map<string, Promise<Awaited<ReturnType<typeof createStarryNight>>>>()
 const highlightCache = new Map<string, string | null>()
 const highlightPending = new Map<string, Promise<string | null>>()
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 128
@@ -101,24 +68,34 @@ export async function highlightCodeBuiltin(language: string, code: string): Prom
   }
 }
 
+/** 行内文本转义：与 hast-util-to-html 的文本节点同口径（& < >；引号留在文本里）。 */
+function escapeHtmlText(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+/** 一行 span → HTML 片段（行内不含换行；换行由拼接层按行补）。 */
+function lineToHtml(line: HighlightedLine): string {
+  let html = ''
+  for (const span of line.spans) {
+    const text = escapeHtmlText(span.text)
+    html += span.classes.length > 0
+      ? `<span class="${span.classes.join(' ')}">${text}</span>`
+      : text
+  }
+  return html
+}
+
 async function highlightCodeUncached(language: string, code: string): Promise<string | null> {
   const scope = scopeForLanguage(language)
-  const load = scope && GRAMMAR_LOADERS[scope]
-  if (!scope || !load) return cacheResult(cacheKey(language, code), null)
-  // 先同步触发核心动态 import（并行于语法包），避免串行等待
-  const core = loadCore()
-  let highlighter = highlighters.get(scope)
-  if (!highlighter) {
-    highlighter = load().then(async ({ default: grammar }) => {
-      const { createStarryNight: create } = await core
-      return create([grammar], {
-        getOnigurumaUrlFetch: () => new URL(onigWasmUrl, window.location.href),
-      })
-    })
-    highlighters.set(scope, highlighter)
-  }
-  const [starry, { toHtml: toHtmlFn }] = await Promise.all([highlighter, core])
-  return cacheResult(cacheKey(language, code), toHtmlFn(starry.highlight(code, scope)))
+  if (!scope) return cacheResult(cacheKey(language, code), null)
+  const { highlightBlock } = await loadMarkdownCompute()
+  const lines = highlightBlock(code, language)
+  // 语言已知但语法包缺失 ⇒ 计算核返回空，与 TS 基线「loader 缺失返回 null」同语义。
+  if (lines === undefined) return cacheResult(cacheKey(language, code), null)
+  // 消费方契约：HTML 串按 '\n' 切行后与 `code.split('\n')` 逐行对齐——源码以换行
+  // 收尾时行数组少一个空尾行，这里补回，保证行数一致。
+  const html = lines.map(lineToHtml).join('\n') + (code.endsWith('\n') ? '\n' : '')
+  return cacheResult(cacheKey(language, code), html)
 }
 
 /** legacy 查询面 facade：优先走已注册 provider（core 插件），未注册时回退 builtin。 */

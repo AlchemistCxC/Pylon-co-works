@@ -9,7 +9,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
-import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from './streamingMarkdownSplit.ts'
+import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from '../../../infrastructure/compute/streamingCompute.ts'
 import { noteStreamingRowSet } from './streamingRowCounters.ts'
 
 export interface MarkdownContentProps {

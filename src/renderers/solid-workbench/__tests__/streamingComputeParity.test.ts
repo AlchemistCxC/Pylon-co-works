@@ -1,65 +1,38 @@
 /**
- * #220 WP3 parity witness：流式切分 + 揭示预算引擎的 TS↔Rust 差分。
+ * #220 WP3 切流门禁：流式切分的 wasm 出口契约 + 揭示预算引擎的调度器↔引擎协议差分。
  *
- * 同一输入喂两侧、断言逐项一致（issue 的验收第 1 条：差分 corpus 上逐字节一致）：
- * - 切分：TS 基线 `chat/streamingMarkdownSplit.ts`（纯函数，直接调用）对 WASM
- *   出口——corpus 覆盖 `streamingMarkdownSplit.test.ts` 的全部契约形状 + 四个
- *   调度器测试文件用到的输入形状（纯 ASCII 重复、👩‍💻 字素重复、中文、CRLF），
- *   并做**全前缀扫描**（切分决策只依赖完整行，每个前缀都必须一致）；
- * - 预算引擎：TS 基线 `streamingDisplayScheduler.ts`（真实调度器，注入时钟）对
- *   WASM `StreamingRevealEngine`——先跑 TS 侧录下事件流（reset/feed/noteBacklog/tick，
- *   含每拍时刻与发布内容），再用**同一份事件流**驱动 WASM 引擎，逐拍断言
- *   发布种类、每行揭示前缀、预算与欠账读数、追赶窗口计数全部一致。
+ * TS 基线（`chat/streamingMarkdownSplit.ts` 与调度器内的预算数学）已随切流退役，
+ * 本文件的角色相应收口为两件事：
+ * - **切分契约不变量**（原「wasm == TS」差分隐含的性质，TS 退役后显式化）：
+ *   同一 corpus 覆盖 `streamingMarkdownSplit.test.ts` 的全部契约形状 + 四个调度器
+ *   测试文件用到的输入形状，并做**全前缀扫描**（切分决策只依赖完整行）：
+ *   ① stableBlocks 拼接 + unstable 还原原文；② `splitStreamingMarkdown` 与
+ *   blocks 出口同源（stable = stableBlocks 拼接）；③ 边界偏移 = stable 的
+ *   UTF-16 长度；④ stable 只前进；⑤ `splitOpenCodeFenceTail` 与 blocks 出口
+ *   对围栏状态的判定一致（有未闭合围栏 ⇒ unstable 含围栏体）。
+ * - **揭示预算引擎协议差分**：真实调度器（已内嵌 wasm 引擎）跑出事件流，再用
+ *   **同一份事件流**直接驱动一个独立 wasm 引擎实例，逐拍断言发布种类、每行揭示
+ *   前缀、预算与欠账读数、追赶窗口计数全部一致——这是调度器喂入协议
+ *   （reset → (feed → noteBacklog)* → tick*）的回归网。
  *   镜像单写者的漂移断言在回放中逐 feed 执行（`mirrorText` 必须等于权威目标）。
  *
- * 装载走 `loadPylonCompute()`（blessed loader，Node 宿主自读 wasm 字节）。
- * 流式出口的 TS 类型尚未并入 `PylonCompute` 接口——那是 TS 退役/切流那一刀的
- * 落点（主 agent 统筹），这里先用窄化 cast 消费运行时确实存在的导出。
+ * 装载走 `loadStreamingCompute()`（顶层 await，import 即就绪）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
-  findLastStableBlockBoundary as tsFindLastStableBlockBoundary,
-  splitOpenCodeFenceTail as tsSplitOpenCodeFenceTail,
-  splitStreamingMarkdown as tsSplitStreamingMarkdown,
-  splitStreamingMarkdownBlocks as tsSplitStreamingMarkdownBlocks,
-} from '../chat/streamingMarkdownSplit.ts'
+  findLastStableBlockBoundary,
+  splitOpenCodeFenceTail,
+  splitStreamingMarkdown,
+  splitStreamingMarkdownBlocks,
+  streamingCompute,
+} from '../../../infrastructure/compute/streamingCompute.ts'
 import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
 import type { StreamingDisplaySchedulerOptions } from '../streamingDisplayScheduler.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
-import { loadPylonCompute } from '../../../infrastructure/compute/pylonCompute'
 
-// ── WASM 出口（运行时存在；类型收编随 TS 退役那一刀落地） ──────────────────────
+// ── WASM 出口（streamingCompute 模块顶层装载，import 即就绪；出口类型随切流收编） ──
 
-interface WasmTail { prefix: string, language?: string, code: string }
-interface WasmRowReveal { key: string, value: string, consumedUnits: number }
-interface WasmTickOutcome {
-  kind: 'budgeted' | 'converged'
-  budget: number
-  backlogUnits: number
-  advancedMaxUnits: number
-  advancedTotalUnits: number
-  rows: WasmRowReveal[]
-  catchUpWindows: number
-}
-interface WasmRevealEngine {
-  reset(rows: { key: string, text: string }[], at: number): void
-  feed(key: string, delta: string): void
-  noteBacklog(now: number): void
-  tick(now: number): WasmTickOutcome
-  mirrorText(key: string): string | undefined
-  revealedText(key: string): string | undefined
-  revealedUnits(key: string): number | undefined
-  catchUpWindows(): number
-}
-interface StreamingComputeExports {
-  splitStreamingMarkdownBlocks(text: string): { stableBlocks: string[], unstable: string }
-  splitStreamingMarkdown(text: string): { stable: string, unstable: string }
-  findLastStableBlockBoundary(text: string): number
-  splitOpenCodeFenceTail(text: string): WasmTail | null
-  StreamingRevealEngine: { new (options?: Record<string, number>): WasmRevealEngine }
-}
-
-const compute = (await loadPylonCompute()) as unknown as StreamingComputeExports
+const compute = streamingCompute()
 
 // ── 切分 parity ───────────────────────────────────────────────────────────────
 
@@ -132,35 +105,36 @@ function prefixesOf(text: string): string[] {
   return prefixes
 }
 
-describe('切分 parity（splitStreamingMarkdownBlocks / splitStreamingMarkdown / findLastStableBlockBoundary / splitOpenCodeFenceTail）', () => {
+describe('切分契约不变量（splitStreamingMarkdownBlocks / splitStreamingMarkdown / findLastStableBlockBoundary / splitOpenCodeFenceTail）', () => {
   for (const text of SPLIT_CORPUS) {
     it(`corpus 逐前缀一致：${JSON.stringify(text.length > 24 ? `${text.slice(0, 24)}…(${text.length})` : text)}`, () => {
       for (const prefix of prefixesOf(text)) {
         const context = `prefix=${JSON.stringify(prefix)}`
-        const wasmBlocks = compute.splitStreamingMarkdownBlocks(prefix)
-        const tsBlocks = tsSplitStreamingMarkdownBlocks(prefix)
-        expect(wasmBlocks.stableBlocks, `stableBlocks ${context}`).toEqual([...tsBlocks.stableBlocks])
-        expect(wasmBlocks.unstable, `unstable ${context}`).toBe(tsBlocks.unstable)
+        const blocks = splitStreamingMarkdownBlocks(prefix)
+        // ① 拼接还原原文（stable 前缀无损 + unstable 是尾块）
+        expect(blocks.stableBlocks.join('') + blocks.unstable, `还原 ${context}`).toBe(prefix)
+        // ④ stable 只前进（全前缀扫描下单调）
+        const stable = blocks.stableBlocks.join('')
+        expect(prefix.startsWith(stable), `stable 是前缀 ${context}`).toBe(true)
+        // ③ 边界偏移 = stable 的 UTF-16 长度（TS 基线的定义式）
+        expect(findLastStableBlockBoundary(prefix), `boundary ${context}`).toBe(stable.length)
+        // ③' 引擎侧 blocks 出口与便捷出口同源
+        expect(blocks.unstable, `unstable ${context}`).toBe(prefix.slice(stable.length))
 
-        const wasmSplit = compute.splitStreamingMarkdown(prefix)
-        const tsSplit = tsSplitStreamingMarkdown(prefix)
-        expect(wasmSplit.stable, `stable ${context}`).toBe(tsSplit.stable)
-        expect(wasmSplit.unstable, `unstable ${context}`).toBe(tsSplit.unstable)
+        const split = splitStreamingMarkdown(prefix)
+        // ② splitStreamingMarkdown 与 blocks 出口同源
+        expect(split.stable, `stable ${context}`).toBe(stable)
+        expect(split.unstable, `unstable ${context}`).toBe(blocks.unstable)
 
-        expect(
-          compute.findLastStableBlockBoundary(prefix),
-          `boundary ${context}`,
-        ).toBe(tsFindLastStableBlockBoundary(prefix))
-
-        const wasmTail = compute.splitOpenCodeFenceTail(prefix)
-        const tsTail = tsSplitOpenCodeFenceTail(prefix)
-        if (tsTail === null) {
-          expect(wasmTail, `tail ${context}`).toBeNull()
-        } else {
-          expect(wasmTail, `tail 存在 ${context}`).not.toBeNull()
-          expect(wasmTail!.prefix, `tail.prefix ${context}`).toBe(tsTail.prefix)
-          expect(wasmTail!.language, `tail.language ${context}`).toBe(tsTail.language)
-          expect(wasmTail!.code, `tail.code ${context}`).toBe(tsTail.code)
+        // ⑤ 尾块出口：prefix 是输入前缀；code 是输入（CRLF 归一后）的尾部——
+        // 「整块进」喂法依赖这两条，保证围栏体永远来自同一份流式文本。
+        const tail = splitOpenCodeFenceTail(prefix)
+        if (tail !== null) {
+          expect(prefix.startsWith(tail.prefix), `tail.prefix ${context}`).toBe(true)
+          expect(
+            prefix.replaceAll('\r\n', '\n').endsWith(tail.code),
+            `tail.code 是输入尾部 ${context}`,
+          ).toBe(true)
         }
       }
     })
