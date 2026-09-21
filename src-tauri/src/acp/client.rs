@@ -265,7 +265,7 @@ impl AcpClient {
 
     /// Prepare a prompt request without writing to stdin.
     /// R3：与 [`Self::prepare_rpc`] 统一返回 [`PreparedRpc`]——发送经 `send_keep_rx`
-    /// （含写超时与失败路径 pending 清理），等待经 [`wait_prompt_with_cancel`]。
+    /// （含写超时与失败路径 pending 清理），等待经 [`wait_prompt_with_recovery`]。
     pub fn prepare_prompt(
         &self,
         session_id: &str,
@@ -449,9 +449,8 @@ impl AcpClient {
                     .take_stdout()
                     .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
                 let pid = child.pid();
-                let handles = super::engine::spawn_sdk_engine(
+                let backend = super::engine::spawn_sdk_engine(
                     agent,
-                    client_generation,
                     stdin,
                     stdout,
                     wire_trace.clone(),
@@ -474,7 +473,7 @@ impl AcpClient {
                     child,
                     protocol: crate::hermes_runtime::effective_protocol(agent),
                     capability_registry: CapabilityRegistry::default(),
-                    backend: handles.backend,
+                    backend,
                     crashed,
                     stopped: AtomicBool::new(false),
                     crashed_watch,

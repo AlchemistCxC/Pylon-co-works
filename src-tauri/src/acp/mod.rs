@@ -52,8 +52,6 @@ pub(crate) use turn_ledger::{
     TurnLedger, TurnTerminalCause,
 };
 pub(crate) mod wire_trace;
-#[cfg(test)]
-pub(crate) use engine::wait_prompt_with_cancel;
 pub(crate) use engine::{
     wait_prompt_with_recovery, CancelSettleResolution, PreparedRpc, PromptTimeoutKind,
     PromptWaitOutcome,

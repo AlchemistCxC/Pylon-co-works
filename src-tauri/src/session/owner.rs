@@ -21,15 +21,18 @@
 //!     （**禁止** fallback 到另一个 active runtime）；
 //!   - runtime 存在但无该 source 会话 → `SessionNotFound`。
 //!
-//! 本卡只交付契约与解析原语（+ 测试）；命令层逐卡迁移（OWNER-02 起）才切换路由，
-//! 在此之前整个契约 API 是"预备契约"——dead_code 属预期，模块级 allow 统一豁免。
-
-#![allow(dead_code)]
+//! 本卡交付契约与解析原语（+ 测试）。命令层迁移已落地（OWNER-02：control/
+//! create/prompt/persist/export 经 `AppState::resolve_owner_runtime` /
+//! `resolve_agent_runtime` 路由），原「预备契约」模块级 `allow(dead_code)` 已随之
+//! 摘除（#228）；仅存的两个测试专用原语（`with_profile`/`as_context_key`）逐项
+//! 挂 `#[cfg(test)]`，生产接线时摘除。
 
 use std::sync::Arc;
 
 use crate::error::PylonError;
-use crate::runtime::{AgentContextKey, AgentRuntime, AgentRuntimeManager};
+#[cfg(test)]
+use crate::runtime::AgentContextKey;
+use crate::runtime::{AgentRuntime, AgentRuntimeManager};
 
 /// SQLite durable identity. Unlike [`SessionOwner`], all three dimensions are
 /// required because persisted state must never be recovered by remote ACP id or
@@ -100,12 +103,21 @@ impl SessionOwner {
     }
 
     /// 携带声明维 profile_id（A 版不校验，仅保留在 OwnerKey 中）。
+    ///
+    /// 仅测试消费（#228）：生产的 profileId 声明维经 `DurableSessionOwner`
+    /// 携带并校验（session/create.rs）；生产需要 builder 形态时摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub(crate) fn with_profile(mut self, profile_id: Option<String>) -> Self {
         self.profile_id = profile_id;
         self
     }
 
     /// 降级为既有 AgentContextKey（owner → context 单向，禁止反方向补 agentId）。
+    ///
+    /// 仅测试消费（#228）：生产路由直接走 `resolve_owner_runtime`/
+    /// `resolve_agent_runtime`，无需经 context key 互转；生产互转需求出现时
+    /// 摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub(crate) fn as_context_key(&self) -> AgentContextKey {
         AgentContextKey::new(self.agent_id.clone(), self.source.clone())
     }

@@ -1193,7 +1193,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         Duration::from_secs(first_token_timeout_secs),
         liveness_activity,
         move || async move {
-            // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
+            // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
             acp_for_cancel
                 .lock()
                 .await

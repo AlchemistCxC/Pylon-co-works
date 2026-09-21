@@ -36,9 +36,8 @@ pub(crate) struct TurnKey {
 /// snake_case wire code 供日志与诊断。
 ///
 /// 词表按 issue #99 验收枚举**完备定义**（含 writer/EOF/过载等传输侧终因）；
-/// 当前 prompt 路径直接构造其中一部分，其余由测试构造锁定语义、供 #97/#98
-/// 消费——与 engine.rs 的 `#![allow(dead_code)]` 同一先例。
-#[allow(dead_code)]
+/// 生产 prompt 路径当前直接构造其中一部分。尚未接线的变体逐项挂
+/// `#[allow(dead_code)]`（预留，含摘除条件），不做模块/块级豁免。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TurnTerminalCause {
@@ -53,20 +52,45 @@ pub(crate) enum TurnTerminalCause {
     /// agent 达到最大回合数（stopReason=max_turn_requests）。
     MaxTurn,
     /// 首 token 超时（判死后触发 cancel）。
+    ///
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：判死类别现经 settle
+    /// detail 编码（`triggered_by:first-token`），未落为独立终因；接线为
+    /// 细粒度终因或词表收敛裁除时摘除。
+    #[allow(dead_code)] // 预留：细粒度超时终因接线或词表收敛时摘除
     FirstTokenTimeout,
     /// 活动后闲置超时（判死后触发 cancel）。
+    ///
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：判死类别现经 settle
+    /// detail 编码（`triggered_by:idle`），未落为独立终因；接线为
+    /// 细粒度终因或词表收敛裁除时摘除。
+    #[allow(dead_code)] // 预留：细粒度超时终因接线或词表收敛时摘除
     IdleTimeout,
     /// cancel 已发出但 settle 窗口内未收到终态。
     CancelSettleTimeout,
     /// stdin 写超时（agent 存活但不读 stdin）。
+    ///
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
+    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
+    /// 收敛裁除时摘除。
+    #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
     WriterTimeout,
     /// stdin 写失败（EPIPE 等）。
+    ///
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
+    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
+    /// 收敛裁除时摘除。
+    #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
     WriterFailed,
     /// 连接关闭 / EOF / 引擎任务消失。
     ConnectionLost,
     /// 协议错误（畸形响应、未知 stopReason、RPC error）。
     ProtocolError,
     /// 入站过载：spill 溢出后以显式 gap 终止连接。
+    ///
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：过载崩溃现以
+    /// `CrashReason::Overloaded` 广播收敛，turn 结算尚未映射 Overloaded；
+    /// 接线或词表收敛裁除时摘除。
+    #[allow(dead_code)] // 预留：过载结算映射到账本终因时摘除
     Overloaded,
 }
 
@@ -108,8 +132,6 @@ pub(crate) enum EmptyTurnCause {
 }
 
 /// turn 生命周期阶段（issue #99 建议语义：Prompting → Streaming → Settling → 终态）。
-/// `Settling` 为语义完备性保留（cancel 已发出的中间态由超时路径隐式跨越）。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TurnPhase {
@@ -118,6 +140,10 @@ pub(crate) enum TurnPhase {
     /// 已收到本回合首个 live 活动（文本/思考/工具）。
     Streaming,
     /// 终态已判 waiting settle（cancel 已发出）。
+    ///
+    /// 预留（issue #99 语义完备性）：当前 cancel 已发出的中间态由超时路径
+    /// 隐式跨越（settle 直接 Terminal）；超时路径显式进入 Settling 时摘除。
+    #[allow(dead_code)] // 预留：超时路径显式建模 Settling 中间态时摘除
     Settling,
     /// 已收敛到唯一终态。
     Terminal,
@@ -196,21 +222,23 @@ pub(crate) enum SettleOutcome {
 /// 内部为 `Mutex<HashMap<TurnKey, TurnRecord>>`；所有操作锁内完成、锁外返回
 /// clone，避免把账本锁跨越 await（与 runtime.rs 锁序纪律一致）。
 /// 内存上界（评审 E8）：settle 内建每会话终态保留裁剪，`drop_generation`
-/// 随代际退出收敛；`release`/`late_terminal_events` 为诊断辅助面。
-#[allow(dead_code)]
+/// 随代际退出收敛；`late_terminal_events` 为诊断计数（读取面见其方法文档）。
 #[derive(Debug, Default)]
 pub(crate) struct TurnLedger {
     records: Mutex<HashMap<TurnKey, TurnRecord>>,
     late_terminal_events: AtomicU64,
 }
 
-#[allow(dead_code)]
 impl TurnLedger {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
 
     /// 迟到终态计数（诊断：任何 >0 都意味着竞态路径被 CAS 拦截过）。
+    ///
+    /// 仅测试消费（#228）：生产诊断出口（冷挂载快照/日志）尚未读取该计数，
+    /// 接入时摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub(crate) fn late_terminal_events(&self) -> u64 {
         self.late_terminal_events.load(Ordering::Relaxed)
     }
@@ -238,6 +266,11 @@ impl TurnLedger {
 
     /// 推进阶段。Streaming/Settling 只能向前，不能从终态回退；未知 turn 静默
     /// 忽略（通知路径可能晚于终态清理到达）。
+    ///
+    /// 仅测试消费（#228）：生产 phase 推进走会话作用域的
+    /// `note_session_activity`（dispatcher 不持有 turn_id）；持有 turn_id 的
+    /// 生产调用方出现时摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub(crate) fn advance(&self, key: &TurnKey, phase: TurnPhase) {
         let mut records = self.lock();
         if let Some(record) = records.get_mut(key) {
@@ -255,7 +288,7 @@ impl TurnLedger {
     /// 会话作用域的活动推进（dispatcher 用：不持有 turn_id，命中该会话在途的
     /// 唯一 turn）——刷新 ingress cursor / 文本与工具标志，并把阶段推进到
     /// Streaming。多活跃 turn（理论竞态）时取 turn_id 最小者，与
-    /// `settle_by_session`/`active_snapshot` 的选择语义一致（评审 E9）。
+    /// `settle_by_session` 的选择语义一致（评审 E9）。
     /// 返回是否命中在途 turn（false = 回合未登记或已终态，迟到活动只算诊断）。
     pub(crate) fn note_session_activity(
         &self,
@@ -391,6 +424,10 @@ impl TurnLedger {
     /// prompt_gate 保证同一实例同一时刻至多一个 prompt，因此会话三元组至多
     /// 命中一个未终态 turn；若存在多个（理论竞态），取 turn_id 最小者结算，
     /// 其余留给显式 key 调用收敛。
+    ///
+    /// 仅测试消费（#228）：生产结算路径（session/prompt）持完整 `TurnKey`
+    /// 直接走 `settle`；无 key 的生产结算方出现时摘除 `#[cfg(test)]`。
+    #[cfg(test)]
     pub(crate) fn settle_by_session(
         &self,
         local_session_id: &str,
@@ -421,26 +458,6 @@ impl TurnLedger {
     /// 快照：指定 turn 的当前记录（冷挂载/诊断只读投影）。
     pub(crate) fn snapshot(&self, key: &TurnKey) -> Option<TurnRecord> {
         self.lock().get(key).cloned()
-    }
-
-    /// 快照：某会话当前在途（未终态）turn。
-    pub(crate) fn active_snapshot(
-        &self,
-        local_session_id: &str,
-        remote_session_id: &str,
-        generation: u64,
-    ) -> Option<TurnRecord> {
-        let records = self.lock();
-        records
-            .values()
-            .filter(|record| {
-                record.terminal.is_none()
-                    && record.key.local_session_id == local_session_id
-                    && record.key.remote_session_id == remote_session_id
-                    && record.key.generation == generation
-            })
-            .cloned()
-            .min_by_key(|record| record.key.turn_id)
     }
 
     /// 快照：某会话「在途优先、否则最近终态」的单条 turn 记录（冷挂载数据面）。
@@ -481,15 +498,6 @@ impl TurnLedger {
                 })
                 .map(|record| (*record).clone()),
         }
-    }
-
-    /// 释放单个 turn 条目（终态发布完成后的生命周期收敛点）。
-    ///
-    /// 运行路径的常规收敛走 `settle` 内建的每会话终态保留裁剪与
-    /// `drop_generation`（评审 E8：保留上界，不再依赖显式调用）。
-    #[allow(dead_code)]
-    pub(crate) fn release(&self, key: &TurnKey) {
-        self.lock().remove(key);
     }
 
     /// generation 硬隔离清理：客户端替换后旧代际条目整体收敛。

@@ -446,7 +446,7 @@ async fn timeout_sends_cancel_and_waits_for_final_response() {
     let cancel_called = Arc::new(AtomicBool::new(false));
     let cancel_called_for_task = cancel_called.clone();
 
-    let outcome = wait_prompt_with_cancel(
+    let outcome = wait_prompt_with_recovery(
         &mut rx,
         std::time::Duration::from_millis(200),
         std::time::Duration::from_millis(10),
@@ -457,6 +457,7 @@ async fn timeout_sends_cancel_and_waits_for_final_response() {
             tx.send(response())
                 .map_err(|_| "receiver closed".to_string())
         },
+        || async {},
     )
     .await;
 
@@ -520,7 +521,7 @@ async fn response_before_timeout_does_not_send_cancel() {
     let cancel_called = Arc::new(AtomicBool::new(false));
     let cancel_called_for_task = cancel_called.clone();
 
-    let outcome = wait_prompt_with_cancel(
+    let outcome = wait_prompt_with_recovery(
         &mut rx,
         std::time::Duration::from_millis(10),
         std::time::Duration::from_secs(1),
@@ -530,6 +531,7 @@ async fn response_before_timeout_does_not_send_cancel() {
             cancel_called_for_task.store(true, Ordering::SeqCst);
             Ok(())
         },
+        || async {},
     )
     .await;
 
@@ -540,7 +542,7 @@ async fn response_before_timeout_does_not_send_cancel() {
 #[tokio::test]
 async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
     let (_tx, mut rx) = tokio::sync::oneshot::channel();
-    let wait = wait_prompt_with_cancel(
+    let wait = wait_prompt_with_recovery(
         &mut rx,
         std::time::Duration::from_millis(5),
         std::time::Duration::from_millis(20),
@@ -549,6 +551,7 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         // Returning now on every poll models an indefinitely active turn.
         || Some(std::time::Instant::now()),
         || async { Ok(()) },
+        || async {},
     );
 
     // The whole turn must remain alive despite prompt_timeout being shorter than
@@ -1221,7 +1224,7 @@ async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response()
         .expect("prompt must serialize");
     let request_id = rpc.id;
     let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
-    let outcome = wait_prompt_with_cancel(
+    let outcome = wait_prompt_with_recovery(
         &mut response_rx,
         std::time::Duration::from_millis(200),
         std::time::Duration::from_millis(20),
@@ -1233,6 +1236,7 @@ async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response()
                 .await
                 .map_err(|error| error.to_string())
         },
+        || async {},
     )
     .await;
     assert!(matches!(
@@ -1368,7 +1372,7 @@ async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
         )
         .expect("prompt must serialize");
     let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
-    let outcome = wait_prompt_with_cancel(
+    let outcome = wait_prompt_with_recovery(
         &mut response_rx,
         std::time::Duration::from_millis(200),
         std::time::Duration::from_millis(20),
@@ -1380,6 +1384,7 @@ async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
                 .await
                 .map_err(|error| error.to_string())
         },
+        || async {},
     )
     .await;
     match outcome {
