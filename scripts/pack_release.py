@@ -50,7 +50,11 @@ for _stream in (sys.stdout, sys.stderr):
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DIR = SCRIPT_DIR.parent
 SRC_TAURI_DIR = REPO_DIR / "src-tauri"
-RELEASE_DIR = SRC_TAURI_DIR / "target" / "release"
+# #228 发行实践：G 盘满时本仓纪律是 CARGO_TARGET_DIR 落 D 盘（见 .agents/L.md）。
+# cargo 与 tauri CLI 尊重该环境变量，本脚本随之从同源读取产物目录，保证
+# 「构建指向哪、打包就从哪收」；未设置时维持默认 src-tauri/target。
+_TARGET_ROOT = Path(os.environ.get("CARGO_TARGET_DIR", SRC_TAURI_DIR / "target"))
+RELEASE_DIR = _TARGET_ROOT / "release"
 TEMPLATE_DIR = REPO_DIR / "resources" / "release"
 HERMES_RUNTIME_DIR = SRC_TAURI_DIR / "resources" / "runtime"
 HERMES_RUNTIME_TREE = HERMES_RUNTIME_DIR / "git"
@@ -62,7 +66,8 @@ DETECT_EXE_NAME = "pylon-detect.exe"
 # workspace），release 产物落在自己的 target/ 下；包内与 README 同级放在 tools/ 里，
 # 与其它随包脚本（install-webview2.bat 等）并列。
 MCP_DIR = REPO_DIR / "tools" / "webview2-mcp"
-MCP_RELEASE_DIR = MCP_DIR / "target" / "release"
+# 独立 crate 不属 workspace：CARGO_TARGET_DIR 对它同样生效（ cargo 按调用进程环境），与上面同源。
+MCP_RELEASE_DIR = Path(os.environ.get("CARGO_TARGET_DIR", MCP_DIR / "target")) / "release"
 MCP_EXE_NAME = "pylon-webview2-mcp.exe"
 MCP_PACKAGE_DIR = "tools/webview2-mcp"
 TOP_DIR_PATTERN = re.compile(r"^pylon-[^/\\]+-win64/?$")
