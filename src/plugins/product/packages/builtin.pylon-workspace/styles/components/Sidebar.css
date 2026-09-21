@@ -247,7 +247,13 @@
 /* 时间与操作钮共用一个流内格子（与组头同一手法）：默认只显示时间，悬停/聚焦时操作钮
    淡入顶替。若让四个操作钮常驻占宽（84px），单行会话名会被挤成「sessio…」。 */
 .session-tail { position:relative; flex:0 0 auto; display:grid; place-items:center end; min-width:22px; }
-.session-meta { grid-area:1/1; font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
+/* 时间戳**恒为 pointer-events:none**，不是可省的卫生项：opacity<1（含淡出后的 0）会创建
+   stacking context，按规范画进 positioned 层（paint step 8），高于普通 in-flow grid item
+   （step 5）——交叉淡出期间淡出的 meta 整层压住 DOM 靠后的 .session-actions，透明照吃
+   点击，齿轮（会话设置）「点了没反应」（issue #204①，实机 elementsFromPoint 栈顶即
+   .session-meta）。DOM 顺序救不了这个布局，淡出侧必须自己弃权；一条基础规则同时盖住
+   hover 态、@media (hover:none) 分支与 120ms 过渡中间态。 */
+.session-meta { grid-area:1/1; pointer-events:none; font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); transition:opacity var(--motion-fast) var(--ease-standard); }
 .session-actions { grid-area:1/1; display:flex; align-items:center; gap:2px; opacity:0; visibility:hidden; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard), visibility 0s linear var(--motion-fast); }
 /* 门控必须落在**容器**上：opacity 作用于整个子树，只把按钮自己的 opacity 提上去，
    依然被容器的 opacity:0 整体罩住——这就是「会话设置不可见」的根因（按钮自己的
