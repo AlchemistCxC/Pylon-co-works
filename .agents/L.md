@@ -399,3 +399,12 @@
 **工具链新增前置**：开发机开工时**没有** `wasm32-unknown-unknown` target 与 `wasm-pack`，已补（rustup target add；wasm-pack 0.14.0 装入 `$CARGO_HOME/bin`）。CI 侧是否需同样预装见 spec「未决问题 1」。
 
 **与他域的交接（开工后观测到 #217 正在同一工作树施工）**：我在 04:01 观测到 `src-tauri/src/session/{model.rs,prompt.rs}` 正在被 #217 改写（263 行新增，纯追加、未被我的 `cargo fmt --all` 改动）。**我全程不碰这三个文件与 `runtime.rs`**；我的 `src-tauri/src/session/event_repo.rs` 改动与本域之外的 Rust 侧不交叉。**两处声明重叠，需留意**：`docs/说明书/Pylon-项目架构参考.md` 与 `.agents/records/`（#217 也声明了这两处）——我只在我自己的记录文件与说明书「前端计算核」一节落笔，不删改 #217 的活性段落。另：`src-tauri/Cargo.lock` 我因新增依赖而改写，若 #217 也加依赖，合并时按「两边都保留」处理。
+
+**范围扩至 WP2–WP4 + 旧实现退役（2026-09-21 11 起）**：#217 已自行提交（`22b57d0e`/`d6806da7`/`516954ee`）并从本文件移除其条目，工作树不再有他人在途改动，冲突面消失。新增文件域：
+
+- 新增 crate/模块：`src-tauri/pylon-markdown/**`（WP4，含 `gen/` 资产生成器与 `parity/` 差分工具）、`src-tauri/pylon-compute/src/{events,projector,streaming}/`
+- 前端计算核消费者：`src/domains/workbench/**`、`src/renderers/solid-workbench/**`、`src/components/chat/**`、`src/sheets/agent-workbench/**`、`src/infrastructure/compute/**`
+- 门禁与基准：`scripts/{build-wasm.mjs,check-bundle-size.mjs,bench-compute-boundary.mts,audit-maintenance.mts}`、`.github/workflows/ci.yml`、`package.json`、`tsconfig.json`、`eslint.config.js`、`vitest.config.ts`
+- 文档：`.agents/records/220-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`
+
+**仍未取到的证据**：① `check:all` 全绿——本机 `check:rust` 需编译主 crate，而 G: 盘曾 100% 满（我已清 `target/debug/incremental` 腾出约 7 GB），CI 侧 rust-test/rust-shadow 当时仍 pending；② 实机（webview2-mcp）性能前后对比未做，目前只有 mock 基准数字。`docs/说明书/Pylon-项目架构参考.md` 的 WASM 一节**仍未加**——该文件 #217 也声明过，请其确认归属后补，我不擅自动它。
