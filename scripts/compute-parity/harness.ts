@@ -33,13 +33,8 @@ export interface CaseSpec<In> {
 export type PairFn<In, Out> = (input: In) => Out | Promise<Out>
 
 export type Domain =
-  | 'canonical'
-  | 'events'
-  | 'projector'
   | 'streaming-split'
   | 'streaming-budget'
-  | 'markdown-parse'
-  | 'markdown-highlight'
 
 export interface PairSpec<In, Out> {
   /** wasm 出口名（与 `#[wasm_bindgen(js_name)]` 一致）。 */

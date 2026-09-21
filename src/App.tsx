@@ -32,7 +32,6 @@ import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
-import { whenProjectorComputeReady } from './infrastructure/compute/projectorCompute'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
@@ -211,11 +210,6 @@ export default function App() {
       hydrateDomains: async () => {
         await hydrateIdentityAndWorkspace(consumeLegacyProfilePayload())
       },
-      // #220：投影核的消费点是同步的（乐观发送 / session response / refresh 兜底折叠），
-      // 浏览器宿主的 wasm 又是异步初始化的 ⇒ 必须在任何 sheet 绑定之前收敛。
-      // 只预热投影核：流式核由渲染器 suite 的 prepare 负责，markdown 消费点本就是
-      // 异步 Promise，都不该为它们拖慢启动。
-      warmComputeCores: () => whenProjectorComputeReady(),
       fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => {
         applyAgentInstancesThroughPort(getPluginServiceRegistry(), list)

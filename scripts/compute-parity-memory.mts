@@ -28,7 +28,7 @@ function nodeProbe(): import('./compute-parity/harness.ts').MemoryProbe {
   const host = globalThis as Record<string, unknown>
   const linearMemory = (): Record<string, number> => {
     const out: Record<string, number> = {}
-    for (const name of ['pylon-compute', 'pylon-markdown']) {
+    for (const name of ['pylon-compute']) {
       const key = `__${name.replace('-', '_')}_wasm_module__memory`
       const memory = host[key]
       if (memory instanceof WebAssembly.Memory) out[name] = memory.buffer.byteLength
@@ -58,7 +58,7 @@ if (uncovered.length > 0) {
 const probe = nodeProbe()
 const before = probe.linearMemory()
 console.log(`内存对照（scale=${scale}，保留增量取 ${repeats} 次调用的平均）`)
-console.log(`装载后线性内存：${Object.entries(before).map(([name, size]) => `${name} ${(size / 1024 / 1024).toFixed(2)}MiB`).join('，')}`)
+console.log(`装载后线性内存：${Object.entries(before).map(([name, size]) => `${name} ${(size / 1024 / 1024).toFixed(2)}MiB`).join('，') || '（未装载）'}`)
 
 const rows = await runMemory(suites, { scale, probe, repeats })
 console.log(`\n${formatMemoryTable(rows, probe)}`)

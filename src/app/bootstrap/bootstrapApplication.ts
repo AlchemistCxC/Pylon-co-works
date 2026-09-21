@@ -39,15 +39,6 @@ export interface BootstrapDeps {
   applyAgentStatus?: (payload: unknown) => void
   /** 注册全局 controller/listener，返回 dispose handle（阶段 2.8） */
   registerListeners: () => Promise<() => void>
-  /**
-   * 预热前端计算核（#220）：投影核的调用点是**同步**的（乐观发送、session response、
-   * refresh 兜底折叠），而 wasm 在浏览器宿主是异步初始化的。不在这里收敛，首次开
-   * agent sheet 就会撞上「核未就绪」（真机验收记录 §25.2）。
-   *
-   * 只装**同步消费方需要**的核：流式核由渲染器 suite 的 `prepare` 负责，markdown 核
-   * 的消费点本就是异步 Promise，都不该拖慢启动。失败不静默：bootstrap 走 degraded。
-   */
-  warmComputeCores?: () => Promise<void>
   reportError: (action: string, error: unknown) => void
   /** Optional success seam used to resolve a matching active notification. */
   resolveError?: (action: string) => void
@@ -58,8 +49,6 @@ export interface BootstrapDeps {
 
 export async function bootstrapApplication(deps: BootstrapDeps): Promise<BootstrapResult> {
   deps.setStatus('loading')
-  // 与 hydrate 并行预热，但**必须在 bootstrap 继续之前落定**（见 `warmComputeCores`）。
-  const warmComputeCores = Promise.resolve(deps.warmComputeCores?.())
   try {
     await deps.hydrateDomains()
     if (deps.cancelled()) return 'cancelled'
@@ -70,14 +59,6 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
     if (deps.cancelled()) return 'cancelled'
     deps.reportError('恢复本地数据', error)
     deps.setStatus('degraded', '本地数据恢复失败')
-    return 'degraded'
-  }
-  try {
-    await warmComputeCores
-  } catch (error) {
-    if (deps.cancelled()) return 'cancelled'
-    deps.reportError('装载前端计算核', error)
-    deps.setStatus('degraded', '前端计算核装载失败')
     return 'degraded'
   }
 

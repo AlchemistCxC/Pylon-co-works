@@ -3,7 +3,6 @@ import type { RenderAppearanceSnapshot, RenderNodeSnapshot, RenderSurface } from
 import type { RendererPrepareContext, WorkbenchHostPort, WorkbenchMountInput, WorkbenchRendererFactory, WorkbenchRendererInstance } from './workbenchContracts.ts'
 import { loadSolidWorkbench } from './loadSolidWorkbench.ts'
 import { whenStreamingComputeReady } from '../../infrastructure/compute/streamingCompute.ts'
-import { whenProjectorComputeReady } from '../../infrastructure/compute/projectorCompute.ts'
 import { loadBuiltinSolidContentSlot } from './loadBuiltinSolidContentSlot.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS, SHARED_TOOL_SETTINGS_SCHEMA } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
@@ -115,10 +114,6 @@ const factory: WorkbenchRendererFactory = Object.freeze({
     // 就绪前调用会显式报错而不是静默降级——因此必须在首次渲染前等它。
     // `prepare` 是宿主给的异步前置，落这里最合适，且不会把 `mount` 变成异步。
     await whenStreamingComputeReady()
-    // #220：投影核同址等待。bootstrap 已预热过一次（App.tsx 的 warmComputeCores），
-    // 这里再等是**渲染器自足**：本 suite 消费投影文档，不该依赖宿主一定先预热过。
-    // 已就绪时是零成本的空 resolved。
-    await whenProjectorComputeReady()
     return {
       mount(container: HTMLElement, input: WorkbenchMountInput, host: WorkbenchHostPort): WorkbenchRendererInstance {
         return module.mountSolidWorkbenchFromHostPort({ host: container, input, hostPort: host, activation: context.activation })

@@ -1,9 +1,23 @@
-# compute-parity · 计算纯函数 TS↔wasm 对照脚手架
+# compute-parity · wasm 计算出口的 TS↔wasm 对照脚手架
 
-issue #220（计算核 wasm 化）的配套基建：对 wasm 计算核的**每一个计算出口**，
-用迁移前/保留的 TS 原生实现做同输入对照——parity（两侧归一后逐字节一致）、
-性能（同 harness 中位数比值）与内存（每调用足迹 + 核线性内存高水位）共用同一份
-套件定义。
+issue #220 的配套基建：对**仍在 wasm 里的计算出口**做同输入对照——parity（两侧归一后逐字节
+一致）、性能（同 harness 中位数比值）、内存（核线性高水位 + 每调用宿主保留量）共用同一份套件定义。
+
+## 现行 scope（2026-09-21 收窄，ADR-0018 修订 1）
+
+**只对流式两项**：`pylon-compute` 的切分（`splitStreamingMarkdown*` /
+`findLastStableBlockBoundary` / `splitOpenCodeFenceTail`）与揭示预算引擎
+（`StreamingRevealEngine`）。
+
+已下线的比较面：
+
+| 域 | 原因 |
+| --- | --- |
+| markdown-parse / markdown-highlight | TS 基线退役：生产**流式形状**实测 wasm 快 **12–25×**，比较已无必要；markdown 回归改由产品路径快照锁守（`markdownComputeParity.test.ts` 的 markdown 半） |
+| canonical / events / projector | **回退 TS**：投影的内存是「文档两份」的结构成本（4.4–6.1×）、速度为负或至多打平；events 的 wasm 出口比它要替换的 TS 慢 9–71× 且从未接线。判决见 ADR-0018 修订 1 |
+
+保留 wasm 的判据收敛成一句：**同形状对照里真的赢** —— markdown 流式形 12–25×、
+流式切分大输入 2–3×、揭示预算 burst 档 0.6–0.9×。
 
 ## 跑法
 
@@ -44,22 +58,18 @@ NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 | `index.ts` | wasm 装载上下文、全套件注册表、**覆盖门**（REQUIRED_EXPORTS 必须全部有对照 pair） |
 | `../compute-parity-{bench,memory}.mts` | 两个跑器入口（性能 / 内存），共用上面这套套件 |
 | `baselines/` | TS 侧基线实现（冻结/雕刻，见下）——**不在任何生产路径，不 import 进 src** |
-| `fixtures/` | PYPB v1 帧编码器、events 语料、workbench envelope 生成器、切分/markdown/高亮语料 |
-| `suites/` | 五个域套件：canonical / events / projector / streaming-split / streaming-budget（markdown 两个套件已随 TS 基线下线，见下「已下线的比较面」） |
+| `fixtures/` | 切分语料（`corpora.ts`） |
+| `suites/` | 两个域套件：`streaming-split` / `streaming-budget` |
 
-## TS 基线的两种来源（baselines/ 头注逐一声明出处）
+## TS 基线的两种来源（`baselines/` 头注逐一声明出处）
 
 1. **冻结整文件**（逐字节等于迁移前，只改 import 路径）：
-   - `oldWorkbenchProjector.ts` ← `f784dc98:src/domains/workbench/__baselineOldProjector.ts`（原样取自 `76cbc819^`）
    - `oldStreamingMarkdownSplit.ts` ← `76cbc819^:src/renderers/solid-workbench/chat/streamingMarkdownSplit.ts`
 2. **雕刻**（纯数学函数逐字拷贝 + 组装方式对齐 Rust 权威移植）：
-   - `oldRevealEngine.ts` ← 旧 `streamingDisplayScheduler.ts` 的预算数学（advancePrefix/revealBudget/D1 摊分）+ `pylon-compute/src/streaming/budget.rs` 的状态机形状
-   - `oldMarkdownParsePipeline.ts` ← 旧 `markdownRenderModel.ts` 的 unified/remark 解析核
-   - `oldHighlightEngine.ts` ← 旧 `codeHighlight.ts` 的 starry-night 装配 + markdownComputeParity 的 token 扁平口径
-   - `oldCoverageMerge.ts` ← 旧投影核的 coverage 区间合并
+   - `oldRevealEngine.ts` ← 旧 `streamingDisplayScheduler.ts` 的预算数学
+     （advancePrefix / revealBudget / D1 摊分）+ `pylon-compute/src/streaming/budget.rs` 的状态机形状
 
-事件域与 canonical 域、part 级投影原语的 TS 实现仍在生产树上
-（`src/domains/events/**`、`contentPartSchema.ts`），套件直接 import 活实现。
+两者都是**回退点**：流式若将来也回退 TS，基线即现成的恢复源。
 
 ## 场景维度
 
@@ -70,11 +80,9 @@ NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 
 ## 已过审差异（known-diff，不算红）
 
-| pair · case | 差异 | 出处 |
-|---|---|---|
-| splitStreamingMarkdown(prefix-scan) · growing-source | 前缀恰以孤立 UTF-16 高代理结尾时，Rust 字符串无法持有，serde 编组落成 U+FFFD；TS 原样保留。UTF-8/UTF-16 编组层固有损耗，非切分逻辑分歧 | 本脚手架差分发现，随套件注释过审 |
+`splitStreamingMarkdown(prefix-scan) · growing-source` —— 见下「已知差异」。
 
-新增已过审差异必须走 parity 门禁流程（更新 parity-report 清单或在此表登记理由），
+新增已过审差异必须走 parity 门禁流程（在套件里登记 `knownDivergences` 并写明理由），
 不许静默加进 `knownDivergences`。
 
 **边界归一口径**：`harness.ts` 的 `normalizeBoundaryMaps` 把 serde_wasm_bindgen 编成
@@ -85,33 +93,16 @@ JS `Map` 的 BTreeMap 深转回普通对象（与 `pylon-markdown/src/wasm_exit.
 
 1. wasm 计算核新增出口 → 在 `index.ts` 的 `REQUIRED_EXPORTS` 登记 → 覆盖门变红 →
    补对应 suite pair（TS 侧找迁移前实现或树上活实现，出处写进头注）。
-2. 编组变体出口（`*Json`）与诊断出口（`markdownEngineVersion`）在 `EXEMPT_EXPORTS`。
-3. 改帧格式：`fixtures/eventsFrame.ts`（PYPB v1）与生产 parity 测试要一起改。
+2. 编组变体出口（`*Json`）在 `EXEMPT_EXPORTS`（现为空——流式的导出都是结构化返回）。
 
-## 口径提醒：events 域尚未接线
+## 已知差异
 
-`events` 域的批量出口（`mergeAdjacentDeltaChunks` / `canonicalBatchSpanOf` /
-`projectCanonicalMessages` / `projectToolProjectionsFromBatch` …）**在生产里还没接线** ——
-`src/infrastructure/events/canonicalEventSink.ts` 与 `canonicalEventBatch.ts` 仍 import TS 实现。
-所以本域比值量的是**待接线路径**，不代表当前生产收益/成本。
-
-另：这些 pair 的 wasm 侧在计时 lambda 内调用 `encodeEventsFrame`，即**宿主帧编码也计入
-「wasm 侧」**。该编码器已于 2026-09-21 按生产技术重写（`encodeInto` + 分块池 + Int32 槽表 +
-i64 拆字，见其头注），并做过**新旧逐字节对照（17 帧 0 差异）**；但读数时仍应记得这一段不是计算核。
-
-## 已下线的比较面（2026-09-21 裁决）
-
-`parseMarkdown` / `highlightBlock` / `scopeForLanguage` 的 TS 基线（`baselines/oldMarkdownParsePipeline.ts`、
-`oldHighlightEngine.ts`）与两个 markdown 套件**已下线**，理由与取回办法写在 `index.ts` 的
-`EXEMPT_EXPORTS` 处。一句话：生产**流式**形状实测 wasm 快 **12–25×**（一次完整流式回合
-10.94ms → 0.39ms；每帧 TS ~340µs vs wasm ~12µs），比较已无必要，且旧实现本就不在生产路径。
-
-**markdown 仍然受门禁**，只是换了形式：`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts`
-的 markdown 半是「**产品路径 vs 快照**」（`src-tauri/pylon-markdown/parity/rust-snapshot.json`），
-不依赖 TS 基线 —— 删它会削弱门禁，故未动。
+`splitStreamingMarkdown(prefix-scan) · growing-source`：前缀恰以孤立 UTF-16 高代理结尾时，
+Rust 字符串无法持有、serde 编组落成 U+FFFD，TS 原样保留。UTF-8/UTF-16 编组层固有损耗，
+非切分逻辑分歧（`harness.ts` 的 `normalizeBoundaryMaps` 与之同语义）。
 
 ## 与既有 parity 门禁的关系
 
-`src/**/__tests__/*Parity*.test.ts` 五个门禁是**产品路径**的行为锁（快照/corpus
-驱动）；本脚手架是**计算核面**的差分基建：覆盖全部出口、可配维度、性能对照、
-冻结 TS 基线集中管理。两边互不替代。
+`src/**/__tests__/*Parity*.test.ts` 剩下的门禁是**产品路径**的行为锁（快照 / corpus 驱动），
+例如 `markdownComputeParity.test.ts` 的 markdown 半（产品路径 vs `rust-snapshot.json`）；
+本脚手架是**计算核面**的差分基建：覆盖全部出口、可配维度、三跑器共用一套套件。两边互不替代。

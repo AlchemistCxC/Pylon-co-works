@@ -3230,11 +3230,8 @@ dependencies = [
 name = "pylon-compute"
 version = "0.2.4-Rev"
 dependencies = [
- "js-sys",
- "pylon-canonical-types",
  "serde",
  "serde-wasm-bindgen",
- "serde_json",
  "unicode-segmentation",
  "wasm-bindgen",
 ]

@@ -1396,3 +1396,54 @@ harness 会 `await` 而完全看不出来。
 第 28 节我说「抛开投影优势只在 markdown 解析那 10×」—— 口径偏低：那 10× 是**整篇**形状
 （且 TS 侧整篇读数抖动大，89–147ms）。按**生产实际形状**（流式短尾 + 逐帧增长）量，
 优势是 **12–25×**。结论方向不变、量级上调：markdown 是这次迁移里唯一「结构性、可替换」的赢。
+
+---
+
+## 31. 【结算】scope 收窄落地：wasm 只留 markdown + 流式，投影与 events 回退 TS
+
+仓库主 2026-09-21 裁决：「events 层和投影核回退吧，wasm 只留 markdown + streaming」。
+替代路线（换库 / 后端计算 / SAB 零拷贝）经评估均不成立，逐条理由见
+[ADR-0018 修订 1](../decisions/0018-frontend-compute-core-rust-wasm.md)「被否证的替代路线」。
+
+### 落地清单
+
+| 面 | 动作 |
+| --- | --- |
+| Rust | 删 `pylon-compute/src/{canonical.rs,events/**,projector/**}`（**约 9 千行**）；`lib.rs` 只留 `pub mod streaming` 并把 scope 依据写进头注；`Cargo.toml` 去掉 `pylon-canonical-types`（streaming 不用）、`serde_json`、`js-sys`（0 引用） |
+| 前端投影核 | `__baselineOldProjector.ts`（= `76cbc819^` 原实现）**扶正**为 `workbenchProjector.ts`（导出面逐项比对一致，可安全互换），冻结基线删除 |
+| 会话层 | `agentWorkbenchSession.ts`：去掉 `SessionProjector` 句柄与 `ensureProjector`；**`foldPage(envelopes, base?)` 走页级入口、新增 `foldEvent(envelope)` 走单事件归约器** —— 这个区分是承重的（页级入口为取工作数组所有权会复制整条 timeline，逐事件用它就是 #205 那个 Θ(N²)）；两处 `await whenProjectorComputeReady()` 与 `warmComputeCores` 机制一并撤除 |
+| 装载层 | 删 `projectorCompute.ts`(705 行)、`pylonCompute.ts`；`streamingCompute.ts` 保留 |
+| 门禁 | 删 `eventsComputeParity.test.ts`（**整文件都是 TS↔wasm 差分，无产品行为断言**，主体没了即无物可守）、`projectorComputeParity.test.ts`、`compute/__tests__/{projectorCompute,pylonCompute}.test.ts` |
+| 脚手架 | 删 canonical / events / projector 三套件 + `fixtures/{eventsFrame,eventsCorpus,envelopes}.ts` + `baselines/{oldWorkbenchProjector,oldCoverageMerge}.ts`；`index.ts` 改为只装流式出口（**不再装 2.87MB 的 markdown**）；`harness.ts` 的 `Domain` 收窄到两项 |
+| 基准脚本 | 删 `bench-{compute-boundary,ts-vs-wasm,probe,memory-hold,live-probe}.mts`（全是投影基准）；另删他人遗留的未跟踪 `scripts/tmp-220-probe.mts`（其 import 的模块已删，跑不起来） |
+| 预算 | `check-bundle-size.mjs` 的 wasm 预算按实产物重定标 **1,450,000 → 1,110,000**（否则这一档放空 50%） |
+
+### 被否决的替代路线（每条都量过，理由见 ADR）
+
+- **换高性能库**：慢的是数据模型与逐事件过界，库能碰的不到 15%。
+- **后端计算**：对 events 只是把 ~0.4% 单核成本从一处搬到另一处（且无内存收益可承诺）；对投影解决不了「文档两份」，还把同步折叠变异步。
+- **SAB 零拷贝**：可省的只有输入侧一次 memcpy，且 ∝ 字节 —— live 289B ≈ **0.1%**、冷页 ≈ **0.2%**；亏的是逐次调用固定开销（核外 ~9µs/次）。SAB 还要 COOP/COEP，换来的主要是「移出主线程」这个 UX 目标。
+- **live 折叠合批**：那是**语义边界**（历史 vs 现实），不是性能余地。
+
+### 证据
+
+- `bun run test` → **619 文件 / 4604 用例通过**，0 失败（收窄前 623/4698；差额是删掉的门禁文件与为其写的 2 条预热用例）
+- `bunx tsc -b` exit 0；`eslint src/` 0 error（仍只有既存那 1 条 warning）
+- parity 门禁：**98 项 ok 97 / known-diff 1 / mismatch 0**（收窄前 148；删掉三域 50 项）
+- `check:docs` / `check:deps` / `check:canonical-types`（「与 Rust 单源一致（22 项）」）/ `check:bundle` 全通过
+- `cargo test -p pylon-compute --lib` → **31 passed**（收窄前 181；删掉的都是被撤模块的测试）
+- wasm 产物：`pylon_compute_bg.wasm` **841,273 → 119,788 B**（gzip 307,257 → **53,238 B**）；
+  wasm 总 gzip **1,216,820 → 962,801 B（−254 KB ≈ −21%）**
+- `bun run build` 全流程通过（即生产构建在剥离后可用）
+
+### 保留的资产
+
+- **markdown 的产品路径快照锁**（`markdownComputeParity.test.ts` 的 markdown 半，不依赖 TS 基线）—— 那是门禁，未动。
+- **`check:csp`** 与那次 CSP P0 的修复 —— wasm 仍有 markdown 与流式两个产物，门禁继续有效。
+- **`pylon-canonical-types` 单源 + 代码生成** —— 与 wasm 无关，未受影响。
+- 差分脚手架本身（现只剩流式两项），及其「同形状、等量工作、可复现」的方法论。
+
+### 仍然没做的
+
+- **实机（webview2-mcp）复验本轮回退**：真机最后一次验收是 CSP 修复那一轮（§25），当时的读数（两个核 3.5MiB 线性、进程 WS 61.6MB）**已随回退失效**。回退后应当复验一次并更新内存读数——这需要重编 release + 换 `F:\A-I\Platform\Pylon` 的 exe。
+- **`docs/说明书/Pylon-项目架构参考.md` 的 WASM 一节**：仍未加（#217 也声明该文件，需其收工后补或仓库主指定归属）。
