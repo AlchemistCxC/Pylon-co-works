@@ -191,12 +191,13 @@ impl InstanceLifecycle {
 /// 运行期句柄：adapter（W4 route 分发用）+ cancel（stop/restart/remove 触发）
 /// + 后台任务（平台连接循环 + 退出收敛 watchdog）。
 pub(crate) struct InstanceRuntime {
-    /// W4 route 分发经它 deliver；W1 只登记不使用。
-    #[allow(dead_code)]
+    /// W4 route 分发经它 deliver；stop/finalize 摘注册（`notify_adapter_registry`）也用它。
     pub(crate) adapter: Arc<dyn PlatformAdapter>,
     pub(crate) cancel: CancellationToken,
-    /// W1 只负责取消/丢弃；W2 stop 收敛时 await join（含超时）。
-    #[allow(dead_code)]
+    /// 暂无消费点：stop 收敛现依赖 cancel + generation 校验的 finalize（见
+    /// `stop`/`finalize_runtime`），不经 join；JoinHandle drop 仅 detach 不取消任务，
+    /// 字段保留给未来带超时的 stop 收敛（await join）。
+    #[allow(dead_code)] // 预留：带超时的 stop 收敛（await join）落地时摘除
     pub(crate) join: JoinHandle<()>,
 }
 

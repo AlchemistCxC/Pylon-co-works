@@ -1537,6 +1537,7 @@ pub(crate) async fn browser_agent_click(
     }
 }
 
+/// tauri command 签名即 invoke 参数面（参数名 = wire 字段），不可收敛入参。
 #[allow(clippy::too_many_arguments)]
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_agent_type(
@@ -2045,6 +2046,7 @@ async fn scroll_impl(
     }
 }
 
+/// 与 browser_agent_emulate 命令的 invoke 参数面逐参对应（命令层透传），保持显式签名。
 #[allow(clippy::too_many_arguments)]
 async fn emulate_impl(
     state: tauri::State<'_, AppState>,

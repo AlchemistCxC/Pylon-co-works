@@ -168,6 +168,8 @@ pub(crate) fn mark_attached_if_current(
     Ok(true)
 }
 
+// clippy 2026-09-22：8 参均为独立 detach 判定/报告入参（runtime/source/peri_id/
+// 新旧 generation/reason/retryable/remove_mapping），语义互不分组，保持显式签名。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn mark_detached_if_current(
     runtime: &AgentRuntime,

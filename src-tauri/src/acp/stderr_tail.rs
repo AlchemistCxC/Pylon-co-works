@@ -66,7 +66,6 @@ impl StderrTail {
         }
     }
 
-    #[allow(dead_code)]
     pub fn mark(&self) -> u64 {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).next
     }
