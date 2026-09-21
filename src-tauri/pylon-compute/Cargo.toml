@@ -16,6 +16,8 @@ pylon-canonical-types = { path = "../pylon-canonical-types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 wasm-bindgen = "0.2"
+# 诊断时钟：wasm32 上 std::time::Instant 没有实现（会 panic），只能走 js_sys::Date。
+js-sys = "0.3"
 serde-wasm-bindgen = "0.6"
 # #220 WP3：D2（揭示计量按 UTF-16 单位且不劈字素）的命门。Rust 字符串是 UTF-8，
 # 而契约按 UTF-16 计量；`unicode-segmentation` 是 UAX#29 的参考实现，用来保证

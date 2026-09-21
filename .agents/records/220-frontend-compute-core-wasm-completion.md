@@ -329,3 +329,65 @@ parity 与行为测试，性能上尚未达到迁移前水平。**这是本轮�
 以下（要求每事件分配降一个数量级）与 ③ 把边界 185ms 压到接近 0（patch 真切片 + 结构化
 编组，不再每次 `document()` 全量 JSON）。两者都超出「一处微调」的量级，各自需要一轮
 独立改造 + parity 复验。护栏（2500ms 预算）在 CI 上仍会红，直到 ①+③ 落地。
+
+### 12. 性能调查定案：385ms 的完整分段（release wasm，20k 事件）
+
+用 `PylonProjector.foldPhases()`（新增的诊断出口：批量入口内 4 个时钟，把 decode / project /
+patch 序列化分开）与 `bench-ts-vs-wasm.mts` 的边界分段，把迁移后的耗时逐段量清：
+
+| 阶段 | ms | 占比 |
+| --- | --- | --- |
+| JS 帧编码 | 89 | 23% |
+| wasm decode | 9 | 2% |
+| **wasm project（折叠）** | **197** | **51%** |
+| patch 序列化 | 6 | 2% |
+| JS `JSON.parse(patch)` | 12 | 3% |
+| wasm `document()` | 23 | 6% |
+| JS `JSON.parse(doc)` | 14 | 4% |
+| `materializePage` | ~54 | 14% |
+| **迁移前 TS 全管线（同 harness）** | **25** | — |
+
+**这条调查推翻了我上一轮的两个猜测**：① 「patch 是 3.5MB、序列化贵」——**错**，patch 3.48MB
+但序列化只要 6ms；② 「边界（帧编码 + JSON 往返 + 物化）是大头」——只占 49%，而
+**Rust 折叠本体就是 51%**，是最大单项。
+
+再往折叠里切（native **release** 探针，20k 事件）：
+
+| 分段 | ms | 说明 |
+| --- | --- | --- |
+| 全量 `project_batch` | 132 | wasm 侧 197（wasm 比 native release 慢约 1.5×） |
+| 逐事件 `reduce_workbench_event` | 108 | 与批量几乎相同 ⇒ 没有批量级开销，纯按事件 |
+| 仅「建 timeline 条目 + 入表」 | 36 | 含探针自建 envelope 的开销，条目本身约 15 |
+| 含 `with_event` 信封复制 | 51 | ⇒ `with_event` 一项约 **+14.5ms** |
+| 仅文本抽取 | 20 | 含探针开销 |
+
+结论：折叠的时间**摊在按事件的分配上**，没有单点大头——`with_event` 的信封字段克隆（~15ms）、
+`timeline_entry` 的事件树克隆、`identity.to_value()` 建 Map + `provider_identity_key` 哈希、
+`text_from_parts` 建 String、`merge_reasoning_pair` 的 map 重建，各占几到二十毫秒。要把它从
+197ms 压到 ~30ms 以下需要**热路径不再用 `serde_json::Value` 造树**（① 的结构性改造），
+逐项微调凑不出来。
+
+### 13. 本轮落地的两处真实优化
+
+1. **JS 帧编码的字串池**：原来是 `const pool: number[]` + `for (const byte of bytes) pool.push(byte)`
+   ——一帧 5MB 就是 500 万次 JS 数组 push，外加一次 `Uint8Array.from(pool)` 的再遍历。
+   改为**分块 + 末尾一次 `set` 拼接**。实测编组 **119ms → 89ms**。
+2. **`std::time::Instant` 在 wasm32 上会 panic**（本 crate panic=abort，表现为
+   `RuntimeError: unreachable`）：阶段读数的时钟改为 `#[cfg(target_arch = "wasm32")] js_sys::Date::now()` /
+   非 wasm 用 std。**这条平台约束值得后来者记住**：计算核里任何「读时钟」都必须走 `js_sys`
+   或由 JS 传参（生产路径是后者，见 streaming 的 `tick(now)`）——与 dev-standards「计算核不读时钟」
+   是同一条约束的两面。
+
+### 14. 仍未达标（结论不变）
+
+同 harness：**TS 25ms vs wasm 385ms（15.4×）**。本轮把 415→385（-7%），量级未动。
+要真正收口，剩下的是**两件结构性改造**，各自需要一轮：
+
+- **① 折叠去 `Value`**（197ms 的主目标）：消息 content/parts、timeline 条目改定型结构体，
+  只在边界进出转 `Value`；`identity` 不建 Map、不哈希；`BTreeMap` 换有序 `Vec` + 二分。
+  预期把 197 → 40ms 量级。
+- **③ 边界**（其余 188ms）：帧编码 89（可用 `encodeInto` + 预分配池再压）、
+  `document()`+parse+`materializePage` 约 91（patch 真切片后免掉全量 document）、
+  patch+parse 18（patch 变薄后自然降）。
+
+护栏（2500ms）在 CI 上仍会红到 ①+③ 落地。

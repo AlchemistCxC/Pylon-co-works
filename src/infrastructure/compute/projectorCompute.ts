@@ -43,6 +43,11 @@ export interface PylonProjectorInstance {
   appendBatch(frame: Uint8Array): string
   /** 全量读数：返回 WorkbenchDocument JSON 文本（null 保真，JS 侧 JSON.parse）。 */
   document(): string
+  /**
+   * 诊断读数：上次批量入口的 decode / project / patch 序列化耗时（毫秒）。
+   * 只给性能调查与基准脚本用，生产路径不读——它不影响投影语义。
+   */
+  foldPhases(): string
 }
 
 interface ProjectorGlue {
@@ -120,12 +125,17 @@ export function resetProjectorBoundaryCrossings(): void {
  */
 export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[]): Uint8Array {
   const encoder = new TextEncoder()
-  const pool: number[] = []
+  // 字串池用**分块 + 末尾一次拼接**，不要用 `number[]` 逐字节 push：
+  // 一帧 5MB 就是 500 万次 JS 数组 push，外加一次 `Uint8Array.from(pool)` 的再遍历。
+  // 20k 事件的编组分段实测里，这两步占了绝大部分（见 `bench-ts-vs-wasm.mts`）。
+  const poolChunks: Uint8Array[] = []
+  let poolLength = 0
   const putString = (value: string | undefined): [number, number] => {
     if (value === undefined || value.length === 0) return [0, 0]
     const bytes = encoder.encode(value)
-    const offset = pool.length
-    for (const byte of bytes) pool.push(byte)
+    const offset = poolLength
+    poolChunks.push(bytes)
+    poolLength += bytes.length
     return [offset, bytes.length]
   }
 
@@ -204,15 +214,19 @@ export function encodeProjectorFrame(envelopes: readonly WorkbenchEventEnvelope[
     (total, item) => total + 24 + FRAME_PAIRS * 8 + (item.envelope.coverage !== undefined ? 16 : 0),
     0,
   )
-  const frame = new Uint8Array(14 + pool.length + eventSectionBytes)
+  const frame = new Uint8Array(14 + poolLength + eventSectionBytes)
   const view = new DataView(frame.buffer)
   frame.set([0x50, 0x59, 0x50, 0x42]) // "PYPB"
   view.setUint16(4, FRAME_VERSION, true)
   view.setUint32(6, encoded.length, true)
-  view.setUint32(10, pool.length, true)
-  frame.set(Uint8Array.from(pool), 14)
+  view.setUint32(10, poolLength, true)
+  for (let index = 0, at = 14; index < poolChunks.length; index += 1) {
+    const chunk = poolChunks[index]!
+    frame.set(chunk, at)
+    at += chunk.length
+  }
 
-  let cursor = 14 + pool.length
+  let cursor = 14 + poolLength
   for (const item of encoded) {
     view.setFloat64(cursor, item.envelope.sequence, true)
     view.setFloat64(cursor + 8, 0, true)
@@ -384,6 +398,9 @@ export function createProjector(sessionId: string): PylonProjectorInstance {
     document(): string {
       boundaryCrossings += 1
       return inner.document()
+    },
+    foldPhases(): string {
+      return inner.foldPhases()
     },
   }
 }

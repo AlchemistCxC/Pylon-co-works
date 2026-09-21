@@ -3550,9 +3550,41 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
 // ── wasm 薄壳（只做值/错误转换；可失败逻辑全在纯内层） ────────────────────────
 
 /// 工作台投影核实例：持有折叠状态，`append_batch` 按页合批消费二进制帧。
+/// 诊断用时钟（毫秒）。
+///
+/// **wasm32-unknown-unknown 上 `std::time::Instant::now()` 没有实现，会 panic**
+/// （本 crate 的 panic 策略是 abort，表现为 `RuntimeError: unreachable`）——这条
+/// 平台约束意味着计算核里任何「读时钟」的代码都必须走 `js_sys` 或由 JS 传参
+/// （后者是生产路径的做法，见 streaming 的 `tick(now)`）。此处只服务诊断读数。
+#[cfg(target_arch = "wasm32")]
+fn diag_now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn diag_now_ms() -> f64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
 #[wasm_bindgen]
 pub struct PylonProjector {
     document: WorkbenchDocument,
+    /// 上一次 `appendBatch` 的分段耗时（诊断读数，不参与投影语义；见 `foldPhases`）。
+    phases: FoldPhases,
+}
+
+/// `appendBatch` 各阶段的上次耗时（毫秒，f64 便于直接过界读）。
+///
+/// 存在理由是**可测量的性能调查**：整体一个数分不清「Rust 折叠慢」还是「边界编组贵」，
+/// 而这两者的修法完全不同。每次批量入口只取 4 个时钟，代价可忽略。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FoldPhases {
+    pub decode_ms: f64,
+    pub project_ms: f64,
+    pub patch_json_ms: f64,
 }
 
 #[wasm_bindgen]
@@ -3561,6 +3593,7 @@ impl PylonProjector {
     pub fn new(session_id: &str) -> PylonProjector {
         PylonProjector {
             document: create_workbench_document(session_id),
+            phases: FoldPhases::default(),
         }
     }
 
@@ -3568,10 +3601,31 @@ impl PylonProjector {
     /// 返回增量 patch（非全量 document）。
     #[wasm_bindgen(js_name = appendBatch)]
     pub fn append_batch(&mut self, frame: &[u8]) -> Result<String, JsError> {
+        let started = diag_now_ms();
         let envelopes = decode_frame(frame).map_err(|error| JsError::new(&error))?;
+        let after_decode = diag_now_ms();
         let patch =
             project_batch(&mut self.document, envelopes).map_err(|error| JsError::new(&error))?;
-        to_boundary_json(&patch)
+        let after_project = diag_now_ms();
+        let text = to_boundary_json(&patch)?;
+        let after_json = diag_now_ms();
+        self.phases = FoldPhases {
+            decode_ms: after_decode - started,
+            project_ms: after_project - after_decode,
+            patch_json_ms: after_json - after_project,
+        };
+        Ok(text)
+    }
+
+    /// 诊断读数：上一次批量入口的 decode / project / patch 序列化耗时（毫秒）。
+    /// 供 `scripts/bench-ts-vs-wasm.mts` 把边界耗时拆开；生产路径不读它。
+    #[wasm_bindgen(js_name = foldPhases)]
+    pub fn fold_phases(&self) -> Result<String, JsError> {
+        to_boundary_json(&serde_json::json!({
+            "decodeMs": self.phases.decode_ms,
+            "projectMs": self.phases.project_ms,
+            "patchJsonMs": self.phases.patch_json_ms,
+        }))
     }
 
     /// 全量读数（parity / 冷刷新；热路径消费 patch）。
@@ -5731,6 +5785,55 @@ mod projection_index_tests {
         println!(
             "[probe] per-event reduce = {:.1}ms",
             started.elapsed().as_secs_f64() * 1000.0
+        );
+
+        // 分段：只到「建条目 + 入 timeline」为止（不含归约器）。
+        let started = Instant::now();
+        let mut doc = create_workbench_document("session-probe2");
+        for index in 0..total {
+            let item = envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            );
+            let entry = timeline_entry(&item);
+            insert_by_sequence(&mut doc.timeline, entry);
+        }
+        println!(
+            "[probe] 仅建条目+入 timeline = {:.1}ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+
+        // 分段：条目 + 信封复制（with_event）。
+        let started = Instant::now();
+        let mut doc2 = create_workbench_document("session-probe3");
+        for index in 0..total {
+            let item = envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            );
+            let effective = item.with_event(item.event.clone());
+            let entry = timeline_entry(&effective);
+            insert_by_sequence(&mut doc2.timeline, entry);
+        }
+        println!(
+            "[probe] 含 with_event（信封复制）= {:.1}ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+
+        // 分段：只做文本抽取（事件树读取）。
+        let started = Instant::now();
+        let mut units = 0usize;
+        for index in 0..total {
+            let item = envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            );
+            units += text_from_parts(item.event.get("parts").expect("parts")).len();
+        }
+        println!(
+            "[probe] 仅文本抽取 = {:.1}ms（{} 字符）",
+            started.elapsed().as_secs_f64() * 1000.0,
+            units
         );
     }
 
