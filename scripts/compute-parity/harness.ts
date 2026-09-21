@@ -263,3 +263,172 @@ export function formatBenchTable(rows: readonly BenchRow[]): string {
   const separator = widths.map(width => '─'.repeat(width)).join('──')
   return [line(head), separator, ...body.map(cells => line(cells))].join('\n')
 }
+
+// ── 内存跑器 ─────────────────────────────────────────────────────────────────
+//
+// 「不算内存的 benchmark 只做了一半」——wasm 计算核的线性内存只增不减（没有归还
+// 系统的路径），一次大输入的峰值会永久留在核里，这是速度表看不见的成本。
+//
+// 三类读数，各自解决「可信度」的不同问题：
+//
+// 1. **结果字节数**（`resultBytes`）：两侧返回值 `stableJson` 后的长度。**确定性**，
+//    与 GC 无关，直接解释「一次调用在边界上制造了多少 JS 垃圾」——比值也因此可复现。
+// 2. **核线性内存**（`computeLinearBytes` / `markdownLinearBytes`）：`WebAssembly.Memory`
+//    的 `buffer.byteLength`。同样与 GC 无关，且就是计算核自身的占用——它只会随高水位
+//    上涨，所以这里量的是「跑过这个 case 之后核永久变大多少」。
+// 3. **宿主保留增量**（`tsRetainedBytes` / `wasmRetainedBytes`）：调用前后的
+//    `retained()` 差。有 `globalThis.gc`（`node --expose-gc`）时精确；没有时**是上限**
+//    （含尚未回收的垃圾），输出里会点明 `gc=` 状态，不要把上限当精确值读。
+//
+// harness 不 import `node:*`：探针由入口注入（与产品源码「不耦合 node」同一条纪律）。
+
+/** 宿主内存探针（由跑器注入）。 */
+export interface MemoryProbe {
+  /** 当前宿主保留字节数（heapUsed + external + arrayBuffers 口径由实现决定）。 */
+  retained(): number
+  /** 尽力回收；无 GC 时为空操作。 */
+  collect(): void
+  /** 是否真的能强制回收（决定 `*RetainedBytes` 是精确值还是上限）。 */
+  readonly canCollect: boolean
+  /** 各计算核的线性内存字节数（key = 产物名，如 `pylon-compute`）。 */
+  linearMemory(): Record<string, number>
+}
+
+export interface MemoryRow {
+  readonly domain: Domain
+  readonly pair: string
+  readonly caseId: string
+  readonly meta: CaseMeta
+  /** 两侧返回值键序归一后的字节数。 */
+  readonly tsResultBytes: number
+  readonly wasmResultBytes: number
+  /** 计算核线性内存增量（跨整轮，含预热）。 */
+  readonly linearDeltaBytes: number
+  /** 单个计算核的线性内存高水位（跑完本 case 后）。 */
+  readonly linearHighWaterBytes: number
+  /** 单次调用的宿主保留增量；无 GC 时是上限。 */
+  readonly tsRetainedBytes: number
+  readonly wasmRetainedBytes: number
+}
+
+export interface MemoryOptions {
+  scale: Scale
+  probe: MemoryProbe
+  /** 计入保留增量的重复次数（取平均，压单次抖动）。 */
+  repeats?: number
+}
+
+/**
+ * 一个 case 的内存读数。
+ *
+ * 顺序有意如此：先两侧各跑一遍（预热 + 拿结果），**在这一次调用前后量核线性内存**
+ * ——线性内存是只涨不跌的**高水位**，重复调用不会让它再涨，所以「本 case 让核永久长高
+ * 多少」只能由一次调用给出；若把它放在 repeats 循环两侧量，读到的是「跑 N 次之后涨了
+ * 多少」，既不是单次成本、也不是峰值（两者在 allocator 复用后会重合，混在一起读不出东西）。
+ * 保留增量则相反：需要多次取平均压抖动，且每次都先 `collect()`。
+ */
+export async function runMemory(
+  suites: readonly Suite[],
+  options: MemoryOptions,
+): Promise<MemoryRow[]> {
+  const { probe } = options
+  const repeats = options.repeats ?? 8
+  const rows: MemoryRow[] = []
+  for (const suite of suites) {
+    for (const pair of suite.pairs) {
+      for (const scenario of pair.cases) {
+        if (!includeCase(scenario.meta, options.scale)) continue
+        const input = scenario.build()
+        // 预热：JIT / wasm 装载 / 引擎首载都算冷启动，不计入保留增量。
+        const tsWarm = await pair.ts(input)
+        const wasmWarm = await pair.wasm(input)
+        const tsResultBytes = stableJson(normalizeOut(pair, tsWarm)).length
+        const wasmResultBytes = stableJson(normalizeOut(pair, wasmWarm)).length
+
+        // 单次调用的线性内存增量 = 本 case 把核的高水位抬高了多少（高水位不回落）。
+        const linearBefore = sumLinear(probe.linearMemory())
+        await pair.wasm(input)
+        const linearAfterSingle = sumLinear(probe.linearMemory())
+
+        probe.collect()
+        const tsBaseline = probe.retained()
+        for (let index = 0; index < repeats; index += 1) await pair.ts(input)
+        probe.collect()
+        const tsRetained = (probe.retained() - tsBaseline) / repeats
+
+        probe.collect()
+        const wasmBaseline = probe.retained()
+        for (let index = 0; index < repeats; index += 1) await pair.wasm(input)
+        probe.collect()
+        const wasmRetained = (probe.retained() - wasmBaseline) / repeats
+
+        rows.push({
+          domain: suite.domain,
+          pair: pair.name,
+          caseId: scenario.id,
+          meta: scenario.meta,
+          tsResultBytes,
+          wasmResultBytes,
+          linearDeltaBytes: linearAfterSingle - linearBefore,
+          linearHighWaterBytes: sumLinear(probe.linearMemory()),
+          tsRetainedBytes: tsRetained,
+          wasmRetainedBytes: wasmRetained,
+        })
+      }
+    }
+  }
+  return rows
+}
+
+function sumLinear(linear: Record<string, number>): number {
+  let total = 0
+  for (const value of Object.values(linear)) total += value
+  return total
+}
+
+/** KiB 显示；≥1MiB 用 MiB，便于扫表。 */
+function bytes(value: number): string {
+  const abs = Math.abs(value)
+  if (abs >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)}M`
+  return `${(value / 1024).toFixed(1)}K`
+}
+
+export function formatMemoryTable(rows: readonly MemoryRow[], probe: MemoryProbe): string {
+  const head = ['domain', 'pair', 'case', 'scale', 'ts结果', 'wasm结果', '结果比', '核线性Δ', '核高水位', 'wasm保留/次', 'ts保留/次', '保留比']
+  const body = rows.map(row => [
+    row.domain, row.pair, row.caseId, row.meta.scale ?? 'xs',
+    bytes(row.tsResultBytes), bytes(row.wasmResultBytes),
+    row.tsResultBytes === 0 ? '—' : (row.wasmResultBytes / row.tsResultBytes).toFixed(2),
+    bytes(row.linearDeltaBytes), bytes(row.linearHighWaterBytes),
+    bytes(row.wasmRetainedBytes), bytes(row.tsRetainedBytes),
+    row.tsRetainedBytes <= 1 ? '—' : (row.wasmRetainedBytes / row.tsRetainedBytes).toFixed(2),
+  ])
+  const widths = head.map((column, index) => Math.max(column.length, ...body.map(cells => cells[index]!.length)))
+  const line = (cells: readonly string[]) => cells.map((cell, index) => cell.padEnd(widths[index]!)).join('  ')
+  const separator = widths.map(width => '─'.repeat(width)).join('──')
+  const header = `保留增量口径：${probe.canCollect ? '已强制 GC（精确）' : '无 --expose-gc，读作上限'}` +
+    '；「保留比」<1 表示 wasm 路径每次调用留下的宿主内存更少'
+  return [header, line(head), separator, ...body.map(cells => line(cells))].join('\n')
+}
+
+/**
+ * 分域汇总。**「本域核增长」用 `linearDeltaBytes` 求和**，不是 `linearHighWaterBytes`
+ * ——后者是只涨不跌的累计高水位，按域读会变成「越靠后的域越大」的假象。
+ */
+export function summarizeMemory(rows: readonly MemoryRow[]): string {
+  const byDomain = new Map<string, MemoryRow[]>()
+  for (const row of rows) {
+    const list = byDomain.get(row.domain) ?? []
+    list.push(row)
+    byDomain.set(row.domain, list)
+  }
+  const lines = ['分域内存小结（结果字节比中位 / 本域核线性内存增长 / 保留比中位）']
+  for (const [domain, list] of byDomain) {
+    const resultRatios = list.filter(row => row.tsResultBytes > 0).map(row => row.wasmResultBytes / row.tsResultBytes).sort((a, b) => a - b)
+    const retainedRatios = list.filter(row => row.tsRetainedBytes > 1).map(row => row.wasmRetainedBytes / row.tsRetainedBytes).sort((a, b) => a - b)
+    const growth = list.reduce((total, row) => total + row.linearDeltaBytes, 0)
+    const pick = (values: number[]): string => (values.length === 0 ? '—' : values[Math.floor(values.length / 2)]!.toFixed(2))
+    lines.push(`  ${domain.padEnd(18)} 结果 ${pick(resultRatios).padStart(6)} / 核增长 ${bytes(growth).padStart(9)} / 保留 ${pick(retainedRatios).padStart(6)}`)
+  }
+  return lines.join('\n')
+}

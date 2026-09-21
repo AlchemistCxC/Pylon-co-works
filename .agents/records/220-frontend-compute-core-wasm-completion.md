@@ -960,3 +960,146 @@ message 是快照（每次全量）。同一份 patch DTO 里两半的口径不�
 - `bunx vitest run scripts/compute-parity.test.mts` → 2/2 passed（`ok 172 / known-diff 3 / mismatch 0`）
 - `bunx tsc -b` exit 0；`bunx eslint src/` 0 error（仍只有 `RightRailHost.tsx` 那条既存 warning）
 - 改动面：`src/infrastructure/compute/projectorCompute.ts`（帧编码内部，无契约变化）
+
+---
+
+## 25. 实机验收（真机 → 抓到一个 P0）+ 内存基准
+
+用户 2026-09-21 指定验收实例 `F:\A-I\Platform\Pylon`，并要求「除了速度，内存占用也相当重要」。
+按 `[.agents/skills/webview2-acceptance]` 走：备份 → 换 exe → 带调试端口启动 → 连 CDP 取证。
+
+### 25.1 【P0】打包态 CSP 挡住 wasm 取回：计算核在打包应用里**从未加载成功过**
+
+首次连上（`webview2-mcp`，Edge 153 / V8 15.3）读控制台，四条即两件事：
+
+```
+[exception] TypeError: Cannot read properties of undefined (reading '__wbindgen_export')
+    at new Qe (first-party-pylon-renderers-CGCHObm6.js)      ← new PylonProjector(...)
+    at ce/fe (workbenchProjector-0ZJTbad9.js)                  ← createProjector
+    at Object.bind (AgentSheetView-lT5yXeyDi.js)               ← agent sheet 绑定
+[log/security] Connecting to 'http://tauri.localhost/assets/pylon_compute_bg-CD2CvqhT.wasm'
+    violates the following Content Security Policy directive:
+    "connect-src ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: ..."
+[log/javascript] Fetch API cannot load .../pylon_compute_bg-CD2CvqhT.wasm.
+    Refused to connect because it violates the document's Content Security Policy.
+```
+
+**根因**：`src-tauri/tauri.conf.json` 的 `csp.connect-src` 是**唯一没有 `'self'` 的取值指令**
+——`default-src`/`img-src`/`style-src`/`script-src`/`font-src` 都有它，只有管 `fetch()` 的
+`connect-src` 没有。于是打包后页面源 `http://tauri.localhost` 取自己的 `assets/*.wasm`
+被 CSP 拒；`script-src` 里的 `'wasm-unsafe-eval'` 形同虚设（拿不到字节）。
+
+**为什么所有轮子都绿**：`devCsp.connect-src` 显式列了 `http://localhost:5173`，dev 页面源
+正好是它 ⇒ 同源 fetch 恰好放行。**只有打包态能看见**——正是 skill 里「单测与浏览器 mock
+证明不了真实宿主」那条。而 #220 之前的应用不 fetch 任何 wasm，所以这是本 issue 引入的缺陷
+（`github/main` 上无 `src/infrastructure/compute/pylonCompute.ts`，已核对）。
+
+**后果**：打包应用里的**每一条**已迁移计算路径（投影、流式切分、揭示预算、markdown、高亮）
+全部走不到——投影核构造函数在 wasm 未初始化时直接抛。功能上等于 #220 在发行包里 0 上线。
+
+**修法**（两行）：`csp` 与 `devCsp` 的 `connect-src` 各补 `'self'`。
+
+**复验**（换 exe 后同一路径）：
+```
+GET http://tauri.localhost/assets/pylon_compute_bg-CD2CvqhT.wasm
+  → status 200, mimeType application/wasm, 841,273 B, 17ms
+GET http://tauri.localhost/assets/pylon_markdown_bg-BLvHjJYQ.wasm
+  → status 200, mimeType application/wasm, 2,873,113 B, 43ms
+全量扫描 console：Content Security Policy 命中 0 条
+```
+
+### 25.2 同轮发现（未修，交给 owner 判）· 首次使用竞态
+
+CSP 修好后这条**仍然复现一次**（时间戳证明是同一动作内、fetch 前 59ms）：
+打开 agent sheet 时 `AgentSheetView` 的绑定路径走到 `projectWorkbench`（**纯函数同步出口**）
+→ `createProjector` → `new glue.PylonProjector(...)`，而此刻 wasm 还没就绪 ⇒ 同一个
+`__wbindgen_export` TypeError。
+
+- **性质**：一次性竞态，不是持续故障。核暖后开第二张 agent sheet（`Hermes\default`）
+  再读增量控制台 **0 条新错误**；sheet 也正常渲染出来了（截图与 `role=tab` 读数佐证）。
+- **为什么不该由我顺手改**：`whenProjectorComputeReady()` 是异步门，而 `projectWorkbench` /
+  `reduceWorkbenchFold` 是**同步纯函数出口**，天生无法自己等待；要么绑定侧 await、要么让同步
+  出口在未就绪时抛一条人话错误。两条都动 `AgentSheetView` / 纯函数 API 的契约，且
+  「抛错 vs 等待」是行为选择 ⇒ 留证据与两条路线，请 owner 定。
+- 现状危害：控制台一条 TypeError + 首帧可能少一次渲染，用户可见影响未观察到。
+
+### 25.3 功能复验：两次真实 agent 回合，全绿
+
+在 `Hermes\default`（**无工作区**，避免真机 agent 落到工作区改文件）发两条明确要求
+「不调用任何工具」的短提示：
+
+| 回合 | 内容 | 结果 |
+| --- | --- | --- |
+| 1 | 纯文本答复 | 消息与回复正常渲染，处理耗时 6s，新会话 `session-mub4qux1` 入列 |
+| 2 | 要求输出 TypeScript 代码块 | `pre/code` 命中 2 处（高亮真的工作），消息数 5 |
+
+- 两回合期间 console **0 条错误/异常**，`tauri_backend_logs` 按 `level=error` 查 **0 条**。
+- 一次真实回合走完了 canonical → 投影核（wasm）→ 渲染，第二次额外走了 markdown 解析 + 高亮（wasm）。
+
+### 25.4 内存读数
+
+**真机（Edge 153 / V8 15.3，进程 `pylon.exe`）**——in-page 探针在 reload 前用
+`Page.addScriptToEvaluateOnNewDocument` 包一层 `WebAssembly.instantiate*` 记录 `memory`：
+
+| 时点 | compute 核线性 | markdown 核线性 | JS 堆 | 进程 WS | 进程 Private |
+| --- | --- | --- | --- | --- | --- |
+| 启动（tasklist 初读） | — | — | — | 49.3MB | — |
+| 核装载后（2 张 agent sheet） | **1.125MiB** (1,179,648B) | 未装载 | 13.7MB | 51.9MB | 137.4MB |
+| 两次真实回合后（含代码块高亮） | 1.125MiB | **2.375MiB** | 16.5MB | **61.6MB** | 198.7MB |
+
+⇒ 真机稳态：**两个计算核合计 3.5MiB 线性内存**，进程 WS 约 62MB。核本身的占用在真机上很小。
+
+**Node 宿主脚手架（`scripts/compute-parity-memory.mts`，新增）**——把每个出口跑一遍
+m 档全表后的核高水位：
+
+| 计算核 | 装载后 | 跑完全表高水位 |
+| --- | --- | --- |
+| `pylon-compute` | 1.13MiB | **99.44MiB（+98.31MiB）** |
+| `pylon-markdown` | 2.38MiB | **94.50MiB（+92.13MiB）** |
+
+单次调用把高水位抬起来的量（`核线性Δ` 列）：`projectWorkbench(fold) delta-m`（2001 事件）
+**+2.63MiB**、`mixed-m`（2251 事件）**+5.13MiB**、`paged-replay-m` +8.06MiB；
+xs/s 档普遍 0.0K（分配器复用得上）。`markdown-highlight` 逐语言约 +11MiB（syntect 语法装载）。
+
+**两条读法上的纪律**（已写进 `harness.ts` 与脚手架 README，避免后人混读）：
+- `核线性Δ` 必须是**单次调用**的增量：线性内存是高水位、只涨不跌，重复调用不会再涨；
+- `wasm保留/次` 没有 `--expose-gc` 时是**上限**，输出头会点明状态（本轮用
+  `NODE_OPTIONS=--expose-gc` 取到精确值，故 `ts保留/次` 出现负数——GC 后比基线还低，
+  说明该口径有地板噪声，故比值列在 ts 侧 ≤1B 时显示 `—`）。
+- 结论只写有把握的那半：**核的线性内存不归还，高水位由最大单次输入决定**；
+  真机当前用不到 m 档以上的折叠，所以稳态 3.5MiB 与脚手架的 190MiB 不矛盾——
+  后者是「把所有出口的 m 档都跑一遍」的累计高水位。
+
+### 25.5 新增门禁：`check:csp`（防这一类复发）
+
+本轮所有既有门禁（lint / tsc / 622 个测试文件 / bundle / docs / deps / CI）对 25.1 都是瞎的
+——它们看不见打包态 CSP。新增 `scripts/check-csp-self.mjs`：断言 `csp` 与 `devCsp` 里
+**凡管取资源的指令**（`connect-src` 硬要求，其余存在即查）都含 `'self'`，并接进
+`check:frontend` / `check:frontend:static`（`check:csp`）。
+
+- 正向：`bun run check:csp` → 通过（6 条口径）
+- **负向对照**：临时摘掉 `csp.connect-src` 的 `'self'` → 门禁红并指名该指令
+  （`✗ csp.connect-src 没有 'self'：ipc: ...`），随即恢复。有牙。
+
+### 25.6 本轮改动面与复验
+
+| 文件 | 性质 |
+| --- | --- |
+| `src-tauri/tauri.conf.json` | 修 P0：两处 `connect-src` 补 `'self'` |
+| `scripts/check-csp-self.mjs` | 新增门禁（含负向对照） |
+| `package.json` | 接 `check:csp` 进两条 frontend 门禁链 |
+| `scripts/compute-parity-memory.mts` | 新增内存跑器入口（用户要求的「适当改造脚手架」） |
+| `scripts/compute-parity/harness.ts` | 新增内存跑器（结果字节 / 核线性高水位 / 单次保留量）+ 分域汇总 |
+| `scripts/compute-parity/README.md` | 补内存跑法 + 三列口径差别 |
+
+复验：`bun run check:csp` 通过、`check:docs` exit 0、`check:deps` exit 0；
+真机两次真实回合 0 错误（见 25.3）。
+
+### 25.7 仍未做
+
+1. 25.2 的首次使用竞态——待 owner 在「绑定侧 await」与「同步出口抛人话错」之间定。
+2. **实机性能前后对比**（验收项第 5 条）：本轮量了内存与功能，没量速度对照。要做需要把
+   迁移前的 exe（`pylon.exe.bak-before220` 是同分支旧构建，**不带** wasm 核；真正的
+   「迁移前」是 `76cbc819^` 的构建）装上跑同一会话夹具——属独立一轮。
+3. 本次验收在真机装的 exe 为本地 release 构建（36,479,488 B，已留
+   `pylon.exe.bak-before220` 备份）；验收后已关闭该实例，调试端口不再暴露。

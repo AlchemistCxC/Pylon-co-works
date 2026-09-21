@@ -1,8 +1,9 @@
 # compute-parity · 计算纯函数 TS↔wasm 对照脚手架
 
 issue #220（计算核 wasm 化）的配套基建：对 wasm 计算核的**每一个计算出口**，
-用迁移前/保留的 TS 原生实现做同输入对照——parity（两侧归一后逐字节一致）与
-性能（同 harness 中位数比值）共用同一份套件定义。
+用迁移前/保留的 TS 原生实现做同输入对照——parity（两侧归一后逐字节一致）、
+性能（同 harness 中位数比值）与内存（每调用足迹 + 核线性内存高水位）共用同一份
+套件定义。
 
 ## 跑法
 
@@ -14,7 +15,20 @@ vitest run scripts/compute-parity.test.mts
 # 里有无扩展名相对 import，裸 node 解析不了）
 npx vite-node scripts/compute-parity-bench.mts
 COMPUTE_PARITY_SCALE=full COMPUTE_PARITY_ROUNDS=5 npx vite-node scripts/compute-parity-bench.mts
+
+# 内存对照（结果字节数 / 核线性内存高水位 / 每调用宿主保留量）
+npx vite-node scripts/compute-parity-memory.mts
+COMPUTE_PARITY_REPEATS=16 npx vite-node scripts/compute-parity-memory.mts
+# 加 --expose-gc 才拿得到**精确**的保留量（否则读作上限，输出头会点明状态）
+NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 ```
+
+> 内存表三列的口径差别（**别混读**，详见 `harness.ts` 的「内存跑器」节）：
+> - `ts结果`/`wasm结果`：返回值 `stableJson` 后的字节数。确定性、与 GC 无关。
+> - `核线性Δ`：本 case 的**单次**调用把计算核线性内存的高水位抬高了多少。线性内存只涨
+>   不跌，所以只有单次调用能给出这个数；`核高水位` 是跑完全表的累计值（越靠后的行越大，
+>   不是该 case 的占用）。
+> - `wasm保留/次`：调用前后 `retained()` 差 / 重复次数。**没有 `--expose-gc` 时是上限**。
 
 > 逃生门：crate 上有他人**在途改动**导致 wasm 重建失败时，可
 > `npx vitest run --config scripts/compute-parity/vitest.config.ts`
@@ -25,8 +39,9 @@ COMPUTE_PARITY_SCALE=full COMPUTE_PARITY_ROUNDS=5 npx vite-node scripts/compute-
 
 | 路径 | 职责 |
 |---|---|
-| `harness.ts` | CaseSpec/PairSpec/Suite 类型、stableJson 比对口径、parity/性能双跑器、维度过滤（scale × shape × edge × flow） |
+| `harness.ts` | CaseSpec/PairSpec/Suite 类型、stableJson 比对口径、parity/性能/内存三跑器、维度过滤（scale × shape × edge × flow） |
 | `index.ts` | wasm 装载上下文、全套件注册表、**覆盖门**（REQUIRED_EXPORTS 必须全部有对照 pair） |
+| `../compute-parity-{bench,memory}.mts` | 两个跑器入口（性能 / 内存），共用上面这套套件 |
 | `baselines/` | TS 侧基线实现（冻结/雕刻，见下）——**不在任何生产路径，不 import 进 src** |
 | `fixtures/` | PYPB v1 帧编码器、events 语料、workbench envelope 生成器、切分/markdown/高亮语料 |
 | `suites/` | 七个域套件：canonical / events / projector / streaming-split / streaming-budget / markdown-parse / markdown-highlight |
