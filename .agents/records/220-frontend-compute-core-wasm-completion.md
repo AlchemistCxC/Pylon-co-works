@@ -684,3 +684,55 @@ Rust 报 `"undefined"`——5 处校验写成「布尔判定 + 恒报 undefined�
   `TimelinePatch.entry` 持 `TimelineEntry`：**收批不再建 20k 个中间 JSON 树**，
   收批 29.5 → **4.3ms**；`project_batch` → **44.4ms**（本轮起点 130ms，−66%）。
   键序契约由 `timeline_entry_serialize_tests` 逐字节钉死（含小数 sequence）。
+
+---
+
+## 22. 脚手架门禁通过 + 全出口性能对照（首轮完整读数）
+
+**门禁**（`bun run test scripts/compute-parity.test.mts`，2/2 passed）：
+`parity 断言 175 项：ok 172 / known-diff 3 / mismatch 0`。3 条 known-diff 正是预期的那三条：
+流式切分的孤立代理表征差异、markdown 脚注、高亮 js-sample。
+
+**性能**（`bunx vite-node scripts/compute-parity-bench.mts`，scale=m，每侧 3 轮中位数，
+175 case；`ratio = wasm/ts`，<1 表示 wasm 更快）：
+
+| 域 | case 数 | 中位 ratio | 最好 | 最差 | 读法 |
+| --- | --- | --- | --- | --- | --- |
+| markdown-parse | 17 | **0.06×** | 0.03× | 0.11× | **wasm 快 17/17**，且是绝对量最大的一块 |
+| streaming-budget | 9 | **0.81×** | 0.53× | 2.09× | 6 快 / 3 慢 |
+| streaming-split | 89 | 1.43× | 0.34× | 3.00× | 绝大多数 case < 0.5ms，比值由每次调用的过界开销主导 |
+| markdown-highlight | 10 | 1.85× | 0.50× | 8.21× | syntect vs starry-night，引擎级 |
+| canonical | 6 | 4.38× | 1.14× | 5.43× | 绝对值 0.00–0.05ms，同上：纯过界开销 |
+| projector | 18 | 5.36× | 1.60× | 16.00× | **端到端真实比值**（生产入口） |
+| events | 26 | **12.44×** | 0.41× | **152.53×** | 见下：主要是诊断出口的 JSON 编组，不是计算 |
+
+绝对耗时 ≥0.2ms 的 case 才是有效读数。其中：
+
+**wasm 明显更快**
+- `parseMarkdown doc-m`：86.90 → **9.34ms（0.11×）**；`doc-s` 6.66 → 0.57（0.09×）；
+  各 xs 用例 0.03–0.11×（comrak 对 unified JS 管线的结构性优势）
+- `splitStreamingMarkdown blocks-m` 0.34×、`splitStreamingMarkdownBlocks blocks-m` 0.76×、
+  `findLastStableBlockBoundary blocks-m` 0.38×
+- `StreamingRevealEngine`：smooth-m 0.89×、burst-drain 0.67×、options 族 0.53–0.58×
+
+**wasm 明显更慢**
+- `projectWorkbench(fold) mixed-m`：42.75 → **222ms（5.20×）**；`delta-m` 2.64 → 20.28（7.67×）；
+  `paged-replay-m` 4.21 → 27.21（6.46×）——**这是生产入口的真实比值**，与我此前隔离测量的
+  7.5×/9.7× 一致，主因是折叠的按事件分配（① 未做）+ 边界
+- `mergeAdjacentDeltaChunks byte-cap-2002` 0.48 → 24.92（**51.73×**）、
+  `normalizeRawEvent turn-batch-scale` 0.86 → 10.35（12.06×）、
+  `canonicalBatchSpanOf batch-scale` 0.02 → 3.74（**152.53×**）、
+  `projectCanonicalMessages conversations-scale` 0.18 → 3.34（19.04×）、
+  `projectToolProjectionsFromBatch tools-scale` 0.03 → 1.47（42.62×）
+  —— **注**：这些 pair 的 wasm 侧是「`JSON.stringify(整个语料)` 进、`JSON.parse` 出」的
+  诊断出口，比值里含整份语料的编解码，**不是计算核本体**；生产路径不走这条（projector 走二进制帧）。
+- `highlightBlock`：ts-sample 0.34 → 0.85（2.53×）、css-sample 0.13 → 0.50（3.75×）
+- `StreamingRevealEngine astral-grapheme` 0.19 → 0.41（2.09×）——字素/UTF-16 路径
+
+**由此得到的下一步排序（按数字，不按直觉）**
+1. **events 层出口去 JSON 编组**：把 `normalizeRawEvent` / `mergeAdjacentDeltaChunks` /
+   `canonicalBatchSpanOf` / `projectCanonicalMessages` / `projectToolProjectionsFromBatch`
+   这类出口从「JSON 字符串进/出」改成与 projector 同款的**二进制/批量**形态——那几个
+   12–152× 的比值主要是编组，改完应回到同一量级。
+2. **① 折叠去 `Value`**：projector 5–8× 的端到端比值（生产真实路径）主要在这里。
+3. **高亮** 1.4–3.8×：syntect vs starry-night 的引擎差异，量级小（<1ms），可后置。
