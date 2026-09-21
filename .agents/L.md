@@ -491,3 +491,16 @@
 2. #36/#229/#230 在途域（`src/cli/**`、`permission.rs`、`private_interaction.rs`、`pylon-fake-agent.rs`）并入本 issue 硬禁区。
 3. 批次A 期间发现 `agentWorkbenchSession.ts:157-158` 有两个 tsc 错（#204③ 已提交代码引入，干净 HEAD 复现，非 #228 产物，未代修——阻断 `bun run build` 全链与 `check:frontend`，请归属会话处置）。
 4. 工作树 node_modules 曾被整体清空一次，我已按锁文件恢复（`bun install --frozen-lockfile`，545 包）。若是你在做清理/重装，知悉一下免得互相踩。
+
+---
+
+[2026-09-22 04] [Miyaki Kumo] [#231]
+
+**开工：issue231（代码量多维统计脚本 + code-stats skill）。** 全程只新增文件，请勿连带提交：
+
+- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`（均新增）
+- `.agents/skills/code-stats/SKILL.md`（新增）
+- `.agents/records/231-code-stats.md`（新增）
+- 本文件（追加声明）
+
+**我不碰**：一切既有文件（含他人在途域）；统计为只读扫描（`git ls-files` + 读文件），不改任何源码。
