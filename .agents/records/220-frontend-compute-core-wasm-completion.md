@@ -233,3 +233,42 @@ Bun 在堆约 270MB 处每次 `memory.grow` 都要搬运整块线性内存。Rus
    ——属未完成项。
 8. **大单帧的批大小敏感**：Node 下线性但堆会涨到约 280MB；生产按页（~1000）喂，
    落在曲线线性段，但「解码即折叠、不整页物化」仍是更稳的形态（未做）。
+
+### 9. 【最重要】同 harness 对照：迁移后**比迁移前慢 11.28×**（未达成用户判据）
+
+用户要求「不能出现用了 wasm 计算核还不如原生 TypeScript 的情况」。为此把迁移前的 TS 折叠
+从 git 历史原样取出（`src/domains/workbench/__baselineOldProjector.ts`，冻结基线，不在任何
+生产路径上），与迁移后的 wasm 折叠在**同一 harness、同一输入、同一 Node 宿主**上对照：
+
+```
+形状先验：TS {"timeline":20001,"messages":["user:3","reasoning:128890"]}
+          wasm {"timeline":20001,"messages":["user:3","reasoning:128890"]}   ← 等量工作
+同形态对照（20000 条 reasoning delta + 1 条 user，3 轮中位数）
+  迁移前 TS 折叠 : 28ms
+  迁移后 wasm 折叠: 315ms
+  比值           : 11.28×（<1 表示 wasm 更快）
+```
+
+复现：`node scripts/bench-ts-vs-wasm.mts`
+
+**成本落点不在边界，在 Rust 折叠本身**：Rust 单测探针 `project_batch(20000)` = 371ms
+（对照同一探针的逐事件路径 358ms），而迁移前 TS 的**整条管线**只要 28ms。也就是说
+「同一算法的 Rust 实现比 V8 上的 TS 实现慢约 13×」，再加上边界编组（帧编码 + `document()`
+的 JSON 往返）才到 315ms。
+
+机制（初判，未逐条仪器化证实）：Rust 侧用 `serde_json::Value` 建模整份文档——每个对象是
+`BTreeMap`、每个数组是 `Vec`，逐事件的部件合并与消息更新都在这些树上分配；且每个批量入口
+都 `document.clone()` 深拷整份文档 + `diff_patches` 建全 timeline 的 HashMap。迁移前的 TS
+则是原地改普通对象/数组，V8 的对象模型与 rope 字符串让「追加文本」近乎 O(1)。
+
+**这条推翻了 issue 的性能前提在本实现上成立**：就冷装载折叠而言，当前实现是回退而非收益。
+收口方向（按收益排序，均需单独一轮）：
+
+1. **热路径去 `Value`**：消息 content/parts、timeline 条目这些高频字段改定型结构体，
+   只在边界进出时转 `Value`；`BTreeMap` 换有序 `Vec` + 二分。
+2. **去掉每批量的深拷 + 全量 diff**：改为归约时增量记账（哪些 message/timeline 位置被触碰），
+   patch 由记账产出，不再 `clone()` 整份文档。
+3. **`document()` 的 JSON 往返**：物化改二进制/结构化编组，或让 patch 真正切片（未决问题 2）。
+
+在 1–3 完成前，**不应把「wasm 计算核」当作已兑现的性能改进对外描述**；功能上它已切流并通过
+parity 与行为测试，性能上尚未达到迁移前水平。**这是本轮最该被看见的数字。**
