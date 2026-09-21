@@ -383,23 +383,34 @@
 
 ---
 
-[2026-09-21 10] [Bolide/B] [#223 · 预设组装 刀1]
+[2026-09-21 19] [Bolide/B] [#223 · 预设组装 刀2]
 
-**开工：预设组装刀1——区域引用表（`zoneRefs`）+ 装配路径倒置为「逐区域装配」**（行为零变化）。施工单 `E:\Acode\FILES\任务\预设修正\预设组装\01-施工单-刀1-区域引用表与装配倒置.md`（规范 v1.0 已定稿）；分支 **`feat/preset-assemble.1`**（基于 `origin/main @ 5e251b40`，已解上游跟踪）。
+**开工：预设组装刀2——把 50 条出厂区域预设从「构建时派生」改成「落盘数据」。** 施工单 `E:\Acode\FILES\任务\预设修正\预设组装\02-施工单-刀2-出厂区域预设独立成数据.md`（规范 v1.0 同步已定稿，含「★ 裁决 A：不折叠」）。分支沿用 **`feat/preset-assemble.1`**。刀1（引用表 + 逐区域装配）已落存档 `cd21829d` / `660aaed0`。
 
 **我方本轮文件域（请勿改写、勿连带提交）**：
 
-- `src/presets/types.ts`（`GlobalPreset` 加可选 `zoneRefs`）
-- `src/presets/builtin.ts`（10 套 `RAW_GLOBAL_PRESETS` 显式写出 5 项 `zoneRefs`；`DEFAULT_PRESETS` 本刀**不加**）
-- `src/domains/theme/presetReducer.ts`（新增 `requireZoneRefs` / `assertZoneSliceOwnership` / `assembleGlobalPresetReducer`；既有 `setGlobalPresetReducer` 保留为参考实现）
-- `src/application/transactions/applyGlobalPreset.ts`（plan 带上 `zoneRefs` + `profileTokens`；引用表展开成逐区域条目）
-- `src/store.ts`（**只动 `setGlobalPreset` 与 `resetTheme` 这两个预设 action**，其余一行不动）
-- **新增**测试文件（`src/__tests__/` 下的预设组装专项，只增不改）
-- 文档：本文件
+- `src/zones/zonePresetPool.ts`（判据换 `origin`；取值改为直接读 `values`；**折叠退场**（`sources` 删除）；池的数据来源换成落盘数据表）
+- `src/zones/index.ts`（门面转出同步）
+- **新增** `src/zones/factory/**`（按 (桶, 区域) 拆的数据文件 + 索引）
+- **新增** `scripts/generate-factory-zone-presets.mts`（默认校验 / `--write` 产出；越区键报错）
+- `src/components/Settings.tsx`（**只动两处**：`:97` 判据消费、`:107-108` 同形悬停提示删除；观感一行不改）
+- **新增** `src/zones/__tests__/factoryZonePresets.test.ts`
+- `src/zones/__tests__/zonePresetPool.test.ts`（**只改「判据 / 折叠」直接相关的那几条**，逐条点名）
+- 文档：本文件、`.agents/records/`
 
-**我不碰**：`src/zones/zonePresetPool.ts` 与 `src/zones/pickZoneFields.ts`（只复用其导出，**一行不改**）、`src/themeFieldDefs.ts`、`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/completion.ts`、`src/components/Settings.tsx` 与 `src/components/settings/TemplateLibrary.tsx`（UI 一行不改）、契约快照 JSON（只由脚本重拍）、`src/renderers/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+**我不碰**：`src/application/transactions/applyGlobalPreset.ts`（刀1 的引用解析已能读新池）、`src/presets/**`、`src/domains/theme/presetReducer.ts`、`src/store.ts`、`src/themeFieldDefs.ts`、`src/zones/pickZoneFields.ts`、`package.json`（**不把新脚本接进 CI 链**）、契约快照 JSON、`docs/**`、`src/renderers/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
-**约束（复审据此把关）**：行为**零变化**——全量测试 files/passed/failed 三数同改造前、契约快照 `--write` 后 `git diff` 行数为 0、10 套预设字段值逐字段等于前置备份；**只新增测试，不改既有行为测试**；**不 bump 任何版本号**（`THEME_SCHEMA_VERSION` / `CC_LAYOUT_SCHEMA_VERSION` 都不动）。前置备份已落仓外 `E:\Acode\FILES\任务\预设修正\备份\预设组装-前存档-20260921\`。
+**约束（复审据此把关）**：值与基线**逐字段相同**（基线 = 备份存档 `预设组装-前存档-20260921/`，翻译已验 md5 与当前代码产出逐字节一致）；**不做数据瘦身**（终端切面照抄全量）；**不删任何数据**；**不改既有测试**（唯一例外见上，逐条点名）；出厂条目仍**不可删**（结构性闸门保留）；`zonePresetsFor` / `resolveZonePresetEntryTheme` **签名不变**；不 bump 版本号。
+
+---
+
+[2026-09-21 10] [Bolide/B] [#223 · 预设组装 刀1 —— ✅ 已完工（`cd21829d` / `660aaed0`），文件域移交刀2]
+
+~~**开工：预设组装刀1——区域引用表（`zoneRefs`）+ 装配路径倒置为「逐区域装配」**~~（行为零变化）。施工单 `E:\Acode\FILES\任务\预设修正\预设组装\01-施工单-刀1-区域引用表与装配倒置.md`（规范 v1.0 已定稿）；分支 **`feat/preset-assemble.1`**（基于 `origin/main @ 5e251b40`，已解上游跟踪）。
+
+**刀1 已改动文件（现已存档，勿回改）**：`src/presets/types.ts`、`src/presets/builtin.ts`、`src/domains/theme/presetReducer.ts`、`src/application/transactions/applyGlobalPreset.ts`、`src/store.ts`、新增 `src/__tests__/presetAssembly.test.ts`。开发记录 `.agents/records/issue-223-preset-zone-refs-assembly.md`。
+
+**刀1 不碰（已由刀2 接手）**：`src/zones/zonePresetPool.ts`、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/completion.ts`、`src/components/Settings.tsx`、`src/components/settings/TemplateLibrary.tsx`、契约快照 JSON。
 
 ---
 
