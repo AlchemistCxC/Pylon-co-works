@@ -17,6 +17,7 @@ npx vite-node scripts/compute-parity-bench.mts
 COMPUTE_PARITY_SCALE=full COMPUTE_PARITY_ROUNDS=5 npx vite-node scripts/compute-parity-bench.mts
 
 # 内存对照（结果字节数 / 核线性内存高水位 / 每调用宿主保留量）
+# 注意：markdown 已不在对照面内 ⇒ 内存表里也不会出现 pylon-markdown 的线性内存。
 npx vite-node scripts/compute-parity-memory.mts
 COMPUTE_PARITY_REPEATS=16 npx vite-node scripts/compute-parity-memory.mts
 # 加 --expose-gc 才拿得到**精确**的保留量（否则读作上限，输出头会点明状态）
@@ -44,7 +45,7 @@ NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 | `../compute-parity-{bench,memory}.mts` | 两个跑器入口（性能 / 内存），共用上面这套套件 |
 | `baselines/` | TS 侧基线实现（冻结/雕刻，见下）——**不在任何生产路径，不 import 进 src** |
 | `fixtures/` | PYPB v1 帧编码器、events 语料、workbench envelope 生成器、切分/markdown/高亮语料 |
-| `suites/` | 七个域套件：canonical / events / projector / streaming-split / streaming-budget / markdown-parse / markdown-highlight |
+| `suites/` | 五个域套件：canonical / events / projector / streaming-split / streaming-budget（markdown 两个套件已随 TS 基线下线，见下「已下线的比较面」） |
 
 ## TS 基线的两种来源（baselines/ 头注逐一声明出处）
 
@@ -71,8 +72,6 @@ NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 
 | pair · case | 差异 | 出处 |
 |---|---|---|
-| parseMarkdown · footnote-probe | remark-gfm 脚注形状 vs comrak 脚注形状 | #220 WP4 parity 清单 |
-| highlightBlock · js-sample / go-sample | syntect 与 starry-night 的引擎级残差 | `src-tauri/pylon-markdown/parity/parity-report.json` |
 | splitStreamingMarkdown(prefix-scan) · growing-source | 前缀恰以孤立 UTF-16 高代理结尾时，Rust 字符串无法持有，serde 编组落成 U+FFFD；TS 原样保留。UTF-8/UTF-16 编组层固有损耗，非切分逻辑分歧 | 本脚手架差分发现，随套件注释过审 |
 
 新增已过审差异必须走 parity 门禁流程（更新 parity-report 清单或在此表登记理由），
@@ -88,6 +87,17 @@ JS `Map` 的 BTreeMap 深转回普通对象（与 `pylon-markdown/src/wasm_exit.
    补对应 suite pair（TS 侧找迁移前实现或树上活实现，出处写进头注）。
 2. 编组变体出口（`*Json`）与诊断出口（`markdownEngineVersion`）在 `EXEMPT_EXPORTS`。
 3. 改帧格式：`fixtures/eventsFrame.ts`（PYPB v1）与生产 parity 测试要一起改。
+
+## 已下线的比较面（2026-09-21 裁决）
+
+`parseMarkdown` / `highlightBlock` / `scopeForLanguage` 的 TS 基线（`baselines/oldMarkdownParsePipeline.ts`、
+`oldHighlightEngine.ts`）与两个 markdown 套件**已下线**，理由与取回办法写在 `index.ts` 的
+`EXEMPT_EXPORTS` 处。一句话：生产**流式**形状实测 wasm 快 **12–25×**（一次完整流式回合
+10.94ms → 0.39ms；每帧 TS ~340µs vs wasm ~12µs），比较已无必要，且旧实现本就不在生产路径。
+
+**markdown 仍然受门禁**，只是换了形式：`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts`
+的 markdown 半是「**产品路径 vs 快照**」（`src-tauri/pylon-markdown/parity/rust-snapshot.json`），
+不依赖 TS 基线 —— 删它会削弱门禁，故未动。
 
 ## 与既有 parity 门禁的关系
 

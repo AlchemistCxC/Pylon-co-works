@@ -6,7 +6,6 @@
 // 共享同一份套件定义——对照面只有一份，改场景两入口同时生效。
 
 import { loadPylonCompute } from '../../src/infrastructure/compute/pylonCompute.ts'
-import { loadMarkdownCompute } from '../../src/infrastructure/compute/markdownCompute.ts'
 import type { EventsCompute } from './fixtures/eventsFrame.ts'
 import type { Suite } from './harness.ts'
 import { buildCanonicalSuite } from './suites/canonicalSuite.ts'
@@ -14,8 +13,6 @@ import { buildEventsSuite } from './suites/eventsSuite.ts'
 import { buildProjectorSuite, buildProjectorFlowSuite } from './suites/projectorSuite.ts'
 import { buildStreamingSplitSuite } from './suites/streamingSplitSuite.ts'
 import { buildStreamingBudgetSuite } from './suites/streamingBudgetSuite.ts'
-import { buildMarkdownParseSuite } from './suites/markdownParseSuite.ts'
-import { buildMarkdownHighlightSuite } from './suites/markdownHighlightSuite.ts'
 
 /** 投影段 wasm 出口（WP2 projector 段薄壳）。 */
 export interface ProjectorCompute {
@@ -36,24 +33,20 @@ export interface StreamingComputeExports {
   StreamingRevealEngine: new (options?: Record<string, number>) => unknown
 }
 
-export interface MarkdownComputeExports {
-  parseMarkdown(text: string): unknown
-  highlightBlock(code: string, language: string): unknown
-  scopeForLanguage(language: string): string | undefined
-}
-
 /** 套件运行上下文：两侧实现 + 帧编码装置都从这里取。 */
 export interface ComputeContextLike {
   compute: EventsCompute & ProjectorCompute & StreamingComputeExports
-  markdown: MarkdownComputeExports
 }
 
+/**
+ * 只装 `pylon-compute`。**不再装 `pylon-markdown`**：markdown 的 TS 基线已随比较装置下线
+ * （2026-09-21 裁决——流式形状实测 12–25×，比较已无必要），这里没有对照面可跑；markdown 的
+ * 回归由产品路径门禁 `src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts`
+ * 的**快照锁**承担（那是「产品路径 vs 快照」，不是差分）。少装一个 2.87MB 产物也让本脚手架更快。
+ */
 export async function loadComputeContext(): Promise<ComputeContextLike> {
-  const [compute, markdown] = await Promise.all([
-    loadPylonCompute() as Promise<ComputeContextLike['compute']>,
-    loadMarkdownCompute() as Promise<MarkdownComputeExports>,
-  ])
-  return { compute, markdown }
+  const compute = await loadPylonCompute()
+  return { compute: compute as ComputeContextLike['compute'] }
 }
 
 export function buildAllSuites(ctx: ComputeContextLike): Suite[] {
@@ -64,8 +57,6 @@ export function buildAllSuites(ctx: ComputeContextLike): Suite[] {
     buildProjectorFlowSuite(),
     buildStreamingSplitSuite(ctx),
     buildStreamingBudgetSuite(ctx),
-    buildMarkdownParseSuite(ctx),
-    buildMarkdownHighlightSuite(ctx),
   ]
 }
 
@@ -89,13 +80,22 @@ export const REQUIRED_EXPORTS: readonly string[] = [
   // streaming split + budget
   'splitStreamingMarkdownBlocks', 'splitStreamingMarkdown', 'findLastStableBlockBoundary',
   'splitOpenCodeFenceTail', 'StreamingRevealEngine',
-  // markdown
-  'parseMarkdown', 'highlightBlock', 'scopeForLanguage',
+  // markdown 三出口的 TS 基线已随比较装置下线 ⇒ 见 `EXEMPT_EXPORTS` 处的理由与取回办法。
 ]
 
 /** 编组变体/诊断出口：与同名主出口同一计算，单独对照没有信息量。 */
 export const EXEMPT_EXPORTS: readonly string[] = [
   'parseMarkdownJson', 'highlightBlockJson', 'markdownEngineVersion', 'foldPhases',
+  // 2026-09-21：markdown 三出口的 TS 基线（`baselines/oldMarkdownParsePipeline.ts` 与
+  // `oldHighlightEngine.ts`）随比较装置下线。依据是**流式形状实测**：生产每帧只解析增长
+  // 短尾（graft 成立时连这一次都省），该形状 wasm 快 12–25×（一次完整流式回合
+  // 10.94ms → 0.39ms），比较已无必要；且旧实现本就不在生产路径
+  // （`markdownRenderModel` / `codeHighlight` 自 #220 切流起直取计算核，无 TS 回退）。
+  // 取回办法：两个基线分别雕刻自 `76cbc819^` 的 `markdownRenderModel.ts` 与
+  // `components/chat/codeHighlight.ts`，`git show 76cbc819^:<path>` 可取。
+  // **这不是「markdown 不受门禁」**：产品路径快照锁见
+  // `src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts`。
+  'parseMarkdown', 'highlightBlock', 'scopeForLanguage',
 ]
 
 /** 覆盖门：返回缺失的出口名（非空即脚手架没跟上计算核面，parity 不许绿）。 */
