@@ -1558,7 +1558,7 @@ src/plugin-runtime/sessionData/pluginSessionDataApi.ts
 src/plugin-runtime/ui/pluginUiTypes.ts
 src/infrastructure/plugins/pluginPackageClient.ts
 src/infrastructure/plugins/pluginProcessClient.ts
-src-tauri/src/plugin_cmds.rs
+src-tauri/src/plugin_cmds/
 ```
 
 相关示例：

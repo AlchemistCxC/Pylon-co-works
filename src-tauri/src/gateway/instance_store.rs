@@ -10,8 +10,6 @@
 //!   文件缺失 → 空列表（首启）。
 //! - 校验：id/platform 非空；重复 id → 损坏（应用自写文件出现重复 = 外部破坏）。
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -55,13 +53,6 @@ impl InstanceStoreError {
             Self::Io(_) => "instance_store_io",
         }
     }
-}
-
-fn now_path_suffix() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos().to_string())
-        .unwrap_or_default()
 }
 
 /// 校验实例列表：id/platform 非空、id 不重复。非法 → 损坏错误。
@@ -108,8 +99,9 @@ pub(crate) fn load_instances(path: &Path) -> Result<Vec<StoredInstance>, Instanc
     Ok(snapshot.instances)
 }
 
-/// 原子写实例配置：临时文件 + flush/sync + rename（同一目录，保证 rename 原子）。
-/// 失败返回 Err，原文件保持不动（无半写入残留）。
+/// 原子写实例配置：唯一临时文件 + sync + rename（经 agent_config 正身
+/// [`crate::agent_config::AtomicWriteOptions`] 收敛，issue #228 批次D）。
+/// 失败返回 Err，原文件保持不动（无半写入残留，临时文件已清理）。
 pub(crate) fn persist_instances(
     path: &Path,
     instances: &[StoredInstance],
@@ -121,37 +113,12 @@ pub(crate) fn persist_instances(
     };
     let serialized = serde_json::to_string_pretty(&snapshot)
         .map_err(|error| InstanceStoreError::Io(format!("序列化失败: {error}")))?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| InstanceStoreError::Io(format!("无法解析父目录: {}", path.display())))?;
-    std::fs::create_dir_all(parent)
-        .map_err(|error| InstanceStoreError::Io(format!("创建目录失败: {error}")))?;
-    let temp_path = path.with_extension(format!(
-        "json.tmp-{}-{}",
-        std::process::id(),
-        now_path_suffix()
-    ));
-    let result = (|| -> Result<(), InstanceStoreError> {
-        let file = File::create(&temp_path)
-            .map_err(|error| InstanceStoreError::Io(format!("创建临时文件失败: {error}")))?;
-        let mut writer = BufWriter::new(file);
-        writer
-            .write_all(serialized.as_bytes())
-            .and_then(|_| writer.flush())
-            .map_err(|error| InstanceStoreError::Io(format!("写临时文件失败: {error}")))?;
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|error| InstanceStoreError::Io(format!("sync 临时文件失败: {error}")))?;
-        drop(writer);
-        std::fs::rename(&temp_path, path)
-            .map_err(|error| InstanceStoreError::Io(format!("rename 到目标失败: {error}")))?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    result
+    crate::agent_config::write_file_atomically(
+        path,
+        serialized.as_bytes(),
+        crate::agent_config::AtomicWriteOptions::synced_data_file(),
+    )
+    .map_err(|error| InstanceStoreError::Io(format!("原子写实例配置失败: {error}")))
 }
 
 #[cfg(test)]
