@@ -1103,3 +1103,86 @@ xs/s 档普遍 0.0K（分配器复用得上）。`markdown-highlight` 逐语言�
    「迁移前」是 `76cbc819^` 的构建）装上跑同一会话夹具——属独立一轮。
 3. 本次验收在真机装的 exe 为本地 release 构建（36,479,488 B，已留
    `pylon.exe.bak-before220` 备份）；验收后已关闭该实例，调试端口不再暴露。
+
+---
+
+## 26. 基准复跑（在途状态：本人已提交 + 他人路线 A 的 WIP）
+
+**测的是什么状态**：`src-tauri/pylon-compute/src/projector/workbench.rs`（+722 行）、
+`src/infrastructure/compute/projectorCompute.ts`（+86）、`projectorComputeParity.test.ts`
+上有**他人的在途改动**，内容是记录 §24.3 的**路线 A**（`MessageAppendPatch`：patch 带
+`contentTail` / `lastPart` / `pushedParts` 的紧凑追加形态，TS 侧 `applyMessageAppend` 展开）。
+该状态**能编译**（`cargo check -p pylon-compute --lib` 干净），故本轮数字是「本人已提交的
+工作 + 对方路线 A 的 WIP」的合成态，**不是任何一个提交点**。产物重建于本轮
+（`pylon_compute_bg.wasm` 859,914 B）。机器空闲（CPU 2%，无 cargo/rustc）。
+
+### 26.1 parity 门禁
+
+`175 项：ok 172 / known-diff 3 / mismatch 0`（3 条仍是预期的孤立代理 / 脚注 / 高亮 js）。
+
+### 26.2 速度（`compute-parity-bench.mts`，scale=m，每侧 3 轮中位数）
+
+分域（wasm 占优 / ts 占优 / 总数）：canonical 0/6、events 1/25、**projector 0/18**、
+streaming-split 20/69、streaming-budget 7/2、**markdown-parse 17/0**、markdown-highlight 2/8。
+
+| projector case | ts(ms) | wasm(ms) | ratio | 会话起点 | 上一轮 |
+| --- | --- | --- | --- | --- | --- |
+| `fold mixed-m` | 45.02 | 46.57 | **1.03×** | 5.22× | 1.18× |
+| `paged paged-replay-m` | 5.08 | 10.59 | 2.08× | 5.55× | 2.25× |
+| `fold delta-m` | 3.09 | 20.00 | 6.48× | 7.67× | 5.72× |
+| `fold mixed-s` / `delta-s` | 0.41 / 0.30 | 1.82 / 1.16 | 4.49× / 3.81× | 6.6× / 4.3× | — |
+| `fold coverage-disorder` | 0.01 | 0.06 | 7.73× | 11.6× | 9.2× |
+| `paged idempotent-refold` | 0.07 | 0.51 | 7.43× | 8.4× | 8.9× |
+
+其余域的关键行：`parseMarkdown doc-m` **0.10×**（wasm 快 10×）、`doc-s` 0.09×；
+`highlightBlock` 0.62–3.0×（引擎级）；`canonical` 1.94–6.33× 与
+`streaming-split` 的 xs 行（绝对值 < 0.05ms，纯过界开销）；`events` 批量出口 12.75–151×
+——**注**：那几条的 wasm 侧把脚手架 fixture 的 JS 帧编码计进了计时（§23 已定位），
+且 events 层未切流，比值不代表计算核。
+
+### 26.3 live 逐事件（生产路径，一进程一段，n=2001）
+
+| 段 | 本轮 | 本人修完折叠扫描后 | 变化 |
+| --- | --- | --- | --- |
+| JS 单事件帧编码 | 3.71µs | 5.25µs | −29% |
+| wasm `appendBatch` | **14.46µs** | 57.08µs | **−75%** |
+| patch `JSON.parse` | **2.24µs** | 21.55µs | **−90%** |
+| **生产 live 全路径** | **31.24µs** | 84.04µs | **−63%** |
+| 迁移前 TS（对照） | 20.13µs | 19.35µs | — |
+| **live / TS** | **1.55×** | 4.07× | — |
+
+patch 传输总量 **1.0MiB / 2001 事件**（此前 **36.3MiB**，**36× 少**）——这正是路线 A 的靶子：
+紧凑追加形态取代了「每事件重发整条累计消息」。
+
+剩余 live 缺口（31.24µs 里）：`appendBatch` 14.46 + 编码 3.71 + parse 2.24 ≈ 20.4µs，
+其余 **~10.8µs 落在 JS 侧 patch 应用**（`applyMessageAppend` + 文档重建 + 池登记）。
+本人上一轮测同一项时该段 ≈0 ⇒ 这 10.8µs 是路线 A 新引入的 TS 侧成本，**属对方未完成的半成品**，
+照实记，不代改。
+
+### 26.4 冷装载 20k（1000/页，一进程一配置）
+
+| case | 三次读数 |
+| --- | --- |
+| `cold-ts`（迁移前 TS） | 34.5 / 24.6 / 29.0 ms |
+| `cold-wasm` | 233.9 / 268.5 / 191.4 ms |
+
+比值 6.8–9×，**读数噪声大**：单进程内把 20k 事件折完会把 wasm 线性堆顶到 ~280MB，
+之后每次 `memory.grow` 都要搬整块线性内存（记录 §17 已登记的宿主假象）。
+这个数**不是核的计算时间**；要稳定读数需按页独立进程，属未做。
+
+### 26.5 内存（`compute-parity-memory.mts`，`--expose-gc` 精确保留量）
+
+核线性内存高水位（跑完 m 档全表，**只涨不跌**）：`pylon-compute` 1.13 → **99.44MiB**；
+`pylon-markdown` 2.38 → **94.50MiB**。单次调用抬高量：`fold delta-m` **+2.63MiB**、
+`fold mixed-m` **+5.13MiB**、`paged-replay-m` 单次 0（复用得上）。
+保留/次：`delta-m` 1.19M、`mixed-m` 1.60M；TS 侧 ≈0 或负（口径地板噪声，比值列显示 `—`）。
+
+**同 workload 持有成本对照**（`bench-memory-hold.mts`，两侧文档形状逐项核对等量）：
+
+| 文档形状 | ① TS 文档 | ② wasm（核内 + JS 物化） | ②/① | ③ 核线性峰值保留 | ③/① |
+| --- | --- | --- | --- | --- | --- |
+| delta 2001 条 | 0.36MiB | 1.59MiB | **4.46×** | 8.19MiB | 23.0× |
+| mixed 2251 条 | 0.50MiB | 3.04MiB | **6.05×** | 14.06MiB | 28.0× |
+
+⇒ **纯 TS 实现的文档内存明显更低**，且对象越多差距越大（`serde_json::Value` 结构成本）。
+路线 A 只消掉**过界传输**（36.3MiB → 1.0MiB），不消核内的那份文档；要动那一份仍是「① 去 `Value`」。
