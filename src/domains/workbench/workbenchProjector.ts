@@ -810,9 +810,11 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
         || providerIdentityKey(envelope.identity) === '' && previous.running === true
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
+  if (role === 'user' && (globalThis as any).__DEBUG_ECHO__) console.log('[dbg] reduceMessage user', JSON.stringify({ type: event.type, origin: envelope.provenance?.origin, seq: envelope.sequence, eid: envelope.eventId, content: content.slice(0, 12), incomingOptimistic }))
   const duplicateIndex = role === 'user'
     ? findCorrelatedUserEcho(document.messages, envelope, content, incomingOptimistic)
     : -1
+  if ((globalThis as any).__DEBUG_ECHO__ && role === 'user') console.log('[dbg] duplicateIndex', duplicateIndex, 'prevIdentity', JSON.stringify(document.messages.at(-1)?.identity), 'echoIdentity', JSON.stringify(envelope.identity), 'prevOptimistic', document.messages.at(-1)?.optimistic, 'prevRunning', document.messages.at(-1)?.running)
   if (duplicateIndex >= 0) {
     // Prefer the Kernel-committed row regardless of whether it arrives before
     // or after the debounced optimistic append. Replacement at the optimistic
@@ -820,12 +822,12 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     if (incomingOptimistic) return document
     return {
       ...document,
-      messages: document.messages.map((message, index) => index === duplicateIndex ? {
+      messages: document.messages.map((message, index) => index === duplicateIndex ? freezeDeepSnapshot({
         ...messageIdentityFor(envelope), role: 'user', content, parts,
         identity: envelope.identity, source: envelope.source,
         sequence: envelope.sequence, running: !terminal && !importedHistory,
         time: envelope.occurredAt ?? envelope.recordedAt,
-      } : message),
+      } as WorkbenchMessage) : message),
     }
   }
   // Out-of-order arrival convergence: a journal-earlier text delta belongs to
@@ -835,11 +837,11 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   // not resurrected.
   if (!terminal && previous && previous.role === role && !previous.running && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)
     && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document, context?.terminalSessionSequences))) {
-    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), freezeDeepSnapshot({
       ...previous,
       content: previous.content + content,
       parts: coalesceAdjacentDisplayTextParts([...previous.parts, ...parts]),
-    }]
+    })]
     return { ...document, messages: folded }
   }
   // A terminal segment is an absorption fence. A late delta may only start a
@@ -860,8 +862,8 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     return addOutOfOrderDiagnostic(document, envelope)
   }
   const messages = append
-    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal && !importedHistory }]
-    : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal && !importedHistory, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
+    ? [...document.messages.slice(0, -1), freezeDeepSnapshot({ ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal && !importedHistory })]
+    : [...document.messages, freezeDeepSnapshot({ ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal && !importedHistory, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) } as WorkbenchMessage)]
   return { ...document, messages }
 }
 
@@ -901,14 +903,14 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
   if (append && previous && !previous.running) {
     if (redacted && !previous.redacted) {
-      const secured: WorkbenchMessage = {
+      const secured: WorkbenchMessage = freezeDeepSnapshot({
         ...previous,
         content: '',
         parts,
         sequence: envelope.sequence,
         redacted: true,
         ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
-      }
+      })
       return { ...document, messages: [...document.messages.slice(0, -1), secured] }
     }
     return document
@@ -920,11 +922,11 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary
     && textStreamContinues(document, previous, envelope, context?.textBoundarySequences)
     && envelope.sequence < Math.max(previous.sequence, terminalSessionSequence(document, context?.terminalSessionSequences))) {
-    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), {
+    const folded: WorkbenchMessage[] = [...document.messages.slice(0, -1), freezeDeepSnapshot({
       ...previous,
       content: previous.content + content,
       parts: coalesceAdjacentReasoningParts([...previous.parts, ...reasoningParts]),
-    }]
+    })]
     return { ...document, messages: folded }
   }
   if (event.type === 'reasoning.delta' && previous && previous.role === 'reasoning' && !previous.running && !hasToolBoundary) {
@@ -949,7 +951,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const durationMs = event.type === 'reasoning.delta'
     ? (append ? previous?.thoughtDurationMs : undefined)
     : Number.isFinite(terminalAt) && Number.isFinite(startedAt) ? Math.max(0, terminalAt - startedAt) : undefined
-  const message: WorkbenchMessage = append
+  const message: WorkbenchMessage = freezeDeepSnapshot(append
     ? {
         ...previous,
         content: redacted ? content : previous.content + content,
@@ -974,7 +976,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : { thoughtStartedAtMs: Number.isFinite(startedAt) ? startedAt : undefined }),
         ...(redacted ? { redacted: true } : {}),
         ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
-      }
+      })
   return { ...document, messages: append ? [...document.messages.slice(0, -1), message] : [...document.messages, message] }
 }
 
@@ -1320,13 +1322,13 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   return {
     ...document,
     ...(settlesMessages ? {
-      messages: document.messages.map(message => message.running ? {
+      messages: document.messages.map(message => message.running ? freezeDeepSnapshot({
         ...message,
         running: false,
         ...(message.role === 'reasoning' && message.thoughtStartedAtMs !== undefined && Number.isFinite(completedAt)
           ? { thoughtDurationMs: Math.max(0, completedAt - message.thoughtStartedAtMs) }
           : {}),
-      } : message),
+      }) : message),
     } : {}),
     session: {
       ...document.session,
@@ -1396,7 +1398,7 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   return {
     ...document,
     ...(transitionToError ? {
-      messages: document.messages.map(item => item.running ? { ...item, running: false } : item),
+      messages: document.messages.map(item => item.running ? freezeDeepSnapshot({ ...item, running: false }) : item),
       session: { ...document.session, status: 'error' },
     } : {}),
     diagnostics: [...document.diagnostics, diagnostic],
@@ -1429,7 +1431,7 @@ function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<s
     const orphan = !ids.has(activity.parentId)
     if (activity.orphan === orphan) return activity
     changed = true
-    return { ...activity, orphan }
+    return freezeDeepSnapshot({ ...activity, orphan })
   })
   return changed ? { ...document, activities } : document
 }
@@ -1453,7 +1455,11 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
 
 function insertBySequence<T extends { sequence: number }>(items: readonly T[], item: T): T[] {
   const last = items.at(-1)
-  if (!last || last.sequence <= item.sequence) return [...items, item]
+  if (!last || last.sequence <= item.sequence) {
+    const next = [...items, item]
+    Object.freeze(item)
+    return next
+  }
   let low = 0
   let high = items.length
   while (low < high) {
@@ -1461,7 +1467,9 @@ function insertBySequence<T extends { sequence: number }>(items: readonly T[], i
     if (items[middle]!.sequence <= item.sequence) low = middle + 1
     else high = middle
   }
-  return [...items.slice(0, low), item, ...items.slice(low)]
+  const next = [...items.slice(0, low), item, ...items.slice(low)]
+  Object.freeze(item)
+  return next
 }
 
 function addLateEventDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, message: string): WorkbenchDocument {
@@ -1518,7 +1526,7 @@ function settleSupersededRunningMessages(
   return {
     ...document,
     messages: document.messages.map(message => message.running && message.role !== continuingRole
-      ? { ...message, running: false }
+      ? freezeDeepSnapshot({ ...message, running: false })
       : message),
   }
 }
@@ -1567,7 +1575,7 @@ function settleTextSegment(
   return {
     ...document,
     messages: document.messages.map((message, messageIndex) => messageIndex === index
-      ? { ...message, running: false, sequence: envelope.sequence }
+      ? freezeDeepSnapshot({ ...message, running: false, sequence: envelope.sequence })
       : message),
   }
 }
@@ -1592,12 +1600,12 @@ function settleReasoningSegment(document: WorkbenchDocument, envelope: Workbench
   return {
     ...document,
     messages: document.messages.map((message, messageIndex) => messageIndex === index
-      ? {
+      ? freezeDeepSnapshot({
           ...message,
           running: false,
           sequence: envelope.sequence,
           ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
-        }
+        })
       : message),
   }
 }
@@ -1665,6 +1673,22 @@ function jsonSnapshot<T>(value: T): T | undefined {
       return undefined
     }
   }
+}
+
+/** #204③ 解冻基线：文档项在**构造时**冻结（O(新项数)），运行时 freezeDocument 据此走
+ * 前缀共享快路——大数组整体 Object.freeze 在 JSC 是 O(N) 高成本操作（40k ≈ 18ms/次），
+ * 逐帧执行曾占 live 每帧成本的绝大部分。深冻结是**保形**操作（只把同一形状里的对象/数组
+ * 替换为冻结副本），`T` 即最精确的契约。 */
+export function freezeDeepSnapshot<T>(value: T): T {
+  return freezeDeepValue(value)
+}
+
+function freezeDeepValue<T>(value: T): T {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue)) as T
+  if (value && typeof value === 'object') {
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)]))) as T
+  }
+  return value
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

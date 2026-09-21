@@ -7,7 +7,7 @@ import type {
   GenerationSummary,
 } from './generationFooterContracts.ts'
 import type { WorkbenchActivityNode, WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
-import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
+import { createWorkbenchDocument, freezeDeepSnapshot, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
@@ -325,7 +325,9 @@ export function mergeWorkbenchRuntimeSnapshot(
   input: WorkbenchRuntimeMergeInput,
 ): WorkbenchRuntimeSnapshot {
   const document = input.document ?? previous.document
-  const projected = document ? legacyFieldsFromDocument(document) : {}
+  // #204③：legacy `messages` 派生按需门控——仅当宿主真的在用 legacy 字段（预览
+  // fixture / 预览宿主写入，数组非空）时才随文档重建；生产恒为空数组 ⇒ 零派生成本。
+  const projected = document ? legacyFieldsFromDocument(document, (previous.messages?.length ?? 0) > 0) : {}
   const preserved = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
   // #213 活性权威：会话层已用回合时钟表态时，文档派生的 `generating` 一律让位——
   // 重放出的 `running` 尾行只是"没见到终态"的证据，不是"本进程在跑"的证据。
@@ -418,29 +420,67 @@ function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSna
   return Object.freeze(snapshot)
 }
 
+// JSC 把 `Object.freeze` 过的数组转入字典元素模式——此后逐位读取/拷贝按哈希走，
+// 实测 40k 行数组单次遍历从 ~0.1ms 退化到 ~10ms。大集合改为项级冻结 + copy-on-write
+// 纪律，数组本身保持 packed；小集合维持整体冻结的原契约。
+const FROZEN_ARRAY_ELEMENT_LIMIT = 2048
+
+function freezeLargeAware<T>(items: readonly T[]): readonly T[] {
+  return items.length <= FROZEN_ARRAY_ELEMENT_LIMIT ? Object.freeze(items) : items
+}
+
 function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocument): WorkbenchDocument {
   // P57 S2-R1b：全部元素与 previous 逐项引用相等时，直接返回 previousItems 原引用
   //（已冻结）。此前 items.map 恒产生新数组 → snapshot 侧数组引用每事件必新，
   // 一切数组引用 memo（legacy fields / 显示链包装）全部落空。
+  //
+  // #204③ 解冻基线：**数组本身不再整体 Object.freeze**（JSC 上对大数组是 O(N)
+  // 高成本操作，40k ≈ 18ms/次，曾占 live 每帧成本的绝大部分），改为逐项校验：
+  // 与上一帧引用相等的项（上一帧已冻结）直接沿用，新项若未冻结才走 freezeItem
+  // ——投影器已改为**建时冻结**（见 workbenchProjector.freezeDeepSnapshot），故
+  // live 每帧的稳态成本 = O(N) 指针比对 + 0 克隆 + 0 数组分配。数组可变性纪律
+  // 由投影器/运行时的 copy-on-write 承担（快照不再提供数组级冻结防线）。
   const freezeItems = <T extends object>(
     items: readonly T[],
     previousItems?: readonly T[],
     freezeItem: (item: T) => T = item => Object.freeze({ ...item }) as T,
   ): readonly T[] => {
-    if (items === previousItems && Object.isFrozen(items)) return items
-    if (previousItems !== undefined && Object.isFrozen(previousItems) && items.length === previousItems.length) {
-      let allSame = true
+    // 同一数组引用：上一帧已处理过，恒等返回（不做 isFrozen——JSC 对未冻结大数组的
+    // Object.isFrozen 本身是 O(N) 遍历）。
+    if (items === previousItems) return items
+    // #204③ 解冻基线：数组本身不再整体 Object.freeze（JSC 上 40k ≈ 18ms/次，曾占
+    // live 每帧成本的绝大部分）。改两遍扫描：
+    //   ① 逐位引用比对（上一帧同位项按归纳已冻结，O(1) 沿用）；引用不同的项用
+    //      Object.isFrozen（O(1) 小对象判定）确认投影器建时冻结是否已生效；
+    //   ② 稳态（live 每帧只有尾部 1–2 个新项且已冻结）⇒ 零克隆、零分配直接返回；
+    //      仅当存在未冻结的新项（非投影器来源的首折/外部文档）才拷贝补冻。
+    // 数组可变性纪律由投影器/运行时的 copy-on-write 承担（快照不再提供数组级冻结防线）。
+    if (previousItems !== undefined) {
+      let allRefEqual = items.length === previousItems.length
+      let needsFreeze = false
       for (let index = 0; index < items.length; index += 1) {
-        if (items[index] !== previousItems[index]) {
-          allSame = false
-          break
-        }
+        const item = items[index]!
+        if (item === previousItems[index]) continue
+        allRefEqual = false
+        if (!Object.isFrozen(item)) { needsFreeze = true; break }
       }
-      if (allSame) return previousItems
+      if (!needsFreeze) {
+        // 全等且等长 → previous 原引用（P57 S2-R1b 引用稳定契约）；否则返回 items
+        //（携带着新增/替换的已冻结项，零分配）。
+        return allRefEqual ? previousItems : items
+      }
+      const copied = [...items]
+      for (let index = 0; index < copied.length; index += 1) {
+        const item = copied[index]!
+        if (item === previousItems[index] || Object.isFrozen(item)) continue
+        copied[index] = freezeItem(item)
+      }
+      return freezeLargeAware(copied)
     }
-    return Object.freeze(items.map((item, index) => item === previousItems?.[index] && Object.isFrozen(item)
+    const mapped = items.map((item, index) => item === previousItems?.[index] && Object.isFrozen(item)
       ? item
-      : freezeItem(item)))
+      : freezeItem(item))
+    return freezeLargeAware(mapped)
   }
   const session = document.session === previous?.session && Object.isFrozen(document.session)
     ? document.session
@@ -507,20 +547,6 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
   })
 }
 
-function freezeDeepSnapshot<T extends object>(value: T): T {
-  return freezeDeepValue(value)
-}
-
-/** 深冻结是**保形**操作（只把同一形状里的对象/数组替换为冻结副本），
- *  故 `T` 即最精确的契约——原先的 `unknown` 反而抹掉了调用方类型。 */
-function freezeDeepValue<T>(value: T): T {
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue)) as T
-  if (value && typeof value === 'object') {
-    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)]))) as T
-  }
-  return value
-}
-
 function freezeUsage(usage: NonNullable<WorkbenchDocument['session']['usage']>): NonNullable<WorkbenchDocument['session']['usage']> {
   return Object.freeze({
     ...usage,
@@ -543,49 +569,36 @@ function freezeJsonValue(value: JsonValue): JsonValue {
   return value
 }
 
-// Message projection depends only on the immutable message array. Activity,
-// diagnostic and model changes must not rebuild it; weak keys release old turns.
-const messageProjectionMemo = new WeakMap<readonly WorkbenchMessage[], {
-  messages: readonly Message[]
+// #204③ legacy messages 派生链退役：`snapshot.messages` 在生产没有任何写入者
+// （P52 D4 后 replay commit 适配器是文档化 no-op，agentWorkbenchLifecycle.replayAdapter）
+// 与有效读取者（SolidWorkbenchApp/scheduler 的 legacy 分支都是 document 缺席时的
+// fallback，而 runtime 恒有 document；WorkbenchMessage 无 tool 角色 ⇒ tool 合并恒空转）。
+// 字段保留为**预览宿主输入**（documentFromLegacy + update({messages})，预览兼容面），
+// 派生不再执行 ⇒ 每帧 O(M) 数组重建 + 大数组冻结消失。
+// 派生里唯一仍有消费者的部分是 running 行记账（generating/phase/thinkingStart 的
+// document 侧证据）——降为无分配单趟扫描。
+interface RunningState {
   firstRunning?: WorkbenchMessage
   lastRunning?: WorkbenchMessage
   runningReasoning?: WorkbenchMessage
-}>()
-
-// #204③：单条 WorkbenchMessage → legacy Message 的投影按消息引用缓存——append-delta
-// 只替换末条对象，其余行引用跨帧稳定，每帧只需重投影变化行（原实现按 messages 数组
-// 引用缓存，delta 每帧产生新数组 ⇒ 恒 O(M) 全量重建与分配）。消息对象不可变，缓存
-// 不会过期；被替换的旧行由 WeakMap 随 GC 释放。
-const legacyMessageMemo = new WeakMap<WorkbenchMessage, Message>()
-
-function legacyMessageOf(message: WorkbenchMessage): Message {
-  const cached = legacyMessageMemo.get(message)
-  if (cached) return cached
-  const projected: Message = {
-    id: message.id,
-    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
-    sender: message.source.provider, content: message.content, time: message.time, running: message.running,
-  }
-  legacyMessageMemo.set(message, projected)
-  return projected
 }
 
-function projectLegacyMessages(source: readonly WorkbenchMessage[]) {
-  const cached = messageProjectionMemo.get(source)
+const runningStateMemo = new WeakMap<readonly WorkbenchMessage[], RunningState>()
+
+function runningStateOf(source: readonly WorkbenchMessage[]): RunningState {
+  const cached = runningStateMemo.get(source)
   if (cached) return cached
   let firstRunning: WorkbenchMessage | undefined
   let lastRunning: WorkbenchMessage | undefined
   let runningReasoning: WorkbenchMessage | undefined
-  const messages = source.map(message => {
-    if (message.running) {
-      firstRunning ??= message
-      lastRunning = message
-      if (message.role === 'reasoning') runningReasoning = message
-    }
-    return legacyMessageOf(message)
-  })
-  const result = { messages: Object.freeze(messages), firstRunning, lastRunning, runningReasoning }
-  messageProjectionMemo.set(source, result)
+  for (const message of source) {
+    if (!message.running) continue
+    firstRunning ??= message
+    lastRunning = message
+    if (message.role === 'reasoning') runningReasoning = message
+  }
+  const result: RunningState = { firstRunning, lastRunning, runningReasoning }
+  runningStateMemo.set(source, result)
   return result
 }
 
@@ -600,7 +613,34 @@ let legacyFieldsMemo: {
   readonly value: Partial<WorkbenchRuntimeSnapshot>
 } | undefined
 
-function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
+// #204③：legacy `messages` 派生（按需）。单条 WorkbenchMessage → legacy Message 按
+// 消息引用缓存（append-delta 只重投影变化行）；仅在宿主 legacy 字段非空（预览宿主/
+// fixture）时被调用，生产路径恒空数组 ⇒ 不进入。
+const legacyMessageMemo = new WeakMap<WorkbenchMessage, Message>()
+
+function legacyMessageOf(message: WorkbenchMessage): Message {
+  const cached = legacyMessageMemo.get(message)
+  if (cached) return cached
+  const projected: Message = {
+    id: message.id,
+    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
+    sender: message.source.provider, content: message.content, time: message.time, running: message.running,
+  }
+  legacyMessageMemo.set(message, projected)
+  return projected
+}
+
+const legacyMessagesMemo = new WeakMap<readonly WorkbenchMessage[], readonly Message[]>()
+
+function projectLegacyMessages(source: readonly WorkbenchMessage[]): readonly Message[] {
+  const cached = legacyMessagesMemo.get(source)
+  if (cached) return cached
+  const derived = Object.freeze(source.map(legacyMessageOf))
+  legacyMessagesMemo.set(source, derived)
+  return derived
+}
+
+function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessages: boolean): Partial<WorkbenchRuntimeSnapshot> {
   const memo = legacyFieldsMemo
   if (memo !== undefined
     && memo.messages === document.messages
@@ -611,7 +651,7 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     && memo.sessionMode === document.session.mode) {
     return memo.value
   }
-  const { messages, firstRunning, lastRunning: lastRunningMessage, runningReasoning } = projectLegacyMessages(document.messages)
+  const { firstRunning, lastRunning: lastRunningMessage, runningReasoning } = runningStateOf(document.messages)
   // #204③：倒序扫描（免 `[...].reverse()` 每帧两份数组分配）；命中即返回，未命中
   // 走满也只是无分配的整数/字符串比较。
   let error: string | null = null
@@ -650,8 +690,9 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
       ]) ?? generationStart
     : undefined
   const value: Partial<WorkbenchRuntimeSnapshot> = {
-    // memo 复用的数组必须先冻结：freezeSnapshot 对未冻结数组会逐次拷贝（引用失稳）。
-    messages,
+    // `messages` 仅在宿主 legacy 字段非空（预览宿主/fixture 兼容面）时随文档派生；
+    // 生产恒空数组 ⇒ 不派生（见 mergeWorkbenchRuntimeSnapshot 的门控）。
+    ...(deriveLegacyMessages ? { messages: projectLegacyMessages(document.messages) } : {}),
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',
@@ -745,16 +786,16 @@ function applyLivenessAuthority(
   }
 }
 
+// #204③：终态是投影器的**吸收态**——`session.completed|failed` 折入时 reduceSession
+// 必置 session.status 为同一终态，且 terminalRegression 阻止任何非终态回写；
+// `turn.failed/provider.error` 经 addDiagnostic 置 'error'。因此「timeline 存在终态
+// session 条目」⇔「session.status 为终态」，逐条 timeline 扫描（每次 publish 的隐藏
+// O(N)）删为 O(1) 状态判定。仍只认显式生命周期终态事件为证据：completed
+// assistant/reasoning 行不是——provider 可能对同一回合补发迟到的 tool.started。
+const TERMINAL_DOCUMENT_STATUSES: ReadonlySet<string> = new Set(['completed', 'error', 'cancelled', 'failed'])
+
 function hasTerminalDocumentState(document: WorkbenchDocument): boolean {
-  const status = document.session.status.toLowerCase()
-  // Only an explicit lifecycle terminal event is sufficient evidence. A
-  // completed assistant/reasoning row is not: providers may emit a delayed
-  // tool.started for the same turn, and inferring a fence from a temporary
-  // text-only gap would stop the footer before that tool is observed.
-  return ['completed', 'error', 'cancelled', 'failed'].includes(status)
-    || document.timeline.some(entry => entry.kind === 'session'
-      && typeof entry.status === 'string'
-      && ['completed', 'error', 'cancelled', 'failed'].includes(entry.status.toLowerCase()))
+  return TERMINAL_DOCUMENT_STATUSES.has(document.session.status.toLowerCase())
 }
 
 function isTerminalActivityStatus(status: string): boolean {
