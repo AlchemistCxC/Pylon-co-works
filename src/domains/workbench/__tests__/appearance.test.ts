@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { cloneCcLayout } from '../../../ccLayoutState.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
+import { effectivePresetTheme } from '../../../zones/index.ts'
 import type { ThemeSettings } from '../../../store.ts'
 import { selectWorkbenchAppearance } from '../appearance.ts'
 import {
@@ -113,7 +114,7 @@ describe('selectWorkbenchAppearance', () => {
 
   it('内置预设的非聊天界面统一使用系统字体', () => {
     for (const preset of GLOBAL_PRESETS) {
-      expect(preset.theme.globalFont ?? DEFAULTS.globalFont, preset.name).toBe('system')
+      expect(effectivePresetTheme(preset).globalFont ?? DEFAULTS.globalFont, preset.name).toBe('system')
     }
     expect(DEFAULTS.chatFont).toBe('mono')
     expect(DEFAULTS.msgFont).toBe('mono')

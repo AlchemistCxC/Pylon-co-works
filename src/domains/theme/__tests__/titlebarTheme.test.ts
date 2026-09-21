@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
+import { effectivePresetTheme } from '../../../zones/index.ts'
 import { GROUP_ORDER, THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
 import { DEFAULTS } from '../themeDefaults.ts'
 import { selectThemeCssSnapshot } from '../themeCssSnapshot.ts'
@@ -28,8 +29,8 @@ describe('TitleBar 主题契约', () => {
   it('所有全局预设都显式定义协调的 TitleBar 背景与文字颜色', () => {
     expect(GLOBAL_PRESETS.length).toBeGreaterThanOrEqual(9)
     for (const preset of GLOBAL_PRESETS) {
-      expect(preset.theme.titlebarBg, `${preset.name}.titlebarBg`).toBeTruthy()
-      expect(preset.theme.titlebarTextColor, `${preset.name}.titlebarTextColor`).toBeTruthy()
+      expect(effectivePresetTheme(preset).titlebarBg, `${preset.name}.titlebarBg`).toBeTruthy()
+      expect(effectivePresetTheme(preset).titlebarTextColor, `${preset.name}.titlebarTextColor`).toBeTruthy()
     }
   })
 })

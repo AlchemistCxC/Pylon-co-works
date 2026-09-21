@@ -8,7 +8,7 @@
  */
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, type GlobalPreset } from '../../presets/index.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET } from '../../presets/index.ts'
 import { PRESET_ZONES } from '../../domains/theme/presetReducer.ts'
 import { ZONE_FIELDS } from '../../themeFieldDefs.ts'
 import type { ThemeSettings } from '../../store.ts'
@@ -17,10 +17,11 @@ import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStor
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.tsx'
 import { resetStores } from '../../test/resetStores.ts'
 import { pickZoneFields } from '../pickZoneFields.ts'
+import { effectivePresetTheme } from '../effectivePresetTheme.ts'
 import {
   ZONE_PRESET_POOL,
+  assembleFactoryZonePresetPool,
   createZonePresetEntryId,
-  deriveZonePresetPool,
   isCustomZonePresetEntry,
   normalizeZonePresetEntries,
   normalizeZonePresetValues,
@@ -75,14 +76,14 @@ describe('zonePresetPool · 派生（刀6 #206）', () => {
   })
 
   it('不折叠（刀2 / #223 裁决 A）：同形切面各留一条，各自 id 与 label 取自己的来源；sources 已退场', () => {
-    const presets: GlobalPreset[] = [
-      // a1 / a2 侧栏切面同形（且字段书写顺序不同，验证键序无关）
-      { name: 'glass', label: 'A1', interfaceMode: 'gui', theme: { sidebarBg: '#111', sidebarNameSize: 14 } },
-      { name: 'solarized', label: 'A2', interfaceMode: 'gui', theme: { sidebarNameSize: 14, sidebarBg: '#111' } },
-      { name: 'nord', label: 'A3', interfaceMode: 'gui', theme: { sidebarBg: '#222' } },
+    // 刀3（#223）：刀2 的 `deriveZonePresetPool` 参考实现已删（预设不再自带 theme）⇒ 夹具改为**手写条目**
+    const twinEntries: ZonePresetEntry[] = [
+      // 前两条侧栏切面同形（且字段书写顺序不同）
+      { id: 'glass', mode: 'gui', zone: 'sidebar', label: 'A1', origin: 'factory', source: { presetName: 'glass' }, values: { sidebarBg: '#111', sidebarNameSize: 14 } },
+      { id: 'solarized', mode: 'gui', zone: 'sidebar', label: 'A2', origin: 'factory', source: { presetName: 'solarized' }, values: { sidebarNameSize: 14, sidebarBg: '#111' } },
+      { id: 'nord', mode: 'gui', zone: 'sidebar', label: 'A3', origin: 'factory', source: { presetName: 'nord' }, values: { sidebarBg: '#222' } },
     ]
-    const pool = deriveZonePresetPool(presets)
-    const entries = pool.gui.sidebar
+    const entries = assembleFactoryZonePresetPool(twinEntries).gui.sidebar
     // 折叠若复活：同形的两条会并成一条 ⇒ 长度 2、且 solarized 这条消失（它的引用就装不上了）
     expect(entries).toHaveLength(3)
     expect(entries.map(entry => entry.id)).toEqual(['glass', 'solarized', 'nord'])
@@ -104,13 +105,13 @@ describe('zonePresetPool · 派生（刀6 #206）', () => {
     expect(screen.queryByText('局部预设')).not.toBeInTheDocument()
   })
 
-  it('出厂条目应用切片逐字段等于 pickZoneFields(来源预设.theme, zone)（应用行为零变化）', () => {
+  it('出厂条目应用切片逐字段等于来源预设有效值在该区的切面（应用行为零变化）', () => {
     for (const mode of BUCKETS) {
       for (const zone of PRESET_ZONES) {
         for (const entry of ZONE_PRESET_POOL[mode][zone]) {
           const preset = GLOBAL_PRESETS.find(item => item.name === entry.source?.presetName)
           expect(preset, `${mode}/${zone} 来源预设必须存在`).toBeTruthy()
-          expect(resolveZonePresetEntryTheme(entry), `${mode}/${zone}/${entry.id}`).toEqual(pickZoneFields(preset!.theme, zone))
+          expect(resolveZonePresetEntryTheme(entry), `${mode}/${zone}/${entry.id}`).toEqual(pickZoneFields(effectivePresetTheme(preset!), zone))
         }
       }
     }

@@ -5,7 +5,7 @@ import {
   type GlobalPresetZoneSlice,
   type ZoneRefMap,
 } from '../../domains/theme/presetReducer.ts'
-import { ZONE_PRESET_POOL, resolveZonePresetEntryTheme } from '../../zones/zonePresetPool.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, resolveZonePresetEntryTheme } from '../../zones/index.ts'
 import { useStore, type ThemeSettings } from '../../store.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileRegistry } from '../../plugin-runtime/presentation/presentationProfileRegistry.ts'
@@ -57,9 +57,11 @@ export function planGlobalPreset(
   if (!preset) return { kind: 'skip' }
 
   const zoneRefs = preset.zoneRefs ? requireZoneRefs(preset.zoneRefs, `出厂预设 ${preset.name} 的区域引用表`) : undefined
+  // 刀3（#223）：预设不再手写 `theme` ⇒ 有效值一律走视图（两条默认预设的视图就是它自己写的 theme）
+  const theme = effectivePresetTheme(preset)
 
   if (!preset.presentationProfileId) {
-    return { kind: 'apply', presetName: preset.name, interfaceMode: preset.interfaceMode, theme: preset.theme, ...(zoneRefs ? { zoneRefs } : {}) }
+    return { kind: 'apply', presetName: preset.name, interfaceMode: preset.interfaceMode, theme, ...(zoneRefs ? { zoneRefs } : {}) }
   }
 
   const profile = lookupProfile(preset.presentationProfileId)
@@ -69,7 +71,8 @@ export function planGlobalPreset(
     kind: 'apply',
     presetName: preset.name,
     interfaceMode: preset.interfaceMode,
-    theme: { ...preset.theme, ...profile.tokens },
+    // 呈现方案 token **叠在有效值之上**（优先级不变：token 覆盖预设值）
+    theme: { ...theme, ...profile.tokens },
     activateProfileId: profile.id,
     ...(zoneRefs ? { zoneRefs, profileTokens: profile.tokens } : {}),
   }

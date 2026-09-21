@@ -1,36 +1,35 @@
 /**
- * 区域层 · 区域预设池（刀6 / #206 建池；刀2 / #223 出厂条目独立成数据）。
+ * 区域层 · 区域预设池（刀6 / #206 建池；刀2 / #223 出厂条目独立成数据；刀3 / #223 拆掉过渡工具）。
  *
- * **出厂条目**从刀2 起是**落盘数据**（`src/zones/factory/**`，由
- * `scripts/generate-factory-zone-presets.mts` 从 `GLOBAL_PRESETS` 现场切出、并逐条校验）；
+ * **出厂条目**是**落盘数据**（`src/zones/factory/**`，刀2 由生成脚本从 `GLOBAL_PRESETS` 现场切出并逐条校验）；
  * **自定义条目**存值快照（`values`）——铁律「存引用不存值」的**唯一**字面例外
  * （自建条目没有来源预设可指）。
  *
- * 刀2 的三处变化：
+ * 刀2 的三处变化（历史，仍生效）：
  * 1. ★ **判据换成显式来源字段 `origin`**：出厂与自定义**都带 `values`**，旧的
  *    `values !== undefined` 判据会立刻失效（出厂条目会变成"可删"、UI 亮「自定义」）。
  * 2. ★ **折叠退场**（规范 §7 刀2「裁决 A」）：刀1 的 `zoneRefs` 是逐套显式写自己的名字，
  *    而折叠会把内容相同的多条并成一条、只留排序最前的 id ⇒ 被折叠那套的引用指向不存在的 id
- *    ⇒ 那个预设**装不上**。两者互斥，去掉折叠。当前实测每格恰好 5 条、无一折叠 ⇒ 行为零变化。
- *    `sources` 字段与 UI 的同形悬停提示随之退场。
- * 3. `deriveZonePresetPool` 退为**参考实现**（生成脚本 + 测试对拍用），不再进生产读路径。
+ *    ⇒ 那个预设**装不上**。两者互斥，去掉折叠。`sources` 字段与 UI 的同形悬停提示随之退场。
+ * 3. `ZONE_PRESET_POOL` 的数据来源 = 落盘数据表（不再现场派生）。
+ *
+ * ★ 刀3（#223）已删掉刀2 的两个过渡产物：生成脚本与其依赖的 `deriveZonePresetPool` /
+ * `deriveFactoryZonePresetEntries` 参考实现（预设不再自带 `theme`，它们的输入消失了）。
+ * 出厂条目的"值"此后只有两个来源：**落盘数据表**（生产）与测试里手写的字面量。
  *
  * 规则唯一来源：`预设修正/预设系统V2/06-规则提案-区域预设池派生-待拍板.md` §三。
- * 本模块只消费 `GLOBAL_PRESETS` / `INTERFACE_MODE_PRESET_BUCKET` / `PRESET_ZONES` /
- * `ZONE_FIELDS` / `pickZoneFields`，不复制它们的任何真值。
+ * 本模块只消费 `INTERFACE_MODE_PRESET_BUCKET` / `PRESET_ZONES` / `ZONE_FIELDS`，
+ * 不复制它们的任何真值。
  */
 
 import type { ThemeSettings } from '../store.ts'
 import { ZONE_FIELDS, type ZoneName } from '../themeFieldDefs.ts'
 import { PRESET_ZONES, assertZoneSliceOwnership, type PresetZone } from '../domains/theme/presetReducer.ts'
 import {
-  GLOBAL_PRESETS,
   INTERFACE_MODE_PRESET_BUCKET,
-  type GlobalPreset,
   type PresetInterfaceMode,
 } from '../presets/index.ts'
 import { FACTORY_ZONE_PRESET_ENTRIES } from './factory/index.ts'
-import { pickZoneFields } from './pickZoneFields.ts'
 
 /**
  * 条目来源。**出厂与自定义的区分唯一真值**（不再看有没有 `values`——刀2 起两方都有）。
@@ -89,49 +88,6 @@ export function assembleFactoryZonePresetPool(entries: readonly ZonePresetEntry[
 
 /** 构建时装配的出厂池（刀2：来源 = 落盘数据表；内容只随数据文件变化）。 */
 export const ZONE_PRESET_POOL: ZonePresetPool = assembleFactoryZonePresetPool(FACTORY_ZONE_PRESET_ENTRIES)
-
-// ── 参考实现：现场派生（生成脚本 + 测试对拍用，不进生产读路径） ──────
-
-/** 从一套预设现场切出某区域的出厂条目（含越区校验）。 */
-function buildFactoryEntry(mode: PresetInterfaceMode, zone: PresetZone, preset: GlobalPreset): ZonePresetEntry {
-  const values = pickZoneFields(preset.theme, zone)
-  assertZoneSliceOwnership(zone, values, `出厂区域预设 ${mode}/${zone}/${preset.name}`)
-  return {
-    id: preset.name,
-    mode,
-    zone,
-    label: preset.label,
-    origin: 'factory',
-    source: { presetName: preset.name },
-    values,
-  }
-}
-
-/**
- * **参考实现**（刀2 起不再进生产读路径）：`presetsForInterfaceMode(桶) × PRESET_ZONES × pickZoneFields`
- * → 逐条出厂条目。
- *
- * ★ 刀2 起**不做折叠**（规范 §7 刀2「裁决 A」）：每套预设在每个区域各留一条、id 恒等于来源预设名。
- * 生成脚本用它产出落盘数据；`factoryZonePresets.test.ts` 用它做 B1 对拍。
- */
-export function deriveZonePresetPool(presets: readonly GlobalPreset[]): ZonePresetPool {
-  const pool = {} as ZonePresetPool
-  for (const mode of PRESET_INTERFACE_MODES) {
-    const bucketPresets = presets.filter(preset => preset.interfaceMode === mode)
-    const zones = {} as Record<PresetZone, ZonePresetEntry[]>
-    for (const zone of PRESET_ZONES) {
-      zones[zone] = bucketPresets.map(preset => buildFactoryEntry(mode, zone, preset))
-    }
-    pool[mode] = Object.freeze(zones)
-  }
-  return Object.freeze(pool)
-}
-
-/** 参考实现产出的**扁平**出厂条目表（与落盘数据同形，供逐条对拍）。 */
-export function deriveFactoryZonePresetEntries(presets: readonly GlobalPreset[] = GLOBAL_PRESETS): ZonePresetEntry[] {
-  const pool = deriveZonePresetPool(presets)
-  return PRESET_INTERFACE_MODES.flatMap(mode => PRESET_ZONES.flatMap(zone => pool[mode][zone]))
-}
 
 // ── 自定义条目（值快照） ───────────────────────────────────────────
 

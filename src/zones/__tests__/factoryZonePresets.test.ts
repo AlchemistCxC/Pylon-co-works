@@ -17,7 +17,7 @@
  */
 import { fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_PRESETS, type GlobalPreset } from '../../presets/index.ts'
+import { GLOBAL_PRESETS } from '../../presets/index.ts'
 import { PRESET_ZONES, requireZoneRefs } from '../../domains/theme/presetReducer.ts'
 import { expandGlobalPresetZoneRefs } from '../../application/transactions/applyGlobalPreset.ts'
 import { DEFAULTS } from '../../domains/theme/themeDefaults.ts'
@@ -29,7 +29,7 @@ import {
   FACTORY_ZONE_PRESET_ENTRIES,
   ZONE_PRESET_POOL,
   assembleFactoryZonePresetPool,
-  deriveZonePresetPool,
+  effectivePresetTheme,
   isCustomZonePresetEntry,
   pickZoneFields,
   removeZonePresetEntryReducer,
@@ -59,8 +59,8 @@ beforeEach(() => {
 
 // ── B1 数据 == 派生参考 ────────────────────────────────────────────
 
-describe('B1 落盘数据 == 现场派生参考（50 条逐字段）', () => {
-  it('50 条 × 每条全部字段与 pickZoneFields(来源预设.theme, zone) 逐字段相等', () => {
+describe('B1 落盘数据 == 来源预设有效值在该区的切面（50 条逐字段）', () => {
+  it('50 条 × 每条全部字段与 pickZoneFields(有效值视图, zone) 逐字段相等', () => {
     expect(FACTORY_ZONE_PRESET_ENTRIES).toHaveLength(50)
     let checked = 0
     for (const entry of FACTORY_ZONE_PRESET_ENTRIES) {
@@ -69,7 +69,9 @@ describe('B1 落盘数据 == 现场派生参考（50 条逐字段）', () => {
       expect(preset, `${at} 来源预设必须存在（id = 来源预设名）`).toBeTruthy()
       expect(entry.origin, `${at} 出厂数据必须显式标 factory`).toBe('factory')
       expect(entry.source?.presetName, `${at} 来源可追溯`).toBe(entry.id)
-      expect(entry.values, `${at} 全部字段`).toEqual(pickZoneFields(preset!.theme, entry.zone))
+      // 刀3（#223）：预设不再自带 theme ⇒ 参考值改由有效值视图取（= 该预设五区切面之并集）。
+      // 这条锁的是「切片 → 并集 → 再切回该区」这条往返无损（没有哪一区的值在合并里被别的区盖掉）。
+      expect(entry.values, `${at} 全部字段`).toEqual(pickZoneFields(effectivePresetTheme(preset!), entry.zone))
       checked += 1
     }
     expect(checked, '实际逐条对拍条数').toBe(50)
@@ -164,15 +166,15 @@ describe('B3 出厂条目不进 zonePresetEntries（结构性闸门）', () => {
 // ── B4 引用解析仍通 ───────────────────────────────────────────────
 
 describe('B4 刀1 的区域引用解析仍通（10 套 × 5 区域）', () => {
-  it('全部解析成功，取到的值 = 现场派生切片，且就是数据里的那份 values', () => {
+  it('全部解析成功，取到的值 = 有效值视图在该区的切面，且就是数据里的那份 values', () => {
     for (const preset of GLOBAL_PRESETS) {
       const refs = requireZoneRefs(preset.zoneRefs, preset.name)
       const slices = expandGlobalPresetZoneRefs(preset.interfaceMode, refs)
       expect(slices.map(slice => slice.zone), `${preset.name} 区域覆盖`).toEqual([...PRESET_ZONES])
       for (const slice of slices) {
         const at = `${preset.name}/${slice.zone}`
-        // 与刀1 那一刻的切片（现场派生）逐字段相同
-        expect(slice.theme, `${at} 等于派生切片`).toEqual(pickZoneFields(preset.theme, slice.zone))
+        // 刀3：预设不再自带 theme ⇒ 参考值改由有效值视图取
+        expect(slice.theme, `${at} 等于视图的该区切面`).toEqual(pickZoneFields(effectivePresetTheme(preset), slice.zone))
         // 且来源是落盘数据里的那份 values（同一个对象 ⇒ 生产路径没有回头重算）
         const entry = ZONE_PRESET_POOL[preset.interfaceMode][slice.zone].find(candidate => candidate.id === slice.presetName)!
         expect(entry, `${at} 池里必须能解析到 ${slice.presetName}`).toBeTruthy()
@@ -215,16 +217,17 @@ describe('B6 无折叠（规范 §7 刀2「裁决 A」）', () => {
   })
 
   it('合成两块同形切面：仍是 2 条，各自 id = 各自的来源预设名', () => {
-    const twins: GlobalPreset[] = [
-      // 内容同形、字段书写顺序不同（键序无关的老要求仍在）
-      { name: 'nord', label: '双胞胎甲', interfaceMode: 'gui', theme: { sidebarBg: '#111', sidebarNameSize: 14 } },
-      { name: 'tokyo', label: '双胞胎乙', interfaceMode: 'gui', theme: { sidebarNameSize: 14, sidebarBg: '#111' } },
+    // 刀3（#223）：刀2 的 `deriveZonePresetPool` 参考实现已删 ⇒ 夹具改为**手写条目**
+    const twins: ZonePresetEntry[] = [
+      // 内容同形、字段书写顺序不同
+      { id: 'nord', mode: 'gui', zone: 'sidebar', label: '双胞胎甲', origin: 'factory', source: { presetName: 'nord' }, values: { sidebarBg: '#111', sidebarNameSize: 14 } },
+      { id: 'tokyo', mode: 'gui', zone: 'sidebar', label: '双胞胎乙', origin: 'factory', source: { presetName: 'tokyo' }, values: { sidebarNameSize: 14, sidebarBg: '#111' } },
     ]
-    const pool = deriveZonePresetPool(twins)
-    expect(pool.gui.sidebar).toHaveLength(2)
-    expect(pool.gui.sidebar.map(entry => entry.id)).toEqual(['nord', 'tokyo'])
-    expect(pool.gui.sidebar.map(entry => entry.label)).toEqual(['双胞胎甲', '双胞胎乙'])
-    for (const entry of pool.gui.sidebar) {
+    const cell = assembleFactoryZonePresetPool(twins).gui.sidebar
+    expect(cell).toHaveLength(2)
+    expect(cell.map(entry => entry.id)).toEqual(['nord', 'tokyo'])
+    expect(cell.map(entry => entry.label)).toEqual(['双胞胎甲', '双胞胎乙'])
+    for (const entry of cell) {
       expect(entry.source, '来源仍可追溯').toEqual({ presetName: entry.id })
       expect(entry.values).toEqual({ sidebarBg: '#111', sidebarNameSize: 14 })
       expect(entry).not.toHaveProperty('sources')

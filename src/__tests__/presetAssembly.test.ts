@@ -40,7 +40,7 @@ import {
 } from '../domains/theme/presetReducer.ts'
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
 import { ZONE_FIELDS, THEME_PRESET_KEYS } from '../themeFieldDefs.ts'
-import { ZONE_PRESET_POOL, pickZoneFields, resolveZonePresetEntryTheme } from '../zones/index.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, resolveZonePresetEntryTheme } from '../zones/index.ts'
 import { useStore, type ThemeSettings } from '../store.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { resetStores } from '../test/resetStores.ts'
@@ -48,10 +48,10 @@ import { expandGlobalPresetZoneRefs, planGlobalPreset } from '../application/tra
 
 const PROFILE_BY_ID = new Map(BUILTIN_PRESENTATION_PROFILES.map(profile => [profile.id, profile]))
 
-/** 预设带呈现方案时，旧路径拿到的输入是 `preset.theme ⊕ profile.tokens`（见 `planGlobalPreset`）。 */
+/** 预设带呈现方案时，旧路径拿到的输入是 `effectivePresetTheme(preset) ⊕ profile.tokens`（见 `planGlobalPreset`）。 */
 function boxedTheme(preset: GlobalPreset): Partial<ThemeSettings> {
   const tokens = profileTokensOf(preset)
-  return tokens ? { ...preset.theme, ...tokens } : preset.theme
+  return tokens ? { ...effectivePresetTheme(preset), ...tokens } : effectivePresetTheme(preset)
 }
 
 function profileTokensOf(preset: GlobalPreset): Partial<ThemeSettings> | undefined {
@@ -77,7 +77,7 @@ function assembleFromRefs(state: ThemePresetState, preset: GlobalPreset) {
 
 /** 一条预设的五区取值切片（`zoneRefs` 缺省时用来构造「整份 theme 的 5 个切面」）。 */
 function slicesOf(preset: GlobalPreset, presetName = preset.name): GlobalPresetZoneSlice[] {
-  return PRESET_ZONES.map(zone => ({ zone, presetName, theme: pickZoneFields(preset.theme, zone) }))
+  return PRESET_ZONES.map(zone => ({ zone, presetName, theme: pickZoneFields(effectivePresetTheme(preset), zone) }))
 }
 
 function baseState(): ThemePresetState {
@@ -207,10 +207,10 @@ describe('B2 新旧装配等价（旧路径保留为参考实现）', () => {
     for (const bucket of ['gui', 'terminal'] as const) {
       const preset = DEFAULT_PRESETS[bucket]
       const union = Object.assign({}, ...slicesOf(preset).map(slice => slice.theme))
-      expect(filterPresetTheme(union), `${preset.name} 切面并集`).toEqual(filterPresetTheme(preset.theme))
+      expect(filterPresetTheme(union), `${preset.name} 切面并集`).toEqual(filterPresetTheme(effectivePresetTheme(preset)))
       // 真的装一遍：取值与旧路径一致，记名统一为空串（见 B6）
       expect(assembleGlobalPresetReducer(state, slicesOf(preset), { appliedName: '' }))
-        .toEqual(setGlobalPresetReducer('', preset.theme))
+        .toEqual(setGlobalPresetReducer('', effectivePresetTheme(preset)))
     }
   })
 
@@ -218,7 +218,7 @@ describe('B2 新旧装配等价（旧路径保留为参考实现）', () => {
     // 比的是**预设自带的那份 theme**：呈现方案的 token 不走切面，它在装配之后单独叠加（见上一条用例）
     for (const preset of GLOBAL_PRESETS) {
       const union = Object.assign({}, ...slicesOf(preset).map(slice => slice.theme))
-      expect(filterPresetTheme(union), `${preset.name} 切面并集`).toEqual(filterPresetTheme(preset.theme))
+      expect(filterPresetTheme(union), `${preset.name} 切面并集`).toEqual(filterPresetTheme(effectivePresetTheme(preset)))
     }
   })
 })
@@ -227,7 +227,7 @@ describe('B2 新旧装配等价（旧路径保留为参考实现）', () => {
 
 describe('B3 全量换装语义（预设没覆盖的字段回默认值，不保留用户当前值）', () => {
   it('纯层：先把字段改成非默认值，装配后必须回到 DEFAULTS', () => {
-    // ★ 终端那 6 套由 `completeTerminalPreset` 补满全字段（191/191）⇒「预设未覆盖的字段」为 0，
+    // ★ 终端那 6 套在出厂数据里就已补满全字段（191/191）⇒「预设未覆盖的字段」为 0，
     //   铺底在那条路上无从观测；GUI 桶（glass 69 / solarized 191 / 三套 agent 各 36）覆盖面参差，
     //   才有可观测的未覆盖字段。这条用例专门盯 GUI 桶。
     const guiPresets = GLOBAL_PRESETS.filter(preset => preset.interfaceMode === 'gui')
@@ -276,7 +276,7 @@ describe('B4 cc 区特殊处理在逐区域路径上仍生效', () => {
 
   it('ccHeight 收敛：claude 的裸值 76 装配后是 clamp 过的 84（且等于旧路径）', () => {
     const claude = GLOBAL_PRESETS.find(candidate => candidate.name === 'claude')!
-    const ccSlice = filterPresetTheme(pickZoneFields(claude.theme, 'cc')) as Partial<ThemeSettings>
+    const ccSlice = filterPresetTheme(pickZoneFields(effectivePresetTheme(claude), 'cc')) as Partial<ThemeSettings>
     expect(ccSlice.ccHeight, 'claude 预设里的裸 ccHeight').toBe(76)
     expect(clampPresetCcHeight(ccSlice), '裸值 != clamp 值，这条断言才不空洞').not.toBe(76)
 
@@ -372,7 +372,7 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
     const preset = DEFAULT_PRESETS.gui
     const slices = slicesOf(preset, preset.name)
     const diffKey = THEME_PRESET_KEYS.find(
-      key => preset.theme[key] !== undefined && preset.theme[key] !== defaultOf(key),
+      key => effectivePresetTheme(preset)[key] !== undefined && effectivePresetTheme(preset)[key] !== defaultOf(key),
     )
     expect(diffKey, '默认预设至少有一个字段与 DEFAULTS 不同，否则这条断言是空洞的').toBeTruthy()
 
@@ -382,7 +382,7 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
       expect(reset.appliedPreset?.[zone], `${zone}.appliedPreset`).toBe('')
       expect(reset.custom?.[zone], `${zone}.custom`).toBe(false)
     }
-    expect((reset as Record<string, unknown>)[diffKey!]).toBe(preset.theme[diffKey!])
+    expect((reset as Record<string, unknown>)[diffKey!]).toBe(effectivePresetTheme(preset)[diffKey!])
 
     // 省略 appliedName（刀4 的用法）：逐区域记各自的引用 id
     const named = assembleGlobalPresetReducer(baseState(), slices)
@@ -403,12 +403,12 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
       // 值与「只留空标记」不同：确实取了当前模式默认预设的值
       const preset = DEFAULT_PRESETS[mode === 'modern-gui' ? 'gui' : 'terminal']
       const diffKey = THEME_PRESET_KEYS.find(
-        key => preset.theme[key] !== undefined && preset.theme[key] !== defaultOf(key),
+        key => effectivePresetTheme(preset)[key] !== undefined && effectivePresetTheme(preset)[key] !== defaultOf(key),
       )!
       expect(
         (useStore.getState() as unknown as Record<string, unknown>)[diffKey],
         `${mode}/${diffKey} 应等于默认预设的值`,
-      ).toBe(preset.theme[diffKey])
+      ).toBe(effectivePresetTheme(preset)[diffKey])
     }
   })
 
