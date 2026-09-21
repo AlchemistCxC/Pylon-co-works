@@ -7,19 +7,16 @@
 // 产物位置：`src/wasm/pylon-compute/`，由 `scripts/build-wasm.mjs` 生成（不入库，
 // vitest 的 globalSetup 与 `bun run build:wasm` 都会确保它存在）。
 //
-// 装载时序：本模块**顶层 await** 完成实例化——调度器与流式切分的调用点全是同步
-// 上下文（rAF 回调、Solid memo、纯函数），计算核必须在首次调用前就绪，因此把
-// 「等装载」放在模块求值处而不是每个调用点。glue 的 `init()` 内部有
-// `wasm !== undefined` 守卫，与 `pylonCompute.ts` 等其他装载方并发安全。
-//
-// 两种宿主的装载路径：
-// - 浏览器 / Vite：glue 的 `--target web` 默认 `init()` 用 `new URL(..., import.meta.url)`
-//   取 wasm，Vite 接成资源 URL，直接 await 即可。
-// - Node（vitest）：`fetch` 拿不到 `file:` URL，这里自读字节喂给
-//   `WebAssembly.instantiate`。**刻意不用 `new URL(字面量, import.meta.url)`**——
-//   Vite/vitest 的静态重写会把字面量换成资源路径，Node 分支就再也还原不出文件
-//   路径；改成字符串拼接后重写不匹配，语义在两种宿主下都稳定。
+// 装载时序同 `projectorCompute.ts`：Node 宿主（vitest，含 jsdom）在模块导入时
+// **同步**初始化，于是调度器与切分的调用点可以保持同步（rAF 回调、Solid memo、
+// 纯函数）；浏览器宿主异步初始化，宿主在挂载前 `await whenStreamingComputeReady()`，
+// 就绪前调用同步出口会得到显式报错。**不用顶层 await**：Vite 生产构建 target 是
+// es2020，TLA 会让 esbuild 转译阶段直接失败（这正是上一版踩过的）。
 
+// node:* 走**默认导入**：vite 的 browser-external 桩只有 default 导出，具名导入
+// 会让 rollup 构建直接失败；属性访问只发生在 Node 分支内，浏览器永不触达。
+import nodeFs from 'node:fs'
+import nodeUrl from 'node:url'
 import init, * as glue from '../../wasm/pylon-compute/pylon_compute.js'
 
 /** 揭示预算引擎的节奏选项（缺省字段由 Rust 侧 `positiveFinite` 归一化）。 */
@@ -70,7 +67,13 @@ export interface StreamingCompute {
   StreamingRevealEngine: new (options?: StreamingRevealEngineOptions) => StreamingRevealEngine
 }
 
+let ready: Promise<void>
+/** 同步出口的守卫：Node 宿主在导入时就为真，浏览器宿主在 `ready` settle 后置真。 */
+let glueReady = false
+
 const WASM_ARTIFACT = 'pylon_compute_bg.wasm'
+/** vitest 的 forks 池在同进程内跨测试文件复用 globalThis：编译好的 Module 只产一次。 */
+const WASM_MODULE_CACHE_KEY = '__pylon_streaming_wasm_module__'
 
 function isNodeRuntime(): boolean {
   // 不看 `document`：jsdom 测试环境里 document 存在但运行时仍是 Node，
@@ -78,30 +81,64 @@ function isNodeRuntime(): boolean {
   return typeof process !== 'undefined' && !!process.versions?.node
 }
 
-async function instantiate(): Promise<void> {
-  if (isNodeRuntime()) {
-    const [{ readFile }, { fileURLToPath }] = await Promise.all([
-      import('node:fs/promises'),
-      import('node:url'),
-    ])
-    const here = import.meta.url
-    const artifactUrl = `${here.slice(0, here.lastIndexOf('/') + 1)}../../wasm/pylon-compute/${WASM_ARTIFACT}`
-    await init({ module_or_path: await readFile(fileURLToPath(artifactUrl)) })
-    return
+function readWasmBytes(): Buffer {
+  const candidates: string[] = []
+  // 第一候选：从本模块 URL 推导（Node 直跑与浏览器构建都成立；vitest 的 vite
+  // 管线可能产出非标准 URL，任一转换失败即退下一候选）。
+  try {
+    candidates.push(nodeUrl.fileURLToPath(new URL(`../../wasm/pylon-compute/${WASM_ARTIFACT}`, import.meta.url).href))
+  } catch {
+    /* 退下一候选 */
   }
-  await init()
+  // 兜底：vitest/bun 的 cwd 恒为仓库根（`bun run test` / `bunx vitest` 入口）。
+  candidates.push(`src/wasm/pylon-compute/${WASM_ARTIFACT}`)
+  let lastError: unknown
+  for (const candidate of candidates) {
+    try {
+      return nodeFs.readFileSync(candidate)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('wasm 产物读取失败')
 }
 
-// 模块顶层装载：TLA。装载成功前，任何 import 本模块的代码都不会开始求值。
-const loaded: StreamingCompute = await (async () => {
-  await instantiate()
-  return glue as unknown as StreamingCompute
-})()
+function compiledWasmModule(): WebAssembly.Module {
+  const cache = globalThis as Record<string, WebAssembly.Module | undefined>
+  const cached = cache[WASM_MODULE_CACHE_KEY]
+  if (cached) return cached
+  const compiled = new WebAssembly.Module(new Uint8Array(readWasmBytes()))
+  cache[WASM_MODULE_CACHE_KEY] = compiled
+  return compiled
+}
 
-/** 装载后的计算核出口。顶层 await 保证：import 本模块即已就绪。 */
+// 装载模型与 `projectorCompute.ts` 一致（**刻意不用顶层 await**：Vite 生产构建
+// target 是 es2020，不支持 TLA——顶层 await 会让 `vite build` 在 esbuild 转译阶段
+// 直接失败）。Node 宿主（vitest，含 jsdom）在模块导入时**同步**初始化，于是切分与
+// 引擎的调用点可以保持同步；浏览器宿主异步初始化，同步调用方在就绪前拿到的是
+// 显式报错而不是静默降级，宿主在挂载前 `await whenStreamingComputeReady()`。
+if (isNodeRuntime()) {
+  glue.initSync({ module: compiledWasmModule() })
+  glueReady = true
+  ready = Promise.resolve()
+} else {
+  ready = Promise.resolve(init()).then(() => {
+    glueReady = true
+  })
+}
+
+/** 流式计算核就绪；Node 宿主恒已就绪（模块导入时同步初始化）。 */
+export function whenStreamingComputeReady(): Promise<void> {
+  return ready
+}
+
+/**
+ * 装载后的计算核出口。浏览器宿主在就绪前调用会抛——**不静默降级**：切分与预算
+ * 一旦回退成另一套实现，就是 issue 明令禁止的长期双实现。
+ */
 export function streamingCompute(): StreamingCompute {
-  if (loaded === undefined) throw new Error('流式计算核未就绪：模块顶层装载尚未完成')
-  return loaded
+  if (!glueReady) throw new Error('流式计算核未就绪：请先 await whenStreamingComputeReady()')
+  return glue as unknown as StreamingCompute
 }
 
 // ── 同步出口包装（切分的调用点是同步 memo/纯函数；测试直接 import 这些名字） ──
