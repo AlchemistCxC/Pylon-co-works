@@ -257,6 +257,18 @@ impl TextPartPayload {
         }
     }
 
+    /// **只物化那一个部件**（`{kind,text}`：1 个 `Map` + 2 个 `String`）。
+    ///
+    /// 热路径要的不是整棵事件镜像，而只是「待合并的那一个部件」——所以别走 `mirror()`
+    /// （那是 2 个 `Map` + 5~6 个 `String`）。合并仍交给同一个 `merge_reasoning_pair`
+    /// / `append_parts_with_merge`，不存在第二份合并实现。
+    pub fn part_value(&self) -> Value {
+        let mut part = Map::new();
+        part.insert("kind".to_string(), Value::String(self.kind.to_string()));
+        part.insert("text".to_string(), Value::String(self.text.clone()));
+        Value::Object(part)
+    }
+
     /// `Value` 镜像（首次调用时建一次，之后借出）。键序按字典序，与 wire 一致。
     fn mirror(&self) -> &Value {
         self.mirror.get_or_init(|| {
@@ -319,10 +331,18 @@ impl EventPayload {
         }
     }
 
-    /// 单文本部件的文本（热形态**零分配**；冷形态回退到 `parts` 抽取）。
+    /// 单文本部件的文本（热形态**零分配**；冷形态返回 `None`）。
     pub fn text_of_single_part(&self) -> Option<&str> {
         match self {
             EventPayload::TextPart(payload) => Some(payload.text.as_str()),
+            EventPayload::Other(_) => None,
+        }
+    }
+
+    /// 定长形态的载荷（`part_value()` 的入口）；冷形态返回 `None`。
+    pub fn text_part(&self) -> Option<&TextPartPayload> {
+        match self {
+            EventPayload::TextPart(payload) => Some(payload),
             EventPayload::Other(_) => None,
         }
     }
@@ -2598,7 +2618,8 @@ fn reduce_interaction(document: &mut WorkbenchDocument, envelope: &SemanticEnvel
 
 fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
     let event = &envelope.event;
-    let role_source = event.get("role").and_then(Value::as_str).unwrap_or("");
+    // 定长访问器：`event.get("role")` 会为定长形态物化整棵事件镜像，而 role 就在载荷上。
+    let role_source = event.role_str().unwrap_or("");
     let role = if role_source == "reasoning" {
         "assistant"
     } else if role_source == "user" {
@@ -2633,10 +2654,15 @@ fn reduce_message(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope)
         }
     }
     settle_superseded_running_messages(document, Some(role));
-    let parts = event
-        .get("parts")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
+    // 【去 Value 的热路径】定长形态只物化那一个部件（1 Map + 2 String），不物化事件镜像；
+    // 冷形态照旧克隆 `parts` 数组。
+    let parts = match event.text_part() {
+        Some(payload) => Value::Array(vec![payload.part_value()]),
+        None => event
+            .get("parts")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    };
     let content = text_from_parts(&parts);
     let previous_index = document.messages.len().checked_sub(1);
     let terminal = envelope.event_type == "message.completed";
@@ -2943,15 +2969,30 @@ fn reduce_reasoning(document: &mut WorkbenchDocument, envelope: &SemanticEnvelop
     // 文本抽取在「原始 parts」与「已合并 parts」上结果一致（合并只把相邻文本部件的
     // text 相接，不改变整体拼接），故 `content` 直接用原始切片算。
     // C01：redacted 时不保留原文（D06——raw 不进 projection），只留安全占位。
-    let parts_value = event.get("parts");
-    let parts_slice: &[Value] = parts_value
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let parts_owned = || {
-        parts_value
+    //
+    // 【去 Value 的热路径】定长形态**只物化那一个部件**，不物化整棵事件镜像：
+    // `event.get("parts")` 会触发 `mirror()`（2 个 Map + 5~6 个 String 的逐事件分配），
+    // 而这里真正需要的只是「待合并的那一个部件」。合并仍走同一个
+    // `merge_reasoning_pair` / `append_parts_with_merge`，没有第二份实现。
+    // 冷形态（`Other`）照旧借出 `parts` 数组，零额外分配。
+    let typed_part = event.text_part().map(TextPartPayload::part_value);
+    // 两形态都不需要时才为 None；初始化为 None 只为让「冷形态才赋值」这件事在类型上成立。
+    let mut cold_parts: Option<&Value> = None;
+    let parts_slice: &[Value] = match &typed_part {
+        Some(part) => std::slice::from_ref(part),
+        None => {
+            cold_parts = event.get("parts");
+            cold_parts
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+        }
+    };
+    let parts_owned = || match &typed_part {
+        Some(part) => Value::Array(vec![part.clone()]),
+        None => cold_parts
             .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new()))
+            .unwrap_or_else(|| Value::Array(Vec::new())),
     };
     let redacted = envelope.event_type == "reasoning.redacted";
     let content = if redacted {

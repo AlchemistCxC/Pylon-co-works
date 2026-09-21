@@ -69,6 +69,15 @@ if (segment === 'encode') {
   for (const frame of frames) bytes += projector.appendBatch(frame).length
   const ms = performance.now() - started
   console.log(`[append-only]   ${ms.toFixed(1)}ms  ${per(ms)}  (patch ${(bytes / 1024 / 1024).toFixed(1)}MiB total)`)
+  // 核内相位（最后一次调用 = 单事件帧）：把「核内折叠」与「核外过界」分开。
+  const phases = JSON.parse(projector.foldPhases()) as { decodeMs: number, projectMs: number, patchJsonMs: number }
+  const lastPatch = projector.appendBatch(frames[frames.length - 1]!)
+  const total = phases.decodeMs + phases.projectMs + phases.patchJsonMs
+  console.log(
+    `[append 相位·单事件帧] decode ${(phases.decodeMs * 1000).toFixed(2)}us / project ${(phases.projectMs * 1000).toFixed(2)}us`
+    + ` / patchJson ${(phases.patchJsonMs * 1000).toFixed(2)}us / 合计核内 ${(total * 1000).toFixed(2)}us`
+    + ` （patch ${lastPatch.length}B；其余 ≈ 核外：JS 串过界 + JSON.parse 前的字符串落地）`,
+  )
 } else if (segment === 'parse') {
   const projector = createProjector(SESSION_ID)
   const patches: string[] = []
