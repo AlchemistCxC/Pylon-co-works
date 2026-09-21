@@ -1,6 +1,9 @@
 /** 预设层 · 类型定义：PresetName / GlobalPreset。 */
 
 import type { ThemeSettings } from '../store.ts'
+// 区域清单的唯一真值是 PRESET_ZONES（domains/theme/presetReducer.ts）；`import type` 类型擦除、
+// 零运行时依赖 ⇒ 不构成模块环，也不在这里另立第二份区域清单。
+import type { PresetZone } from '../domains/theme/presetReducer.ts'
 
 // ── 预设定义 ─────────────────────────────────────────────────────
 
@@ -25,9 +28,25 @@ export interface GlobalPreset {
   label: string
   /** 刀5（#201）：预设归属桶——预设菜单第一级只有 GUI / 终端 两桶（用户拍板归属表）。 */
   interfaceMode: PresetInterfaceMode
-  theme: Partial<ThemeSettings>
+  /**
+   * 有效值（刀3 / #223 起**可选**）。
+   *
+   * 10 套出厂预设**不写它** —— 它们的有效值由 `zoneRefs` + 工厂数据算出
+   * （`src/zones/effectivePresetTheme.ts`）。两条默认预设仍写它（"直给"路径）。
+   * 读值请一律走 `effectivePresetTheme(preset)`，不要直接读这个字段。
+   */
+  theme?: Partial<ThemeSettings>
   /** 可选的聊天呈现方案；应用全局预设时与主题一起激活。 */
   presentationProfileId?: string
+  /**
+   * 刀1（#223 · 预设组装）：**区域引用表**——5 个区域各指向一条区域预设 id。
+   * 有则「应用整套预设」走**逐区域装配**；无则回落现在的「整份 `theme`」路径。
+   *
+   * 现在不变量（由 `requireZoneRefs` 在消费点强制）：**5 项必须齐**，缺项 = 非法（抛错，不静默回落）。
+   * 两条默认预设（`DEFAULT_PRESETS`）刀1 不写它：终端默认是 `glass` 的**拷贝**而非引用，
+   * 且引 `glass` 会成跨桶引用。
+   */
+  zoneRefs?: Readonly<Record<PresetZone, string>>
 }
 
 export type PresetInterfaceMode = 'gui' | 'terminal'

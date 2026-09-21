@@ -3,7 +3,7 @@
 // 原脚本 store/defs/App/CSS/skin/settingsDomains 的源码文本段由 css-var 审计覆盖，不迁。
 import { describe, expect, it } from 'vitest'
 import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
-import { pickZoneFields } from '../zones/index.ts'
+import { effectivePresetTheme, pickZoneFields } from '../zones/index.ts'
 import { ZONE_FIELDS } from '../themeFieldDefs.ts'
 
 const field = 'ccStatusFontSize'
@@ -33,7 +33,7 @@ describe('ccStatusFontSize zone 归属契约', () => {
     // built-in preset 未覆写时可继承 DEFAULTS 的值；
     // 因此应用提取子集必须保留默认值而不是擦除它。
     for (const preset of GLOBAL_PRESETS) {
-      const subset = pickZoneFields(preset.theme, 'cc')
+      const subset = pickZoneFields(effectivePresetTheme(preset), 'cc')
       const applied = { ccStatusFontSize: 14, ...subset }
       expect(typeof applied.ccStatusFontSize).toBe('number')
     }

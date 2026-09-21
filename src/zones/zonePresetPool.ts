@@ -1,38 +1,54 @@
 /**
- * 区域层 · 区域预设池（刀6 / #206）：键 = (界面模式桶, 区域)。
+ * 区域层 · 区域预设池（刀6 / #206 建池；刀2 / #223 出厂条目独立成数据；刀3 / #223 拆掉过渡工具）。
  *
- * 出厂条目**存引用**（`source.presetName`，应用时现场 `pickZoneFields` 切）；
- * 自定义条目**存值快照**（`values`）——铁律「存引用不存值」的**唯一**字面例外，
- * 理由见规则提案 §二-5 / §四-2（自建条目没有来源预设可指）。
+ * **出厂条目**是**落盘数据**（`src/zones/factory/**`，刀2 由生成脚本从 `GLOBAL_PRESETS` 现场切出并逐条校验）；
+ * **自定义条目**存值快照（`values`）——铁律「存引用不存值」的**唯一**字面例外
+ * （自建条目没有来源预设可指）。
+ *
+ * 刀2 的三处变化（历史，仍生效）：
+ * 1. ★ **判据换成显式来源字段 `origin`**：出厂与自定义**都带 `values`**，旧的
+ *    `values !== undefined` 判据会立刻失效（出厂条目会变成"可删"、UI 亮「自定义」）。
+ * 2. ★ **折叠退场**（规范 §7 刀2「裁决 A」）：刀1 的 `zoneRefs` 是逐套显式写自己的名字，
+ *    而折叠会把内容相同的多条并成一条、只留排序最前的 id ⇒ 被折叠那套的引用指向不存在的 id
+ *    ⇒ 那个预设**装不上**。两者互斥，去掉折叠。`sources` 字段与 UI 的同形悬停提示随之退场。
+ * 3. `ZONE_PRESET_POOL` 的数据来源 = 落盘数据表（不再现场派生）。
+ *
+ * ★ 刀3（#223）已删掉刀2 的两个过渡产物：生成脚本与其依赖的 `deriveZonePresetPool` /
+ * `deriveFactoryZonePresetEntries` 参考实现（预设不再自带 `theme`，它们的输入消失了）。
+ * 出厂条目的"值"此后只有两个来源：**落盘数据表**（生产）与测试里手写的字面量。
  *
  * 规则唯一来源：`预设修正/预设系统V2/06-规则提案-区域预设池派生-待拍板.md` §三。
- * 本模块只消费 `GLOBAL_PRESETS` / `INTERFACE_MODE_PRESET_BUCKET` / `PRESET_ZONES` /
- * `ZONE_FIELDS` / `pickZoneFields`，不复制它们的任何真值。
+ * 本模块只消费 `INTERFACE_MODE_PRESET_BUCKET` / `PRESET_ZONES` / `ZONE_FIELDS`，
+ * 不复制它们的任何真值。
  */
 
 import type { ThemeSettings } from '../store.ts'
 import { ZONE_FIELDS, type ZoneName } from '../themeFieldDefs.ts'
-import { PRESET_ZONES, type PresetZone } from '../domains/theme/presetReducer.ts'
+import { PRESET_ZONES, assertZoneSliceOwnership, type PresetZone } from '../domains/theme/presetReducer.ts'
 import {
-  GLOBAL_PRESETS,
   INTERFACE_MODE_PRESET_BUCKET,
-  type GlobalPreset,
   type PresetInterfaceMode,
 } from '../presets/index.ts'
-import { pickZoneFields } from './pickZoneFields.ts'
+import { FACTORY_ZONE_PRESET_ENTRIES } from './factory/index.ts'
+
+/**
+ * 条目来源。**出厂与自定义的区分唯一真值**（不再看有没有 `values`——刀2 起两方都有）。
+ * 缺省视为自定义：持久化通道里存的一律是用户条目。
+ */
+export type ZonePresetOrigin = 'factory' | 'custom'
 
 export interface ZonePresetEntry {
   id: string
   mode: PresetInterfaceMode
   zone: ZoneName
-  /** 出厂条目 = 来源预设 label（去重组取排序最前）；自定义条目 = 用户命名。 */
+  /** 出厂条目 = 来源预设 label；自定义条目 = 用户命名。 */
   label: string
-  /** 出厂条目：引用来源预设（应用时现场切）。与 `values` 恰好其一。 */
+  /** 刀2（#223）：条目来源。缺省 = 自定义（历史持久化条目与调用方直造的条目都没有该字段）。 */
+  origin?: ZonePresetOrigin
+  /** 该区域的字段值：出厂条目 = 落盘数据；自定义条目 = 用户存下的快照。 */
+  values: Partial<ThemeSettings>
+  /** 仅出厂条目：这批值切自哪套预设（= 引用表里的 id，可追溯）。 */
   source?: { presetName: string }
-  /** 同形多来源清单：去重折叠时**除 label 来源之外**的那些预设名（仅出厂条目，且 ≥2 来源才有）。 */
-  sources?: readonly string[]
-  /** 仅自定义条目：该 zone 的字段值快照。 */
-  values?: Partial<ThemeSettings>
   /**
    * 派生标记（不落盘）：Q8 清理后该条目**已无有效字段键** ⇒ 行内占位、不可应用。
    */
@@ -44,74 +60,34 @@ export type ZonePresetPool = Record<PresetInterfaceMode, Record<PresetZone, Zone
 
 const PRESET_INTERFACE_MODES = ['gui', 'terminal'] as const satisfies readonly PresetInterfaceMode[]
 
-// ── 稳定序列化（切面指纹） ─────────────────────────────────────────
-
-/** 对象键递归排序的 JSON：同形切面在任意构造顺序下得到同一个指纹。 */
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(item => stableJson(item)).join(',')}]`
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`
-  }
-  return JSON.stringify(value) ?? 'null'
-}
-
-/** 切面指纹：字段按 ZONE_FIELDS 顺序、值递归键排序 ⇒ 顺序无关的「同形」判据。 */
-function sliceKey(zone: string, slice: Partial<ThemeSettings>): string {
-  const fields = ZONE_FIELDS[zone] ?? []
-  const record = slice as Record<string, unknown>
-  return stableJson(fields.filter(field => field in slice).map(field => [field, record[field]]))
-}
-
-// ── 派生（构建时求值） ─────────────────────────────────────────────
+// ── 出厂数据 → 池（刀2 的生产读路径） ───────────────────────────────
 
 /**
- * 规则提案 §三算法：`presetsForInterfaceMode(桶) × PRESET_ZONES × pickZoneFields`
- * → 切面指纹去重（同形折叠：`label` 取排序最前的来源，其余进 `sources`）。
+ * 把**落盘出厂数据**装配成池。
  *
- * 「排序最前」= 该桶在 `GLOBAL_PRESETS` 里的顺序（`filter` 保序）。
+ * ★ 两件事在这里发生，且都必须在构建时报错而不是静默降级：
+ * - **越区键**：每条的值键必须全部属于它自己那个区域（判据 `ZONE_FIELDS`，复用刀1 的
+ *   `assertZoneSliceOwnership`）。静默丢弃的症状是「我这个区域该改的没改」，用户看不出原因。
+ * - 条目**原对象直接入池**（不复制、不重算）——「数据表就是活数据源」这件事因此可被断言钉住。
  */
-export function deriveZonePresetPool(presets: readonly GlobalPreset[]): ZonePresetPool {
+export function assembleFactoryZonePresetPool(entries: readonly ZonePresetEntry[]): ZonePresetPool {
   const pool = {} as ZonePresetPool
   for (const mode of PRESET_INTERFACE_MODES) {
-    const bucketPresets = presets.filter(preset => preset.interfaceMode === mode)
     const zones = {} as Record<PresetZone, ZonePresetEntry[]>
     for (const zone of PRESET_ZONES) {
-      // 同形折叠：指纹 → 该形态的首个条目；后到的同名形态记进它名下的 sources。
-      const entryByKey = new Map<string, { entry: ZonePresetEntry; sources: string[] }>()
-      const ordered: { entry: ZonePresetEntry; sources: string[] }[] = []
-      for (const preset of bucketPresets) {
-        const key = sliceKey(zone, pickZoneFields(preset.theme, zone))
-        const folded = entryByKey.get(key)
-        if (folded) {
-          folded.sources.push(preset.name)
-          continue
-        }
-        const draft = {
-          entry: {
-            id: preset.name,
-            mode,
-            zone,
-            label: preset.label,
-            source: { presetName: preset.name },
-          } satisfies ZonePresetEntry,
-          sources: [] as string[],
-        }
-        entryByKey.set(key, draft)
-        ordered.push(draft)
+      const cell = entries.filter(entry => entry.mode === mode && entry.zone === zone)
+      for (const entry of cell) {
+        assertZoneSliceOwnership(zone, entry.values, `出厂区域预设 ${mode}/${zone}/${entry.id}`)
       }
-      zones[zone] = ordered.map(({ entry, sources }) => Object.freeze({
-        ...entry,
-        ...(sources.length > 0 ? { sources: Object.freeze([...sources]) } : {}),
-      }) as ZonePresetEntry)
+      zones[zone] = Object.freeze(cell.map(entry => Object.freeze(entry))) as ZonePresetEntry[]
     }
     pool[mode] = Object.freeze(zones)
   }
   return Object.freeze(pool)
 }
 
-/** 构建时求值的出厂池（模块加载一次；内容只随内置预设表变化）。 */
-export const ZONE_PRESET_POOL: ZonePresetPool = deriveZonePresetPool(GLOBAL_PRESETS)
+/** 构建时装配的出厂池（刀2：来源 = 落盘数据表；内容只随数据文件变化）。 */
+export const ZONE_PRESET_POOL: ZonePresetPool = assembleFactoryZonePresetPool(FACTORY_ZONE_PRESET_ENTRIES)
 
 // ── 自定义条目（值快照） ───────────────────────────────────────────
 
@@ -140,17 +116,19 @@ export function normalizeZonePresetValues(
 }
 
 /**
- * 出厂条目 vs 自定义条目的唯一判据：出厂条目存引用（`source`），自定义条目存值快照。
- * 铁律 1（出厂预设不允许改、也不允许删）在 UI 与数据两侧都以它为闸门。
+ * 出厂条目 vs 自定义条目的唯一判据：**显式来源字段 `origin`**（刀2 起）。
+ *
+ * ★ 不能再判 `values !== undefined`——出厂条目也带 `values` 了，那样出厂条目会变成「可删」、
+ * UI 会亮「自定义」、删除闸门也挡不住。缺省（无 `origin`）= 自定义：持久化通道只存用户条目。
  */
 export function isCustomZonePresetEntry(entry: ZonePresetEntry): boolean {
-  return entry.values !== undefined
+  return entry.origin !== 'factory'
 }
 
-/** 清理后是否已无任何有效字段（⇒ 该条目退化为行内占位）。 */
+/** 清理后是否已无任何有效字段（⇒ 该条目退化为行内占位）。出厂数据不参与。 */
 function isEntryStale(entry: ZonePresetEntry): boolean {
-  if (!entry.values) return false
-  return Object.keys(entry.values).length === 0
+  if (entry.origin === 'factory') return false
+  return Object.keys(entry.values ?? {}).length === 0
 }
 
 /**
@@ -161,7 +139,7 @@ function isEntryStale(entry: ZonePresetEntry): boolean {
 export function cleanupZonePresetEntries(entries: readonly ZonePresetEntry[]): ZonePresetEntry[] {
   let changed = false
   const next = entries.map(entry => {
-    if (!entry.values) return entry
+    if (entry.origin === 'factory' || !entry.values) return entry
     const { values, droppedKeys } = normalizeZonePresetValues(entry.zone, entry.values)
     if (droppedKeys.length === 0) return entry
     changed = true
@@ -182,11 +160,15 @@ export function normalizeZonePresetEntries(value: unknown): ZonePresetEntry[] {
     if (typeof candidate.zone !== 'string' || !candidate.zone) continue
     if (typeof candidate.label !== 'string' || !candidate.label.trim()) continue
     if (!candidate.values || typeof candidate.values !== 'object') continue
+    const origin: ZonePresetOrigin | undefined = candidate.origin === 'factory' || candidate.origin === 'custom'
+      ? candidate.origin
+      : undefined
     entries.push({
       id: candidate.id.trim(),
       mode: candidate.mode,
       zone: candidate.zone,
       label: candidate.label.trim().slice(0, 40),
+      ...(origin ? { origin } : {}),
       values: { ...(candidate.values as Partial<ThemeSettings>) },
     })
   }
@@ -232,8 +214,9 @@ export interface ZonePresetRemovalPatch {
 /**
  * 删除一条**自定义**区域预设条目。形态对齐全局先例 `removeCustomPresetReducer`：
  *
- * - 出厂条目**不可删**：它们由构建时派生表持有、从不进入 `zonePresetEntries`，
- *   故传出厂预设名（即条目 id）是 no-op——同一份闸门同时挡住 UI 与任意调用方。
+ * - 出厂条目**不可删**：它们由落盘的出厂数据表持有（`src/zones/factory/**`）、
+ *   从不进入 `zonePresetEntries`，故传出厂预设名（即条目 id）是 no-op——同一份闸门
+ *   同时挡住 UI 与任意调用方。
  * - 引用它的区域**失去基准**：`appliedPreset[zone]=''` + `custom[zone]=true`，
  *   **字段保留现值**（与全局删除链同语义：不是回默认态，是「无基准的自定义快照」）。
  * - 未命中 ⇒ 原样返回 `zonePresetEntries` 引用，调用方据此跳过写状态。
@@ -260,7 +243,7 @@ export function removeZonePresetEntryReducer(
 // ── 查询与消费 ─────────────────────────────────────────────────────
 
 /**
- * 该 (界面模式, 区域) 的候选条目：出厂条目（构建时派生）+ 自定义条目（已过 Q8 清理）。
+ * 该 (界面模式, 区域) 的候选条目：出厂条目（落盘数据）+ 自定义条目（已过 Q8 清理）。
  * 界面模式**未登记归属桶**（如 `tactical-blue`）⇒ 空数组 ⇒ 调用方整组不渲染。
  */
 export function zonePresetsFor(
@@ -275,7 +258,8 @@ export function zonePresetsFor(
     .filter(entry => entry.mode === bucket && entry.zone === zone)
     .map(entry => {
       const { values } = normalizeZonePresetValues(entry.zone, entry.values ?? {})
-      const cleaned: ZonePresetEntry = { ...entry, values }
+      // ★ 持久化通道里的一律是**用户自建**条目 ⇒ 显式标 custom（挡住"手改 localStorage 塞 factory"）
+      const cleaned: ZonePresetEntry = { ...entry, origin: 'custom', values }
       return isEntryStale(cleaned) ? { ...cleaned, stale: true } : cleaned
     })
   if (factory.length === 0 && custom.length === 0) return []
@@ -284,15 +268,11 @@ export function zonePresetsFor(
 
 /**
  * 条目 → 应用用的主题切片。
- * - 出厂条目：现场 `pickZoneFields(来源预设.theme, zone)`（与刀5 现状同一切法、同一时刻）
+ * - 出厂条目：直接给落盘数据里的 `values`（刀2 起不再现场切——切法退为参考实现）
  * - 自定义条目：直接给清理后的值快照
- * - 行内占位条目 / 来源预设已不存在 ⇒ `null`（不可应用）
+ * - 行内占位条目 ⇒ `null`（不可应用）
  */
 export function resolveZonePresetEntryTheme(entry: ZonePresetEntry): Partial<ThemeSettings> | null {
   if (entry.stale) return null
-  if (entry.values) return entry.values
-  const presetName = entry.source?.presetName
-  if (!presetName) return null
-  const preset = GLOBAL_PRESETS.find(item => item.name === presetName)
-  return preset ? pickZoneFields(preset.theme, entry.zone) : null
+  return entry.values ?? null
 }

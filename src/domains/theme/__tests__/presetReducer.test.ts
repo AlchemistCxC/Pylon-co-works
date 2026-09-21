@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
+import { effectivePresetTheme } from '../../../zones/index.ts'
 import { ZONE_FIELDS } from '../../../themeFieldDefs.ts'
 import type { ThemeSettings } from '../../../store'
 import {
@@ -151,12 +152,12 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
 
   it('applyZonePreset：写字段 + 记名 + 清 custom', () => {
     const state = makeZoneState()
-    const zoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, nord.theme[f]])) as Partial<ThemeSettings>
+    const zoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, effectivePresetTheme(nord)[f]])) as Partial<ThemeSettings>
     const patch = applyZonePresetReducer(state, 'chat', 'nord', zoneTheme)
     expect(patch.appliedPreset?.chat).toBe('nord')
     expect(patch.custom?.chat).toBe(false)
     for (const field of ZONE_FIELDS.chat) {
-      expect(patch[field]).toEqual(nord.theme[field]) // `chat.${String(field)} 应写入预设字段`
+      expect(patch[field]).toEqual(effectivePresetTheme(nord)[field]) // `chat.${String(field)} 应写入预设字段`
     }
     // 无全局预设时不影响 global
     expect(patch.appliedPreset?.global).toBe('')
@@ -164,7 +165,7 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
 
   it('applyZonePreset（A2）：只写 zone 基准/custom，不手写 global 标记（全局由派生承担）', () => {
     const withGlobal = (name: string) => makeZoneState({ appliedPreset: { ...makeZoneState().appliedPreset, global: name } })
-    const glassZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, glass.theme[f]])) as Partial<ThemeSettings>
+    const glassZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, effectivePresetTheme(glass)[f]])) as Partial<ThemeSettings>
 
     const patch = applyZonePresetReducer(withGlobal('nord'), 'chat', 'glass', glassZoneTheme)
     expect(patch.appliedPreset?.chat).toBe('glass')
@@ -186,7 +187,7 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
 
   it('applyZonePreset cc 同步：ccLayout 恢复规范 + ccHeight clamp', () => {
     const state = makeZoneState()
-    const ccTheme = Object.fromEntries(ZONE_FIELDS.cc.map(f => [f, nord.theme[f]])) as Partial<ThemeSettings>
+    const ccTheme = Object.fromEntries(ZONE_FIELDS.cc.map(f => [f, effectivePresetTheme(nord)[f]])) as Partial<ThemeSettings>
     const patch = applyZonePresetReducer(state, 'cc', 'nord', ccTheme)
     expect(patch.ccLayout?.version).toBe(DEFAULT_CC_LAYOUT.version) // cc zone 预设应恢复规范排布
     if (patch.ccHeight !== undefined) {
@@ -195,7 +196,7 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
   })
 
   it('setGlobalPreset：全 zone 记名 + 全 custom 清 + 规范排布', () => {
-    const patch = setGlobalPresetReducer('solarized', solarized.theme)
+    const patch = setGlobalPresetReducer('solarized', effectivePresetTheme(solarized))
     for (const zone of zones) {
       expect(patch.appliedPreset?.[zone]).toBe('solarized') // `${zone}: 全局预设应同步名称`
       expect(patch.custom?.[zone]).toBe(false) // `${zone}: 全局预设应清 custom`

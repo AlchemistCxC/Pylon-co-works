@@ -18,7 +18,7 @@ import {
 import { PRESET_ZONES, deriveGlobalStatus, filterPresetTheme } from '../domains/theme/presetReducer.ts'
 import { THEME_PRESET_KEYS } from '../themeFieldDefs.ts'
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
-import { ZONE_PRESET_POOL, pickZoneFields, zonePresetsFor } from '../zones/index.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, zonePresetsFor } from '../zones/index.ts'
 import { useStore } from '../store.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { activateInterfaceMode, resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
@@ -32,7 +32,7 @@ vi.mock('../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const GLASS = GLOBAL_PRESETS.find(preset => preset.name === 'glass')!
-/** 终端契约字段（与 `completion.ts` 的 TERMINAL_VISUAL_COMPLETION 同写法）。 */
+/** 终端契约字段（原「终端补全」层里的同一组字段；刀3 起该层已无）。 */
 const TERMINAL_CONTRACT = {
   msgStyle: 'terminal',
   messageLayout: 'classic',
@@ -46,7 +46,7 @@ const DEFAULT_NAMES: string[] = [DEFAULT_PRESETS.gui.name, DEFAULT_PRESETS.termi
  * 先跑过的用例一旦已经把预设内容写脏（例如重置顺手改了共享 theme 对象），基准就被污染，
  * 「重置不写出厂预设」这条会变成永远绿——与测试顺序耦合的假测试。
  */
-const PRISTINE_PRESET_THEMES = structuredClone(GLOBAL_PRESETS.map(preset => preset.theme))
+const PRISTINE_PRESET_THEMES = structuredClone(GLOBAL_PRESETS.map(preset => effectivePresetTheme(preset)))
 
 /** 预设域字段快照（用于「重置 == 应用默认预设」的逐字段比对；标记另测）。 */
 function themeSnapshot(): Record<string, unknown> {
@@ -81,7 +81,8 @@ describe('刀7 · 两条默认预设不显示（#214）', () => {
     }
     // 默认预设住在独立表里 ⇒ 出厂预设总数不变（docs「当前 10 套」不失真）
     expect(GLOBAL_PRESETS).toHaveLength(10)
-    expect(DEFAULT_PRESETS.gui.theme).toBe(GLASS.theme)
+    // 刀3：glass 不再自带 theme 对象 ⇒ 比的从"同一个对象"改为"同一份值"（有效值视图）
+    expect(DEFAULT_PRESETS.gui.theme).toEqual(effectivePresetTheme(GLASS))
   })
 
   it('预设菜单里没有「默认预设」这类按钮（全局行 5 条 chip）', () => {
@@ -115,7 +116,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
 
   it('modern-gui 模式：重置后 == 应用 GUI-默认预设（内容即 glass），且覆盖范围与原来一致', () => {
     // 参照基准：直接应用 glass 全局预设
-    useStore.getState().setGlobalPreset('glass', GLASS.theme)
+    useStore.getState().setGlobalPreset('glass', effectivePresetTheme(GLASS))
     const appliedGlass = themeSnapshot()
 
     resetStores()
@@ -128,7 +129,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     expect(useStore.getState().sidebarWidth).toBe(DEFAULTS.sidebarWidth)
     // 四区逐一切面确实等于 glass 的对应切面（按「可应用」白名单：rightWidth/sidebarWidth
     // 归属工作区布局与右栏，任何预设路径都不写它们，glass 的这两条值本来就不落地）
-    const glassApplicable = filterPresetTheme(GLASS.theme)
+    const glassApplicable = filterPresetTheme(effectivePresetTheme(GLASS))
     for (const zone of PRESET_ZONES) {
       expect(pickZoneFields(useStore.getState() as never, zone), `重置后 ${zone} 切面`).toMatchObject(pickZoneFields(glassApplicable, zone))
     }
@@ -152,7 +153,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     for (const zone of PRESET_ZONES) {
       // glass 侧先摘掉契约字段（glass 自己设了 ccVariant:'pill'，终端默认要把它改成 'terminal'）
       const glassSlice = Object.fromEntries(
-        Object.entries(pickZoneFields(filterPresetTheme(GLASS.theme), zone))
+        Object.entries(pickZoneFields(filterPresetTheme(effectivePresetTheme(GLASS)), zone))
           .filter(([key]) => !(key in TERMINAL_CONTRACT)),
       )
       expect(pickZoneFields(useStore.getState() as never, zone), `终端重置后 ${zone} 切面`)
@@ -194,7 +195,8 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
       withInterfaceMode(mode)
       useStore.getState().resetTheme()
     }
-    expect(GLOBAL_PRESETS.map(preset => preset.theme)).toEqual(PRISTINE_PRESET_THEMES)
+    // 刀3：预设不再自带 theme ⇒ 比有效值视图（否则两边都是 undefined，这条守卫会变成永远绿）
+    expect(GLOBAL_PRESETS.map(preset => effectivePresetTheme(preset))).toEqual(PRISTINE_PRESET_THEMES)
     expect(GLOBAL_PRESETS).toHaveLength(10)
   })
 
@@ -204,7 +206,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     expect(defaultPresetForInterfaceMode('modern-gui')).toBe(DEFAULT_PRESETS.gui)
     expect(defaultPresetForInterfaceMode('terminal-like')).toBe(DEFAULT_PRESETS.terminal)
     // 终端默认 = glass 副本 + 契约（浅色那款；深色预设一条都不用）
-    expect(DEFAULT_PRESETS.terminal.theme).toMatchObject({ ...GLASS.theme, ...TERMINAL_CONTRACT })
+    expect(DEFAULT_PRESETS.terminal.theme).toMatchObject({ ...effectivePresetTheme(GLASS), ...TERMINAL_CONTRACT })
   })
 })
 

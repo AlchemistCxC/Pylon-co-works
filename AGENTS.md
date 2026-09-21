@@ -43,7 +43,7 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 - **已记录** → 优先读取并核查内容，将当前用户反馈补充在 issue 评论区中，并**认领**（assignee 设为自己）。然后开展下一步。
 
 ### 2.3 正式开工
-0. 如果你是deepseek系列模型，**注意峰谷**，周一到周五的早上9点到午12点，下午2到6点**双倍计费**，提醒用户。
+0. 如果你是deepseek系列模型，注意**峰谷计费**：周一到周五 9:00–12:00、14:00–18:00 为双倍。★ **只在开工时提醒一次**（若开工时不在高峰、之后跨入高峰，可再提醒一次）；**不要每条回复都重复提**。
 1. 按 issue 内容 grep `docs/说明书/`，定位涉及区域获取相关说明，作为初步了解——**按需读取，不通读全仓**，后继续探索代码定位实际问题，请不要违背开发决策相关文件（你在开发前需要grep有没有已经落地的，会影响到本地任务的历史决策）
 2. 定位问题区域后，尽力对齐用户需求，进行对齐工作，澄清模糊语义与决策，而后在`.agents/spec/` 落地规格化文档（模板 `.agents/templates/spec.md`），这一步目的是方便追溯。
 3. 遵守 [`.agents/dev-standards.md`](.agents/dev-standards.md)（路线与技术决策记录在此）。若 issue 涉及路线与决策，按 [`.agents/templates/adr.md`](.agents/templates/adr.md) 的格式登记到 `.agents/decisions/`，注意，请不要在用户没有完成决策前就登记，

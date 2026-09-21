@@ -3,6 +3,7 @@ import { cloneCcLayout } from '../../ccLayoutState.ts'
 import type { CustomPreset } from '../../customPresets.ts'
 import { DEFAULTS } from '../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../presets/index.ts'
+import { effectivePresetTheme } from '../../zones/index.ts'
 import {
   THEME_CSS_VAR_MAP,
   THEME_FIELD_DEFS,
@@ -185,7 +186,8 @@ function createBoundaryTheme(edge: 'min' | 'max'): ThemeSettings {
 }
 
 function createMixedTheme(): ThemeSettings {
-  const byName = new Map(GLOBAL_PRESETS.map(preset => [preset.name, preset.theme]))
+  // 刀3（#223）：预设不再自带 `theme` ⇒ 取有效值视图（各套自己的那份）
+  const byName = new Map(GLOBAL_PRESETS.map(preset => [preset.name, effectivePresetTheme(preset)]))
   return mergeTheme({
     ...byName.get('glass'),
     ...Object.fromEntries(
@@ -217,7 +219,7 @@ export function createWorkbenchSkinFixtureSet(
 ): WorkbenchSkinFixtureSet {
   const fixtures: WorkbenchThemeFixture[] = [
     makeFixture('default', '默认主题', 'default', DEFAULTS),
-    ...GLOBAL_PRESETS.map(preset => makeFixture(`builtin-${preset.name}`, preset.label, 'builtin', mergeTheme(preset.theme))),
+    ...GLOBAL_PRESETS.map(preset => makeFixture(`builtin-${preset.name}`, preset.label, 'builtin', mergeTheme(effectivePresetTheme(preset)))),
     ...customPresets.map(preset => makeFixture(`custom-${preset.id}`, preset.name, 'custom', mergeTheme(preset.theme))),
     makeFixture('mixed-zones', '分区混合主题', 'mixed', createMixedTheme()),
     makeFixture('dirty-custom', '逐字段调整主题', 'dirty', createDirtyTheme()),

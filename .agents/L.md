@@ -383,6 +383,53 @@
 
 ---
 
+[2026-09-21 20] [Bolide/B] [#223 · 预设组装 刀3]
+
+**开工：预设组装刀3——`GlobalPreset.theme` 从"手写数据"改成"算出来的视图"，并整块拆掉"终端补全"机制。** 施工单 `E:\Acode\FILES\任务\预设修正\预设组装\03-施工单-刀3-预设不再自带值.md`（规范 v1.0 §7 刀3）。分支沿用 **`feat/preset-assemble.1`**。刀1（`cd21829d`）、刀2（`41e8f58a`）已核验落存档。
+
+**开工实测（本刀头号坑，停手条件 1）：已排除** —— 逐套比对「`theme` 键集 vs 五区切面并集键集」**完全相等**（会丢 0、并集多出 0）；`191 = 17+8+78+83+5`，`layout` 0 字段 ⇒ 视图不会丢键。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/presets/builtin.ts`（`GLOBAL_PRESETS` 去掉 `completeTerminalPreset` 那层；10 套手写 `theme` 摘除）
+- `src/presets/completion.ts`（**整文件删除**）、`src/presets/types.ts`（`theme` 改可选）
+- **新增** `src/zones/effectivePresetTheme.ts`（纯计算视图；入参预设对象、**不 import `src/presets/**`**）
+- `src/application/transactions/applyGlobalPreset.ts`（`:72` 一处：有效值视图再叠 token）
+- `src/domains/workbench/workbenchSkinContract.ts`（夹具来源改视图）
+- `src/components/settings/TemplateLibrary.tsx`（**两处**：显示用 theme + `createPresetBundle` 的 theme）
+- `src/zones/zonePresetPool.ts` + `src/zones/index.ts`（删 `deriveZonePresetPool` / `deriveFactoryZonePresetEntries` 及转出；`pickZoneFields` 去留按实测）
+- **删** `scripts/generate-factory-zone-presets.mts`（刀2 过渡工具，输入已消失）
+- 测试：删 `src/__tests__/completeTerminalPreset.test.ts`；**新增**有效值视图专项；§4.3 授权清单内的既有测试**只换值的来源**（逐条点名）
+- 文档：本文件、`.agents/records/`
+
+**我不碰**：`src/zones/factory/**`（**一个字节都不动**，A3 硬要求）、`src/presets/completion` 之外的补全消费者、`src/store.ts`、`src/domains/theme/presetReducer.ts`、`src/themeFieldDefs.ts`、`package.json`、契约快照 JSON（只由脚本重拍后还原）、`docs/**`、`src/renderers/**`、`src-tauri/**`、`tools/**`、禁区三项（`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`）。
+
+**约束（复审据此把关）**：**零变化**——10 套预设有效值逐字段不变、契约夹具除 `generatedAt` 外逐字节相同（本刀主证据）、全量测试除「删 `completeTerminalPreset.test.ts`（−1 文件）」与「本刀新增断言」外三数完全相同；**不做数据瘦身**（工厂数据照抄现状）；**不改任何既有断言的语义**（只换值的来源，逐条点名）；不 bump 版本号。
+
+**前置导出已完成**（本刀后不可再导）：`预设修正/备份/预设组装-刀3前-有效值-20260921/`（10 套 `theme` md5 `4df663534288b1c2b5a2cef8c8b95862` / 2 套默认 / 50 条工厂数据，附 `索引.md`）。
+
+---
+
+[2026-09-21 19] [Bolide/B] [#223 · 预设组装 刀2 —— ✅ 已完工（`41e8f58a` / `93771fbc`），文件域移交刀3]
+
+~~**开工：预设组装刀2——把 50 条出厂区域预设从「构建时派生」改成「落盘数据」。**~~ 施工单 `02-施工单-刀2-出厂区域预设独立成数据.md`。
+
+**刀2 已改动文件（现已存档，勿回改）**：`src/zones/zonePresetPool.ts`（判据换 `origin`、取值直取 `values`、折叠退场、池来源换成数据表）、`src/zones/index.ts`、`src/components/Settings.tsx`（仅删同形悬停提示）、`src/zones/__tests__/zonePresetPool.test.ts`（仅判据/折叠两条）、新增 `src/zones/factory/**`（10 数据文件 + 索引）、新增 `scripts/generate-factory-zone-presets.mts`、新增 `src/zones/__tests__/factoryZonePresets.test.ts`。开发记录 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
+
+**刀2 不碰（已由刀3 接手）**：`src/presets/**`、`src/domains/workbench/workbenchSkinContract.ts`、`src/components/settings/TemplateLibrary.tsx`、契约快照 JSON。
+
+---
+
+[2026-09-21 10] [Bolide/B] [#223 · 预设组装 刀1 —— ✅ 已完工（`cd21829d` / `660aaed0`），文件域移交刀2]
+
+~~**开工：预设组装刀1——区域引用表（`zoneRefs`）+ 装配路径倒置为「逐区域装配」**~~（行为零变化）。施工单 `E:\Acode\FILES\任务\预设修正\预设组装\01-施工单-刀1-区域引用表与装配倒置.md`（规范 v1.0 已定稿）；分支 **`feat/preset-assemble.1`**（基于 `origin/main @ 5e251b40`，已解上游跟踪）。
+
+**刀1 已改动文件（现已存档，勿回改）**：`src/presets/types.ts`、`src/presets/builtin.ts`、`src/domains/theme/presetReducer.ts`、`src/application/transactions/applyGlobalPreset.ts`、`src/store.ts`、新增 `src/__tests__/presetAssembly.test.ts`。开发记录 `.agents/records/issue-223-preset-zone-refs-assembly.md`。
+
+**刀1 不碰（已由刀2 接手）**：`src/zones/zonePresetPool.ts`、`src/zones/pickZoneFields.ts`、`src/themeFieldDefs.ts`、`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/completion.ts`、`src/components/Settings.tsx`、`src/components/settings/TemplateLibrary.tsx`、契约快照 JSON。
+
+---
+
 [2026-09-21 09] [Miyaki Kumo] [#218]
 
 **开工：issue218（webview2-mcp 上下文瘦身）。** 在 `Ru5t/Reflector` 上施工。本轮文件域，请勿改写、勿连带提交：

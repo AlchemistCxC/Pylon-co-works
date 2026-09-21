@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
 import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
+import { effectivePresetTheme } from '../../../zones/index.ts'
 import { PROFILE_SCHEMA_VERSION } from '../../../profilePersistence.ts'
 import { readFileSync } from 'node:fs'
 import { CC_LAYOUT_SCHEMA_VERSION } from '../../../ccLayoutState.ts'
@@ -128,7 +129,7 @@ describe('废弃坐标字段已清除（v3 以 slot layout 为真值）', () => 
   it('预设主题不得再携带 ekg/pct/tokens/model/mode/send/attach 坐标对象', () => {
     const deprecated = ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach']
     for (const preset of GLOBAL_PRESETS) {
-      const theme = preset.theme as Record<string, unknown>
+      const theme = effectivePresetTheme(preset) as Record<string, unknown>
       for (const id of deprecated) {
         expect(theme, `${preset.label} 不得携带废弃坐标 ${id}`).not.toHaveProperty(id)
       }
