@@ -109,6 +109,17 @@ pub fn advance_prefix(current: &str, target: &str, budget: f64) -> PrefixAdvance
         };
     }
 
+    let (taken_bytes, code_units) = advance_graphemes(remaining, budget);
+    PrefixAdvance {
+        value: format!("{current}{}", &remaining[..taken_bytes]),
+        consumed_units: code_units,
+    }
+}
+
+/// 沿 `remaining` 按字素步进最多 `budget` 个 UTF-16 单元，返回
+/// `(taken_bytes, consumed_units)`。[`advance_prefix`] 与 [`RevealEngine::tick`]
+/// 共用这一段——tick 只要尾巴字节区间，不再为构造整条前缀付出一次 `format!` 复制。
+fn advance_graphemes(remaining: &str, budget: f64) -> (usize, f64) {
     let mut code_units = 0.0f64;
     let mut taken_bytes = 0usize;
     for grapheme in remaining.graphemes(true) {
@@ -120,18 +131,23 @@ pub fn advance_prefix(current: &str, target: &str, budget: f64) -> PrefixAdvance
         code_units = next;
         taken_bytes += grapheme.len();
     }
-    PrefixAdvance {
-        value: format!("{current}{}", &remaining[..taken_bytes]),
-        consumed_units: code_units,
-    }
+    (taken_bytes, code_units)
 }
 
 /// 一行的镜像与揭示状态。`canonical` 是镜像（单写者：`reset`/`feed`）；
 /// `revealed_bytes` 是已发布前缀的字节长度（恒落在 char 边界：只按整字素推进）。
+///
+/// UTF-16 计数**增量记账**（#220 边界收口）：`canonical_units` 在 `feed` 时只对
+/// delta 计数、`revealed_units` 在 `tick` 时累加已算出的 `consumed_units`。这些都是
+/// 整数值的 f64（< 2^53），每步加法精确 ⇒ 与「从头 `encode_utf16().count()`」逐位
+/// 一致，欠账/预算读数因此不触碰「与 TS 同运算顺序」的契约，而 `pending_units`
+/// 从 O(全文)/拍降到 O(行数)/拍。
 struct RevealRow {
     key: String,
     canonical: String,
+    canonical_units: f64,
     revealed_bytes: usize,
+    revealed_units: f64,
 }
 
 /// 一次 `tick` 的结果（TS `tick()` → `interpolateSnapshot` + `publishSnapshot` 的
@@ -157,12 +173,20 @@ pub struct TickOutcome {
 }
 
 /// 一行的本拍决策（TS `RowDecision` + 行 key）。
+///
+/// wire 形状是**增量尾巴**（#220 边界收口）：`tail` 只携带本拍新揭示的部分，JS 侧
+/// 追加到自己持有的已揭示前缀上——整条前缀每拍过界是 O(全文)/拍、O(N²)/流的
+/// 编组+复制+GC 开销（与投影 live 路线 A 同款病灶）。`revealed_length` 是本拍
+/// 结束后已揭示前缀的 UTF-16 长度：JS 侧逐列表裁决（`resolveTailValue`）靠它判断
+/// 本列表是否恰在揭示位上、分叉列表该截到哪，不追加就能自愈。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RowReveal {
     pub key: String,
-    /// 本拍结束后该行的揭示前缀。
-    pub value: String,
+    /// 本拍新增的尾巴（`revealed_length - tail 的 UTF-16 长度` = 拍前揭示位）。
+    pub tail: String,
+    /// 本拍结束后该行已揭示前缀的 UTF-16 长度。
+    pub revealed_length: f64,
     /// 该行本拍消费的 UTF-16 单元数。
     pub consumed_units: f64,
 }
@@ -241,10 +265,15 @@ impl RevealEngine {
     pub fn reset(&mut self, rows: &[(&str, &str)], at: f64) {
         self.rows = rows
             .iter()
-            .map(|(key, text)| RevealRow {
-                key: (*key).to_string(),
-                canonical: (*text).to_string(),
-                revealed_bytes: text.len(),
+            .map(|(key, text)| {
+                let canonical_units = text.encode_utf16().count() as f64;
+                RevealRow {
+                    key: (*key).to_string(),
+                    canonical: (*text).to_string(),
+                    canonical_units,
+                    revealed_bytes: text.len(),
+                    revealed_units: canonical_units,
+                }
             })
             .collect();
         self.catch_up_deadline = f64::NEG_INFINITY;
@@ -259,11 +288,16 @@ impl RevealEngine {
             return Ok(());
         }
         match self.rows.iter_mut().find(|row| row.key == key) {
-            Some(row) => row.canonical.push_str(delta),
+            Some(row) => {
+                row.canonical.push_str(delta);
+                row.canonical_units += delta.encode_utf16().count() as f64;
+            }
             None => self.rows.push(RevealRow {
                 key: key.to_string(),
+                canonical_units: delta.encode_utf16().count() as f64,
                 canonical: delta.to_string(),
                 revealed_bytes: 0,
+                revealed_units: 0.0,
             }),
         }
         Ok(())
@@ -283,14 +317,12 @@ impl RevealEngine {
     }
 
     /// 当前欠账（UTF-16 单元，D3 归并后的口径：一行只计一次——镜像天然按行去重）。
+    /// 读的是增量记账的计数器（见 [`RevealRow`]），O(行数)，不再整串重编码。
     fn pending_units(&self) -> f64 {
         self.rows
             .iter()
-            .filter(|row| row.revealed_bytes < row.canonical.len())
-            .map(|row| {
-                let revealed_units = row.canonical[..row.revealed_bytes].encode_utf16().count();
-                (row.canonical.encode_utf16().count() - revealed_units) as f64
-            })
+            .filter(|row| row.revealed_units < row.canonical_units)
+            .map(|row| row.canonical_units - row.revealed_units)
             .sum()
     }
 
@@ -374,27 +406,27 @@ impl RevealEngine {
             } else {
                 remaining
             };
-            let row = &self.rows[index];
-            let advanced = advance_prefix(
-                &row.canonical[..row.revealed_bytes],
-                &row.canonical,
-                per_row,
-            );
-            let consumed = advanced.consumed_units;
+            let row = &mut self.rows[index];
+            let start = row.revealed_bytes;
+            let (taken_bytes, consumed) = advance_graphemes(&row.canonical[start..], per_row);
+            let end = start + taken_bytes;
+            // 尾巴只切新增区间：不再为 wire 构造整条前缀（O(全文)/拍 → O(尾)/拍）
+            let tail = row.canonical[start..end].to_string();
+            row.revealed_bytes = end;
+            row.revealed_units += consumed;
+            remaining = (remaining - consumed).max(0.0);
+            rows_left -= 1.0;
             advanced_total_units += consumed;
             if consumed > advanced_max_units {
                 advanced_max_units = consumed;
             }
-            remaining = (remaining - consumed).max(0.0);
-            rows_left -= 1.0;
-            if advanced.value.len() < row.canonical.len() {
+            if end < row.canonical.len() {
                 still_pending = true;
             }
-            let key = row.key.clone();
-            self.rows[index].revealed_bytes = advanced.value.len();
             reveals.push(RowReveal {
-                key,
-                value: advanced.value,
+                key: row.key.clone(),
+                tail,
+                revealed_length: row.revealed_units,
                 consumed_units: consumed,
             });
         }
@@ -437,12 +469,12 @@ impl RevealEngine {
             .map(|row| &row.canonical[..row.revealed_bytes])
     }
 
-    /// 已揭示前缀的 UTF-16 单元数。
+    /// 已揭示前缀的 UTF-16 单元数（增量记账，O(1) 查表）。
     pub fn revealed_units(&self, key: &str) -> Option<f64> {
         self.rows
             .iter()
             .find(|row| row.key == key)
-            .map(|row| row.canonical[..row.revealed_bytes].encode_utf16().count() as f64)
+            .map(|row| row.revealed_units)
     }
 
     /// 追赶窗口（重新）开启次数（TS `catchUpWindows`）。
@@ -707,6 +739,93 @@ mod tests {
             1,
             "note_backlog 不计数；首个欠账拍自武装计 1"
         );
+    }
+
+    // ── wire tail：tail 拼接 == 整条揭示前缀；revealed_length == UTF-16 长度 ──
+
+    #[test]
+    fn tick_rows_carry_incremental_tails_that_concat_to_the_revealed_prefix() {
+        let mut engine = engine();
+        seed(&mut engine, &[("m1", "")]);
+        engine.feed("m1", &"x".repeat(4000)).expect("feed");
+        engine.note_backlog(0.0);
+        let mut revealed = String::new();
+        let mut ticks = 0;
+        loop {
+            let outcome = engine.tick((ticks + 1) as f64 * TICK);
+            ticks += 1;
+            for row in &outcome.rows {
+                // 拍前揭示位（JS 侧追加基准）+ tail == 拍后揭示位（长度守恒）
+                assert_eq!(
+                    revealed.encode_utf16().count() as f64 + row.tail.encode_utf16().count() as f64,
+                    row.revealed_length,
+                    "ticks={ticks}"
+                );
+                revealed.push_str(&row.tail);
+            }
+            if outcome.kind == "converged" {
+                break;
+            }
+            assert!(ticks < 200, "4000 单元必须收敛");
+        }
+        assert_eq!(revealed, "x".repeat(4000));
+        assert_eq!(engine.revealed_units("m1"), Some(4000.0));
+    }
+
+    #[test]
+    fn astral_tails_keep_revealed_length_in_utf16_units() {
+        let mut engine = engine();
+        seed(&mut engine, &[("m1", "")]);
+        let grapheme = "👩‍💻"; // 1 字素 = 5 UTF-16 单元
+        engine.feed("m1", &grapheme.repeat(400)).expect("feed");
+        engine.note_backlog(0.0);
+        let mut revealed_units = 0.0f64;
+        let mut tail_units = 0.0f64;
+        for ticks in 1..200 {
+            let outcome = engine.tick(ticks as f64 * TICK);
+            for row in &outcome.rows {
+                assert_eq!(row.revealed_length, revealed_units + row.consumed_units);
+                tail_units += row.tail.chars().map(char::len_utf16).sum::<usize>() as f64;
+                revealed_units = row.revealed_length;
+            }
+            if outcome.kind == "converged" {
+                break;
+            }
+        }
+        // 全部 tail 拼出的 UTF-16 长度 == 揭示位；tail 切点都落在字素边界（整字素倍数）
+        assert_eq!(revealed_units, 2000.0);
+        assert_eq!(tail_units, 2000.0);
+        assert_eq!(
+            engine.revealed_text("m1"),
+            Some(grapheme.repeat(400).as_str())
+        );
+    }
+
+    #[test]
+    fn tail_path_matches_the_full_prefix_reference_advance() {
+        // tick 走的 advance_graphemes 与参考实现 advance_prefix 逐字节等价
+        //（前缀目标场景；非前缀整发回落是 advance_prefix 自己的分支）
+        let mut random = Lcg(0x220_CA11);
+        for case in 0..300 {
+            let mut target = String::new();
+            let parts = 1 + random.below(10);
+            for _ in 0..parts {
+                target.push_str(UNITS[random.below(UNITS.len())]);
+            }
+            let mut current = String::new();
+            for grapheme in target.graphemes(true) {
+                let budget = (random.below(12)) as f64;
+                let reference = advance_prefix(&current, &target, budget);
+                let (taken_bytes, consumed) = advance_graphemes(&target[current.len()..], budget);
+                assert_eq!(
+                    &target[current.len()..][..taken_bytes],
+                    &reference.value[current.len()..],
+                    "case={case} tail 与整发前缀的增量不一致"
+                );
+                assert_eq!(consumed, reference.consumed_units, "case={case}");
+                current.push_str(grapheme);
+            }
+        }
     }
 
     // ── 400ms 追赶窗口 ───────────────────────────────────────────────────────

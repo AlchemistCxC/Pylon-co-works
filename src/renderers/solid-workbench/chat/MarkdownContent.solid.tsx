@@ -9,7 +9,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
-import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from '../../../infrastructure/compute/streamingCompute.ts'
+import { splitOpenCodeFenceTail, splitStreamingMarkdownBlockEnds } from '../../../infrastructure/compute/streamingCompute.ts'
 import { noteStreamingRowSet } from './streamingRowCounters.ts'
 
 export interface MarkdownContentProps {
@@ -58,6 +58,8 @@ interface RowSpec {
 
 interface DerivedRows {
   readonly specs: readonly RowSpec[]
+  /** specs 前 stableSpecs 项来自已提交块（文本只增不变），其余至多一项是增长尾块。 */
+  readonly stableSpecs: number
   /** 当前文本的段落数（稳定块 + 尾块）——行集合的上界，只读诊断用。 */
   readonly paragraphs: number
 }
@@ -77,26 +79,32 @@ interface DerivedRows {
  * `trimRowStructuralWhitespace`），且不为空——分隔空行是行与行之间的结构，不是行内容。
  */
 function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
-  const split = splitStreamingMarkdownBlocks(visible)
+  // 热路径只取块边界偏移（ends 出口）：块内容由这里从 visible 切出——整组 stable
+  // 块字符串每拍从 wasm 重分配/编组是 O(全文) 的过界流量（#220 边界收口）。
+  const ends = splitStreamingMarkdownBlockEnds(visible)
   const specs: RowSpec[] = []
-  for (const block of split.stableBlocks) {
+  let start = 0
+  for (const end of ends) {
     // The splitter includes the blank-line delimiter in each stable block so the
     // accumulated prefix stays lossless.  That delimiter is structural, though—not
     // content that should become an extra `pre-wrap` line inside the row.  The shared
     // `.term-p + .term-p` cadence represents the separator; strip it from the visible
     // stable text to keep streaming geometry identical to the completed Markdown path.
-    const text = trimRowStructuralWhitespace(block)
+    const text = trimRowStructuralWhitespace(visible.slice(start, end))
     if (text.length > 0) specs.push({ text, tail: false })
+    start = end
   }
-  if (split.unstable.length > 0) {
+  const stableSpecs = specs.length
+  const unstable = visible.slice(start)
+  if (unstable.length > 0) {
     // Consecutive blank lines are collapsed by the splitter rather than becoming empty
     // renderer rows, so a tail that is still only structural whitespace contributes
     // nothing.  Its delimiter is stripped unconditionally: the old condition（只在它前面
     // 确实提交过块时才裁）会把前导空行留在行文本里，渲染成 `'\n\n快'` 一类的行。
-    const text = trimRowStructuralWhitespace(split.unstable)
+    const text = trimRowStructuralWhitespace(unstable)
     if (text.length > 0) specs.push({ text, tail: !final })
   }
-  return { specs, paragraphs: split.stableBlocks.length + (split.unstable.length > 0 ? 1 : 0) }
+  return { specs, stableSpecs, paragraphs: ends.length + (unstable.length > 0 ? 1 : 0) }
 }
 
 function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; inline?: boolean }) {
@@ -105,31 +113,37 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   // committedText / hiddenLeading / stableRows 累积 + reset() 正是漂移的来源。
   let rendered: StreamingBlockRow[] = []
   let lastText = ''
+  // stable 行文本只增不变（切分不变量：边界只前进），按位缓存修剪后的最终行文本，
+  // 后继发布省掉对全部已完成块的 slice+trim 重复分配；尾行永远重算，回退/换挡清空。
+  let cachedStableTexts: readonly string[] = []
   const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
 
   const reconcile = (text: string, final: boolean) => {
     // 非后继输入（回退/换挡/重放）只作为只读计数，不再需要特殊分支：推导只看当前文本。
     const reset = !text.startsWith(lastText)
     lastText = text
+    if (reset) cachedStableTexts = []
     // Providers may open an assistant stream with blank lines (for example right after a
     // reasoning phase). CommonMark drops them once the parser runs, but the plain fast
     // path renders each as an empty pre-wrap line, pushing the first generated characters
     // below the assistant indicator.
     const derived = deriveRowSpecs(trimLeadingBlankLines(text), final)
+    const resolvedSpecs = derived.specs.map((spec, index) => cachedStableTexts[index] ?? spec.text)
+    cachedStableTexts = resolvedSpecs.slice(0, derived.stableSpecs)
     // S0 只读计数：rows / textParagraphs > 1 说明行集合里出现了文本之外的边界（issue #55 判据）。
     noteStreamingRowSet({ rows: derived.specs.length, paragraphs: derived.paragraphs, reset })
     const nextRows: StreamingBlockRow[] = []
-    for (let index = 0; index < derived.specs.length; index += 1) {
-      const spec = derived.specs[index]!
+    for (let index = 0; index < resolvedSpecs.length; index += 1) {
+      const specText = resolvedSpecs[index]!
       const candidate = rendered[index]
       if (candidate === undefined) {
-        nextRows.push(createStreamingBlockRow(nextId++, spec.text, spec.tail))
+        nextRows.push(createStreamingBlockRow(nextId++, specText, derived.specs[index]!.tail))
         continue
       }
       // 位置对账：文本未变就不碰 signal（不多余重解析），变了就地更新——保持 DOM 身份是
       // 尾块逐拍增长不闪烁、稳定块（含代码块）不重挂载的前提。
-      if (candidate.text !== spec.text) candidate.update(spec.text)
-      candidate.setTail(spec.tail)
+      if (candidate.text !== specText) candidate.update(specText)
+      candidate.setTail(derived.specs[index]!.tail)
       nextRows.push(candidate)
     }
     rendered = nextRows

@@ -25,10 +25,19 @@ export interface StreamingRevealEngineOptions {
   maxRevealLagMs?: number
 }
 
-/** 一行的本拍决策（Rust `RowReveal`）。 */
+/**
+ * 一行的本拍决策（Rust `RowReveal`）。
+ *
+ * wire 是**增量尾巴**（#220 边界收口）：`tail` 只携带本拍新揭示的部分，消费方追加
+ * 到自己持有的已揭示前缀上；`revealedLength` 是拍后已揭示前缀的 UTF-16 长度——
+ * 整条前缀每拍过界是 O(全文)/拍的编组+复制+GC 开销，尾巴化后降到 O(新增)。
+ */
 export interface StreamingRevealRow {
   readonly key: string
-  readonly value: string
+  /** 本拍新增的尾巴（拍前揭示位 + tail = 拍后揭示前缀）。 */
+  readonly tail: string
+  /** 本拍结束后该行已揭示前缀的 UTF-16 长度。 */
+  readonly revealedLength: number
   readonly consumedUnits: number
 }
 
@@ -59,6 +68,8 @@ export interface StreamingRevealEngine {
 /** 流式计算核出口（与 Rust 侧 `pylon_compute::streaming` 一一对应）。 */
 export interface StreamingCompute {
   splitStreamingMarkdownBlocks(text: string): { stableBlocks: string[], unstable: string }
+  /** stable 顶块的 UTF-16 结束偏移升序数组（热路径：JS 从自己持有的文本切片）。 */
+  splitStreamingMarkdownBlockEnds(text: string): number[]
   splitStreamingMarkdown(text: string): { stable: string, unstable: string }
   findLastStableBlockBoundary(text: string): number
   splitOpenCodeFenceTail(text: string): { prefix: string, language?: string, code: string } | null
@@ -93,6 +104,14 @@ export function splitStreamingMarkdown(text: string): { stable: string, unstable
 /** Stable 顶层块序列 + unstable 尾块。已解析结果永不增长、可缓存复用。 */
 export function splitStreamingMarkdownBlocks(text: string): { stableBlocks: string[], unstable: string } {
   return streamingCompute().splitStreamingMarkdownBlocks(text)
+}
+
+/**
+ * Stable 顶块的 UTF-16 结束偏移升序数组（热路径出口）。
+ * 块 i 的文本 = `text.slice(ends[i-1] ?? 0, ends[i])`；unstable = `text.slice(ends.at(-1) ?? 0)`。
+ */
+export function splitStreamingMarkdownBlockEnds(text: string): number[] {
+  return Array.from(streamingCompute().splitStreamingMarkdownBlockEnds(text))
 }
 
 /** 最后一个已证安全的块边界的 UTF-16 偏移。 */

@@ -23,6 +23,7 @@ import {
   findLastStableBlockBoundary,
   splitOpenCodeFenceTail,
   splitStreamingMarkdown,
+  splitStreamingMarkdownBlockEnds,
   splitStreamingMarkdownBlocks,
   streamingCompute,
 } from '../../../infrastructure/compute/streamingCompute.ts'
@@ -125,6 +126,17 @@ describe('切分契约不变量（splitStreamingMarkdownBlocks / splitStreamingM
         // ② splitStreamingMarkdown 与 blocks 出口同源
         expect(split.stable, `stable ${context}`).toBe(stable)
         expect(split.unstable, `unstable ${context}`).toBe(blocks.unstable)
+
+        // ⑥ ends 出口（热路径）与 blocks 出口同源：ends[i] = 前 i+1 块的 UTF-16 累计
+        // 长度，末偏移 = stable 的 UTF-16 长度——JS 侧据此切片还原块内容与 unstable。
+        const ends = splitStreamingMarkdownBlockEnds(prefix)
+        expect(ends.length, `ends 数 ${context}`).toBe(blocks.stableBlocks.length)
+        let units = 0
+        blocks.stableBlocks.forEach((block, index) => {
+          units += block.length
+          expect(ends[index], `ends[${index}] ${context}`).toBe(units)
+        })
+        expect(ends.at(-1) ?? 0, `ends 末偏移 ${context}`).toBe(stable.length)
 
         // ⑤ 尾块出口：prefix 是输入前缀；code 是输入（CRLF 归一后）的尾部——
         // 「整块进」喂法依赖这两条，保证围栏体永远来自同一份流式文本。

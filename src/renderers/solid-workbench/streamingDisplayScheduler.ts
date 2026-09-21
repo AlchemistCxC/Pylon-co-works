@@ -2,6 +2,7 @@ import type { ContentPart } from '../../domains/workbench/content/contentPartSch
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import { streamingCompute } from '../../infrastructure/compute/streamingCompute.ts'
+import type { StreamingRevealRow } from '../../infrastructure/compute/streamingCompute.ts'
 
 /**
  * Renderer-side pacing defaults.
@@ -472,13 +473,14 @@ export function createStreamingDisplayScheduler(
     }
 
     // budgeted：把引擎的本拍决策写回两个列表（D3：同 key 共用同一决策）。
+    // 决策是增量尾巴（wasm 侧只发本拍新增，O(新增)/拍 过界），不是整条揭示前缀。
     const plans = pendingRowPlans(displayed, target)
-    const decisions = new Map<string, string>()
+    const decisions = new Map<string, StreamingRevealRow>()
     const pendingKeys: string[] = []
     for (const row of outcome.rows) {
-      decisions.set(row.key, row.value)
+      decisions.set(row.key, row)
       const planNextLength = plans.get(row.key)?.nextText.length
-      if (planNextLength !== undefined && row.value.length < planNextLength) pendingKeys.push(row.key)
+      if (planNextLength !== undefined && row.revealedLength < planNextLength) pendingKeys.push(row.key)
     }
     if (pendingKeys.length === 0) {
       clearTimer()
@@ -957,13 +959,13 @@ function isStreamMessage(message: DisplayMessage): boolean {
 /**
  * 把本拍决策写回一个列表：同一 id+role 的行共用同一决策（D3），
  * 因此两列表同源时不会各自推进一次，聚合也不会翻倍。
- * 决策对某列表不可用（双列表短暂分叉，见 `resolveListValue`）时该列表本拍保守不动，
+ * 决策对某列表不可用（双列表短暂分叉，见 `resolveTailValue`）时该列表本拍保守不动，
  * 绝不整发、不回退。
  */
 function applyRowDecisions<T extends DisplayMessage>(
   current: readonly T[],
   target: readonly T[],
-  decisions: ReadonlyMap<string, string>,
+  decisions: ReadonlyMap<string, StreamingRevealRow>,
 ): readonly T[] {
   if (decisions.size === 0 || current === target) return target
   const currentById = new Map(current.map(message => [message.id, message]))
@@ -974,7 +976,7 @@ function applyRowDecisions<T extends DisplayMessage>(
     if (decision === undefined) return message
     const previous = currentById.get(message.id)
     const previousText = previous?.role === message.role ? previous.content : ''
-    const value = resolveListValue(previousText, decision, message.content)
+    const value = resolveTailValue(previousText, decision, message.content)
     if (value === undefined || value === message.content) return message
     changed = true
     const parts = partialTextParts(message.parts, value)
@@ -988,16 +990,31 @@ function applyRowDecisions<T extends DisplayMessage>(
 }
 
 /**
- * 决策对单个列表的可用性。决策是**合并目标文本**（两列表取更长）的揭示前缀：
- * - 本列表目标包含整个决策 ⇒ 两列表得到同一前缀（常态）；
- * - 本列表目标短于决策（另一列表暂时领先）⇒ 截到本列表自己的目标——它仍是决策的
- *   前缀，而已揭示的 canonical 前缀只会更长，不会让任何新文本提前上屏；
- * - 其余（回退/收缩类异常）⇒ `undefined`，该列表本拍保持不动。
+ * 决策（增量尾巴 + 拍后揭示位）对单个列表的落地值。决策的语义内容是
+ * 「合并目标文本（两列表取更长）的已揭示前缀现在有 `revealedLength` 个 UTF-16 单元」：
+ * - 本列表恰在拍前揭示位上（常态）：追加 tail 即得揭示前缀；本列表目标放不下
+ *   整个结果（双列表短暂分叉）时截到本列表自己的目标——已揭示的 canonical 前缀
+ *   只会更长，不让任何新文本提前上屏；
+ * - 本列表落后于拍前揭示位（分叉）：直接追加会留缺口，改为自愈——目标仍延伸
+ *   显示文本时推进到 min(本列表目标, 揭示位)，不回退、不越过合并揭示位；
+ * - 其余（回退/收缩类异常，或显示态超前于引擎）⇒ `undefined`，该列表本拍保守不动。
  */
-function resolveListValue(previousText: string, value: string, targetText: string): string | undefined {
-  if (value.length >= previousText.length && targetText.startsWith(value)) return value
-  if (value.length > targetText.length && targetText.startsWith(previousText)) return targetText
-  return undefined
+function resolveTailValue(
+  previousText: string,
+  decision: StreamingRevealRow,
+  targetText: string,
+): string | undefined {
+  const preRevealed = decision.revealedLength - decision.tail.length
+  if (previousText.length === preRevealed) {
+    const appended = previousText + decision.tail
+    if (targetText.startsWith(appended)) return appended
+    if (appended.length > targetText.length && targetText.startsWith(previousText)) return targetText
+    return undefined
+  }
+  if (previousText.length > decision.revealedLength) return undefined
+  if (!targetText.startsWith(previousText)) return undefined
+  if (targetText.length <= decision.revealedLength) return targetText
+  return targetText.slice(0, decision.revealedLength)
 }
 
 function partialTextParts(

@@ -147,9 +147,14 @@ pub struct SplitBlocks {
     pub unstable: String,
 }
 
-/// 把流式文本切成 stable 顶块序列 + unstable 尾块（TS `splitStreamingMarkdownBlocks`）。
-pub fn split_streaming_markdown_blocks(text: &str) -> SplitBlocks {
-    let mut stable_blocks: Vec<String> = Vec::new();
+/// 扫描 stable 顶块边界，返回**已提交块的字节结束偏移**（升序；首块从 0 起）。
+///
+/// 三个出口（`split_streaming_markdown_blocks` 的整组字符串、
+/// `split_streaming_markdown_block_ends` 的 UTF-16 偏移数组、
+/// `find_last_stable_block_boundary` 的末偏移）共用这一趟扫描——
+/// 切分语义只在这一处。
+fn stable_block_byte_ends(text: &str) -> Vec<usize> {
+    let mut ends: Vec<usize> = Vec::new();
     let mut block_start = 0usize;
     let mut in_fence = false;
     // fence 字符/长度只在 in_fence 时有意义；占位值与 TS 初始值同形
@@ -190,10 +195,13 @@ pub fn split_streaming_markdown_blocks(text: &str) -> SplitBlocks {
                 // 反引号、空白判定天然为假——结构上仍要走空行分支
                 _ => {
                     if is_blank_line(line) && newline.is_some() {
-                        let candidate = &text[block_start..next_position];
-                        // 空白分隔符保留在源前缀里，但不产生空块
-                        if !candidate.trim_matches(js_whitespace).is_empty() {
-                            stable_blocks.push(candidate.to_string());
+                        // 空白分隔符保留在源前缀里，但不产生空块；纯空白候选不推进
+                        // block_start（它粘进下一个已提交块，与 TS 行为逐字一致）
+                        if !text[block_start..next_position]
+                            .trim_matches(js_whitespace)
+                            .is_empty()
+                        {
+                            ends.push(next_position);
                             block_start = next_position;
                         }
                     }
@@ -203,9 +211,21 @@ pub fn split_streaming_markdown_blocks(text: &str) -> SplitBlocks {
         position = next_position;
     }
 
+    ends
+}
+
+/// 把流式文本切成 stable 顶块序列 + unstable 尾块（TS `splitStreamingMarkdownBlocks`）。
+pub fn split_streaming_markdown_blocks(text: &str) -> SplitBlocks {
+    let ends = stable_block_byte_ends(text);
+    let mut stable_blocks = Vec::with_capacity(ends.len());
+    let mut start = 0usize;
+    for end in &ends {
+        stable_blocks.push(text[start..*end].to_string());
+        start = *end;
+    }
     SplitBlocks {
         stable_blocks,
-        unstable: text[block_start..].to_string(),
+        unstable: text[start..].to_string(),
     }
 }
 
@@ -218,9 +238,30 @@ pub fn split_streaming_markdown(text: &str) -> (String, String) {
 /// TS `findLastStableBlockBoundary`：最后一个已证安全的块边界的**UTF-16 偏移**。
 /// TS 按 `text.length - unstable.length` 计算，这里换算成同一量纲。
 pub fn find_last_stable_block_boundary(text: &str) -> usize {
-    let split = split_streaming_markdown_blocks(text);
-    let stable_bytes = text.len() - split.unstable.len();
+    let stable_bytes = stable_block_byte_ends(text).last().copied().unwrap_or(0);
     text[..stable_bytes].encode_utf16().count()
+}
+
+/// stable 顶块的 **UTF-16 结束偏移**升序数组（TS 侧没有对位出口，#220 边界收口新增）。
+///
+/// 热路径（`MarkdownContent` 每次发布重推导行集）只用偏移，不用块内容：块内容
+/// JS 侧从自己持有的文本 `slice` 即可，整组块字符串每拍过界是 O(全文) 的
+/// Rust 分配 + serde 编组。与 `split_streaming_markdown_blocks` 的关系（由
+/// `split_block_ends_match_the_blocks_split` 钉死）：
+/// `ends[i]` 处切片 == 第 i 个 stable 块；`ends.last() ?? 0` == stable 前缀的
+/// UTF-16 长度 == `findLastStableBlockBoundary`。
+pub fn split_streaming_markdown_block_ends(text: &str) -> Vec<u32> {
+    let ends = stable_block_byte_ends(text);
+    let mut utf16_ends = Vec::with_capacity(ends.len());
+    let mut units = 0u32;
+    let mut cursor = 0usize;
+    for end in &ends {
+        // 增量累计：每个字节只被编码一次，不做逐块的整前缀重数
+        units += text[cursor..*end].encode_utf16().count() as u32;
+        utf16_ends.push(units);
+        cursor = *end;
+    }
+    utf16_ends
 }
 
 /// TS `OpenCodeFenceTail`：文末最后一个仍未闭合的围栏代码块。
@@ -282,11 +323,17 @@ pub fn split_open_code_fence_tail(text: &str) -> Option<OpenCodeFenceTail> {
     }
 
     let state = open?;
+    let body = &text[state.content_start..];
     Some(OpenCodeFenceTail {
         prefix: text[..state.start].to_string(),
         language: state.language,
-        // TS `.replace(/\r\n/g, '\n')`：把围栏体内的 CRLF 归一成 LF
-        code: text[state.content_start..].replace("\r\n", "\n"),
+        // TS `.replace(/\r\n/g, '\n')`：把围栏体内的 CRLF 归一成 LF。
+        // `str::replace` 无条件分配，无 CRLF 的常态（绝大多数代码体）直接拷走。
+        code: if body.contains("\r\n") {
+            body.replace("\r\n", "\n")
+        } else {
+            body.to_string()
+        },
     })
 }
 
@@ -323,6 +370,12 @@ pub fn split_streaming_markdown_blocks_js(text: &str) -> Result<JsValue, JsError
         unstable: split.unstable,
     })
     .map_err(|error| JsError::new(&format!("切分结果序列化失败: {error}")))
+}
+
+/// stable 顶块的 UTF-16 结束偏移数组（热路径出口：JS 从自己持有的文本切片）。
+#[wasm_bindgen(js_name = splitStreamingMarkdownBlockEnds)]
+pub fn split_streaming_markdown_block_ends_js(text: &str) -> Vec<u32> {
+    split_streaming_markdown_block_ends(text)
 }
 
 #[wasm_bindgen(js_name = splitStreamingMarkdown)]
@@ -521,6 +574,71 @@ mod tests {
         // JS `trim` 与 Rust `trim` 的差异点：U+FEFF 按 JS 语义裁掉
         let feff = split_open_code_fence_tail("```\u{FEFF} ts\ncode").expect("open tail");
         assert_eq!(feff.language.as_deref(), Some("ts"));
+    }
+
+    #[test]
+    fn split_block_ends_match_the_blocks_split() {
+        // 三个出口同源：ends[i] = 前 i+1 个 stable 块的 UTF-16 累计长度；
+        // 末偏移 = stable 前缀的 UTF-16 长度 = findLastStableBlockBoundary。
+        // JS 侧据此从自己持有的文本 slice 出块内容与 unstable（热路径契约）。
+        for text in [
+            "",
+            "\n\n",
+            "  \n\nx\n\ntail",
+            "头部\n\n```js\nconst x = 1",
+            "a\n\nb\n\nc",
+            "第一段\r\n\r\n第二段",
+            "```md\n1. item\n\n> quote\n```\n\ntail",
+            "- 项1\n- 项2\n\n新段落",
+        ] {
+            let split = split_streaming_markdown_blocks(text);
+            let ends = split_streaming_markdown_block_ends(text);
+            assert_eq!(ends.len(), split.stable_blocks.len(), "text={text:?}");
+            let mut units = 0usize;
+            for (end, block) in ends.iter().zip(&split.stable_blocks) {
+                units += block.encode_utf16().count();
+                assert_eq!(*end as usize, units, "text={text:?}");
+            }
+            let stable_utf16 = split.stable_blocks.concat().encode_utf16().count();
+            assert_eq!(
+                ends.last().copied().unwrap_or(0) as usize,
+                stable_utf16,
+                "text={text:?}"
+            );
+            assert_eq!(find_last_stable_block_boundary(text), stable_utf16);
+        }
+    }
+
+    #[test]
+    fn randomized_prefixes_hold_the_ends_invariants() {
+        let mut random = Lcg(0x220_e7d5);
+        for case in 0..120 {
+            let mut text = String::new();
+            let tokens = 8 + random.below(20);
+            for _ in 0..tokens {
+                text.push_str(TOKENS[random.below(TOKENS.len())]);
+            }
+            for end in 0..=text.chars().count() {
+                let prefix: String = text.chars().take(end).collect();
+                let split = split_streaming_markdown_blocks(&prefix);
+                let ends = split_streaming_markdown_block_ends(&prefix);
+                assert_eq!(
+                    ends.len(),
+                    split.stable_blocks.len(),
+                    "case={case} end={end}"
+                );
+                let mut units = 0usize;
+                for (offset, block) in ends.iter().zip(&split.stable_blocks) {
+                    units += block.encode_utf16().count();
+                    assert_eq!(*offset as usize, units, "case={case} end={end}");
+                }
+                assert_eq!(
+                    ends.last().copied().unwrap_or(0) as usize,
+                    split.stable_blocks.concat().encode_utf16().count(),
+                    "case={case} end={end}"
+                );
+            }
+        }
     }
 
     // ── property-style 随机用例（确定性种子，失败可复现） ────────────────────

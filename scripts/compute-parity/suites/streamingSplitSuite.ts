@@ -11,6 +11,18 @@ import {
 } from '../baselines/oldStreamingMarkdownSplit.ts'
 import { PREFIX_SCAN_SOURCE, repeatedBlocks, SPLIT_CORPUS } from '../fixtures/corpora.ts'
 
+/** TS 侧 ends 推导：旧 blocks 基线的块 UTF-16 长度累计（`block.length` 即 UTF-16 数）。 */
+function tsSplitStreamingMarkdownBlockEnds(text: string): number[] {
+  const split = tsSplitStreamingMarkdownBlocks(text)
+  const ends: number[] = []
+  let units = 0
+  for (const block of split.stableBlocks) {
+    units += block.length
+    ends.push(units)
+  }
+  return ends
+}
+
 export function buildStreamingSplitSuite(ctx: ComputeContextLike): Suite {
   const wasm = ctx.compute
   return {
@@ -61,6 +73,26 @@ export function buildStreamingSplitSuite(ctx: ComputeContextLike): Suite {
           })),
           { id: 'prefix-scan', meta: { scale: 's', flow: 'prefix-scan' }, build: () => PREFIX_SCAN_SOURCE },
           { id: 'blocks-m', meta: { scale: 'm' }, build: () => repeatedBlocks(500) },
+        ],
+      },
+      {
+        // ends 出口（#220 边界收口新增，wasm 独有）：TS 侧按旧 blocks 基线推导同一
+        // 量纲（块 UTF-16 长度累计）。热路径消费方（MarkdownContent）据此从自己
+        // 持有的文本切片，不再让整组 stable 块字符串每拍过界。
+        name: 'splitStreamingMarkdownBlockEnds',
+        domain: 'streaming-split',
+        ts: text => tsSplitStreamingMarkdownBlockEnds(text),
+        wasm: text => Array.from(wasm.splitStreamingMarkdownBlockEnds(text)),
+        cases: [
+          ...SPLIT_CORPUS.map((text, index) => ({
+            id: `corpus-${index}`,
+            meta: { shape: 'corpus' as const, edge: text.length === 0 },
+            build: () => text,
+          })),
+          { id: 'prefix-scan', meta: { scale: 's', flow: 'prefix-scan' }, build: () => PREFIX_SCAN_SOURCE },
+          { id: 'blocks-s', meta: { scale: 's' }, build: () => repeatedBlocks(20) },
+          { id: 'blocks-m', meta: { scale: 'm' }, build: () => repeatedBlocks(500) },
+          { id: 'blocks-l', meta: { scale: 'l' }, build: () => repeatedBlocks(5000) },
         ],
       },
       {

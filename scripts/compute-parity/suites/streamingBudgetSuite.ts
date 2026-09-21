@@ -25,6 +25,14 @@ interface EngineObservation {
   readonly mirrorTextByKey: Record<string, string | undefined>
 }
 
+/** wasm 侧逐拍行决策的 wire 形状：增量尾巴 + 拍后揭示位（#220 边界收口）。 */
+interface WasmRevealRow {
+  readonly key: string
+  readonly tail: string
+  readonly revealedLength: number
+  readonly consumedUnits: number
+}
+
 function replayTs(script: ReadonlyArray<Op>, options?: Record<string, number>): EngineObservation[] {
   const engine = new OldStreamingRevealEngine(options)
   const observations: EngineObservation[] = []
@@ -50,20 +58,29 @@ function replayTs(script: ReadonlyArray<Op>, options?: Record<string, number>): 
   return observations
 }
 
+/**
+ * 把 wasm 的 tail 形态归一成与 TS 基线可比的整条前缀：按 key 累积已揭示文本，
+ * `value = 拍前已揭示 + tail`，同时断言 `revealedLength` 与累计 UTF-16 长度一致
+ * ——这正是生产消费方（调度器 `resolveTailValue`）的追加语义，归一即验证。
+ */
 function replayWasm(
   engine: { reset(rows: ReadonlyArray<{ key: string, text: string }>, at: number): void, feed(key: string, delta: string): void, noteBacklog(now: number): void, tick(now: number): Record<string, unknown>, revealedText(key: string): string | undefined, mirrorText(key: string): string | undefined },
   script: ReadonlyArray<Op>,
 ): EngineObservation[] {
   const observations: EngineObservation[] = []
+  const revealed = new Map<string, string>()
   for (const step of script) {
-    if (step.op === 'reset') engine.reset(step.rows, step.at)
-    else if (step.op === 'feed') engine.feed(step.key, step.delta)
-    else if (step.op === 'backlog') engine.noteBacklog(step.now)
-    else {
+    if (step.op === 'reset') {
+      engine.reset(step.rows, step.at)
+      for (const row of step.rows) revealed.set(row.key, row.text)
+    } else if (step.op === 'feed') {
+      engine.feed(step.key, step.delta)
+    } else if (step.op === 'backlog') {
+      engine.noteBacklog(step.now)
+    } else {
       const outcome = engine.tick(step.now) as {
         kind: string, budget: number, backlogUnits: number, advancedMaxUnits: number,
-        advancedTotalUnits: number, rows: Array<{ key: string, value: string, consumedUnits: number }>,
-        catchUpWindows: number,
+        advancedTotalUnits: number, rows: WasmRevealRow[], catchUpWindows: number,
       }
       observations.push({
         kind: outcome.kind,
@@ -71,7 +88,15 @@ function replayWasm(
         backlogUnits: outcome.backlogUnits,
         advancedMaxUnits: outcome.advancedMaxUnits,
         advancedTotalUnits: outcome.advancedTotalUnits,
-        rows: outcome.rows.map(row => ({ key: row.key, value: row.value, consumedUnits: row.consumedUnits })),
+        rows: outcome.rows.map((row) => {
+          const previous = revealed.get(row.key) ?? ''
+          const value = previous + row.tail
+          if (value.length !== row.revealedLength) {
+            throw new Error(`tail 追加后揭示位不一致: key=${row.key} ${value.length} != ${row.revealedLength}`)
+          }
+          revealed.set(row.key, value)
+          return { key: row.key, value, consumedUnits: row.consumedUnits }
+        }),
         catchUpWindows: outcome.catchUpWindows,
         revealedTextByKey: { m1: engine.revealedText('m1'), m2: engine.revealedText('m2') },
         mirrorTextByKey: { m1: engine.mirrorText('m1'), m2: engine.mirrorText('m2') },
@@ -126,6 +151,18 @@ function astralStream(): Op[] {
   return script
 }
 
+/** 长流：2000 拍 × 40 单元增量（累计 8 万单元）——生产「一次完整回合」的形状，
+ *  也是边界收口前 O(全文)/拍 编组的尺度来源（对照基准 scripts/tmp-streaming-bench.mts）。 */
+function longStream(): Op[] {
+  const script: Op[] = [{ op: 'reset', rows: [{ key: 'm1', text: '' }], at: 0 }]
+  for (let index = 0; index < 2000; index += 1) {
+    script.push({ op: 'feed', key: 'm1', delta: 'x'.repeat(40) })
+    script.push({ op: 'backlog', now: index * TICK })
+    script.push({ op: 'tick', now: (index + 1) * TICK })
+  }
+  return script
+}
+
 /** 边角：空 delta、未知行 feed、reset 整发、无欠账连 tick。 */
 function edgeScript(): Op[] {
   return [
@@ -168,6 +205,7 @@ export function buildStreamingBudgetSuite(ctx: ComputeContextLike): Suite {
           { id: 'edge-reset-feed-tick', meta: { edge: true, flow: 'replay-script' }, build: () => edgeScript() },
           { id: 'smooth-s', meta: { scale: 's', flow: 'replay-script' }, build: () => smoothStream(50) },
           { id: 'smooth-m', meta: { scale: 'm', flow: 'replay-script' }, build: () => smoothStream(400) },
+          { id: 'long-stream', meta: { scale: 'l', flow: 'replay-script' }, build: () => longStream() },
           { id: 'burst-drain', meta: { scale: 's', flow: 'replay-script' }, build: () => burstStream() },
           { id: 'multi-row-d1', meta: { scale: 's', shape: 'multi-row', flow: 'replay-script' }, build: () => multiRowStream() },
           { id: 'astral-grapheme', meta: { scale: 's', shape: 'astral', edge: true, flow: 'replay-script' }, build: () => astralStream() },
