@@ -376,7 +376,33 @@ function hasToolBetween(
   index?: readonly number[],
 ): boolean {
   if (index) return hasIndexedSequenceBetween(index, after, before)
-  return document.timeline.some(entry => entry.kind === 'tool' && entry.sequence > after && entry.sequence < before)
+  return timelineHasBetween(document.timeline, after, before, entry => entry.kind === 'tool')
+}
+
+/**
+ * #204③：sequence 升序 timeline 上「存在 ∈ (after, before) 且满足谓词的条目」。
+ * 二分定位起点后只在区间内扫描——live 流式的区间几乎恒空（相邻 sequence），
+ * 每帧从整条 `.some` 的 O(N) 降到 O(log N + k)。谓词语义与原扫描逐条一致。
+ */
+function timelineHasBetween(
+  timeline: readonly WorkbenchTimelineEntry[],
+  after: number,
+  before: number,
+  predicate: (entry: WorkbenchTimelineEntry) => boolean,
+): boolean {
+  let low = 0
+  let high = timeline.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (timeline[middle]!.sequence <= after) low = middle + 1
+    else high = middle
+  }
+  for (let index = low; index < timeline.length; index += 1) {
+    const entry = timeline[index]!
+    if (entry.sequence >= before) return false
+    if (predicate(entry)) return true
+  }
+  return false
 }
 
 /** 终态 session 条目的判据（`terminalSessionSequence` 的逐条口径，索引与扫描共用）。 */
@@ -1378,12 +1404,25 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   }
 }
 
+// #204③：orphan 判据的 id 集合按 activities 数组引用缓存——delta 帧不改 activities，
+// 引用跨帧稳定 ⇒ 单事件路径 O(1) 命中，免每帧重建 Set（与批量路径按数组同一性
+// 缓存的短路同构；数组被替换（增删/更新节点）时必然 miss 并重建）。
+const orphanActivityIdsMemo = new WeakMap<readonly WorkbenchActivityNode[], ReadonlySet<string>>()
+
+function orphanActivityIdsOf(activities: readonly WorkbenchActivityNode[]): ReadonlySet<string> {
+  const cached = orphanActivityIdsMemo.get(activities)
+  if (cached) return cached
+  const ids = new Set(activities.map(activity => activity.id))
+  orphanActivityIdsMemo.set(activities, ids)
+  return ids
+}
+
 function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<string>): WorkbenchDocument {
   // P57 S2-R1a：仅当某个带 parentId 的 activity 的 orphan 值实际变化时才克隆该节点；
   // 没有任何变化时恒等返回输入 document。此前每个带 parentId 的节点无条件克隆，
   // 恒产生新 activities 数组，放大了 freezeDeepSnapshot 每事件的全量深拷贝。
   // #205：调用方已知 id 集合（如批量路径按 activities 数组同一性缓存）时可免重建。
-  const ids = providedIds ?? new Set(document.activities.map(activity => activity.id))
+  const ids = providedIds ?? orphanActivityIdsOf(document.activities)
   let changed = false
   const activities = document.activities.map(activity => {
     if (!activity.parentId) return activity
@@ -1497,11 +1536,9 @@ function textStreamContinues(
 ): boolean {
   // #205：journal 里每一条 message/reasoning 条目本身就是文本流边界（见
   // `isTextStreamBoundary`），逐事件整条扫描把重放压成 Θ(N²)；批量路径改走
-  // 升序边界索引 + 二分，语义等价（无索引时回退原扫描，live 路径不变）。
+  // 升序边界索引 + 二分，语义等价（无索引时回退二分区间扫描，live 路径语义不变）。
   if (boundaryIndex) return !hasIndexedSequenceBetween(boundaryIndex, previous.sequence, envelope.sequence)
-  return !document.timeline.some(entry => entry.sequence > previous.sequence
-    && entry.sequence < envelope.sequence
-    && isTextStreamBoundary(entry))
+  return !timelineHasBetween(document.timeline, previous.sequence, envelope.sequence, isTextStreamBoundary)
 }
 
 function isTextStreamBoundary(entry: WorkbenchTimelineEntry): boolean {

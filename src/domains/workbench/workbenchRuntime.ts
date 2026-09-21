@@ -6,7 +6,7 @@ import type {
   GenerationPhase,
   GenerationSummary,
 } from './generationFooterContracts.ts'
-import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
+import type { WorkbenchActivityNode, WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
 
@@ -552,23 +552,37 @@ const messageProjectionMemo = new WeakMap<readonly WorkbenchMessage[], {
   runningReasoning?: WorkbenchMessage
 }>()
 
+// #204③：单条 WorkbenchMessage → legacy Message 的投影按消息引用缓存——append-delta
+// 只替换末条对象，其余行引用跨帧稳定，每帧只需重投影变化行（原实现按 messages 数组
+// 引用缓存，delta 每帧产生新数组 ⇒ 恒 O(M) 全量重建与分配）。消息对象不可变，缓存
+// 不会过期；被替换的旧行由 WeakMap 随 GC 释放。
+const legacyMessageMemo = new WeakMap<WorkbenchMessage, Message>()
+
+function legacyMessageOf(message: WorkbenchMessage): Message {
+  const cached = legacyMessageMemo.get(message)
+  if (cached) return cached
+  const projected: Message = {
+    id: message.id,
+    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
+    sender: message.source.provider, content: message.content, time: message.time, running: message.running,
+  }
+  legacyMessageMemo.set(message, projected)
+  return projected
+}
+
 function projectLegacyMessages(source: readonly WorkbenchMessage[]) {
   const cached = messageProjectionMemo.get(source)
   if (cached) return cached
   let firstRunning: WorkbenchMessage | undefined
   let lastRunning: WorkbenchMessage | undefined
   let runningReasoning: WorkbenchMessage | undefined
-  const messages: Message[] = source.map(message => {
+  const messages = source.map(message => {
     if (message.running) {
       firstRunning ??= message
       lastRunning = message
       if (message.role === 'reasoning') runningReasoning = message
     }
-    return {
-      id: message.id,
-      role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
-      sender: message.source.provider, content: message.content, time: message.time, running: message.running,
-    }
+    return legacyMessageOf(message)
   })
   const result = { messages: Object.freeze(messages), firstRunning, lastRunning, runningReasoning }
   messageProjectionMemo.set(source, result)
@@ -598,11 +612,27 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
     return memo.value
   }
   const { messages, firstRunning, lastRunning: lastRunningMessage, runningReasoning } = projectLegacyMessages(document.messages)
-  const error = [...document.diagnostics].reverse().find(diagnostic => diagnostic.level === 'error')?.message ?? null
+  // #204③：倒序扫描（免 `[...].reverse()` 每帧两份数组分配）；命中即返回，未命中
+  // 走满也只是无分配的整数/字符串比较。
+  let error: string | null = null
+  for (let index = document.diagnostics.length - 1; index >= 0; index -= 1) {
+    const diagnostic = document.diagnostics[index]!
+    if (diagnostic.level === 'error') {
+      error = diagnostic.message
+      break
+    }
+  }
   const status = document.session.status === 'error' || document.session.status === 'degraded' || document.session.status === 'loading' || document.session.status === 'ready' || document.session.status === 'idle'
     ? document.session.status
     : document.session.status === 'completed' ? 'ready' : 'ready'
-  const runningActivity = [...document.activities].reverse().find(activity => !isTerminalActivityStatus(activity.status))
+  let runningActivity: WorkbenchActivityNode | undefined
+  for (let index = document.activities.length - 1; index >= 0; index -= 1) {
+    const activity = document.activities[index]!
+    if (!isTerminalActivityStatus(activity.status)) {
+      runningActivity = activity
+      break
+    }
+  }
   // Lifecycle status alone is not evidence of an active turn. Require a
   // running message/activity so mode strings and stale status cannot revive
   // a completed generation.
