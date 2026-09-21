@@ -311,6 +311,90 @@ describe('PylonCliService typed command surface', () => {
     )
   })
 
+  it('accepts numeric positionals/flags as strings for string-typed args (#229)', async () => {
+    const { service, interactions } = harness()
+    // CLI 壳 parse_value 把纯数字 token 发成 JSON number——照抄列表 id 走
+    // positional 必须可用（#229 前：requestId 必须是非空字符串）。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: '7', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }, { optionId: 'reject_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { positionals: [7, 'allow_once'] } })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: '7' }),
+      'approval',
+      { optionId: 'allow_once' },
+    )
+    // flag 数字形式同样宽松化。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'approval', requestId: '7', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 1, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { requestId: 7, optionId: 'allow_once' } })
+    expect(interactions.respond).toHaveBeenCalledTimes(2)
+  })
+
+  it('interaction respond answers private interactions via values/text without optionId (#230)', async () => {
+    const { service, interactions } = harness()
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: 'Ask user', prompt: 'choice:Pick one',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({
+      command: 'interaction respond',
+      args: { requestId: 'q-1', values: { choice: 'A' } },
+    })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'q-1' }),
+      'ask-user',
+      { optionId: undefined, text: undefined, values: { choice: 'A' } },
+    )
+    // options 为空的私有交互：declined 是唯一合法 optionId。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: '', prompt: '',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await service.execute({ command: 'interaction respond', args: { requestId: 'q-1', optionId: 'declined' } })
+    expect(interactions.respond).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'q-1' }),
+      'ask-user',
+      { optionId: 'declined', text: undefined, values: undefined },
+    )
+    // 三者皆缺 → fail-closed。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'elicitation', requestId: 'e-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: 'Elicitation', prompt: '',
+        options: [{ optionId: 'accept' }, { optionId: 'declined' }, { optionId: 'cancel' }],
+        requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { requestId: 'e-1' } }))
+      .rejects.toThrow(/必须提供 optionId/)
+    // 空白名单传非法 optionId → 拒绝。
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', kind: 'ask-user', requestId: 'q-1', sessionId: 's-1',
+        toolCallId: '', clientGeneration: 2, title: '', prompt: '',
+        options: [], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { requestId: 'q-1', optionId: 'bogus' } }))
+      .rejects.toThrow(/仅支持 declined/)
+  })
+
   it('surfaces structured backend errors instead of [object Object] (#36)', async () => {
     const { service, interactions } = harness()
     interactions.list.mockResolvedValueOnce({

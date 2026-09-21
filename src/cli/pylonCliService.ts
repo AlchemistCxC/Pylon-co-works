@@ -198,18 +198,27 @@ function record(value: unknown): Record<string, unknown> {
     : {}
 }
 
+/** CLI 壳（pylon-cli.rs parse_value）按 JSON 类型化所有 token：纯数字
+ *  positional/flag 值以 number 到达。字符串参数按 O27 标量宽松化先例无损
+ *  收编（#229），壳层类型化设计不动。 */
+function scalarString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
 function stringArg(args: Record<string, unknown>, key: string, position?: number): string {
-  const direct = args[key]
-  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  const direct = scalarString(args[key])
+  if (direct) return direct
   const positionals = Array.isArray(args.positionals) ? args.positionals : []
   const positional = position === undefined ? undefined : positionals[position]
-  if (typeof positional === 'string' && positional.trim()) return positional.trim()
+  const positionalString = scalarString(positional)
+  if (positionalString) return positionalString
   throw new Error(`${key} 必须是非空字符串`)
 }
 
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
-  const value = args[key]
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return scalarString(args[key])
 }
 
 function positiveInteger(value: unknown, fallback: number, maximum = Number.MAX_SAFE_INTEGER): number {
@@ -501,12 +510,29 @@ export class PylonCliService {
       case 'interaction respond':
         return this.mutate(command, options.signal, async () => {
           const requestId = stringArg(args, 'requestId', 0)
-          const optionId = optionalString(args, 'optionId') ?? stringArg(args, 'optionId', 1)
+          const positionals = Array.isArray(args.positionals) ? args.positionals : []
+          const optionId = optionalString(args, 'optionId') ?? scalarString(positionals[1])
+          // #230：ask-user/elicitation 类自由作答——values（questionId→label 表）
+          // 或 text（单值/feedback），经 --args JSON 传入。
+          const values = args.values === undefined ? undefined : record(args.values)
+          if (args.values !== undefined && (typeof args.values !== 'object' || Array.isArray(args.values))) {
+            throw new Error('values 必须是对象（questionId → label/label 数组）')
+          }
+          const text = optionalString(args, 'text')
           const items = (await this.ports.interactions.list()).items
           const found = items.find(item => item.requestId === requestId)
           if (!found) throw new Error(`挂起交互不存在（已应答/超时）：${requestId}`)
-          if (!found.options.some(option => option.optionId === optionId)) {
+          if (optionId !== undefined && found.options.length > 0
+            && !found.options.some(option => option.optionId === optionId)) {
             throw new Error(`非法 optionId：${optionId}（可用：${found.options.map(option => option.optionId).join(', ')}）`)
+          }
+          if (optionId === undefined && values === undefined && !text) {
+            // ask-user（options 为空）的 declined 与 ask-user 之外的白名单动作
+            // 都经 optionId 表达；三者皆缺则无合法应答形状。
+            throw new Error('必须提供 optionId，或携带 values / text 的自由作答')
+          }
+          if (optionId !== undefined && found.options.length === 0 && optionId !== 'declined') {
+            throw new Error(`非法 optionId：${optionId}（此类交互仅支持 declined 或 values/text 自由作答）`)
           }
           await this.ports.interactions.respond({
             provider: found.provider,
@@ -515,8 +541,8 @@ export class PylonCliService {
             sessionId: found.sessionId,
             toolCallId: found.toolCallId || null,
             clientGeneration: found.clientGeneration,
-          }, found.kind, { optionId })
-          return { requestId, optionId, responded: true }
+          }, found.kind, { optionId, text, values })
+          return { requestId, optionId: optionId ?? null, responded: true }
         })
       // ── 第二批：注册表工作区 CRUD / 会话配置 / 导出 ──
       case 'workspace registry list':

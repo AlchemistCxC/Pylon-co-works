@@ -16,6 +16,16 @@ pub(crate) struct PendingPrivateInteraction {
     pub params: serde_json::Value,
     pub question_specs: Option<Vec<crate::acp::question_policy::QuestionSpec>>,
     pub client_generation: u64,
+    /// 到达时刻（#230：interaction_list 投影 requestedAt 用；私有交互不参与
+    /// 超时结算，仅作展示时间戳）。
+    pub enqueued_at: crate::time::Timestamp,
+}
+
+impl PendingPrivateInteraction {
+    /// 队列 canonical kind（委托 PrivateBridge::queue_kind 单一映射）。
+    pub(crate) fn queue_kind(&self) -> &'static str {
+        self.bridge.queue_kind()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -51,6 +61,13 @@ impl PrivateInteractionOwner {
             pending.clear();
         }
     }
+    /// #230：interaction_list 投影快照（request_id → 条目）。
+    pub(crate) fn snapshot(&self) -> Vec<(RequestId, PendingPrivateInteraction)> {
+        self.pending
+            .lock()
+            .map(|pending| pending.iter().map(|(id, item)| (id.clone(), item.clone())).collect())
+            .unwrap_or_default()
+    }
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.pending.lock().unwrap().len()
@@ -72,9 +89,13 @@ mod tests {
             params: serde_json::json!({}),
             question_specs: None,
             client_generation: 3,
+            enqueued_at: crate::time::Timestamp::now(),
         };
         owner.insert(RequestId::Number(1), item).unwrap();
         assert_eq!(owner.len(), 1);
+        // #230：snapshot 投影不消费条目。
+        assert_eq!(owner.snapshot().len(), 1);
+        assert_eq!(owner.snapshot()[0].1.queue_kind(), "ask-user");
         assert!(owner.take(&RequestId::Number(1)).unwrap().is_some());
         assert!(owner.take(&RequestId::Number(1)).unwrap().is_none());
     }

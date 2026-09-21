@@ -339,6 +339,8 @@ type PermissionLock =
 /// answered with a JSON-RPC error so the provider cannot wait until its own timeout.
 /// The helper intentionally accepts only summary fields; params are never emitted back
 /// to the UI because interaction payloads may contain commands, paths, or credentials.
+// clippy 2026-09-22：10 参均为独立拒绝摘要入参（window/acp/provider/agent_id/method/
+// request_id/params/reason_code/rpc_code/message），语义互不分组，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn reject_interaction_request<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -1127,6 +1129,9 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
     true
 }
 
+// clippy 2026-09-22：参数为各锁/上下文的按引用透传（window/gateway/sessions/
+// binding_health/pet/update_channels/generation），与 flush_pending_canonical 同一
+// 调用点形态，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -2263,6 +2268,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             .unwrap_or_default()
                             .to_string();
                         if !session_id.is_empty() {
+                            let arrived_at = crate::time::Timestamp::now();
                             let _ = private_interactions.insert(
                                 request_id.clone(),
                                 crate::private_interaction::PendingPrivateInteraction {
@@ -2274,6 +2280,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     params: params.clone(),
                                     question_specs,
                                     client_generation: generation,
+                                    enqueued_at: arrived_at,
                                 },
                             );
                             let interaction_event = serde_json::json!({
@@ -2292,19 +2299,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     crate::acp::interaction_queue::InteractionQueueEntry {
                                         request_id: request_id.to_string(),
                                         method: method.to_string(),
-                                        kind: match bridge {
-                                            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
-                                                "approval".to_string()
-                                            }
-                                            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
-                                                "elicitation".to_string()
-                                            }
-                                            _ => "ask-user".to_string(),
-                                        },
+                                        kind: bridge.queue_kind().to_string(),
                                         session_id,
                                         agent_id: agent_id.clone(),
                                         client_generation: generation,
-                                        enqueued_at: crate::time::Timestamp::now(),
+                                        enqueued_at: arrived_at,
                                         event: interaction_event.clone(),
                                         state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                                     },

@@ -696,6 +696,10 @@ pub(crate) async fn get_approval_mode(
 /// 条目携带 `kind`（respond 必传词项）：pending_permissions 只存
 /// request_permission 条目（协议适配层归一为 "approval"），故恒为该值——
 /// CLI 侧透传，不自行硬编码（#36：`permission` 是漂移词项，会被门禁拒绝）。
+/// #230：同时投影私有交互（elicitation / ask-user / exit-plan）——identity
+/// 取 private_interactions store（respond 复核真源），options 为应答动作
+/// 虚拟投影（fail-closed 白名单见 respond_interaction）；私有交互不参与
+/// 超时结算，deadlineMs 以 0 标注。
 #[tauri::command]
 pub(crate) async fn interaction_list(
     state: tauri::State<'_, AppState>,
@@ -733,8 +737,98 @@ pub(crate) async fn interaction_list(
                 "deadlineMs": permission_deadline_ms(permission.requested_at),
             }));
         }
+        for (request_id, pending_private) in runtime.private_interactions.snapshot() {
+            items.push(private_interaction_item(&provider, &agent_id, request_id, &pending_private));
+        }
     }
     Ok(serde_json::json!({ "items": items }))
+}
+
+/// #230：CLI 投影展示文本上限——prompt 摘要截断，防超长 plan/question 撑爆列表。
+const PRIVATE_PROMPT_MAX_CHARS: usize = 400;
+
+fn truncate_prompt(text: &str) -> String {
+    if text.chars().count() <= PRIVATE_PROMPT_MAX_CHARS {
+        return text.to_string();
+    }
+    let mut truncated: String = text.chars().take(PRIVATE_PROMPT_MAX_CHARS).collect();
+    truncated.push('…');
+    truncated
+}
+
+/// #230：单条私有交互的 CLI 投影（identity + kind + 应答动作虚拟 options）。
+fn private_interaction_item(
+    provider: &str,
+    agent_id: &str,
+    request_id: crate::acp::RequestId,
+    pending: &crate::private_interaction::PendingPrivateInteraction,
+) -> serde_json::Value {
+    use crate::acp::adapter::private_ext::PrivateBridge;
+    let (title, prompt, tool_call_id, options) = match pending.bridge {
+        PrivateBridge::Elicitation => (
+            "Elicitation".to_string(),
+            pending
+                .params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            String::new(),
+            vec!["accept", "declined", "cancel"],
+        ),
+        PrivateBridge::GrokExitPlan => {
+            let (plan, tool_call) = crate::acp::adapter::private_ext::parse_exit_plan(
+                pending.bridge,
+                &pending.params,
+            )
+            .unwrap_or_default();
+            (
+                "Exit plan".to_string(),
+                plan,
+                tool_call,
+                vec!["approved", "abandoned", "keep_planning"],
+            )
+        }
+        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
+            // 问题以 id + 题面摘要进 prompt；应答走 values（questionId → label）
+            // 或 declined，options 不适用（留空 + prompt 说明）。
+            let summary = pending
+                .question_specs
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|spec| format!("{}:{}", spec.id, spec.question))
+                .collect::<Vec<_>>()
+                .join("；");
+            (
+                "Ask user".to_string(),
+                if summary.is_empty() {
+                    pending.method.clone()
+                } else {
+                    summary
+                },
+                String::new(),
+                Vec::new(),
+            )
+        }
+    };
+    serde_json::json!({
+        "provider": if pending.provider.is_empty() { provider } else { &pending.provider },
+        "agentId": agent_id,
+        "kind": pending.queue_kind(),
+        "requestId": request_id.to_string(),
+        "sessionId": pending.session_id,
+        "toolCallId": tool_call_id,
+        "clientGeneration": pending.client_generation,
+        "title": title,
+        "prompt": truncate_prompt(&prompt),
+        "options": options.iter().map(|option_id| serde_json::json!({
+            "optionId": option_id,
+        })).collect::<Vec<_>>(),
+        "requestedAt": pending.enqueued_at.to_string(),
+        // 私有交互无后端超时结算——0 = 不适用（区别于权限请求的真实 deadline）。
+        "deadlineMs": 0,
+    })
 }
 
 /// ACP-03（§5.6）：权限请求的展示截止时刻——deadline 由后端单一来源
@@ -902,6 +996,68 @@ mod tests {
         assert_eq!(item["kind"], "approval");
         assert_eq!(item["requestId"], "7");
         assert_eq!(item["clientGeneration"], 2);
+    }
+
+    /// #230：私有交互（elicitation / exit-plan）投影进 interaction_list——
+    /// kind 沿队列 canonical 值、identity 取 store 真源、options 为应答动作
+    /// 虚拟白名单、deadlineMs=0（无后端超时）。
+    #[test]
+    fn interaction_list_projects_private_interactions_for_cli() {
+        use crate::acp::adapter::private_ext::PrivateBridge;
+        use crate::private_interaction::{PendingPrivateInteraction, PrivateInteractionOwner};
+        let base = PendingPrivateInteraction {
+            provider: String::new(),
+            agent_id: "a1".into(),
+            session_id: "s1".into(),
+            method: "elicitation/create".into(),
+            bridge: PrivateBridge::Elicitation,
+            params: serde_json::json!({"sessionId": "s1", "message": "issue230 验收"}),
+            question_specs: None,
+            client_generation: 4,
+            enqueued_at: Timestamp::now(),
+        };
+        let elicitation = base.clone();
+        let exit_plan = PendingPrivateInteraction {
+            provider: "peri".into(),
+            method: "_x.ai/exit_plan_mode".into(),
+            bridge: PrivateBridge::GrokExitPlan,
+            params: serde_json::json!({"sessionId": "s1", "planContent": "step 1", "toolCallId": "tc-9"}),
+            client_generation: 5,
+            ..base
+        };
+        let owner = PrivateInteractionOwner::default();
+        owner.insert(crate::acp::RequestId::Number(11), elicitation).unwrap();
+        owner.insert(crate::acp::RequestId::String("e2".into()), exit_plan).unwrap();
+        for (request_id, pending) in owner.snapshot() {
+            let item = private_interaction_item("peri-fallback", "a1", request_id, &pending);
+            let option_ids = || {
+                item["options"].as_array().expect("options 数组")
+                    .iter()
+                    .map(|o| o["optionId"].as_str().expect("optionId"))
+                    .collect::<Vec<_>>()
+            };
+            match pending.bridge {
+                PrivateBridge::Elicitation => {
+                    assert_eq!(item["kind"], "elicitation");
+                    assert_eq!(item["title"], "Elicitation");
+                    assert_eq!(item["prompt"], "issue230 验收");
+                    // store provider 缺省时回退配置反查值。
+                    assert_eq!(item["provider"], "peri-fallback");
+                    assert_eq!(option_ids(), vec!["accept", "declined", "cancel"]);
+                    assert_eq!(item["deadlineMs"], 0);
+                    assert_eq!(item["clientGeneration"], 4);
+                }
+                PrivateBridge::GrokExitPlan => {
+                    assert_eq!(item["kind"], "approval");
+                    assert_eq!(item["toolCallId"], "tc-9");
+                    assert_eq!(item["provider"], "peri");
+                    assert_eq!(item["prompt"], "step 1");
+                    assert_eq!(option_ids(), vec!["approved", "abandoned", "keep_planning"]);
+                    assert_eq!(item["clientGeneration"], 5);
+                }
+                _ => panic!("本测试只覆盖 elicitation 与 exit-plan"),
+            }
+        }
     }
 
     fn request_params() -> serde_json::Value {

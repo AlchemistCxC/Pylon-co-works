@@ -13,6 +13,18 @@ pub enum PrivateBridge {
     Elicitation,
 }
 
+impl PrivateBridge {
+    /// 交互队列 canonical kind（#230：dispatcher admit 与 CLI
+    /// interaction_list 投影共用此单一映射，防漂移）。
+    pub(crate) fn queue_kind(self) -> &'static str {
+        match self {
+            Self::GrokExitPlan => "approval",
+            Self::Elicitation => "elicitation",
+            Self::GrokExtQuestions | Self::PiSelectAsk => "ask-user",
+        }
+    }
+}
+
 /// Validate Codeg-compatible private interaction request shapes before the
 /// generic dispatcher rejects an unsupported bridge. This is deliberately a
 /// fail-closed parser seam: it never fabricates an answer or RPC response.
