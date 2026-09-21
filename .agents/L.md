@@ -432,3 +432,20 @@
 - 文档：`docs/说明书/Pylon-项目架构参考.md`、`.agents/records/`、`.agents/decisions/`（T3 ADR）、本文件
 
 **我不碰**：`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css` 与 `src/components/__tests__/Sidebar.blocks.css.test.ts`（#204① 在途域）；其余全部源码。
+
+---
+
+[2026-09-22 00] [Miyaki Kumo] [#36]
+
+**开工：issue36（CLI `interaction respond` kind 契约不一致 + 错误 `[object Object]`）。** spec 见 `.agents/spec/issue-36-cli-interaction-kind-contract.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/cli/pylonCliService.ts`（kind 透传 + `errorMessage` 归一化导出）
+- `src/cli/pylonCliBridge.ts`（错误归一化复用）
+- `src/cli/__tests__/pylonCliService.test.ts`（断言契约修正 + 新增用例）
+- `src-tauri/src/permission.rs`（仅 `interaction_list` 投影加 `kind` 字段）
+- `docs/说明书/Pylon-CLI-命令表.md`（list 条目字段描述一句）
+- 文档：`.agents/records/`（新增 issue36 记录）、本文件
+
+**我不碰**：`src-tauri/src/protocol_adapter.rs`（kind 门禁契约不动，仅读）；#204③/#226/#155T3 在途域全部文件（workbench projector/runtime、agentWorkbenchSession、replay 测试、session/dispatcher/scripts）；GUI 交互链路（`src/infrastructure/acp/**`、`src/domains/agent/**`）；构建产物不提交。spec 为一次性文档不入库。
