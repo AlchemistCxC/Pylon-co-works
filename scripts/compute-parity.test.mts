@@ -5,7 +5,10 @@
 // - mismatch 即红；known-diff（已过审引擎级差异）只记录不算红。
 //
 // 性能对照走 `node scripts/compute-parity-bench.mts`（同一套套件定义）。
-// @vitest-environment jsdom
+// @vitest-environment node
+// markdown 套件下线后，本门禁只剩 pylon-compute 的纯计算出口（无 DOM 依赖）——原先的
+// jsdom 是被「旧 unified 管线经 decode-named-character-reference 读 document」逼出来的，
+// 那个依赖已随 TS 基线下线而消失。
 // 为什么需要 jsdom：markdown 侧的 TS 基线（旧 unified 管线）经
 // `decode-named-character-reference` 解析实体名，其 dom 变体要 `document`；
 // 在 node 环境下这一步直接 `ReferenceError: document is not defined`，
