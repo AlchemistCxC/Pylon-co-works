@@ -1025,6 +1025,10 @@
   border: var(--line-width-1) solid var(--border);
   border-radius: 0;
   background: var(--bg-input);
+  /* #221 WP1 布局圈闭：块内重排不再外溢参与整页布局。只能 layout 不能 content——
+     data-wrap="none" 的 pre 有合法横向溢出（paint 圈闭会剪裁）；行级（.term-row）
+     圈闭被否决：.copy-btn absolute right:-40px 溢出行外，layout 圈闭会改其锚定。 */
+  contain: layout;
 }
 .term-code-line { min-height: 1.25em; line-height: 1.4; }
 /* R-B1 契约（P57 S3-R1）：三个代码域（term-ansi / streaming code / fenced code 内容 span）
