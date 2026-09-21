@@ -371,7 +371,8 @@ impl serde::Serialize for EventPayload {
             EventPayload::Other(value) => value.serialize(serializer),
             EventPayload::TextPart(payload) => {
                 // 手写而不是 derive：键序要与 `Value`（BTreeMap，字典序）逐字节一致。
-                let mut map = serializer.serialize_map(Some(if payload.role.is_some() { 3 } else { 2 }))?;
+                let mut map =
+                    serializer.serialize_map(Some(if payload.role.is_some() { 3 } else { 2 }))?;
                 map.serialize_entry("parts", &TextPartOnly(payload))?;
                 if let Some(role) = payload.role {
                     map.serialize_entry("role", role)?;
@@ -3517,7 +3518,14 @@ fn reduce_diagnostic(document: &mut WorkbenchDocument, envelope: &SemanticEnvelo
         }
     }
     let event_value = event.to_value();
-    add_diagnostic(document, envelope, &code, &message, &level, Some(&event_value));
+    add_diagnostic(
+        document,
+        envelope,
+        &code,
+        &message,
+        &level,
+        Some(&event_value),
+    );
 }
 
 fn reduce_session(
@@ -4185,11 +4193,11 @@ fn reduce_goal(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
 /// C13：lifecycle 事件经 domain reducer 收敛；恢复成功不删除历史事实。
 fn reduce_lifecycle(document: &mut WorkbenchDocument, envelope: &SemanticEnvelope) {
     let event_value = envelope.event.to_value();
-    if let Some(next) = lifecycle_model::apply_lifecycle_event(
-        &document.lifecycle,
-        &event_value,
-        &|raw: &Value| normalize_normalized_error(raw, 0),
-    ) {
+    if let Some(next) =
+        lifecycle_model::apply_lifecycle_event(&document.lifecycle, &event_value, &|raw: &Value| {
+            normalize_normalized_error(raw, 0)
+        })
+    {
         document.mark_slice(Slice::Lifecycle);
         document.lifecycle = next;
     }
@@ -4572,11 +4580,11 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
     if flags & FLAG_UNUSED_MASK != 0 {
         return Err(format!("flags 保留位非零：{flags:#x}"));
     }
-    let event_type = WORKBENCH_EVENT_TYPES
+    let event_type_static = WORKBENCH_EVENT_TYPES
         .get(type_index)
         .copied()
-        .ok_or_else(|| format!("typeIndex 越界：{type_index}"))?
-        .to_string();
+        .ok_or_else(|| format!("typeIndex 越界：{type_index}"))?;
+    let event_type = event_type_static.to_string();
 
     let event_id = reader.string()?;
     let session_id = reader.string()?;
@@ -4597,10 +4605,13 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
         parent_agent_id: reader.optional_string()?,
     };
     let reason = reader.optional_string()?;
+    // 热路径分流判据：帧上确实没有 reason、没有 extra 对象（见下面的 TextPart 分支）。
+    let reason_is_absent = reason.is_none();
     let parts_mode = (flags >> FLAG_PARTS_MODE_SHIFT) & 0b11;
     let part_kind_index = ((flags >> FLAG_PART_KIND_SHIFT) & 0b111) as usize;
     let parts_text = reader.optional_string()?;
     let extra = reader.optional_json()?;
+    let extra_is_empty = extra.is_none();
     let provenance_extra = reader.optional_json()?;
     let coverage = if flags & FLAG_HAS_COVERAGE != 0 {
         let start = reader.f64()?;
@@ -4613,27 +4624,35 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
     // 重建 semantic event 对象（与 TS envelope.event 逐字段等价）。
     let mut event = Map::new();
     event.insert("type".to_string(), Value::String(event_type.clone()));
+    let mut role_static: Option<&'static str> = None;
     if flags & FLAG_HAS_ROLE != 0 {
         let role_index = ((flags >> FLAG_ROLE_SHIFT) & 0b111) as usize;
         let role = MESSAGE_ROLES
             .get(role_index)
+            .copied()
             .ok_or_else(|| format!("role 位越界：{role_index}"))?;
+        role_static = Some(role);
         event.insert("role".to_string(), Value::String(role.to_string()));
     }
+    let mut kind_static: Option<&'static str> = None;
     match parts_mode {
         0 => {}
         1 => {
-            let text = parts_text.unwrap_or_default();
+            let text = parts_text.clone().unwrap_or_default();
+            // 下面 TextPart 分支要用原值：这里用 clone 取走一份，语义不变（见其头注）。
             let kind = TEXT_PART_KINDS
                 .get(part_kind_index)
+                .copied()
                 .ok_or_else(|| format!("partKind 位越界：{part_kind_index}"))?;
+            kind_static = Some(kind);
             event.insert(
                 "parts".to_string(),
                 Value::Array(vec![serde_json::json!({ "kind": kind, "text": text })]),
             );
         }
         2 => {
-            let parsed = match parts_text {
+            // `parts_text` 后面 TextPart 分支还要用，这里按引用取（冷路径，多一次 clone 无妨）。
+            let parsed = match parts_text.clone() {
                 Some(text) => serde_json::from_str::<Value>(&text)
                     .map_err(|error| format!("parts JSON 解析失败: {error}"))?,
                 None => return Err("parts JSON 通道为空".to_string()),
@@ -4656,6 +4675,37 @@ fn decode_event(reader: &mut FrameReader) -> Result<SemanticEnvelope, String> {
         for (key, value) in extra {
             event.insert(key, value);
         }
+    }
+    // 热路径**不建 `Value` 树**（#220「去 `Value`」）：帧的单文本部件通道 + 除 role 外
+    // 没有额外键时，事件就是 `{type, [role], parts:[{kind,text}]}`——它的 `Value` 形态
+    // 要 6 个节点、5~6 次 String 分配，而实测它占整份文档内存的 67%（见 `EventPayload`）。
+    // 判据取「帧上确实没有其它东西」：无 reason、无 extra 对象，且 partsMode==1。
+    // 注意此处 `event` 这张 Map 只有 type/[role]/parts 三个键与上面两个分支写入的键，
+    // 所以`extra.is_none() && reason.is_none()` 等价于「除这三个键外再无别键」。
+    if parts_mode == 1 && extra_is_empty && reason_is_absent {
+        return Ok(SemanticEnvelope {
+            event_type,
+            sequence,
+            event_id,
+            session_id,
+            recorded_at,
+            occurred_at,
+            identity,
+            source,
+            provenance_origin: (flags & 0b111) as u8,
+            provenance_trust: ((flags >> 3) & 1) as u8,
+            provenance_extra: provenance_extra.and_then(|value| match value {
+                Value::Object(entries) => Some(entries),
+                _ => None,
+            }),
+            coverage,
+            event: EventPayload::TextPart(TextPartPayload::new(
+                event_type_static,
+                kind_static.expect("parts_mode==1 必已取到 kind"),
+                parts_text.unwrap_or_default(),
+                role_static,
+            )),
+        });
     }
     // 池内 JSON 的数字按 JS 语义规范化（整值浮点 → 整数）。
     let mut event = Value::Object(event);
@@ -4869,10 +4919,6 @@ pub fn projector_event_types() -> Result<JsValue, JsError> {
 
 // ── 原生单测：对齐 `src/domains/workbench/__tests__/workbenchProjector*.test.ts`
 //    中落在已移植归约器上的断言 ──
-#[cfg(test)]
-#[path = "value_memory_probe.rs"]
-mod value_memory_probe;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5119,7 +5165,12 @@ mod tests {
             .iter()
             .find(|entry| entry.kind == "interaction")
             .expect("interaction entry");
-        assert!(entry.data.get("request").expect("request").get("password").is_none());
+        assert!(entry
+            .data
+            .get("request")
+            .expect("request")
+            .get("password")
+            .is_none());
     }
 
     #[test]
