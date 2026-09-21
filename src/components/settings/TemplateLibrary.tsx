@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { GLOBAL_PRESETS } from '../../presets/index.ts'
+import { effectivePresetTheme } from '../../zones/index.ts'
 import { THEME_DEFAULTS } from '../../themeFieldDefs'
 import SettingsPreview from '../SettingsPreview'
 import type { ThemeSettings } from '../../store'
@@ -27,14 +28,19 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
   const [applyingId, setApplyingId] = useState<string | null>(null)
   const applyingRef = useRef<string | null>(null)
   const [applyFeedback, setApplyFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
-  const official = useMemo(() => GLOBAL_PRESETS.map(preset => ({
-    id: `official:${preset.name}`,
-    name: preset.name,
-    label: preset.label,
-    interfaceMode: preset.interfaceMode,
-    theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
-    bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, source: 'builtin', theme: preset.theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
-  })), [])
+  const official = useMemo(() => GLOBAL_PRESETS.map(preset => {
+    // 刀3（#223）：预设不再自带 `theme` ⇒ 走有效值视图。
+    // ★ 只算**一次**、两处共用：显示用的主题与 `createPresetBundle` 落盘的主题必须同源。
+    const theme = effectivePresetTheme(preset)
+    return {
+      id: `official:${preset.name}`,
+      name: preset.name,
+      label: preset.label,
+      interfaceMode: preset.interfaceMode,
+      theme: { ...THEME_DEFAULTS, ...theme } as Partial<ThemeSettings>,
+      bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, source: 'builtin', theme: theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
+    }
+  }), [])
   // 刀5（#201）：官方模板分组跟随预设归属表（GUI / 终端 两桶）
   const officialGui = official.filter(preset => preset.interfaceMode === 'gui')
   const officialTerminal = official.filter(preset => preset.interfaceMode === 'terminal')

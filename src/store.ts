@@ -25,11 +25,14 @@ import { reportLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWo
 import {
   applyCustomPresetReducer,
   applyZonePresetReducer,
+  assembleGlobalPresetReducer,
   removeCustomPresetReducer,
   saveCustomPresetReducer,
   setGlobalPresetReducer,
   setZoneFieldReducer,
   toThemeDelta,
+  type AssembleGlobalPresetOptions,
+  type GlobalPresetZoneSlice,
 } from './domains/theme/presetReducer.ts'
 import type { Profile } from './identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
@@ -147,6 +150,13 @@ type ThemeState = ThemeSettings & {
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>, source?: SettingWriteSource) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
+  /**
+   * 刀1（#223 · 预设组装）：**逐区域装配**一条全局预设。
+   * `slices` = 5 个区域各自的 `{ zone, 引用 id, 取值切片 }`（由 `expandGlobalPresetZoneRefs` 展开）。
+   * 与 `setGlobalPreset`（整份 `theme` 一次性写）是两条等价路径：带区域引用表的预设走这条，
+   * 两条默认预设（无引用表）回落上面那条。
+   */
+  assembleGlobalPreset: (slices: readonly GlobalPresetZoneSlice[], options?: AssembleGlobalPresetOptions) => void
   saveCustomPreset: (name: string, id?: string) => string
   applyCustomPreset: (id: string) => Promise<PresetApplyResult>
   removeCustomPreset: (id: string) => void
@@ -287,6 +297,15 @@ export const useStore = create<ThemeState>()(persist(
   setGlobalPreset: (name, theme) => {
     recordSettingWrites('global-preset', '*', Object.keys({ ...DEFAULTS, ...theme }))
     set(() => setGlobalPresetReducer(name, theme))
+  },
+  // 刀1（#223）：逐区域装配薄壳——纯计算在 presetReducer，这里只记溯源 + set(reducer(state, args))
+  assembleGlobalPreset: (slices, options = {}) => {
+    recordSettingWrites('global-preset', '*', Object.keys({
+      ...DEFAULTS,
+      ...Object.assign({}, ...slices.map(slice => slice.theme)),
+      ...(options.profileTokens ?? {}),
+    }))
+    set(state => assembleGlobalPresetReducer(state, slices, options))
   },
   saveCustomPreset: (name, id) => {
     const state = get()

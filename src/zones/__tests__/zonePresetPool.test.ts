@@ -8,7 +8,7 @@
  */
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, type GlobalPreset } from '../../presets/index.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET } from '../../presets/index.ts'
 import { PRESET_ZONES } from '../../domains/theme/presetReducer.ts'
 import { ZONE_FIELDS } from '../../themeFieldDefs.ts'
 import type { ThemeSettings } from '../../store.ts'
@@ -17,10 +17,11 @@ import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStor
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.tsx'
 import { resetStores } from '../../test/resetStores.ts'
 import { pickZoneFields } from '../pickZoneFields.ts'
+import { effectivePresetTheme } from '../effectivePresetTheme.ts'
 import {
   ZONE_PRESET_POOL,
+  assembleFactoryZonePresetPool,
   createZonePresetEntryId,
-  deriveZonePresetPool,
   isCustomZonePresetEntry,
   normalizeZonePresetEntries,
   normalizeZonePresetValues,
@@ -58,42 +59,38 @@ describe('zonePresetPool · 派生（刀6 #206）', () => {
     useInterfaceModeStore.setState({ interfaceMode: 'modern-gui' })
   })
 
-  it('每格条数 ≤ 桶大小、桶非空每格 ≥1 条，且「条目 + sources」恰好覆盖该桶全部预设', () => {
+  it('每格条数 == 桶大小（刀2 起不折叠）、桶非空每格 ≥1 条，且条目 id 恰好覆盖该桶全部预设', () => {
     const cells = census()
     for (const mode of BUCKETS) {
       const names = bucketPresetNames(mode)
       for (const zone of PRESET_ZONES) {
         const entries = ZONE_PRESET_POOL[mode][zone]
         const at = `${mode}/${zone}`
-        expect(entries.length, `${at} 去重后条数不得超过桶大小`).toBeLessThanOrEqual(names.length)
+        expect(entries.length, `${at} 条数不得超过桶大小`).toBeLessThanOrEqual(names.length)
         expect(entries.length, `${at} 桶非空 ⇒ 每格至少 1 条`).toBeGreaterThanOrEqual(1)
-        // 覆盖性：每个桶内预设恰好出现在「来源 id 或 sources」之一，去重不丢条目、也不重复计。
-        expect(entries.flatMap(entry => [entry.id, ...(entry.sources ?? [])]).sort(), `${at} 覆盖该桶全部预设`).toEqual([...names].sort())
-        // 图省事写坏的「假去重」会把两条同形切面留成两条：逐格确认没有重复切面。
-        const fingerprints = entries.map(entry => JSON.stringify(resolveZonePresetEntryTheme(entry)))
-        expect(new Set(fingerprints).size, `${at} 同一格内不得有同形重复条目`).toBe(entries.length)
+        // 覆盖性（刀2 / #223 起不折叠）：每套预设各留自己那条，id 恰好等于该桶全部预设名。
+        expect(entries.map(entry => entry.id).sort(), `${at} 覆盖该桶全部预设`).toEqual([...names].sort())
       }
     }
     console.log('[刀6] 每格条数', JSON.stringify(cells))
   })
 
-  it('去重：同形切面折叠为一条，label 取排序最前的来源，其余进 sources', () => {
-    const presets: GlobalPreset[] = [
-      // a1 / a2 侧栏切面同形（且字段书写顺序不同，验证稳定序列化与键序无关）
-      { name: 'glass', label: 'A1', interfaceMode: 'gui', theme: { sidebarBg: '#111', sidebarNameSize: 14 } },
-      { name: 'solarized', label: 'A2', interfaceMode: 'gui', theme: { sidebarNameSize: 14, sidebarBg: '#111' } },
-      { name: 'nord', label: 'A3', interfaceMode: 'gui', theme: { sidebarBg: '#222' } },
+  it('不折叠（刀2 / #223 裁决 A）：同形切面各留一条，各自 id 与 label 取自己的来源；sources 已退场', () => {
+    // 刀3（#223）：刀2 的 `deriveZonePresetPool` 参考实现已删（预设不再自带 theme）⇒ 夹具改为**手写条目**
+    const twinEntries: ZonePresetEntry[] = [
+      // 前两条侧栏切面同形（且字段书写顺序不同）
+      { id: 'glass', mode: 'gui', zone: 'sidebar', label: 'A1', origin: 'factory', source: { presetName: 'glass' }, values: { sidebarBg: '#111', sidebarNameSize: 14 } },
+      { id: 'solarized', mode: 'gui', zone: 'sidebar', label: 'A2', origin: 'factory', source: { presetName: 'solarized' }, values: { sidebarNameSize: 14, sidebarBg: '#111' } },
+      { id: 'nord', mode: 'gui', zone: 'sidebar', label: 'A3', origin: 'factory', source: { presetName: 'nord' }, values: { sidebarBg: '#222' } },
     ]
-    const pool = deriveZonePresetPool(presets)
-    const entries = pool.gui.sidebar
-    expect(entries).toHaveLength(2)
-    expect(entries[0].id).toBe('glass')
-    expect(entries[0].label).toBe('A1')
+    const entries = assembleFactoryZonePresetPool(twinEntries).gui.sidebar
+    // 折叠若复活：同形的两条会并成一条 ⇒ 长度 2、且 solarized 这条消失（它的引用就装不上了）
+    expect(entries).toHaveLength(3)
+    expect(entries.map(entry => entry.id)).toEqual(['glass', 'solarized', 'nord'])
+    expect(entries.map(entry => entry.label)).toEqual(['A1', 'A2', 'A3'])
     expect(entries[0].source).toEqual({ presetName: 'glass' })
-    expect(entries[0].sources).toEqual(['solarized'])
-    expect(entries[1].id).toBe('nord')
-    expect(entries[1].label).toBe('A3')
-    expect(entries[1].sources).toBeUndefined()
+    expect(entries[1].source).toEqual({ presetName: 'solarized' })
+    for (const entry of entries) expect(entry).not.toHaveProperty('sources')
   })
 
   it('tactical-blue / 未登记模式 ⇒ 空池，且整组不渲染', () => {
@@ -108,13 +105,13 @@ describe('zonePresetPool · 派生（刀6 #206）', () => {
     expect(screen.queryByText('局部预设')).not.toBeInTheDocument()
   })
 
-  it('出厂条目应用切片逐字段等于 pickZoneFields(来源预设.theme, zone)（应用行为零变化）', () => {
+  it('出厂条目应用切片逐字段等于来源预设有效值在该区的切面（应用行为零变化）', () => {
     for (const mode of BUCKETS) {
       for (const zone of PRESET_ZONES) {
         for (const entry of ZONE_PRESET_POOL[mode][zone]) {
           const preset = GLOBAL_PRESETS.find(item => item.name === entry.source?.presetName)
           expect(preset, `${mode}/${zone} 来源预设必须存在`).toBeTruthy()
-          expect(resolveZonePresetEntryTheme(entry), `${mode}/${zone}/${entry.id}`).toEqual(pickZoneFields(preset!.theme, zone))
+          expect(resolveZonePresetEntryTheme(entry), `${mode}/${zone}/${entry.id}`).toEqual(pickZoneFields(effectivePresetTheme(preset!), zone))
         }
       }
     }

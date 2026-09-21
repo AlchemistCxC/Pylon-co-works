@@ -29,7 +29,7 @@ import {
   deleteCustomPreset,
   type CustomPreset,
 } from '../../customPresets.ts'
-import { normalizeThemeState, THEME_DEFAULTS, THEME_PRESET_KEYS } from '../../themeFieldDefs.ts'
+import { normalizeThemeState, THEME_DEFAULTS, THEME_PRESET_KEYS, ZONE_FIELDS } from '../../themeFieldDefs.ts'
 import { markZoneCustom } from '../../themePresetState.ts'
 import type { ThemeSettings } from '../../store.ts'
 import type { PresetBundleV2 } from './presetBundle.ts'
@@ -210,6 +210,124 @@ export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSetting
     appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, name])),
     custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
+}
+
+// ── 刀1（#223 · 预设组装）：区域引用表 + 逐区域装配 ────────────────
+//
+// 方向倒置：旧路径「整套预设 → 按区域切一刀 → 5 块」，新路径「5 块区域预设 → 拼成一套预设」。
+// 本段与 `setGlobalPresetReducer`（旧的一次性全量路径，保留为参考实现）**必须逐字段等价**——
+// 等价性由 `src/__tests__/presetAssembly.test.ts` 对 10 套出厂预设 + 2 套默认预设逐套对拍。
+
+/**
+ * 区域引用表：5 个区域各指向一条区域预设 id（现有状态下 = 来源预设名）。
+ * `PRESET_ZONES` 是唯一真值——不许另立第二份区域清单。
+ */
+export type ZoneRefMap = Readonly<Record<PresetZone, string>>
+
+/**
+ * 引用表完整性校验：**缺项 / 空值 / 非区域键一律抛错**（缺项不得静默回落）。
+ * 覆盖 `PRESET_ZONES` 全部 5 项才算过。
+ */
+export function requireZoneRefs(value: unknown, context: string): ZoneRefMap {
+  if (value === undefined || value === null) throw new Error(`${context}：缺少区域引用表`)
+  if (typeof value !== 'object') throw new Error(`${context}：区域引用表不是键值表`)
+  const record = value as Record<string, unknown>
+  const missing = PRESET_ZONES.filter(zone => typeof record[zone] !== 'string' || !(record[zone] as string).trim())
+  if (missing.length > 0) throw new Error(`${context}：区域引用表缺项（${missing.join(' / ')}）`)
+  const unknown = Object.keys(record).filter(key => !(PRESET_ZONES as readonly string[]).includes(key))
+  if (unknown.length > 0) throw new Error(`${context}：区域引用表含非区域键（${unknown.join(' / ')}）`)
+  return Object.fromEntries(PRESET_ZONES.map(zone => [zone, String(record[zone])])) as ZoneRefMap
+}
+
+/** 该区域合法的字段键集（判据用 `ZONE_FIELDS` 单一真值，不另写一份区域归属判断）。 */
+function zoneFieldKeys(zone: string): Set<string> {
+  return new Set<string>(ZONE_FIELDS[zone] ?? [])
+}
+
+/**
+ * 越区键校验：切片里任何**不属于该区域**的键 → 抛错（**不静默丢弃**）。
+ *
+ * 静默丢弃的症状是「我这个区域该改的没改」，而用户完全看不出原因（规范 §4.1 硬约束 4）；
+ * 出厂的派生条目按构造不可能越区，这道闸门真正拦的是**手写/持久化的区域预设数据**。
+ */
+export function assertZoneSliceOwnership(zone: string, slice: Partial<ThemeSettings>, context: string): void {
+  const allowed = zoneFieldKeys(zone)
+  const foreign = Object.keys(slice).filter(key => !allowed.has(key))
+  if (foreign.length > 0) {
+    throw new Error(`${context}：区域 ${zone} 的取值含越区/未知字段（${foreign.join(' / ')}）`)
+  }
+}
+
+/** 一条区域引用展开后的装配输入：哪个区域、记什么名字、取哪些值。 */
+export interface GlobalPresetZoneSlice {
+  zone: PresetZone
+  /** 该区域引用的区域预设 id（现有状态下 = 来源预设名）。 */
+  presetName: string
+  /** 该区域引用的取值切片。 */
+  theme: Partial<ThemeSettings>
+}
+
+export interface AssembleGlobalPresetOptions {
+  /**
+   * 统一改写写进 `appliedPreset` 的名字（重置主题路径传 `''`）。省略 = 逐区域记各区域的引用 id。
+   *
+   * ★「用来取值的引用」与「写进 `appliedPreset` 的名字」是两件事：重置主题取的是**默认预设的值**，
+   * 但名字必须是空串——默认预设不进列表，按它的名字记名会让预设行认不出它而亮出兜底 chip「未知预设」。
+   */
+  appliedName?: string
+  /** 呈现方案覆盖层：**装配之后**叠加，优先级不变（token 覆盖预设值）。 */
+  profileTokens?: Partial<ThemeSettings>
+}
+
+/**
+ * 刀1（#223）：逐区域装配一套全局预设，返回可 `set(...)` 的 patch。
+ *
+ * 与旧的一次性全量路径（`setGlobalPresetReducer`）等价，差别只在「值从哪来」：
+ * 旧 = 整份 `preset.theme`；新 = 5 个区域各按引用取自己那一片。三条必须守住的语义：
+ *
+ * 1. ★ **先铺 `filterPresetTheme(DEFAULTS)`**（全量换装）：逐区域装配只写「区域预设有的字段」，
+ *    不铺底的话，预设没覆盖的字段会**残留用户当前值**，而不是回到默认值；
+ * 2. ★ **复用 `applyZonePresetReducer`**：cc 区的 `ccLayout` 归一与 `ccHeight` 收敛都在它里面，新写一份合并逻辑必漏；
+ * 3. ★ **按 `PRESET_ZONES` 顺序逐区域累积**：把上一步结果并进下一步的输入再算——5 个区域各算一份 patch
+ *    最后一起合并，`appliedPreset` 会互相覆盖（后写的 patch 带着它自己那份完整 `appliedPreset`）。
+ *
+ * 缺区域 / 重复区域 / 越区键一律抛错，不静默回落、不静默丢弃。
+ */
+export function assembleGlobalPresetReducer(
+  state: ThemePresetState,
+  slices: readonly GlobalPresetZoneSlice[],
+  options: AssembleGlobalPresetOptions = {},
+): ThemePresetPatch {
+  const byZone = new Map<string, GlobalPresetZoneSlice>()
+  for (const slice of slices) {
+    if (byZone.has(slice.zone)) throw new Error(`逐区域装配出现重复区域：${slice.zone}`)
+    byZone.set(slice.zone, slice)
+  }
+  const missing = PRESET_ZONES.filter(zone => !byZone.has(zone))
+  if (missing.length > 0) throw new Error(`逐区域装配缺区域（${missing.join(' / ')}）`)
+  if (byZone.size !== PRESET_ZONES.length) {
+    throw new Error(`逐区域装配含非区域项（${[...byZone.keys()].filter(key => !(PRESET_ZONES as readonly string[]).includes(key)).join(' / ')}）`)
+  }
+
+  // 1. 铺底：预设没覆盖的字段回到默认值（不是「保留用户当前值」）
+  let patch: ThemePresetPatch = { ...filterPresetTheme(DEFAULTS) }
+
+  for (const zone of PRESET_ZONES) {
+    const slice = byZone.get(zone)!
+    assertZoneSliceOwnership(zone, slice.theme, `区域 ${zone}（引用 ${slice.presetName}）`)
+    // 2 + 3：逐步把上一步结果并进输入，复用既有 reducer（cc 特殊处理在其内）
+    patch = { ...patch, ...applyZonePresetReducer({ ...state, ...patch } as ThemePresetState, zone, slice.presetName, slice.theme) }
+  }
+
+  // 记名与取值解耦；键集恒等于 PRESET_ZONES，不夹带 state 的额外键（与旧路径逐字节同形）
+  const appliedName = options.appliedName
+  patch.appliedPreset = Object.fromEntries(PRESET_ZONES.map(zone => [zone, appliedName ?? byZone.get(zone)!.presetName]))
+  patch.custom = Object.fromEntries(PRESET_ZONES.map(zone => [zone, false]))
+
+  // 呈现方案覆盖层最后叠加（模式自身的基准，不标 custom —— 见 sourceMarksZoneCustom）
+  if (options.profileTokens) patch = { ...patch, ...filterPresetTheme(options.profileTokens) }
+
+  return patch
 }
 
 export interface SavePresetCommand {

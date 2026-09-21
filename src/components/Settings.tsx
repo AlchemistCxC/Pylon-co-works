@@ -93,7 +93,8 @@ function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSa
           const selected = activeName === entry.id && !isDirty
           // 刀7 前置（#211）出现条件：**只在自定义条目**上；普通条目「被选中才出现」
           // （那排 chip 本来就挤），Q8 灰显占位条目常驻——那是它唯一的自然出口。
-          // 出厂条目（存 `source` 引用）任何情况下都不进入这一段（铁律 1：出厂件不可改、不可删）。
+          // 刀2（#223）起判据是显式来源字段 `origin`：出厂条目（`origin:'factory'`）**任何情况下**
+          // 都不进入这一段（铁律 1：出厂件不可改、不可删）。
           const deletable = isCustomZonePresetEntry(entry) && (entry.stale === true || selected)
           return (
             <Fragment key={entry.id}>
@@ -104,9 +105,7 @@ function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSa
                 disabled={entry.stale === true}
                 title={entry.stale
                   ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
-                  : entry.sources && entry.sources.length > 0
-                    ? `与该条目同形的来源：${entry.sources.join('、')}`
-                    : undefined}
+                  : undefined}
                 onClick={() => onApply(zone, entry)}>{entry.label}</button>
               {deletable && (pendingDeleteEntryId === entry.id ? (
                 <div className="set-confirm set-confirm-inline" role="alertdialog" aria-label={`确认删除区域预设 ${entry.label}`}>

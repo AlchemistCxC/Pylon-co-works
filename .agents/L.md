@@ -383,8 +383,11 @@
 
 ---
 
-[2026-09-21 04] [Miyaki Kumo] [#220]
+（#223 预设组装线·刀1~刀3 已随 PR #224 合入 main（`1ba21c14`），在途条目移除；内容见 git 历史与 `.agents/records/issue-223-*.md`。）
 
+---
+
+[2026-09-21 04] [Miyaki Kumo] [#220]
 **开工：issue220（前端计算核下沉 Rust/WASM，WP1–WP4）。** 在 `Ru5t/Reflector` 上施工（开工时工作树干净，已 ff 到 `github/main` `5e251b40`；本人 #218 条目已随 PR #219 合入 main，按「只留在途」移除）。spec：`.agents/spec/220-frontend-compute-core-wasm.md`；ADR：`.agents/decisions/0018-frontend-compute-core-rust-wasm.md`。本轮文件域，请勿改写、勿连带提交：
 
 - 新增 crate：`src-tauri/pylon-canonical-types/**`、`src-tauri/pylon-compute/**`、`wasm-markdown/**`
@@ -457,3 +460,17 @@
 - 文档：`.agents/spec/220-streaming-boundary-delta.md`（gitignore）、`.agents/records/220-streaming-boundary-delta.md`（**新增独立记录**——220-completion 记录有 §31 未提交改动，我写进去会造成连带提交）、本文件
 
 **不碰**：§31 回退施工的全部在途文件（workbenchProjector / agentWorkbenchSession / bootstrap / App / scaffold `harness.ts`+`index.ts` / `check-bundle-size.mjs` 等）；`github/main` 合并因 App.tsx 等重叠**推迟**到回退收工后；三个旧切分出口（`splitStreamingMarkdownBlocks` / `splitStreamingMarkdown` / `findLastStableBlockBoundary`）保留不删（parity 与既有测试钉着）。
+
+---
+
+[2026-09-21 09] [Miyaki Kumo] [#218]
+
+**开工：issue218（webview2-mcp 上下文瘦身）。** 在 `Ru5t/Reflector` 上施工。本轮文件域，请勿改写、勿连带提交：
+
+- `tools/webview2-mcp/src/tools/mod.rs`（工具/参数描述瘦身 + 大结果紧凑编码）
+- `tools/webview2-mcp/src/mcp.rs`（INSTRUCTIONS 收紧）
+- `tools/webview2-mcp/README.md`（通用约定表述同步）
+- `tools/webview2-mcp/scripts/stdio-smoke.py`（如断言口径需同步）
+- `.agents/records/218-mcp-context-slimming.md`（开发记录，新增）
+
+**不碰**：`tools/webview2-mcp/src/cdp/**`、`jsscript.rs`、`args.rs`、`error.rs`、`main.rs`；他人一切文件域。L.md 旧条目不动（归档归各 issue 负责人）。
