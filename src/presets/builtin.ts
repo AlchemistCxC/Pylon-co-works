@@ -9,6 +9,9 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'claude',
     interfaceMode: 'terminal',
     label: 'Claude 风格',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id。现有状态下 5 项同名，
+    // ★ 逐套**显式写出 5 项**（不靠「默认补全」——靠默认会掩盖漏写）。
+    zoneRefs: { global: 'claude', sidebar: 'claude', chat: 'claude', cc: 'claude', right: 'claude' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#D77757",
@@ -82,6 +85,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'glass',
     interfaceMode: 'gui',
     label: 'Glass Light',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'glass', sidebar: 'glass', chat: 'glass', cc: 'glass', right: 'glass' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#6366f1",
@@ -159,6 +164,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'nord',
     interfaceMode: 'terminal',
     label: 'Nord Frost',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'nord', sidebar: 'nord', chat: 'nord', cc: 'nord', right: 'nord' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#88c0d0",
@@ -233,6 +240,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'tokyo',
     interfaceMode: 'terminal',
     label: 'Tokyo Night',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'tokyo', sidebar: 'tokyo', chat: 'tokyo', cc: 'tokyo', right: 'tokyo' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#7aa2f7",
@@ -309,6 +318,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'solarized',
     interfaceMode: 'gui',
     label: 'Solarized Light',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'solarized', sidebar: 'solarized', chat: 'solarized', cc: 'solarized', right: 'solarized' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#268bd2",
@@ -384,6 +395,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'amber',
     interfaceMode: 'terminal',
     label: 'Amber CRT',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'amber', sidebar: 'amber', chat: 'amber', cc: 'amber', right: 'amber' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#ffb000",
@@ -464,6 +477,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'matrix',
     interfaceMode: 'terminal',
     label: 'Matrix 磷绿',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'matrix', sidebar: 'matrix', chat: 'matrix', cc: 'matrix', right: 'matrix' },
     // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
     theme: {
       accent: "#39ff14",
@@ -544,6 +559,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     interfaceMode: 'gui',
     label: 'Agent 指挥台',
     presentationProfileId: 'builtin.presentation.agent-command',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'agent-command', sidebar: 'agent-command', chat: 'agent-command', cc: 'agent-command', right: 'agent-command' },
     theme: {
       accent: '#38bdf8',
       globalBgColor: '#08111f',
@@ -588,6 +605,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     interfaceMode: 'gui',
     label: 'Agent 关系图',
     presentationProfileId: 'builtin.presentation.agent-map',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'agent-map', sidebar: 'agent-map', chat: 'agent-map', cc: 'agent-map', right: 'agent-map' },
     theme: {
       accent: '#a78bfa',
       globalBgColor: '#11101d',
@@ -632,6 +651,8 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
     interfaceMode: 'gui',
     label: '专注流程',
     presentationProfileId: 'builtin.presentation.focus-flow',
+    // 刀1（#223 · 预设组装）：区域引用表——5 个区域各指向一条区域预设 id（显式写出 5 项）。
+    zoneRefs: { global: 'focus-flow', sidebar: 'focus-flow', chat: 'focus-flow', cc: 'focus-flow', right: 'focus-flow' },
     theme: {
       accent: '#d6a85f',
       globalBgColor: '#181713',
