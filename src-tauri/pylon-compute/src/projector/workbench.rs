@@ -5879,6 +5879,67 @@ mod projection_index_tests {
             started.elapsed().as_secs_f64() * 1000.0,
             units
         );
+
+        // ── 受控消融：每段只比上一段多做**一个**调用，差值即该调用的成本 ──────────
+        // native release。段 0 是 harness 基线（只建信封），差值才是被测函数。
+        fn ablate<F: FnMut(&SemanticEnvelope, &mut WorkbenchDocument)>(
+            label: &str,
+            total: usize,
+            make: &dyn Fn(usize) -> SemanticEnvelope,
+            mut body: F,
+        ) {
+            let mut doc = create_workbench_document("session-abl");
+            let started = Instant::now();
+            for index in 0..total {
+                let item = make(index);
+                body(&item, &mut doc);
+            }
+            println!(
+                "[ablate] {label} = {:.1}ms",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let make = |index: usize| {
+            envelope(
+                (index + 2) as f64,
+                json!({ "type": "reasoning.delta", "parts": [{ "kind": "thinking", "text": format!("第{index}段") }] }),
+            )
+        };
+        ablate("0 只建信封（harness 基线）", total, &make, |_, _| {});
+        ablate("1 + timeline_entry + insert", total, &make, |item, doc| {
+            let entry = timeline_entry(item);
+            insert_by_sequence(&mut doc.timeline, entry);
+        });
+        ablate("2 + reduce_semantic_event", total, &make, |item, doc| {
+            let entry = timeline_entry(item);
+            insert_by_sequence(&mut doc.timeline, entry);
+            let effective = item.with_event(item.event.clone());
+            let _ = reduce_semantic_event(doc, &effective);
+        });
+        ablate(
+            "3 + refresh_orphans（= 完整 reduce_workbench_event）",
+            total,
+            &make,
+            |item, doc| {
+                let entry = timeline_entry(item);
+                insert_by_sequence(&mut doc.timeline, entry);
+                let effective = item.with_event(item.event.clone());
+                let _ = reduce_semantic_event(doc, &effective);
+                refresh_orphans(doc);
+            },
+        );
+        ablate(
+            "4 只 with_event（信封复制）",
+            total,
+            &make,
+            |item, _| {
+                let _ = item.with_event(item.event.clone());
+            },
+        );
+        ablate("5 只 reduce_reasoning", total, &make, |item, doc| {
+            let effective = item.with_event(item.event.clone());
+            reduce_reasoning(doc, &effective);
+        });
     }
 
     /// 窗口查询必须与「逐条扫全表」判据逐字等价——这是那处 Θ(N·T) → Θ(log T + 窗口)

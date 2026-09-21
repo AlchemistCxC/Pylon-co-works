@@ -438,3 +438,93 @@ wasm 线性内存持续增长，而每次 `memory.grow` 的代价随堆大小上
 结论：**这份基准必须一进程一配置**。当前脚本的「同形态对照」段（每次新建投影核、3 轮中位数）是
 唯一稳定可比的读数（5 次独立运行：315 / 306 / 282 / 274 / 282 ms），分段数字只能当量级参考。
 把 `scripts/bench-ts-vs-wasm.mts` 改成 `--only=<段>` 一进程一段，是下次先要做的事。
+
+---
+
+## 18. 【调查定案】迁移当前在两种喂法上都是净回退，根因唯一且可定位
+
+测量方法：**一进程一配置**（`scripts/bench-probe.mts --case=...`）。理由见 §17——同进程重复大批量折叠
+会被 wasm 堆增长污染，这是本轮调查最重要的方法学前置。
+
+### 干净读数（Node 宿主，每 case 独立进程）
+
+| case | N | 耗时 | 与 main 的 TS 比 |
+| --- | --- | --- | --- |
+| `cold-ts`（main 的 TS 折叠） | 20k | **28.4 ms** | 基准 |
+| `cold-wasm` 单帧 | 20k | **405.5 ms** | **14.3×** |
+| `cold-wasm` 1000/页（生产喂法） | 20k | **758.7 ms** | **26.7×** |
+| `live-ts`（TS 逐事件） | 1k | **15.4 ms** | 基准 |
+| `live-wasm`（逐事件） | 1k | **1383.2 ms** | **90×** |
+
+两侧结果形状逐字节相同（`timeline 20001` / `messages ["user:3","reasoning:128890"]`），即等量工作。
+
+### 消融（同进程内的定向 ablation，用于定位而非取绝对值）
+
+| ablation | N | 耗时 | 得到 |
+| --- | --- | --- | --- |
+| `doc-loop`：先折完 N 条，再循环「`document()` + `JSON.parse`」N 次 | 1k | **1512 ms** | live 路径总 1383ms ≈ 全在这里 ⇒ **live 的成本 ≈ 每事件一次全量文档读** |
+| `encode-loop`：只做「帧编码 + `appendBatch`」，不读文档 | 1k | **348 ms** | ⇒ 每事件仍有 **0.35 ms 固定底噪**（纯过界+批量开销） |
+
+native release 的受控消融（20k，段 0 = 只建信封 21.0ms 为 harness 基线）：
+
+| 段 | 累计 ms | 差值 = 该部分 |
+| --- | --- | --- |
+| 1 + `timeline_entry` + `insert_by_sequence` | 36.8 | **15.8** |
+| 2 + `reduce_semantic_event` | 70.9 | **24.0**（已扣其中的 `with_event`） |
+| 3 + `refresh_orphans` | 71.1 | **0.2**（可忽略） |
+| 4 只 `with_event`（信封复制） | 31.1 | **10.1** |
+| 5 只 `reduce_reasoning` 本体 | 49.5 | **≈18.4** |
+| 完整 `project_batch(20000)` | 97.0 | 上面各项只解释 ~50 ⇒ **其余 ~47ms（48%）在两个每批量动作** |
+
+### 根因（唯一）
+
+`project_batch` 每次调用都：
+
+1. `let before = document.clone()` —— **整份文档深拷**（全部消息含累计文本与 parts 树、全部 timeline 条目）；
+2. 逐事件折叠；
+3. `diff_patches(&before, document)` —— 对**全部** messages 做整对象 `!=` 比较、为**全部**
+   before.timeline 建 `&str` HashMap、再对**全部** after.timeline 逐条查表 + 深比较
+   `TimelineEntry`（内含 `data: Value` 树）、并把**全部新增条目** `to_value()` 收进 patch。
+
+⇒ **每次调用的成本是 Θ(文档规模)，与本次喂了多少事件无关。** 冷装载单帧调用 1 次
+（可接受），但 **live 路径是每事件一次调用** ⇒ Θ(N)/事件 ⇒ **整体 Θ(N²)**，并且每事件
+还附带一次全量 `document()` 的 JSON 往返（TS 侧 `reduceWorkbenchFold` → `foldIntoProjector`
+里那句 `document()`）。这解释了 `0.35 ms/事件` 的底噪，也解释了 §12 那张表里那 3.5MB patch
+（空 `before` 时全部 20k 条目都是 upsert）——而消费方同时又在读全量 `document()`，
+**这份 patch 与那份文档是同一批信息的两次传输**。
+
+**这正是 issue 要消灭的复杂度，被重新引入了边界层。** main 的 TS 两条路都慢在别处：
+冷装载它没有边界（同进程建对象，28ms），live 它每事件克隆文档（V8 浅克隆很快，15ms/1k）。
+我们的实现把「每事件一次全量序列化 + 重建」叠加在「每批量一次全文档深拷 + 全量 diff」之上。
+
+### 修法（已定位到函数，各自有界）
+
+**③-a（Rust，收益最大）**：`project_batch` 不再 clone+diff，改为**折叠过程中增量记账**
+- 记「被触碰的 message 下标 + 其变更前的值」（用于回滚与 upsert，规模 = 本页而非全文档；
+  现状的 `document = before` 整份回滚也可改为按记账回放）；
+- 记「本页新增/变更的 timeline 条目下标」（timeline 只增不减，新增即尾部区间）；
+- `applied_event_ids_appended`、`applied_ranges` 已有现成增量口径。
+⇒ 每批量成本从 Θ(文档) 降到 Θ(本页)，live 底噪 0.35ms/事件应降到 ~0.02ms 量级。
+
+**③-b（Rust + TS）**：patch 补齐切片（activities / diagnostics / plan / goal / lifecycle /
+systemErrors / assist / interactions / extensions），低频字段可以「脏则整面重发」；
+TS 侧 `foldIntoProjector` 改为**把 patch 应用到上一份 JS 文档**，热路径不再调用 `document()`
+（`document()` 只留给冷刷新与 parity）。这一条同时消掉 live 的每事件全量 JSON 往返，
+以及分页冷装载的 26.7×（现在每页都重传全量文档）。
+
+**①（折叠去 `Value`）**：native 侧 97ms 里按事件部分约 50ms（`timeline_entry` 15.8 +
+`with_event` 10.1 + `reduce_*` 24），去 Value 化是把它压到 20~30ms 的路。加上 wasm 侧
+相对 native 还有约 2× 的分配器差距（dlmalloc），两者都要动。
+
+**顺序建议**：先 ③-a（一行函数级改造、收益最大、不动 wire 形状）→ 再 ③-b（补 patch 切片，
+动 wire DTO，要重跑 parity）→ 最后 ①。
+
+### 给基准脚手架的硬要求（本轮踩出来的）
+
+1. **一进程一配置**。同进程重复大批量折叠会让 wasm 堆持续增长、`memory.grow` 代价随堆上升，
+   多轮中位数会被污染到 10× 以上（实测 project 中位数 2718ms vs 首轮 ~200ms）。
+2. 两侧必须做**等量工作先验**（本仓用 document 的形状指纹逐字节比对），否则比值无意义。
+3. 预热要**按测量尺度**做（200 事件的预热不足以让 1 万规模定型，曾虚高 6×）。
+4. 分段要分「wasm 内部」与「JS 侧」——本轮为此加了 `PylonProjector.foldPhases()` 诊断出口
+   （批量入口内 4 个时钟，把 decode/project/patch 序列化分开）。
+5. 逐事件 live 路径要单独一类，别和冷装载混：两者成本结构不同（前者每事件一次全量读）。
