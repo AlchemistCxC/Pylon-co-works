@@ -877,3 +877,86 @@ wasm 端到端（脚手架，scale=m，每侧 3 轮中位数）：
 3. **① 折叠去 `Value`**：mixed-m 已到 1.18×，剩下的绝对量是逐事件 base cost（约 7µs/事件）
    与 wasm dlmalloc 相对 native 的 ~1.45×（native 26.4ms vs wasm 核内 42ms）。
 4. **高亮 1.4–3.8×**：syntect vs starry-night 引擎级差异，绝对值 <1ms。
+
+---
+
+## 24. 宿主帧编码去分配（delta-m 编码 7.45 → 3.30ms）+ live 路径的账：patch 重发累计文本
+
+承 §23 的「仍未做」第 2 项。这一节把**折叠之外的那一半**拆干净，并量出 live 路径真正的
+瓶颈——它不在计算核里。
+
+### 24.1 帧编码：逐字段 `encoder.encode` 每次新建 Uint8Array
+
+用「与生产同构、按开关抽掉某一步」的消融编码器（临时探针，已删）对照：
+
+| case | N | 生产 | 同形消融（仅换编码方式） | −encodeInto | −json | −DataView | 三抽 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `delta-m` | 2001 | **6.56ms** | 2.36ms | 1.03 | 1.86 | 2.35 | 0.61 |
+| `mixed-m` | 2251 | **7.98ms** | 3.51ms | 1.27 | 2.18 | 3.12 | 0.67 |
+
+即：**逐字段 `encoder.encode(value)`（每次新建一个 Uint8Array）占编码总耗时的 2/3**；
+末尾逐事件 `DataView.setUint32` 那 7.6 万次写入只占 ~0.01ms（原本怀疑它，实测不是）。
+`Object.entries` → `Object.keys` + 下标循环 + 计数器判空另占约 0.5ms（每事件少两个短命数组）。
+
+落地（`src/infrastructure/compute/projectorCompute.ts`）：
+- `putSlot` 改 `encodeInto` 写进**复用 scratch** 再 `slice` 取走——只保留「拷进池」那一次
+  memcpy。扩容按 UTF-8 最坏 3 字节/UTF-16 单元估上界，`read` 未走完即原地翻倍重试
+  （孤代理 → U+FFFD 的编码语义与 `encode` 一致，字节结果不变）。
+- `extra` / `provenanceExtras` 改 `Object.keys` + 下标循环 + 计数器，不再 `Object.entries`
+  与第二次 `Object.keys(...)`。语义仍是**只枚举自有可枚举键**。
+
+实测：`delta-m` 编码 **7.45 → 3.30ms**、`mixed-m` **7.88 → 3.19ms**（约 2.3×）。
+端到端随之下来：`delta-m` e2e 19.49 → **15.23ms**；`projectorCompute` 边界计数断言未动。
+
+### 24.2 live 逐事件路径：4.07× 的 98% 是「每事件重发整条累计消息」
+
+用户判据里唯一还未兑现的是**逐事件实时折叠**。一进程一段的干净读数（`n=2000`，
+每段独立进程，避免 wasm 堆增长污染）：
+
+| 段 | 总耗时 | 单事件 |
+| --- | --- | --- |
+| ① JS 单事件帧编码 | 10.5ms | 5.25µs |
+| ② wasm `appendBatch`（帧已预编码） | **114.2ms** | **57.08µs** |
+| ③ `JSON.parse(patch)` | 43.1ms | 21.55µs |
+| ④ 生产 live（`foldIntoProjector` 每事件一次） | 168.2ms | 84.04µs |
+| ⑤ 迁移前 TS 逐事件（对照） | 38.7ms | 19.35µs |
+
+①+②+③ = 83.9µs ≈ ④ 的 84.0µs ⇒ `applyPatch` + 池登记≈0，账全在前三段。
+
+**② 的 57µs 不是折叠慢，是 patch 大。** 取运行中段的 patch 按字段拆字节：
+
+```
+patch 全长 18516B（第 1000 事件）
+  timelineUpserts                187B  (1 项)
+  messageUpserts               18122B  (1 项)   ← 98%
+  appliedRanges / session / 长度位  ~63B
+按事件位置：500 → 9510B   1000 → 18516B   1500 → 28517B
+patch 总长 36.3MB / 2001 事件
+```
+
+**`MessagePatch` 携带的是整条消息的完整值**（`content` 累计文本 + `parts[].text` 同一份
+文本，各约一半），而流式每事件只增长一个尾巴 ⇒ **过界字节是 Θ(N²)**（2001 事件 36.3MB）。
+②（Rust 建这棵树 + 序列化 + 字符串过界）与 ③（V8 解析并重建这棵树）都按字节付费，
+所以两者总共占 live 的 93%。
+
+**这条正是 issue 边界纪律第 2 条（「热路径边界不做 JSON 序列化」）与第 1 条（「禁止逐事件
+append」）指向的东西——并且在 live 上尚未落实**：timeline 是增量的（只发新条目），
+message 是快照（每次全量）。同一份 patch DTO 里两半的口径不一致。
+
+### 24.3 两条收口路线（设计决策，未动手，等裁断）
+
+| 路线 | 做法 | 收益 | 代价 / 风险 |
+| --- | --- | --- | --- |
+| **A · 让 `MessagePatch` 真正增量** | patch 增加紧凑形态（如 `{index, contentTail, partTextTail}`），仅当「这条消息本次只被追加」时下发；TS 侧对上一份消息做 append。Rust 在写点记录 O(1) 的「追加前长度 + 尾巴」，`finish_batch` 据此选形态 | 过界字节 Θ(N²)→Θ(N)：live 84µs → 估 ~15µs，**比值跨过 1**（对照 TS 19.35µs） | 动的是 JS↔wasm 的 **patch DTO 契约**（跨语言、有 parity 门禁钉着），且要覆盖「合并可能新增部件」等分支；等价性证据要重跑全套 parity |
+| **B · live 侧按帧合批** | `agentWorkbenchSession.foldPage` 把一拍内到达的事件合并成一页再折（纪律第 1 条的正面落实） | 字节同样降 K 倍（K = 每拍事件数），实现极小 | **改变可观测的更新时序**：文档不再在 ingest 后同步更新。消费方（渲染、导出、测试）是否依赖这一点要逐处核 |
+
+**建议 A**：文档形状与加载时序都不变，落在计算核自己的边界契约内，且正是 issue 纪律
+第 2 条的字面要求；B 的收益虽同量级，但要先证明没有消费方依赖同步更新。
+两者都要用户点头——A 动跨语言契约，B 动时序，都不该由我单方面定（AGENTS §2.3-3）。
+
+### 24.4 本轮复验
+
+- `bun run test` → `Test Files 622 passed`、`Tests 4688 passed | 1 todo`，0 failed
+- `bunx vitest run scripts/compute-parity.test.mts` → 2/2 passed（`ok 172 / known-diff 3 / mismatch 0`）
+- `bunx tsc -b` exit 0；`bunx eslint src/` 0 error（仍只有 `RightRailHost.tsx` 那条既存 warning）
+- 改动面：`src/infrastructure/compute/projectorCompute.ts`（帧编码内部，无契约变化）
