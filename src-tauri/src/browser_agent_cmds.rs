@@ -155,6 +155,68 @@ fn resolve_tab(state: &AppState, tab_id: Option<u64>) -> Result<(u64, tauri::Web
         .map_err(|error| denial("browser_not_ready", error))
 }
 
+/// 单条工具命令的收口上下文：持有 `finish` 所需的公共参数，把命令体内反复
+/// 出现的「deny / error / ok」出口收敛为单行调用。四个出口与直写
+/// `Ok(finish(state, &session_key, tool.as_str(), summary, …).await)` 逐字等价
+/// （同 outcome 文案、同 payload、同信封形状），仅是样板收敛。
+struct CmdCx<'a> {
+    state: &'a AppState,
+    session_key: &'a str,
+    tool: AgentBrowserTool,
+    summary: &'a str,
+}
+
+impl<'a> CmdCx<'a> {
+    fn new(
+        state: &'a AppState,
+        session_key: &'a str,
+        tool: AgentBrowserTool,
+        summary: &'a str,
+    ) -> Self {
+        Self {
+            state,
+            session_key,
+            tool,
+            summary,
+        }
+    }
+
+    async fn finish_with(self, outcome: String, payload: Value) -> Result<Value, PylonError> {
+        Ok(finish(
+            self.state,
+            self.session_key,
+            self.tool.as_str(),
+            self.summary,
+            outcome,
+            payload,
+        )
+        .await)
+    }
+
+    /// deny 出口：`authorize` / `ensure_write_claim` / `resolve_tab` /
+    /// `resolve_click_target` 返回的 Err 信封原样透传，outcome = `denied:{code}`。
+    async fn denied(self, denied: Value) -> Result<Value, PylonError> {
+        self.finish_with(format!("denied:{}", denied["code"]), denied)
+            .await
+    }
+
+    /// deny 出口（现场构造信封）：URL 黑名单、stale_ref、平台不支持。
+    async fn denied_msg(self, code: &str, message: impl Into<String>) -> Result<Value, PylonError> {
+        self.finish_with(format!("denied:{code}"), denial(code, message))
+            .await
+    }
+
+    /// error 出口：outcome = `error`，payload 由调用方用 `denial` 构造。
+    async fn error(self, payload: Value) -> Result<Value, PylonError> {
+        self.finish_with("error".into(), payload).await
+    }
+
+    /// ok 出口：outcome = `ok`，payload 原样作为成功信封返回。
+    async fn ok(self, payload: Value) -> Result<Value, PylonError> {
+        self.finish_with("ok".into(), payload).await
+    }
+}
+
 // ── 设置与状态面（非工具；Sheet Agent 面板与 sessionCreation 消费） ──
 
 #[tauri::command(rename_all = "camelCase")]
@@ -294,80 +356,33 @@ pub(crate) async fn browser_agent_navigate(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Navigate;
     let summary = serde_json::to_string(&url).unwrap_or_default();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, &summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let parsed = match url::Url::parse(&url) {
         Ok(parsed) => parsed,
         Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("invalid_url", format!("URL 非法: {error}")),
-            )
-            .await)
+            return cx
+                .error(denial("invalid_url", format!("URL 非法: {error}")))
+                .await
         }
     };
     let blocklist = hub.settings().domain_blocklist;
     if let Err(d) = check_url_allowed(&parsed, &blocklist) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", d.code),
-            denial(d.code, d.message),
-        )
-        .await);
+        return cx.denied_msg(d.code, d.message).await;
     }
     let result = resolve_tab(state.inner(), tab_id);
     let (tab_id, _) = match result {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     match state.browser.navigate_on(tab_id, &url) {
         Ok(snapshot) => {
-            let payload = serde_json::json!({ "ok": true, "tabId": tab_id, "browser": snapshot });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "tabId": tab_id, "browser": snapshot }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("navigate_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("navigate_failed", error)).await,
     }
 }
 
@@ -383,30 +398,13 @@ pub(crate) async fn browser_agent_snapshot(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Snapshot;
     let summary = "";
+    let cx = CmdCx::new(state.inner(), &session_key, tool, summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, _) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let raw = match state
         .browser
@@ -414,31 +412,11 @@ pub(crate) async fn browser_agent_snapshot(
         .await
     {
         Ok(raw) => raw,
-        Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("snapshot_failed", error),
-            )
-            .await)
-        }
+        Err(error) => return cx.error(denial("snapshot_failed", error)).await,
     };
     let (mut elements, targets) = match js::parse_enumeration(&raw) {
         Ok(parsed) => parsed,
-        Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("snapshot_failed", error),
-            )
-            .await)
-        }
+        Err(error) => return cx.error(denial("snapshot_failed", error)).await,
     };
     let references = hub
         .refs()
@@ -446,15 +424,7 @@ pub(crate) async fn browser_agent_snapshot(
         .ok()
         .map(|mut registry| registry.replace_tab(resolved_tab, targets));
     let Some(references) = references else {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("internal", "ref 注册表锁不可用"),
-        )
-        .await);
+        return cx.error(denial("internal", "ref 注册表锁不可用")).await;
     };
     for (index, element) in elements.iter_mut().enumerate() {
         element.reference = references.get(index).cloned().unwrap_or_default();
@@ -472,15 +442,7 @@ pub(crate) async fn browser_agent_snapshot(
         "innerHeight": raw.get("innerHeight").cloned().unwrap_or(Value::Null),
         "elements": elements,
     });
-    Ok(finish(
-        state.inner(),
-        &session_key,
-        tool.as_str(),
-        summary,
-        "ok".into(),
-        payload,
-    )
-    .await)
+    cx.ok(payload).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -492,39 +454,16 @@ pub(crate) async fn browser_agent_tab_list(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::TabList;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     match state.browser.snapshot() {
         Ok(snapshot) => {
-            let payload = serde_json::json!({ "ok": true, "browser": snapshot });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "browser": snapshot }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "error".into(),
-            denial("status_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("status_failed", error)).await,
     }
 }
 
@@ -540,43 +479,22 @@ pub(crate) async fn browser_agent_tab_new(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::TabNew;
     let summary = url.as_deref().unwrap_or("(blank)");
+    let cx = CmdCx::new(state.inner(), &session_key, tool, summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let initial_url = url.as_deref().unwrap_or("about:blank");
     let parsed = match url::Url::parse(initial_url) {
         Ok(parsed) => parsed,
         Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("invalid_url", format!("URL 非法: {error}")),
-            )
-            .await)
+            return cx
+                .error(denial("invalid_url", format!("URL 非法: {error}")))
+                .await
         }
     };
     let blocklist = hub.settings().domain_blocklist;
     if let Err(d) = check_url_allowed(&parsed, &blocklist) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", d.code),
-            denial(d.code, d.message),
-        )
-        .await);
+        return cx.denied_msg(d.code, d.message).await;
     }
     let outcome = if background.unwrap_or(false) {
         state.browser.open_tab_background(initial_url)
@@ -585,26 +503,10 @@ pub(crate) async fn browser_agent_tab_new(
     };
     match outcome {
         Ok(snapshot) => {
-            let payload = serde_json::json!({ "ok": true, "browser": snapshot });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "browser": snapshot }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("tab_new_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("tab_new_failed", error)).await,
     }
 }
 
@@ -619,39 +521,16 @@ pub(crate) async fn browser_agent_tab_select(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::TabSelect;
     let summary = &tab_id.to_string();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     match state.browser.select_tab(tab_id) {
         Ok(snapshot) => {
-            let payload = serde_json::json!({ "ok": true, "browser": snapshot });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "browser": snapshot }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("tab_select_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("tab_select_failed", error)).await,
     }
 }
 
@@ -666,27 +545,12 @@ pub(crate) async fn browser_agent_tab_close(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::TabClose;
     let summary = &tab_id.to_string();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     if let Err(denied) = ensure_write_claim(&hub, &session_key) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     match state.browser.close_tab(tab_id) {
         Ok(snapshot) => {
@@ -694,26 +558,10 @@ pub(crate) async fn browser_agent_tab_close(
             if let Ok(mut cdp_state) = hub.cdp.lock() {
                 cdp_state.drop_tab(tab_id);
             }
-            let payload = serde_json::json!({ "ok": true, "browser": snapshot });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "browser": snapshot }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("tab_close_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("tab_close_failed", error)).await,
     }
 }
 
@@ -727,30 +575,13 @@ pub(crate) async fn browser_agent_screenshot(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Screenshot;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (_, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     #[cfg(windows)]
     {
@@ -758,48 +589,25 @@ pub(crate) async fn browser_agent_screenshot(
             Ok(bytes) => {
                 use base64::Engine as _;
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                let payload = serde_json::json!({
+                cx.ok(serde_json::json!({
                     "ok": true,
                     "driver": "cdp",
                     "pngBase64": encoded,
                     "byteLength": bytes.len(),
-                });
-                Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "ok".into(),
-                    payload,
-                )
-                .await)
+                }))
+                .await
             }
-            Err(error) => Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                "error".into(),
-                denial("screenshot_failed", error),
-            )
-            .await),
+            Err(error) => cx.error(denial("screenshot_failed", error)).await,
         }
     }
     #[cfg(not(windows))]
     {
         let _ = webview;
-        Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "denied:unsupported_on_platform".into(),
-            denial(
-                "unsupported_on_platform",
-                "截图仅在 Windows（WebView2 CDP）可用",
-            ),
+        cx.denied_msg(
+            "unsupported_on_platform",
+            "截图仅在 Windows（WebView2 CDP）可用",
         )
-        .await)
+        .await
     }
 }
 
@@ -813,46 +621,19 @@ pub(crate) async fn browser_agent_save_page(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::SavePage;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (_, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     #[cfg(windows)]
     {
         let mhtml = match cdp::capture_mhtml(&webview).await {
             Ok(mhtml) => mhtml,
-            Err(error) => {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("save_page_failed", error),
-                )
-                .await)
-            }
+            Err(error) => return cx.error(denial("save_page_failed", error)).await,
         };
         let save_result = state
             .inner()
@@ -875,43 +656,20 @@ pub(crate) async fn browser_agent_save_page(
             });
         match save_result {
             Ok(path) => {
-                let payload = serde_json::json!({ "ok": true, "driver": "cdp", "path": path.to_string_lossy(), "byteLength": mhtml.len() });
-                Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "ok".into(),
-                    payload,
-                )
-                .await)
+                cx.ok(serde_json::json!({ "ok": true, "driver": "cdp", "path": path.to_string_lossy(), "byteLength": mhtml.len() }))
+                    .await
             }
-            Err(error) => Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                "error".into(),
-                denial("save_page_failed", error.to_string()),
-            )
-            .await),
+            Err(error) => cx.error(denial("save_page_failed", error.to_string())).await,
         }
     }
     #[cfg(not(windows))]
     {
         let _ = webview;
-        Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "denied:unsupported_on_platform".into(),
-            denial(
-                "unsupported_on_platform",
-                "MHTML 存档仅在 Windows（WebView2 CDP）可用",
-            ),
+        cx.denied_msg(
+            "unsupported_on_platform",
+            "MHTML 存档仅在 Windows（WebView2 CDP）可用",
         )
-        .await)
+        .await
     }
 }
 
@@ -927,30 +685,13 @@ pub(crate) async fn browser_agent_read_network(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::ReadNetwork;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     #[cfg(windows)]
     {
@@ -958,56 +699,27 @@ pub(crate) async fn browser_agent_read_network(
         if let Err(error) =
             cdp::ensure_network_attached(&webview, resolved_tab, &hub.cdp, ad_filter)
         {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                "error".into(),
-                denial("cdp_failed", error),
-            )
-            .await);
+            return cx.error(denial("cdp_failed", error)).await;
         }
         // 响应体预览：单个 requestId 的文本负载（≤64KiB，超限截断并标注）。
         if let Some(request_id) = request_id {
             let body = cdp::response_body(&webview, &request_id).await;
             return match body {
                 Ok(Some((preview, truncated))) => {
-                    let payload = serde_json::json!({
+                    cx.ok(serde_json::json!({
                         "ok": true,
                         "driver": "cdp",
                         "requestId": request_id,
                         "body": preview,
                         "truncated": truncated,
-                    });
-                    Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        "",
-                        "ok".into(),
-                        payload,
-                    )
-                    .await)
+                    }))
+                    .await
                 }
-                Ok(None) => Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("body_unavailable", "响应体缺失、二进制或超过 64KiB"),
-                )
-                .await),
-                Err(error) => Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("cdp_failed", error),
-                )
-                .await),
+                Ok(None) => {
+                    cx.error(denial("body_unavailable", "响应体缺失、二进制或超过 64KiB"))
+                        .await
+                }
+                Err(error) => cx.error(denial("cdp_failed", error)).await,
             };
         }
         let limit = limit.unwrap_or(50).min(200);
@@ -1046,31 +758,16 @@ pub(crate) async fn browser_agent_read_network(
                 .unwrap_or(0)
         };
         let payload = serde_json::json!({ "ok": true, "driver": "cdp", "tabId": resolved_tab, "inflight": inflight, "entries": entries });
-        Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "ok".into(),
-            payload,
-        )
-        .await)
+        cx.ok(payload).await
     }
     #[cfg(not(windows))]
     {
         let _ = (webview, limit, request_id, resolved_tab);
-        Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "denied:unsupported_on_platform".into(),
-            denial(
-                "unsupported_on_platform",
-                "网络观测仅在 Windows（WebView2 CDP）可用",
-            ),
+        cx.denied_msg(
+            "unsupported_on_platform",
+            "网络观测仅在 Windows（WebView2 CDP）可用",
         )
-        .await)
+        .await
     }
 }
 
@@ -1094,44 +791,21 @@ pub(crate) async fn browser_agent_wait(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Wait;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let Some(kind) = driver::WaitUntil::parse(&until) else {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "error".into(),
-            denial(
+        return cx
+            .error(denial(
                 "invalid_wait",
                 "until 仅支持 load | network_idle | selector",
-            ),
-        )
-        .await);
+            ))
+            .await;
     };
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(8_000).min(30_000));
     let deadline = tokio::time::Instant::now() + timeout;
@@ -1149,40 +823,20 @@ pub(crate) async fn browser_agent_wait(
                         .map(str::to_string)
                 });
             if ready.as_deref() == Some("complete") {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "ok".into(),
-                    serde_json::json!({ "ok": true, "until": "load" }),
-                )
-                .await);
+                return cx
+                    .ok(serde_json::json!({ "ok": true, "until": "load" }))
+                    .await;
             }
             if tokio::time::Instant::now() >= deadline {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("wait_timeout", "等待页面加载超时"),
-                )
-                .await);
+                return cx.error(denial("wait_timeout", "等待页面加载超时")).await;
             }
             tokio::time::sleep(PAGE_SETTLE_POLL).await;
         },
         driver::WaitUntil::Selector => {
             let Some(selector) = selector else {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("invalid_wait", "until=selector 需要 selector 参数"),
-                )
-                .await);
+                return cx
+                    .error(denial("invalid_wait", "until=selector 需要 selector 参数"))
+                    .await;
             };
             let script = js::build_selector_present_script(&selector);
             loop {
@@ -1194,18 +848,12 @@ pub(crate) async fn browser_agent_wait(
                     .and_then(|value| value.get("ok").and_then(Value::as_bool))
                     .unwrap_or(false);
                 if present {
-                    return Ok(finish(state.inner(), &session_key, tool.as_str(), "", "ok".into(), serde_json::json!({ "ok": true, "until": "selector", "selector": selector })).await);
+                    return cx.ok(serde_json::json!({ "ok": true, "until": "selector", "selector": selector })).await;
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    return Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        "",
-                        "error".into(),
-                        denial("wait_timeout", format!("等待元素超时：{selector}")),
-                    )
-                    .await);
+                    return cx
+                        .error(denial("wait_timeout", format!("等待元素超时：{selector}")))
+                        .await;
                 }
                 tokio::time::sleep(PAGE_SETTLE_POLL).await;
             }
@@ -1217,27 +865,11 @@ pub(crate) async fn browser_agent_wait(
                 if let Err(error) =
                     cdp::ensure_network_attached(&webview, resolved_tab, &hub.cdp, ad_filter)
                 {
-                    return Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        "",
-                        "error".into(),
-                        denial("cdp_failed", error),
-                    )
-                    .await);
+                    return cx.error(denial("cdp_failed", error)).await;
                 }
                 let network = hub.cdp.lock().ok().map(|state| state.network.clone());
                 let Some(network) = network else {
-                    return Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        "",
-                        "error".into(),
-                        denial("internal", "CDP 状态锁不可用"),
-                    )
-                    .await);
+                    return cx.error(denial("internal", "CDP 状态锁不可用")).await;
                 };
                 loop {
                     let (inflight, idle_ms) = {
@@ -1253,29 +885,17 @@ pub(crate) async fn browser_agent_wait(
                         }
                     };
                     if inflight == 0 && idle_ms >= 500 {
-                        return Ok(finish(
-                            state.inner(),
-                            &session_key,
-                            tool.as_str(),
-                            "",
-                            "ok".into(),
-                            serde_json::json!({ "ok": true, "until": "network_idle" }),
-                        )
-                        .await);
+                        return cx
+                            .ok(serde_json::json!({ "ok": true, "until": "network_idle" }))
+                            .await;
                     }
                     if tokio::time::Instant::now() >= deadline {
-                        return Ok(finish(
-                            state.inner(),
-                            &session_key,
-                            tool.as_str(),
-                            "",
-                            "error".into(),
-                            denial(
+                        return cx
+                            .error(denial(
                                 "wait_timeout",
                                 format!("等待网络静默超时（在飞请求 {inflight}）"),
-                            ),
-                        )
-                        .await);
+                            ))
+                            .await;
                     }
                     tokio::time::sleep(PAGE_SETTLE_POLL).await;
                 }
@@ -1283,18 +903,11 @@ pub(crate) async fn browser_agent_wait(
             #[cfg(not(windows))]
             {
                 let _ = (webview, resolved_tab, deadline);
-                Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "denied:unsupported_on_platform".into(),
-                    denial(
-                        "unsupported_on_platform",
-                        "network_idle 等待仅在 Windows（WebView2 CDP）可用",
-                    ),
+                cx.denied_msg(
+                    "unsupported_on_platform",
+                    "network_idle 等待仅在 Windows（WebView2 CDP）可用",
                 )
-                .await)
+                .await
             }
         }
     }
@@ -1365,58 +978,21 @@ pub(crate) async fn browser_agent_click(
         .or(selector.as_deref())
         .unwrap_or("")
         .to_string();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, &summary);
     let mode = match authorize(&hub, workspace_id.as_deref(), tool) {
         Ok(mode) => mode,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     if let Err(denied) = ensure_write_claim(&hub, &session_key) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let (selector, expected) = match resolve_click_target(&hub, resolved_tab, reference, selector) {
         Ok(target) => target,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     // 高亮 + 重查（滚动入视口 + 指纹复核 + 最新中心点）。
     let _ = state
@@ -1432,71 +1008,29 @@ pub(crate) async fn browser_agent_click(
         .await
     {
         Ok(raw) => raw,
-        Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("click_failed", error),
-            )
-            .await)
-        }
+        Err(error) => return cx.error(denial("click_failed", error)).await,
     };
     let verified = match js::parse_verify(&verify_raw) {
         Ok(verified) => verified,
         Err(code) if code == "stale_ref" => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "denied:stale_ref".into(),
-                denial(
+            return cx
+                .denied_msg(
                     "stale_ref",
                     "元素已变化（stale_ref）；请重新 browser_snapshot",
-                ),
-            )
-            .await)
+                )
+                .await
         }
-        Err(code) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial(&code, "元素定位失败"),
-            )
-            .await)
-        }
+        Err(code) => return cx.error(denial(&code, "元素定位失败")).await,
     };
     // 打开新标签的锚点直接走内部标签路径（与用户点击同语义）。
     if verified.get("opensTab").and_then(Value::as_bool) == Some(true) {
         if let Some(href) = verified.get("href").and_then(Value::as_str) {
             return match state.browser.open_tab(href) {
                 Ok(snapshot) => {
-                    let payload = serde_json::json!({ "ok": true, "driver": "host", "openedTab": true, "href": href, "browser": snapshot });
-                    Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        summary,
-                        "ok".into(),
-                        payload,
-                    )
-                    .await)
+                    cx.ok(serde_json::json!({ "ok": true, "driver": "host", "openedTab": true, "href": href, "browser": snapshot }))
+                        .await
                 }
-                Err(error) => Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    summary,
-                    "error".into(),
-                    denial("click_failed", error),
-                )
-                .await),
+                Err(error) => cx.error(denial("click_failed", error)).await,
             };
         }
     }
@@ -1506,41 +1040,18 @@ pub(crate) async fn browser_agent_click(
     #[cfg(windows)]
     {
         if mode == BrowserAccessMode::Full && cdp::trusted_click(&webview, x, y).await.is_ok() {
-            let payload = serde_json::json!({ "ok": true, "driver": "cdp", "x": x, "y": y, "detail": verified });
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await);
+            return cx
+                .ok(serde_json::json!({ "ok": true, "driver": "cdp", "x": x, "y": y, "detail": verified }))
+                .await;
         }
     }
     let _ = mode;
     match state.browser.click(Some(selector.clone()), None).await {
         Ok(_) => {
-            let payload = serde_json::json!({ "ok": true, "driver": "js", "detail": verified });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "driver": "js", "detail": verified }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("click_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("click_failed", error)).await,
     }
 }
 
@@ -1565,58 +1076,21 @@ pub(crate) async fn browser_agent_type(
         .or(selector.as_deref())
         .unwrap_or("")
         .to_string();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, &summary);
     let mode = match authorize(&hub, workspace_id.as_deref(), tool) {
         Ok(mode) => mode,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     if let Err(denied) = ensure_write_claim(&hub, &session_key) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let (selector, expected) = match resolve_click_target(&hub, resolved_tab, reference, selector) {
         Ok(target) => target,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let verify_raw = match state
         .browser
@@ -1627,31 +1101,15 @@ pub(crate) async fn browser_agent_type(
         .await
     {
         Ok(raw) => raw,
-        Err(error) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("type_failed", error),
-            )
-            .await)
-        }
+        Err(error) => return cx.error(denial("type_failed", error)).await,
     };
     if js::parse_verify(&verify_raw).err().as_deref() == Some("stale_ref") {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "denied:stale_ref".into(),
-            denial(
+        return cx
+            .denied_msg(
                 "stale_ref",
                 "元素已变化（stale_ref）；请重新 browser_snapshot",
-            ),
-        )
-        .await);
+            )
+            .await;
     }
     #[cfg(windows)]
     {
@@ -1666,67 +1124,27 @@ pub(crate) async fn browser_agent_type(
                 if submit.unwrap_or(false) {
                     let enter = cdp::key_to_cdp("Enter").map_err(PylonError::Protocol)?;
                     if let Err(error) = cdp::trusted_press(&webview, enter).await {
-                        return Ok(finish(
-                            state.inner(),
-                            &session_key,
-                            tool.as_str(),
-                            summary,
-                            "error".into(),
-                            denial("type_failed", error),
-                        )
-                        .await);
+                        return cx.error(denial("type_failed", error)).await;
                     }
                 }
-                let payload =
-                    serde_json::json!({ "ok": true, "driver": "cdp", "selector": selector });
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    summary,
-                    "ok".into(),
-                    payload,
-                )
-                .await);
+                return cx
+                    .ok(serde_json::json!({ "ok": true, "driver": "cdp", "selector": selector }))
+                    .await;
             }
         }
     }
     let _ = mode;
     // JS 兜底：setter + input/change 事件。
     if let Err(error) = state.browser.type_text(text, Some(selector.clone())).await {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("type_failed", error),
-        )
-        .await);
+        return cx.error(denial("type_failed", error)).await;
     }
     if submit.unwrap_or(false) {
         if let Err(error) = state.browser.press("Enter".to_string()).await {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "error".into(),
-                denial("type_failed", error),
-            )
-            .await);
+            return cx.error(denial("type_failed", error)).await;
         }
     }
-    let payload = serde_json::json!({ "ok": true, "driver": "js", "selector": selector });
-    Ok(finish(
-        state.inner(),
-        &session_key,
-        tool.as_str(),
-        summary,
-        "ok".into(),
-        payload,
-    )
-    .await)
+    cx.ok(serde_json::json!({ "ok": true, "driver": "js", "selector": selector }))
+        .await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1741,44 +1159,17 @@ pub(crate) async fn browser_agent_press(
     let summary = key.clone();
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Press;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, &summary);
     let mode = match authorize(&hub, workspace_id.as_deref(), tool) {
         Ok(mode) => mode,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                &summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     if let Err(denied) = ensure_write_claim(&hub, &session_key) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            &summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                &summary,
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     let _ = resolved_tab;
     #[cfg(windows)]
@@ -1787,29 +1178,18 @@ pub(crate) async fn browser_agent_press(
             match cdp::key_to_cdp(&key) {
                 Ok(mapped) => {
                     if cdp::trusted_press(&webview, mapped).await.is_ok() {
-                        let payload =
-                            serde_json::json!({ "ok": true, "driver": "cdp", "key": key });
-                        return Ok(finish(
-                            state.inner(),
-                            &session_key,
-                            tool.as_str(),
-                            &summary,
-                            "ok".into(),
-                            payload,
-                        )
-                        .await);
+                        return cx
+                            .ok(serde_json::json!({ "ok": true, "driver": "cdp", "key": key }))
+                            .await;
                     }
                 }
                 Err(_) => {
-                    return Ok(finish(
-                        state.inner(),
-                        &session_key,
-                        tool.as_str(),
-                        &summary,
-                        "error".into(),
-                        denial("unsupported_key", format!("CDP 路径不支持按键：{key}")),
-                    )
-                    .await)
+                    return cx
+                        .error(denial(
+                            "unsupported_key",
+                            format!("CDP 路径不支持按键：{key}"),
+                        ))
+                        .await
                 }
             }
         }
@@ -1817,26 +1197,10 @@ pub(crate) async fn browser_agent_press(
     let _ = mode;
     match state.browser.press(key).await {
         Ok(_) => {
-            let payload = serde_json::json!({ "ok": true, "driver": "js" });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                &summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "driver": "js" }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            &summary,
-            "error".into(),
-            denial("press_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("press_failed", error)).await,
     }
 }
 
@@ -1853,61 +1217,22 @@ pub(crate) async fn browser_agent_download(
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Download;
     let summary = serde_json::to_string(&url).unwrap_or_default();
+    let cx = CmdCx::new(state.inner(), &session_key, tool, &summary);
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     if let Err(denied) = ensure_write_claim(&hub, &session_key) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     if let Err(denied) = resolve_tab(state.inner(), tab_id) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     match state.browser.download(&url, filename).await {
         Ok(result) => {
-            let payload = serde_json::json!({ "ok": true, "download": result });
-            Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                summary,
-                "ok".into(),
-                payload,
-            )
-            .await)
+            cx.ok(serde_json::json!({ "ok": true, "download": result }))
+                .await
         }
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            summary,
-            "error".into(),
-            denial("download_failed", error),
-        )
-        .await),
+        Err(error) => cx.error(denial("download_failed", error)).await,
     }
 }
 
@@ -1963,30 +1288,13 @@ async fn scroll_impl(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Scroll;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (resolved_tab, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     #[cfg(windows)]
     {
@@ -2018,38 +1326,19 @@ async fn scroll_impl(
         .await
         .is_ok()
         {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                "ok".into(),
-                serde_json::json!({ "ok": true, "driver": "cdp", "deltaX": delta_x, "deltaY": delta_y }),
-            )
-            .await);
+            return cx
+                .ok(serde_json::json!({ "ok": true, "driver": "cdp", "deltaX": delta_x, "deltaY": delta_y }))
+                .await;
         }
     }
     #[cfg(not(windows))]
     let _ = webview;
     match state.browser.scroll(delta_x, delta_y).await {
-        Ok(result) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "ok".into(),
-            serde_json::json!({ "ok": true, "driver": "js", "scroll": result }),
-        )
-        .await),
-        Err(error) => Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            "error".into(),
-            denial("scroll_failed", error),
-        )
-        .await),
+        Ok(result) => {
+            cx.ok(serde_json::json!({ "ok": true, "driver": "js", "scroll": result }))
+                .await
+        }
+        Err(error) => cx.error(denial("scroll_failed", error)).await,
     }
 }
 
@@ -2068,57 +1357,24 @@ async fn emulate_impl(
     let session_key = session_key_of(session_key);
     let hub = hub_of(state.inner());
     let tool = AgentBrowserTool::Emulate;
+    let cx = CmdCx::new(state.inner(), &session_key, tool, "");
     if let Err(denied) = authorize(&hub, workspace_id.as_deref(), tool) {
-        return Ok(finish(
-            state.inner(),
-            &session_key,
-            tool.as_str(),
-            "",
-            format!("denied:{}", denied["code"]),
-            denied,
-        )
-        .await);
+        return cx.denied(denied).await;
     }
     let (_, webview) = match resolve_tab(state.inner(), tab_id) {
         Ok(resolved) => resolved,
-        Err(denied) => {
-            return Ok(finish(
-                state.inner(),
-                &session_key,
-                tool.as_str(),
-                "",
-                format!("denied:{}", denied["code"]),
-                denied,
-            )
-            .await)
-        }
+        Err(denied) => return cx.denied(denied).await,
     };
     #[cfg(windows)]
     {
         let effective = if clear { (None, None) } else { (width, height) };
         match cdp::emulate(&webview, effective.0, effective.1, user_agent).await {
             Ok(()) => {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "ok".into(),
-                    serde_json::json!({ "ok": true, "driver": "cdp" }),
-                )
-                .await);
+                return cx
+                    .ok(serde_json::json!({ "ok": true, "driver": "cdp" }))
+                    .await;
             }
-            Err(error) => {
-                return Ok(finish(
-                    state.inner(),
-                    &session_key,
-                    tool.as_str(),
-                    "",
-                    "error".into(),
-                    denial("emulate_failed", error),
-                )
-                .await);
-            }
+            Err(error) => return cx.error(denial("emulate_failed", error)).await,
         }
     }
     #[cfg(not(windows))]
