@@ -402,3 +402,17 @@
 - `.agents/records/218-mcp-context-slimming.md`（开发记录，新增）
 
 **不碰**：`tools/webview2-mcp/src/cdp/**`、`jsscript.rs`、`args.rs`、`error.rs`、`main.rs`；他人一切文件域。L.md 旧条目不动（归档归各 issue 负责人）。
+
+---
+
+[2026-09-21 15] [Miyaki Kumo] [#204①]
+
+**开工：左栏会话设置点不动（#204 已重开，仅症状①——命中面修复；②③已随 PR #207 收口）。** spec 见 `.agents/spec/issue-204-session-settings-hit-surface.md`。分支沿用 `Ru5t/Reflector`。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css`（仅 `.session-tail`/`.session-meta` 一节与 `@media (hover:none)` 行）
+- `src/components/__tests__/Sidebar.blocks.css.test.ts`（追加「淡出侧弃权命中面」契约断言）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/components/Sidebar.tsx`、`src/components/sidebar/**`、`src/App.tsx`、其余全部源码与首方样式；`src-tauri/**` 源码（实机验收只构建不改动）。构建产物一律不提交。
