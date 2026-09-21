@@ -422,7 +422,7 @@
 - `src/infrastructure/compute/__tests__/wasmRuntime.test.ts`（装载门契约，新增）
 - `scripts/bench-memory-hold.mts`（TS vs wasm 同 workload 持有成本对照，新增）
 
-**待对方收工后我还要做**：① 重跑 `bun run test`（现在被上面的编译错误挡住，我最后一次全绿是 19:07 的 622 文件 / 4690 用例）；② 重编 release + 换 `F:\A-I\Platform\Pylon` 的 exe，复验「首次开 agent sheet 不再抛 `__wbindgen_export`」。在此之前**别动 `workbench.rs`**——我们两边会打架。
+**（已解除）** 对方收工、仓库主随后裁决**投影与 events 回退 TS、wasm 只留 markdown + 流式**；本条目涉及的两个 crate 模块已删，冲突面随之消失。结算见 ADR-0018 修订 1 与记录 §31。
 
 ---
 
@@ -439,3 +439,21 @@
   已在 19:24 的全量跑里联合验证）、两份测试、`bench-compute-boundary.mts`（新增场景 E）、
   记录 §27、本文件。
 - `scripts/bench-live-probe.mts`、`value_memory_probe.rs` 两份未跟踪文件仍归你，我未触碰。
+
+---
+
+[2026-09-21 22] [Miyaki Kumo] [#220 · streaming 边界收口]
+
+**开工：wasm 保留面（流式）的性能/内存边界收口**——① 揭示出口 tail 化（`TickOutcome.rows` 由「整条已揭示前缀」改「本拍增量尾巴」，JS 侧追加；O(全文)/拍 → O(尾)/拍）；② 切分新增「块边界 UTF-16 偏移数组」出口（热路径不再整组 stable 块字符串过界，旧出口保留）；③ `RevealEngine` 增量 UTF-16 计数（消掉每拍/每 push 的整串 `encode_utf16`）；④ 杂项（围栏 CRLF 守卫、消费侧行文本缓存）。用户已裁决放行（跨语言契约变更）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src-tauri/pylon-compute/src/streaming/{split,budget}.rs`（含 Rust 单测）
+- `src/infrastructure/compute/streamingCompute.ts`
+- `src/renderers/solid-workbench/streamingDisplayScheduler.ts`
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`
+- `src/renderers/solid-workbench/__tests__/streamingComputeParity.test.ts`（S1 契约形态更新）
+- `scripts/compute-parity/suites/streamingSplitSuite.ts`、`streamingBudgetSuite.ts`（tail 形态适配 + 长流新 pair）
+- 文档：`.agents/spec/220-streaming-boundary-delta.md`（gitignore）、`.agents/records/220-streaming-boundary-delta.md`（**新增独立记录**——220-completion 记录有 §31 未提交改动，我写进去会造成连带提交）、本文件
+
+**不碰**：§31 回退施工的全部在途文件（workbenchProjector / agentWorkbenchSession / bootstrap / App / scaffold `harness.ts`+`index.ts` / `check-bundle-size.mjs` 等）；`github/main` 合并因 App.tsx 等重叠**推迟**到回退收工后；三个旧切分出口（`splitStreamingMarkdownBlocks` / `splitStreamingMarkdown` / `findLastStableBlockBoundary`）保留不删（parity 与既有测试钉着）。
