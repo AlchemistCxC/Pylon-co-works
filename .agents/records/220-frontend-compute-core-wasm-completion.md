@@ -1341,3 +1341,58 @@ N 次调用的核内时间（或给 `diag_now_ms` 换更高分辨率时钟），
   未必是 live 的正确形状。
 
 代价：会话层的更新语义要从「逐帧精确」变成「按批收敛」。**这是设计决策，不是我可以自定的优化。**
+
+---
+
+## 29. 【补缺】流式 markdown 形状的测量：优势比整篇更大（12–25×）
+
+仓库主 2026-09-21 指出「流式 markdown 解析测算了吗」。**没有** —— `markdown-parse` 套件原来只有
+整篇形状（shape/edge 语料 + `doc-s/m/l`），而生产的流式形状完全不同：
+
+`MarkdownContent.solid.tsx:23-24` 把文本切成「已完成块 stable + 增长尾块 unstable」，stable 走
+内容键 LRU 复用**不重解析**，**每帧只解析那一小段短尾**；`markdownRenderModel` 的 graft 判据
+（纯文本追加）成立时**连这一次都省掉**，只有结构性边界（含换行/`*`/`` ` ``/`|` 等）才回落整块重解析。
+
+⇒ 整篇解析是「冷渲染/全量重解析」的形状，一次调用摊掉全部过界成本；流式短尾是**每帧一次调用、
+输入几十到上千字符**的细粒度形状。两者比值不通用。**这是本轮补的缺口。**
+
+### 新增 case（`scripts/compute-parity/suites/markdownParseSuite.ts`）
+
+两个 pair：`parseMarkdown(unstable-tail)`（短尾静态档 + 带行内标记的尾块）与
+`parseMarkdown(growing-tail)`（逐帧增长驱动，模拟一次流式回合）。parity 断言 175 → **182**，
+`ok 179 / known-diff 3 / mismatch 0`。
+
+### 读数（scale=m，3 轮中位数）
+
+| case | ts | wasm | ratio |
+| --- | --- | --- | --- |
+| `unstable-tail tail-20` | 0.46ms | 0.02ms | **0.05×** |
+| `unstable-tail tail-80` | 0.32ms | 0.02ms | **0.07×** |
+| `unstable-tail tail-320` | 0.41ms | 0.03ms | **0.08×** |
+| `unstable-tail tail-1280` | 0.61ms | 0.03ms | **0.05×** |
+| `unstable-tail tail-inline-markers` | 0.46ms | 0.05ms | **0.11×** |
+| `growing-tail growing-paragraph`（32 帧） | 10.94ms | **0.39ms** | **0.04×** |
+| `growing-tail growing-paragraph-with-blocks`（40 帧） | 15.72ms | **0.56ms** | **0.04×** |
+| （对照）`parseMarkdown doc-m` 整篇 | 147ms | 6.92ms | 0.05× |
+
+⇒ **流式形状是 markdown 优势最大的地方**：单帧短尾 12–20×，一次完整流式回合 **25×**
+（10.94 → 0.39ms；每帧 TS ~340µs vs wasm ~12µs）。
+
+机制：TS 侧的**固定成本不随输入缩小** —— 每次调用都要建 processor、跑插件链、
+mdast→hast→渲染模型逐层建对象（小输入也要 0.3–0.5ms）；wasm 侧的固定成本只有过界那几微秒，
+其余是 comrak 的线性工作。所以**输入越小、TS 的固定成本占比越高、wasm 赢得越多** ——
+这与投影 live 的结论（细粒度过界吃亏）方向相反，因为那边 TS 侧没有这种「每次调用重建管线」
+的固定成本。
+
+### 一处脚手架自伤（记下来防重犯）
+
+`parseMarkdownTs` 是 **async**（unified 管线）。新 pair 我第一版写成 `frames.map(frame => parseMarkdownTs(frame))`
+⇒ 得到一串 Promise ⇒ `stableJson` 把它们读成 `{}` ⇒ **2 条假 mismatch**。已改 `Promise.all`。
+教训：脚手架里「TS 基线是 async」这件事会在**数组驱动**的 pair 上咬人，而单输入 pair 因为
+harness 会 `await` 而完全看不出来。
+
+### 对第 28 节结论的修正
+
+第 28 节我说「抛开投影优势只在 markdown 解析那 10×」—— 口径偏低：那 10× 是**整篇**形状
+（且 TS 侧整篇读数抖动大，89–147ms）。按**生产实际形状**（流式短尾 + 逐帧增长）量，
+优势是 **12–25×**。结论方向不变、量级上调：markdown 是这次迁移里唯一「结构性、可替换」的赢。
