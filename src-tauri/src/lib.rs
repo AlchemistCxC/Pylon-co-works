@@ -13,13 +13,14 @@ pub use pylon_core::agent_catalog;
 pub mod agent;
 mod agent_config;
 pub mod browser;
-mod correlation;
+// #247：correlation/hermes/provider_adapter 归位 pylon-core，路径经重导出保活。
+pub(crate) use pylon_core::correlation;
 mod cwd;
 mod dispatcher;
 mod error;
 mod export;
 mod gateway;
-mod hermes;
+pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
 mod lifecycle;
@@ -32,7 +33,7 @@ mod plugin_process;
 mod prism;
 mod private_interaction;
 mod protocol_adapter;
-pub mod provider_adapter;
+pub use pylon_core::provider_adapter;
 pub mod pylon_cli;
 mod runtime;
 mod runtime_log;

@@ -104,9 +104,9 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/src/acp` | ACP SDK engine（`agent-client-protocol`）、子进程、replay、wire trace、实例注册与诊断 cause | Rust Kernel | `engine.rs`、`client.rs`、`replay.rs`、`instance_registry.rs`、`cause.rs` |
-| `src-tauri/src/agent_config` | agents.yaml 解析、校验、原子写与补丁 API | Rust Kernel | `types.rs`、`load.rs`、`patch.rs`、`atomic_write.rs` |
-| `src-tauri/src/session` | Session create/prompt/load/state、SQLite repos | Rust Kernel | `persist.rs`、`msg_repo/mod.rs`、`msg_repo/migrations.rs`、`event_repo.rs` |
+| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：engine/client/negotiated/replay/wire trace/policies；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine.rs`、`client.rs`、`negotiated.rs` |
+| `src-tauri/src/agent_config` | agents.yaml 读取/补丁/原子写编排（AgentDef 值类型在 pylon-core） | Rust Kernel | `load.rs`、`patch.rs`、`atomic_write.rs` |
+| `src-tauri/pylon-session` | 会话存储核：canonical event / message / user_data 仓库、retention、turn 聚合（rusqlite，零 tauri） | 可复用 Kernel library | `event_repo/`、`msg_repo/`、`error.rs`（SessionError） |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
 | `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
 | `src-tauri/src/agent` | GUI 检测命令层（`detection.rs`：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消，P74 B0）与多 agent 运行时状态机（`runtime.rs`） | Rust Kernel | `detection.rs`、`runtime.rs` |

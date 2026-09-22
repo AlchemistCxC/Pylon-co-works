@@ -114,7 +114,7 @@ pub(crate) async fn fork_session_slot(
     let generation = state.current_generation(runtime);
     // 能力 gate（AC7）：fork 必须协商通过且消费者已注册（usable），否则稳定
     // unsupported——不因远端广告 true 就执行。
-    let snapshot = crate::acp::NegotiatedCapabilitySnapshot::capture(runtime)
+    let snapshot = crate::acp::capture_negotiated_snapshot(runtime)
         .await
         .map_err(PylonError::Protocol)?;
     if !snapshot.fork_usable() {

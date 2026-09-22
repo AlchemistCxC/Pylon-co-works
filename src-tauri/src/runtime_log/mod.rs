@@ -9,7 +9,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::correlation::RuntimeCorrelation;
+// #247：RuntimeLogContext 与功能域词汇下沉 pylon-core（引擎日志汇端口共享形状）。
 use crate::time::Timestamp;
+use pylon_acp::stderr::AGENT_STDERR_ECHO_TARGET;
+#[cfg(test)]
+use pylon_core::log_context::LOG_CATEGORY_STDERR;
+use pylon_core::log_context::{RuntimeLogContext, LOG_CATEGORY_FRONTEND};
 
 /// R18：生产 hub 注册处——run() 创建 hub 后写入，tracing Layer 按事件读取。
 /// 测试不安装 subscriber，Layer 不运行，无需注册。
@@ -28,19 +33,6 @@ const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 #[cfg(test)]
 const REDACTED: &str = "[REDACTED]";
 
-/// LOG-01：agent stderr 行回声专用 tracing target——该 target 只作 console/外部日志
-/// 出口（fmt layer），`RuntimeLogLayer` 跳过它，hub 唯一归属 = stderr reader 的显式
-/// push（保留真实行文本 + agent + correlation，同一行只进 hub 一次，方案书 §5.14）。
-pub(crate) const AGENT_STDERR_ECHO_TARGET: &str = "agent_stderr_echo";
-
-/// LOG-03：日志功能域分类词汇（集中定义防拼写漂移）。
-/// 本卡只填充可确定性判定的站点（stderr/frontend）；transport/session/permission/
-/// command/lifecycle 等域由后续结构化日志站点按此词汇填充（方案书 §5.14 增量字段
-/// `category`）。类别语义：`stderr`=agent 原始 stderr 行（可与结构化后端日志分离筛选），
-/// `frontend`=前端日志（source 亦固定为 frontend）。
-pub const LOG_CATEGORY_STDERR: &str = "stderr";
-pub const LOG_CATEGORY_FRONTEND: &str = "frontend";
-
 /// LOG-03：结构化日志上下文——RuntimeLogEntry 增量字段的推进入口（方案书 §5.14：
 /// code/category/agentId/provider/source/sessionId/clientGeneration/requestId/toolCallId/
 /// recoverable/userActionRequired/rawAvailable）。
@@ -48,22 +40,6 @@ pub const LOG_CATEGORY_FRONTEND: &str = "frontend";
 /// 已由 [`crate::correlation::RuntimeCorrelation`] + 既有 `session` 字段承载（OBS-02），
 /// 本 context 只承载判定性增量字段。全部 `Option` + `skip_serializing_if`：缺失不上 wire，
 /// 旧 UI 不认识新字段时不影响既有解析（OBS-02 兼容性纪律，同 correlation.rs）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeLogContext {
-    /// 机器可读错误码（稳定契约，前端可分支）。值域：agent 结构化 stderr 自报码
-    /// （agent 命名空间）或 Pylon wire_code（DEL-05 词汇），不得发明新码；
-    /// agent_unavailable 等内部测试码不进该字段（DEL-05 CR-002）。
-    pub code: Option<String>,
-    /// 日志功能域分类（词汇见 [`LOG_CATEGORY_STDERR`] / [`LOG_CATEGORY_FRONTEND`]）。
-    pub category: Option<String>,
-    /// 该错误是否可重试/自愈（语义由填充方定义；stderr 文本行不可判定 → None）。
-    pub recoverable: Option<bool>,
-    /// 是否需用户操作介入（同上；本卡无填充站点）。
-    pub user_action_required: Option<bool>,
-    /// 该条是否承载真实原始文本（可能经脱敏；区别于历史 B 型占位符"Agent stderr output"）。
-    pub raw_available: Option<bool>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +138,7 @@ impl RuntimeLogHub {
 
     /// OBS-02：带 correlation context 的 push（统一身份进运行时日志）。
     /// correlation=None 时与旧 push 完全一致（wire 不新增字段，旧 UI 兼容）。
-    // #245：结构化字段面即 8 参（历史基线项，原 runtime_log.rs 路径随文件归目录迁移）。
+    // #247：结构化字段面即 8 参（历史基线项，原 runtime_log.rs 路径随存储核分域迁移）。
     #[allow(clippy::too_many_arguments)]
     pub fn push_with_correlation(
         &self,
@@ -189,7 +165,7 @@ impl RuntimeLogHub {
     /// LOG-03：带结构化上下文的 push（增量字段 code/category/recoverable/
     /// userActionRequired/rawAvailable 的唯一推进入口）。context 为缺省值时与
     /// `push_with_correlation` 完全一致（wire 不新增字段，旧 UI 兼容）。
-    // #245：同上——9 参为结构化上下文面，历史基线项随文件归目录迁移保留。
+    // #247：同上——9 参为结构化上下文面，历史基线项随 crate 分域保留。
     #[allow(clippy::too_many_arguments)]
     pub fn push_with_context(
         &self,
@@ -497,6 +473,33 @@ pub(crate) fn sanitize_message(message: String) -> String {
 
 fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
     crate::sanitize::sanitize_fields(fields)
+}
+
+// #247：引擎日志汇端口（pylon-acp::runtime_sink）的宿主侧实现——转发到
+// 同名固有方法，ring buffer/脱敏/查询语义零变化。
+impl crate::acp::runtime_sink::RuntimeLogSink for RuntimeLogHub {
+    fn push_with_context(
+        &self,
+        timestamp: Timestamp,
+        level: String,
+        source: String,
+        session: Option<String>,
+        message: String,
+        fields: Map<String, Value>,
+        correlation: Option<RuntimeCorrelation>,
+        context: RuntimeLogContext,
+    ) {
+        self.push_with_context(
+            timestamp,
+            level,
+            source,
+            session,
+            message,
+            fields,
+            correlation,
+            context,
+        );
+    }
 }
 
 #[cfg(test)]
