@@ -647,3 +647,15 @@
 
 **我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
 =======
+
+---
+
+[2026-09-23 06] [Miyaki Kumo] [#259]
+
+**开工：issue259（code-stats crate 清单漂移修复——pylon-acp/pylon-session 入表，清单改随 Cargo workspace members 动态解析）。** 分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`
+- `.agents/skills/code-stats/SKILL.md`（口径同步）
+- `.agents/records/259-*.md`（完工时新增）、本文件
+
+**我不碰**：`src/`（#257/#258 等在途域）、`src-tauri/**`、`tools/**`。全程 pathspec 提交。
