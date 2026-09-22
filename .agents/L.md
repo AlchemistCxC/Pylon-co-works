@@ -631,4 +631,19 @@
 - `.agents/records/`（完工时各补一条开发记录）、`.agents/L.md`（本条）
 
 另 #250/#252 已登记在案（#250 修复未开工；#252 File 只读化未开工）。各条目完工合入后即撤。
+
+---
+
+[2026-09-23 05] [Miyaki Kumo] [#258]
+
+**开工：issue258（stderr 处理管线去重与分配削减——不改行为纯性能/质量）。** spec 见 `.agents/spec/258-stderr-pipeline-dedup.md`。分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `src-tauri/pylon-acp/src/stderr.rs`（解析收敛一次 + 新增分类钉子测试）
+- `src-tauri/pylon-acp/src/stderr_tail.rs`（`sanitize_diagnostic` is_match 守卫 + `summarize_parser_error` OnceLock 预编译；**既有测试不动**）
+- `src-tauri/pylon-foundations/src/sanitize.rs`（仅 `sanitize_message` 签名 `String`→`&str`，函数体不变）
+- `src-tauri/src/runtime_log/mod.rs`（仅 `sanitize_message` 薄包装签名跟随 + `:192` 调用点）
+- `src-tauri/src/permission.rs`（仅 `:101` 调用点借用化一行）
+- 文档：`.agents/records/258-*.md`（完工时新增）、本文件
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
 =======
