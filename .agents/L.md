@@ -290,7 +290,6 @@
 
 **追加施工**（同分支同 issue 域，PR #177 审查遗留收口）：`ingest_established_config_options_event` 幂等去重（防重复 load/revive 线性膨胀 journal）+ revive 写入路径集成测试。**本轮新增触碰文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/event_repo.rs`（新增 `latest_event_of_type` 定向查询 + 单测——该文件在 #110 Huygens 条目亦有声明，本轮只追加方法与测试，不动既有行）。其余触碰沿用 2026-09-19 05 条目文件域：`src-tauri/src/session/create.rs`、`src-tauri/tests/issue53_selector_probe/mod.rs`、开发记录、本文件。
 
-
 ---
 
 [2026-09-19 07] [Miyaki Kumo] [#172 收口·errorPayload 抽模块 + ADR-0013]
@@ -602,14 +601,3 @@
 
 ---
 
-[2026-09-22 16] [Miyaki Kumo] [#245]
-
-**开工：后端 `src-tauri/src/` 根目录散落文件归类（纯 `git mv` + 模块路径修正，零行为变更）。** spec 见 `.agents/spec/245-host-src-file-regroup.md`。分支 `Ru5t/host-src-regroup`（自 `github/main` 新开——Reflector 与 renderer-memory-probe 均压有未合并工作，本重构需要干净 diff，勿 merge 带走）。
-
-**我方本轮文件域（大体量移动，请勿改写、勿连带提交）**：
-
-- `src-tauri/src/` 根约 25 个文件 `git mv` 入家族目录（browser/gateway/hermes/mcp/pet/prism/workspaces/agent/session/runtime_log/acp），lib.rs 声明与全 crate `crate::X` 路径修正
-- `src-tauri/config-template.rs`（删除，全仓零引用的死脚手架）、`src-tauri/winds.c` → `src-tauri/tools/winds.c`（归档 + 头注释）
-- `docs/说明书/Pylon-项目架构参考.md`（文件表路径同步）、`.agents/records/`、本文件
-
-**我不碰**：`test_harness.rs`/`test_utils.rs`（原地不动）、全部实现逻辑（diff 只有路径/声明/use 行）、前端 `src/**`、pylon-* 子 crate、`tools/**`、他人在途域。
