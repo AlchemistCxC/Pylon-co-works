@@ -5,11 +5,11 @@
 //! 只做决策与簿记，命令层（browser_agent_cmds）按 hub 决策调度。
 
 #[cfg(windows)]
-use crate::browser_agent::cdp::CdpState;
-use crate::browser_agent::claim::ClaimManager;
-use crate::browser_agent::policy::BrowserAccessMode;
-use crate::browser_agent::refs::RefRegistry;
-use crate::browser_agent::settings::BrowserAgentSettings;
+use crate::browser::agent::cdp::CdpState;
+use crate::browser::agent::claim::ClaimManager;
+use crate::browser::agent::policy::BrowserAccessMode;
+use crate::browser::agent::refs::RefRegistry;
+use crate::browser::agent::settings::BrowserAgentSettings;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -103,7 +103,7 @@ impl BrowserAgentHub {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browser_agent::policy::AgentBrowserTool;
+    use crate::browser::agent::policy::AgentBrowserTool;
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir =

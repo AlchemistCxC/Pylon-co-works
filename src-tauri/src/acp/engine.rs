@@ -586,7 +586,7 @@ pub(crate) async fn spawn_agent_child(
         )
         .into());
     }
-    let hermes_runtime = crate::hermes_runtime::prepare(agent)
+    let hermes_runtime = crate::hermes::runtime::prepare(agent)
         .await
         .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
     // 托管运行时要现查 PATH 与 Git Bash，无法离线进入 plan；它作为显式的运行时
@@ -613,7 +613,7 @@ pub(crate) async fn spawn_agent_child(
         .stderr(Stdio::piped());
     super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
-        crate::hermes_runtime::apply_to_command(&mut cmd, agent, selection);
+        crate::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
     }
     let child = cmd
         .spawn()

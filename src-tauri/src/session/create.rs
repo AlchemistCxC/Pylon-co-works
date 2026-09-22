@@ -18,7 +18,7 @@ pub(crate) fn replace_session_slot(
     max_sessions: usize,
 ) -> Result<Option<SessionInfo>, PylonError> {
     // 方案 8：委托 SessionStore（满额策略 + mapping_ready 通知 + 锁序纪律）。
-    crate::session_store::insert(
+    crate::session::store::insert(
         runtime,
         source,
         session,
@@ -884,7 +884,7 @@ async fn create_session_slot(
 ) -> Result<SessionMapping, PylonError> {
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if sessions.len() >= crate::agent_runtime::SessionSlotPolicy::default().max_sessions {
+        if sessions.len() >= crate::agent::runtime::SessionSlotPolicy::default().max_sessions {
             return Err(PylonError::Protocol("max sessions reached".to_string()));
         }
     }
@@ -974,9 +974,9 @@ async fn create_session_slot(
         source,
         session,
         false,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
-    let attached = crate::session_store::mark_attached_if_current(
+    let attached = crate::session::store::mark_attached_if_current(
         runtime, source, &peri_id, generation, generation,
     )
     .map_err(|error| PylonError::Protocol(error.to_string()))?;
@@ -1041,9 +1041,9 @@ pub(crate) async fn ensure_session_mapping(
         .cloned()
     {
         let unavailable = match health {
-            crate::agent_runtime::SessionBindingHealth::Attached { .. } => None,
-            crate::agent_runtime::SessionBindingHealth::Probing { .. } => Some("probing"),
-            crate::agent_runtime::SessionBindingHealth::Detached { .. } => Some("detached"),
+            crate::agent::runtime::SessionBindingHealth::Attached { .. } => None,
+            crate::agent::runtime::SessionBindingHealth::Probing { .. } => Some("probing"),
+            crate::agent::runtime::SessionBindingHealth::Detached { .. } => Some("detached"),
         };
         if let Some(health) = unavailable {
             return Err(PylonError::SessionBindingUnavailable {
@@ -1328,9 +1328,9 @@ async fn revive_session_slot(
         source,
         session,
         true,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
-    let attached = crate::session_store::mark_attached_if_current(
+    let attached = crate::session::store::mark_attached_if_current(
         runtime,
         source,
         &revived_peri_id,

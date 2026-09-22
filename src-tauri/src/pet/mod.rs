@@ -1,5 +1,7 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
+pub(crate) mod cmds;
+
 pub use pylon_pet_core::{
     AchievementInfo, AiEvent, CosmeticInfo, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome,
 };

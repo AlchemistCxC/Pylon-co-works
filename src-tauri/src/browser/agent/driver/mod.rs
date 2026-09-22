@@ -10,7 +10,7 @@
 //!   （CDP 用网络事件环形缓冲，JS 用轮询）。
 
 pub(crate) mod js;
-// CDP 传输在 `browser_agent::cdp`（文件级 `#![cfg(windows)]`：非 Windows 编译为空
+// CDP 传输在 `browser::agent::cdp`（文件级 `#![cfg(windows)]`：非 Windows 编译为空
 // 模块，能力缺失由命令层显式返回 `unsupported_on_platform`）。
 
 /// 一次页面快照中的可交互元素（ref 序列由 Rust 侧分配）。

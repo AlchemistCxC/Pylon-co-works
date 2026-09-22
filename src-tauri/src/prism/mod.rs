@@ -4,6 +4,8 @@
 //! `PRISM_ADMIN_API_TOKEN`。客户端不暴露任意 URL/HTTP method，避免把
 //! Tauri command 变成通用 SSRF 或本地管理接口代理。
 
+pub(crate) mod cmds;
+
 use reqwest::{Client, Method, Url};
 use serde_json::Value;
 use std::env;

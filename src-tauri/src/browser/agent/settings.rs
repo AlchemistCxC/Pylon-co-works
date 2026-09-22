@@ -6,7 +6,7 @@
 //! 经命令解析有效档位。
 
 use crate::agent_config::write_config_atomically;
-use crate::browser_agent::policy::BrowserAccessMode;
+use crate::browser::agent::policy::BrowserAccessMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

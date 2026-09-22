@@ -6,17 +6,17 @@
 //! 基础设施故障才返回 `Err(PylonError)`。MCP 桥与 pylon_cli 两条通道都经过
 //! 本层，策略不存在旁路。
 
-use crate::browser_agent::audit::{
+use crate::browser::agent::audit::{
     append_audit, recent_audit, BrowserAuditEntry, AUDIT_MAX_ENTRIES,
 };
-use crate::browser_agent::claim::{ClaimAcquireError, ClaimUseError};
-use crate::browser_agent::driver::js;
-use crate::browser_agent::hub::{denial, BrowserAgentHub};
-use crate::browser_agent::policy::{
+use crate::browser::agent::claim::{ClaimAcquireError, ClaimUseError};
+use crate::browser::agent::driver::js;
+use crate::browser::agent::hub::{denial, BrowserAgentHub};
+use crate::browser::agent::policy::{
     check_tool_allowed, check_url_allowed, AgentBrowserTool, BrowserAccessMode,
 };
-use crate::browser_agent::settings::BrowserAgentSettings;
-use crate::browser_agent::{cdp, driver};
+use crate::browser::agent::settings::BrowserAgentSettings;
+use crate::browser::agent::{cdp, driver};
 use crate::error::PylonError;
 use crate::session::user_data_service_of;
 use crate::AppState;
@@ -1256,10 +1256,10 @@ fn resolve_click_target(
             .ok()
             .and_then(|registry| registry.resolve(tab_id, reference).cloned());
         return match target {
-            Some(crate::browser_agent::refs::RefTarget::Js { selector, name, .. }) => {
+            Some(crate::browser::agent::refs::RefTarget::Js { selector, name, .. }) => {
                 Ok((selector, name))
             }
-            Some(crate::browser_agent::refs::RefTarget::Cdp { .. }) => Err(denial(
+            Some(crate::browser::agent::refs::RefTarget::Cdp { .. }) => Err(denial(
                 "stale_ref",
                 "ref 注册表不含选择器（CDP 型）；请重新 browser_snapshot",
             )),

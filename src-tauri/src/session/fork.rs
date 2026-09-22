@@ -158,7 +158,7 @@ pub(crate) async fn fork_session_slot(
         child_source,
         child,
         true,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
     record_fork_link(
         child_source,

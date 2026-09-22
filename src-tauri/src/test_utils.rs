@@ -235,8 +235,8 @@ pub(crate) async fn test_state_with_acp(
 /// Connected 状态 runtime（替代 lifecycle.rs:621-625 / 686-689 内联状态赋值）。
 pub(crate) fn connected_runtime() -> Arc<AgentRuntime> {
     let runtime = AgentRuntime::new_disconnected();
-    *runtime.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
-        status: crate::agent_runtime::AgentLifecycleStatus::Connected,
+    *runtime.agent_runtime.lock().unwrap() = crate::agent::runtime::AgentRuntimeState {
+        status: crate::agent::runtime::AgentLifecycleStatus::Connected,
         last_error: None,
         last_connected_at: None,
         activated_config_fingerprint: None,
@@ -383,7 +383,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .status,
-            crate::agent_runtime::AgentLifecycleStatus::Connected,
+            crate::agent::runtime::AgentLifecycleStatus::Connected,
             "connected_runtime 必须置 Connected"
         );
     }

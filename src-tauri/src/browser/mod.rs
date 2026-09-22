@@ -5,6 +5,13 @@
 //! 所有子 WebView。地址栏、window.open 与初始 URL 共用 http/https 白名单（仅额外允许
 //! 内部初始化用 about:blank）。缩放属于 Browser Sheet，新标签继承当前值。
 
+// #245：browser 家族归目录；bridge 保持对外可见（原 pub mod browser_bridge），
+// 其余成员沿用原 crate 根私有 mod 的 crate 级可见（pub(crate)）。
+pub(crate) mod agent;
+pub(crate) mod agent_cmds;
+pub mod bridge;
+pub(crate) mod cmds;
+
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -115,7 +122,7 @@ pub(crate) fn is_allowed_browser_url(url: &url::Url) -> bool {
 pub(crate) struct BrowserManager {
     inner: Mutex<BrowserInner>,
     /// 页面加载钩子（issue #82）：Agent 层在此失效 ref 注册表等 per-tab 状态。
-    page_load_hooks: Mutex<Vec<crate::browser_agent::PageLoadHook>>,
+    page_load_hooks: Mutex<Vec<crate::browser::agent::PageLoadHook>>,
 }
 
 struct BrowserInner {
@@ -162,7 +169,7 @@ impl BrowserManager {
     }
 
     /// 注册页面加载钩子（tab 导航完成时以 tab_id 回调；失败静默）。
-    pub(crate) fn register_page_load_hook(&self, hook: crate::browser_agent::PageLoadHook) {
+    pub(crate) fn register_page_load_hook(&self, hook: crate::browser::agent::PageLoadHook) {
         if let Ok(mut hooks) = self.page_load_hooks.lock() {
             hooks.push(hook);
         }

@@ -471,7 +471,7 @@ impl AcpClient {
 
                 let mut client = AcpClient {
                     child,
-                    protocol: crate::hermes_runtime::effective_protocol(agent),
+                    protocol: crate::hermes::runtime::effective_protocol(agent),
                     capability_registry: CapabilityRegistry::default(),
                     backend,
                     crashed,
