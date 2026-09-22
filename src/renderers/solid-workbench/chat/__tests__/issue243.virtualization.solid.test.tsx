@@ -24,8 +24,8 @@ class ResizeObserverMock {
   constructor(private readonly callback: ResizeObserverCallback) {
     ResizeObserverMock.instances.push(this)
   }
-  emit() {
-    this.callback([], this as unknown as ResizeObserver)
+  emit(entries?: ResizeObserverEntry[]) {
+    this.callback(entries ?? [], this as unknown as ResizeObserver)
   }
   unobserve = vi.fn()
 }
@@ -61,6 +61,7 @@ function mountScroller() {
   }) as unknown as typeof scroller.scrollTo
   return {
     scroller,
+    readScrollTop: () => scrollTop,
     jumpTo: (value: number) => {
       scrollTop = value
       scroller.dispatchEvent(new Event('scroll'))
@@ -207,6 +208,38 @@ describe('PlainMessageList #243 行虚拟化', () => {
     ;(globalThis as { __probeTag?: string }).__probeTag = 'after-update'
     await waitFor(() => expect(result.container.querySelector('[data-message-id="m0"]')).toHaveTextContent('row 0 updated'))
     expect(result.container.querySelector('[data-message-id="m0"]')).toBe(stable)
+  })
+
+  it('#243 实测回填：pin 姿态下视口起点之上的行按实测差值补偿 scrollTop（引擎修正链路）', async () => {
+    // 行元素真实高度 76px（与估算一致）；jsdom 无布局，桩在 HTMLElement 原型上
+    const proto = HTMLElement.prototype
+    Object.defineProperty(proto, 'offsetHeight', { get: () => 76, configurable: true })
+    try {
+      const { scroller, readScrollTop, jumpTo } = mountScroller()
+      let port!: MessageListPort
+      const result = render(() => (
+        <PlainMessageList
+          initialItems={[]} virtualization="on" scrollViewport={() => scroller}
+          scrollPosture={() => 'pin'}
+          onPortReady={value => { port = value }} renderItem={item => item.key}
+        />
+      ), { container: scroller })
+      port.setItems(makeItems('m', 200, 'row'))
+      await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
+
+      // 视口下移 400px：m0/m1 整体位于视口起点之上（76+76 ≤ 400）
+      jumpTo(400)
+      await waitFor(() => expect(readScrollTop()).toBe(400))
+
+      // m1 实测长高 100px：经引擎 RO → resizeItem → 姿态门控（pin）→ scrollTop +100
+      const m1 = result.container.querySelector<HTMLElement>('[data-message-id="m1"]')!
+      Object.defineProperty(m1, 'offsetHeight', { value: 176, configurable: true })
+      const entry = { target: m1, borderBoxSize: [{ inlineSize: 100, blockSize: 176 }] } as unknown as ResizeObserverEntry
+      ResizeObserverMock.instances.at(-1)!.emit([entry])
+      await waitFor(() => expect(readScrollTop()).toBe(500))
+    } finally {
+      delete (proto as { offsetHeight?: unknown }).offsetHeight
+    }
   })
 
   it('#243 切片4：行卸载后再挂载不重解析（markdown LRU 计数证明，D7 改口径②）', async () => {

@@ -33,6 +33,13 @@ class ResizeObserverMock {
   unobserve = vi.fn()
 }
 
+/** 组件自己的 RO：引擎（有 scrollViewport 时 adapter onMount 先建）与 #243 的内容
+ * 容器观察器也在 instances 里，以「观察了列表容器」这一特征定位，不依赖顺序。 */
+function componentObserver() {
+  return ResizeObserverMock.instances.find(m =>
+    m.observe.mock.calls.some(c => (c[0] as HTMLElement | undefined)?.classList?.contains('plain-message-list')))!
+}
+
 beforeEach(() => {
   ResizeObserverMock.instances = []
   vi.stubGlobal('ResizeObserver', ResizeObserverMock)
@@ -323,7 +330,7 @@ describe('PlainMessageList', () => {
   it('#212 S4：pin 姿态下上方行高度变化时补偿 scrollTop（自管锚点）', () => {
     const { scroller, readScrollTop, shiftContent } = mountInScroller({ posture: 'pin' })
     const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-    const observer = ResizeObserverMock.instances.at(-1)!
+    const observer = componentObserver()
     // 文档空间 top = rect.top - 视口顶(0) + scrollTop(100)。row0 全在视口上方 ⇒ 不参与；
     // row1 从视口顶开始 ⇒ 它是锚。
     rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
@@ -342,7 +349,7 @@ describe('PlainMessageList', () => {
   it('#212 S4：follow 姿态不补偿（贴底跟随才是意图）', () => {
     const { scroller, readScrollTop } = mountInScroller({ posture: 'follow' })
     const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-    const observer = ResizeObserverMock.instances.at(-1)!
+    const observer = componentObserver()
     rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
     rows[1]!.getBoundingClientRect = () => rectOf(-100, 30)
     observer.emit()
@@ -414,7 +421,7 @@ describe('PlainMessageList', () => {
       <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} onContentResize={onContentResize} renderItem={item => item.key} />
     ))
     const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
-    const observer = ResizeObserverMock.instances[0]!
+    const observer = componentObserver()
 
     port!.invalidateMeasurements('theme-changed')
     expect(container.dataset.measurementRevision).toBe('1')
