@@ -163,3 +163,56 @@ IPC wire 与持久化格式不变。
 - **`check:csp` 与那次 CSP P0 的修复不变**：打包态 `connect-src` 缺 `'self'` 曾使 wasm
   在发行包里从未加载（真机验收 §25.1）。wasm 仍有 markdown 与流式两个产物，这条门禁继续有效。
 - 本 ADR 的**方法论**不变：跨语言计算核只有在「同形状、等量工作、可复现」的对照下才谈收益。
+
+---
+
+## 修订 2（2026-09-22）· 高亮退出 wasm：wasm 只留 markdown 解析 + 流式
+
+**状态**：已生效（同日在 `Ru5t/Reflector` 上落地，issue #241 / PR 见该 issue）。
+**取代**修订 1 表中「WP4 markdown 解析 / 高亮 → 保留在 wasm」的**高亮那半**；markdown 解析仍保留。
+
+### 改了什么
+
+| 面 | 去向 |
+| --- | --- |
+| WP4 markdown **解析**（comrak） | **保留在 wasm** |
+| WP4 代码**高亮**（syntect + 14 份 vendored tmLanguage） | **迁出 wasm** → 前端 Lezer（`src/components/chat/lezerHighlight.ts`） |
+
+引擎选型与类名映射的取舍另见 **ADR-0020**；本条只记 **wasm 边界的这次收窄**。
+
+### 依据（本仓实测）
+
+1. **语法资产的成本形状与算力无关**（#240）：14 个语法各占一个 `'static OnceLock<SyntaxSet>`
+   槽位，**首次用到该语言才编译、编译后永不清除**；驱动 wasm 线性内存高水位的是**编译峰值存活**
+   而非保留尺寸。实测原生 css **18.06MB** / ts **12.67MB** 峰值；真机渲染器进程按语言 +42.0MB /
+   +31.5MB 的**不可归还台阶**（wasm 线性内存只涨不落，GC 不可见）。css 那 18MB 里 **88%** 来自
+   10 个关键字列表模式。
+2. **规模占比**：语法资产约占渲染器可控内存的 **30%**（同轮定位）。
+3. **换引擎不解决**：#241 的引擎对比（内存 / 延迟 / 覆盖 / 掉色四表）里，starry-night 本身
+   就是 wasm（`vscode-oniguruma`），内存更差且**同样不可归还**；Prism 覆盖率不足；worker 化
+   只是把同一份常驻挪到另一个进程。⇒ 要的是**没有「按语言编译的常驻资产」**这一类成本。
+4. **Lezer 的落点**：与应用内文件编辑器（CodeMirror 6）同一套引擎，按语言**懒加载**语法，
+   语法是普通 JS 模块（可被 V8 回收），不进 wasm 线性内存。
+
+### 后果
+
+- `pylon-markdown` wasm 产物 **2,872,825 → 428,930 B raw（−85.1%）**，glue 15,783 → 12,469 B；
+  wasm 总 gzip **962,801 → 198,431 B（−79.4%）**。`check-bundle-size.mjs` 的 wasm 预算随之
+  **下调** 1,110,000 → **230,000**（留 16% 余量）——修订 1 那次预算里 909,563 B gzip 正是被删的
+  语法资产，不随删随降等于把这一档放空 80%。
+- 代价侧：Lezer 引擎以**懒加载 JS chunk** 落在 JS 总额里（约 78.5 KB gzip，未进主 chunk）。
+- 渲染器进程 private **193.4MB → 107.7MB**（#241 刀2 真机 A/B，同一探针同一状态），
+  「+42MB 入视口台阶」一并消失。
+- 退役项：`highlight.rs`/`theme.rs`/`tm_language.rs`、`assets/grammars/*`（728KB）+
+  `starry-theme.json`、`gen/generate-assets.mjs`、`parity/{dump-ts.mjs,diff.mjs,ts-baseline.json,
+  parity-report.json}`、`starryCore.ts`、syntect 依赖、`@wooorm/starry-night` + `vscode-oniguruma`。
+
+### 不变的部分
+
+- **`parseMarkdown`（comrak）留在 wasm**：它在同形状对照里是赢的那半（markdown 流式形 **12–25×**），
+  且**没有**语法资产那种「编译即常驻、不可归还」的成本。crate 不删，markdown parity 快照锁保留
+  （117 条，只是摘掉了 highlight 组）。
+- **高亮的对外契约不变**：仍产 `pl-*` 类名、仍由 `--syn-*` CSS 变量配色、仍是「整块进 / 行数组出」，
+  插件 provider（`highlightCode`，HTML 串进出）与四个消费面零改动。改的只是**谁在算**。
+- 本 ADR 的**方法论**不变：跨语言计算核只有在「同形状、等量工作、可复现」的对照下才谈收益——
+  这次反向适用：**当一项成本的形状（不可归还的常驻峰值）与算法无关时，换语言不是解法，换机制才是。**
