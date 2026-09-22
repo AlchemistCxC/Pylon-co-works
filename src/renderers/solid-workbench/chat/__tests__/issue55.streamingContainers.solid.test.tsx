@@ -86,19 +86,21 @@ describe('issue 55: streaming Markdown retains container context', () => {
       expect(live.container.querySelector(selector)).not.toBeNull()
       expect(replay.container.querySelector(selector)).not.toBeNull()
     })
-    // 高亮是**异步**的（#221 帧预算调度后两条路径各自 await `highlightCode`：流式走
-    // `scheduleHighlightJob`、非流式走 `createResource`），上面那个 waitFor 只等到代码块
-    // **容器**出现——那是首帧就有的，此时 token span 还没落地。CI 4 vCPU 并发分片下
-    // 「live 未落地 vs replay 已落地」会把结构比红（#237：docs-only 提交同样红 ⇒ 是断言抢跑，
-    // 不是产品分歧）。故含代码块的 case 在比结构之前先等两侧高亮落地；
-    // **只加等待、不改判据**——下面仍是逐字节严格相等，不是「最终相等」。
-    if (selector.includes('term-code-block')) {
-      await waitFor(() => {
-        expect(live.container.querySelector('.term-code-text span')).not.toBeNull()
-        expect(replay.container.querySelector('.term-code-text span')).not.toBeNull()
-      })
-    }
     const bodyHtml = (container: HTMLElement) => container.querySelector('.term-reasoning-body')?.innerHTML
-    expect(bodyHtml(live.container)).toBe(bodyHtml(replay.container))
+    if (selector.includes('term-code-block')) {
+      // #237：含代码块时两侧的**高亮是异步**的（#221 帧预算调度后两条路径各自 await
+      // `highlightCode`），上面那个 waitFor 只等到代码块**容器**出现——那是首帧就有的。
+      // 于是 CI 并发分片下会拿「live 高亮未落地」去比「replay 已落地」而红，且是**方向
+      // 不定**的抢跑（docs-only 提交同样红）。
+      // 判据拆两步：① replay 是终态渲染（文本完整、非流式），它的高亮必然落地 —— 先等它，
+      // 这同时钉住「高亮确实发生了」（语法包缺失会在此失败）；② live 是流式路径、结算更晚，
+      // 等它与 replay 收敛后再比结构。**判据仍是逐字节相等**，只是把「何时比」等到结算之后。
+      await waitFor(() => {
+        expect(replay.container.querySelector('.term-code-text span')).not.toBeNull()
+        expect(bodyHtml(live.container)).toBe(bodyHtml(replay.container))
+      }, { timeout: 5_000 })
+    } else {
+      expect(bodyHtml(live.container)).toBe(bodyHtml(replay.container))
+    }
   })
 })
