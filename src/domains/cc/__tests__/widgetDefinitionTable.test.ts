@@ -166,7 +166,7 @@ describe('#238 · 定义表不变量 4：成员与容器不进三份名单', () 
 
   it('成员 id 不得落进常态放行 / 空态隐藏这两份名单', () => {
     const memberIds = memberRows.map(({ member }) => member.id)
-    expect(memberIds.filter(id => EMPTY_STATE_HIDDEN_WIDGET_IDS.includes(id))).toEqual([])
+    expect(memberIds.filter(id => (EMPTY_STATE_HIDDEN_WIDGET_IDS as readonly string[]).includes(id))).toEqual([])
     expect(memberIds.filter(id => (ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).includes(id))).toEqual([])
   })
 })
