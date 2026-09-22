@@ -620,6 +620,10 @@
 
 **开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支沿用 `Ru5t/renderer-memory-probe`（#240 附六/探针所在支，PR #242 在途；#243 实现为堆叠提交）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
 
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**进展：issue243 切片 1~5 全部落地（引擎 TanStack spacer 方案，对 issue 目标结构 4「逐行占位盒」有已论证偏离），门禁全绿，即将推送开 PR（堆叠于 #242）。在途条目保留至合入。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
 本轮文件域（请勿改写、勿连带提交）：
 
 - 核心：`src/renderers/solid-workbench/chat/PlainMessageList.solid.tsx`、**新增** `src/renderers/solid-workbench/chat/rowHeightTable.ts`、`rowHeightEstimate.ts`
