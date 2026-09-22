@@ -102,6 +102,25 @@ export function contentBlockToDiffPayload(block: ContentBlock): DiffPayload | nu
   return diffPayloadFromObject(block)
 }
 
+/**
+ * 单遍统计「trim 后非空」的行数——与 `split('\n').filter(l => l.trim()).length`
+ * 逐行等价，但免建整段行数组。流式期间工具卡每次投影都重建模型（大输出动辄
+ * 数千行），此前该表达式每次全量分配两遍（#260-C8）。
+ */
+export function countNonEmptyLines(text: string): number {
+  if (!text) return 0
+  let count = 0
+  let start = 0
+  let index = text.indexOf('\n')
+  while (index !== -1) {
+    if (text.slice(start, index).trim().length > 0) count++
+    start = index + 1
+    index = text.indexOf('\n', start)
+  }
+  if (text.slice(start).trim().length > 0) count++
+  return count
+}
+
 export interface ToolRenderModel {
   kind: ToolKind
   action: ToolAction
@@ -141,7 +160,7 @@ export function buildToolRenderModel(tool: ToolRenderInput): ToolRenderModel {
   const output = tool.output ?? ''
   const diffBlock = tool.contentBlocks?.find(block => block.type === 'tool_diff_content')
   const diffPayload = diffBlock ? contentBlockToDiffPayload(diffBlock) : null
-  const outputLines = output ? output.split('\n').filter(line => line.trim().length > 0).length : 0
+  const outputLines = countNonEmptyLines(output)
   const summaryFields = resolution.summaryFields && resolution.summaryFields.length > 0
     ? resolution.summaryFields
     : undefined

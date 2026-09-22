@@ -45,7 +45,7 @@ export function resolveSpinnerFrames(preset: SpinnerFramePreset, custom: string)
 export type SpinnerMarkerMode = 'frame' | 'custom'
 
 export function resolveSpinnerMarker(
-  frames: string[],
+  frames: readonly string[],
   mode: SpinnerMarkerMode,
   value: string,
 ): string {
