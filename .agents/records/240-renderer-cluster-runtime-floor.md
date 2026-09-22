@@ -423,3 +423,63 @@ Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory |
 
 我们的 ~55 MB 是整簇 ~480 MB 唯一物理的 **~11%**；即使全部压掉也只改一成。
 性价比排序：**`--in-process-gpu`（−39 MB，已实测）> 长会话虚拟化（改斜率）> 宿主 30 MB 归因 > 镜像/包体瘦身 > 缓存回收**。
+
+## 附六：长会话行虚拟化调查
+
+用户判断「只有这个值得做」。本节记录现状、实测斜率、契约约束与设计选项。
+
+### 一、现状：已有挂载窗口，但它只增不减
+
+- 行链路：`projectWorkbench` → `buildChatRowDescriptors`（`chat/chatRowPipeline.ts:69`）→ `MessageListItem`（引用相等门，`WorkbenchContent.solid.tsx:210-222`）
+  → `PlainMessageList` 的 `<For each={visibleRows()}>`（`chat/PlainMessageList.solid.tsx:305-330`）→ `WorkbenchRow` → `MessageRow` 产出 `.term-row`（`chat/MessageRow.solid.tsx:39-46`）
+  → `MarkdownContent` → `MarkdownSegment`（解析模型）→ `MarkdownNode` 建 DOM。
+- **#212 S3b 渐进挂载窗口**：`MOUNT_WINDOW_INITIAL=16` / `MOUNT_WINDOW_STEP=32`，**只在「整批换代」（冷开/切会话）时生效，且窗口只增不减**
+  （`PlainMessageList.solid.tsx:41-49` 常量、`96-115` reconcile、`125-130` 尾部切片）；`pin` 姿态直接全挂；scrollTo 目标不在窗口时全开后重试（`166-180`）。
+  ⇒ **它压的是首帧解析量，不是稳态驻留**（本次实测坐实：窗口会一路扩满，见下）。
+- 无行级虚拟化。#212 裁决明文「不做行虚拟化」，且记录自己标注挂载窗口参数「未经真机验证」；
+  #221 **否决了 `content-visibility: auto`**（理由：与观察器双重机械、span DOM 照旧常驻、intrinsic-size 滚动条跳动）——
+  注意它省的是布局/绘制，**不省内存**，故不是本问题的解。
+- 既有的内存侧局部机制：#208（代码块折叠 400 行 + reasoning 惰性渲染 + 2 MB 字符 LRU）、#221（高亮视口门控 + 圈外降级 + 帧预算调度）、markdown LRU/graft 字符预算。
+- 行测量与锚定：`PlainMessageList` 有 per-row ResizeObserver（`226-237`、`295-303`）与**自管锚点**（`captureAnchor` 260-275 / `syncAnchorCompensation` 277-291，锚是「messageId+top」对，**没有行高表**；
+  `messageListPort.ts:6` 的 `estimatedHeight` 字段全仓无消费点）。贴底跟随在 `WorkbenchContent` 用整体 ResizeObserver + rAF 合并写 scrollTop。
+
+### 二、实测斜率（探针 `__tests__/sessionScale.probe.test.tsx`，默认 `describe.skipIf` 跳过）
+
+| 消息数 | 行数 | **实际挂载行** | DOM 节点 | 节点/行 | 投递 | 全渲染 | jsdom heapUsed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | 16 | **16** | 218 | 13.6 | 15 ms | 81 ms | 98.6 MB |
+| 40 | 80 | **80** | 858 | 10.7 | 15 ms | 82 ms | 111.3 MB |
+| 120 | 240 | **240** | 2458 | 10.2 | 14 ms | 151 ms | 152.3 MB |
+| 300 | 600 | **600** | 6058 | 10.1 | 17 ms | 248 ms | 251.5 MB |
+
+三条结论：① **挂载窗口会扩满**（600/600 全挂）⇒ 稳态下没有任何行被回收；② 节点数与堆**随行数线性**增长；
+③ 绝对堆量是 jsdom 的（每节点成本远高于 Blink），**只有「节点/行」这一列可跨环境用**。
+
+真实锚点（真机测过的点）：4.1 万字符 / 27 行 → **4225 节点 = 156 节点/行**（该会话代码块行多）；
+#221 记录 23,719 节点 ↔ JS 堆 ~35 MB（≈1.5 KB/节点）；#208 记录长会话 DOM 449 k 字符、渲染器峰值 828 MB。
+⇒ 真机上千行级会话约在**数万到十几万节点、JS 堆数百 MB**量级。
+
+### 三、契约约束（哪些会碎）
+
+- **天然兼容**（内容级不变量，与行是否在 DOM 无关）：#55 行集合纯函数、#148 最新即胜、#150 graft 自愈、#212 判据 C 的 `revealingRows`。
+- **必须一起改**（身份/几何级）：
+  1. **DOM 身份保持契约**——mount 测试断言「未受影响行的节点引用不变」（`mountSolidWorkbench.solid.test.tsx:525-554`）；`PlainMessageList` 自己的注释把「先缩窗再换行集」称为身份正确性问题，这正是窗口只增不减的原因。
+  2. **锚点补偿**：锚行不在 DOM 时`同步补偿直接丢弃`（`277-291`），没有行高表 ⇒ 需要高度缓存 + 失效策略。
+  3. **几何消费者**：`getViewportState`（生产未用但语义要求几何）、工具连接线（`domToolConnectorMeasurement.ts:57-60` 已有「virtualized content has zero geometry」的 null 约定，可复用）。
+  4. **`scrollTo`/搜索**：已有「目标不在窗口 ⇒ 全开重试」路径可复用，但「折叠的短正文必须在 DOM 里」（#208 阈值契约 + 搜索）会被打破。
+- **现成衔接点**：#221 记录末尾已写明「本机制与未来行级转录虚拟化的衔接点：虚拟化挂载边界可直接复用行缓存恢复路径」。
+
+### 四、设计选项
+
+| 选项 | 做法 | 代价 |
+| --- | --- | --- |
+| **A 窗口 + 高度估计**（经典虚拟化） | 视口附近保留 K 行，其余用等高占位符；需要**行高表**（按 messageId 缓存 + 内容变更失效）与锚点重做 | 契约改动最大；滚动期高度估算误差会带来滚动条跳动 |
+| **B 分段回卷 + 摘要行**（建议先做） | 最近 K 行保持实时；更早的**整段**折叠成固定高度摘要（「更早的 N 条 · 展开」） | 摘要高度恒定 ⇒ **不需要逐行高度估计**，滚动数学仍然诚实；复用现有折叠/「显示更多」惯例；与 #208 同构。代价是「久远历史默认不在 DOM」的可见性变化 |
+| C `content-visibility: auto` | 跳过布局/绘制 | **#221 已否决**，且不省内存，不解决本问题 |
+
+### 五、建议
+
+1. **先做 B 的最小切片**：对「超出 K 行的整段」折叠成固定高度摘要行，K 与「pin / 流式」姿态联动；老行的节点与解析一起省掉，收益即斜率本身。
+2. 前置测量：本探针只给「节点/行」与 jsdom 形状；**真机的 private/JS 堆斜率**要用合成长会话（假 ACP agent）在实例上测一次，
+   否则 K 取多少、收益多少仍是估的。
+3. A 作为后续：只有当 B 之后仍有压力（例如用户要在久远历史里连续滚动）才值得吃下高度表与锚点重做的成本。
