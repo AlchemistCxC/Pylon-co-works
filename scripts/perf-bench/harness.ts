@@ -63,6 +63,15 @@ export interface PerfPair {
   readonly wiredAt: string
   /** 本条路径测得是**哪一段**（消费方的缓存/生命周期编排不在这条读数里）。 */
   readonly note?: string
+  /**
+   * 本 pair 的单位成本门槛覆盖（缺省用全局 `MIN_UNITS_FOR_UNIT_COST`）。
+   *
+   * 为什么需要按 pair 声明：固定开销是**按引擎**量级不同的——wasm 出口是「过界 + 一次编组」
+   * （5–30µs，全局门槛 32 就是照它定的），而前端 Lezer 高亮实测有 ~1.6ms/次（跑在 Bun 下时
+   * 其中约 0.17ms 是三次缓存动态 import 的开销，V8 下仅 ~17µs）。同一条门槛套到量级差 50 倍的
+   * 引擎上，小语料行会印出「4.78µs/字符」这类由固定开销除出来的假单位成本。
+   */
+  readonly minUnitsForUnitCost?: number
   readonly cases: readonly PerfCase[]
 }
 
@@ -112,6 +121,8 @@ export interface PerfRow {
   /** 单次调用把计算核线性内存高水位抬高的字节数（确定性；无探针为 undefined）。 */
   readonly linearDeltaBytes?: number
   readonly note?: string
+  /** 单位成本门槛（pair 覆盖或全局缺省，见 `PerfPair.minUnitsForUnitCost`）。 */
+  readonly minUnitsForUnitCost: number
 }
 
 export interface PerfOptions {
@@ -174,6 +185,7 @@ export async function runPerf(
           ...(scenario.unitLabel !== undefined ? { unitLabel: scenario.unitLabel } : {}),
           ...(linearDeltaBytes !== undefined ? { linearDeltaBytes } : {}),
           ...(scenario.note !== undefined ? { note: scenario.note } : {}),
+          minUnitsForUnitCost: pair.minUnitsForUnitCost ?? MIN_UNITS_FOR_UNIT_COST,
         })
       }
     }
@@ -219,7 +231,7 @@ function bytes(value: number): string {
 export function formatPerfTable(rows: readonly PerfRow[], opts: { rounds: number, hasProbe: boolean }): string {
   const head = ['domain', '路径', 'case', 'scale', 'ms中位', 'ms最小', '工作量', '单位成本', '核线性Δ']
   const body = rows.map((row) => {
-    const cost = row.units !== undefined && row.units >= MIN_UNITS_FOR_UNIT_COST
+    const cost = row.units !== undefined && row.units >= row.minUnitsForUnitCost
       ? `${unitCost(row.medianMs, row.units)}/${row.unitLabel ?? '单位'}`
       : '—'
     return [
@@ -238,7 +250,7 @@ export function formatPerfTable(rows: readonly PerfRow[], opts: { rounds: number
   const line = (cells: readonly string[]) => cells.map((cell, index) => cell.padEnd(widths[index]!)).join('  ')
   const separator = widths.map(width => '─'.repeat(width)).join('──')
   const header = [
-    `每 case 预热 1 轮 + ${opts.rounds} 轮取中位；单位成本 = 中位耗时 / 工作量（工作量 < ${MIN_UNITS_FOR_UNIT_COST} 时报 —：固定开销会主导读数）`,
+    `每 case 预热 1 轮 + ${opts.rounds} 轮取中位；单位成本 = 中位耗时 / 工作量（工作量低于该 pair 的门槛时报 —：固定开销会主导读数；缺省门槛 ${MIN_UNITS_FOR_UNIT_COST}，引擎固定开销更大者自行声明）`,
     opts.hasProbe ? '核线性Δ = 单次调用抬高计算核高水位的字节数（确定性、与 GC 无关；0 表示未抬高已到过的高水位，不是「不占内存」）' : '（未注入内存探针，核线性Δ 不可用）',
     'ms最小 是无干扰地板：中位与最小拉得开说明本轮采样被外部负载污染',
   ].join('\n')
@@ -257,7 +269,7 @@ export function summarizePerf(rows: readonly PerfRow[]): string {
   for (const [domain, list] of byDomain) {
     const total = list.reduce((sum, row) => sum + row.medianMs, 0)
     const ratios = list
-      .filter(row => row.units !== undefined && row.units >= MIN_UNITS_FOR_UNIT_COST)
+      .filter(row => row.units !== undefined && row.units >= row.minUnitsForUnitCost)
       .map(row => (row.medianMs * 1000) / row.units!)
       .sort((left, right) => left - right)
     const pick = ratios.length === 0 ? '—' : `${ratios[Math.floor(ratios.length / 2)]!.toFixed(3)}µs`

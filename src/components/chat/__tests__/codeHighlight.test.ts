@@ -83,3 +83,26 @@ describe('highlightCode 缓存与 pending 去重', () => {
     expect(cached).toBe(a)
   })
 })
+
+// #241 回归：`syntaxTree(state)` 对「不在编辑器视图里的 state」只做**分段同步解析**，树停在第
+// 一个同步块（本机实测 3006 字符）⇒ 超出的部分**静默丢色**。症状在表上极不显眼（块越大单位成本
+// 越低），是在 #233 基准里读出来的（见 issue #241 的评论）；修复 = 改用 `ensureSyntaxTree`。
+//
+// 本组用「尾部必须有色」而不是「总色数」做判据：截断的特征恰恰是**后半段标记数为 0**，
+// 而总数断言在截断点抬高的实现下会假绿。
+describe('大块整段着色（回归：同步解析上限截断）', () => {
+  const unit = 'export function sample(list: readonly string[]): number {\n'
+    + '  const mapped = list.map(item => item.length)\n'
+    + '  return mapped.reduce((a, b) => a + b, 0)\n'
+    + '}\n\n'
+  const block = (chars: number) => unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars)
+
+  it.each([6_000, 20_000])('长度 %i 的 ts 块，末段同样带 pl-* 标记', async (chars) => {
+    const html = await highlightCode('ts', block(chars))
+    expect(html).not.toBeNull()
+    const lines = html!.split('\n')
+    expect(lines.length).toBeGreaterThan(50)
+    const tail = lines.slice(Math.floor(lines.length * 2 / 3)).join('\n')
+    expect(tail).toMatch(/class="pl-[^"]"/)
+  })
+})

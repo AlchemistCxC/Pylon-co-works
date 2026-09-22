@@ -146,6 +146,21 @@ let enginePromise: Promise<{
   highlighter: unknown
 }> | undefined
 
+/**
+ * 整段同步解析的时间预算（ms）。
+ *
+ * **为什么不能只用 `syntaxTree()`**：CodeMirror 对「不在编辑器视图里的 state」只做**分段同步解析**，
+ * `syntaxTree(state)` 拿到的树停在第一个同步块（本机实测恒为 **3006 字符**）。整块一次性高亮这条路径
+ * 没有视图替它继续推进解析，于是超出的部分**静默丢色**——实测 40k 字符的 ts 块只有前 2486 字符有色，
+ * 第 81 行往后全是纯文本（只读文件视图、聊天代码块、markdown 内嵌块、插件 provider 四条路径同此）。
+ * `ensureSyntaxTree(state, upto, timeout)` 会把解析同步推进到 `upto`，这才是「整块进、整块出」该有的调用。
+ *
+ * 预算的取舍：解析是**同步**的，超时会把主线程卡住。实测 40k 字符 ≈ 27ms、120k ≈ 46ms（JSC），
+ * 故 200ms 覆盖到数十万字符量级；再大的输入**宁可退回部分树**（与修复前同形）也不冻结帧。
+ * 真想支持无上限的巨块，正路是保留解析状态做**分帧增量**（#241 未决问题 4），不是继续抬这个预算。
+ */
+const FULL_PARSE_BUDGET_MS = 200
+
 /** 懒装载引擎与语言清单（首次调用才付这份成本；与编辑器侧同一套包）。 */
 function loadEngine() {
   enginePromise ??= (async () => {
@@ -182,12 +197,13 @@ export async function highlightBlockWithLezer(
   })
   if (description === undefined) return undefined
   const support = await description.load()
-  const [{ EditorState }, { syntaxTree }, { highlightTree }] = await Promise.all([
+  const [{ EditorState }, { syntaxTree, ensureSyntaxTree }, { highlightTree }] = await Promise.all([
     import('@codemirror/state'),
     import('@codemirror/language'),
     import('@lezer/highlight'),
   ])
-  const tree = syntaxTree(EditorState.create({ doc: code, extensions: [support as never] }))
+  const state = EditorState.create({ doc: code, extensions: [support as never] })
+  const tree = ensureSyntaxTree(state, code.length, FULL_PARSE_BUDGET_MS) ?? syntaxTree(state)
 
   // 把「字符区间 → 类名」按行切成 span 数组（行内不含 '\n'，与旧出口同形状）。
   const lines: Array<LezerHighlightSpan[]> = [[]]
