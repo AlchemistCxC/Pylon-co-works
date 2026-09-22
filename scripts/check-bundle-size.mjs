@@ -32,23 +32,20 @@ const TOTAL_GZIP_BUDGET = 1_615_000
 
 // #220：wasm 产物独立预算。此前 dist/assets 里的 .wasm 完全无人记账
 // （starry-night 的 onig 473,151 B raw / 161,144 B gzip 一直静默躺在总额之外）。
-// 定标依据（2026-09-21 **scope 收窄后**实测，`node scripts/build-wasm.mjs` + gzip(9)）：
-//   pylon_compute_bg.wasm        119,788 B raw /  53,238 B gzip（只剩 WP3 流式核）
-//   pylon_markdown_bg.wasm     2,873,113 B raw / 909,563 B gzip（WP4 comrak + vendored 语法）
-//   （收窄前同一门禁读到 841,273 / 307,257 与 1,216,820 总额；投影与 events 的回退
-//     使 wasm 总额降 254 KB gzip ≈ 21%。见 ADR-0018 修订。）
-//   两侧 glue JS                                                 /  12,240 B gzip
-// 合计约 1,375,363 B gzip。按 1,450,000 定标，留约 5% 余量。
+// 定标依据（2026-09-22 **#241 高亮迁出 wasm 后**实测，`bun run build` + gzip）：
+//   pylon_compute_bg.wasm        120,581 B raw /  53,593 B gzip（只剩 WP3 流式核）
+//   pylon_markdown_bg.wasm       428,930 B raw / 144,838 B gzip（只剩 comrak 解析）
+// 合计 198,431 B gzip。按 230,000 定标，留约 16% 余量。
 //
-// **这一档值得单独盯**：wasm 总量仍接近 js 总额（1,615,000）的量级，而其中 909,563 B
-// 是 pylon-markdown 的 vendored tmLanguage 语法（14 份，压缩前 711,931 B minified）。
-// 降体积的正路是**按语言惰性取语法**（首次高亮某语言时才加载该语言的语法资产），
-// 那需要把高亮路径改成「语法就绪后再整块过界」的两段式；本 WP 未做，故先如实记账。
-// 若后续不接受这个量级，请以惰性语法为方向立项，而不是继续抬预算。
-// 2026-09-21 随 scope 收窄重定标：现行实测 962,801 B（markdown 909,563 + compute 53,238），
-// 留约 15% 余量 —— 原 1,450,000 是对「投影 + events 也在包里」定标的，不重定标就等于
-// 把这一档放空 50%，回归将无法被发现。
-const WASM_TOTAL_GZIP_BUDGET = 1_110_000
+// 本档在 #241 大幅缩小：上一轮定标依据（2026-09-21）是 **962,801 B gzip**，
+// 其中 909,563 B 是 pylon-markdown 的 vendored tmLanguage 语法（14 份，
+// 压缩前 711,931 B minified）——这是 syntect 语法机器的资产，编译进 wasm 线性内存后
+// **只涨不落**，是渲染器可控内存里不可归还的那一档（#240 实测 css 18.06MB / ts 12.67MB）。
+// #241/ADR-0020 把高亮整体迁到前端 Lezer：语法机器、14 份语法资产、`gen/` 生成器与
+// syntect 依赖一并退役，wasm 总量 **962,801 → 198,431 B gzip（−79.4%）**；
+// Lezer 引擎改以懒加载 JS chunk 落在**上一档 JS 总额**里（index-*.js，约 78.5 KB gzip）。
+// 若这一档再次抬升，先问是不是又往 wasm 里塞了按语言编译的语法资产。
+const WASM_TOTAL_GZIP_BUDGET = 230_000
 
 if (!exists(distDir)) {
   console.error('dist/assets 不存在——请先 npm run build')

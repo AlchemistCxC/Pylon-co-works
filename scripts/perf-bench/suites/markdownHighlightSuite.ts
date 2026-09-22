@@ -1,20 +1,17 @@
-// markdown-highlight 域基准：生产出口 `highlightBlock`（wasm，syntect）。
+// markdown-highlight 域基准：**引擎出口** `highlightBlockWithLezer`（Lezer，纯 JS）。
 //
-// 接线点：`src/components/chat/codeHighlight.ts:91`——`highlightCodeBuiltin` 的语言门通过后
-// 调的就是它。**语言门之前的那截不在本读数内**（见下）。
+// 接线点：`src/components/chat/codeHighlight.ts:76`——`highlightCodeBuiltin` 的语言门通过后
+// 调的就是它。**语言门与它外面那层编排不在本读数内**（见 pair note）。
 //
-// 语料在树上 `scripts/compute-parity/fixtures/corpora.ts`（HIGHLIGHT_CORPUS）；那条套件
-// （`66671b92^:scripts/compute-parity/suites/markdownHighlightSuite.ts`）随 #220 下线 markdown
-// 装置一起删除，被删的 TS 基线 `oldHighlightEngine.ts`（starry-night 雕刻）**不借**。
+// #241/ADR-0020 起高亮引擎不再是 wasm（syntect），而是前端 Lezer；本域因此**不再触 wasm**：
+// 「核线性Δ」列恒为 0 是预期（旧引擎在这里会显示每语言数 MB–数十 MB 的、不可归还的线性内存台阶）。
 //
-// 两条不在本域内：
-// - `HIGHLIGHT_CORPUS` 里的 `unknown-language` case：生产在同步语言门就被挡住、不进计算核，
-//   拿它当产品路径 case 会量到一条生产永不走的路径。
-// - `scopeForLanguage` 的 wasm 出口：**已删**（#236）——生产用的是 `codeHighlight.ts:46` 的
-//   TS 映射表（同步门，未知语言根本不过界），该 wasm 出口无调用方，且实测逐次调用比 TS 表慢约 18×。
+// 语料在树上 `scripts/compute-parity/fixtures/corpora.ts`（HIGHLIGHT_CORPUS）。
+//
+// 一条不在本域内：`HIGHLIGHT_CORPUS` 里的 `unknown-language` case——生产在同步语言门就被挡住、
+// 不进引擎，拿它当产品路径 case 会量到一条生产永不走的路径。
 
-import type { MarkdownCompute } from '../../../src/infrastructure/compute/markdownCompute.ts'
-import { loadMarkdownCompute } from '../../../src/infrastructure/compute/markdownCompute.ts'
+import { highlightBlockWithLezer } from '../../../src/components/chat/lezerHighlight.ts'
 import { HIGHLIGHT_CORPUS } from '../../compute-parity/fixtures/corpora.ts'
 import type { PerfCase, PerfSuite } from '../harness.ts'
 
@@ -30,17 +27,15 @@ function largeCodeBlock(chars: number): string {
   return unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars)
 }
 
-export async function buildMarkdownHighlightSuite(): Promise<PerfSuite> {
-  const compute: MarkdownCompute = await loadMarkdownCompute()
+export function buildMarkdownHighlightSuite(): PerfSuite {
   const cases: PerfCase[] = [
     {
-      // 单列成一行是为了让 ts 语法资产那笔**一次性**成本落在自己账上：计算核的线性内存高水位
-      // 只涨不跌，首个调用会把它注册进去（实测数十 MB），不隔离的话会记到紧随其后的
-      // `ts-sample` 头上。注意注册是**按语言懒加载**的——其余语言各自在首行显示 Δ（见 pair note）。
+      // 单列成一行：隔离「Lezer 引擎与语言包」的一次性装载（动态 import + 该语言的 parser 初始化）。
+      // 旧引擎这一行是「tmLanguage 编译进不可归还的线性内存」（数十 MB）；现在只是 JS 侧装载。
       id: 'engine-warmup',
       meta: { scale: 'xs', shape: 'warmup' },
-      note: 'ts 语法资产注册（一次性）。没有工作量量纲，故不给单位成本。',
-      run: () => { compute.highlightBlock('const x = 1\n', 'ts') },
+      note: 'Lezer 引擎 + ts 语言包的一次性装载。没有工作量量纲，故不给单位成本。',
+      run: () => highlightBlockWithLezer('const x = 1\n', 'ts'),
     },
     ...HIGHLIGHT_CORPUS
       .filter(item => item.id !== 'unknown-language')
@@ -49,7 +44,7 @@ export async function buildMarkdownHighlightSuite(): Promise<PerfSuite> {
         meta: { shape: item.language },
         units: item.code.length,
         unitLabel: '字符',
-        run: () => { compute.highlightBlock(item.code, item.language) },
+        run: () => highlightBlockWithLezer(item.code, item.language),
       })),
   ]
 
@@ -66,7 +61,7 @@ export async function buildMarkdownHighlightSuite(): Promise<PerfSuite> {
           ...(id === 'block-40k'
             ? { note: '巨块：高亮成本随代码长度线性膨胀，而这块 DOM 在 #221 之前是整块常驻的。' }
             : {}),
-          run: () => { compute.highlightBlock(code, 'ts') },
+          run: () => highlightBlockWithLezer(code, 'ts'),
         } satisfies PerfCase
       }),
   )
@@ -75,11 +70,12 @@ export async function buildMarkdownHighlightSuite(): Promise<PerfSuite> {
     domain: 'markdown-highlight',
     pairs: [
       {
-        name: 'highlightBlock',
+        name: 'highlightBlockWithLezer',
         domain: 'markdown-highlight',
-        wiredAt: 'src/components/chat/codeHighlight.ts:91',
-        note: '整块代码进、行数组出。这一列是**计算核那一段**：`codeHighlight.ts` 的结果缓存（128 条）、语言别名门、行数组拼 HTML 串与 #221 的视口降级/帧预算调度都不在其中。'
-          + ' 另：「核线性Δ」列在**每种语言的第一行**会显示一次数 MB–数十 MB 的增量——那是 tmLanguage 语法资产按语言懒注册的一次性成本，不是该 case 的每调用占用。',
+        wiredAt: 'src/components/chat/codeHighlight.ts:76',
+        note: '整块代码进、行数组出。这一列是**引擎那一段**：`codeHighlight.ts` 的同步语言门、'
+          + '结果缓存（128 条）与并发去重、行数组拼 HTML 串，以及 #221 的视口降级/帧预算调度都不在其中。'
+          + ' 另：本域**不触 wasm**，「核线性Δ」列恒为 0 是预期（旧 syntect 引擎在每种语言首行会显示数 MB–数十 MB 的不可归还增量）。',
         cases,
       },
     ],

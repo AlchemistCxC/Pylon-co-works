@@ -8,13 +8,14 @@
 //! 出口清单（与边界约定对应）：
 //! - [`parse_markdown`]：整块 markdown 进，渲染模型（root 树）出。流式侧只喂
 //!   `splitStreamingMarkdownBlocks` 切出的不稳定尾块，禁止每拍全文。
-//! - [`highlight_block`]：整块代码进，行数组 span 出。逐行过界禁止。
 //! - `*Json` 变体：serde_json 串出口，供宿主快照/调试工具（parity 快照 bin），
 //!   不进浏览器热路径。
+//!
+//! **高亮出口已退役**（#241/ADR-0020）：`highlightBlock` / `highlightBlockJson` 随
+//! syntect 语法机器一并删除，高亮改由前端 Lezer 承担（`src/components/chat/lezerHighlight.ts`）。
 
 use wasm_bindgen::prelude::*;
 
-use crate::highlight::HighlightedLine;
 use crate::model::RenderNode;
 /// 引擎版本标记（随 crate 版本走），供 JS 侧诊断与 parity 记录。
 #[wasm_bindgen(js_name = markdownEngineVersion)]
@@ -45,27 +46,4 @@ pub fn parse_markdown_json(text: &str) -> Result<String, JsError> {
     let model: RenderNode = crate::parser::parse_markdown(text);
     serde_json::to_string(&model)
         .map_err(|error| JsError::new(&format!("渲染模型 JSON 序列化失败: {error}")))
-}
-
-/// 整块代码 → 行数组高亮 span（github `pl-*` 类名链，与 TS 基线 hast 叶子同构）。
-/// 语言未知 / 语法包缺失时返回 `null`（与 TS 基线 `highlightCode` 返回 null 同语义）。
-#[wasm_bindgen(js_name = highlightBlock)]
-pub fn highlight_block(code: &str, language: &str) -> Result<Option<JsValue>, JsError> {
-    let lines: Option<Vec<HighlightedLine>> =
-        crate::highlight::highlight_block(code, language).map_err(|error| JsError::new(&error))?;
-    match lines {
-        Some(lines) => serde_wasm_bindgen::to_value(&lines)
-            .map(Some)
-            .map_err(|error| JsError::new(&format!("高亮结果序列化失败: {error}"))),
-        None => Ok(None),
-    }
-}
-
-/// 整块代码 → 行数组高亮 JSON 串（宿主快照/调试用）。
-#[wasm_bindgen(js_name = highlightBlockJson)]
-pub fn highlight_block_json(code: &str, language: &str) -> Result<String, JsError> {
-    let lines: Option<Vec<HighlightedLine>> =
-        crate::highlight::highlight_block(code, language).map_err(|error| JsError::new(&error))?;
-    serde_json::to_string(&lines)
-        .map_err(|error| JsError::new(&format!("高亮 JSON 序列化失败: {error}")))
 }
