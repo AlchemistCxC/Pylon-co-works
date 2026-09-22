@@ -465,10 +465,18 @@ export function projectWorkbench(
   // 文本流边界 / 终态 session 条目」。原本逐事件整条扫描（落在最高频的 delta 上 ⇒
   // Θ(N·T)）。timeline 自身按 sequence 升序，故按位置增量延展即保持有序；
   // 归约器换掉 timeline 数组时（tool/activity/诊断等低频事件）按位置补扫。
-  const context: { toolSequences: number[]; textBoundarySequences: number[]; terminalSessionSequences: number[] } = {
+  const context: {
+    toolSequences: number[]
+    textBoundarySequences: number[]
+    terminalSessionSequences: number[]
+    draft: boolean
+  } = {
     toolSequences: [],
     textBoundarySequences: [],
     terminalSessionSequences: [],
+    // #234：批量路径独占本轮的中间数组（timeline 已在入口复制、中间文档一律丢弃），
+    // 故允许归约器就地改尾条/数组，免掉每事件 O(T) 的整表复制。
+    draft: true,
   }
   let indexedEntries = 0
   const indexTimeline = (entries: readonly WorkbenchTimelineEntry[], from: number): void => {
@@ -480,7 +488,8 @@ export function projectWorkbench(
     }
   }
   let orphanActivities: readonly WorkbenchActivityNode[] | undefined
-  let orphanIds: ReadonlySet<string> | undefined
+  // #234：可变集合——按尾部增量补齐 id（见下方循环里的不变式说明），不再每事件整集合重建。
+  let orphanIds: Set<string> | undefined
   let document = initial
   for (const envelope of sorted) {
     // #81 L2：与 reduceWorkbenchEvent 同一幂等判据（journal 信封按区间覆盖，
@@ -512,8 +521,34 @@ export function projectWorkbench(
       timeline,
     }
     next = reduceSemanticEvent(next, effective, context)
-    if (next.timeline !== timeline || indexedEntries > next.timeline.length) {
-      timeline = [...next.timeline]
+    if (next.timeline !== timeline) {
+      // 归约器换掉了 timeline 数组，两个来源，代价完全不同（#234）：
+      //
+      // ① **按 eventId 打补丁**（`updateTimeline`，长度不变）：tool / 诊断事件每拍都会走
+      //    （`{streamBoundary:true}` / `{status,title}` / `{status,summary}`）。补丁目标是
+      //    **本轮刚 push 的那一条**——它带的就是本轮 envelope 的 eventId，而它还没进索引
+      //    （`indexedEntries` 只覆盖到它的前一条）。所以**前缀索引毫发无损**：三个索引读的是
+      //    `kind` / `streamBoundary` / `data.*`，补丁里唯一能翻转谓词的是 tool 的
+      //    `streamBoundary=false→true`，而被翻转的正是那条尚未索引的尾条。
+      // ② 其它结构性替换（长度可能变）⇒ 索引确实失效，必须重建。
+      //
+      // 原先对两者一律 `indexedEntries = 0` 整表重扫 ⇒ 「每条 tool/诊断事件重扫一次整条
+      // timeline」= Θ(N²)（实测 tool-only 24,000 事件单次折叠 24.6s，#234）。
+      const replaced = next.timeline as WorkbenchTimelineEntry[]
+      const patchOnTail = replaced.length === timeline.length
+        && replaced.at(-1)?.eventId === envelope.eventId
+      // 接管所有权：归约器给的是它自己 `.map`/展开出来的**新**数组，与 `next` 以外的引用无关，
+      // 可以直接原地 push（省掉每拍一次整表复制）。冻结的数组不能接管——外部传入的
+      // `initialDocument.timeline` 可能是冻结的，原地 push 会抛。
+      timeline = Object.isFrozen(replaced) ? [...replaced] : replaced
+      if (!patchOnTail) {
+        indexedEntries = 0
+        context.toolSequences = []
+        context.textBoundarySequences = []
+        context.terminalSessionSequences = []
+      }
+    }
+    if (indexedEntries > timeline.length) {
       indexedEntries = 0
       context.toolSequences = []
       context.textBoundarySequences = []
@@ -523,9 +558,23 @@ export function projectWorkbench(
     indexedEntries = timeline.length
     // orphan 是 (activities id 集合, parentId) 的纯函数：activities 数组同一引用 ⇒ id 未变
     // ⇒ 上轮结果仍然成立，免掉每事件重建 Set（归约器不读 orphan，故与逐事件刷新等价）。
+    //
+    // #234：**重建整集合本身是 Θ(N·A)**——tool 事件每拍都替换 activities 数组引用（upsert
+    // 出新数组），于是每事件都 `new Set(activities.map(...))`。实测这就是 tool 密集折叠
+    // 47.9% 的 CPU（CPU profile，12,000 卡 = 36,000 事件）。改为**增量补齐尾部新增的 id**：
+    // 不变式 = `orphanIds` 恰是 `orphanActivities` 前 `orphanIds.size` 个元素的 id 集合，
+    // 且 activities **只在尾部增长**。该不变式由两个生产者保证：
+    // `upsertActivity` 新节点追加在末尾、按 id 命中时原位替换（id 与位置都不变）；
+    // `refreshOrphans` 保序保长。长度回退时才退回整集合重建（防御，不是热路径）。
     if (next.activities !== orphanActivities) {
+      if (orphanIds === undefined || next.activities.length < orphanIds.size) {
+        orphanIds = new Set(next.activities.map(activity => activity.id))
+      } else {
+        for (let index = orphanIds.size; index < next.activities.length; index += 1) {
+          orphanIds.add(next.activities[index]!.id)
+        }
+      }
       orphanActivities = next.activities
-      orphanIds = new Set(next.activities.map(activity => activity.id))
     }
     document = refreshOrphans(next, orphanIds)
   }
@@ -702,6 +751,17 @@ interface ProjectionContext {
   readonly textBoundarySequences: readonly number[]
   /** 终态 session 条目 sequence（见 `terminalSessionSequence`）。 */
   readonly terminalSessionSequences: readonly number[]
+  /**
+   * #234：**批量路径的草稿所有权**。置位时归约器可以就地把改动写进传入文档的数组
+   * （`timeline` / `activities` / `diagnostics`），因为这些数组由 `projectWorkbench`
+   * 独占、中间文档一律丢弃。
+   *
+   * 为什么需要：`updateTimeline` 是 `items.map(...)`——**每事件整表复制一次**。tool 与
+   * 诊断事件每拍都会打补丁（`{streamBoundary}` / `{status,title}` / `{status,summary}`），
+   * 于是「每条 tool/诊断事件复制一次整条 timeline」= Θ(N²)（实测 tool-only 12,000 事件
+   * 单次折叠 2.7s、24,000 事件 19s）。live 路径不传本字段，语义与形状**一字不变**。
+   */
+  readonly draft?: boolean
 }
 
 function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, context?: ProjectionContext): WorkbenchDocument {
@@ -719,7 +779,7 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'tool.progress':
     case 'tool.completed':
     case 'tool.failed':
-      return reduceTool(document, envelope, event)
+      return reduceTool(document, envelope, event, context)
     case 'activity.started':
     case 'activity.progress':
     case 'activity.completed':
@@ -980,7 +1040,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   return { ...document, messages: append ? [...document.messages.slice(0, -1), message] : [...document.messages, message] }
 }
 
-function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent): WorkbenchDocument {
+function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent, context?: ProjectionContext): WorkbenchDocument {
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
     return addLateEventDiagnostic(document, envelope, 'late tool event ignored after terminal fence')
   }
@@ -993,7 +1053,7 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   const previous = document.activities.find(node => node.id === id && node.kind === 'tool')
   if (!previous) {
     document = settleSupersededRunningMessages(document)
-    document = { ...document, timeline: updateTimeline(document.timeline, envelope.eventId, { streamBoundary: true }) }
+    document = { ...document, timeline: updateTimeline(document.timeline, envelope.eventId, { streamBoundary: true }, context?.draft === true) }
   }
   const node: WorkbenchActivityNode = {
     // C04/DIC：node.title 是工具身份（machine name，_meta.pylon.toolName 优先）；
@@ -1026,7 +1086,7 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   }
   const merged = mergeToolActivity(previous, node)
   const activities = upsertActivity(document.activities, merged ?? node)
-  const timeline = updateTimeline(document.timeline, envelope.eventId, { status: merged?.status ?? status, title: merged?.title ?? node.title })
+  const timeline = updateTimeline(document.timeline, envelope.eventId, { status: merged?.status ?? status, title: merged?.title ?? node.title }, context?.draft === true)
   return { ...document, activities, timeline }
 }
 
@@ -1424,16 +1484,25 @@ function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<s
   // 没有任何变化时恒等返回输入 document。此前每个带 parentId 的节点无条件克隆，
   // 恒产生新 activities 数组，放大了 freezeDeepSnapshot 每事件的全量深拷贝。
   // #205：调用方已知 id 集合（如批量路径按 activities 数组同一性缓存）时可免重建。
+  //
+  // #234：**先探测、后分配**。原实现每事件都 `activities.map(...)` 一次——即使一个 orphan
+  // 都没改，也先分配一条与 activities 等长的新数组再丢掉。CPU profile 显示这条 map 占
+  // tool 密集折叠 21.8% 的 CPU。探测循环只读一个字段、不分配，代价远低于分配+写入。
   const ids = providedIds ?? orphanActivityIdsOf(document.activities)
-  let changed = false
+  let needsWork = false
+  for (const activity of document.activities) {
+    if (activity.parentId === undefined) continue
+    if (activity.orphan !== !ids.has(activity.parentId)) { needsWork = true; break }
+  }
+  if (!needsWork) return document
   const activities = document.activities.map(activity => {
     if (!activity.parentId) return activity
     const orphan = !ids.has(activity.parentId)
     if (activity.orphan === orphan) return activity
-    changed = true
     return freezeDeepSnapshot({ ...activity, orphan })
   })
-  return changed ? { ...document, activities } : document
+  // 走到这里说明探测已命中至少一个 orphan 变化 ⇒ 新数组必然与输入不同，无需再记 changed。
+  return { ...document, activities }
 }
 
 function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {
@@ -1500,7 +1569,29 @@ function addOutOfOrderDiagnostic(document: WorkbenchDocument, envelope: Workbenc
     { sequence: envelope.sequence })
 }
 
-function updateTimeline(items: readonly WorkbenchTimelineEntry[], eventId: string, patch: Partial<WorkbenchTimelineEntry>): WorkbenchTimelineEntry[] {
+/**
+ * 给 `eventId` 对应的 timeline 条目打补丁。
+ *
+ * `draft`（#234，仅批量路径）时**原地**替换尾条：批量路径下补丁目标恒是「本轮刚 push 的
+ * 那一条」——它的 eventId 就是本轮 envelope 的 eventId，对象本轮新建、不与任何已发布文档
+ * 共享，且它就是数组尾。因此原地替换只动我们独占的数组，省掉每事件 O(T) 的 map + 分配；
+ * 补丁目标不是尾条时（乱序插入兜底等）退回复制语义。live 路径不传 `draft`，一字不变。
+ */
+function updateTimeline(
+  items: readonly WorkbenchTimelineEntry[],
+  eventId: string,
+  patch: Partial<WorkbenchTimelineEntry>,
+  draft = false,
+): WorkbenchTimelineEntry[] {
+  if (draft) {
+    const tailIndex = items.length - 1
+    const tail = items[tailIndex]
+    if (tail !== undefined && tail.eventId === eventId) {
+      const mutable = items as WorkbenchTimelineEntry[]
+      mutable[tailIndex] = { ...tail, ...patch }
+      return mutable
+    }
+  }
   return items.map(item => item.eventId === eventId ? { ...item, ...patch } : item)
 }
 

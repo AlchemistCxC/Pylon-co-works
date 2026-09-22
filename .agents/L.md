@@ -528,3 +528,56 @@
 [2026-09-22 06] [Miyaki Kumo] [#228 进展：六批次全部落地]
 
 **A/B/C/D/E/F 十三笔功能提交已在 `Ru5t/Reflector`（`027ad83c..HEAD`），门禁全绿（vitest 622 文件/4678 用例、cargo test 1344、clippy 基线零新增、build 全链、生产产物排除 demo/mockTauri），开发记录 `.agents/records/228-tech-debt-paydown.md`。** 即将推送开 PR。文件域声明不变；**dispatcher 拆分仍延后**（#229/#230 条目在 L.md 期间不碰该文件），FileTabView 状态机与 CodeBlock 计时器接入两笔已定位为后续（见记录未解问题 2/3）。
+
+---
+
+[2026-09-22 09] [Miyaki Kumo] [#232]
+
+**开工：release.yml 恢复 tag 触发自动发行（打 tag 即构建上传）+ 版本一致性/main 归属两道守卫。** 用户裁定（AskUserQuestion）。本轮文件域仅 `​.github/workflows/release.yml`、`.agents/L.md`，请勿改写、勿连带提交。
+
+---
+
+[2026-09-22 10] [Miyaki Kumo] [#233]
+
+**开工：性能基准改产品路径口径——废除 wasm↔TS 对照跑器（`scripts/compute-parity-{bench,memory}.mts`），新建 `scripts/perf-bench.mts`（绝对成本 + 派生单位成本），收编 markdown/高亮/投影/events 四个已接线开销点。** parity **门禁**（`scripts/compute-parity.test.mts` + 脚手架）保留不动。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 新增：`scripts/perf-bench.mts`、`scripts/perf-bench/**`（harness/suites/fixtures/README）
+- 删除：`scripts/compute-parity-bench.mts`、`scripts/compute-parity-memory.mts`
+- 修改：`scripts/compute-parity/harness.ts`（删性能/内存跑器两节，parity 跑器不动）、`scripts/compute-parity/README.md`
+- 文档：`.agents/spec/233-*.md`、`.agents/records/233-*.md`、`.agents/decisions/0019-*.md`、`docs/说明书/Pylon-模块维护地图.md`（仅「对照见 scripts/compute-parity/」那一句所在格）
+
+**我不碰**：`src/**`（零产品代码改动）、`src-tauri/**`、`scripts/compute-parity/{suites,baselines,fixtures,index.ts,vitest.config.ts,test.mts}`、`vitest.config.ts`、中控区、预设系统、他人在途域。
+
+---
+
+[2026-09-22 12] [Miyaki Kumo] [#236]
+
+**开工：删除 wasm `scopeForLanguage` 死出口**（用户裁定「把死实现落后10倍的项直接删除」，唯一达标项：实测落后现役 TS 表 ~18×）。行为零变化。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/pylon-markdown/src/wasm_exit.rs`（只删 wasm 壳 `scope_for_language`；`highlight.rs` 的内层函数**不动**——`highlight_block` 要用）
+- `src-tauri/pylon-markdown/src/highlight.rs`（仅更正第 61 行那句指向「TS 侧退役即单源」的过期注释）
+- `src/infrastructure/compute/markdownCompute.ts`（删接口成员一句）
+- `src/wasm/pylon-markdown/*`（重建产物，gitignore 内）
+- `scripts/perf-bench/index.ts`（`EXCLUDED_WASM_EXITS` 移除该条）、`scripts/perf-bench/README.md`、`scripts/perf-bench/suites/markdownHighlightSuite.ts`（注释内计数同步）
+- 文档：`.agents/records/236-*.md`、`.agents/records/233-*.md`（追加交叉引用）、`.agents/decisions/0019-*.md`（未接线计数 7→6）
+
+**我不碰**：`src/components/chat/codeHighlight.ts` 与 `codeHighlight.test.ts`（现役 TS 表一字不动）、`src-tauri/pylon-compute/**`、其余 6 个未接线出口（等用户考量）、他人在途域。
+
+---
+
+[2026-09-22 14] [Miyaki Kumo] [#234] + [#237]
+
+**开工两件：① #234 投影批量路径对 tool/diagnostic 密集 journal 的超线性；② #237 issue55.streamingContainers 在 CI 偶发红（断言抢在异步高亮落地前）。** ① 涉及 `workbenchProjector`（用户已裁定开工），② 纯测试侧。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- ① `src/domains/workbench/workbenchProjector.ts`（**单一文件**：批量路径的工作数组所有权与派生索引，不碰 `reduceWorkbenchEvent` 的 live 语义）
+- ② `src/renderers/solid-workbench/chat/__tests__/issue55.streamingContainers.solid.test.tsx`（仅加一处 await，不改判据）
+- 基准／探针：`scripts/perf-bench/suites/projectorSuite.ts`（如需补 case）、临时探针一次性
+- 文档：`.agents/records/234-*.md`、`.agents/records/237-*.md`、本文件
+
+**我不碰**：`src/sheets/agent-workbench/**`、`src/domains/events/**`、`src/__tests__/replay/**`（判据侧）、`vitest.config.ts`、中控区、预设系统、他人在途域（`scripts/perf-bench/**` 除 projectorSuite 外一律不动）。

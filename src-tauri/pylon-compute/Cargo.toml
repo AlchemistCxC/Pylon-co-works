@@ -1,6 +1,6 @@
 [package]
 name = "pylon-compute"
-version = "0.2.5-Evo"
+version = "0.2.6-Abc"
 edition = "2021"
 description = "Pylon 前端计算核（Rust/WASM）——issue #220"
 publish = false
