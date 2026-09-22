@@ -549,3 +549,20 @@
 - 文档：`.agents/spec/233-*.md`、`.agents/records/233-*.md`、`.agents/decisions/0019-*.md`、`docs/说明书/Pylon-模块维护地图.md`（仅「对照见 scripts/compute-parity/」那一句所在格）
 
 **我不碰**：`src/**`（零产品代码改动）、`src-tauri/**`、`scripts/compute-parity/{suites,baselines,fixtures,index.ts,vitest.config.ts,test.mts}`、`vitest.config.ts`、中控区、预设系统、他人在途域。
+
+---
+
+[2026-09-22 12] [Miyaki Kumo] [#236]
+
+**开工：删除 wasm `scopeForLanguage` 死出口**（用户裁定「把死实现落后10倍的项直接删除」，唯一达标项：实测落后现役 TS 表 ~18×）。行为零变化。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/pylon-markdown/src/wasm_exit.rs`（只删 wasm 壳 `scope_for_language`；`highlight.rs` 的内层函数**不动**——`highlight_block` 要用）
+- `src-tauri/pylon-markdown/src/highlight.rs`（仅更正第 61 行那句指向「TS 侧退役即单源」的过期注释）
+- `src/infrastructure/compute/markdownCompute.ts`（删接口成员一句）
+- `src/wasm/pylon-markdown/*`（重建产物，gitignore 内）
+- `scripts/perf-bench/index.ts`（`EXCLUDED_WASM_EXITS` 移除该条）、`scripts/perf-bench/README.md`、`scripts/perf-bench/suites/markdownHighlightSuite.ts`（注释内计数同步）
+- 文档：`.agents/records/236-*.md`、`.agents/records/233-*.md`（追加交叉引用）、`.agents/decisions/0019-*.md`（未接线计数 7→6）
+
+**我不碰**：`src/components/chat/codeHighlight.ts` 与 `codeHighlight.test.ts`（现役 TS 表一字不动）、`src-tauri/pylon-compute/**`、其余 6 个未接线出口（等用户考量）、他人在途域。
