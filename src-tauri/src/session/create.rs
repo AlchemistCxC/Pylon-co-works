@@ -57,17 +57,7 @@ fn option_identity(option: &serde_json::Value) -> Option<String> {
     keys.into_iter().find_map(|wanted| {
         object
             .iter()
-            .find(|(key, _)| {
-                key.replace(['-', ' '], "_")
-                    .chars()
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>()
-                    == wanted
-                        .replace(['-', ' '], "_")
-                        .chars()
-                        .flat_map(char::to_lowercase)
-                        .collect::<String>()
-            })
+            .find(|(key, _)| loose_normalized_key(key) == loose_normalized_key(wanted))
             .and_then(|(_, value)| response_string(value))
     })
 }
@@ -99,40 +89,10 @@ fn option_text(option: &serde_json::Value) -> String {
 fn option_choices(option: &serde_json::Value) -> Vec<String> {
     // ACP implementations have used each of these names in the wild.  The
     // recursive walk also handles a JSON-schema `{schema: {enum: [...]}}`.
-    fn collect(value: &serde_json::Value, depth: usize, out: &mut Vec<String>) {
-        if depth > 4 {
-            return;
-        }
-        if let Some(values) = value.as_array() {
-            for item in values {
-                if let Some(choice) = response_string(item) {
-                    out.push(choice);
-                }
-            }
-            return;
-        }
-        let Some(object) = value.as_object() else {
-            return;
-        };
-        for key in [
-            "options",
-            "choices",
-            "values",
-            "available",
-            "enum",
-            "items",
-            "schema",
-            "optionValues",
-            "option_values",
-        ] {
-            if let Some(nested) = object.get(key) {
-                collect(nested, depth + 1, out);
-            }
-        }
-    }
-
+    // 递归骨架与 model.rs 的 P56/D1 machine-id 轨共享（collect_config_choice_values）；
+    // 本轨宽容提取后排序去重，键序对输出无影响——共享骨架输出逐字节等价（#261）。
     let mut values = Vec::new();
-    collect(option, 0, &mut values);
+    collect_config_choice_values(option, response_string, &mut values);
     values.sort();
     values.dedup();
     values

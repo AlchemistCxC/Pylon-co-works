@@ -66,6 +66,24 @@ fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
     }
 }
 
+/// load_persisted_session 各失败臂共用的收敛：先回滚本次临时 slot，回滚成功
+/// 返回原错误（调用方 `return Err(...)` 上抛），回滚自身失败则上抛回滚错误
+/// （与原 `restore_previous_slot(...)?` 的传播序一致：回滚失败优先于原错误）。
+/// #261：五处 `rollback + return` 样板收敛到单点。
+fn rollback_load_slot_else(
+    runtime: &AgentRuntime,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    previous: Option<SessionInfo>,
+    original: PylonError,
+) -> PylonError {
+    match restore_previous_slot(runtime, source, peri_id, generation, previous) {
+        Ok(()) => original,
+        Err(restore_error) => restore_error,
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
@@ -139,8 +157,14 @@ pub(crate) async fn load_persisted_session(
     match load_result {
         Ok((mut response, replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {
-                restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
-                return Err(error.into());
+                return Err(rollback_load_slot_else(
+                    &runtime,
+                    &source,
+                    &peri_id,
+                    generation,
+                    previous,
+                    error.into(),
+                ));
             }
             let owner_key = owner.key()?;
             let journal_result: Result<(i64, &'static str), PylonError> = async {
@@ -172,8 +196,9 @@ pub(crate) async fn load_persisted_session(
             let (canonical_revision, replay_journal_status) = match journal_result {
                 Ok(result) => result,
                 Err(error) => {
-                    restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
-                    return Err(error);
+                    return Err(rollback_load_slot_else(
+                        &runtime, &source, &peri_id, generation, previous, error,
+                    ))
                 }
             };
             let persisted_state_result: Result<Option<serde_json::Value>, PylonError> = async {
@@ -186,8 +211,9 @@ pub(crate) async fn load_persisted_session(
             let persisted_state = match persisted_state_result {
                 Ok(state) => state,
                 Err(error) => {
-                    restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
-                    return Err(error);
+                    return Err(rollback_load_slot_else(
+                        &runtime, &source, &peri_id, generation, previous, error,
+                    ))
                 }
             };
             let apply_result =
@@ -210,8 +236,14 @@ pub(crate) async fn load_persisted_session(
                     restore_session_state(session, &mut response);
                 });
             if let Err(error) = apply_result {
-                restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
-                return Err(error.into());
+                return Err(rollback_load_slot_else(
+                    &runtime,
+                    &source,
+                    &peri_id,
+                    generation,
+                    previous,
+                    error.into(),
+                ));
             }
             let attached = crate::session::store::mark_attached_if_current(
                 &runtime, &source, &peri_id, generation, generation,
@@ -342,8 +374,14 @@ pub(crate) async fn load_persisted_session(
                 error_code = replay_load_error_code(&error),
                 "session/load replay trace"
             );
-            restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
-            Err(PylonError::from(error))
+            Err(rollback_load_slot_else(
+                &runtime,
+                &source,
+                &peri_id,
+                generation,
+                previous,
+                PylonError::from(error),
+            ))
         }
     }
 }
