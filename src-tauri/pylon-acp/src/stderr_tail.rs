@@ -70,6 +70,18 @@ impl StderrTail {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).next
     }
 
+    /// (#260-B6) kill 路径的「有无 stderr 证据」判定：与旧
+    /// `tail_since(0, 1, max_bytes).lines.is_empty()` **逐一等价**——tail 从
+    /// 最新行开始装、首行超字节预算即整片为空，因此旧判空 ⟺ 无任何行或最新行
+    /// 超过 max_bytes。零分配替代（旧实现为判空构造整个 TailSlice）。
+    pub fn has_recent_evidence(&self, max_bytes: usize) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.lines.back() {
+            Some((_, line)) => line.len() <= max_bytes,
+            None => false,
+        }
+    }
+
     pub fn tail_since(&self, mark: u64, max_lines: usize, max_bytes: usize) -> TailSlice {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let recent: Vec<&String> = inner

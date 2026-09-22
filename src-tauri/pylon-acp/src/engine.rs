@@ -712,22 +712,22 @@ fn publish_inbound(
     // A replay response is the deterministic boundary of the load operation.
     // Keep this classification on the transport message itself so observers
     // do not have to infer it from the response channel.
-    if let Some(super::RequestId::Number(id)) = classified.raw.id.as_ref() {
-        if let Ok(active) = active_replay_requests.lock() {
+    // (#260-B4) 两次读取合并为一次持锁：boundary 与 replay 两判定共享同一份
+    // 快照，判定顺序不变；锁中毒时两判定都跳过，与旧「各自 if let Ok」一致。
+    if let Ok(active) = active_replay_requests.lock() {
+        if let Some(super::RequestId::Number(id)) = classified.raw.id.as_ref() {
             if active.contains_key(id) {
                 classified.classification =
                     super::ReplayClassification::Boundary { request_id: *id };
             }
         }
-    }
-    if let Some(session_id) = classified
-        .raw
-        .params
-        .as_ref()
-        .and_then(|params| params.get("sessionId"))
-        .and_then(serde_json::Value::as_str)
-    {
-        if let Ok(active) = active_replay_requests.lock() {
+        if let Some(session_id) = classified
+            .raw
+            .params
+            .as_ref()
+            .and_then(|params| params.get("sessionId"))
+            .and_then(serde_json::Value::as_str)
+        {
             if classified.classification == super::ReplayClassification::Live {
                 if let Some((request_id, _)) =
                     active.iter().find(|(_, id)| id.as_str() == session_id)
@@ -739,7 +739,12 @@ fn publish_inbound(
             }
         }
     }
-    let _ = replay_events.send(classified.clone());
+    // (#260-B4) 零订阅者跳过整帧深克隆：broadcast send 对无接收者本就是被吞的
+    // no-op。不变量：replay.rs 的 subscribe 严格先于 session/load 发出，故
+    // rc==0 时被跳过的帧必在 load 点之前，journal 重放会覆盖。
+    if replay_events.receiver_count() > 0 {
+        let _ = replay_events.send(classified.clone());
+    }
     relay.relay(classified)
 }
 

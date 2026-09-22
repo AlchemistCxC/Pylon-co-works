@@ -502,17 +502,12 @@ impl TurnLedger {
 
     /// generation 硬隔离清理：客户端替换后旧代际条目整体收敛。
     /// 返回被清理的条目数（诊断）。
+    /// (#260-B7) 单遍 retain 替代「收集 keys 再逐个 remove」的两遍遍历，同删除集。
     pub fn drop_generation(&self, generation: u64) -> usize {
         let mut records = self.lock();
-        let stale: Vec<TurnKey> = records
-            .keys()
-            .filter(|key| key.generation == generation)
-            .cloned()
-            .collect();
-        for key in &stale {
-            records.remove(key);
-        }
-        stale.len()
+        let before = records.len();
+        records.retain(|key, _| key.generation != generation);
+        before - records.len()
     }
 
     #[cfg(test)]
