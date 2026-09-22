@@ -109,10 +109,10 @@ flowchart TB
 | `src-tauri/src/session` | Session create/prompt/load/state、SQLite repos | Rust Kernel | `persist.rs`、`msg_repo/mod.rs`、`msg_repo/migrations.rs`、`event_repo.rs` |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
 | `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
-| `src-tauri/src/agent_detection.rs` | GUI 检测命令层：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消（P74 B0） | Rust Kernel | `agent_detection.rs` |
+| `src-tauri/src/agent` | GUI 检测命令层（`detection.rs`：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消，P74 B0）与多 agent 运行时状态机（`runtime.rs`） | Rust Kernel | `detection.rs`、`runtime.rs` |
 | `src-tauri/pylon-core` | Agent Catalog、native detection、preflight/环境诊断、launch plan、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs`、`agent_diagnostics.rs` |
 | `src-tauri/pylon-foundations` | event_names、sanitize、time、workspace、git 等零 tauri 纯逻辑（P58 拆分） | 可复用 Kernel library | `src/lib.rs` |
-| `src-tauri/src/plugin_cmds.rs` | Native plugin package transaction/store | Kernel plugin adapter | stage/commit/recovery 代码 |
+| `src-tauri/src/plugin_cmds/` | Native plugin package transaction/store | Kernel plugin adapter | stage/commit/recovery 代码 |
 | `src-tauri/src/plugin_process` | 外置插件进程监督 | Kernel plugin adapter | process lifecycle 与 restart |
 
 ## 6. 前端启动序列
@@ -455,7 +455,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --workspace --tests --features t
 | Session 持久化/恢复 | `agentWorkbenchLifecycle.ts` → `chatReplayCoordinator.ts` → `session/persist.rs` → repos |
 | canonical event | `canonicalEventFeed.ts` → cursor/sink → `event_repo.rs` |
 | Profile/Session metadata | `identityStore.ts` → `userDataRepository.ts` → `session/user_data.rs` |
-| Agent 连接/重连 | `lifecycle/mod.rs` → `agent_runtime.rs` → `dispatcher/mod.rs` |
+| Agent 连接/重连 | `lifecycle/mod.rs` → `agent/runtime.rs` → `dispatcher/mod.rs` |
 | Agent 检测 | `AgentRuntimePanel.tsx` → `agentClient.ts` → `pylon-core/agent_detection.rs` |
 | Agent 配置 | `AgentRuntimePanel.tsx` → lifecycle config commands → `agent_config/` |
 | 内置插件 | `builtinProductPlugins.ts` → 目标 package activation → 目标 implementation |
