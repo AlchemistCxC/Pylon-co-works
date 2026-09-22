@@ -35,21 +35,11 @@ pub enum PylonError {
     /// canonical ingest 错误保留 EventError 的稳定机器码，避免 prompt 路径降级成
     /// 泛化 protocol_error 而丢失 recoverability 分类。
     #[error("Canonical event error: {0}")]
-    CanonicalEvent(#[from] crate::session::EventError),
+    CanonicalEvent(#[from] pylon_session::event_repo::EventError),
     /// session/load 会同时读取投影状态；保留 MessageError 的稳定机器码，便于前端
     /// 区分损坏、锁冲突、暂不可用与 tombstone，而不是统一降级为 protocol_error。
     #[error("Message persistence error: {0}")]
-    MessagePersistence(#[from] crate::session::MessageError),
-    #[error("database schema version {found} is newer than supported version {supported}")]
-    DatabaseFutureSchema { found: i64, supported: i64 },
-    #[error("database schema is invalid: {0}")]
-    DatabaseSchemaInvalid(String),
-    #[error("database integrity check failed: {0}")]
-    DatabaseIntegrity(String),
-    #[error("session replay truncated; dropped {dropped_count} events")]
-    ReplayTruncated { dropped_count: u64 },
-    #[error("replay load already in progress")]
-    ReplayLoadInProgress,
+    MessagePersistence(#[from] pylon_session::msg_repo::MessageError),
     #[error("{0}")]
     Workspace(String),
     #[error("Prism error: {0}")]
@@ -66,14 +56,10 @@ pub enum PylonError {
     /// R4/R7（P1-2/P2-1）：Gateway 域错误（细分 code 经 GatewayError::code 委派）。
     #[error("Gateway error: {0}")]
     Gateway(#[from] crate::gateway::GatewayError),
-    /// I13-W3：保留策略写入 revision 冲突（旧写不覆盖新写；wire code 经
-    /// RetentionError::Conflict 委派为 retention_revision_conflict）。
-    #[error("保留策略 revision 冲突：期望 {expected}，实际 {actual}")]
-    RevisionConflict { expected: i64, actual: i64 },
-    /// I13-W4：prune 前策略 revision 已变化（用户预览后策略被改）→ 拒绝按旧统计执行清理
-    /// （wire code 经 RetentionError::StalePreview 委派为 retention_stale_preview）。
-    #[error("保留策略已变化：期望 revision {expected}，实际 {actual}；请重新预览")]
-    StalePreview { expected: i64, actual: i64 },
+    /// #247：会话存储核（pylon-session）错误整包委托——细分 code 经
+    /// SessionError::code 委派，wire code 与拆分前逐字一致。
+    #[error(transparent)]
+    Storage(#[from] pylon_session::SessionError),
 }
 
 impl PylonError {
@@ -91,19 +77,13 @@ impl PylonError {
             Self::Protocol(_) => "protocol_error",
             Self::CanonicalEvent(error) => error.code(),
             Self::MessagePersistence(error) => error.code(),
-            Self::DatabaseFutureSchema { .. } => "database_future_schema",
-            Self::DatabaseSchemaInvalid(_) => "database_schema_invalid",
-            Self::DatabaseIntegrity(_) => "database_integrity_failed",
-            Self::ReplayTruncated { .. } => "replay_truncated",
-            Self::ReplayLoadInProgress => "replay_load_in_progress",
             Self::Workspace(_) => "workspace_error",
             Self::Prism(_) => "prism_error",
             Self::Git(_) => "git_error",
             Self::Plugin(error) => error.code(),
             Self::Config(error) => error.code(),
             Self::Gateway(error) => error.code(),
-            Self::RevisionConflict { .. } => "retention_revision_conflict",
-            Self::StalePreview { .. } => "retention_stale_preview",
+            Self::Storage(error) => error.code(),
         }
     }
 }
@@ -174,7 +154,9 @@ mod tests {
             message.contains("source-a") && message.contains("probing")
         }));
 
-        let truncated = serde_json::to_value(PylonError::ReplayTruncated { dropped_count: 3 })
+        let truncated = serde_json::to_value(
+            PylonError::Storage(pylon_session::SessionError::ReplayTruncated { dropped_count: 3 }),
+        )
             .expect("serialize replay error DTO");
         assert_eq!(truncated["code"], "replay_truncated");
         assert!(truncated["message"]
@@ -191,36 +173,38 @@ mod tests {
         assert_eq!(PylonError::Io("x".into()).code(), "io_error");
         assert_eq!(PylonError::Protocol("x".into()).code(), "protocol_error");
         assert_eq!(
-            PylonError::CanonicalEvent(crate::session::EventError::Unavailable("x".into())).code(),
+            PylonError::CanonicalEvent(pylon_session::event_repo::EventError::Unavailable("x".into())).code(),
             "event_db_unavailable"
         );
         assert_eq!(
-            PylonError::MessagePersistence(crate::session::MessageError::Conflict("x".into()))
+            PylonError::MessagePersistence(pylon_session::msg_repo::MessageError::Conflict("x".into()))
                 .code(),
             "message_repo_conflict"
         );
         assert_eq!(
-            PylonError::DatabaseFutureSchema {
+            PylonError::Storage(pylon_session::SessionError::DatabaseFutureSchema {
                 found: 11,
                 supported: 10,
-            }
+            })
             .code(),
             "database_future_schema"
         );
         assert_eq!(
-            PylonError::DatabaseSchemaInvalid("x".into()).code(),
+            PylonError::Storage(pylon_session::SessionError::DatabaseSchemaInvalid("x".into()))
+                .code(),
             "database_schema_invalid"
         );
         assert_eq!(
-            PylonError::DatabaseIntegrity("x".into()).code(),
+            PylonError::Storage(pylon_session::SessionError::DatabaseIntegrity("x".into())).code(),
             "database_integrity_failed"
         );
         assert_eq!(
-            PylonError::ReplayTruncated { dropped_count: 3 }.code(),
+            PylonError::Storage(pylon_session::SessionError::ReplayTruncated { dropped_count: 3 })
+                .code(),
             "replay_truncated"
         );
         assert_eq!(
-            PylonError::ReplayLoadInProgress.code(),
+            PylonError::Storage(pylon_session::SessionError::ReplayLoadInProgress).code(),
             "replay_load_in_progress"
         );
         assert_eq!(PylonError::Workspace("x".into()).code(), "workspace_error");
@@ -231,18 +215,18 @@ mod tests {
             "gateway_config_lock_poisoned"
         );
         assert_eq!(
-            PylonError::RevisionConflict {
+            PylonError::Storage(pylon_session::SessionError::RevisionConflict {
                 expected: 3,
                 actual: 1
-            }
+            })
             .code(),
             "retention_revision_conflict"
         );
         assert_eq!(
-            PylonError::StalePreview {
+            PylonError::Storage(pylon_session::SessionError::StalePreview {
                 expected: 2,
                 actual: 3
-            }
+            })
             .code(),
             "retention_stale_preview"
         );

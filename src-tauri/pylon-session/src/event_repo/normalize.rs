@@ -3,7 +3,7 @@
 use super::redaction::{redact_journal_credentials, retain_raw_payload};
 use super::row::{CanonicalEventRow, KernelEventInput};
 use super::EventError;
-use crate::session::DurableSessionOwner;
+use crate::owner::DurableSessionOwner;
 
 pub(super) fn now_millis() -> i64 {
     std::time::SystemTime::now()
@@ -328,7 +328,7 @@ pub(super) fn normalize_kernel_event(
 /// 覆盖：eventId 非空、owner 五字段、generation/sequence 正整数域、eventType 非空、
 /// payloadVersion 版本化、occurred_at/received_at 存在、raw_payload 恒存、
 /// eventId 与 owner+sequence 推导一致性（rule 1）。unknown eventType 原样接受。
-pub(crate) fn parse_canonical_event(
+pub fn parse_canonical_event(
     value: &serde_json::Value,
 ) -> Result<CanonicalEventRow, EventError> {
     let mut problems: Vec<String> = Vec::new();
@@ -556,7 +556,7 @@ pub(crate) fn parse_canonical_event(
 /// （前端取证所需），但不指望它经 `parse_canonical_event` 往返（见
 /// `canonical_event_wire_keeps_truncation_metadata_in_payload`）。
 /// rollup 覆盖列属行存储细节，不属 EVT-01，故不输出。
-pub(crate) fn canonical_event_wire(row: &CanonicalEventRow) -> serde_json::Value {
+pub fn canonical_event_wire(row: &CanonicalEventRow) -> serde_json::Value {
     let mut owner = serde_json::Map::new();
     owner.insert("profileId".into(), serde_json::json!(row.profile_id));
     owner.insert("agentId".into(), serde_json::json!(row.agent_id));

@@ -26,7 +26,7 @@ mod real_acp_smoke;
 impl From<pylon_acp::AcpError> for crate::error::PylonError {
     fn from(error: pylon_acp::AcpError) -> Self {
         if let pylon_acp::AcpError::ReplayLoadInProgress = error {
-            return crate::error::PylonError::ReplayLoadInProgress;
+            return crate::error::PylonError::Storage(pylon_session::SessionError::ReplayLoadInProgress);
         }
         crate::error::PylonError::Protocol(error.to_string())
     }

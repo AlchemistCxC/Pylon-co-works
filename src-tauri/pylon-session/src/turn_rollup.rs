@@ -19,12 +19,12 @@ use super::event_repo::{
     canonical_event_wire, parse_canonical_event, CanonicalEventRow, EventError,
 };
 
-pub(crate) const TURN_UNIT_EVENT_TYPE: &str = "turn.unit";
-pub(crate) const TURN_UNIT_AGGREGATE_KIND: &str = "turn-rollup";
-pub(crate) const TURN_UNIT_FOLD_SCHEME: &str = "adjacent-delta-fold-v1";
+pub const TURN_UNIT_EVENT_TYPE: &str = "turn.unit";
+pub const TURN_UNIT_AGGREGATE_KIND: &str = "turn-rollup";
+pub const TURN_UNIT_FOLD_SCHEME: &str = "adjacent-delta-fold-v1";
 
 /// 终态事件类型（触发单元行构建）。
-pub(crate) fn is_turn_terminal(event_type: &str) -> bool {
+pub fn is_turn_terminal(event_type: &str) -> bool {
     event_type == "turn.completed" || event_type == "turn.failed"
 }
 
@@ -48,7 +48,7 @@ fn is_foldable_delta(event_type: &str) -> bool {
 
 /// delta → 基础静态类型映射；`*.batch` 行映射回其基础 delta（#205：读侧尾部折叠
 /// 与单元折叠共用同一口径，`event_repo::fold_adjacent_delta_runs` 复用本函数）。
-pub(crate) fn static_delta_type(event_type: &str) -> Option<&'static str> {
+pub fn static_delta_type(event_type: &str) -> Option<&'static str> {
     match event_type {
         "assistant.text.delta" | "assistant.text.delta.batch" => Some("assistant.text.delta"),
         "assistant.thinking.delta" | "assistant.thinking.delta.batch" => {
@@ -172,14 +172,14 @@ fn segments_sha256(segments: &Value) -> String {
 }
 
 /// 折叠结果（turn 范围行 → segments + sha256）。
-pub(crate) struct TurnFold {
-    pub(crate) segments: Value,
-    pub(crate) content_sha256: String,
+pub struct TurnFold {
+    pub segments: Value,
+    pub content_sha256: String,
 }
 
 /// L3 裁剪校验用：对仍存续的 turn 范围行重折叠，产出与构建期一致的
 /// segments/sha256（行集含 terminal 行，与构建时同一输入域）。
-pub(crate) fn fold_turn_rows(rows: &[CanonicalEventRow]) -> TurnFold {
+pub fn fold_turn_rows(rows: &[CanonicalEventRow]) -> TurnFold {
     let segments_value = Value::Array(fold_segments(rows).iter().map(segment_to_json).collect());
     TurnFold {
         content_sha256: segments_sha256(&segments_value),
@@ -189,7 +189,7 @@ pub(crate) fn fold_turn_rows(rows: &[CanonicalEventRow]) -> TurnFold {
 
 /// 构建单元行（terminal 已写入、`unit_sequence = terminal.sequence + 1`，
 /// 同事务内无并发插行）。rollup 列直接填充。
-pub(crate) fn build_turn_unit_row(
+pub fn build_turn_unit_row(
     terminal: &CanonicalEventRow,
     rows: &[CanonicalEventRow],
     unit_sequence: i64,
@@ -253,7 +253,7 @@ pub(crate) fn build_turn_unit_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::event_repo::parse_canonical_event;
+    use crate::event_repo::parse_canonical_event;
     use serde_json::json;
 
     const OWNER_KEY: &str = r#"["p1","peri","local:s1"]"#;

@@ -3161,6 +3161,7 @@ dependencies = [
  "pylon-core",
  "pylon-foundations",
  "pylon-pet-core",
+ "pylon-session",
  "rand 0.10.2",
  "regex",
  "reqwest 0.12.28",
@@ -3279,6 +3280,22 @@ dependencies = [
  "rand 0.10.2",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "pylon-session"
+version = "0.2.6-Abc"
+dependencies = [
+ "chrono",
+ "pylon-canonical-types",
+ "pylon-foundations",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

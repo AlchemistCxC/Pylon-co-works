@@ -24,20 +24,20 @@ use serde::ser::SerializeMap;
 use serde::Serialize;
 
 /// 单条 user_data payload 序列化后的最大字节数（防超大 envelope 写入/DoS）。
-pub(crate) const MAX_USER_DATA_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_USER_DATA_BYTES: usize = 2 * 1024 * 1024;
 
 /// user_data 行的 key。profiles = Profile + activeProfileId envelope；
 /// sessions = Session（v2 + legacy unresolved 混合）envelope；
 /// browser-agent-ops = Agent 浏览器操作审计 ring buffer（issue #82）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UserDataKey {
+pub enum UserDataKey {
     Profiles,
     Sessions,
     BrowserAgentOps,
 }
 
 impl UserDataKey {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Profiles => "profiles",
             Self::Sessions => "sessions",
@@ -45,7 +45,7 @@ impl UserDataKey {
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "profiles" => Some(Self::Profiles),
             "sessions" => Some(Self::Sessions),
@@ -58,32 +58,32 @@ impl UserDataKey {
 /// 已存储的 user_data 行：version + revision + 原始 envelope payload（自描述含 version）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UserDataEnvelope {
-    pub(crate) version: i64,
-    pub(crate) revision: i64,
-    pub(crate) payload: serde_json::Value,
+pub struct UserDataEnvelope {
+    pub version: i64,
+    pub revision: i64,
+    pub payload: serde_json::Value,
 }
 
 /// save 结果：写入后的新 revision（前端用作后续 expected_revision 基准）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UserDataSaveResult {
-    pub(crate) revision: i64,
+pub struct UserDataSaveResult {
+    pub revision: i64,
 }
 
 /// I14-W7：Profile 原子删除结果——fallback profile id + 两个 envelope 的新 revision
 /// （前端用作后续 expected_revision 基准；sessions envelope 不存在时 sessions_revision=None）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ProfileDeleteResult {
-    pub(crate) fallback: String,
-    pub(crate) profiles_revision: i64,
-    pub(crate) sessions_revision: Option<i64>,
+pub struct ProfileDeleteResult {
+    pub fallback: String,
+    pub profiles_revision: i64,
+    pub sessions_revision: Option<i64>,
 }
 
 /// 用户数据仓库结构化错误（B1.2：前端按 code 分支，message 展示用）。
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum UserDataError {
+pub enum UserDataError {
     /// expected_revision 与仓库当前 revision 不匹配（旧写不覆盖新写）。
     #[error("用户数据 revision 冲突：期望 {expected}，实际 {actual}")]
     RevisionConflict { expected: i64, actual: i64 },
@@ -104,7 +104,7 @@ pub(crate) enum UserDataError {
 
 impl UserDataError {
     /// 机器可读错误码（稳定，不改拼写）。
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::RevisionConflict { .. } => "user_data_revision_conflict",
             Self::Unavailable(_) => "user_data_unavailable",
@@ -283,9 +283,9 @@ fn validate_browser_agent_ops(payload: &serde_json::Value) -> Result<i64, UserDa
 
 /// 打开（或创建）仓库并迁移到最新 schema（复用 msg_repo 的统一迁移链）。
 /// 调用方须先创建 DB 父目录；失败返回 Err——启动路径不得静默回退。
-pub(crate) fn open_user_data_db(path: &Path) -> Result<UserDataStore, UserDataError> {
+pub fn open_user_data_db(path: &Path) -> Result<UserDataStore, UserDataError> {
     let mut conn = Connection::open(path).map_err(UserDataError::from)?;
-    crate::session::connect(&mut conn)
+    crate::connect(&mut conn)
         .map_err(|error| UserDataError::Unavailable(error.to_string()))?;
     Ok(UserDataStore {
         conn: Mutex::new(conn),
@@ -294,16 +294,16 @@ pub(crate) fn open_user_data_db(path: &Path) -> Result<UserDataStore, UserDataEr
 
 /// 用户数据仓库：单一 SQLite 连接 + 互斥（SQLite 单写者；与 MessageService 不同连接、
 /// 同文件——connect 内 busy_timeout 序列化同文件写）。
-pub(crate) struct UserDataStore {
+pub struct UserDataStore {
     conn: Mutex<Connection>,
 }
 
 impl UserDataStore {
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存仓库
-    pub(crate) fn open_in_memory() -> Result<UserDataStore, UserDataError> {
+    pub fn open_in_memory() -> Result<UserDataStore, UserDataError> {
         let mut conn = Connection::open_in_memory().map_err(UserDataError::from)?;
-        crate::session::connect(&mut conn)
+        crate::connect(&mut conn)
             .map_err(|error| UserDataError::Unavailable(error.to_string()))?;
         Ok(UserDataStore {
             conn: Mutex::new(conn),
@@ -312,7 +312,7 @@ impl UserDataStore {
 
     /// 读取 key 对应的 envelope；无数据返回 None。payload 损坏（非 JSON）→ Corrupt
     /// （损坏报错，不静默覆盖现场）。
-    pub(crate) fn load(&self, key: UserDataKey) -> Result<Option<UserDataEnvelope>, UserDataError> {
+    pub fn load(&self, key: UserDataKey) -> Result<Option<UserDataEnvelope>, UserDataError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         let row = conn
             .query_row(
@@ -353,7 +353,7 @@ impl UserDataStore {
     /// - 成功返回新 revision（当前 + 1）。
     ///
     /// 结构校验失败 → Corrupt，不写入。
-    pub(crate) fn save(
+    pub fn save(
         &self,
         key: UserDataKey,
         payload: serde_json::Value,
@@ -470,7 +470,7 @@ impl UserDataStore {
     /// 修正 activeProfileId，并同时落盘 profiles + sessions 两个 envelope。
     /// 任一失败整体回滚（跨 envelope 原子性由同一事务保证）；删除不存在的 profile
     /// → NotFound（不静默）。
-    pub(crate) fn delete_profile(
+    pub fn delete_profile(
         &self,
         profile_id: &str,
     ) -> Result<ProfileDeleteResult, UserDataError> {
@@ -572,7 +572,7 @@ impl UserDataStore {
     /// 调用方（user_session_delete 命令）经 MessageService 执行；迟到写由
     /// deleted_sessions tombstone 拒绝（touch/evt_append 先查命中即拒——canonical
     /// 事件流无 FK 级联，必须显式 tombstone gate，见 DEL-04/CR-05）。
-    pub(crate) fn delete_session(&self, session_id: &str) -> Result<i64, UserDataError> {
+    pub fn delete_session(&self, session_id: &str) -> Result<i64, UserDataError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(UserDataError::from)?;
         let (s_version, s_revision, s_payload) =
@@ -609,14 +609,14 @@ impl UserDataStore {
 }
 
 /// 用户数据 service：spawn_blocking 边界 + 命令层 DTO（与 MessageService 同构）。
-pub(crate) struct UserDataService {
+pub struct UserDataService {
     store: Arc<UserDataStore>,
 }
 
 impl UserDataService {
     /// 打开（或创建）生产仓库并迁移到最新 schema。调用方须先创建 DB 父目录；
     /// 失败返回 Err——启动路径不得静默回退形成双主（ISSUE-14 W5）。
-    pub(crate) fn open_db(path: &Path) -> Result<UserDataService, UserDataError> {
+    pub fn open_db(path: &Path) -> Result<UserDataService, UserDataError> {
         let store = open_user_data_db(path)?;
         Ok(UserDataService {
             store: Arc::new(store),
@@ -625,14 +625,14 @@ impl UserDataService {
 
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存服务
-    pub(crate) fn in_memory() -> Result<UserDataService, UserDataError> {
+    pub fn in_memory() -> Result<UserDataService, UserDataError> {
         let store = UserDataStore::open_in_memory()?;
         Ok(UserDataService {
             store: Arc::new(store),
         })
     }
 
-    pub(crate) async fn load(
+    pub async fn load(
         &self,
         key: UserDataKey,
     ) -> Result<Option<UserDataEnvelope>, UserDataError> {
@@ -644,7 +644,7 @@ impl UserDataService {
             })?
     }
 
-    pub(crate) async fn save(
+    pub async fn save(
         &self,
         key: UserDataKey,
         payload: serde_json::Value,
@@ -659,7 +659,7 @@ impl UserDataService {
     }
 
     /// I14-W7：原子删除 Profile（跨 profiles/sessions envelope 单事务）。
-    pub(crate) async fn delete_profile(
+    pub async fn delete_profile(
         &self,
         profile_id: String,
     ) -> Result<ProfileDeleteResult, UserDataError> {
@@ -672,7 +672,7 @@ impl UserDataService {
     }
 
     /// I14-W7：从 sessions envelope 移除会话（消息级联由命令层协调）。
-    pub(crate) async fn delete_session(&self, session_id: String) -> Result<i64, UserDataError> {
+    pub async fn delete_session(&self, session_id: String) -> Result<i64, UserDataError> {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || store.delete_session(&session_id))
             .await
@@ -1007,8 +1007,8 @@ mod tests {
         // 核心设计假设：UserDataStore 与 MessageService 同文件双连接——各自 open 触发
         // 统一迁移链（幂等），user_data 表可写且不影响会话仓库（busy_timeout 序列化写）。
         let path = unique_temp_db_path();
-        let msg = crate::session::MessageService::open_db(&path).expect("msg open");
-        let user = crate::session::UserDataService::open_db(&path).expect("user open");
+        let msg = crate::msg_repo::MessageService::open_db(&path).expect("msg open");
+        let user = crate::user_data::UserDataService::open_db(&path).expect("user open");
         let runtime = tokio::runtime::Runtime::new().expect("rt");
         let revision = runtime.block_on(async {
             user.save(UserDataKey::Profiles, profiles_payload(), None)
@@ -1019,7 +1019,7 @@ mod tests {
         // 会话仓库在双连接并存下仍可写 session_state（无 SQLITE_BUSY 死锁）
         runtime.block_on(async {
             msg.set_session_state(
-                crate::session::DurableSessionOwner::new("p1", "a1", "s1"),
+                crate::owner::DurableSessionOwner::new("p1", "a1", "s1"),
                 Some("remote-1".into()),
                 serde_json::json!({"usage": {"n": 1}}),
             )
@@ -1195,9 +1195,9 @@ mod tests {
         // tombstone 语义：会话删除后，迟到 evt_append 被 deleted_sessions tombstone
         // 拒绝（不复活已删会话）——DEL-04 canonical 迟到写 gate。
         let path = unique_temp_db_path();
-        let msg = crate::session::MessageService::open_db(&path).expect("msg open");
-        let user = crate::session::UserDataService::open_db(&path).expect("user open");
-        let evt = crate::session::EventService::open_db(&path).expect("evt open");
+        let msg = crate::msg_repo::MessageService::open_db(&path).expect("msg open");
+        let user = crate::user_data::UserDataService::open_db(&path).expect("user open");
+        let evt = crate::event_repo::EventService::open_db(&path).expect("evt open");
         let runtime = tokio::runtime::Runtime::new().expect("rt");
         let owner_key = r#"["p","peri","qq:g:9"]"#.to_string();
         let late_event = || {
@@ -1221,7 +1221,7 @@ mod tests {
                     { "id": "s-del", "agentId": "peri", "name": "待删", "source": "qq:g:9", "profileId": "p" }
                 ]
             });
-            user.save(crate::session::user_data::UserDataKey::Sessions, envelope, None)
+            user.save(crate::user_data::UserDataKey::Sessions, envelope, None)
                 .await
                 .expect("save sessions");
             // 删除前事件可写

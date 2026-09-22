@@ -15,7 +15,7 @@ pub(super) const MAX_FOLD_BYTES: usize = 48 * 1024;
 ///
 /// 与 `mergeAdjacentDeltaChunks` 的跨度契约配套：span 内每一号都落在这唯一一行里，
 /// 因此 dispatcher 把「一个输入一条结果」的配对改成「按跨度展开配对」。
-pub(crate) fn row_input_span_width(row: &CanonicalEventRow) -> usize {
+pub fn row_input_span_width(row: &CanonicalEventRow) -> usize {
     if !row.event_type.ends_with(".batch") {
         return 1;
     }
@@ -42,7 +42,7 @@ pub(super) fn foldable_delta_base(row: &CanonicalEventRow) -> Option<&'static st
     if row.event_type.ends_with(".batch") {
         return None;
     }
-    let base = crate::session::turn_rollup::static_delta_type(&row.event_type)?;
+    let base = crate::turn_rollup::static_delta_type(&row.event_type)?;
     let has_text = row
         .typed_payload
         .as_ref()

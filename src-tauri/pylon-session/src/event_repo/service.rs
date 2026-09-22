@@ -10,17 +10,17 @@ use super::row::{
     KernelEventInput, ReplayJournalIngestResult,
 };
 use super::EventError;
-use crate::session::DurableSessionOwner;
+use crate::owner::DurableSessionOwner;
 
 /// 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
-pub(crate) struct EventService {
+pub struct EventService {
     pub(super) repo: Arc<EventRepo>,
 }
 
 impl EventService {
     /// 打开（或创建）生产仓库并迁移到最新 schema。调用方须先创建 DB 父目录；
     /// 失败返回 Err——启动路径不得静默回退。
-    pub(crate) fn open_db(path: &Path) -> Result<EventService, EventError> {
+    pub fn open_db(path: &Path) -> Result<EventService, EventError> {
         let repo = EventRepo::open(path)?;
         Ok(EventService {
             repo: Arc::new(repo),
@@ -29,7 +29,7 @@ impl EventService {
 
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存服务
-    pub(crate) fn in_memory() -> Result<EventService, EventError> {
+    pub fn in_memory() -> Result<EventService, EventError> {
         let repo = EventRepo::open_in_memory()?;
         Ok(EventService {
             repo: Arc::new(repo),
@@ -37,7 +37,7 @@ impl EventService {
     }
 
     /// 校验 + 批量 append（spawn_blocking 边界）。输入为前端 EVT-01 schema JSON。
-    pub(crate) async fn append_events(
+    pub async fn append_events(
         &self,
         input: Vec<serde_json::Value>,
         expected_revision: Option<i64>,
@@ -58,7 +58,7 @@ impl EventService {
 
     /// Kernel ingest boundary：sequence/revision 在 repository transaction 内分配，
     /// 返回 committed row，供 dispatcher 在 durable append 后发布 projection。
-    pub(crate) async fn ingest_event(
+    pub async fn ingest_event(
         &self,
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
@@ -78,7 +78,7 @@ impl EventService {
     /// repository transaction，仍逐条 normalize/append，并返回实际提交的行（含 terminal
     /// 触发的 turn.unit）。调用方负责在窗口/消息边界 flush；单事件入口委托到这里以保证
     /// 两条路径永远共享同一 sequence、tombstone 和 rollup 语义。
-    pub(crate) async fn ingest_events(
+    pub async fn ingest_events(
         &self,
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
@@ -110,7 +110,7 @@ impl EventService {
     /// Import a complete session/load replay into the single owner journal. Only an empty journal
     /// may be imported. Any trusted local observation wins; a revision race is treated as local
     /// authority (or an idempotent unverified import), never as permission to append a snapshot.
-    pub(crate) async fn ingest_complete_replay(
+    pub async fn ingest_complete_replay(
         &self,
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
@@ -195,7 +195,7 @@ impl EventService {
     }
 
     /// owner 当前 revision（MAX(sequence)，空 = 0）。
-    pub(crate) async fn revision(&self, owner_key: String) -> Result<i64, EventError> {
+    pub async fn revision(&self, owner_key: String) -> Result<i64, EventError> {
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || repo.revision(&owner_key))
             .await
@@ -207,7 +207,7 @@ impl EventService {
     /// Read-only authority probe used before deciding how an incomplete replay may be surfaced.
     /// It deliberately ignores recovery-import rows: only durable local observations establish
     /// the local journal as the load authority.
-    pub(crate) async fn has_authoritative_local_events(
+    pub async fn has_authoritative_local_events(
         &self,
         owner_key: String,
     ) -> Result<bool, EventError> {
@@ -220,7 +220,7 @@ impl EventService {
     }
 
     /// 游标分页读取（最新页 before_seq=null；limit 缺省 100）。
-    pub(crate) async fn list_events(
+    pub async fn list_events(
         &self,
         owner_key: String,
         before_sequence: Option<i64>,
@@ -235,7 +235,7 @@ impl EventService {
     }
 
     /// #51 收口：写入侧幂等判定的读支撑——owner journal 里最新一条指定类型事件。
-    pub(crate) async fn latest_event_of_type(
+    pub async fn latest_event_of_type(
         &self,
         owner_key: String,
         event_type: &'static str,
@@ -249,7 +249,7 @@ impl EventService {
     }
 
     /// #81 L2：compact 读（单元 + 未覆盖行；文档投影/搜索的读取入口）。
-    pub(crate) async fn load_events_compact(
+    pub async fn load_events_compact(
         &self,
         owner_key: String,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
@@ -262,7 +262,7 @@ impl EventService {
     }
 
     /// #81 L3：裁剪迁移（应用关闭时调用；budget_ms 控制单次预算，可续跑）。
-    pub(crate) async fn rollup_trim(
+    pub async fn rollup_trim(
         &self,
         budget_ms: Option<u64>,
     ) -> Result<RollupTrimReport, EventError> {
@@ -275,7 +275,7 @@ impl EventService {
     }
 
     /// #81 L3：剩余未裁剪单元数（策略关闭时的报告数据源）。
-    pub(crate) async fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
+    pub async fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || repo.count_remaining_rollup_units())
             .await
@@ -284,7 +284,7 @@ impl EventService {
             })?
     }
 
-    pub(crate) async fn export_raw_event(
+    pub async fn export_raw_event(
         &self,
         event_id: String,
     ) -> Result<Option<CanonicalEventRawExport>, EventError> {
@@ -297,7 +297,7 @@ impl EventService {
     }
 
     /// B6：跨 owner 内容搜索候选（前端消息级精确过滤的第二阶段数据源）。
-    pub(crate) async fn search_owners(
+    pub async fn search_owners(
         &self,
         query: String,
         limit: u32,

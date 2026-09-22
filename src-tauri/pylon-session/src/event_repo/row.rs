@@ -4,49 +4,49 @@ use serde::Serialize;
 
 use super::provenance::{derive_raw_metadata, owner_triple, provenance_parts};
 use super::EventError;
-use crate::session::DurableSessionOwner;
+use crate::owner::DurableSessionOwner;
 
 /// canonical 事件行（canonical_events 表）。camelCase wire 与 EVT-01 schema 对齐；
 /// identity/typed_payload/raw_payload 以 JSON 文本存取，回读原样还原。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CanonicalEventRow {
-    pub(crate) event_id: String,
-    pub(crate) owner_key: String,
-    pub(crate) profile_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) local_session_id: String,
-    pub(crate) remote_session_id: Option<String>,
-    pub(crate) client_generation: i64,
-    pub(crate) sequence: i64,
-    pub(crate) occurred_at: String,
-    pub(crate) received_at: String,
-    pub(crate) event_type: String,
-    pub(crate) payload_version: i64,
-    pub(crate) identity: Option<serde_json::Value>,
-    pub(crate) typed_payload: Option<serde_json::Value>,
-    pub(crate) raw_payload: serde_json::Value,
-    pub(crate) created_at: i64,
-    pub(crate) schema_version: i64,
-    pub(crate) provenance_origin: String,
-    pub(crate) provenance_trust: String,
-    pub(crate) provenance_provider: Option<String>,
-    pub(crate) provenance_import_id: Option<String>,
-    pub(crate) raw_truncated: bool,
-    pub(crate) raw_original_bytes: i64,
-    pub(crate) raw_retained_bytes: i64,
-    pub(crate) raw_omitted_bytes: i64,
-    pub(crate) raw_truncation_reason: Option<String>,
+pub struct CanonicalEventRow {
+    pub event_id: String,
+    pub owner_key: String,
+    pub profile_id: String,
+    pub agent_id: String,
+    pub local_session_id: String,
+    pub remote_session_id: Option<String>,
+    pub client_generation: i64,
+    pub sequence: i64,
+    pub occurred_at: String,
+    pub received_at: String,
+    pub event_type: String,
+    pub payload_version: i64,
+    pub identity: Option<serde_json::Value>,
+    pub typed_payload: Option<serde_json::Value>,
+    pub raw_payload: serde_json::Value,
+    pub created_at: i64,
+    pub schema_version: i64,
+    pub provenance_origin: String,
+    pub provenance_trust: String,
+    pub provenance_provider: Option<String>,
+    pub provenance_import_id: Option<String>,
+    pub raw_truncated: bool,
+    pub raw_original_bytes: i64,
+    pub raw_retained_bytes: i64,
+    pub raw_omitted_bytes: i64,
+    pub raw_truncation_reason: Option<String>,
     /// raw_payload 的入库序列化文本（与 `raw_payload.to_string()` 逐字节相等）。
     /// 写路径由 retain_raw_payload 直接产出复用（INSERT 免二次序列化）；
     /// 读路径承接 raw_payload_json 列原文。不入 wire（serde skip）。
     #[serde(skip)]
-    pub(crate) raw_payload_json: String,
+    pub raw_payload_json: String,
     /// #81 L2/L3：turn.unit 行的覆盖跨度（其余事件为 NULL）。裁剪迁移的查询列。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) rollup_seq_start: Option<i64>,
+    pub rollup_seq_start: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) rollup_seq_end: Option<i64>,
+    pub rollup_seq_end: Option<i64>,
 }
 
 pub(super) struct StoredCanonicalEventRow {
@@ -91,16 +91,16 @@ fn decode_event_json(
 /// append 结果：实际写入事件（跳过 event_id 去重）+ 该 owner 最新 sequence（revision）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct EventAppendResult {
-    pub(crate) events: Vec<CanonicalEventRow>,
-    pub(crate) revision: i64,
+pub struct EventAppendResult {
+    pub events: Vec<CanonicalEventRow>,
+    pub revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ReplayJournalIngestResult {
-    pub(crate) events: Vec<CanonicalEventRow>,
-    pub(crate) revision: i64,
-    pub(crate) status: &'static str,
+pub struct ReplayJournalIngestResult {
+    pub events: Vec<CanonicalEventRow>,
+    pub revision: i64,
+    pub status: &'static str,
 }
 
 /// Kernel ingest 输入。owner 来自已证明的 runtime session 绑定；remote id 仅是
@@ -118,34 +118,34 @@ pub(super) struct KernelEventInput {
 /// 事件页（游标分页，升序）：事件 + 下一页游标（None = 已到最早，无更旧事件）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct EventPage {
-    pub(crate) events: Vec<CanonicalEventRow>,
-    pub(crate) next_before_sequence: Option<i64>,
+pub struct EventPage {
+    pub events: Vec<CanonicalEventRow>,
+    pub next_before_sequence: Option<i64>,
 }
 
 /// evt_search 候选 owner（B6）：内容命中 canonical_events 的 owner 三元组 +
 /// remote_session_id（前端据此 loadAll 后做消息级精确过滤）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct EventSearchOwner {
-    pub(crate) profile_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) local_session_id: String,
-    pub(crate) remote_session_id: Option<String>,
+pub struct EventSearchOwner {
+    pub profile_id: String,
+    pub agent_id: String,
+    pub local_session_id: String,
+    pub remote_session_id: Option<String>,
 }
 
 /// Forensic export deliberately bypasses JSON decoding so one corrupt row can be isolated without
 /// making the rest of the owner stream appear healthy or leaking payload text into error logs.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CanonicalEventRawExport {
-    pub(crate) event_id: String,
-    pub(crate) owner_key: String,
-    pub(crate) sequence: i64,
-    pub(crate) event_type: String,
-    pub(crate) identity_json: Option<String>,
-    pub(crate) typed_payload_json: Option<String>,
-    pub(crate) raw_payload_json: String,
+pub struct CanonicalEventRawExport {
+    pub event_id: String,
+    pub owner_key: String,
+    pub sequence: i64,
+    pub event_type: String,
+    pub identity_json: Option<String>,
+    pub typed_payload_json: Option<String>,
+    pub raw_payload_json: String,
 }
 
 /// 事件行映射（v15 EVENT_COLUMNS 列序 → StoredCanonicalEventRow；list/compact/trim 共用）。

@@ -8,19 +8,21 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use super::{EventService, MessageService, UserDataService};
+use crate::event_repo::EventService;
+use crate::msg_repo::MessageService;
+use crate::user_data::UserDataService;
 
-pub(crate) struct PersistenceServices {
-    pub(crate) message: Arc<MessageService>,
-    pub(crate) user_data: Arc<UserDataService>,
-    pub(crate) event: Arc<EventService>,
+pub struct PersistenceServices {
+    pub message: Arc<MessageService>,
+    pub user_data: Arc<UserDataService>,
+    pub event: Arc<EventService>,
 }
 
 impl PersistenceServices {
     /// Open/migrate every persistence service before the application accepts
     /// commands. There is deliberately no localStorage or alternate-history
     /// fallback: startup either establishes the one durable authority or fails.
-    pub(crate) fn open(path: &Path) -> Result<Self, String> {
+    pub fn open(path: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("create persistence directory failed: {error}"))?;

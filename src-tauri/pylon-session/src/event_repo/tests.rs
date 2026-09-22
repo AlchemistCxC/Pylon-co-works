@@ -1179,7 +1179,7 @@ fn fresh_db_has_canonical_events_table_and_version() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
+    assert_eq!(version, crate::msg_repo::SCHEMA_VERSION);
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='canonical_events'",
@@ -1686,7 +1686,7 @@ fn fresh_db_migration_includes_table_after_reopen() {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
+        assert_eq!(version, crate::msg_repo::SCHEMA_VERSION);
         // #155 T2（v15）：存储列收窄为 15 列；v13 的 envelope/provenance/raw_* 列
         // 已由读侧派生取代（wire 28 字段契约不变）。
         for column in [
@@ -1742,7 +1742,7 @@ fn fresh_db_migration_includes_table_after_reopen() {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
+        assert_eq!(version, crate::msg_repo::SCHEMA_VERSION);
     }
     let _ = std::fs::remove_file(&path);
 }

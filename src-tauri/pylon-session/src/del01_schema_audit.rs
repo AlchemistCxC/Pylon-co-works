@@ -32,7 +32,7 @@ use rusqlite::Connection;
 use super::event_repo::{parse_canonical_event, EventError, EventRepo};
 use super::msg_repo::connect;
 use super::msg_repo::SCHEMA_VERSION;
-use super::MsgRepo;
+use super::msg_repo::MsgRepo;
 
 /// 审计专用内存库：跑真实 migrate() 到当前版本（唯一事实源）。
 fn audit_db() -> Connection {

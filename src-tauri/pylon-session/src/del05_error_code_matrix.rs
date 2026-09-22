@@ -13,7 +13,8 @@
 
 use super::event_repo::{parse_canonical_event, EventError, EventRepo};
 use super::msg_repo::{MessageError, MsgRepo};
-use super::{validate_delete_owner, UserDataError};
+use super::msg_repo::validate_delete_owner;
+use super::user_data::UserDataError;
 
 /// wire 序列化 `{code, message}` 中的 code 提取（断言形状稳定）。
 fn wire_code<T: serde::Serialize>(error: &T) -> String {

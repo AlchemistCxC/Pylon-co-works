@@ -5,7 +5,7 @@ use serde::Serialize;
 
 /// 事件仓库结构化错误（B1.2：前端按 code 分支，message 展示用）。
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum EventError {
+pub enum EventError {
     /// 批量 append 的 expected_revision 与仓库当前 revision 不匹配（旧写不覆盖新写）。
     #[error("事件仓库 revision 冲突：期望 {expected}，实际 {actual}")]
     RevisionConflict { expected: i64, actual: i64 },
@@ -31,7 +31,7 @@ pub(crate) enum EventError {
 
 impl EventError {
     /// 机器可读错误码（稳定，不改拼写）。
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::RevisionConflict { .. } => "event_revision_conflict",
             Self::Corrupt(_) => "event_repo_corrupt",

@@ -247,7 +247,7 @@ fn legacy_db_is_rebuilt_without_data_migration() {
 fn session_state_roundtrip_merge_keeps_existing_keys() {
     // #155 T2：v8 sessions.session_state 死列已删——merge 语义改在生产 owner 键控路径钉死。
     let repo = MsgRepo::open_in_memory().expect("open");
-    let owner = crate::session::DurableSessionOwner::new("p1", "peri", "local:s1");
+    let owner = crate::owner::DurableSessionOwner::new("p1", "peri", "local:s1");
     repo.set_session_state_for_owner(&owner, None, &serde_json::json!({"usage": {"n": 1}}))
         .expect("set usage");
     repo.set_session_state_for_owner(&owner, None, &serde_json::json!({"commands": ["ls"]}))
@@ -258,7 +258,7 @@ fn session_state_roundtrip_merge_keeps_existing_keys() {
         .expect("present");
     assert_eq!(state["usage"]["n"], 1, "merge 不覆盖已有 key");
     assert_eq!(state["commands"][0], "ls");
-    let ghost = crate::session::DurableSessionOwner::new("p1", "peri", "ghost");
+    let ghost = crate::owner::DurableSessionOwner::new("p1", "peri", "ghost");
     assert!(repo
         .get_session_state_for_owner(&ghost)
         .expect("get")
@@ -268,8 +268,8 @@ fn session_state_roundtrip_merge_keeps_existing_keys() {
 #[test]
 fn durable_session_state_isolated_by_full_owner_when_sources_match() {
     let repo = MsgRepo::open_in_memory().expect("open");
-    let owner_a = crate::session::DurableSessionOwner::new("p1", "agent-a", "shared");
-    let owner_b = crate::session::DurableSessionOwner::new("p2", "agent-b", "shared");
+    let owner_a = crate::owner::DurableSessionOwner::new("p1", "agent-a", "shared");
+    let owner_b = crate::owner::DurableSessionOwner::new("p2", "agent-b", "shared");
 
     repo.set_session_state_for_owner(
         &owner_a,
@@ -301,8 +301,8 @@ fn durable_session_state_isolated_by_full_owner_when_sources_match() {
 #[test]
 fn owner_tombstone_deletes_and_blocks_only_the_matching_snapshot() {
     let repo = MsgRepo::open_in_memory().expect("open");
-    let owner_a = crate::session::DurableSessionOwner::new("p1", "agent-a", "shared");
-    let owner_b = crate::session::DurableSessionOwner::new("p2", "agent-b", "shared");
+    let owner_a = crate::owner::DurableSessionOwner::new("p1", "agent-a", "shared");
+    let owner_b = crate::owner::DurableSessionOwner::new("p2", "agent-b", "shared");
     for owner in [&owner_a, &owner_b] {
         repo.set_session_state_for_owner(owner, None, &serde_json::json!({"usage": {"n": 1}}))
             .expect("seed owner state");
@@ -511,15 +511,15 @@ fn owner_key_of(local_session_id: &str) -> String {
     serde_json::to_string(&["p1", "peri", local_session_id]).expect("owner key")
 }
 
-fn by_time_policy(days: u32) -> crate::session::retention::RetentionPolicy {
+fn by_time_policy(days: u32) -> crate::retention::RetentionPolicy {
     serde_json::from_str(&format!(r#"{{"mode":"by_time","days":{days}}}"#)).expect("policy")
 }
 
-fn by_count_policy(count: u32) -> crate::session::retention::RetentionPolicy {
+fn by_count_policy(count: u32) -> crate::retention::RetentionPolicy {
     serde_json::from_str(&format!(r#"{{"mode":"by_count","count":{count}}}"#)).expect("policy")
 }
 
-fn permanent_policy() -> crate::session::retention::RetentionPolicy {
+fn permanent_policy() -> crate::retention::RetentionPolicy {
     serde_json::from_str(r#"{"mode":"permanent"}"#).expect("policy")
 }
 
@@ -560,7 +560,7 @@ fn retention_policy_set_expected_revision_conflicts_and_rolls_back() {
     assert!(
         matches!(
             err,
-            PylonError::RevisionConflict {
+            SessionError::RevisionConflict {
                 expected: 5,
                 actual: 1
             }
@@ -608,7 +608,7 @@ fn retention_prune_stale_when_policy_revision_changed() {
     assert!(
         matches!(
             err,
-            PylonError::StalePreview {
+            SessionError::StalePreview {
                 expected: 1,
                 actual: 2
             }

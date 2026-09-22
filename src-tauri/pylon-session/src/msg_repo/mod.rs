@@ -9,6 +9,8 @@
 //! - 同步访问（`Mutex<Connection>`，SQLite 单写者）；上层须经 spawn_blocking
 //!   调用，不得在 async 执行器线程上直接执行。
 
+use crate::user_data::UserDataError;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,7 +19,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::ser::SerializeMap;
 use serde::Serialize;
 
-use crate::error::PylonError;
+use crate::error::SessionError;
 
 /// 当前 schema 版本（PRAGMA user_version）。新增迁移必须同步递增。
 /// v3：I14-W5 增加 user_data 表（versioned Profile/Session/activeProfileId 后端存储）。
@@ -43,11 +45,11 @@ use crate::error::PylonError;
 ///      legacy_message_backfill_audit；auto_vacuum=INCREMENTAL + application_id。旧库
 ///      （user_version < 15）不搬迁任何行：保留 user_data.profiles 与 retention_policy，
 ///      其余历史（canonical_events/墓碑/快照/user_data.sessions）丢弃重建。
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 15;
 
 /// Pylon 数据库头标识（PRAGMA application_id，'PYLN' 大端）。诊断用途：文件被误认成
 /// 其他应用数据时可据此识别。
-pub(crate) const PYLON_APPLICATION_ID: i64 = 0x5059_4C4E;
+pub const PYLON_APPLICATION_ID: i64 = 0x5059_4C4E;
 
 /// 当前 schema DDL（CREATE IF NOT EXISTS；v15 起升版只有「重建」一条路，无补列迁移）。
 /// - session_state_snapshots：usage/commands 等可恢复快照（不是历史存储）。
@@ -155,50 +157,50 @@ CREATE TABLE IF NOT EXISTS rollup_migration_state (
 "#;
 
 /// 会话仓库：单一 SQLite 连接 + 互斥（SQLite 单写者）。
-pub(crate) struct MsgRepo {
+pub struct MsgRepo {
     conn: Mutex<Connection>,
 }
 
 /// #110 F3：墓碑事件清扫的宽限期（天）——已终态墓碑超过该期限，其遗留事件即可回收。
 /// 7 天给「误删取证/恢复」留窗口，同时不让垃圾无限累积。
-pub(crate) const TOMBSTONE_EVENT_GRACE_DAYS: i64 = 7;
+pub const TOMBSTONE_EVENT_GRACE_DAYS: i64 = 7;
 
 /// #110 F3：墓碑事件清扫结果（记账/断言用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct TombstonePurgeOutcome {
+pub struct TombstonePurgeOutcome {
     /// 本次纳入清扫的墓碑数（state='deleted' 且超过宽限期）。
-    pub(crate) tombstones: i64,
+    pub tombstones: i64,
     /// 实际删除的 canonical_events 行数。
-    pub(crate) events_deleted: i64,
+    pub events_deleted: i64,
 }
 
 /// I14-W9：保留策略行（单行；version + revision + payload JSON；wire camelCase）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RetentionPolicyRow {
-    pub(crate) version: i64,
-    pub(crate) revision: i64,
-    pub(crate) payload: String,
+pub struct RetentionPolicyRow {
+    pub version: i64,
+    pub revision: i64,
+    pub payload: String,
 }
 
 /// I14-W9：保留候选（preview）与执行结果（prune）的每会话计数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SessionCandidateCount {
-    pub(crate) session_id: String,
-    pub(crate) count: i64,
+pub struct SessionCandidateCount {
+    pub session_id: String,
+    pub count: i64,
 }
 
 /// I14-W9：保留 preview/prune 结果（preview 不删除；prune 返回实际删除计数）。
 /// I13-W4：增 affected_sessions / oldest_deleted_at（by_time 为 cutoff，其余 None）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RetentionPreview {
-    pub(crate) total_candidates: i64,
-    pub(crate) affected_sessions: i64,
+pub struct RetentionPreview {
+    pub total_candidates: i64,
+    pub affected_sessions: i64,
     /// by_time：最早将被删除的 cutoff（毫秒）；by_count/permanent：None。
-    pub(crate) oldest_deleted_at: Option<i64>,
-    pub(crate) per_session: Vec<SessionCandidateCount>,
+    pub oldest_deleted_at: Option<i64>,
+    pub per_session: Vec<SessionCandidateCount>,
 }
 
 /// MessageService 结构化错误（B1.2：前端按 code 分支，message 展示用）。
@@ -206,7 +208,7 @@ pub(crate) struct RetentionPreview {
 /// corrupt（库损坏/非库文件）/ constraint（约束冲突）/ conflict（并发锁）/
 /// unavailable（其余不可用），前端可据 code 区分诊断与重试策略。
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum MessageError {
+pub enum MessageError {
     /// SQLITE_CORRUPT / SQLITE_NOTADB：数据库镜像损坏或非数据库文件。
     #[error("消息仓库损坏：{0}")]
     Corrupt(String),
@@ -226,7 +228,7 @@ pub(crate) enum MessageError {
 
 impl MessageError {
     /// 机器可读错误码（稳定，不改拼写）。
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::Corrupt(_) => "message_repo_corrupt",
             Self::Constraint(_) => "message_repo_constraint",
@@ -238,7 +240,7 @@ impl MessageError {
 }
 
 /// B1.2：结构化错误 wire `{ code, message }`（W2 IPC——Tauri command 直接返回
-/// `Result<T, MessageError>`，前端按 code 分支，message 仅展示）。与 PylonError 同形。
+/// `Result<T, MessageError>`，前端按 code 分支，message 仅展示）。与 SessionError 同形。
 impl Serialize for MessageError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(2))?;
@@ -293,7 +295,7 @@ fn ensure_session_not_deleted(conn: &Connection, session_id: &str) -> Result<(),
 
 fn ensure_owner_not_deleted(
     conn: &Connection,
-    owner: &crate::session::DurableSessionOwner,
+    owner: &crate::owner::DurableSessionOwner,
     owner_key: &str,
 ) -> Result<(), MessageError> {
     let deleted: bool = conn
@@ -338,14 +340,14 @@ fn get_session_state_for_owner_inner(
 /// localSessionId]——与 event_repo/eventSchema toCanonicalOwnerKey 同纪律，禁止冒号拼接
 /// 与任意字符串污染 tombstone owner）。仅当前端显式传 owner_key 时校验（legacy 调用
 /// None 走哨兵不校验）。
-pub(crate) fn validate_owner_key(owner_key: &str) -> Result<(), PylonError> {
+pub fn validate_owner_key(owner_key: &str) -> Result<(), SessionError> {
     let parsed: serde_json::Value = serde_json::from_str(owner_key)
-        .map_err(|error| PylonError::from(format!("owner_key 不是合法 JSON：{error}")))?;
+        .map_err(|error| SessionError::from(format!("owner_key 不是合法 JSON：{error}")))?;
     let arr = parsed
         .as_array()
-        .ok_or_else(|| PylonError::from("owner_key 必须是 JSON 数组".to_string()))?;
+        .ok_or_else(|| SessionError::from("owner_key 必须是 JSON 数组".to_string()))?;
     if arr.len() != 3 {
-        return Err(PylonError::from(format!(
+        return Err(SessionError::from(format!(
             "owner_key 必须是 [profileId, agentId, localSessionId] 三元素数组，实际 {} 个",
             arr.len()
         )));
@@ -354,7 +356,7 @@ pub(crate) fn validate_owner_key(owner_key: &str) -> Result<(), PylonError> {
         match item.as_str() {
             Some(value) if !value.is_empty() => {}
             _ => {
-                return Err(PylonError::from(format!(
+                return Err(SessionError::from(format!(
                     "owner_key[{index}] 必须是非空字符串"
                 )))
             }
@@ -363,17 +365,17 @@ pub(crate) fn validate_owner_key(owner_key: &str) -> Result<(), PylonError> {
     Ok(())
 }
 
-fn legacy_tombstone_owner_key(session_id: &str) -> Result<String, PylonError> {
+fn legacy_tombstone_owner_key(session_id: &str) -> Result<String, SessionError> {
     serde_json::to_string(&["*", "*", session_id])
-        .map_err(|error| PylonError::from(format!("legacy tombstone owner encode failed: {error}")))
+        .map_err(|error| SessionError::from(format!("legacy tombstone owner encode failed: {error}")))
 }
 
-fn repo_err(error: rusqlite::Error) -> PylonError {
-    PylonError::from(format!("message repo: {error}"))
+fn repo_err(error: rusqlite::Error) -> SessionError {
+    SessionError::from(format!("message repo: {error}"))
 }
 
-fn lock_err<E>(_: E) -> PylonError {
-    PylonError::from("message repo lock poisoned".to_string())
+fn lock_err<E>(_: E) -> SessionError {
+    SessionError::from("message repo lock poisoned".to_string())
 }
 
 /// DEL-02（v6→v7）：deleted_sessions 升级为 owner/deletion state（方案书 §5.12）。
@@ -389,11 +391,11 @@ mod migrations;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use migrations::connect;
+pub use migrations::connect;
 
 impl MsgRepo {
     /// 打开（或创建）仓库并迁移到最新 schema（D-02 版本化迁移）。
-    pub(crate) fn open(path: &Path) -> Result<MsgRepo, PylonError> {
+    pub fn open(path: &Path) -> Result<MsgRepo, SessionError> {
         let mut conn = Connection::open(path).map_err(repo_err)?;
         connect(&mut conn)?;
         Ok(MsgRepo {
@@ -403,7 +405,7 @@ impl MsgRepo {
 
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存仓库
-    pub(crate) fn open_in_memory() -> Result<MsgRepo, PylonError> {
+    pub fn open_in_memory() -> Result<MsgRepo, SessionError> {
         let mut conn = Connection::open_in_memory().map_err(repo_err)?;
         connect(&mut conn)?;
         Ok(MsgRepo {
@@ -413,9 +415,9 @@ impl MsgRepo {
 
     /// Owner-keyed state write. The state snapshot is shallow-merged so usage
     /// and commands arriving in separate ACP updates do not clear each other.
-    pub(crate) fn set_session_state_for_owner(
+    pub fn set_session_state_for_owner(
         &self,
-        owner: &crate::session::DurableSessionOwner,
+        owner: &crate::owner::DurableSessionOwner,
         remote_session_id: Option<&str>,
         state: &serde_json::Value,
     ) -> Result<(), MessageError> {
@@ -464,9 +466,9 @@ impl MsgRepo {
         Ok(())
     }
 
-    pub(crate) fn get_session_state_for_owner(
+    pub fn get_session_state_for_owner(
         &self,
-        owner: &crate::session::DurableSessionOwner,
+        owner: &crate::owner::DurableSessionOwner,
     ) -> Result<Option<serde_json::Value>, MessageError> {
         let owner_key = owner
             .key()
@@ -481,10 +483,10 @@ impl MsgRepo {
     /// 会话写入门闸（#155 T2 起 sessions 死表已删，touch 不再落行——生产会话行由
     /// user_data sessions envelope 维护）。保留 tombstone gate 语义：已删除会话拒绝复活。
     #[allow(dead_code)] // 测试/历史兼容路径保留
-    pub(crate) fn touch_session(&self, session_id: &str) -> Result<(), PylonError> {
+    pub fn touch_session(&self, session_id: &str) -> Result<(), SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         ensure_session_not_deleted(&conn, session_id)
-            .map_err(|error| PylonError::from(error.to_string()))?;
+            .map_err(|error| SessionError::from(error.to_string()))?;
         Ok(())
     }
 
@@ -493,32 +495,32 @@ impl MsgRepo {
     /// 会话作用域 legacy owner）；state 恒为 deleted；同一 owner 重复删除 INSERT OR IGNORE 幂等，
     /// 不同 owner 的 tombstone 可并存。#110 F3：exact owner 的 canonical_events 同事务清扫。
     #[allow(dead_code)] // 测试/直通车变体：生产走 DEL-03 两阶段（begin_delete_session → finalize）
-    pub(crate) fn delete_session(
+    pub fn delete_session(
         &self,
         session_id: &str,
         owner_key: Option<&str>,
-    ) -> Result<(), PylonError> {
+    ) -> Result<(), SessionError> {
         self.delete_session_with_state(session_id, owner_key, "deleted")
     }
 
     /// DEL-03（§5.13 步骤 2-4）：本地优先删除开始——同一事务内写 state='deleting'
     /// tombstone 并删除会话行；前端随后远端 close best effort 并调
     /// `finalize_session_delete` 转终态 'deleted'。'deleting' 同样被迟到写 gate（不复活）。
-    pub(crate) fn begin_delete_session(
+    pub fn begin_delete_session(
         &self,
         session_id: &str,
         owner_key: Option<&str>,
-    ) -> Result<(), PylonError> {
+    ) -> Result<(), SessionError> {
         self.delete_session_with_state(session_id, owner_key, "deleting")
     }
 
     /// DEL-03（§5.13）：删除终态化——deleting → deleted。幂等：不存在/已终态均为 no-op。
     /// 失败不阻断：tombstone 保持 'deleting' 仍被 ensure_session_not_deleted gate（不复活）。
-    pub(crate) fn finalize_session_delete(
+    pub fn finalize_session_delete(
         &self,
         session_id: &str,
         owner_key: Option<&str>,
-    ) -> Result<(), PylonError> {
+    ) -> Result<(), SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         if let Some(owner_key) = owner_key {
             validate_owner_key(owner_key)?;
@@ -541,7 +543,7 @@ impl MsgRepo {
 
     /// tombstone 当前 state（None = 无 tombstone）。测试消费（DEL-03/05）；生产 gate 只查存在性。
     #[allow(dead_code)]
-    pub(crate) fn tombstone_state(&self, session_id: &str) -> Result<Option<String>, PylonError> {
+    pub fn tombstone_state(&self, session_id: &str) -> Result<Option<String>, SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         let state: Option<String> = conn
             .query_row(
@@ -562,7 +564,7 @@ impl MsgRepo {
         session_id: &str,
         owner_key: Option<&str>,
         state: &str,
-    ) -> Result<(), PylonError> {
+    ) -> Result<(), SessionError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(repo_err)?;
         if let Some(owner_key) = owner_key {
@@ -625,10 +627,10 @@ impl MsgRepo {
     /// 中间态（远端 close 尚未收尾，可能仍需取证），legacy 墓碑无 owner 维。
     /// **墓碑行本身不删**——迟到写 gate（`ensure_session_not_deleted`）依赖其存在性，
     /// 删墓碑等于允许已删会话复活。
-    pub(crate) fn purge_tombstoned_events(
+    pub fn purge_tombstoned_events(
         &self,
         grace_days: i64,
-    ) -> Result<TombstonePurgeOutcome, PylonError> {
+    ) -> Result<TombstonePurgeOutcome, SessionError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(repo_err)?;
         let cutoff = now_millis().saturating_sub(grace_days.max(0).saturating_mul(86_400_000));
@@ -661,7 +663,7 @@ impl MsgRepo {
     /// 流式回合经 dispatcher 批窗口聚合事务落盘，从不主动 checkpoint 时 WAL 只增不减
     /// ——体检实证 WAL 66.4MB 反超主库 61.9MB。TRUNCATE 在无读者时把 WAL 文件本身收缩
     /// 回零。拿不到写锁时 SQLite 返回 busy 行而不是错误，按「本次跳过」处理（下一轮再来）。
-    pub(crate) fn checkpoint_wal(&self) -> Result<(), PylonError> {
+    pub fn checkpoint_wal(&self) -> Result<(), SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
             row.get::<_, i64>(0)
@@ -673,7 +675,7 @@ impl MsgRepo {
     /// #155 T2：归还 `auto_vacuum=INCREMENTAL` 攒下的空闲页（无参 = 全量归还）。
     /// v15 前的库没有 ptrmap，此调用是 no-op——只在重建后的库上有实际效果。
     /// （PRAGMA incremental_vacuum 不返回行，须走 execute_batch。）
-    pub(crate) fn release_free_pages(&self) -> Result<(), PylonError> {
+    pub fn release_free_pages(&self) -> Result<(), SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         conn.execute_batch("PRAGMA incremental_vacuum")
             .map_err(repo_err)
@@ -682,7 +684,7 @@ impl MsgRepo {
     // ── I14-W9：保留策略执行（policy 读写 + preview/prune 同一筛选） ──
 
     /// 读取保留策略行（单行；无 → None）。
-    pub(crate) fn retention_policy_get(&self) -> Result<Option<RetentionPolicyRow>, PylonError> {
+    pub fn retention_policy_get(&self) -> Result<Option<RetentionPolicyRow>, SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         conn.query_row(
             "SELECT version, revision, payload FROM retention_policy WHERE singleton = 1",
@@ -703,12 +705,12 @@ impl MsgRepo {
     /// RetentionPolicy::parse + is_valid 完成；本方法只负责原子落盘。
     /// I13-W3：expected_revision Some(e) 且与当前 revision 不匹配（无行 = 0）→
     /// RevisionConflict（旧写不覆盖新写，事务回滚）；None → 盲写（首写/import 用）。
-    pub(crate) fn retention_policy_set(
+    pub fn retention_policy_set(
         &self,
         version: i64,
         payload: &str,
         expected_revision: Option<i64>,
-    ) -> Result<i64, PylonError> {
+    ) -> Result<i64, SessionError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(repo_err)?;
         let current: i64 = tx
@@ -720,7 +722,7 @@ impl MsgRepo {
             .map_err(repo_err)?;
         if let Some(expected) = expected_revision {
             if expected != current {
-                return Err(PylonError::RevisionConflict {
+                return Err(SessionError::RevisionConflict {
                     expected,
                     actual: current,
                 });
@@ -754,9 +756,9 @@ impl MsgRepo {
     /// 计数与实际删除不一致。
     fn retention_candidate_counts(
         conn: &Connection,
-        policy: &crate::session::retention::RetentionPolicy,
+        policy: &crate::retention::RetentionPolicy,
         now: i64,
-    ) -> Result<Vec<SessionCandidateCount>, PylonError> {
+    ) -> Result<Vec<SessionCandidateCount>, SessionError> {
         match policy.mode {
             super::retention::RetentionMode::Permanent => Ok(Vec::new()),
             super::retention::RetentionMode::ByTime => {
@@ -807,10 +809,10 @@ impl MsgRepo {
     }
 
     /// preview：统计将删除的候选（不执行删除）。
-    pub(crate) fn retention_candidates(
+    pub fn retention_candidates(
         &self,
-        policy: &crate::session::retention::RetentionPolicy,
-    ) -> Result<RetentionPreview, PylonError> {
+        policy: &crate::retention::RetentionPolicy,
+    ) -> Result<RetentionPreview, SessionError> {
         let conn = self.conn.lock().map_err(lock_err)?;
         let now = now_millis();
         let per_session = Self::retention_candidate_counts(&conn, policy, now)?;
@@ -821,11 +823,11 @@ impl MsgRepo {
     /// CR-003：now 单次取时——统计与删除共用同一 cutoff，边界计数一致。
     /// I13-W4：expected_policy_revision Some(e) 且与策略行当前 revision（无行 = 0）不匹配 →
     /// StalePreview（用户预览后策略被改，拒绝按旧统计执行清理，回滚不删）。
-    pub(crate) fn prune_by_policy(
+    pub fn prune_by_policy(
         &self,
-        policy: &crate::session::retention::RetentionPolicy,
+        policy: &crate::retention::RetentionPolicy,
         expected_policy_revision: Option<i64>,
-    ) -> Result<RetentionPreview, PylonError> {
+    ) -> Result<RetentionPreview, SessionError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(repo_err)?;
         let policy_revision: i64 = tx
@@ -837,7 +839,7 @@ impl MsgRepo {
             .map_err(repo_err)?;
         if let Some(expected) = expected_policy_revision {
             if expected != policy_revision {
-                return Err(PylonError::StalePreview {
+                return Err(SessionError::StalePreview {
                     expected,
                     actual: policy_revision,
                 });
@@ -878,13 +880,13 @@ impl MsgRepo {
 
 /// I13-W4：由候选计数构造 preview/prune 结果（affected_sessions + oldest_deleted_at）。
 fn preview_result(
-    policy: &crate::session::retention::RetentionPolicy,
+    policy: &crate::retention::RetentionPolicy,
     now: i64,
     per_session: Vec<SessionCandidateCount>,
 ) -> RetentionPreview {
     let total_candidates: i64 = per_session.iter().map(|c| c.count).sum();
     let oldest_deleted_at = match policy.mode {
-        crate::session::retention::RetentionMode::ByTime => {
+        crate::retention::RetentionMode::ByTime => {
             Some(now - policy.days.unwrap_or(0) as i64 * 86_400_000)
         }
         _ => None,
@@ -899,19 +901,19 @@ fn preview_result(
 
 /// service 内每 Session 单 writer（Mutex 串行化）。active schema 中本 service 只承担
 /// session_state / tombstone / retention 转发；canonical 事件流由 EventService 承担。
-pub(crate) struct MessageService {
+pub struct MessageService {
     repo: Arc<MsgRepo>,
 }
 
 impl MessageService {
     /// I14-W9：暴露底层 repo（RetentionService 复用同一连接；只读共享）。
-    pub(crate) fn repo(&self) -> Arc<MsgRepo> {
+    pub fn repo(&self) -> Arc<MsgRepo> {
         self.repo.clone()
     }
 
-    pub(crate) async fn set_session_state(
+    pub async fn set_session_state(
         &self,
-        owner: crate::session::DurableSessionOwner,
+        owner: crate::owner::DurableSessionOwner,
         remote_session_id: Option<String>,
         state: serde_json::Value,
     ) -> Result<(), MessageError> {
@@ -927,9 +929,9 @@ impl MessageService {
         })?
     }
 
-    pub(crate) async fn get_session_state(
+    pub async fn get_session_state(
         &self,
-        owner: crate::session::DurableSessionOwner,
+        owner: crate::owner::DurableSessionOwner,
     ) -> Result<Option<serde_json::Value>, MessageError> {
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || repo.get_session_state_for_owner(&owner))
@@ -944,7 +946,7 @@ impl MessageService {
     /// 打开（或创建）生产仓库并迁移到最新 schema（D-02 版本化迁移）。
     /// 调用方须先创建 DB 父目录；失败返回 Err——启动路径不得静默回退
     /// localStorage 形成双主（ISSUE-14 W1：失败进入 blocked）。
-    pub(crate) fn open_db(path: &Path) -> Result<MessageService, MessageError> {
+    pub fn open_db(path: &Path) -> Result<MessageService, MessageError> {
         let repo =
             MsgRepo::open(path).map_err(|error| MessageError::Unavailable(error.to_string()))?;
         Ok(MessageService {
@@ -954,7 +956,7 @@ impl MessageService {
 
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存服务
-    pub(crate) fn in_memory() -> Result<MessageService, MessageError> {
+    pub fn in_memory() -> Result<MessageService, MessageError> {
         let repo = MsgRepo::open_in_memory()
             .map_err(|error| MessageError::Unavailable(error.to_string()))?;
         Ok(MessageService {
@@ -963,7 +965,7 @@ impl MessageService {
     }
 
     /// DEL-03（§5.13 步骤 2-4）：本地优先删除开始——tombstone 写 'deleting' + 删除会话行。
-    pub(crate) async fn begin_delete_session(
+    pub async fn begin_delete_session(
         &self,
         session_id: String,
         owner_key: Option<String>,
@@ -980,7 +982,7 @@ impl MessageService {
     }
 
     /// DEL-03（§5.13）：删除终态化——deleting → deleted（幂等；失败不阻断）。
-    pub(crate) async fn finalize_session_delete(
+    pub async fn finalize_session_delete(
         &self,
         session_id: String,
         owner_key: Option<String>,
@@ -1004,7 +1006,7 @@ impl MessageService {
     /// #155 T2：v15 起 `auto_vacuum=INCREMENTAL`——删除让出的页进 ptrmap 空闲池，
     /// `incremental_vacuum`（无参 = 全量归还）把已释放页交还操作系统，防止空闲页
     /// 重新累积（v14 真实库 74% 页是历史遗留空闲页）。
-    pub(crate) async fn run_journal_maintenance(
+    pub async fn run_journal_maintenance(
         &self,
         grace_days: i64,
     ) -> Result<TombstonePurgeOutcome, MessageError> {
@@ -1013,7 +1015,7 @@ impl MessageService {
             let outcome = repo.purge_tombstoned_events(grace_days)?;
             repo.checkpoint_wal()?;
             repo.release_free_pages()?;
-            Ok::<_, PylonError>(outcome)
+            Ok::<_, SessionError>(outcome)
         })
         .await
         .map_err(|error| {
@@ -1022,3 +1024,17 @@ impl MessageService {
         .map_err(|error| MessageError::Unavailable(error.to_string()))
     }
 }
+
+/// DEL-03（§5.13 步骤 1）：命令层 owner_key 校验——Some 时校验格式（3 元素 JSON 数组），
+/// 非法 → `UserDataError::InvalidOwnerKey`（B1.2 code=invalid_owner_key，前端可分支）；
+/// None（legacy 调用）直接放行，走会话作用域 legacy owner。
+pub fn validate_delete_owner(
+    owner_key: Option<String>,
+) -> Result<Option<String>, UserDataError> {
+    if let Some(ref key) = owner_key {
+        crate::msg_repo::validate_owner_key(key)
+            .map_err(|error| UserDataError::InvalidOwnerKey(error.to_string()))?;
+    }
+    Ok(owner_key)
+}
+

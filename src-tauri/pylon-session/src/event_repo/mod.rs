@@ -32,7 +32,7 @@ use std::sync::Arc;
 use rusqlite::{params, OptionalExtension};
 
 #[cfg(test)]
-use crate::session::DurableSessionOwner;
+use crate::owner::DurableSessionOwner;
 
 mod error;
 mod fold;
@@ -43,18 +43,18 @@ mod repo;
 mod row;
 mod service;
 
-pub(crate) use error::EventError;
-pub(crate) use fold::row_input_span_width;
-pub(crate) use normalize::{canonical_event_wire, parse_canonical_event};
+pub use error::EventError;
+pub use fold::row_input_span_width;
+pub use normalize::{canonical_event_wire, parse_canonical_event};
 // `EventRepo` 的 crate 内直接消费者（del01/03/05 审计模块）均为 cfg(test)，
 // 非 test 构建下本 re-export 无使用点，属预期。
 #[allow(unused_imports)]
-pub(crate) use repo::EventRepo;
-pub(crate) use repo::RollupTrimReport;
-pub(crate) use row::{
+pub use repo::EventRepo;
+pub use repo::RollupTrimReport;
+pub use row::{
     CanonicalEventRawExport, CanonicalEventRow, EventAppendResult, EventPage, EventSearchOwner,
 };
-pub(crate) use service::EventService;
+pub use service::EventService;
 
 #[cfg(test)]
 use fold::MAX_FOLDED_CHUNKS;

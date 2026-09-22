@@ -19,35 +19,35 @@ use serde::{Deserialize, Serialize};
 /// 保留模式（D-03：永久保存 / 按时间保留 / 按每 Session 消息数量保留）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum RetentionMode {
+pub enum RetentionMode {
     Permanent,
     ByTime,
     ByCount,
 }
 
 /// 按时间保留的档位（天）。档位即契约：越档值视为非法 → 回退永久保存。
-pub(crate) const TIME_DAYS_TIERS: [u32; 5] = [7, 30, 90, 180, 365];
+pub const TIME_DAYS_TIERS: [u32; 5] = [7, 30, 90, 180, 365];
 /// 按数量保留的档位（每 Session 消息条数）。
-pub(crate) const COUNT_LIMIT_TIERS: [u32; 5] = [100, 500, 1000, 5000, 10000];
+pub const COUNT_LIMIT_TIERS: [u32; 5] = [100, 500, 1000, 5000, 10000];
 /// 选择按时间保留时的默认档位（天）。
 #[allow(dead_code)] // 默认档位（UI 预设展示）
-pub(crate) const DEFAULT_TIME_DAYS: u32 = 30;
+pub const DEFAULT_TIME_DAYS: u32 = 30;
 /// 选择按数量保留时的默认档位（条）。
 #[allow(dead_code)] // 默认档位（UI 预设展示）
-pub(crate) const DEFAULT_COUNT_LIMIT: u32 = 1000;
+pub const DEFAULT_COUNT_LIMIT: u32 = 1000;
 
 /// 保留策略：`mode` 为唯一入口；`days`/`count` 仅在对应模式下有意义。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct RetentionPolicy {
-    pub(crate) mode: RetentionMode,
+pub struct RetentionPolicy {
+    pub mode: RetentionMode,
     #[serde(default)]
-    pub(crate) days: Option<u32>,
+    pub days: Option<u32>,
     #[serde(default)]
-    pub(crate) count: Option<u32>,
+    pub count: Option<u32>,
     /// #81 L3：「是否裁剪已 rollup（单元覆盖）行」开关（默认开——裁决 1 准许彻底
     /// 丢弃；关闭后 evt_rollup_trim 只报告不删行）。
     #[serde(default = "default_true")]
-    pub(crate) trim_rolledup: bool,
+    pub trim_rolledup: bool,
 }
 
 fn default_true() -> bool {
@@ -57,7 +57,7 @@ fn default_true() -> bool {
 impl RetentionPolicy {
     /// D-15 默认：永久保存（不执行自动清理）。
     #[allow(dead_code)] // 默认策略（UI 预设）
-    pub(crate) fn default_policy() -> RetentionPolicy {
+    pub fn default_policy() -> RetentionPolicy {
         RetentionPolicy {
             mode: RetentionMode::Permanent,
             days: None,
@@ -69,7 +69,7 @@ impl RetentionPolicy {
     /// 从 JSON 解析策略；任何非法输入（解析失败 / 未知模式 / 对应档位缺失 /
     /// 档位不在契约档位内）一律回退为永久保存（D-15 回退语义）。
     #[allow(dead_code)] // 策略 JSON 解析（UI 预设导入）
-    pub(crate) fn parse(json: &str) -> RetentionPolicy {
+    pub fn parse(json: &str) -> RetentionPolicy {
         let policy: Result<RetentionPolicy, _> = serde_json::from_str(json);
         match policy {
             Ok(policy) if policy.is_valid() => policy,
@@ -79,7 +79,7 @@ impl RetentionPolicy {
 
     /// 校验策略是否满足实施契约：`permanent` 无条件合法；
     /// `by_time` 必须携带天数且为 `TIME_DAYS_TIERS` 之一；`by_count` 同理。
-    pub(crate) fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         match self.mode {
             RetentionMode::Permanent => true,
             RetentionMode::ByTime => self
@@ -105,12 +105,12 @@ use std::sync::Arc;
 use serde::ser::SerializeMap;
 use serde::Serialize as SerdeSerialize;
 
-use crate::error::PylonError;
-use crate::session::msg_repo::{MsgRepo, RetentionPolicyRow, RetentionPreview};
+use crate::error::SessionError;
+use crate::msg_repo::{MsgRepo, RetentionPolicyRow, RetentionPreview};
 
 /// 保留策略执行错误（B1.2：前端按 code 分支）。
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum RetentionError {
+pub enum RetentionError {
     #[error("保留策略非法：{0}")]
     InvalidPolicy(String),
     #[error("保留策略执行失败：{0}")]
@@ -124,7 +124,7 @@ pub(crate) enum RetentionError {
 }
 
 impl RetentionError {
-    pub(crate) fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidPolicy(_) => "invalid_retention_policy",
             Self::Unavailable(_) => "retention_unavailable",
@@ -144,17 +144,17 @@ impl SerdeSerialize for RetentionError {
 }
 
 /// 保留策略 service：spawn_blocking 边界 + 命令层 DTO（与 MessageService 同构）。
-pub(crate) struct RetentionService {
+pub struct RetentionService {
     repo: Arc<MsgRepo>,
 }
 
 impl RetentionService {
-    pub(crate) fn new(repo: Arc<MsgRepo>) -> Self {
+    pub fn new(repo: Arc<MsgRepo>) -> Self {
         Self { repo }
     }
 
     /// 读取保留策略行；无 → None（调用方按默认永久保存处理，D-15）。
-    pub(crate) async fn get_policy(&self) -> Result<Option<RetentionPolicyRow>, RetentionError> {
+    pub async fn get_policy(&self) -> Result<Option<RetentionPolicyRow>, RetentionError> {
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || repo.retention_policy_get())
             .await
@@ -171,7 +171,7 @@ impl RetentionService {
     /// 非原始串）。
     /// I13-W3：expected_revision Some(e) → 与后端当前 revision 原子比对，不匹配 →
     /// Conflict（旧写不覆盖新写）；None → 盲写（首写）。
-    pub(crate) async fn set_policy(
+    pub async fn set_policy(
         &self,
         json: String,
         expected_revision: Option<i64>,
@@ -194,7 +194,7 @@ impl RetentionService {
             RetentionError::Unavailable(format!("retention set task failed: {error}"))
         })?
         .map_err(|error| match error {
-            PylonError::RevisionConflict { expected, actual } => {
+            SessionError::RevisionConflict { expected, actual } => {
                 RetentionError::Conflict { expected, actual }
             }
             other => RetentionError::Unavailable(other.to_string()),
@@ -214,7 +214,7 @@ impl RetentionService {
     }
 
     /// preview：统计将删除的候选（不执行删除）。
-    pub(crate) async fn preview(
+    pub async fn preview(
         &self,
         policy: RetentionPolicy,
     ) -> Result<RetentionPreview, RetentionError> {
@@ -231,7 +231,7 @@ impl RetentionService {
     /// prune：事务内统计候选 + 执行删除（与 preview 同一筛选）；返回实际删除计数。
     /// I13-W4：expected_policy_revision Some(e) 且与策略行当前 revision（无行 = 0）不匹配 →
     /// StalePreview（用户预览后策略被改，拒绝按旧统计执行清理）。
-    pub(crate) async fn prune(
+    pub async fn prune(
         &self,
         policy: RetentionPolicy,
         expected_policy_revision: Option<i64>,
@@ -244,7 +244,7 @@ impl RetentionService {
                 RetentionError::Unavailable(format!("retention prune task failed: {error}"))
             })?
             .map_err(|error| match error {
-                PylonError::StalePreview { expected, actual } => {
+                SessionError::StalePreview { expected, actual } => {
                     RetentionError::StalePreview { expected, actual }
                 }
                 other => RetentionError::Unavailable(other.to_string()),
@@ -254,7 +254,7 @@ impl RetentionService {
 
 /// #81 L3：读取「裁剪已 rollup 行」开关（策略缺席/解析失败按默认开启处理——
 /// 与 D-15 的永久保存回退语义无关，该开关只影响 L3 迁移是否删行）。
-pub(crate) fn trim_rolledup_enabled(policy_json: Option<&str>) -> bool {
+pub fn trim_rolledup_enabled(policy_json: Option<&str>) -> bool {
     policy_json
         .and_then(|json| serde_json::from_str::<RetentionPolicy>(json).ok())
         .map(|policy| policy.trim_rolledup)
@@ -416,7 +416,7 @@ mod tests {
 
     fn test_service() -> RetentionService {
         RetentionService::new(Arc::new(
-            crate::session::msg_repo::MsgRepo::open_in_memory().expect("repo"),
+            crate::msg_repo::MsgRepo::open_in_memory().expect("repo"),
         ))
     }
 

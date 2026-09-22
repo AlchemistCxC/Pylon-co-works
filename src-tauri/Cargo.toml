@@ -19,6 +19,7 @@ members = [
     ".",
     "pylon-core",
     "pylon-acp",
+    "pylon-session",
     "pylon-foundations",
     "pet-core",
     "pylon-canonical-types",
@@ -77,6 +78,7 @@ sha2 = "0.10"
 pylon-acp = { path = "pylon-acp" }
 pylon-core = { path = "pylon-core" }
 pylon-foundations = { path = "pylon-foundations" }
+pylon-session = { path = "pylon-session" }
 # #220 WP1：canonical 事件 wire 契约的单源。写入侧（session/event_repo.rs）与
 # WASM 计算核（pylon-compute）共用同一份词表与 identity 推导纪律。
 pylon-canonical-types = { path = "pylon-canonical-types" }

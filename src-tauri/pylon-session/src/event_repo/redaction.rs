@@ -63,7 +63,7 @@ pub(super) fn redact_journal_credentials(
                 .collect(),
         ),
         serde_json::Value::String(text) => {
-            serde_json::Value::String(crate::sanitize::sanitize_value_content(&text))
+            serde_json::Value::String(pylon_foundations::sanitize::sanitize_value_content(&text))
         }
         other => other,
     }

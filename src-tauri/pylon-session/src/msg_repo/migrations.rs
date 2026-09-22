@@ -108,7 +108,7 @@ fn primary_key_columns(conn: &Connection, table: &str) -> Vec<String> {
     primary.into_iter().map(|(name, _)| name).collect()
 }
 
-fn validate_schema_objects(conn: &Connection) -> Result<(), PylonError> {
+fn validate_schema_objects(conn: &Connection) -> Result<(), SessionError> {
     let mut problems = Vec::new();
     for (table, required_columns) in SCHEMA_MANIFEST {
         let mut stmt = conn
@@ -152,14 +152,14 @@ fn validate_schema_objects(conn: &Connection) -> Result<(), PylonError> {
     if problems.is_empty() {
         Ok(())
     } else {
-        Err(PylonError::DatabaseSchemaInvalid(problems.join("; ")))
+        Err(SessionError::DatabaseSchemaInvalid(problems.join("; ")))
     }
 }
 
 /// v15 头字段校验（application_id / auto_vacuum）。**只能在 migrate() 之后调用**：
 /// auto_vacuum 是建库期标志，非空库上设置后须经同连接 VACUUM 才写入文件头——
 /// 重建事务内读回仍是旧值，故与对象形状校验（事务内可跑）分开。
-fn validate_db_header(conn: &Connection) -> Result<(), PylonError> {
+fn validate_db_header(conn: &Connection) -> Result<(), SessionError> {
     let mut problems = Vec::new();
     let application_id: i64 = conn
         .query_row("PRAGMA application_id", [], |row| row.get(0))
@@ -181,12 +181,12 @@ fn validate_db_header(conn: &Connection) -> Result<(), PylonError> {
     if problems.is_empty() {
         Ok(())
     } else {
-        Err(PylonError::DatabaseSchemaInvalid(problems.join("; ")))
+        Err(SessionError::DatabaseSchemaInvalid(problems.join("; ")))
     }
 }
 
-fn validate_quick_check(conn: &Connection) -> Result<(), PylonError> {
-    let integrity_error = |error: rusqlite::Error| PylonError::DatabaseIntegrity(error.to_string());
+fn validate_quick_check(conn: &Connection) -> Result<(), SessionError> {
+    let integrity_error = |error: rusqlite::Error| SessionError::DatabaseIntegrity(error.to_string());
     let mut stmt = conn
         .prepare("PRAGMA quick_check(1)")
         .map_err(integrity_error)?;
@@ -198,7 +198,7 @@ fn validate_quick_check(conn: &Connection) -> Result<(), PylonError> {
     if results.len() == 1 && results[0].eq_ignore_ascii_case("ok") {
         Ok(())
     } else {
-        Err(PylonError::DatabaseIntegrity(if results.is_empty() {
+        Err(SessionError::DatabaseIntegrity(if results.is_empty() {
             "quick_check returned no result".to_string()
         } else {
             results.join("; ")
@@ -213,12 +213,12 @@ fn validate_quick_check(conn: &Connection) -> Result<(), PylonError> {
 /// 其余历史（canonical_events、墓碑、状态快照、user_data.sessions 会话列表、
 /// rollup 进度、legacy 归档）全部丢弃。重建后设置 `auto_vacuum=INCREMENTAL` 并
 /// VACUUM 一次——全部闲置页归还操作系统，文件 ≈ 内容大小（v14 真实库 74% 是空闲页）。
-fn migrate(conn: &mut Connection) -> Result<(), PylonError> {
+fn migrate(conn: &mut Connection) -> Result<(), SessionError> {
     let current: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(repo_err)?;
     if current > SCHEMA_VERSION {
-        return Err(PylonError::DatabaseFutureSchema {
+        return Err(SessionError::DatabaseFutureSchema {
             found: current,
             supported: SCHEMA_VERSION,
         });
@@ -286,9 +286,9 @@ fn migrate(conn: &mut Connection) -> Result<(), PylonError> {
 /// 打开并迁移仓库；FK 开启（历史 ON DELETE CASCADE 依赖已随 messages 表移除，
 /// 保留开启以维持 SQLite 外键一致性纪律）。
 /// I14-W5：busy_timeout 序列化同文件多连接写（MessageService 与 UserDataService
-/// 各自持连接，避免并发写 SQLITE_BUSY）。本函数 pub(crate) 供 user_data.rs 复用
+/// 各自持连接，避免并发写 SQLITE_BUSY）。本函数 pub 供 user_data.rs 复用
 /// 同一迁移链（user_data 表随 SCHEMA_SQL 一并创建/升级）。
-pub(crate) fn connect(conn: &mut Connection) -> Result<(), PylonError> {
+pub fn connect(conn: &mut Connection) -> Result<(), SessionError> {
     conn.busy_timeout(Duration::from_millis(5000))
         .map_err(repo_err)?;
     conn.pragma_update(None, "foreign_keys", true)

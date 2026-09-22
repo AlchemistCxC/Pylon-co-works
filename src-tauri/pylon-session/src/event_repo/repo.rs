@@ -128,14 +128,14 @@ fn query_event_rows(
 /// #81 L3：裁剪迁移报告（wire camelCase）。
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RollupTrimReport {
-    pub(crate) processed_units: i64,
-    pub(crate) trimmed_units: i64,
-    pub(crate) resumed_units: i64,
-    pub(crate) mismatch_units: i64,
-    pub(crate) remaining_units: i64,
-    pub(crate) vacuumed: bool,
-    pub(crate) policy_blocked: bool,
+pub struct RollupTrimReport {
+    pub processed_units: i64,
+    pub trimmed_units: i64,
+    pub resumed_units: i64,
+    pub mismatch_units: i64,
+    pub remaining_units: i64,
+    pub vacuumed: bool,
+    pub policy_blocked: bool,
 }
 
 enum RollupUnitOutcome {
@@ -145,15 +145,15 @@ enum RollupUnitOutcome {
 }
 
 /// 事件仓库：单一 SQLite 连接 + 互斥（SQLite 单写者）。
-pub(crate) struct EventRepo {
+pub struct EventRepo {
     pub(super) conn: Mutex<Connection>,
 }
 
 impl EventRepo {
     /// 打开（或创建）仓库并迁移到最新 schema（D-02 版本化迁移）。
-    pub(crate) fn open(path: &Path) -> Result<EventRepo, EventError> {
+    pub fn open(path: &Path) -> Result<EventRepo, EventError> {
         let mut conn = Connection::open(path).map_err(EventError::from)?;
-        crate::session::connect(&mut conn)
+        crate::connect(&mut conn)
             .map_err(|error| EventError::Unavailable(error.to_string()))?;
         Ok(EventRepo {
             conn: Mutex::new(conn),
@@ -162,9 +162,9 @@ impl EventRepo {
 
     /// 内存仓库（测试用）。
     #[allow(dead_code)] // 测试用内存仓库
-    pub(crate) fn open_in_memory() -> Result<EventRepo, EventError> {
+    pub fn open_in_memory() -> Result<EventRepo, EventError> {
         let mut conn = Connection::open_in_memory().map_err(EventError::from)?;
-        crate::session::connect(&mut conn)
+        crate::connect(&mut conn)
             .map_err(|error| EventError::Unavailable(error.to_string()))?;
         Ok(EventRepo {
             conn: Mutex::new(conn),
@@ -173,7 +173,7 @@ impl EventRepo {
 
     /// owner 当前 revision = 该 owner 最大 sequence（空 = 0）。expected_revision 冲突
     /// 检测基准：单写者（Mutex）下 MAX(sequence) 单调递增，旧写落后即判定过期。
-    pub(crate) fn revision(&self, owner_key: &str) -> Result<i64, EventError> {
+    pub fn revision(&self, owner_key: &str) -> Result<i64, EventError> {
         let conn = self
             .conn
             .lock()
@@ -192,7 +192,7 @@ impl EventRepo {
     /// `RevisionConflict`，不写任何行（旧写不覆盖新写）。
     /// event_id 已存在（重启去重）跳过不重复写入、不消耗 sequence（事件 sequence 由
     /// 前端 allocateEventSequence 分配，rule 3）。返回实际写入事件与写入后 revision。
-    pub(crate) fn append_events(
+    pub fn append_events(
         &self,
         events: &[CanonicalEventRow],
         expected_revision: Option<i64>,
@@ -402,7 +402,7 @@ impl EventRepo {
 
                     // #81 L2：终结事件 → 同一事务追加 turn 单元行（只加不减；未终结不折叠）。
                     // 单元构建失败不阻塞终态事实落盘（best effort：无单元的 turn 不被 L3 裁剪）。
-                    if crate::session::turn_rollup::is_turn_terminal(&event.event_type) {
+                    if crate::turn_rollup::is_turn_terminal(&event.event_type) {
                         let prev_boundary: i64 = tx
                             .prepare_cached(LAST_TURN_BOUNDARY_SQL)
                             .map_err(EventError::from)?
@@ -413,7 +413,7 @@ impl EventRepo {
                             .unwrap_or(0);
                         let turn_rows =
                             query_event_rows(&tx, &owner_key, prev_boundary + 1, event.sequence)?;
-                        match crate::session::turn_rollup::build_turn_unit_row(
+                        match crate::turn_rollup::build_turn_unit_row(
                             &event,
                             &turn_rows,
                             event.sequence + 1,
@@ -482,7 +482,7 @@ impl EventRepo {
 
     /// 游标分页：返回 sequence < before_seq 的最新 limit 条（升序，无 OFFSET）。
     /// before_seq = None 取最新一页；上页最旧一条的 sequence 为下一页游标。
-    pub(crate) fn list_events(
+    pub fn list_events(
         &self,
         owner_key: &str,
         before_sequence: Option<i64>,
@@ -523,7 +523,7 @@ impl EventRepo {
     /// (owner_key, sequence) 聚簇主键倒序走查 + event_type 谓词命中即停，
     /// 供写入侧做「payload 未变不重复追加」的幂等判定；不承担一般查询职责
     /// （一般读路径走 list_events / load_events_compact）。
-    pub(crate) fn latest_event_of_type(
+    pub fn latest_event_of_type(
         &self,
         owner_key: &str,
         event_type: &str,
@@ -553,7 +553,7 @@ impl EventRepo {
     /// （每行三个 payload 列都要解成 `serde_json::Value` 树）再在内存里过滤。实测生产库
     /// （单 owner 13.6 万行）一次 compact 读 `1188ms`、峰值数百 MB，而结果只有 12 行。
     /// 现在先只读单元行拿覆盖跨度，再按跨度在 WHERE 里剪掉被覆盖行 ⇒ 只读取真正要下发的行。
-    pub(crate) fn load_events_compact(
+    pub fn load_events_compact(
         &self,
         owner_key: &str,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
@@ -569,7 +569,7 @@ impl EventRepo {
         let mut units: Vec<CanonicalEventRow> = Vec::new();
         for row in unit_stmt
             .query_map(
-                params![owner_key, crate::session::turn_rollup::TURN_UNIT_EVENT_TYPE],
+                params![owner_key, crate::turn_rollup::TURN_UNIT_EVENT_TYPE],
                 map_event_row,
             )
             .map_err(EventError::from)?
@@ -598,7 +598,7 @@ impl EventRepo {
         uncovered_sql.push_str(" ORDER BY sequence ASC");
         let mut bind: Vec<&dyn rusqlite::ToSql> = vec![
             &owner_key,
-            &crate::session::turn_rollup::TURN_UNIT_EVENT_TYPE,
+            &crate::turn_rollup::TURN_UNIT_EVENT_TYPE,
         ];
         for (start, end) in &ranges {
             bind.push(start);
@@ -644,7 +644,7 @@ impl EventRepo {
         }
         let mut ranges: Vec<(i64, i64)> = Vec::new();
         for row in &all {
-            if row.event_type == crate::session::turn_rollup::TURN_UNIT_EVENT_TYPE {
+            if row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
                 if let (Some(start), Some(end)) = (row.rollup_seq_start, row.rollup_seq_end) {
                     ranges.push((start, end));
                 }
@@ -658,7 +658,7 @@ impl EventRepo {
         let filtered: Vec<CanonicalEventRow> = all
             .into_iter()
             .filter(|row| {
-                row.event_type == crate::session::turn_rollup::TURN_UNIT_EVENT_TYPE
+                row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE
                     || !covered(row.sequence)
             })
             .collect();
@@ -668,7 +668,7 @@ impl EventRepo {
     /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。
     /// 逐 turn 单事务；进度落 `rollup_migration_state`（trimmed/mismatch 永久跳过）。
     /// budget_ms 用尽即在 turn 边界暂停；全部完成后 VACUUM 回收（仅当本次有删行）。
-    pub(crate) fn rollup_trim(
+    pub fn rollup_trim(
         &self,
         budget_ms: Option<u64>,
     ) -> Result<RollupTrimReport, EventError> {
@@ -777,7 +777,7 @@ impl EventRepo {
             tx.commit().map_err(EventError::from)?;
             return Ok(RollupUnitOutcome::AlreadyGone);
         }
-        let rebuilt = crate::session::turn_rollup::fold_turn_rows(&rows);
+        let rebuilt = crate::turn_rollup::fold_turn_rows(&rows);
         let expected = unit
             .typed_payload
             .as_ref()
@@ -815,7 +815,7 @@ impl EventRepo {
         Ok(())
     }
 
-    pub(crate) fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
+    pub fn count_remaining_rollup_units(&self) -> Result<i64, EventError> {
         let conn = self
             .conn
             .lock()
@@ -834,7 +834,7 @@ impl EventRepo {
         Ok(remaining)
     }
 
-    pub(crate) fn export_raw_event(
+    pub fn export_raw_event(
         &self,
         event_id: &str,
     ) -> Result<Option<CanonicalEventRawExport>, EventError> {
@@ -878,7 +878,7 @@ impl EventRepo {
     /// v15：owner 分维列不落库——DISTINCT 收窄到 (owner_key, remote_session_id)，
     /// 三元组经 `owner_triple` 派生后按 (profile, agent, local) 排序截断（与 v14
     /// 的 SQL ORDER BY 语义一致）。
-    pub(crate) fn search_owners(
+    pub fn search_owners(
         &self,
         query: &str,
         limit: u32,
