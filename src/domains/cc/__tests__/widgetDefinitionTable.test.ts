@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ALWAYS_VISIBLE_STATUS_WIDGET_IDS,
+  CC_FLOATING_WIDGET_IDS,
   CC_REGISTERED_SLOT_IDS,
   CC_SYSTEM_FIELDS,
   CC_WIDGET_GROUPS,
@@ -9,6 +10,9 @@ import {
   EMPTY_STATE_HIDDEN_WIDGET_IDS,
   STATUS_WIDGET_IDS,
   WIDGET_PROPERTY_FIELDS,
+  ccInputLandingViolations,
+  ccWidgetLanding,
+  coerceInputLanding,
   resolveCcWidgetGroup,
   type CcMemberVisibility,
 } from '../widgetDefinitions.ts'
@@ -69,7 +73,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       group.members.reduce((sum, member) => sum + member.fields.length, 0),
     ]))
     expect(counts).toEqual({
-      'cc-surface': 8,
+      'cc-surface': 9,
       input: 33,
       model: 7,
       reasoning: 7,
@@ -78,7 +82,8 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       'cc-command-hint': 1,
       'cc-send-button': 9,
     })
-    expect(CC_SYSTEM_FIELDS).toHaveLength(7)
+    // ★ #238 刀3：`footerLayout` 由系统桶转入容器行（归属转移，字段与实现不动）⇒ 系统桶 7 → 6
+    expect(CC_SYSTEM_FIELDS).toHaveLength(6)
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
     expect(total).toBe(83)
   })
@@ -91,7 +96,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
   it('成员 ↔ 字段的归属逐条锁定（挂到错的成员即红）', () => {
     const map = Object.fromEntries(memberRows.map(({ group, member }) => [`${group.id}/${member.id}`, member.fields]))
     expect(map).toEqual({
-      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant'],
+      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant', 'footerLayout'],
       'input/textarea': [
         'inputOffsetTop', 'inputHeight', 'inputMarginX',
         'inputSurfaceBg', 'inputSurfaceOpacity', 'inputFocusRingEnabled', 'inputFocusRingColor',
@@ -171,61 +176,94 @@ describe('#238 · 定义表不变量 4：成员与容器不进三份名单', () 
   })
 })
 
-describe('#238 · 定义表不变量 5-6：容器唯一不占位、锚点无环', () => {
-  it('恰有 1 个容器，它不占任何位置、也不进工具条', () => {
+describe('#238 · 定义表不变量 5-6：容器唯一不参与排布、锚点无环', () => {
+  it('恰有 1 个容器，它不参与排布、也不进工具条', () => {
     const containers = CC_WIDGET_GROUPS.filter(row => row.type === 'container')
     expect(containers).toHaveLength(1)
     expect(containers[0]!.id).toBe('cc-surface')
-    expect(containers[0]!.defaultPlacement).toBeUndefined()
+    expect(containers[0]!.layout).toBeUndefined()
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('cc-surface')
     expect(slotIds).not.toContain('cc-surface')
   })
 
-  it('每个锚点指向表内存在的 id；顺锚点走无环且终止于容器 cc-surface', () => {
+  it('两轴的锚点都指向表内存在的 id；顺 y 锚点走无环且终止于容器 cc-surface', () => {
     const allIds = CC_WIDGET_GROUPS.map(row => row.id)
     for (const row of CC_WIDGET_GROUPS) {
-      if (row.anchor === undefined) continue
-      expect(allIds).toContain(row.anchor)
+      if (!row.layout) continue
+      expect(allIds).toContain(row.layout.x.anchor)
+      expect(allIds).toContain(row.layout.y.anchor)
     }
     for (const row of CC_WIDGET_GROUPS) {
       const seen = new Set<string>([row.id])
-      let cursor: string | undefined = row.anchor
+      let cursor: string | undefined = row.layout?.y.anchor
       let terminal: string = row.id
       while (cursor !== undefined) {
         expect(seen.has(cursor)).toBe(false)
         seen.add(cursor)
         terminal = cursor
-        cursor = resolveCcWidgetGroup(cursor)?.anchor
+        cursor = resolveCcWidgetGroup(cursor)?.layout?.y.anchor
       }
       expect(terminal).toBe('cc-surface')
     }
-    expect(resolveCcWidgetGroup('cc-surface')?.anchor).toBeUndefined()
+    expect(resolveCcWidgetGroup('cc-surface')?.layout).toBeUndefined()
+  })
+
+  it('★ 只有输入栏能落在输入栏容器里（原「input 槽独占」规则的替代）', () => {
+    // 槽位层拆掉后，元件落在哪个容器完全由表的 `(y.anchor, y.side)` 决定，
+    // 拖拽只能改 offset/order、改不了归属 ⇒ 这条规则现在是**表级不变量**。
+    const inputLanding = ccWidgetLanding('input')
+    expect(inputLanding).toBe('cc-surface:top')
+    const landedOnInput = CC_WIDGET_GROUPS
+      .filter(row => row.layout && ccWidgetLanding(row.id) === inputLanding)
+      .map(row => row.id)
+    expect(landedOnInput).toEqual(['input'])
+  })
+
+  it('落脚处与悬浮声明：两个落点 + 恰一个悬浮件（发送按钮）', () => {
+    expect(ccWidgetLanding('model')).toBe('cc-surface:bottom')
+    expect(ccWidgetLanding('reasoning')).toBe('cc-surface:bottom')
+    expect(ccWidgetLanding('cc-command-hint')).toBe('cc-surface:bottom')
+    expect(ccWidgetLanding('cc-send-button')).toBe('input:center')
+    expect(ccWidgetLanding('cc-surface')).toBeUndefined()
+    expect(CC_FLOATING_WIDGET_IDS).toEqual(['cc-send-button'])
+    // 悬浮件不进文档流成组 ⇒ 它不在任何信息落点的成员里
+    expect(CC_WIDGET_GROUPS.filter(row => ccWidgetLanding(row.id) === 'cc-surface:bottom').map(row => row.id))
+      .not.toContain('cc-send-button')
+    // `align` 简写：两轴共用同一锚点
+    const send = resolveCcWidgetGroup('cc-send-button')!.layout!
+    expect(send.x.anchor).toBe('input')
+    expect(send.y.anchor).toBe('input')
+    expect(send.x.side).toBe('right')
+    expect(send.y.side).toBe('center')
   })
 })
 
 describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性表单）', () => {
-  it('DEFAULT_CC_LAYOUT 由表派生且值逐条不变（含键序，契约快照按此序落盘）', () => {
+  it('DEFAULT_CC_LAYOUT 由表派生（含键序 = 表序，契约快照按此序落盘）', () => {
     expect(CC_LAYOUT_SCHEMA_VERSION).toBe(9)
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toEqual([
       'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-send-button',
     ])
+    // ★ #238 刀3：`slot` 退场；序号由「槽内序号」变「同落脚处组内序号」并整理成连续值
+    //（现状 2/3/4/5 中间有空档，是历史遗留）。用户数据里已存的序号不受影响（相对顺序不变 ⇒ 效果等价）。
     expect(DEFAULT_CC_LAYOUT).toEqual({
       version: 9,
       placements: {
-        input: { slot: 'input', order: 0, offsetX: 0, offsetY: 0 },
-        model: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
-        reasoning: { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
-        mode: { slot: 'status-secondary', order: 4, offsetX: 0, offsetY: 0 },
-        tokens: { slot: 'status-secondary', order: 5, offsetX: 0, offsetY: 0 },
-        'cc-send-button': { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
+        input: { order: 0, offsetX: 0, offsetY: 0 },
+        model: { order: 1, offsetX: 0, offsetY: 0 },
+        reasoning: { order: 2, offsetX: 0, offsetY: 0 },
+        mode: { order: 3, offsetX: 0, offsetY: 0 },
+        tokens: { order: 4, offsetX: 0, offsetY: 0 },
+        'cc-send-button': { order: 1, offsetX: 0, offsetY: 0 },
       },
     })
   })
 
-  it('默认布局逐条 = 表里同 id 的 defaultPlacement', () => {
+  it('默认布局逐条 = 表里同 id 的 layout.order（+ 默认零偏移）', () => {
     for (const row of CC_WIDGET_GROUPS) {
-      if (!row.defaultPlacement) continue
-      expect(DEFAULT_CC_LAYOUT.placements[row.id as CcLayoutWidgetId]).toEqual(row.defaultPlacement)
+      if (!row.draggable || !row.layout) continue
+      expect(DEFAULT_CC_LAYOUT.placements[row.id as CcLayoutWidgetId], row.id)
+        .toEqual({ order: row.layout.order, offsetX: 0, offsetY: 0 })
     }
   })
 
@@ -270,18 +308,19 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       ['tokens', '用量', 'context'],
     ])
     expect(BUILTIN_CC_WIDGET_DEFINITIONS.map(entry => entry.defaultPlacement)).toEqual([
-      { slot: 'input', order: 0, offsetX: 0, offsetY: 0 },
-      { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
-      { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
-      { slot: 'status-secondary', order: 4, offsetX: 0, offsetY: 0 },
-      { slot: 'status-secondary', order: 5, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 1, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 4, offsetX: 0, offsetY: 0 },
     ])
     // 用量控件不新增属性字段（S11 拍板）⇒ 目录里不带 propertyFields
     expect(BUILTIN_CC_WIDGET_DEFINITIONS.find(entry => entry.id === 'tokens')?.propertyFields).toBeUndefined()
     expect(BUILTIN_CC_SURFACE_CONTRIBUTION.label).toBe('中控本体背景板')
     expect(BUILTIN_CC_SURFACE_CONTRIBUTION.defaultPlacement).toBeUndefined()
     expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.label).toBe('发送按钮')
-    expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.defaultPlacement).toEqual({ slot: 'actions', order: 0, offsetX: 0, offsetY: 0 })
+    // ★ #238 刀3：插件契约的 `slot` 换成 `anchor` + 可选 `side`
+    expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.defaultPlacement).toEqual({ anchor: 'input', side: 'right', order: 1, offsetX: 0, offsetY: 0 })
   })
 })
 
@@ -339,11 +378,27 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
   })
 })
 
+describe('#238 刀3 · 输入栏落脚处独占守卫（原「input 槽只准放输入栏」的替代）', () => {
+  it('表自身零违规', () => {
+    expect(ccInputLandingViolations(CC_WIDGET_GROUPS.map(row => row.id))).toEqual([])
+  })
+
+  it('非输入栏被错标到输入栏落脚处 ⇒ 退回信息落脚处（宁可换位置，不凭空消失）', () => {
+    expect(coerceInputLanding('input', 'cc-surface:top')).toBe('cc-surface:top')
+    expect(coerceInputLanding('model', 'cc-surface:top')).toBe('cc-surface:bottom')
+    expect(coerceInputLanding('mode', 'cc-surface:top')).toBe('cc-surface:bottom')
+    expect(coerceInputLanding('model', 'cc-surface:bottom')).toBe('cc-surface:bottom')
+    // 悬浮件（发送按钮）不在文档流落脚处这套规则里，原样返回
+    expect(coerceInputLanding('cc-send-button', 'input:center')).toBe('input:center')
+  })
+})
+
 describe('#238 · 表尾：命令行提示结构步只进表、不归位', () => {
-  it('命令行提示在表里但不在任何名单，且不占槽位', () => {
+  it('命令行提示在表里（有位置声明）但不在任何名单、也不进默认布局', () => {
     const hint = resolveCcWidgetGroup('cc-command-hint')
     expect(hint).toBeDefined()
-    expect(hint?.defaultPlacement).toBeUndefined()
+    expect(hint?.layout).toBeDefined()
+    expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('cc-command-hint')
     expect(slotIds).not.toContain('cc-command-hint')
     expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).not.toContain('cc-command-hint')
     expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).not.toContain('cc-command-hint')

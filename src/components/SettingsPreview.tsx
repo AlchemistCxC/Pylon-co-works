@@ -117,9 +117,11 @@ function PvSolidControlCenter() {
   }, [])
   if (failed) return (
     <div className="control-center cc-variant-peri" style={{ pointerEvents: 'none' }} aria-label="中控预览占位">
-      <div className="cc-status-secondary" />
-      <div className="cc-status-primary" />
-      <div className="cc-actions" />
+      {/* ★ #238 刀3：占位结构随真实结构一起改 —— 原来的 `.cc-status-primary` /
+          `-secondary` / `.cc-actions` 三个槽位类已随槽位层删除（不只删中间那一个，
+          留着的两个会成为悬空类名）。 */}
+      <div className="cc-input-slot" />
+      <div className="cc-status-group" />
     </div>
   )
   return <div ref={hostRef} aria-label="Solid 中控预览" />

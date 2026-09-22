@@ -1559,7 +1559,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.childElementCount).toBe(0)
   })
 
-  it('生产中控消费提交模式、隐藏项与布局槽位权威', async () => {
+  it('生产中控消费提交模式、隐藏项与排布权威（落脚处内按序号排）', async () => {
     const { host, services, lifecycle } = mountPreview()
     const theme = structuredClone(DEFAULTS)
     theme.inputMode = 'default'
@@ -1573,17 +1573,23 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
 
     theme.inputSubmitButtonMode = 'external'
-    theme.ccLayout.placements['cc-send-button'] = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
-    theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
+    // ★ #238 刀3（写法同步）：槽位层退场 ⇒「把元件放到哪个槽」不再是用户可改的东西
+    //（位置由定义表 `layout` 声明）。保留原用例的**权威**含义：序号仍由 placements 决定，
+    // 且渲染按序号排序 —— 把 model 的序号设成 9，它就该排到信息组最后。
+    theme.ccLayout.placements.model = { order: 9, offsetX: 0, offsetY: 0 }
     services.appearance.setTheme(theme)
 
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     // 刀4：legacy `send` 已从名单删除（0 残留守卫）
     expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
-    // 2026-09-14：模型控件常态显示，且遵循 placements 权威 —— 此处已从
-    // status-secondary 移到 actions 槽，故应出现在 actions 而非状态槽。
-    expect(host.querySelector('.cc-actions [data-widget-id="model"]')).toBeInTheDocument()
-    expect(host.querySelector('.cc-status-secondary [data-widget-id="model"], .cc-status-primary [data-widget-id="model"]')).toBeNull()
+    // 2026-09-14：模型控件常态显示；序号 9 ⇒ 排在信息组最后
+    const groupIds = [...host.querySelectorAll('.cc-status-group [data-widget-id]')]
+      .map(el => el.getAttribute('data-widget-id'))
+    expect(groupIds[groupIds.length - 1]).toBe('model')
+    expect(groupIds).toContain('reasoning')
+    // 输入栏落在**另一个**落脚处容器里（不再与信息控件同容器）
+    expect(host.querySelector('.cc-input-slot [data-widget-id="input"]')).toBeInTheDocument()
+    expect(host.querySelector('.cc-status-group [data-widget-id="input"]')).toBeNull()
 
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
@@ -1672,18 +1678,19 @@ describe('mountSolidWorkbench', () => {
     expect(screen.queryByRole('toolbar', { name: '中控控件工具栏' })).toBeNull()
   })
 
-  it('属性面板可编辑槽位、顺序、偏移、缩放和 schema 外观字段', async () => {
+  it('属性面板可编辑顺序、偏移、缩放和 schema 外观字段', async () => {
     const { host, services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
 
-    fireEvent.change(screen.getByLabelText('控件槽位'), { target: { value: 'actions' } })
+    // ★ #238 刀3：槽位下拉整块删除（位置改由定义表声明，不再让用户选"放哪个槽"）
+    expect(screen.queryByLabelText('控件槽位')).toBeNull()
     fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '7' } })
     fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '12' } })
     fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '125' } })
     fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
-    await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ slot: 'actions', order: 7, offsetX: 12 }))
+    await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 }))
     expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
     expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle')
     expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeInTheDocument()

@@ -1,5 +1,6 @@
 ﻿import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import { resolveCcWidgetGroup } from '../../../domains/cc/widgetDefinitions.ts'
 import {
   isReasoningOption,
   resolveModeOptionEntries,
@@ -8,6 +9,15 @@ import {
   resolveDocumentOptionValue,
   shortControlCenterError,
 } from './workbenchOptionCatalog.ts'
+
+/**
+ * 同落脚处内的前置间距（#238 刀3）：值从**定义表**读，不再硬编码在控件里。
+ * ★ 仍加在**同一个元素**上（inline `margin-left`）—— 不改成外层盒子统一 `gap`，
+ * 否则换行规则跟着变、像素不可能一致（施工单 §2.4）。
+ */
+function previousWidgetGapPx(id: string): number {
+  return resolveCcWidgetGroup(id)?.gap ?? 0
+}
 
 // #51：切换失败的正文只放稳定短文案（稳定 code 映射，未知文本截 80 字符），
 // 完整后端原文留在浮层 title 里供悬停查看——error 信号存全文，截短在渲染侧做。
@@ -49,7 +59,6 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
 /** 权限模式控件：本体只显示后端机器值（不翻译），外观与交互跟模型／思考强度控件同一套语言。
  *  颜色：permissionTextColor='mode' 时不写 inline color，交给 CSS 的 [data-mode] 语义色
  *  （auto 黄 / bypass 红 / edit 紫 / default 灰）—— 危险模式一眼可见。 */
-const PERMISSION_GAP_PX = 12
 export function SolidModeWidget(props: {
   draftValue?: () => string
   onDraftChange?: (value: string) => void
@@ -71,12 +80,11 @@ export function SolidModeWidget(props: {
   const bg=()=>appearance().permissionBgColor==='black'?'#000':'#fff'
   const color=()=>{const c=appearance().permissionTextColor??'mode';return c==='mode'?undefined:c==='white'?'#fff':'#000'}
   const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),...(color()?{color:color()}:{})})
-  return <div ref={el=>root=el} class="solid-permission-widget" style={{'margin-left':`${PERMISSION_GAP_PX}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),MODE_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-permission-trigger" data-mode={mode()} style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={switchMode()==='menu'?'listbox':undefined} aria-expanded={switchMode()==='menu'?open():undefined} aria-controls={switchMode()==='menu'?menuId:undefined} onClick={()=>switchMode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':mode()}</button><Show when={switchMode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="权限模式选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==mode())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
+  return <div ref={el=>root=el} class="solid-permission-widget" style={{'margin-left':`${previousWidgetGapPx('mode')}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),MODE_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-permission-trigger" data-mode={mode()} style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={switchMode()==='menu'?'listbox':undefined} aria-expanded={switchMode()==='menu'?open():undefined} aria-controls={switchMode()==='menu'?menuId:undefined} onClick={()=>switchMode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':mode()}</button><Show when={switchMode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="权限模式选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==mode())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
 /** Session-create reasoning preference. It uses the same compact control language
  * as the mode widget and remains available in the normal control center. */
-const REASONING_GAP_PX = 12
 export function SolidReasoningWidget(props: { draftValue?: () => string; onDraftChange?: (value: string) => void } = {}) {
   const workbench = useSolidWorkbench(); const runtime = () => workbench.runtimeSnapshot(); const appearance = () => workbench.appearanceSnapshot()
   const [open,setOpen]=createSignal(false); const [error,setError]=createSignal(''); const [pending,setPending]=createSignal(false)
@@ -92,7 +100,7 @@ export function SolidReasoningWidget(props: { draftValue?: () => string; onDraft
   const width=()=>appearance().reasoningWidth??120, height=()=>appearance().reasoningHeight??28, radius=()=>appearance().reasoningRadius??0, fontSize=()=>appearance().reasoningFontSize??12
   const bg=()=>appearance().reasoningBgColor==='black'?'#000':'#fff', fg=()=>appearance().reasoningTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
   const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg()})
-  return <div ref={el=>root=el} class="solid-reasoning-widget" style={{'margin-left':`${REASONING_GAP_PX}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),REASONING_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-reasoning-trigger" style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':current()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="思考强度选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==current())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
+  return <div ref={el=>root=el} class="solid-reasoning-widget" style={{'margin-left':`${previousWidgetGapPx('reasoning')}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),REASONING_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-reasoning-trigger" style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':current()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="思考强度选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==current())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
 
 /** First-batch host renderer: the registered send block includes its icon layer;

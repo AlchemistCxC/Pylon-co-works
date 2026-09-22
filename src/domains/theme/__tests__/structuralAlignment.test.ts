@@ -20,8 +20,14 @@ const defaults = {
   ccLayout: DEFAULTS.ccLayout,
 }
 
-/** 用户手调过的一把值：offset/order + 若干已设字段。 */
+/**
+ * 用户手调过的一把值：offset/order + 若干已设字段。
+ * ★ 样本**保留 legacy `slot`** —— 这是老数据的真实形状；#238 刀3 起读盘**一律不读**它，
+ * 所以下面断言的是「slot 被丢掉、其余原样」。
+ */
 const USER_PLACEMENT = { slot: 'status-secondary' as const, order: 7, offsetX: 12, offsetY: -3 }
+/** 读盘对齐后应该剩下的东西（`slot` 已丢） */
+const USER_EXPECTED = { order: 7, offsetX: 12, offsetY: -3 }
 
 /** 造一份"只有部分控件项"的旧布局（老浏览器里存的真实形状就是缺项）。 */
 const partialLayout = (version: number, placements: Record<string, unknown>): Partial<CcLayoutV3> =>
@@ -56,7 +62,7 @@ describe('#238 刀2 · (a) 缺项的旧版数据 ⇒ 自动补齐，用户 offse
 
   it('用户手调值一律保留（offset / order / 已设字段值；不拍平）', () => {
     const aligned = alignThemeStructure(legacy, defaults) as unknown as Aligned
-    expect(aligned.ccLayout.placements.model).toEqual(USER_PLACEMENT)
+    expect(aligned.ccLayout.placements.model).toEqual(USER_EXPECTED)
     expect(aligned.ccHeight).toBe(220)
     expect(aligned.modelWidth).toBe(150)
     expect(aligned.ccHidden).toEqual(['tokens'])
@@ -77,7 +83,7 @@ describe('#238 刀2 · (a) 缺项的旧版数据 ⇒ 自动补齐，用户 offse
     const aligned = alignThemeStructure(withLegacyIds, defaults) as unknown as Aligned
     expect(aligned.ccLayout.placements).not.toHaveProperty('session')
     expect(aligned.ccLayout.placements).not.toHaveProperty('ekg')
-    expect(aligned.ccLayout.placements.model).toEqual(USER_PLACEMENT)
+    expect(aligned.ccLayout.placements.model).toEqual(USER_EXPECTED)
   })
 })
 
@@ -87,21 +93,21 @@ describe('#238 刀2 · (b) 版本号是垃圾值 / 未来值 ⇒ 不再整份重
 
   it('版本 7（发布过、曾被白名单漏掉）⇒ 位置保留', () => {
     const normalized = normalizeCcLayout(partialLayout(7, placements))
-    expect(normalized.placements.model).toEqual(USER_PLACEMENT)
+    expect(normalized.placements.model).toEqual(USER_EXPECTED)
     expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
   })
 
   it('版本 0 / 未来值 999 / 非数字 ⇒ 位置一律保留', () => {
     for (const version of [0, 1, 999, -1]) {
       const normalized = normalizeCcLayout(partialLayout(version, placements))
-      expect(normalized.placements.model, `version=${version}`).toEqual(USER_PLACEMENT)
+      expect(normalized.placements.model, `version=${version}`).toEqual(USER_EXPECTED)
     }
   })
 
   it('走完整对齐链路同样不重置（版本号不参与判定）', () => {
     for (const version of [7, 999]) {
       const aligned = alignThemeStructure({ ccLayout: { version, placements } }, defaults) as unknown as Aligned
-      expect(aligned.ccLayout.placements.model, `version=${version}`).toEqual(USER_PLACEMENT)
+      expect(aligned.ccLayout.placements.model, `version=${version}`).toEqual(USER_EXPECTED)
       expect(aligned.ccLayout.placements.reasoning).toEqual(DEFAULT_CC_LAYOUT.placements.reasoning)
     }
   })
@@ -155,8 +161,8 @@ describe('#238 刀2 · 幂等（连跑两次结果相同）', () => {
 
   it('用户值处在合法范围内时不被 clamp 改动（第二次跑也不会漂）', () => {
     const once = alignThemeStructure(legacy, defaults) as unknown as Aligned
-    expect(once.ccLayout.placements.model).toEqual(USER_PLACEMENT)
-    expect(once.ccLayout.placements.reasoning).toEqual({ slot: 'actions', order: 3, offsetX: -5, offsetY: 4 })
+    expect(once.ccLayout.placements.model).toEqual(USER_EXPECTED)
+    expect(once.ccLayout.placements.reasoning).toEqual({ order: 3, offsetX: -5, offsetY: 4 })
     expect(once.ccHeight).toBe(300)
   })
 })

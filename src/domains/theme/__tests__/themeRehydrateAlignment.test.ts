@@ -12,7 +12,10 @@ import { THEME_SCHEMA_VERSION } from '../migration.ts'
 import { DEFAULTS } from '../themeDefaults.ts'
 
 const STORAGE_KEY = 'pylon-theme'
+// ★ 种子里**故意留着 legacy `slot`**（老数据的真实形状）：#238 刀3 起读盘一律不读它，
+// 所以持久化进去的 `slot` 不会出现在 store 状态里（下面的期望据此写成 slot-less）。
 const USER_PLACEMENT = { slot: 'status-secondary', order: 7, offsetX: 12, offsetY: -3 }
+const USER_EXPECTED = { order: 7, offsetX: 12, offsetY: -3 }
 
 type Booted = {
   state: Record<string, unknown>
@@ -49,9 +52,9 @@ describe('#238 刀2 · 读盘后无条件结构对齐（版本号相同、migrat
     })
 
     expect(Object.keys(layout.placements).sort()).toEqual(['cc-send-button', 'input', 'mode', 'model', 'reasoning', 'tokens'])
-    expect(layout.placements.reasoning).toMatchObject({ slot: 'status-secondary', order: 3 })
+    expect(layout.placements.reasoning).toMatchObject({ order: 2 })
     // 用户值一样都没动（不拍平）
-    expect(layout.placements.model).toEqual(USER_PLACEMENT)
+    expect(layout.placements.model).toEqual(USER_EXPECTED)
     expect(state.ccHeight).toBe(220)
     expect(state.modelWidth).toBe(150)
     expect(state.ccHidden).toEqual(['tokens'])
@@ -77,8 +80,8 @@ describe('#238 刀2 · 版本号不匹配时仍是「迁移 + 对齐」，用户
       version: 7,
     })
 
-    expect(layout.placements.model).toEqual(USER_PLACEMENT)
-    expect(layout.placements.reasoning).toMatchObject({ slot: 'status-secondary', order: 3 })
+    expect(layout.placements.model).toEqual(USER_EXPECTED)
+    expect(layout.placements.reasoning).toMatchObject({ order: 2 })
     expect(layout.version).toBe(9)
     // migrate 真的跑过 ⇒ 这一支会写盘（与刀2 之前一致：只在版本变化时写）
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').version).toBe(THEME_SCHEMA_VERSION)

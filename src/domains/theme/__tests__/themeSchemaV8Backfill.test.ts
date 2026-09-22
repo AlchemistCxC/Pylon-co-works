@@ -29,10 +29,10 @@ describe('theme schema v8：老安装补入 reasoning 控件', () => {
     }, defaults, 7) as unknown as Migrated
 
     expect(migrated.ccLayout.placements.reasoning).toBeTruthy()
-    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ slot: 'status-secondary', order: 3 })
+    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ order: 2 })
     // 既有控件不被踩掉：补位是按 widget ID 合并，不是整表替换
-    expect(migrated.ccLayout.placements.mode).toMatchObject({ slot: 'status-secondary', order: 4 })
-    expect(migrated.ccLayout.placements.model).toMatchObject({ slot: 'status-secondary', order: 2 })
+    expect(migrated.ccLayout.placements.mode).toMatchObject({ order: 3 })
+    expect(migrated.ccLayout.placements.model).toMatchObject({ order: 1 })
   })
 
   it('用户已拖过的 reasoning 位置不被默认值覆盖（迁移可重复执行）', () => {
@@ -44,7 +44,7 @@ describe('theme schema v8：老安装补入 reasoning 控件', () => {
       ccLayout: { version: CC_LAYOUT_SCHEMA_VERSION, placements },
     }, defaults, 8) as unknown as Migrated
 
-    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ slot: 'actions', order: 9 })
+    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ order: 9 })
   })
 })
 
@@ -87,7 +87,7 @@ describe('theme schema v10：用量控件（S11）', () => {
     const migrated = themeDomainMigrate({ ccLayout: legacy }, defaults, 9) as unknown as Migrated
 
     expect(migrated.ccLayout.placements.pct).toBeUndefined()
-    expect(migrated.ccLayout.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
+    expect(migrated.ccLayout.placements.tokens).toMatchObject({ order: 4 })
   })
 })
 

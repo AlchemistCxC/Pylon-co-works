@@ -18,10 +18,14 @@
   border-radius:inherit;
   z-index:0;
 }
+/* ★ #238 刀3：发送按钮的「贴输入栏右侧」现在由定义表声明（`x: { anchor:'input', side:'right', gap }`），
+   间距经 `--cc-send-anchor-gap` 注入；下面的 calc 是**档位**（inline 贴里侧 / external 贴外沿）
+   与运行期尺寸（输入栏高、按钮大小）的换算，不是可声明的常量。
+   ⚠ 垂直居中那段 top:calc(...) 原样保留 —— 锚点模型没有等价表达，强改必变像素（施工单 §2.5）。 */
 .cc-send-button {
   position:absolute;
   top:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
-  right:var(--cc-input-offset-top,10px);
+  right:calc(var(--cc-send-anchor-gap,0px) + var(--cc-input-offset-top,10px));
   z-index:3;
   width:var(--cc-send-size,32px);
   height:var(--cc-send-size,32px);
@@ -39,7 +43,7 @@
 .cc-send-icon--stroke.cc-send-icon--round { stroke-linejoin:round; stroke-linecap:round; }
 .cc-send-icon--solid { fill:var(--cc-send-icon-color,#fff); stroke:none; }
 .cc-send-button[data-mode="inline"] {
-  right:calc(var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+  right:calc(var(--cc-send-anchor-gap,0px) + var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
 }
 .cc-send-button:disabled { cursor:default; }
 .cc-input-shadow-clip {
@@ -124,12 +128,11 @@
   gap:0; min-width:0; flex-wrap:wrap; row-gap:3px;
   min-height:18px; font-family:var(--mono); font-size:max(14px, var(--cc-status-font-size, 14px)); line-height:1.35;
 }
-.cc-status-primary, .cc-status-secondary, .cc-actions {
+/* ★ #238 刀3：信息控件容器 = **一个落脚处一个容器**（原三个槽位包装 div `.cc-status-primary`
+   / `-secondary` / `.cc-actions` 与它们的 `order:1/2/3` 已随槽位层拆除）。 */
+.cc-status-group {
   display:flex; align-items:center; gap:0; min-width:0;
 }
-.cc-status-secondary { order:1; }
-.cc-status-primary { order:2; }
-.cc-actions { order:3; }
 .cc-command-hint {
   order:4; flex-basis:100%; width:100%; margin-left:0; padding-left:0;
   color:var(--text-dim); font-size:0.86em; font-weight:400; opacity:0.72;
@@ -137,12 +140,10 @@
 }
 .cc-command-hint-key { color:var(--text-dim); }
 .cc-command-hint i { padding:0 7px; color:var(--text-dim); font-style:normal; opacity:0.65; }
-/* 信息栏分隔：每两个实际可见控件之间只出现一个中点。
-   组内按相邻 widget 分隔，跨 slot 组按相邻非空组分隔。 */
+/* 信息栏分隔：每两个实际可见控件之间只出现一个中点（Solid 由 JS 显式插入分隔符，
+   下面这两条是 React 回落期的遗留规则，已无槽位分组可言 —— 见 WorkbenchChrome 的 `content:none` 收口）。 */
 .cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before,
-.cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
-.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
+.cc-footer-status-row .cc-widget + .cc-widget::before {
   content:' · '; padding:0 7px; color:var(--text-dim); opacity:0.65;
 }
 .cc-widget-separator {
@@ -359,21 +360,17 @@
   padding-inline: var(--ui-space-1);
 }
 
-.cc-status-primary,
-.cc-status-secondary,
-.cc-actions {
+.cc-status-group {
   gap: var(--ui-space-1);
   /* 窄窗（面板被侧栏挤到约 300px 时）容不下按钮型控件的自然宽：
-     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让槽内换行，
+     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让组内换行，
      保证控件完整可见（宁可信息栏升到两行，也不压扁/裁掉控件）。 */
   flex-wrap: wrap;
   align-content: center;
 }
 
 .cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before,
-.cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
-.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
+.cc-footer-status-row .cc-widget + .cc-widget::before {
   padding-inline: var(--ui-space-2);
   opacity: .48;
 }

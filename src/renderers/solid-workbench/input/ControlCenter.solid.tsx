@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_WIDGET_LABELS, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
-import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcSlot, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
@@ -15,12 +15,21 @@ import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
 
-const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
-
+/**
+ * ★★ #238 刀3：**槽位层已拆** —— 不再有「先分槽、再在槽里排序」两段式。
+ * 位置由定义表每行的 `layout` 声明，渲染按**落脚处**（`ccWidgetLanding` = `(y.anchor, y.side)`）自动成组。
+ *
+ * 两个落脚处**从表里取**（不写死字符串）：输入栏那一处与信息控件那一处。
+ * ⚠ 容器结构不能随意改：`.cc-input-slot` 这个类名被两处 JS 用来量宽度
+ * （本文件 `onMount` 算 `--cc-input-text-inset-x`、`InputBar.solid.tsx` 取父容器），
+ * 改了会让输入框文字内缩**静默变成 0**。
+ */
+const INPUT_LANDING = ccWidgetLanding('input')
+const INFO_LANDING = ccWidgetLanding('model')
 /**
  * 编辑态可编辑控件 = 内置轨 ∪ 注册轨中**占槽位**的控件（刀4 的「内置轨 ∪ 注册轨」）——
  * 两者都由定义表（`domains/cc/widgetDefinitions.ts`）派生，共 6 条。
- * 「基础」`cc-surface` 不开槽位、无 order/offset/显隐，故不进工具栏（其值在设置页编辑）。
+ * 「基础」`cc-surface` 不参与排布、无 order/offset/显隐，故不进工具栏（其值在设置页编辑）。
  */
 const CC_EDIT_TOOLBAR_IDS: readonly CcLayoutWidgetId[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
 
@@ -279,14 +288,17 @@ export function SolidControlCenter() {
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
-  // 状态行门户：仅对状态槽生效。常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGETS）
-  // 在活跃会话里也放行；其它状态控件仍受"活跃会话收起"约束。input 槽（输入栏）
-  // 从不经过这个门户，否则活跃会话会把输入栏一并过滤掉。
-  const passesStatusGate = (id: CcWidgetId, slot: CcSlot) =>
-    slot === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
-  const idsForSlot = (slot: CcSlot) => visibleIds()
-    .filter(id => appearance().ccLayout.placements[id]?.slot === slot)
-    .filter(id => passesStatusGate(id, slot))
+  // 状态行门户：常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS）在活跃会话里也放行；
+  // 其它信息控件仍受"活跃会话收起"约束。输入栏从不经过这个门户，否则活跃会话会把它一并过滤掉。
+  const passesStatusGate = (id: CcWidgetId) =>
+    id === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
+  // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
+  //   进组前过一遍**输入栏落脚处独占守卫**（原「input 槽只准放输入栏」的替代）：
+  //   非输入栏若被错标到输入栏容器，退回信息落脚处 —— 宁可换位置，不凭空消失。
+  const landingOf = (id: CcWidgetId) => coerceInputLanding(id, ccWidgetLanding(id))
+  const idsForLanding = (landing: string | undefined) => visibleIds()
+    .filter(id => landingOf(id) === landing)
+    .filter(id => passesStatusGate(id))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
   /**
@@ -375,7 +387,7 @@ export function SolidControlCenter() {
     return <div
       class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${appearance().ccHidden.includes(id) ? ' cc-hidden' : ''}${selected() === id ? ' cc-selected' : ''}`}
       data-widget-id={id}
-      data-widget-slot={placement().slot}
+      data-widget-anchor={resolveCcWidgetGroup(id)?.layout?.y.anchor}
       style={placementStyle(placement())}
       onPointerDown={event => beginDrag(event, id)}
     >{body}</div>
@@ -471,19 +483,18 @@ export function SolidControlCenter() {
    * the model name).  A concrete separator has an unambiguous index and is
    * also easier for themes to style consistently.
    */
-  const statusSlots = () => <For each={STATUS_SLOTS}>{(slot, slotIndex) => {
-    const precedingCount = () => STATUS_SLOTS
-      .slice(0, slotIndex())
-      .reduce((count, previousSlot) => count + idsForSlot(previousSlot).length, 0)
-    return <div class={`cc-${slot}`} data-cc-slot={slot}>
-      <For each={idsForSlot(slot)}>{(id, index) => <span class="cc-status-entry" style={{ display: 'contents' }}>
-        <Show when={precedingCount() + index() > 0}>
-          <span class="cc-widget-separator" data-separator-index={precedingCount() + index()} aria-hidden="true">·</span>
-        </Show>
-        {renderWidget(id)}
-      </span>}</For>
-    </div>
-  }}</For>
+  /**
+   * 信息控件容器（#238 刀3）：**一个落脚处一个容器**，不再是三个槽位包装 div。
+   * 组内按 `order` 排；每两个相邻控件之间插入一个中点分隔符。
+   */
+  const statusGroup = () => <div class="cc-status-group" data-cc-landing={INFO_LANDING}>
+    <For each={idsForLanding(INFO_LANDING)}>{(id, index) => <span class="cc-status-entry" style={{ display: 'contents' }}>
+      <Show when={index() > 0}>
+        <span class="cc-widget-separator" data-separator-index={index()} aria-hidden="true">·</span>
+      </Show>
+      {renderWidget(id)}
+    </span>}</For>
+  </div>
 
   const commandHint = () => input().sessionId && appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
     ? <div class="cc-command-hint" aria-label="输入快捷键提示">
@@ -556,6 +567,10 @@ export function SolidControlCenter() {
       '--cc-input-text': appearance().inputTextColor,
       '--cc-input-placeholder': appearance().inputPlaceholder,
       '--cc-send-size': `calc(var(--cc-input-height) * ${sendButtonMode() === 'inline' ? '0.8' : '1'})`,
+      // ★ #238 刀3：发送按钮「右侧偏移」的来源改成定义表（`layout.x.gap`；
+      //   现在是 0，所以像素与改造前完全一致）。剩下的 `calc()` 是"贴输入栏哪一侧"
+      //   的**档位**（inline/external）与运行期尺寸（输入栏高/按钮大小），不是可声明的常量。
+      '--cc-send-anchor-gap': `${resolveCcWidgetGroup('cc-send-button')?.layout?.x.gap ?? 0}px`,
       '--cc-send-color': appearance().sendButtonColor,
       '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
       '--cc-send-border-color': appearance().sendButtonBorderColor === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)',
@@ -586,17 +601,17 @@ export function SolidControlCenter() {
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
-        <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
+        <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
         <div class="cc-footer-status">
           <Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}>
             <EmptyWorkspaceControl />
           </Show>
-          <Show when={statusRowContent()}>{statusSlots()}</Show>
+          <Show when={statusRowContent()}>{statusGroup()}</Show>
           {commandHint()}
         </div>
       </div> : <>
-        <div class="cc-input-slot"><For each={idsForSlot('input')}>{renderWidget}</For></div>
-        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusSlots()}</Show>{commandHint()}</div>
+        <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
+        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show>{commandHint()}</div>
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (
@@ -604,9 +619,6 @@ export function SolidControlCenter() {
         <div class="cc-prop-header"><span>{CC_WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
         <div class="cc-prop-body">
           <div class="cc-prop-sec">布局</div>
-          <div class="cc-prop-field"><label>槽位</label><select class="set-select" aria-label="控件槽位" value={appearance().ccLayout.placements[id()].slot} onChange={event => updatePlacement(id(), { slot: event.currentTarget.value as CcSlot })}>
-            <option value="input">输入栏</option><option value="status-primary">状态左</option><option value="status-secondary">状态右</option><option value="actions">操作区</option>
-          </select></div>
           <div class="cc-prop-field"><label>顺序</label><input type="number" class="set-num" aria-label="控件顺序" min="0" max="99" step="1" value={appearance().ccLayout.placements[id()].order} onInput={event => {
             const value = event.currentTarget.valueAsNumber
             if (Number.isFinite(value)) updatePlacement(id(), { order: value })

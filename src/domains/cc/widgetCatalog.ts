@@ -11,15 +11,28 @@ function groupOf(id: string) {
   return row
 }
 
+/**
+ * 表里那一行的**默认位置**（插件契约形状）。
+ * ★ #238 刀3：槽位退场后改成 `anchor` + `side`；两轴当前共用同一锚点（`layout.x.anchor === layout.y.anchor`），
+ * 这里报 x 轴那份（水平侧的落位更有信息量）。缺 `layout` = 容器，返回 undefined。
+ */
+function defaultPlacementOf(id: string) {
+  const layout = groupOf(id).layout
+  return layout
+    ? { anchor: layout.x.anchor, side: layout.x.side, order: layout.order, offsetX: 0, offsetY: 0 }
+    : undefined
+}
+
 /** Legacy widget definitions retained for the switch renderer. */
 export const BUILTIN_CC_WIDGET_DEFINITIONS = Object.freeze(CC_WIDGET_IDS.map(id => {
   const row = groupOf(id)
   const propertyFields = WIDGET_PROPERTY_FIELDS[id]
+  const defaultPlacement = defaultPlacementOf(id)
   return {
     id,
     label: row.label,
     category: row.category,
-    defaultPlacement: { ...row.defaultPlacement! },
+    ...(defaultPlacement ? { defaultPlacement } : {}),
     ...(propertyFields.length > 0 ? { propertyFields } : {}),
   }
 }) as CcWidgetContribution[])
@@ -46,8 +59,8 @@ export const BUILTIN_CC_SEND_BUTTON_CONTRIBUTION: CcWidgetContribution = Object.
   id: 'cc-send-button',
   label: groupOf('cc-send-button').label,
   category: groupOf('cc-send-button').category,
-  // legacy `send` 槽位事实迁到注册轨（F1=A）：默认仍在操作区首位。
-  defaultPlacement: { ...groupOf('cc-send-button').defaultPlacement! },
+  // legacy `send` 槽位事实迁到注册轨（F1=A）：默认仍在输入栏右端、垂直居中。
+  defaultPlacement: defaultPlacementOf('cc-send-button')!,
   render: { kind: 'host-renderer' as const, rendererKey: 'cc-send-button' },
   propertyFields: Object.freeze([
     { kind: 'theme-field', key: 'inputSubmitButtonMode', label: '位置' },

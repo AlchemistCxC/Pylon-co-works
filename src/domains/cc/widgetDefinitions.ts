@@ -1,10 +1,13 @@
 /**
  * widgetDefinitions — 中控元件两级定义表（组 + 成员）单一真值。
  *
- * 表形（issue #238 刀1·结构步）：
+ * 表形（issue #238 刀1 立表 / 刀3 起位置改两轴）：
  * - **组**：可摆、可藏、可缩放的单元 —— 表里 `draggable` 的行才进
  *   `ccLayout` / `ccHidden` / `ccScale` 三份名单。共 8 行 = 控件 7 + 容器 1（`cc-surface`）。
  * - **成员**：组里一个有名字的部件 + 它自己那组字段 —— **只做归属**，不进任何名单。
+ * - ★ **位置**（刀3）：每行自己声明 `layout: { x: {锚点, 方位, 间距?}, y: {…}, order }`
+ *   —— 不再有「先分槽、再在槽里排序」两段式。渲染按**落脚处**（`ccWidgetLanding` =
+ *   `(y.anchor, y.side)`）自动成组，组内按 `order` 排。声明为 `floating` 的行不进文档流。
  *
  * 其余全部派生：`CC_WIDGET_IDS` / `STATUS_WIDGET_IDS` / 常态放行名单 / 空态隐藏名单 /
  * 标签表 / 默认布局（`ccLayoutState.ts`）/ 目录三份（`widgetCatalog.ts`）/
@@ -16,9 +19,8 @@
  * **只有 `import type`**（类型擦除，零运行时边），字段键本身写字符串；
  * 「每个字段都合法、83 个全覆盖且无重叠」由 `__tests__/widgetDefinitionTable.test.ts` 机检。
  *
- * ★ 间距栏位 `gap` 本刀**只记值不消费**：控件里硬编码的 `PERMISSION_GAP_PX` /
- * `REASONING_GAP_PX`（12px）仍原地生效，收编（改成消费表里的值）属内容步
- * —— 依据 #238 施工单停手条件 7（做不到像素级相同就退回原处）。
+ * ★ 间距：两个轴上的「贴边间距」写在 `layout.x/y.gap`；**同落脚处内的前置间距**用行级 `gap`
+ * （思考强度 / 权限各 12px，就是控件里原先硬编码的那两个常量；#238 刀3 起由控件读表）。
  *
  * ★ 中文名一律**照抄现状**（渲染出来的字逐字相同）：`cc-surface` 的现状字面量是
  * 「中控本体背景板」（骨架 §2 单元格写作「中控本体」，按其 §4 栏位字典「中文名照抄现状」
@@ -27,7 +29,6 @@
  */
 import type { ThemeSettings } from '../../store.ts'
 import type { ThemeFieldKey } from '../../themeFieldDefs.ts'
-import type { CcWidgetPlacement } from '../../ccLayoutState.ts'
 
 export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor'
 export type CcNumberPropertyKey =
@@ -90,6 +91,51 @@ export interface CcWidgetMember {
 
 // ── 组层 ──
 
+/** x 轴方位（`stretch` = 两侧都贴、撑满；`center` = 贴中线） */
+export type CcAxisX = 'left' | 'right' | 'center' | 'stretch'
+/** y 轴方位（`stretch` = 上下都贴、撑满；`center` = 贴中线） */
+export type CcAxisY = 'top' | 'bottom' | 'center' | 'stretch'
+
+export interface CcPlacementX {
+  /** 贴谁（指向表内 id，或最外的容器 `cc-surface`） */
+  readonly anchor: string
+  readonly side: CcAxisX
+  /** 与该边之间的间距（★ 数值来源见各行的 note；缺省 = 由既有 CSS 变量提供） */
+  readonly gap?: number
+}
+
+export interface CcPlacementY {
+  readonly anchor: string
+  readonly side: CcAxisY
+  readonly gap?: number
+}
+
+/**
+ * ★★ 位置（#238 刀3）：**两轴各声明一次「贴着谁」**，取代原来的「槽位 + 行内序」两段式。
+ * `order` = 同一**落脚处**（`(y.anchor, y.side)`，见 `ccWidgetLanding`）组内的次序。
+ */
+export interface CcWidgetLayout {
+  readonly x: CcPlacementX
+  readonly y: CcPlacementY
+  readonly order: number
+}
+
+/**
+ * `align` 简写：两轴共用同一锚点（各自再细化 `side` / `gap`）。
+ * 例：发送按钮 `alignLayout('input', { x: { side: 'right' }, y: { side: 'center' }, order: 1 })`
+ * —— 贴输入栏、右边 + 中线。
+ */
+export function alignLayout(
+  anchor: string,
+  spec: { x: { side: CcAxisX; gap?: number }; y: { side: CcAxisY; gap?: number }; order: number },
+): CcWidgetLayout {
+  return {
+    x: { anchor, side: spec.x.side, ...(spec.x.gap === undefined ? {} : { gap: spec.x.gap }) },
+    y: { anchor, side: spec.y.side, ...(spec.y.gap === undefined ? {} : { gap: spec.y.gap }) },
+    order: spec.order,
+  }
+}
+
 export interface CcWidgetGroup {
   id: string
   /** 容器 = 不可拖、不占槽、承载外观项、可作锚点；控件 = 可拖、有成员、挂在锚点上 */
@@ -98,20 +144,22 @@ export interface CcWidgetGroup {
   category: string
   /** 渲染轨：`builtin` = 内置渲染器；`registered` = 注册轨（宿主渲染，经 ccWidgetRegistry） */
   rail: 'builtin' | 'registered'
-  /** 锚点 = 贴哪一行（指向表内 id）；最外的容器无锚点。★ 必须无环，顺锚点必到 `cc-surface` */
-  anchor?: string
-  /** 方位（★ 值属内容层，结构步照抄现状） */
-  side?: string
-  /** 间距（★ 值属内容层；结构步只记值不消费，见文件头） */
+  /** ★ 位置声明（两轴）；最外的容器 `cc-surface` 无此项（它是所有锚点的终点） */
+  layout?: CcWidgetLayout
+  /**
+   * ★ **同落脚处内的前置间距**（与同组前一个元件之间的距离，落在元件自己身上）。
+   * 现状：思考强度 / 权限各 12px（原先硬编码在控件里的 `REASONING_GAP_PX` / `PERMISSION_GAP_PX`，
+   * #238 刀3 起由控件读本值）。两轴上的「贴边间距」不走这里，走 `layout.x/y.gap`。
+   */
   gap?: number
+  /** ★ 声明为**悬浮**（不参与文档流成组；占区叠加约束对它豁免，见刀4） */
+  floating?: boolean
   /** 是否进 `ccLayout` / `ccHidden` / `ccScale` 三份名单 */
   draggable: boolean
   /** 常态放行：活跃会话里也显示（派生 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`） */
   alwaysVisibleInActiveSession?: boolean
   /** 空态隐藏（派生 `EMPTY_STATE_HIDDEN_WIDGET_IDS`） */
   hiddenInEmptyState?: boolean
-  /** 容器不占位 ⇒ 缺此项 */
-  defaultPlacement?: CcWidgetPlacement
   /** 属性表单（PropertyPanel 消费） */
   propertyFields?: WidgetPropertyForm
   members: readonly CcWidgetMember[]
@@ -160,11 +208,11 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'surface-body',
         label: '中控本体面',
-        fields: ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant'],
+        fields: ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant', 'footerLayout'],
         visibility: { kind: 'always' },
       },
     ],
-    note: '最外的容器：不开槽位、不可拖不可藏，是所有其它行的锚点终点（其值在设置页编辑）。',
+    note: '最外的容器：不参与排布（所有其它行的锚点终点）、不可拖不可藏（其值在设置页编辑）。★ `footerLayout` 由 #238 刀3 从「跨元件系统字段」桶转入本行（只做**归属转移**：字段与 peri/free 两种实现都不动）。',
   }),
   widgetGroup({
     id: 'input',
@@ -172,10 +220,8 @@ export const CC_WIDGET_GROUPS = [
     label: '输入栏',
     category: 'input',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: 'peri=文档流首项／free=绝对浮起',
+    layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 0 },
     draggable: true,
-    defaultPlacement: { slot: 'input', order: 0, offsetX: 0, offsetY: 0 },
     propertyFields: [
       { kind: 'section', title: '输入栏设置' },
       { kind: 'color', key: 'inputBg', label: '背景色' },
@@ -233,7 +279,7 @@ export const CC_WIDGET_GROUPS = [
       { id: 'error', label: '报错条', fields: [], visibility: { kind: 'content' } },
       { id: 'empty-slot', label: '空态插槽', fields: [], visibility: { kind: 'host' } },
     ],
-    note: '间距走 CSS 变量 --cc-input-offset-top / --cc-input-margin-x，不是表内 gap。',
+    note: '间距不写死在表里：横向上/纵向上的实际数值由既有的两个 CSS 变量提供（`--cc-input-margin-x` = 输入栏左右间距、`--cc-input-offset-top` = 输入栏上间距，都是设置页字段），`x.side=stretch` + `y.side=top` 描述的就是它们。peri 下由 `.cc-footer-peri` 让它回到文档流当第一个，free 下由绝对定位浮起 —— 这套差值仍在 CSS 里（本刀不动）。',
   }),
   widgetGroup({
     id: 'model',
@@ -241,13 +287,11 @@ export const CC_WIDGET_GROUPS = [
     label: '模型',
     category: 'runtime',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: '底部区域',
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 1 },
     gap: 0,
     draggable: true,
     alwaysVisibleInActiveSession: true,
     hiddenInEmptyState: true,
-    defaultPlacement: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
     propertyFields: [
       { kind: 'section', title: '模型控件' },
       {
@@ -280,13 +324,11 @@ export const CC_WIDGET_GROUPS = [
     label: '思考强度',
     category: 'runtime',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: '底部区域',
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 2 },
     gap: 12,
     draggable: true,
     alwaysVisibleInActiveSession: true,
     hiddenInEmptyState: true,
-    defaultPlacement: { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
     propertyFields: [
       { kind: 'section', title: '思考强度控件' },
       { kind: 'chips', key: 'reasoningSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
@@ -314,13 +356,11 @@ export const CC_WIDGET_GROUPS = [
     label: '权限模式',
     category: 'runtime',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: '底部区域',
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 3 },
     gap: 12,
     draggable: true,
     alwaysVisibleInActiveSession: true,
     hiddenInEmptyState: true,
-    defaultPlacement: { slot: 'status-secondary', order: 4, offsetX: 0, offsetY: 0 },
     propertyFields: [
       { kind: 'section', title: '权限控件' },
       { kind: 'chips', key: 'permissionSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
@@ -352,13 +392,11 @@ export const CC_WIDGET_GROUPS = [
     label: '用量',
     category: 'context',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: '底部区域',
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 4 },
     gap: 0,
     draggable: true,
     alwaysVisibleInActiveSession: true,
     hiddenInEmptyState: true,
-    defaultPlacement: { slot: 'status-secondary', order: 5, offsetX: 0, offsetY: 0 },
     propertyFields: [],
     members: [
       {
@@ -378,8 +416,7 @@ export const CC_WIDGET_GROUPS = [
     label: '命令行提示',
     category: 'input',
     rail: 'builtin',
-    anchor: 'cc-surface',
-    side: '行尾（cli 时整行靠右）',
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 5 },
     gap: 0,
     // ★ 结构步必须为 false：渲染仍走 ControlCenter 的裸渲染 commandHint()，
     //   归位（删裸渲染 + 承担工具条 6→7）属内容步（规范 §11.7）。
@@ -400,11 +437,12 @@ export const CC_WIDGET_GROUPS = [
     label: '发送按钮',
     category: 'action',
     rail: 'registered',
-    anchor: 'input',
-    side: '右端（骑边）',
+    // ★ 悬浮声明：它一直是绝对定位的悬浮件（骑在输入栏右端），不进文档流成组；
+    //   占区叠加约束对它豁免（刀4）。`alignLayout('input', …)` = 贴输入栏、右边 + 中线。
+    layout: alignLayout('input', { x: { side: 'right' }, y: { side: 'center' }, order: 1 }),
+    floating: true,
     draggable: true,
     hiddenInEmptyState: true,
-    defaultPlacement: { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
     members: [
       {
         id: 'button',
@@ -435,6 +473,41 @@ const GROUP_BY_ID: ReadonlyMap<string, CcWidgetGroupRow> = new Map(
 /** 按 id 取表里的行（测试与派生用；渲染主路径不查表） */
 export function resolveCcWidgetGroup(id: string): CcWidgetGroupRow | undefined {
   return GROUP_BY_ID.get(id)
+}
+
+/**
+ * ★ 落脚处（#238 刀3）：**同一 `(y.anchor, y.side)` 的元件归入同一个容器**，组内按 `order` 排。
+ * 取代原来的三份槽位包装 div（`.cc-status-primary/-secondary/.cc-actions`）。
+ * 返回 `undefined` = 该行不参与排布（容器 `cc-surface`，或缺 `layout` 的行）。
+ */
+export function ccWidgetLanding(id: string): string | undefined {
+  const layout = resolveCcWidgetGroup(id)?.layout
+  return layout ? `${layout.y.anchor}:${layout.y.side}` : undefined
+}
+
+/** 声明为**悬浮**的行（不进文档流成组；占区叠加约束豁免，见刀4） */
+export const CC_FLOATING_WIDGET_IDS: readonly string[] = CC_WIDGET_GROUPS
+  .filter(row => row.floating === true)
+  .map(row => row.id as string)
+
+/**
+ * ★ **输入栏落脚处独占守卫**（#238 刀3）——原 `input` 槽「只允许输入栏」规则的替代。
+ *
+ * 槽位层拆掉后，「元件落在哪个容器」完全由定义表声明；拖拽只改 `offset`/`order`、
+ * 改不了归属，所以老问题（「别的元件挪进输入栏 → 槽位过滤把它剔掉 → 控件凭空消失」）
+ * 的**新形式**是「表被改坏 / 将来允许改锚点 ⇒ 非输入栏落在输入栏容器里被拉伸」。
+ * 判据：凡声明落在输入栏落脚处、自己却不是输入栏的，**退回默认信息落脚处**
+ * —— 宁可换位置，也不让它凭空消失。
+ */
+export function coerceInputLanding(id: string, declaredLanding: string | undefined): string | undefined {
+  const inputLanding = ccWidgetLanding('input')
+  if (declaredLanding !== inputLanding) return declaredLanding
+  return id === 'input' ? declaredLanding : ccWidgetLanding('model')
+}
+
+/** 表自身的输入栏落脚处违规项（空 = 合规；渲染层与测试共用同一判据） */
+export function ccInputLandingViolations(ids: readonly string[]): string[] {
+  return ids.filter(id => coerceInputLanding(id, ccWidgetLanding(id)) !== ccWidgetLanding(id))
 }
 
 // ── 派生：名单 / 标签表 / 属性表单 ──
@@ -498,13 +571,13 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, WidgetPropertyForm> = Ob
  * 跨元件的系统字段：不属于任何单个组/成员的字段。
  *
  * - `ccLayout` / `ccHidden` / `ccScale`：三份名单本体（值为元件名，属布局状态）。
- * - `ccStatusFontSize` / `statusBg` / `statusBgImage` / `footerLayout`：原「信息行」名下的 4 项，
- *   作用面是**整条状态行**而非某个元件。其收尾（2 项僵尸废弃 / 字号收窄 / 底排布改由锚点表达）
- *   属 #238 内容步，本刀照现状保留。
+ * - `ccStatusFontSize` / `statusBg` / `statusBgImage`：原「信息行」名下的项，作用面是**整条状态行**
+ *   而非某个元件。其收尾（2 项僵尸废弃 / 字号收窄）属刀5。
+ *   ★ `footerLayout` 已由 #238 刀3 移入容器行 `cc-surface`（只做归属转移，字段与实现不动）。
  */
 export const CC_SYSTEM_FIELDS = [
   'ccLayout', 'ccHidden', 'ccScale',
-  'ccStatusFontSize', 'statusBg', 'statusBgImage', 'footerLayout',
+  'ccStatusFontSize', 'statusBg', 'statusBgImage',
 ] as const satisfies readonly ThemeFieldKey[]
 
 export interface WidgetVisibilityCtx {

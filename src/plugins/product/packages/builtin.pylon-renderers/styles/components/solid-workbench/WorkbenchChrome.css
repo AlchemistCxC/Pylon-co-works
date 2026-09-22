@@ -565,11 +565,10 @@
 /* Solid renders separators explicitly from the visible widget sequence.  The
    legacy pseudo-element rules in ControlCenter.css remain for the React
    fallback, but must not leak into this tree or create a duplicate/leading
-   `·` when an earlier slot is empty. */
+   `·`.  ★ #238 刀3：槽位分组选择器（`.cc-status-primary` / `-secondary` / `.cc-actions`）
+   已随槽位层拆除 —— 信息控件现在只有一个落脚处容器，不再存在跨组分隔。 */
 .solid-workbench-control-center-slot .cc-status-row .cc-widget + .cc-widget::before,
-.solid-workbench-control-center-slot .cc-footer-status-row .cc-widget + .cc-widget::before,
-.solid-workbench-control-center-slot .cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
-.solid-workbench-control-center-slot .cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
+.solid-workbench-control-center-slot .cc-footer-status-row .cc-widget + .cc-widget::before {
   content: none !important;
   padding: 0 !important;
 }
@@ -709,6 +708,6 @@
 .app[data-interface-mode="tactical-blue"] .input-btn.send { color:#071f45; background:#80e6ff; border-color:#80e6ff; border-radius:2px; box-shadow:none; }
 .app[data-interface-mode="tactical-blue"] .input-btn.stop { background:#442032; color:#ffc5cf; border-color:#ff8c99; }
 .app[data-interface-mode="tactical-blue"] .cc-footer-status-row { flex-wrap:wrap; gap:6px 0; font-size:12px; }
-.app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-primary,.cc-status-secondary,.cc-actions) { flex-wrap:wrap; max-width:100%; }
+.app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-group) { flex-wrap:wrap; max-width:100%; }
 .app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .control-center { min-height:140px; height:auto; }
 .app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .cc-body { height:auto; min-height:140px; }
