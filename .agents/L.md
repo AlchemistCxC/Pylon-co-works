@@ -600,3 +600,20 @@
 **不碰**：`src/plugin-runtime/cc-widget/**`（插件契约面）、`src/themeFieldDefs.ts`（只读且禁运行时 import）、`src/ccHeightState.ts`、`src/domains/workbench/appearance.ts`、`ControlCenter.css`、`WorkbenchWidgets.solid.tsx`（12px 间距按施工单停手条件 7 原地保留）、`src/components/cc/widgetCatalogView.ts` 及其测试（第③件的东西，本刀不动）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
 **给后来者**：中控区另两件（状态左行撤槽、死数据清理）与本件文件重叠 ⇒ **不许并行开工**；顺序 = 本件 → 状态左行 → 死数据清理。
+
+---
+
+[2026-09-22 16] [Baryon] [#238 · 刀2]
+
+**续开工：刀2 归一化解耦（把「结构对齐」从版本号上摘下来）。** 分支**沿用** `feat/cc-widget-definition-table`（与刀1 在 `src/ccLayoutState.ts` 有重叠）。施工单 `元件定义表/04-施工单-刀2-归一化解耦.md`。本刀**对外行为零变化**（改的是"什么时候对齐"）：对齐搬到**每次读盘后无条件跑**，版本白名单整段退场。
+
+**本刀（在刀1 文件域之上叠加）**：
+
+- `src/domains/theme/migration.ts`（拆「结构对齐」与「一次性语义转换」）
+- `src/ccLayoutState.ts`（删 `normalizeCcLayout` 的版本白名单判定 + 版本号职责注释）
+- `src/store.ts`（persist 增加 `merge`：读盘后无条件结构对齐）
+- 新增测试 `src/domains/theme/__tests__/{structuralAlignment,themeRehydrateAlignment}.test.ts`（等价性 / 幂等 / 真实读盘路径）
+- `src/domains/cc/__tests__/ccLayoutV8.test.ts`（**只调整 **"不在白名单里的版本整份回落默认布局" 那条用例的**写法**，样本保留）
+- 文档：`.agents/records/238-*-刀2*.md`、本文件
+
+**不碰**：槽位（刀3）、中控渲染、插件契约面、`src/domains/cc/widgetDefinitions.ts`（刀1 产物，本刀只读）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
