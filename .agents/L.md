@@ -687,3 +687,15 @@
 - 文档：`.agents/records/261-*.md`（完工时新增）、本文件
 
 **我不碰**：#260 四批次在途域（`lifecycle/mod.rs`、`identityStore.ts`、`pylon-acp/**`、`Cargo.lock`、hook_bridge、toolPresentation 族、spinnerVerbs）；`src-tauri/src/dispatcher/**`（#155 域）；中控区、预设系统；`scripts/**`。全程 pathspec 提交，工作树里 #260 批次 A 未提交 WIP 原样保留、绝不 stage。
+
+---
+
+[2026-09-23 09] [Miyaki Kumo] [#262]
+
+**开工：issue262（CI 修复——shadow parity 背压探针路径随 #247 抽取失效 + clippy 基线两条新增）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `scripts/check-acp-shadow-parity.mjs`（仅 runBackpressureCheck 探针命令与测试名）
+- `src-tauri/src/session/prompt.rs`（仅 settle_prompt_cancelled_after_timeout 签名收窄 + 调用点，#261 已收工）
+- `src-tauri/src/gateway/qq/mod.rs`（仅 dead_target_gate let-else → `?`，#261 已收工）
+
+**我不碰**：其余全部。全程 pathspec 提交。
