@@ -41,7 +41,7 @@
 5. **锚定**：#212 S4 自管锚点原样保留且对虚拟化路径成立——锚行恒在窗内（可见行必物化），窗外几何变化经 spacer 反映为真实 DOM 位移，DOM 基准的补偿照常工作（B2 的直接推论）。
 6. **失效（D5）**：`invalidateMeasurements(theme/font/container-resized)` ⇒ 引擎 `measure()` 清实测缓存 + 行高表 `invalidateAll` 重估 + spacer 刷新；`items-changed` 是增量口径不作废。
 7. **jsdom 适配**：引擎 `getRect` 读 `offsetHeight`（jsdom 恒 0 ⇒ 取窗恒空）、`getMaxScrollOffset` 读 `scrollHeight - clientHeight`（恒 0 ⇒ scrollToIndex 钳到 0）——测试夹具以 `Object.defineProperty` 补 `offsetHeight/scrollHeight/clientHeight`；`measureElement` 对零几何元素跳过（`node.offsetHeight > 0` 守卫），防零尺寸毒化缓存。
-8. **For cell 陷阱（后来者注意）**：Solid 的 `For` 回调**是追踪作用域**——回调体内直接读信号（哪怕只为分支判断）会让整块 JSX 在每次信号写入时重建（DOM 身份断）。本轮踩过：`virtualActive()`（读 rows/charsTotal）在 cell 体内被追踪，setItems 即全列表重建。修法=cell 主体 `untrack` 包裹，重渲染交给细粒度效应。
+8. **For cell 陷阱（后来者注意）**：Solid 的 `For` 回调**是追踪作用域**——回调体内直接读信号（哪怕只为分支判断）会让整块 JSX 在每次信号写入时重建（DOM 身份断）。本轮踩过：中间态实现把 `virtualActive()`（读 rows/charsTotal）留在 cell 体内，setItems 即全列表重建。**最终结构从根上消除了该面**：分支判定（legacy/虚拟化）上移到 `<Show>` 层，cell 回调体只读普通 wrapper 对象（`RenderedCell`/`StableMessageListRow.item`），动态属性由编译器包装为独立 render effect——cell 自身无信号依赖，永不重跑。（审查复核：cell 内 descriptor signal getter 走属性效应，不污染 cell 作用域。）
 
 ## #212 三条窗口用例改写说明（issue 验收点名）
 
@@ -65,4 +65,5 @@
 1. **切片 0 真机标定未做**：阈值（300 行/100k 字符）与 overscan=8 为 jsdom 读数推的保守默认，**待真机复验后修正**（D8 已授权临时改实例 `agents.yaml` 喷合成长会话；同一装置复跑启用前后对照 DOM 节点/渲染器 private/JS 堆/long task）。本机 G 盘接近满、且本轮未走实机验收流程，建议下轮在真机装置上补齐后回填本记录与阈值。
 2. 高亮缓存（128 条）读数接口未暴露，「不重高亮」暂由 markdown LRU 计数 + #221 既有测试间接覆盖。
 3. `virtualization="auto"` 的阈值跨越无迟滞：会话行数在阈值附近抖动时会整体切换渲染分支（语义正确，成本一次全量挂载）。真机标定时一并观察。
+4. 审查（2026-09-23）补落：引擎 elementsCache 卸载清扫、leading 高度变化的 scrollMargin 重测（`.term` 观察器）、invalidateAll 覆盖退役行、整体换代清理跨会话缓存、jsdom 行高桩 + 实测补偿行为测试（原「修正链路零覆盖」缺口已闭合；真机对照仍在遗留 1）。
 4. PR 与 #242（同支前驱 docs PR）为堆叠关系：本 PR 合入前需先合 #242。

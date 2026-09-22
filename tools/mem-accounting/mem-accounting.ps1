@@ -2,8 +2,10 @@
 mem-accounting.ps1 -- De-duplicated memory accounting for a Pylon (Tauri/WebView2) process tree.
 
 WHY: summing WorkingSet across the cluster double counts every shared page. This cluster maps the
-same 332 MB msedge.dll into 5-7 processes, so the naive sum overstates by ~1.6x. Task Manager's
-per-process numbers cannot be added up.
+same 332 MB msedge.dll into 5-7 processes, so that single file's naive sum overstates its union
+footprint by ~1.6x (cluster-wide, the naive sum overstated by ~20% before the accounting below --
+see .agents/records/240-renderer-cluster-runtime-floor.md appendix 3). Task Manager's per-process
+numbers cannot be added up.
 
 HOW: for every process in the tree we enumerate the working set page by page (QueryWorkingSet),
 then classify each resident page:
@@ -61,25 +63,17 @@ public class MemAccounting
         public IntPtr a; public IntPtr b; public IntPtr c; public IntPtr d; public IntPtr e; public IntPtr f; public IntPtr PrivateUsage;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    struct MODULEINFO { public IntPtr lpBaseOfDll; public uint SizeOfImage; public IntPtr EntryPoint; }
-
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint a, bool i, int pid);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr VirtualQueryEx(IntPtr h, IntPtr a, out MEMORY_BASIC_INFORMATION m, IntPtr l);
     [DllImport("psapi.dll", SetLastError = true)] static extern bool QueryWorkingSet(IntPtr h, IntPtr buf, uint size);
     [DllImport("psapi.dll", SetLastError = true)] static extern bool GetProcessMemoryInfo(IntPtr h, out PROCESS_MEMORY_COUNTERS_EX c, uint s);
     [DllImport("psapi.dll", CharSet = CharSet.Unicode)] static extern uint GetMappedFileName(IntPtr h, IntPtr a, StringBuilder n, uint s);
-    [DllImport("psapi.dll", SetLastError = true)] static extern bool EnumProcessModulesEx(IntPtr h, IntPtr[] m, uint s, out uint n, uint f);
-    [DllImport("psapi.dll", CharSet = CharSet.Unicode)] static extern uint GetModuleFileNameEx(IntPtr h, IntPtr m, StringBuilder n, uint s);
-    [DllImport("psapi.dll", SetLastError = true)] static extern bool GetModuleInformation(IntPtr h, IntPtr m, out MODULEINFO i, uint s);
-
-    class Mod { public ulong Base; public ulong Size; public string Name; }
-
     struct Region
     {
         public ulong Base;        // identity base: module base (IMAGE) or allocation base (MAPPED)
-        public ulong Size;
+        public ulong Start;       // actual region start (hit-testing) -- an allocation spans many regions
+        public ulong Span;        // actual region size
         public uint Type;
         public uint Protect;
         public string File;       // module file name or mapped file name; null => anonymous
@@ -103,23 +97,6 @@ public class MemAccounting
 
     static void Zero(IntPtr p, int size) { byte[] z = new byte[size]; Marshal.Copy(z, 0, p, size); }
 
-    static List<Mod> Modules(IntPtr h)
-    {
-        var res = new List<Mod>();
-        var buf = new IntPtr[4096]; uint needed;
-        if (!EnumProcessModulesEx(h, buf, (uint)(buf.Length * IntPtr.Size), out needed, 0x03)) return res;
-        int count = (int)(needed / (uint)IntPtr.Size);
-        for (int i = 0; i < count && i < buf.Length; i++)
-        {
-            var sb = new StringBuilder(1024);
-            if (GetModuleFileNameEx(h, buf[i], sb, 1024) == 0) continue;
-            MODULEINFO info;
-            if (!GetModuleInformation(h, buf[i], out info, (uint)Marshal.SizeOf(typeof(MODULEINFO)))) continue;
-            res.Add(new Mod { Base = (ulong)buf[i].ToInt64(), Size = info.SizeOfImage, Name = System.IO.Path.GetFileName(sb.ToString()) });
-        }
-        return res;
-    }
-
     static List<Region> Regions(IntPtr h)
     {
         var list = new List<Region>();
@@ -136,7 +113,7 @@ public class MemAccounting
                 var sb = new StringBuilder(2048);
                 uint n = GetMappedFileName(h, (IntPtr)(long)b, sb, 2048);
                 string file = n > 0 ? sb.ToString() : null;
-                var reg = new Region { Base = (ulong)r.AllocationBase.ToInt64(), Size = size, Type = r.Type, Protect = r.Protect };
+                var reg = new Region { Base = (ulong)r.AllocationBase.ToInt64(), Start = b, Span = size, Type = r.Type, Protect = r.Protect };
                 if (!string.IsNullOrEmpty(file) && file.IndexOf("Pagefile", StringComparison.OrdinalIgnoreCase) < 0)
                     reg.File = System.IO.Path.GetFileName(file);
                 list.Add(reg);
@@ -147,8 +124,6 @@ public class MemAccounting
         }
         return list;
     }
-
-    static bool IsExec(uint p) { return (p & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0; }
 
     public static ProcessResult Analyze(int pid, string role)
     {
@@ -163,7 +138,6 @@ public class MemAccounting
             res.PrivateUsage = c.PrivateUsage.ToInt64();
 
             var regions = Regions(h);
-            var mods = Modules(h);
 
             long pages = res.WorkingSet / 4096 + 8192;
             IntPtr buf = Marshal.AllocHGlobal((int)(pages * 8));
@@ -180,7 +154,9 @@ public class MemAccounting
                 }
                 if (QueryWorkingSet(h, buf, (uint)(pages * 8)))
                 {
-                    for (long i = 0; i < pages; i++)
+                    // QueryWorkingSet's first returned element is the entry count itself;
+                    // page addresses start at index 1.
+                    for (long i = 1; i < pages; i++)
                     {
                         long va = Marshal.ReadInt64(buf, (int)(i * 8));
                         if (va == 0) break;
@@ -196,7 +172,7 @@ public class MemAccounting
                 Region? hit = null;
                 foreach (var r in regions)
                 {
-                    if (u >= r.Base && u < r.Base + r.Size) { hit = r; break; }
+                    if (u >= r.Start && u < r.Start + r.Span) { hit = r; break; }
                 }
                 if (hit == null) { res.PrivateResident += 4096; continue; }
                 var reg = hit.Value;
@@ -233,11 +209,13 @@ $tree = New-Object System.Collections.Generic.List[object]
 foreach ($root in @($all | Where-Object { $_.Name -eq $ProcessName })) {
     $tree.Add(@{ proc = $root; role = 'app' })
     foreach ($c in @($byParent[[int]$root.ProcessId])) {
+        if (-not $c) { continue }
         $cl = [string]$c.CommandLine
         $role = 'browser'
         if ($cl -match '--type=([a-zA-Z\-]+)') { $role = $matches[1] }
         $tree.Add(@{ proc = $c; role = $role })
         foreach ($g in @($byParent[[int]$c.ProcessId])) {
+            if (-not $g) { continue }
             $gcl = [string]$g.CommandLine
             $grole = 'child'
             if ($gcl -match '--type=([a-zA-Z\-]+)') { $grole = $matches[1] }
@@ -296,7 +274,8 @@ if ($Json) {
         anonMaxMB = [math]::Round($anonMax / $mb, 1)
         dedupedMB = @([math]::Round($dedupLow / $mb, 1), [math]::Round($dedupHigh / $mb, 1))
         topFiles = @($fileSum.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First $TopFiles | ForEach-Object {
-            [pscustomobject]@{ file = $_.Key; summedMB = [math]::Round($_.Value / $mb, 1); unionMB = [math]::Round($fileSets[$_.Key].Count * 4096 / $mb, 1); processes = @($results | Where-Object { $_.FilePages.ContainsKey($_.Key) }).Count }
+            $entry = $_
+            [pscustomobject]@{ file = $entry.Key; summedMB = [math]::Round($entry.Value / $mb, 1); unionMB = [math]::Round($fileSets[$entry.Key].Count * 4096 / $mb, 1); processes = @($results | Where-Object { $_.FilePages.ContainsKey($entry.Key) }).Count }
         })
     } | ConvertTo-Json -Depth 4
     exit 0

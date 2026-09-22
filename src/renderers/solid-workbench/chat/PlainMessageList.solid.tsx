@@ -85,6 +85,10 @@ export function PlainMessageList(props: PlainMessageListProps) {
   let bottomAnchor: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
   let destroyed = false
   let resizeObserver: ResizeObserver | undefined
+  /** 滚动内容容器（生产为 `.term`）的观察器：leading 活动区高度变化不改列表自身
+   * 高度 ⇒ container 的 RO 不触发，scrollMargin 会过期（审查 P1-2）。只做廉价的
+   * margin 重测与 spacer 刷新，不走测量失效。 */
+  let contentObserver: ResizeObserver | undefined
   const measurements = createFrameTask((reason: MeasurementInvalidationReason) => port.invalidateMeasurements(reason))
 
   // ── #243 行虚拟化（视口窗口 + 行高表 + 占位符） ─────────────
@@ -158,9 +162,10 @@ export function PlainMessageList(props: PlainMessageListProps) {
   }
   /**
    * 渲染切片（引擎取窗内的行；D2 回卷 = 上滚时取窗自动向上步进）。窗外的行**不驻留
-   * DOM**，其几何由容器 spacer（见 JSX 内联 padding）承载——高度来自同一张行高表
-   * （引擎实测缓存 + 估算回落），故「窗外行的实测修正」只改 spacer 总高、不改视口内
-   * 已锚定行的位置（spec 240 B2 的几何稳定性，以 O(1) 个 spacer 实现）。
+   * DOM**，其几何由容器 spacer（见 JSX 内联 padding）承载，两种修正机制殊途同归：
+   * 实测修正经引擎 RO→resizeItem→store→totalSize 传播，估算修正落在本组件行高表、
+   * 于引擎下次重算（滚动/行数变化）时并入——无论哪条路，高度都来自同一张行高表，
+   * 物化/卸载不改变布局总高，视口内已锚定行不因窗外高度变化位移（spec 240 B2）。
    *
    * wrapper 按 row key 缓存且在 index 不变时复用 ⇒ 滚动与 setItems 都不会重建
    * 窗内既有行的单元格（DOM 身份契约，P57 S2-R3）。
@@ -304,6 +309,16 @@ export function PlainMessageList(props: PlainMessageListProps) {
         return existing
       })
       if (!changed && nextItems.length === previousRows.length) return
+      // 整体换代（冷开/切换会话）：清理上一会话的退役条目（chars/cell wrapper/行高表
+      // 退役实测），防跨会话只增不减（审查 P2-3）。引擎 itemSizeCache 一并清空——
+      // 新会话的行尚未实测，量随用随建。
+      const previousKeys = new Set(previousRows.map(row => row.key))
+      if (previousRows.length > 0 && !nextItems.some(item => previousKeys.has(item.key))) {
+        charsByKey.clear()
+        cellByKey.clear()
+        heightTable.reset()
+        if (virtualActive()) virtualizer.measure()
+      }
       // 内容变化的行使字符缓存失效，重新计入总量（未变化行走缓存，零 descriptor 读取）
       for (const { key } of contentChanged) charsByKey.delete(key)
       setCharsTotal(nextItems.reduce((sum, item) => sum + charsOf(item), 0))
@@ -381,7 +396,8 @@ export function PlainMessageList(props: PlainMessageListProps) {
       container.dataset.measurementRevision = String(Number(container.dataset.measurementRevision || 0) + 1)
       container.dataset.measurementReason = reason
       // D5 失效策略：字体/主题/容器变化 ⇒ 实测全部作废——引擎 measure() 清缓存后由
-      // 挂载行的观察器重测、占位符回落重估（items-changed 是增量口径，不作废）。
+      // 挂载行的观察器重测、占位符回落重估（items-changed 是增量口径，不作废；
+      // 'manual' 沿用 #212 旧语义：只翻 revision，无失效消费方）。
       if (reason === 'theme-changed' || reason === 'font-changed' || reason === 'container-resized') {
         if (virtualActive()) {
           const itemByKey = new Map(untrack(items).map(item => [item.key, item]))
@@ -403,6 +419,8 @@ export function PlainMessageList(props: PlainMessageListProps) {
       stopMountExpansion()
       resizeObserver?.disconnect()
       resizeObserver = undefined
+      contentObserver?.disconnect()
+      contentObserver = undefined
       rowElements.clear()
       setItems([])
       setRows([])
@@ -421,6 +439,11 @@ export function PlainMessageList(props: PlainMessageListProps) {
       })
       resizeObserver.observe(container)
       for (const node of rowElements.values()) resizeObserver.observe(node)
+      const contentHost = container.parentElement
+      if (contentHost) {
+        contentObserver = new ResizeObserver(() => geometrySync.schedule())
+        contentObserver.observe(contentHost)
+      }
     }
     measureScrollMargin()
     props.onPortReady?.(port)
@@ -499,6 +522,12 @@ export function PlainMessageList(props: PlainMessageListProps) {
     onCleanup(() => {
       resizeObserver?.unobserve(node)
       if (rowElements.get(messageId) === node) rowElements.delete(messageId)
+      // 引擎的 elementsCache 持有登记过的行节点；断开节点不再触发 RO，引擎自带的
+      // isConnected 清扫不可达 ⇒ 不主动清扫则访问过的历史 DOM 全部常驻堆
+      // （审查 P1-1）。measureElement(null) 是引擎提供的官方批量清扫入口。
+      if (index !== undefined && virtualActive()) {
+        (virtualizer.measureElement as unknown as (node: Element | null) => void)(null)
+      }
     })
   }
 

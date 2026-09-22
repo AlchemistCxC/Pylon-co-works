@@ -31,7 +31,12 @@ export interface RowHeightTable {
   measure(key: string, size: number): number
   /** 作废单行实测（降级回估算，尺寸取 estimateFor 重算）。 */
   invalidate(key: string, estimateFor: (key: string) => number): void
-  /** 作废全部实测（theme/font/container 失效路径），尺寸统一由 estimateFor 重算。 */
+  /**
+   * 作废全部实测（theme/font/container 失效路径），尺寸统一由 estimateFor 重算。
+   * 遍历**全部已知条目**（含已退役行）：当前行集用 estimateFor 重估；退役行无内容
+   * 可估，原值降级为估算（调用方的 estimateFor 以 sizeOf 回落）——过期实测不再被
+   * 重挂命中（审查 P1-4）。
+   */
   invalidateAll(estimateFor: (key: string) => number): void
   entry(key: string): RowHeightEntry | undefined
   isMeasured(key: string): boolean
@@ -131,11 +136,11 @@ export function createRowHeightTable(): RowHeightTable {
     },
     invalidateAll(estimateFor) {
       let earliest = Number.POSITIVE_INFINITY
-      for (let index = 0; index < keys.length; index += 1) {
-        const entry = sizes.get(keys[index]!)
-        if (entry?.source !== 'measured') continue
-        sizes.set(keys[index]!, { size: estimateFor(keys[index]!), source: 'estimated' })
-        earliest = Math.min(earliest, index)
+      for (const [key, entry] of sizes) {
+        if (entry.source !== 'measured') continue
+        sizes.set(key, { size: estimateFor(key), source: 'estimated' })
+        const index = indexByKey.get(key)
+        if (index !== undefined) earliest = Math.min(earliest, index)
       }
       if (earliest < Number.POSITIVE_INFINITY) markDirtyFrom(earliest)
     },
