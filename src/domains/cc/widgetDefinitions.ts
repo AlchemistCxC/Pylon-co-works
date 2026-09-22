@@ -136,6 +136,14 @@ export function alignLayout(
   }
 }
 
+/**
+ * 运行期**状态检测条件**（#238 刀5B；条件表见文件末 `CC_VISIBILITY_CONDITIONS`）。
+ *
+ * ★ 为什么不做成「三档枚举」：工况只会增加。新增一种工况 = **往条件表加一行** + 需要它的行引用它，
+ * 不动任何行的枚举值、也不动判定顺序（用户口径：「三档还是局限……万一以后不止有这三种工况呢？」）。
+ */
+export type CcVisibilityCondition = 'has-session' | 'cli-mode' | 'hint-visible'
+
 export interface CcWidgetGroup {
   id: string
   /** 容器 = 不可拖、不占槽、承载外观项、可作锚点；控件 = 可拖、有成员、挂在锚点上 */
@@ -156,8 +164,16 @@ export interface CcWidgetGroup {
   floating?: boolean
   /** 是否进 `ccLayout` / `ccHidden` / `ccScale` 三份名单 */
   draggable: boolean
-  /** 常态放行：活跃会话里也显示（派生 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`） */
-  alwaysVisibleInActiveSession?: boolean
+  /**
+   * ★ **活跃会话里显示还是收起**（#238 刀5B）—— 只有两个值，缺省 `'hide'`（= 活跃会话里收起）。
+   * 与 `conditions` 是**两件正交的事**：本项答"活跃会话里要不要"，`conditions` 答"运行期满不满足"。
+   */
+  inActiveSession?: 'show' | 'hide'
+  /**
+   * ★ 附带的**运行期状态检测**（可多选，**全部满足**才可见）。与 `inActiveSession` 正交。
+   * 例：命令行提示要"有会话 + 命令行模式 + 详细档不是 hidden"三条同时成立。
+   */
+  conditions?: readonly CcVisibilityCondition[]
   /** 空态隐藏（派生 `EMPTY_STATE_HIDDEN_WIDGET_IDS`） */
   hiddenInEmptyState?: boolean
   /** 属性表单（PropertyPanel 消费） */
@@ -222,6 +238,9 @@ export const CC_WIDGET_GROUPS = [
     rail: 'builtin',
     layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 0 },
     draggable: true,
+    // ★ 输入栏在活跃会话里**一直显示**（#238 刀5B 之前由门户里的 `id === 'input'` 特例承担）。
+    //   写进表里让「活跃会话显隐」这条轴**对每一行都成立**，不必再留硬编码豁免。
+    inActiveSession: 'show',
     propertyFields: [
       { kind: 'section', title: '输入栏设置' },
       { kind: 'color', key: 'inputBg', label: '背景色' },
@@ -290,7 +309,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 2 },
     gap: 0,
     draggable: true,
-    alwaysVisibleInActiveSession: true,
+    inActiveSession: 'show',
     hiddenInEmptyState: true,
     propertyFields: [
       { kind: 'section', title: '模型控件' },
@@ -327,7 +346,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 3 },
     gap: 12,
     draggable: true,
-    alwaysVisibleInActiveSession: true,
+    inActiveSession: 'show',
     hiddenInEmptyState: true,
     propertyFields: [
       { kind: 'section', title: '思考强度控件' },
@@ -359,7 +378,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 4 },
     gap: 12,
     draggable: true,
-    alwaysVisibleInActiveSession: true,
+    inActiveSession: 'show',
     hiddenInEmptyState: true,
     propertyFields: [
       { kind: 'section', title: '权限控件' },
@@ -395,7 +414,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 5 },
     gap: 0,
     draggable: true,
-    alwaysVisibleInActiveSession: true,
+    inActiveSession: 'show',
     hiddenInEmptyState: true,
     propertyFields: [],
     members: [
@@ -418,9 +437,12 @@ export const CC_WIDGET_GROUPS = [
     rail: 'builtin',
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 5 },
     gap: 0,
-    // ★ 结构步必须为 false：渲染仍走 ControlCenter 的裸渲染 commandHint()，
-    //   归位（删裸渲染 + 承担工具条 6→7）属内容步（规范 §11.7）。
-    draggable: false,
+    draggable: true,
+    // ★ 显示条件是**另一类**（有会话 + 命令行模式 + 详细档不为 hidden）⇒ 用 `conditions` 表达，
+    //   不用「三档枚举」。★ 少了 `inActiveSession: 'show'` 这一条，升格后它会在活跃会话里
+    //   被状态行门户滤掉（刀5A 实测过的"不出现"）——所以它与常态放行的四个元件同列。
+    inActiveSession: 'show',
+    conditions: ['has-session', 'cli-mode', 'hint-visible'],
     members: [
       {
         id: 'hint-line',
@@ -429,7 +451,7 @@ export const CC_WIDGET_GROUPS = [
         visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
       },
     ],
-    note: '升格为正式控件的结构已完成（表里有行），但拖拽/工具条归位属内容步。',
+    note: '★ #238 刀5B：已升格为**普通行内元件**（有多宽占多宽）—— 不再是裸渲染、也不再整行特化；进编辑工具条、受占区约束、也当障碍。',
   }),
   widgetGroup({
     id: 'cc-send-button',
@@ -442,6 +464,9 @@ export const CC_WIDGET_GROUPS = [
     layout: alignLayout('input', { x: { side: 'right' }, y: { side: 'center' }, order: 0 }),
     floating: true,
     draggable: true,
+    // ★ 它在活跃会话里确实显示（受 `inputSubmitButtonMode` 与 `ccHidden` 管），故据实声明；
+    //   它的渲染目前走单独一行、不经过 `isWidgetVisible`，本项是为"声明与事实一致"而写。
+    inActiveSession: 'show',
     hiddenInEmptyState: true,
     members: [
       {
@@ -541,13 +566,18 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
  * 常态显示的状态控件（2026-09-14）——不受"活跃会话收起旧状态控件"影响。
  *
  * 背景：`showStatusSlots()` 原先只在空态或编辑模式放行状态行，目的是让活跃
- * 对话界面干净（旧控件多）。模型控件是每轮对话都要看的当前状态，不属于该类，
- * 故由表里的 `alwaysVisibleInActiveSession` 标出。渲染过滤（idsForSlot）与状态行门户
- * （statusRowContent）共用同一名单，保持单一真值。
+ * 对话界面干净（旧控件多）。模型等每轮对话都要看的当前状态，不属于该类，
+ * 故由表里的 `inActiveSession: 'show'` 标出。渲染过滤（`idsForLanding`）与状态行门户
+ * （`statusRowContent`）共用同一名单，保持单一真值。
+ *
+ * ★ #238 刀5B：来源布尔 `alwaysVisibleInActiveSession` 换成两值字段 `inActiveSession`；
+ *   名单口径不变（**状态控件**里"活跃会话里也放行"的那些）⇒ 仍从 `STATUS_WIDGET_IDS` 收，
+ *   输入栏天然不在其中（它是常驻件，不进"状态控件"这个概念）。
+ *   ★ 命令行提示本刀起也标 `'show'`（它要能在活跃会话里显示，否则会被门户滤掉）
+ *   ⇒ 名单由 4 条变 5 条，这是**预期变化**。
  */
-export const ALWAYS_VISIBLE_STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_GROUPS
-  .filter(row => row.type === 'widget' && row.alwaysVisibleInActiveSession === true)
-  .map(row => row.id) as readonly CcWidgetId[]
+export const ALWAYS_VISIBLE_STATUS_WIDGET_IDS: readonly CcWidgetId[] = STATUS_WIDGET_IDS
+  .filter(id => resolveCcWidgetGroup(id)?.inActiveSession === 'show')
 
 /**
  * 空态追加隐藏的控件（`hiddenWidgetIds()` 的唯一真值）。
@@ -585,14 +615,39 @@ export interface WidgetVisibilityCtx {
   submitButtonMode: string
   /** 编辑模式：全显（隐藏/模式互斥规则不生效） */
   editMode?: boolean
+  /** 当前是否处于**活跃会话**（`conditions` 的 `'has-session'` 用；缺省 = 未知） */
+  hasSession?: boolean
+  /** 命令行提示的详细档（`conditions` 的 `'hint-visible'` 用；缺省 = 未知） */
+  hintMode?: string
+}
+
+/**
+ * ★ 运行期状态检测条件表（#238 刀5B）——**一行一个纯函数**，全部满足该行才可见。
+ * 新增工况只在这里加一行；哪一行需要它就在那行的 `conditions` 里写上名字。
+ */
+const CC_VISIBILITY_CONDITIONS: Record<CcVisibilityCondition, (ctx: WidgetVisibilityCtx) => boolean> = {
+  'has-session': ctx => ctx.hasSession === true,
+  'cli-mode': ctx => ctx.inputMode === 'cli',
+  'hint-visible': ctx => ctx.hintMode !== 'hidden',
 }
 
 /**
  * widget 可见性单一真值（C2）：渲染（ControlCenter.renderWidget）与高度计数
  * （resolveVisibleStatusWidgetCount）消费同一谓词，杜绝"计数多算不渲染的 widget"。
+ *
+ * ★ 判定顺序（#238 刀5B）——**按序，全部满足才可见**：
+ * 1. 用户显隐 `ccHidden`（**编辑态豁免**：编辑时要把藏起来的元件露出来才好操作）；
+ * 2. `inActiveSession`（活跃会话里显/隐；**编辑态同样豁免**，与门户里"编辑态全显"一致）；
+ * 3. `conditions`（运行期状态检测）。★ **不豁免编辑态** —— 与升格前的裸渲染条件一致
+ *    （那时没会话/非命令行模式下，编辑态也看不到提示）。
  */
 export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   const edit = ctx.editMode === true
   if (!edit && ctx.hidden.includes(id)) return false
+  const row = resolveCcWidgetGroup(id)
+  if (!edit && (row?.inActiveSession ?? 'hide') !== 'show' && ctx.hasSession === true) return false
+  for (const condition of row?.conditions ?? []) {
+    if (!CC_VISIBILITY_CONDITIONS[condition](ctx)) return false
+  }
   return true
 }

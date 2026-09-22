@@ -274,6 +274,9 @@ export function SolidControlCenter() {
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
     editMode: appearance().ccEditMode,
+    // ★ #238 刀5B：`conditions`（运行期状态检测）要读的两个事实 —— 必须与高度计数同源。
+    hasSession: Boolean(input().sessionId),
+    hintMode: appearance().cliHintMode,
   })
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
@@ -286,11 +289,13 @@ export function SolidControlCenter() {
       hiddenIds: hiddenWidgetIds(),
       inputMode: appearance().inputMode,
       submitButtonMode: appearance().inputSubmitButtonMode,
+      hintMode: appearance().cliHintMode,
+      hasSession: Boolean(input().sessionId),
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
-  // 状态行门户：常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS）在活跃会话里也放行；
-  // 其它信息控件仍受"活跃会话收起"约束。输入栏从不经过这个门户，否则活跃会话会把它一并过滤掉。
+  // 状态行门户：常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS = `inActiveSession: 'show'` 的状态控件）
+  // 在活跃会话里也放行；其它信息控件仍受"活跃会话收起"约束。输入栏从不经过这个门户。
   const passesStatusGate = (id: CcWidgetId) =>
     id === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
   // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
@@ -378,6 +383,16 @@ export function SolidControlCenter() {
           onDraftChange={emptyVisual() ? setMode : undefined}
           forceDropdown={emptyVisual()}
         />
+      case 'cc-command-hint':
+        // ★ #238 刀5B：命令行提示从「裸渲染」升格为表里的普通行内元件（本分支就是它的渲染实现）。
+        //   运行期条件（有会话 / 命令行模式 / 详细档不为 hidden）**不在这里判** ——
+        //   它们写在定义表的 `conditions` 里，由 `isWidgetVisible` 统一裁决
+        //   ⇒ 渲染与高度计数共用一个谓词，不可见时自然不计数。
+        return <div class="cc-command-hint" aria-label="输入快捷键提示">
+          <span class="cc-command-hint-key">/: 命令</span>
+          <span class="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
+          {appearance().cliHintMode === 'full' && <span class="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
+        </div>
     }
   }
 
@@ -528,37 +543,20 @@ export function SolidControlCenter() {
   }
 
   /**
-   * Render separators from the actual visible widget sequence.  The old CSS
-   * implementation used sibling/`:empty` pseudo selectors; an empty Solid
-   * slot can still contain a marker node, so that approach occasionally put a
-   * leading `·` in front of the first visible control (most noticeably before
-   * the model name).  A concrete separator has an unambiguous index and is
-   * also easier for themes to style consistently.
-   */
-  /**
-   * 信息控件容器（#238 刀3）：**一个落脚处一个容器**，不再是三个槽位包装 div。
-   * 组内按 `order` 排；每两个相邻控件之间插入一个中点分隔符。
+   * 信息控件容器（#238 刀3）：**一个落脚处一个容器**，不再是三个槽位包装 div。组内按 `order` 排。
+   *
+   * ★ #238 刀5B：**分隔点整族删除**（用户口径「分割点可以不要」）—— 这里不再插入 `·`；
+   *   配套删掉的还有 `.cc-widget-separator` 样式、ControlCenter.css 里两条旧 `::before`
+   *   回落规则、以及 WorkbenchChrome.css 里专门压住它们的那处 `content:none !important`。
    */
   const statusGroup = () => <div class="cc-status-group" data-cc-landing={INFO_LANDING}>
-    <For each={idsForLanding(INFO_LANDING)}>{(id, index) => <span class="cc-status-entry" style={{ display: 'contents' }}>
-      <Show when={index() > 0}>
-        <span class="cc-widget-separator" data-separator-index={index()} aria-hidden="true">·</span>
-      </Show>
-      {renderWidget(id)}
-    </span>}</For>
+    <For each={idsForLanding(INFO_LANDING)}>{id => renderWidget(id)}</For>
   </div>
 
-  const commandHint = () => input().sessionId && appearance().inputMode === 'cli' && appearance().cliHintMode !== 'hidden'
-    ? <div class="cc-command-hint" aria-label="输入快捷键提示">
-      <span class="cc-command-hint-key">/: 命令</span>
-      <span class="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
-      {appearance().cliHintMode === 'full' && <span class="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
-    </div>
-    : null
   // Keep empty-state/edit-mode controls available for session setup and layout
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
-  // 例外（2026-09-14）：模型控件常态显示，见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS。
+  // 例外（2026-09-14）：常态放行的状态控件，见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS。
   const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGET_IDS
     .some(id => isWidgetVisible(id, visibilityContext()))
   const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
@@ -659,11 +657,10 @@ export function SolidControlCenter() {
             <EmptyWorkspaceControl />
           </Show>
           <Show when={statusRowContent()}>{statusGroup()}</Show>
-          {commandHint()}
         </div>
       </div> : <>
         <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
-        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show>{commandHint()}</div>
+        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show></div>
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (

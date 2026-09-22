@@ -59,6 +59,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -192,6 +197,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
           },
           "tokens": {
             "slot": "status-secondary",
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
+          "cc-command-hint": {
             "order": 5,
             "offsetX": 0,
             "offsetY": 0
@@ -333,6 +343,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -470,6 +485,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -603,6 +623,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
           },
           "tokens": {
             "slot": "status-secondary",
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
+          "cc-command-hint": {
             "order": 5,
             "offsetX": 0,
             "offsetY": 0

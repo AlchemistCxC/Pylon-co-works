@@ -136,28 +136,16 @@
   display:flex; align-items:center; gap:0; min-width:0;
 }
 .cc-command-hint {
-  order:4; flex-basis:100%; width:100%; margin-left:0; padding-left:0;
-  /* ★ #238 刀5：字号自己管自己（原来是整行的 `0.86em`）。默认 16px 与固定后的行字号同值
-     ⇒ 折算结果 13.76px，与改造前逐项相同。 */
+  /* ★ #238 刀5A：字号自己管自己（原来是整行的 `0.86em`）。默认 16px 与固定后的行字号同值
+     ⇒ 折算结果 13.76px。
+     ★ 刀5B：它已是**普通行内元件**（有多宽占多宽）⇒ **整行特化全部删除**
+     （`order` / `flex-basis:100%` / `width:100%` / `text-align:right` / `transform:translateY`），
+     这里只留"这几个字自己长什么样"。 */
   color:var(--text-dim); font-size:calc(var(--cc-hint-font-size, 16px) * 0.86); font-weight:400; opacity:0.72;
-  display:block; line-height:1.35; white-space:nowrap; text-align:right; transform:translateY(-3px);
+  line-height:1.35; white-space:nowrap;
 }
 .cc-command-hint-key { color:var(--text-dim); }
 .cc-command-hint i { padding:0 7px; color:var(--text-dim); font-style:normal; opacity:0.65; }
-/* 信息栏分隔：每两个实际可见控件之间只出现一个中点（Solid 由 JS 显式插入分隔符，
-   下面这两条是 React 回落期的遗留规则，已无槽位分组可言 —— 见 WorkbenchChrome 的 `content:none` 收口）。 */
-.cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before {
-  content:' · '; padding:0 7px; color:var(--text-dim); opacity:0.65;
-}
-.cc-widget-separator {
-  display:inline-block;
-  flex:0 0 auto;
-  padding-inline:var(--ui-space-2);
-  color:var(--text-dim);
-  opacity:.48;
-  user-select:none;
-}
 .cc-widget { position:relative; overflow:visible; display:flex; align-items:center; }
 /* Widget failures must not participate in the status-row layout. Backend
    diagnostics can include an advertised model list and therefore be long. */
@@ -205,7 +193,6 @@
 
 @media (max-width:900px) {
   .cc-status-row { row-gap:2px; }
-  .cc-command-hint { width:100%; padding-left:0; text-align:right; }
   .cc-command-hint .cc-hint-tertiary { display:none; }
 }
 @media (max-width:720px) {
@@ -238,7 +225,6 @@
 }
 .control-center.cli-mode .cc-footer-peri { flex:0 0 auto; }
 .control-center.cli-mode .cc-footer-peri .cc-footer-status { flex:0 0 auto; }
-.control-center.cli-mode .cc-footer-peri .cc-command-hint { flex-basis:auto; width:100%; }
 .app[data-cli-overflow-mode="grow"] .control-center.cli-mode { height:auto; }
 .app[data-cli-overflow-mode="grow"] .control-center.cli-mode .cc-body { height:auto; min-height:var(--cc-min-height,64px); }
 .app[data-cli-overflow-mode="overlay"] .control-center.cli-mode,
@@ -374,11 +360,6 @@
   align-content: center;
 }
 
-.cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before {
-  padding-inline: var(--ui-space-2);
-  opacity: .48;
-}
 
 .cc-widget.cc-natural > button,
 .cc-widget.cc-natural > [role="button"] {
@@ -459,9 +440,4 @@
   padding-left:1.4em;
   padding-right:0;
   align-items:baseline;
-}
-.app[data-interface-mode="terminal-like"] .control-center.cli-mode .cc-command-hint {
-  padding-left:0;
-  padding-right:0;
-  transform:translateY(-2px);
 }

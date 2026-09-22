@@ -96,6 +96,11 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,

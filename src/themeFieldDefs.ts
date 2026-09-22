@@ -233,6 +233,10 @@ export const THEME_FIELD_DEFS = {
         hiddenIds: t.ccHidden || [],
         inputMode: t.inputMode,
         submitButtonMode: t.inputSubmitButtonMode || 'inline',
+        // ★ #238 刀5B：命令行提示的可见性含 `'hint-visible'` 条件 ⇒ 把档位传进去；
+        //   `hasSession` 在这里**拿不到**（this 是主题对象，没有会话信息），故不传
+        //   ⇒ 含 `'has-session'` 的行在此按"不可见"计（保守：不改写用户已落盘的高度）。
+        hintMode: t.cliHintMode || 'full',
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
     }),

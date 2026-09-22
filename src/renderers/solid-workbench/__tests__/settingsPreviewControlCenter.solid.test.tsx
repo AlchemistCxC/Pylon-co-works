@@ -24,7 +24,8 @@ describe('settingsPreviewControlCenter（P52 D4 Solid 中控预览）', () => {
     const statusWidgetIds = [...host.querySelectorAll(
       '.cc-status-group [data-widget-id]',
     )].map(el => el.getAttribute('data-widget-id'))
-    expect(statusWidgetIds).toEqual(['model', 'reasoning', 'mode', 'tokens'])
+    // ★ #238 刀5B：命令行提示升格为普通元件后也在这条行里（活跃会话 + cli ⇒ 三条条件满足）
+    expect(statusWidgetIds).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
     // 那三个槽位节点确实不再存在（DOM 级验收）
     expect(host.querySelector('.cc-status-primary:not(.cc-status-group), .cc-status-secondary, .cc-actions')).toBeNull()
 

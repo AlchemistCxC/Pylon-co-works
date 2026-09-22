@@ -51,7 +51,8 @@ describe('#238 刀2 · 读盘后无条件结构对齐（版本号相同、migrat
       version: THEME_SCHEMA_VERSION,
     })
 
-    expect(Object.keys(layout.placements).sort()).toEqual(['cc-send-button', 'input', 'mode', 'model', 'reasoning', 'tokens'])
+    // ★ #238 刀5B：命令行提示升格 ⇒ 对齐会把它也补进老数据（缺项补默认，正是本刀2 测试要的语义）
+    expect(Object.keys(layout.placements).sort()).toEqual(['cc-command-hint', 'cc-send-button', 'input', 'mode', 'model', 'reasoning', 'tokens'])
     expect(layout.placements.reasoning).toMatchObject({ order: 3 })
     // 用户值一样都没动（不拍平）
     expect(layout.placements.model).toEqual(USER_EXPECTED)

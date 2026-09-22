@@ -562,17 +562,6 @@
 .cc-empty-workspace-popover button { height: var(--ui-control-compact, 28px); padding: 0 var(--ui-space-2); color: var(--text); border: 1px solid var(--border); border-radius: 0; background: transparent; cursor: pointer; }
 .cc-empty-workspace-popover button:hover { color: var(--accent); border-color: var(--accent); }
 
-/* Solid renders separators explicitly from the visible widget sequence.  The
-   legacy pseudo-element rules in ControlCenter.css remain for the React
-   fallback, but must not leak into this tree or create a duplicate/leading
-   `·`.  ★ #238 刀3：槽位分组选择器（`.cc-status-primary` / `-secondary` / `.cc-actions`）
-   已随槽位层拆除 —— 信息控件现在只有一个落脚处容器，不再存在跨组分隔。 */
-.solid-workbench-control-center-slot .cc-status-row .cc-widget + .cc-widget::before,
-.solid-workbench-control-center-slot .cc-footer-status-row .cc-widget + .cc-widget::before {
-  content: none !important;
-  padding: 0 !important;
-}
-
 /* ── Solid control-center selectors ──
    Keep these menus in the same square, dense visual language as the terminal
    titlebar.  StatusBar.css still supplies the legacy fallback defaults; the

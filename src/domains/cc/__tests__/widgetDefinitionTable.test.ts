@@ -13,6 +13,7 @@ import {
   ccInputLandingViolations,
   ccWidgetLanding,
   coerceInputLanding,
+  isWidgetVisible,
   resolveCcWidgetGroup,
   type CcMemberVisibility,
 } from '../widgetDefinitions.ts'
@@ -26,6 +27,7 @@ import {
   DEFAULT_CC_LAYOUT,
   type CcLayoutWidgetId,
 } from '../../../ccLayoutState.ts'
+import { resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import { ZONE_FIELDS } from '../../../themeFieldDefs.ts'
 
 /**
@@ -149,12 +151,13 @@ describe('#238 · 定义表不变量 3：类型计数 7 控件 + 1 容器', () =
     expect(CC_WIDGET_GROUPS).toHaveLength(8)
     expect(widgets).toHaveLength(7)
     expect(containers).toEqual(['cc-surface'])
-    expect([...widgets].sort()).toEqual([...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS, 'cc-command-hint'].sort())
+    // ★ #238 刀5B：`cc-command-hint` 已升格 ⇒ 落进 CC_WIDGET_IDS，不必再单独并进来
+    expect([...widgets].sort()).toEqual([...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS].sort())
   })
 
-  it('可拖行 = 落槽行；命令行提示结构步不可拖', () => {
-    expect(slotIds).toEqual(['input', 'model', 'reasoning', 'mode', 'tokens', 'cc-send-button'])
-    expect(resolveCcWidgetGroup('cc-command-hint')?.draggable).toBe(false)
+  it('可拖行 = 落槽行（★ 刀5B：命令行提示已升格进来）；容器不可拖', () => {
+    expect(slotIds).toEqual(['input', 'model', 'reasoning', 'mode', 'tokens', 'cc-command-hint', 'cc-send-button'])
+    expect(resolveCcWidgetGroup('cc-command-hint')?.draggable).toBe(true)
     expect(resolveCcWidgetGroup('cc-surface')?.draggable).toBe(false)
   })
 })
@@ -244,7 +247,7 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
   it('DEFAULT_CC_LAYOUT 由表派生（含键序 = 表序，契约快照按此序落盘）', () => {
     expect(CC_LAYOUT_SCHEMA_VERSION).toBe(9)
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toEqual([
-      'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-send-button',
+      'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-command-hint', 'cc-send-button',
     ])
     // ★ #238 刀3：`slot` 退场；序号语义由「槽内序号」变为「同落脚处组内序号」。
     // ★ 序号**沿用历史值**（2/3/4/5 的空档也照抄）：出厂区域预设的落盘数据（`zones/factory/**`，
@@ -258,6 +261,9 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
         reasoning: { order: 3, offsetX: 0, offsetY: 0 },
         mode: { order: 4, offsetX: 0, offsetY: 0 },
         tokens: { order: 5, offsetX: 0, offsetY: 0 },
+        // ★ 刀5B：提示的序号沿用表里结构步时写的 5（与 tokens 同序）。两者同序不冲突：
+        //   `idsForLanding` 的排序是稳定排序，表序（tokens 在前）决定并列时的先后。
+        'cc-command-hint': { order: 5, offsetX: 0, offsetY: 0 },
         'cc-send-button': { order: 0, offsetX: 0, offsetY: 0 },
       },
     })
@@ -272,17 +278,19 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
   })
 
   it('内置轨 / 注册轨名单 = 表里对应轨道的可拖行（顺序 = 表序）', () => {
-    expect(CC_WIDGET_IDS).toEqual(['input', 'model', 'reasoning', 'mode', 'tokens'])
+    expect(CC_WIDGET_IDS).toEqual(['input', 'model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
     expect(CC_REGISTERED_SLOT_IDS).toEqual(['cc-send-button'])
-    expect(STATUS_WIDGET_IDS).toEqual(['model', 'reasoning', 'mode', 'tokens'])
+    expect(STATUS_WIDGET_IDS).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
   })
 
-  it('编辑工具条仍是 6 条（内置轨 5 + 注册轨 1），cc-surface 不进', () => {
-    expect(slotIds).toHaveLength(6)
+  it('★ 编辑工具条 6 → 7 条（内置轨 6 + 注册轨 1），cc-surface 不进', () => {
+    // ★ #238 刀5B 两处预期变化之一：提示升格后自动进工具条。
+    expect(slotIds).toHaveLength(7)
   })
 
-  it('常态放行 / 空态隐藏的实际效果不变（成员集合一致）', () => {
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS).toEqual(['model', 'reasoning', 'mode', 'tokens'])
+  it('常态放行 5 条（原 4 + 命令行提示）/ 空态隐藏 5 条，两集合语义仍不同', () => {
+    // ★ 刀5B：提示标 `inActiveSession: 'show'` ⇒ 常态放行由 4 变 5（不写它，提示会在活跃会话里被门户滤掉）。
+    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
     expect([...EMPTY_STATE_HIDDEN_WIDGET_IDS].sort())
       .toEqual(['cc-send-button', 'model', 'reasoning', 'mode', 'tokens'].sort())
     // 两个集合语义不同，不许并成一个：空态隐藏比常态放行多出注册轨的发送按钮
@@ -310,12 +318,15 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       ['reasoning', '思考强度', 'runtime'],
       ['mode', '权限模式', 'runtime'],
       ['tokens', '用量', 'context'],
+      // ★ 刀5B：提示升格 ⇒ 目录（由表派生）多一条
+      ['cc-command-hint', '命令行提示', 'input'],
     ])
     expect(BUILTIN_CC_WIDGET_DEFINITIONS.map(entry => entry.defaultPlacement)).toEqual([
       { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 4, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
     ])
     // 用量控件不新增属性字段（S11 拍板）⇒ 目录里不带 propertyFields
@@ -397,14 +408,64 @@ describe('#238 刀3 · 输入栏落脚处独占守卫（原「input 槽只准放
   })
 })
 
-describe('#238 · 表尾：命令行提示结构步只进表、不归位', () => {
-  it('命令行提示在表里（有位置声明）但不在任何名单、也不进默认布局', () => {
+describe('#238 刀5B · 可见性：显/隐（`inActiveSession`）+ 状态检测条件（`conditions`）', () => {
+  it('命令行提示：`inActiveSession: show` + 三条条件（少了它，活跃会话里会被门户滤掉）', () => {
+    const hint = resolveCcWidgetGroup('cc-command-hint')
+    expect(hint?.draggable).toBe(true)
+    expect(hint?.inActiveSession).toBe('show')
+    expect(hint?.conditions).toEqual(['has-session', 'cli-mode', 'hint-visible'])
+    // ★ 这两条是「活跃会话里能显示」的必要条件：门户只放行 `inActiveSession: 'show'` 的状态控件
+    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).toContain('cc-command-hint')
+  })
+
+  it('常态放行的四个状态控件不带条件（`show` 且无 conditions）', () => {
+    for (const id of ['model', 'reasoning', 'mode', 'tokens']) {
+      const row = resolveCcWidgetGroup(id)
+      expect(row?.inActiveSession, id).toBe('show')
+      expect(row?.conditions ?? [], id).toEqual([])
+    }
+  })
+
+  it('三条条件逐个可判：全部满足才可见（缺任一条即不可见）', () => {
+    const base = { hidden: [] as readonly string[], inputMode: 'cli', submitButtonMode: 'inline', hasSession: true, hintMode: 'full' }
+    expect(isWidgetVisible('cc-command-hint', base)).toBe(true)
+    expect(isWidgetVisible('cc-command-hint', { ...base, hintMode: 'compact' })).toBe(true)
+    expect(isWidgetVisible('cc-command-hint', { ...base, hintMode: 'hidden' })).toBe(false)   // hint-visible
+    expect(isWidgetVisible('cc-command-hint', { ...base, inputMode: 'default' })).toBe(false) // cli-mode
+    expect(isWidgetVisible('cc-command-hint', { ...base, hasSession: false })).toBe(false)    // has-session
+    // 缺省 ctx（拿不到会话信息的调用方）⇒ `has-session` 判否（保守：不改写用户已落盘的高度）
+    expect(isWidgetVisible('cc-command-hint', { hidden: [], inputMode: 'cli', submitButtonMode: 'inline' })).toBe(false)
+  })
+
+  it('`ccHidden` 仍能藏它；编辑态豁免显隐、但仍受条件约束（与升格前的裸渲染条件一致）', () => {
+    const ctx = { inputMode: 'cli', submitButtonMode: 'inline', hasSession: true, hintMode: 'full' }
+    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: ['cc-command-hint'] })).toBe(false)
+    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: ['cc-command-hint'], editMode: true })).toBe(true)
+    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: [], editMode: true, inputMode: 'default' })).toBe(false)
+  })
+
+  it('非 cli 模式下提示不参与高度计数（条件在同一谓词里 ⇒ 自然不计数）', () => {
+    const counts = (inputMode: string) => resolveVisibleStatusWidgetCount({
+      hiddenIds: [], inputMode, submitButtonMode: 'inline', hintMode: 'full', hasSession: true,
+    })
+    expect(counts('cli')).toBe(5)      // 4 常态 + 提示
+    expect(counts('default')).toBe(4)  // 提示被 `cli-mode` 条件挡掉
+  })
+})
+
+describe('#238 刀5B · 命令行提示已升格为可拖元件', () => {
+  it('它在名单、默认布局、常态放行里；仍不在空态隐藏名单', () => {
     const hint = resolveCcWidgetGroup('cc-command-hint')
     expect(hint).toBeDefined()
     expect(hint?.layout).toBeDefined()
-    expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('cc-command-hint')
-    expect(slotIds).not.toContain('cc-command-hint')
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).not.toContain('cc-command-hint')
+    expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toContain('cc-command-hint')
+    expect(slotIds).toContain('cc-command-hint')
+    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).toContain('cc-command-hint')
+    // 空态：条件 `has-session` 自然把它挡掉，不需要额外声明"空态隐藏"
     expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).not.toContain('cc-command-hint')
+  })
+
+  it('它既受占区约束、也当障碍（不是悬浮件）', () => {
+    expect(CC_FLOATING_WIDGET_IDS).not.toContain('cc-command-hint')
   })
 })

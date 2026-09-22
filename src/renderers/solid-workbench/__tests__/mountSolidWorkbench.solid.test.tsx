@@ -1171,9 +1171,14 @@ describe('mountSolidWorkbench', () => {
       return value!
     })
     // 2026-09-15：模型/思考强度/权限/用量四控件常态显示；其余旧状态控件在活跃会话里仍然收起。
+    // ★ #238 刀5B：命令行提示升格为普通元件后也在这一行（活跃会话 + cli 模式 ⇒ 三条条件满足）。
     expect([...row.querySelectorAll('[data-widget-id]')]
-      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens'])
-    expect(row.querySelector('.cc-widget-separator')).toBeInTheDocument()
+      .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
+    // ★ #238 刀5B：**分隔点整族删除** ⇒ 一个都不许有（用户口径「分割点可以不要」）。
+    //   判据用"组里除了元件节点没有别的东西"，比找文本 `·` 稳（元件自己的文案不受影响）。
+    const group = row.querySelector('.cc-status-group')!
+    expect(row.querySelector('.cc-widget-separator')).toBeNull()
+    expect(group.querySelectorAll('.cc-widget').length).toBe(group.childElementCount)
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {
