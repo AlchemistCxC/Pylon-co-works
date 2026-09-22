@@ -16,6 +16,7 @@ import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/tool
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
+import { resolveCcWidgetGroup } from '../../../domains/cc/widgetDefinitions.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
@@ -1557,6 +1558,18 @@ describe('mountSolidWorkbench', () => {
     lifecycle.destroy()
     lifecycle.destroy()
     expect(host.childElementCount).toBe(0)
+  })
+
+  it('间距来源 = 定义表 gap（思考强度 / 权限的 margin-left；#238 刀3 收编）', async () => {
+    const { host } = mountPreview()
+    await waitFor(() => expect(host.querySelector('.solid-reasoning-widget')).toBeInTheDocument())
+    const gapOf = (id: string) => resolveCcWidgetGroup(id)?.gap ?? 0
+    // 值本身非 0（否则断言空洞）：表里思考强度 / 权限各 12px
+    expect(gapOf('reasoning')).toBe(12)
+    expect(gapOf('mode')).toBe(12)
+    // 控件读的**就是**表里的值（改成 0 这条会红）
+    expect(getComputedStyle(host.querySelector('.solid-reasoning-widget')!).marginLeft).toBe(`${gapOf('reasoning')}px`)
+    expect(getComputedStyle(host.querySelector('.solid-permission-widget')!).marginLeft).toBe(`${gapOf('mode')}px`)
   })
 
   it('生产中控消费提交模式、隐藏项与排布权威（落脚处内按序号排）', async () => {
