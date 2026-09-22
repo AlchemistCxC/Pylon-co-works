@@ -536,17 +536,17 @@ fn protocol_defaults_match_current_behavior() {
     assert_eq!(protocol.set_model_api(), SetModelApi::ConfigOption);
     assert_eq!(
         protocol.prompt_timeout(),
-        crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS
+        crate::agent_config::DEFAULT_PROMPT_TIMEOUT_SECS
     );
     assert_eq!(
         protocol.cancel_settle_timeout(),
-        crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS
+        crate::agent_config::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS
     );
     // R-t5 缺省：闲置窗口有自己的缺省（600，与 prompt 预算解耦——判"停摆"而非"步骤预算"）；
     // 首 token 仍回退到 prompt 预算（判"agent 起没起来"，短判据）。
     assert_eq!(
         protocol.idle_timeout(),
-        crate::acp::DEFAULT_IDLE_TIMEOUT_SECS
+        crate::agent_config::DEFAULT_IDLE_TIMEOUT_SECS
     );
     assert_eq!(protocol.first_token_timeout(), protocol.prompt_timeout());
     assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
@@ -555,10 +555,10 @@ fn protocol_defaults_match_current_behavior() {
     assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
     assert_eq!(protocol.mcp_servers, McpServersMode::Always);
     let limits = protocol.attachment_limits();
-    assert_eq!(limits.max_attachments, crate::acp::DEFAULT_MAX_ATTACHMENTS);
+    assert_eq!(limits.max_attachments, crate::agent_config::DEFAULT_MAX_ATTACHMENTS);
     assert_eq!(
         limits.max_attachment_bytes,
-        crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES
+        crate::agent_config::DEFAULT_MAX_ATTACHMENT_BYTES
     );
     assert_eq!(
         protocol.initialize_caps(),

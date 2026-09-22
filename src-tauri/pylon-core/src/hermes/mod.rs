@@ -17,7 +17,7 @@
 //!   （名称 → `<home>/profiles/<name>`；路径原样/相对 base_dir 解析）。
 //! - [`hermes_home_override`]：由 AgentDef 计算应注入子进程的 `HERMES_HOME`。
 
-pub(crate) mod runtime;
+pub mod runtime;
 
 use crate::agent_config::AgentDef;
 use std::path::{Path, PathBuf};
@@ -239,7 +239,7 @@ mod tests {
     fn profile_name_resolves_under_injected_home() {
         // P91 批 C1（横切 §4）：home 经参数注入（原实现 set_var 进程全局
         // HERMES_HOME，与并行测试竞态）——名称解析为 <home>/profiles/profile-a
-        let dir = crate::test_utils::unique_temp("hermes");
+        let dir = unique_temp("hermes");
         std::fs::create_dir_all(dir.join("profiles")).unwrap();
         let agent = agent_with_profile(Some("profile-a"));
         let resolved =
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn list_profiles_returns_sorted_dirs_only() {
-        let dir = crate::test_utils::unique_temp("hermes-list");
+        let dir = unique_temp("hermes-list");
         std::fs::create_dir_all(dir.join("profiles")).unwrap();
         for name in ["profile-a", "profile-x", "shared"] {
             std::fs::create_dir_all(dir.join("profiles").join(name)).unwrap();
@@ -286,4 +286,13 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(profiles, vec!["profile-a", "profile-x", "shared"]);
     }
+}
+
+#[cfg(test)]
+fn unique_temp(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("pylon-{label}-{}-{nanos}", std::process::id()))
 }

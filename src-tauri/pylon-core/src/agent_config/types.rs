@@ -65,13 +65,13 @@ impl ConfigError {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AgentConfigFile {
+pub struct AgentConfigFile {
     /// E1：agents 先以宽松值解析，再在 parse() 内逐 agent 反序列化——
     /// 非法字段（负数值/未知枚举/类型错误）的报错带 agent id 上下文。
-    pub(crate) agents: HashMap<String, serde_yml::Value>,
+    pub agents: HashMap<String, serde_yml::Value>,
     /// 外置工具归一化字典（provider → tools）。缺省为空表，前端可继续使用内置 fallback。
     #[serde(default)]
-    pub(crate) tool_dictionary: HashMap<String, Vec<ToolDictEntry>>,
+    pub tool_dictionary: HashMap<String, Vec<ToolDictEntry>>,
 }
 
 /// 工具归一化字典条目（agents.yaml `tool_dictionary.<provider>[]`）。
@@ -253,8 +253,8 @@ pub struct AttachmentLimits {
 impl Default for AttachmentLimits {
     fn default() -> Self {
         Self {
-            max_attachments: crate::acp::DEFAULT_MAX_ATTACHMENTS,
-            max_attachment_bytes: crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES,
+            max_attachments: crate::agent_config::DEFAULT_MAX_ATTACHMENTS,
+            max_attachment_bytes: crate::agent_config::DEFAULT_MAX_ATTACHMENT_BYTES,
         }
     }
 }
@@ -309,7 +309,7 @@ impl AcpProtocolConfig {
     /// `idle_timeout` 的回退值。
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs
-            .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS)
+            .unwrap_or(crate::agent_config::DEFAULT_PROMPT_TIMEOUT_SECS)
     }
 
     /// R-t5 闲置超时（秒，缺省 `DEFAULT_IDLE_TIMEOUT_SECS` = 600）。距最后一次活动超过
@@ -319,7 +319,7 @@ impl AcpProtocolConfig {
     /// 与"多久没输出算停摆"不是同一个问题；混用会把 agent 等用户点击的时间当停摆。
     pub fn idle_timeout(&self) -> u64 {
         self.idle_timeout_secs
-            .unwrap_or(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS)
+            .unwrap_or(crate::agent_config::DEFAULT_IDLE_TIMEOUT_SECS)
     }
 
     /// R-t5 首 token 超时（秒，缺省 = prompt 预算）。发出后到首次活动的最长等待——
@@ -332,7 +332,7 @@ impl AcpProtocolConfig {
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
     pub fn cancel_settle_timeout(&self) -> u64 {
         self.cancel_settle_timeout_secs
-            .unwrap_or(crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS)
+            .unwrap_or(crate::agent_config::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS)
     }
 
     /// H8/H9 通用 RPC 超时（秒，缺省 30；complete + 回放共用）。
@@ -345,10 +345,10 @@ impl AcpProtocolConfig {
         AttachmentLimits {
             max_attachments: self
                 .max_attachments
-                .unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENTS),
+                .unwrap_or(crate::agent_config::DEFAULT_MAX_ATTACHMENTS),
             max_attachment_bytes: self
                 .max_attachment_bytes
-                .unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES),
+                .unwrap_or(crate::agent_config::DEFAULT_MAX_ATTACHMENT_BYTES),
         }
     }
 
@@ -399,7 +399,7 @@ impl AcpProtocolConfig {
 /// D2 双格式反序列化：bool（true=set_model / false=config_option）或字符串
 /// （"set_model"/"config_option"/"none"）。未知值拒绝（E1：报错指明字段与可选值；
 /// agent id 上下文由 parse() 的逐 agent 反序列化包装补充）。
-pub(crate) fn deserialize_set_model_api<'de, D>(
+pub fn deserialize_set_model_api<'de, D>(
     deserializer: D,
 ) -> Result<Option<SetModelApi>, D::Error>
 where
@@ -425,7 +425,7 @@ where
 }
 
 /// D4 mcp_servers 字段形态反序列化：字符串 "always" | "omit_if_empty"。
-pub(crate) fn deserialize_mcp_servers_mode<'de, D>(
+pub fn deserialize_mcp_servers_mode<'de, D>(
     deserializer: D,
 ) -> Result<McpServersMode, D::Error>
 where
@@ -444,7 +444,7 @@ where
 
 /// D1 统一默认 clientCapabilities（现值：tokenStats + _meta.peri.*，Hermes 忽略无害；
 /// `_meta.peri.*` 是 Peri wire 契约，不得从默认 caps 移除——07 文档 §4.3）。
-pub(crate) fn default_initialize_caps() -> serde_json::Value {
+pub fn default_initialize_caps() -> serde_json::Value {
     serde_json::json!({
         "tokenStats": true,
         "_meta": {
@@ -456,35 +456,35 @@ pub(crate) fn default_initialize_caps() -> serde_json::Value {
 }
 
 /// H4 默认 clientInfo（现值 {"name":"Pylon","version":"0.1.0"}）。
-pub(crate) fn default_client_info() -> serde_json::Value {
+pub fn default_client_info() -> serde_json::Value {
     serde_json::json!({"name": "Pylon", "version": "1.0.0"})
 }
 
 /// E1：acp 段取值校验——数值字段必须 > 0（负数在反序列化层已被 u64 拒绝，
 /// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
-pub(crate) const MAX_PROMPT_TIMEOUT_SECS: u64 = 3600;
-pub(crate) const MAX_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 300;
-pub(crate) const MAX_IDLE_TIMEOUT_SECS: u64 = 3600;
-pub(crate) const MAX_FIRST_TOKEN_TIMEOUT_SECS: u64 = 3600;
-pub(crate) const MAX_RPC_TIMEOUT_SECS: u64 = 300;
-pub(crate) const MAX_ATTACHMENTS: usize = 64;
-pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 256 * 1024 * 1024;
-pub(crate) const MAX_REPLAY_EVENTS: usize = 100_000;
-pub(crate) const MAX_INITIALIZE_VALUE_BYTES: usize = 256 * 1024;
-pub(crate) const WARN_PROMPT_TIMEOUT_SECS: u64 = 900;
-pub(crate) const WARN_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
-pub(crate) const WARN_REPLAY_EVENTS: usize = 50_000;
+pub const MAX_PROMPT_TIMEOUT_SECS: u64 = 3600;
+pub const MAX_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 300;
+pub const MAX_IDLE_TIMEOUT_SECS: u64 = 3600;
+pub const MAX_FIRST_TOKEN_TIMEOUT_SECS: u64 = 3600;
+pub const MAX_RPC_TIMEOUT_SECS: u64 = 300;
+pub const MAX_ATTACHMENTS: usize = 64;
+pub const MAX_ATTACHMENT_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_REPLAY_EVENTS: usize = 100_000;
+pub const MAX_INITIALIZE_VALUE_BYTES: usize = 256 * 1024;
+pub const WARN_PROMPT_TIMEOUT_SECS: u64 = 900;
+pub const WARN_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
+pub const WARN_REPLAY_EVENTS: usize = 50_000;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AgentConfigDiagnostic {
+pub struct AgentConfigDiagnostic {
     pub agent_id: String,
     pub code: &'static str,
     pub field: &'static str,
     pub message: String,
 }
 
-pub(crate) fn config_diagnostics(agents: &HashMap<String, AgentDef>) -> Vec<AgentConfigDiagnostic> {
+pub fn config_diagnostics(agents: &HashMap<String, AgentDef>) -> Vec<AgentConfigDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut ids = agents.keys().collect::<Vec<_>>();
     ids.sort();
@@ -522,7 +522,7 @@ pub(crate) fn config_diagnostics(agents: &HashMap<String, AgentDef>) -> Vec<Agen
     diagnostics
 }
 
-pub(crate) fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigError> {
+pub fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigError> {
     for (field, value) in [
         ("initialize_caps", acp.initialize_caps.as_ref()),
         ("client_info", acp.client_info.as_ref()),
@@ -773,7 +773,7 @@ impl AgentDef {
 /// O27：env/args 标量宽松化共用转换——String 原样、Number→to_string、Bool→to_string，
 /// 其余（map/seq/null）拒绝。null 不在宽松范围内：显式 null 应视为配置错误。
 /// R27b：serde_yaml → serde_yml（API 兼容，noyalib compat 面）。
-pub(crate) fn scalar_to_string(value: serde_yml::Value) -> Option<String> {
+pub fn scalar_to_string(value: serde_yml::Value) -> Option<String> {
     match value {
         serde_yml::Value::String(text) => Some(text),
         serde_yml::Value::Number(number) => Some(number.to_string()),
@@ -783,7 +783,7 @@ pub(crate) fn scalar_to_string(value: serde_yml::Value) -> Option<String> {
 }
 
 /// env 值反序列化：map 中每个值经 scalar_to_string 转字符串。
-pub(crate) fn string_or_scalar<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+pub fn string_or_scalar<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -818,7 +818,7 @@ where
 }
 
 /// args 元素反序列化：序列中每个元素经 scalar_to_string 转字符串。
-pub(crate) fn string_or_scalar_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+pub fn string_or_scalar_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

@@ -6,7 +6,7 @@
 //! as JSON" escape hatch, so a consumer cannot re-derive provider behaviour from
 //! an untyped blob at the call site.
 
-use pylon_core::agent_catalog::{
+use crate::agent_catalog::{
     self, CatalogAdapterRelation, CatalogBridgeId, CatalogClientCapabilities,
     CatalogInteractionBridge, PylonAgentProfile,
 };

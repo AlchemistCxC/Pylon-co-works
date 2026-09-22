@@ -21,20 +21,20 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Hermes' supported environment override.  Hermes reads this before PATH
 /// lookup, so it is the most deterministic way to select the bundled Bash.
-pub(crate) const HERMES_GIT_BASH_PATH_ENV: &str = "HERMES_GIT_BASH_PATH";
+pub const HERMES_GIT_BASH_PATH_ENV: &str = "HERMES_GIT_BASH_PATH";
 /// Coarse Hermes-side fallback for a wedged concurrent tool batch.  The fast
 /// user-visible liveness guard lives in Pylon's ACP prompt path; this value is
 /// intentionally only a last line of defence inside Hermes.
-pub(crate) const HERMES_CONCURRENT_TOOL_TIMEOUT_ENV: &str = "HERMES_CONCURRENT_TOOL_TIMEOUT_S";
-pub(crate) const HERMES_CONCURRENT_TOOL_TIMEOUT_DEFAULT: &str = "30";
+pub const HERMES_CONCURRENT_TOOL_TIMEOUT_ENV: &str = "HERMES_CONCURRENT_TOOL_TIMEOUT_S";
+pub const HERMES_CONCURRENT_TOOL_TIMEOUT_DEFAULT: &str = "30";
 
 /// Hermes-only defaults.  They are applied only when the user did not provide
 /// an explicit value in `agents.yaml`.  The idle budget deliberately follows
 /// the normal prompt budget: a provider may spend a long interval thinking
 /// without emitting a session/update heartbeat, and a short compatibility
 /// window would terminate a healthy turn while it is still making progress.
-pub(crate) const HERMES_IDLE_TIMEOUT_DEFAULT_SECS: u64 = crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS;
-pub(crate) const HERMES_CANCEL_SETTLE_DEFAULT_SECS: u64 = 5;
+pub const HERMES_IDLE_TIMEOUT_DEFAULT_SECS: u64 = crate::agent_config::DEFAULT_PROMPT_TIMEOUT_SECS;
+pub const HERMES_CANCEL_SETTLE_DEFAULT_SECS: u64 = 5;
 
 const BASH_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const BASH_PROBE_POLL: Duration = Duration::from_millis(25);
@@ -42,16 +42,16 @@ const BASH_EXTERNAL_PROBE: &str =
     "/usr/bin/true; /usr/bin/cat --version >/dev/null; /usr/bin/mktemp -u >/dev/null";
 
 #[derive(Debug, Clone)]
-pub(crate) struct HermesRuntimeSelection {
-    pub(crate) bash_path: PathBuf,
-    pub(crate) root: PathBuf,
-    pub(crate) bundled: bool,
+pub struct HermesRuntimeSelection {
+    pub bash_path: PathBuf,
+    pub root: PathBuf,
+    pub bundled: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HermesRuntimeError {
-    pub(crate) code: &'static str,
-    pub(crate) message: String,
+pub struct HermesRuntimeError {
+    pub code: &'static str,
+    pub message: String,
 }
 
 impl HermesRuntimeError {
@@ -74,14 +74,14 @@ impl HermesRuntimeError {
 /// already normalized by `agent_config::resolve_provider`; comparing the
 /// provider (rather than the Agent name/id or executable basename) prevents
 /// accidental activation for another Agent.
-pub(crate) fn is_hermes_agent(agent: &AgentDef) -> bool {
+pub fn is_hermes_agent(agent: &AgentDef) -> bool {
     agent
         .provider
         .as_deref()
         .is_some_and(|provider| provider.trim().eq_ignore_ascii_case("hermes"))
 }
 
-pub(crate) fn should_apply(agent: &AgentDef) -> bool {
+pub fn should_apply(agent: &AgentDef) -> bool {
     cfg!(windows)
         && agent.transport.trim().eq_ignore_ascii_case("subprocess")
         && is_hermes_agent(agent)
@@ -93,7 +93,7 @@ pub(crate) fn should_apply(agent: &AgentDef) -> bool {
 /// falls back to `idle_timeout_secs`.  Keep the prompt/first-token budget for
 /// the idle window unless the user explicitly supplied an idle value; Hermes
 /// must not silently turn a configured 180s prompt into a 12s local cutoff.
-pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
+pub fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
     let mut protocol = agent.protocol().clone();
     if !should_apply(agent) {
         return protocol;
@@ -109,7 +109,7 @@ pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
         // 取**较大者**——保留原意（不得把配置的 180s 收紧成更短的本地截断），同时让
         // "agent 在等用户点击"不再落进停摆窗口。首 token 仍按 prompt 预算（判"起没起来"）。
         protocol.idle_timeout_secs =
-            Some(preserved_idle.max(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS));
+            Some(preserved_idle.max(crate::agent_config::DEFAULT_IDLE_TIMEOUT_SECS));
         if protocol.first_token_timeout_secs.is_none() {
             protocol.first_token_timeout_secs = Some(preserved_idle);
         }
@@ -125,7 +125,7 @@ pub(crate) fn effective_protocol(agent: &AgentDef) -> AcpProtocolConfig {
 /// The blocking probe runs on Tokio's blocking pool because a broken MSYS
 /// launcher can hang while creating its child process.  Non-Hermes and
 /// non-Windows agents return `None` without even inspecting the host PATH.
-pub(crate) async fn prepare(
+pub async fn prepare(
     agent: &AgentDef,
 ) -> Result<Option<HermesRuntimeSelection>, HermesRuntimeError> {
     if !should_apply(agent) {
@@ -142,7 +142,7 @@ pub(crate) async fn prepare(
 /// Apply a selected runtime to one child command.  `Command::env` is
 /// intentionally used instead of `std::env::set_var`: the parent Pylon
 /// process and all other Agent children retain their original environment.
-pub(crate) fn apply_to_command(
+pub fn apply_to_command(
     command: &mut Command,
     agent: &AgentDef,
     selection: &HermesRuntimeSelection,
@@ -584,7 +584,7 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(
                 effective.idle_timeout_secs,
-                Some(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS),
+                Some(crate::agent_config::DEFAULT_IDLE_TIMEOUT_SECS),
                 "闲置窗口取 prompt 预算与 DEFAULT_IDLE_TIMEOUT_SECS 的较大者（等用户点击不算停摆）"
             );
             assert_eq!(effective.first_token_timeout_secs, Some(180));
@@ -605,7 +605,7 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(
                 effective.idle_timeout_secs,
-                Some(crate::acp::DEFAULT_IDLE_TIMEOUT_SECS),
+                Some(crate::agent_config::DEFAULT_IDLE_TIMEOUT_SECS),
                 "Hermes 默认闲置窗口必须允许长思考（下界 600s），不得固定为 12s"
             );
         } else {

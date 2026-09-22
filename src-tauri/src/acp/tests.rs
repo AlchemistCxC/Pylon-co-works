@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_config::{DEFAULT_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENT_BYTES};
 #[cfg(test)]
 use crate::agent_config::McpServersMode;
 use std::collections::HashMap;
