@@ -67,7 +67,14 @@ function buildSession(messages: number): WorkbenchEventEnvelope[] {
   return events
 }
 
-describe.skipIf(process.env.SESSION_SCALE_PROBE !== '1')('长会话规模探针', () => {
+// Node 运行时口：vitest 进程内可用；tsconfig.solid 不含 node 类型，这里做窄化访问。
+interface NodeRuntime {
+  env: Record<string, string | undefined>
+  memoryUsage(): { heapUsed: number }
+}
+const node = (globalThis as { process?: NodeRuntime }).process
+
+describe.skipIf(node?.env.SESSION_SCALE_PROBE !== '1')('长会话规模探针', () => {
   it('量行数 → 节点/堆/耗时', async () => {
     const rows: string[] = []
     for (const messages of [8, 40, 120, 300]) {
@@ -97,7 +104,7 @@ describe.skipIf(process.env.SESSION_SCALE_PROBE !== '1')('长会话规模探针'
       const rowsMounted = host.querySelectorAll('.plain-message-list__row').length
       const termRows = host.querySelectorAll('.term-row').length
       const codeBlocks = host.querySelectorAll('.term-code-block').length
-      const heapMB = +(process.memoryUsage().heapUsed / 1048576).toFixed(1)
+      const heapMB = +((node?.memoryUsage().heapUsed ?? 0) / 1048576).toFixed(1)
       rows.push(`messages=${String(messages).padStart(4)}  预期行=${messages * 2}  挂载行=${String(rowsMounted).padStart(4)}  .term-row=${String(termRows).padStart(4)}  代码块=${codeBlocks}  节点=${String(nodes).padStart(6)}  节点/行=${(nodes / (messages * 2)).toFixed(1)}  投递=${Math.round(landed - started)}ms  全渲染=${Math.round(done - started)}ms  heapUsed=${heapMB}MB`)
       framePump.restore()
       for (const s of servicesList.splice(0)) s.destroy()
