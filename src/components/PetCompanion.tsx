@@ -86,6 +86,18 @@ function persistable(pet: PetState) {
   return persistPetState(pet)
 }
 
+// (#260-D13) 状态对象一律替换、绝不原地突变（setPet 全部返回新对象），
+// 按对象身份缓存序列化结果：save 的「无变化短路」此前每轮询对 next/previous
+// 各整份 stringify，StrictMode 双调用再翻倍。WeakMap 键不阻止状态对象回收。
+const serializedStateCache = new WeakMap<object, string>()
+function serializedPetState(state: PetState): string {
+  const cached = serializedStateCache.get(state)
+  if (cached !== undefined) return cached
+  const serialized = JSON.stringify(persistable(state))
+  serializedStateCache.set(state, serialized)
+  return serialized
+}
+
 function CosmeticOverlay({ id }: { id: string | null }) {
   if (!id) return null
   return <g className={`pet-cosmetic pet-cosmetic-${id}`} data-cosmetic={id} aria-hidden="true">
@@ -219,10 +231,10 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
 
   const save = useCallback((next: PetState) => {
     // 数据无变化时不产生新 state、不写盘（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）
-    const serialized = JSON.stringify(persistable(next))
+    const serialized = serializedPetState(next)
     let changed = false
     setPet(previous => {
-      if (previous && JSON.stringify(persistable(previous)) === serialized) return previous
+      if (previous && serializedPetState(previous) === serialized) return previous
       changed = true
       return next
     })
