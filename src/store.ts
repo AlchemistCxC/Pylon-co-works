@@ -125,10 +125,12 @@ export interface ThemeSettings {
 }
 
 /**
- * themeStore — 主题状态域（阶段 1：store 按域拆分后收敛）。
+ * themeStore — 主题状态域。
  *
- * 唯一持久化域（pylon-theme）。身份/运行时/Workspace 状态已迁出到
- * identityStore / runtimeStore / workspaceStore（组合出口见文件尾）。
+ * 持久化键 pylon-theme。身份/运行时/Workspace 状态已迁出到
+ * identityStore / runtimeStore / workspaceStore（组合出口见文件尾；其中
+ * workspaceStore 亦独立持久化 pylon-workspace-sheets，另有 interface-mode、
+ * presentation-preferences 等独立 persist 域——「唯一持久化域」说法已废）。
  */
 type ThemeState = ThemeSettings & {
   customPresets: CustomPreset[]

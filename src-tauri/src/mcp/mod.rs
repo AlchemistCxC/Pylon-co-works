@@ -2,7 +2,7 @@
 //!
 //! 序列化统一走官方 agent-client-protocol-schema v1 的 McpServer 类型
 //! （tagged：http/sse 带 type，stdio untagged）——与 ACP 同源，wire 格式
-//! 由 schema 保证。差异字典见 acp.rs「差异适配表」：Hermes 要求 name 必填，
+//! 由 schema 保证。差异字典见 pylon-acp `error.rs`「差异适配表」：Hermes 要求 name 必填，
 //! Peri DefaultOnError 容忍但 name 缺失会被跳过；统一补 name（name→id 兜底）
 //! 两边兼容。注意：官方 schema 无 oauth 字段，OAuthConfig 仅作前端表单
 //! 校验保留，不序列化进 wire。

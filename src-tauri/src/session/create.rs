@@ -899,7 +899,8 @@ async fn create_session_slot(
             ));
         }
     }
-    // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 acp.rs 构造器 doc）——
+    // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 pylon-core
+    // agent_config/types.rs 的 McpServersMode doc）——
     // per-agent 协议配置解析，缺省 Always = 现状 wire；OmitIfEmpty 显式删键（v2 语义）。
     // B2：参数经 SessionNewPlan 纯函数成形（MCP 模式语义保持在 session_new_params）。
     let params = crate::acp::initialize_plan::build_session_new_plan(

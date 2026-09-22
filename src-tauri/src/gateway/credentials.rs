@@ -199,7 +199,7 @@ impl CredentialStore {
     /// 阶段 4 任一 rename 失败时 active key 仍是旧密钥且 staged 新密钥存在，旧密文文件
     /// 用旧 key、新密文文件用 staged key 均可解密（双 key 恢复窗口），凭据不会永久不可解密；
     /// 成功轮换后 staged 被消费，无残留。失败不自动覆盖 corrupt 文件（ISSUE-12 禁止事项）。
-    #[allow(dead_code)] // 密钥轮换为 ISUUE-12 预留入口（当前未接线）
+    #[allow(dead_code)] // 密钥轮换为 ISSUE-12 预留入口（当前未接线）
     pub(crate) fn rotate_master_key(&mut self) -> Result<usize, CredentialError> {
         let new_key = generate_master_key();
         let new_cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&new_key[..]));
