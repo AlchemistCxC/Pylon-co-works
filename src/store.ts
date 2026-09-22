@@ -16,7 +16,7 @@ import {
 } from './zones/index.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
-import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration.ts'
+import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { defaultPresetForInterfaceMode } from './presets/index.ts'
@@ -190,6 +190,14 @@ function sourceMarksZoneCustom(source: SettingWriteSource): boolean {
 
 let customPresetApplyRevision = 0
 let customPresetApplyTail: Promise<void> = Promise.resolve()
+
+/** 迁移 / 结构对齐共用的默认值包（base 传 DEFAULTS，避免域→store 循环）。 */
+const THEME_MIGRATION_DEFAULTS = {
+  base: DEFAULTS,
+  appliedPreset: DEFAULTS.appliedPreset,
+  custom: DEFAULTS.custom,
+  ccLayout: DEFAULTS.ccLayout,
+}
 
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
@@ -544,13 +552,19 @@ export const useStore = create<ThemeState>()(persist(
     },
     removeItem: key => localStorage.removeItem(key),
   })),
-  migrate: (persisted, version) =>
-  themeDomainMigrate(persisted, {
-    base: DEFAULTS,
-    appliedPreset: DEFAULTS.appliedPreset,
-    custom: DEFAULTS.custom,
-    ccLayout: DEFAULTS.ccLayout,
-  }, version),
+  migrate: (persisted, version) => themeDomainMigrate(persisted, THEME_MIGRATION_DEFAULTS, version),
+  /**
+   * ★★ #238 刀2：读盘后的**结构对齐**每次读盘无条件跑（不依赖版本号）。
+   *
+   * 挂钩为什么选 `merge` 而不是 `onRehydrateStorage`：zustand 的 hydrate 用**原始 set**
+   * 落 `merge` 的返回值（不触发写盘），只有真的跑过 `migrate` 才 `setItem()` ——
+   * 所以对齐**不产生任何额外写盘 / 订阅广播**；且 `migrate → merge` 的顺序保证
+   * 它跑在一次性语义转换之后。
+   *
+   * 语义：缺项补默认、多余项忽略、**用户手调的 offsetX/offsetY/order 与已设字段值一律保留**
+   * （既定口径：「布局归一化不是把用户排布拍平」）。幂等，见 `alignThemeStructure`。
+   */
+  merge: (persisted, current) => ({ ...current, ...alignThemeStructure(persisted, THEME_MIGRATION_DEFAULTS) }),
   partialize: (state) => {
     // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden/ccScale 对象）+ 显式 meta。
     // 取代"排除式 partialize"——杜绝新增 action/临时字段误持久化，并修剪迁移遗留的旧键。

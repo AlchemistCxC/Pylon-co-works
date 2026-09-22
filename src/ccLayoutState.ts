@@ -30,7 +30,16 @@ export interface CcLayoutV3 {
 // v8：删除 pct 控件（并入「用量」tokens 控件）；用量控件默认移到状态区次行、紧跟权限控件。
 // v9：中控名单换代（旧 11 → 新 7）——删 session/workspace/activity/ekg/tasks 五个 id；
 // legacy `send` 的槽位事实迁到注册轨 id `cc-send-button`（老数据里的 `send` 键在
-// 归一化时按别名读取，保留用户既有拖拽位置）。★ v8 仍在版本白名单内，老布局不重置。
+// 归一化时按别名读取，保留用户既有拖拽位置）。
+//
+// ★★ 版本号职责（#238 刀2 起收窄 —— **后来者请勿再往这里塞东西**）：
+// `CC_LAYOUT_SCHEMA_VERSION` **只表示「数据格式版本」**。★ **反例：加控件、改槽位、
+// 改 id 都不需要 bump** —— 结构对齐（补缺项/按 id 合并）由读盘路径每次无条件跑，
+// 与版本号无关（`alignThemeStructure`，见 `domains/theme/migration.ts`）。
+// 历史上这里曾有一份**版本白名单**（`[3,4,5,6,7,8,当前版本]`）用来决定"要不要采用老数据"，
+// 它内插了「当前版本」这个变量 ⇒ 每次升版本号就自动少一项，v7 就这么被漏掉过
+// （磁盘上版本 7 的布局被**整份丢弃、回落默认、不报错**）。刀2 把整段判定删掉：
+// 版本号不再参与"用不用老数据"，只在下述一次性语义转换时才有意义。
 export const CC_LAYOUT_SCHEMA_VERSION = 9
 
 /**
@@ -60,13 +69,23 @@ export function cloneCcLayout(layout: CcLayoutV3): CcLayoutV3 {
   }
 }
 
+/**
+ * 布局归一化（**按 id 合并**）：缺项补默认、多余项忽略、用户手调值一律保留。
+ *
+ * ★ #238 刀2：**不再按版本号决定"要不要采用老数据"** —— 版本号与结构对齐无关。
+ * 本函数由读盘路径**每次读盘无条件跑一次**（`store.ts` 的 persist `merge` →
+ * `alignThemeStructure`），所以「加了新控件但忘记 bump 版本号 ⇒ 控件永远不出现」
+ * 这类静默事故在结构上不可能再发生；磁盘上版本号是垃圾值/未来值也不会整份重置。
+ *
+ * 保留的合并规则（与 `updateCcPlacementState` 同语义）：
+ * - 只遍历**当前控件全集**（`DEFAULT_CC_LAYOUT` 的键）⇒ 缺项补默认、旧 id 自然丢弃；
+ * - 已存在的项保留其 `slot` / `order` / `offsetX` / `offsetY`（只做范围 clamp）；
+ * - legacy `send` 键按别名读入（v9 键名迁移，与版本号无关、幂等）；
+ * - 槽位语义修复：`input` 槽只属于 input 控件，非 input 落在 input 槽会渲染消失 ⇒ 回落默认槽位。
+ */
 export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined): CcLayoutV3 {
   const placements = cloneCcLayout(DEFAULT_CC_LAYOUT).placements
-  // ★ 白名单显式列出历史版本：`8` 必须留在这里，否则常量 8→9 会让老 v8 布局
-  // 整份回落默认值（用户排布静默丢失）。
-  if (!layout?.placements || ![3, 4, 5, 6, 7, 8, CC_LAYOUT_SCHEMA_VERSION].includes(layout.version ?? 0)) {
-    return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
-  }
+  if (!layout?.placements) return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
 
   const legacyPlacements = layout.placements as Record<string, CcWidgetPlacement | undefined>
   for (const id of Object.keys(placements) as CcLayoutWidgetId[]) {

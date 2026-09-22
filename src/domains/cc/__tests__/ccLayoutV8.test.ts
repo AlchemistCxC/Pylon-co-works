@@ -69,9 +69,18 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     expect(Object.keys(normalized.placements)).not.toContain('ekg')
   })
 
-  it('不在白名单里的版本整份回落默认布局', () => {
+  // ★ #238 刀2 逐条点名：本用例的**样本一字未动**（版本 2 + 用户拖过的 model 位置），
+  // 只把**期望**从「整份回落默认布局」改成「不再整份重置、按 id 合并保留用户位置」。
+  // 改的原因：版本白名单整段退场 —— 旧写法把"磁盘上的版本号不在白名单里"当成
+  // "这份数据不可用"，而白名单内插了「当前版本」这个变量 ⇒ 每次升版本号就自动少一项，
+  // v7 就这么被漏掉过（磁盘上版本 7 的布局被整份丢弃、回落默认、不报错）。
+  // 现在版本号不再参与"用不用老数据"；结构对齐每次读盘无条件跑。
+  it('版本号是历史值/垃圾值也不再整份重置：按 id 合并并保留用户位置（#238 刀2）', () => {
     const v2 = { version: 2, placements: { model: { slot: 'actions' as const, order: 9, offsetX: 11, offsetY: -3 } } }
     const normalized = normalizeCcLayout(v2 as unknown as Partial<CcLayoutV3>)
-    expect(normalized.placements.model).toEqual(DEFAULT_CC_LAYOUT.placements.model)
+    expect(normalized.placements.model).toEqual({ slot: 'actions', order: 9, offsetX: 11, offsetY: -3 })
+    // 未提供的项仍补默认（"缺项补默认"是归一化的本职，与版本号无关）
+    expect(normalized.placements.tokens).toEqual(DEFAULT_CC_LAYOUT.placements.tokens)
+    expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
   })
 })
