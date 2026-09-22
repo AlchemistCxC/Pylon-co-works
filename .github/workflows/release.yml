@@ -1,15 +1,34 @@
 name: Release
 
-# **只在手动 dispatch 时运行——`push: tags: ['v*']` 已移除（2026-09-18 决定）。**
+# 发行流程（2026-09-22 起，#232）：**打 tag 即发行**。
 #
-# 本仓的发行流程是**本地构建 + 手动上传资产**：`bun run release:portable` 出 zip/sha256/
-# manifest，再 `gh release create <tag> <assets>` 一并建 tag 与 release。既然资产在打 tag
-# 之前就已上传，tag 推送再触发一次 CI 构建纯属重复：0.2.0 / 0.2.1 / 0.2.2 三次都在构建
-# 中途被手动取消（取消时作业尚未走到上传步骤，所以已发布的资产不会被覆盖，但也意味着那次
-# 运行没有任何产出）。需要让 CI 验一遍发行链时，手动 dispatch 本工作流即可；在 tag ref 上
-# dispatch 仍会走到发布步骤（下方 `if`），在分支上 dispatch 则只构建、不发布。
+#   合并 PR 进 main → 版本号提交合入 → `git tag v0.2.7-X && git push origin v0.2.7-X`
+#   → 本工作流自动构建发行包并上传到该 tag 的 GitHub Release。
+#
+# tag 触发时两道 fail-fast 守卫：
+#   1. 版本一致性——tag 名（去 v）必须等于 package.json 与 src-tauri/tauri.conf.json 的
+#      `version`（zip/manifest 的版本号来自 tauri.conf，tag 只是 git 引用，二者错位即静默错发）；
+#   2. main 归属——tag 所在提交必须是 origin/main 的祖先：发行内容必须经过 PR CI 全绿，
+#      打在未合并分支上的 tag 不予发行。
+#
+# workflow_dispatch 保留为**预演入口**：在分支上 dispatch 只构建、不发布（发布步骤由下方
+# `if` 门住）；在 tag ref 上 dispatch 则与 tag 推送等价（用于 CI 失败后的重试）。
+#
+# 历史：`push: tags` 曾于 2026-09-18 移除——当时流程是「本地构建 → 先传资产 → 后打 tag」，
+# tag 触发纯属重复（0.2.0~0.2.2 三次 run 均中途取消、零产出）。2026-09-22 随 #228 发行
+# 实践恢复 tag 触发并倒转流程：本地 `bun run release:portable` 退役为预演/应急手段
+# （G 盘满时须 CARGO_TARGET_DIR 落 D 盘，pack_release.py 已同源适配）。
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+# 同 tag 重推排队而非互杀：发行构建重复跑无害（softprops 幂等更新），互杀反而可能
+# 把一次半途的发行停在上传前。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -19,7 +38,42 @@ jobs:
     name: 构建发行包并发布
     runs-on: windows-latest
     steps:
+      # main 归属守卫需要完整历史做 merge-base 判定（发行低频，全量克隆代价可接受）
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 版本一致性守卫（tag = package.json = tauri.conf.json）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          pkg_version=$(node -p "require('./package.json').version")
+          conf_version=$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')).version")
+          echo "tag=$tag package.json=$pkg_version tauri.conf.json=$conf_version"
+          if [ "$tag" != "v$pkg_version" ]; then
+            echo "::error::tag $tag 与 package.json 版本 v$pkg_version 不一致——请改版本号后重打 tag"
+            exit 1
+          fi
+          if [ "$pkg_version" != "$conf_version" ]; then
+            echo "::error::package.json ($pkg_version) 与 tauri.conf.json ($conf_version) 版本不一致"
+            exit 1
+          fi
+
+      - name: main 归属守卫（tag 提交必须是 origin/main 祖先——发行内容必经 PR CI）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag 提交已在 main：$(git log --oneline -1 "$GITHUB_SHA")"
+          else
+            echo "::error::tag 所在提交不在 origin/main——请在 PR 合并后从 main 打 tag"
+            exit 1
+          fi
+
 
       # P46：bun 负责依赖安装与脚本编排（bun.lock 冻结安装）；vite/vitest 仍由 Node 宿主
       - uses: oven-sh/setup-bun@v2
