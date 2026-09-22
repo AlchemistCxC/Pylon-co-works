@@ -138,3 +138,51 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='ms
    `onExit`/降级路径。需要单独核一次（可能是 #221 之后新增的），本轮只登记。
 4. **建议加只读 `linearMemoryBytes()` 诊断出口**：把这块从「靠进程差分间接推」变成直接读数，
    否则每次回归都要重启实例做差分。属产品代码改动，需开 issue。
+
+## 十、追加：异常点定位（原生侧探针）
+
+用户当轮指令「先查异常点」。原生侧用**计数全局分配器 + bisect**（临时 lib 测试，探针已删，`git status` 干净）。
+
+**口径修正（重要）**：编译出的 `SyntaxSet` **几乎不驻留**（css 编译完只多 0.03MB）。真正的机制是
+**编译期峰值 live**——wasm 的 dlmalloc 不归还页、线性内存不能缩，于是峰值被永久留成高水位。
+
+| | css | ts |
+| --- | --- | --- |
+| 编译期总分配（churn） | 543.60MB | 1796.55MB |
+| **编译期峰值 live** | **18.06MB** | **12.67MB** |
+| 编译后驻留 | 0.03MB | — |
+| 编译时间（release native） | 433ms | 654ms |
+
+真机台阶（css +42MB / ts +31.5MB）对原生峰值是**统一的 ~2.3× 系数**（wasm 碎片 + 高亮本身 + span HTML）。
+
+**css 的罪魁 = 10 条关键字列表**（bisect，release）：
+
+| 变体 | 峰值 | churn | 时间 |
+| --- | --- | --- | --- |
+| full | 18.06MB | 543.60MB | 433ms |
+| 去最长 1 条 | 11.13MB | 337.23MB | 263ms |
+| 去最长 3 条 | 4.66MB | 180.41MB | 137ms |
+| 去全部 ≥500 字符的 match（10 条） | **2.16MB** | 113.55MB | **81ms** |
+| 去全部 ≥200 字符的 match（20 条） | 1.65MB | 71.33MB | 47ms |
+
+那 10 条是 `support.type.property-name.css`（9,919 字符 / 701 分支）、
+`support.constant.property-value.css`（4,414 / 448）、`entity.name.tag.css`（2,115 / 268）等关键字表。
+**裁掉 → 峰值 −88%、编译时间 −81%。**
+
+**ts 没有单点**：去掉全部 13 条 ≥500 字符的 pattern，峰值只降 12.67 → 12.39MB（−2%）。
+ts 的代价摊在整个语法（527 pattern / 9,716 组 / 35,245 字符类字符），要降只能换更轻的 TS 语法。
+
+**被实测否掉的假设**（省后人弯路）：单条巨交替本身不贵（合成 700 分支交替峰值 ≈0、churn 19MB）；
+拆开无改善（21 vs 19MB）；`(?i)` 不是乘数；与 JSON 大小不成比例（python 76KB→3.5MB vs css 56KB→18.06MB）；
+repository 的 include 不重复编译（1 处 0.42MB vs 10 处 0.45MB）。
+
+**附带发现（时间同源）**：首次用到某语言时编译是**同步**发生在 `highlightCode` 内（wasm 主线程），
+release native css 433ms / ts 654ms，wasm 再乘 ~1.5× ⇒ **首次高亮新语言有 ~0.5–1s 主线程阻塞**；
+#221 的帧预算调度只能串行化作业之间，单作业内部无法分帧。
+
+**探针形状（可复现）**：临时 lib 测试（能访问私有 `build_engine`）里放计数全局分配器 +
+`neuter_longest(json, n, min_len)` 两遍遍历替换最长 match；`measure` 读「峰值 / 分配总量 / 时间」。
+`#[global_allocator]` 只认同一个测试二进制 ⇒ 探针必须放 lib 测试模块，集成测试量不到私有函数。
+跑法 `cargo test -p pylon-markdown --lib <name> -- --nocapture`（真实时间加 `--release`）。
+
+修复判据与预期收益见 #240 的对应评论；**注意其中「裁剪 css 关键字表」有行为代价，需仓库主裁决。**
