@@ -53,7 +53,7 @@
 1. **一个 case = 一条已接线的生产路径 + 一份输入**（`PerfCase.run`），没有第二实现。
    于是「想量一个开销点」不再需要先造 TS 基线——投影与 events 这两面因此才量得了（它们的实现本来就在 TS 里）。
 2. **入册判据是接线点，不是 wasm 出口身份**：每 pair 强制 `wiredAt` 的 `file:line`；
-   没接线的四个出口进 `EXCLUDED_WASM_EXITS` 连理由一起**打印出来**——排除是结论，得能被人核。
+   没接线的 7 个出口进 `EXCLUDED_WASM_EXITS` 连理由一起**打印出来**——排除是结论，得能被人核。
 3. **借存量资产按「已接线才借」**：切分/揭示**直接复用 parity 套件的 case 定义**（`pair.wasm` 就是生产出口，
    语料只有一份）；markdown 的「生产流式形状」构造与 projector 的 envelope 生成器从 git 历史恢复；
    `baselines/**` 一律不借。
@@ -86,7 +86,7 @@
 | 验收项 | 结果 |
 | --- | --- |
 | `bun scripts/perf-bench.mts` 退出 0、六域表、每行有 ms中位/单位成本/核线性Δ | ✅ 退出 0，64 case，六域齐全 |
-| 表里不出现没接线的四个出口 | ✅ 路径列里没有 `splitStreamingMarkdown` / `splitStreamingMarkdownBlocks` / `findLastStableBlockBoundary` / `scopeForLanguage`（`grep` 核过：出现的 `splitStreamingMarkdownBlockEnds` 是**已接线**的 ends 出口）；表尾印出四条的排除理由 |
+| 表里不出现没接线的 7 个 wasm 导出 | ✅ 路径列里没有 `splitStreamingMarkdown` / `splitStreamingMarkdownBlocks` / `findLastStableBlockBoundary` / `scopeForLanguage` / `parseMarkdownJson` / `highlightBlockJson` / `markdownEngineVersion`（`grep` 核过：出现的 `splitStreamingMarkdownBlockEnds` 是**已接线**的 ends 出口）；表尾印出七条的排除理由 |
 | 无网络、未安装 vite-node 的树上可跑 | ✅ 两次全跑均无网络访问；`node_modules/vite-node` 不存在 |
 | parity 门禁仍绿且断言计数不变 | ✅ **126 项：ok 125 / known-diff 1 / mismatch 0**（与记录 220 同数） |
 | `tsc -b` 退出 0 | ✅ 退出 0 |
@@ -203,6 +203,13 @@ tool-only 18.73 → 1024.12µs/事件、24k 事件单次折叠 24.6 秒）。#20
 4. **`projector` 超线性已开 #234 但未修**（需先裁决是否动 `workbenchProjector`）。
 5. **`streaming-split` 的 `list-block-*` 成本行读起来「更快」**：单位成本低是因为它几乎不产出稳定块，
    不是更优。README 已写明「别把便宜当更优」，但这一列本身仍有被误读的空间。
+6. **7 个未接线 wasm 导出是否退役**：三个旧切分出口、wasm 的 `scopeForLanguage`、两个 `*Json` 编组变体、
+   `markdownEngineVersion`——它们在 `src/`（含测试）里都没有调用方，等于白付 wasm 体积与维护面。
+   退役会**同时缩小 parity 覆盖门与计算核产物**（`pylon-compute` 现 120,581 B raw；
+   `pylon-markdown` 2,873,113 B raw，其中 `*Json` 是整条 serde 编组路径）。
+   本轮**只登记不处置**：体积收益没有实测，且退役属改计算核与 parity 契约面，得先裁决。
+   注意 `splitStreamingMarkdown*` 与 `findLastStableBlockBoundary` 是 parity 门禁的对照物，
+   退役要先解决「覆盖门拿什么当对照」。
 
 ## 并行交集
 

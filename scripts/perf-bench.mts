@@ -61,5 +61,5 @@ for (const [name, size] of Object.entries(after)) {
   console.log(`  ${name.padEnd(16)} ${(size / 1024 / 1024).toFixed(2)}MiB（装载后 ${(start / 1024 / 1024).toFixed(2)}MiB，+${((size - start) / 1024 / 1024).toFixed(2)}MiB）`)
 }
 
-console.log('\n已排除的 wasm 计算出口（src/ 内无调用方；parity 门禁仍用它们）')
+console.log('\n已排除的 wasm 计算出口（判据：src/ 内无调用方；逐条给理由）')
 for (const exit of EXCLUDED_WASM_EXITS) console.log(`  ${exit.name.padEnd(34)} ${exit.reason}`)

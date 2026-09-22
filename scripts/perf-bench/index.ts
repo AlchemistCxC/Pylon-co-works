@@ -27,24 +27,40 @@ export async function buildPerfSuites(): Promise<PerfSuite[]> {
  * **被排除**的 wasm 计算出口，以及排除理由。
  *
  * 列出来而不是只体现在「表里没有」：「没接线」是一个结论，得能被人核。
- * 判据统一为「`src/` 里有没有调用方」——只被测试引用的出口是给 parity 门禁留的兼容面，
- * parity **门禁**（`scripts/compute-parity.test.mts`）仍需要它们，但产品路径不走。
+ * 判据统一为「`src/` 里有没有调用方」。
+ *
+ * 本清单覆盖**两个计算核的全部真实导出**（`pylon-compute` 6 个、`pylon-markdown` 6 个，
+ * `initSync` 除外）：接线的是 **5 个**（本基准的 5 个 wasm pair 一一对应），未接线的是
+ * **7 个**（下表）。不要只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute`
+ * 的一半，且不含 `pylon-markdown`。
  */
 export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonly reason: string }> = [
   {
     name: 'splitStreamingMarkdown',
-    reason: 'src/ 内无调用方（生产消费方已切到 ends 出口），仅 parity 门禁用',
+    reason: '#220 边界收口后被 splitStreamingMarkdownBlockEnds 取代；src/ 内无调用方，作 parity 门禁的对照物保留',
   },
   {
     name: 'splitStreamingMarkdownBlocks',
-    reason: '同上：作为兼容出口保留给 parity，热路径是 splitStreamingMarkdownBlockEnds',
+    reason: '同上（`MarkdownContent.solid.tsx:76` 只是注释提到这个名字，实际调的是 ends 出口）',
   },
   {
     name: 'findLastStableBlockBoundary',
-    reason: '同上：src/ 内无调用方',
+    reason: '同上；src/ 内无调用方',
   },
   {
     name: 'scopeForLanguage（wasm 出口）',
-    reason: '生产用 src/components/chat/codeHighlight.ts:15 的 TS 映射表做同步语言门，wasm 出口无调用方',
+    reason: '生产用 `src/components/chat/codeHighlight.ts:46` 的同名 TS 表做同步语言门——未知语言不过界，wasm 出口无调用方',
+  },
+  {
+    name: 'parseMarkdownJson',
+    reason: 'wasm-bindgen 编组变体（serde_json → String）；全仓（含测试）零引用',
+  },
+  {
+    name: 'highlightBlockJson',
+    reason: '同上：编组变体，全仓零引用',
+  },
+  {
+    name: 'markdownEngineVersion',
+    reason: '诊断出口（头注称「供诊断与 parity 记录」）；只在 `markdownCompute.ts:42` 的接口里有声明，无调用方',
   },
 ]

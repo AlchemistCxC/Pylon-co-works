@@ -44,9 +44,12 @@ ADR-0018 修订 1 的判决建立在 `scripts/compute-parity-bench.mts` / `-memo
    它不是 benchmark；ADR-0018 修订 1 明确保留，markdown 快照锁同类）。
 2. **新建** `scripts/perf-bench/`（入口 `bun scripts/perf-bench.mts`）。每行读数：
    `ms中位` / `ms最小` / `工作量` / `单位成本`（中位耗时 ÷ 工作量）/ `核线性Δ`。
-3. **「已接线」是入册的唯一判据**，逐条给 `wiredAt` 的 `file:line` 证据。没接线的 wasm 出口
-   （`splitStreamingMarkdown` / `splitStreamingMarkdownBlocks` / `findLastStableBlockBoundary` /
-   `scopeForLanguage`）**显式列在排除清单里连理由一起打印**——排除是结论，得能被人核。
+3. **「已接线」是入册的唯一判据**，逐条给 `wiredAt` 的 `file:line` 证据。两个计算核共 12 个真实
+   导出（`pylon-compute` 6 + `pylon-markdown` 6），**接线 5 个**（= 基准里的 5 个 wasm 路径），
+   **未接线 7 个**（三个被 #220 ends 出口取代的旧切分出口、wasm 的 `scopeForLanguage`、
+   两个 `*Json` 编组变体、`markdownEngineVersion`）。这 7 个**显式列在排除清单里连理由一起打印**
+   ——排除是结论，得能被人核；判据是「`src/` 里有没有调用方」，**不是** parity 脚手架
+   `REQUIRED_EXPORTS` 那半张表（它只覆盖 `pylon-compute`）。
 4. **存量资产按「已接线才借」收编**：切分/揭示的 case 定义与语料留在 `compute-parity/` 被两边共用；
    markdown/highlight 的语料与「生产流式形状」构造、projector 的 envelope 生成器从 git 历史恢复；
    `baselines/**` **一律不借**（那些正是「没接线」的那一半）。
