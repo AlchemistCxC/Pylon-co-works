@@ -46,6 +46,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const workspaces = useWorkspaceEntityStore(s => s.workspaces)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
@@ -326,7 +327,9 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
                     <span className="overview-agent-glyph" aria-hidden="true">{agent.name.slice(0, 1).toUpperCase()}</span>
                     <span className="overview-agent-copy">
                       <strong>{agent.name}</strong>
-                      <span>{agent.provider || agent.transport || 'ACP'} · {sessionCount} 个会话</span>
+                      {/* #254：副标题用 agentId——同名 Agent（如 hermes/hermes-2）靠它区分，
+                          与「打开 Sheet」面板的 Agent 卡口径一致。 */}
+                      <span>{agent.id} · {sessionCount} 个会话</span>
                     </span>
                     <span className="overview-agent-state"><i aria-hidden="true" />{switchingId === agent.id ? '切换中' : statusLabel(status)}</span>
                     <ArrowUpRight className="overview-card-arrow" size={14} aria-hidden="true" />
@@ -388,11 +391,23 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
               <div className="overview-workspace-list">
                 {[...workspaces].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, 5).map(workspace => {
                   const linkedSessions = sessions.filter(session => session.workspaceId === workspace.id)
+                  // #255：与左栏树同口径的「当前可见」数（当前 Profile+Agent、未归档）。
+                  // 两数一致时退回单数字，避免噪音。
+                  const currentCount = linkedSessions.filter(session =>
+                    session.profileId === activeProfileId
+                    && session.agentId === activeAgent
+                    && !session.archivedAt).length
+                  const countLabel = currentCount === linkedSessions.length
+                    ? `${linkedSessions.length} 会话`
+                    : `${linkedSessions.length} 关联 · ${currentCount} 当前`
                   return (
                     <button type="button" className="overview-workspace-row" key={workspace.id} onClick={() => openWorkspace(workspace.id, workspace.agentId)}>
                       <span className="overview-folder-icon"><Folder size={15} aria-hidden="true" /></span>
                       <span className="overview-workspace-copy"><strong>{workspace.name}</strong><span title={workspace.rootPath}>{workspace.rootPath}</span></span>
-                      <span className="overview-workspace-count">{linkedSessions.length} 会话</span>
+                      <span
+                        className="overview-workspace-count"
+                        title={`关联 ${linkedSessions.length} 个会话（全部 Profile/Agent，含归档）；当前 Profile/Agent 下可见 ${currentCount} 个（与左栏树一致）`}
+                      >{countLabel}</span>
                       <ArrowUpRight size={14} aria-hidden="true" />
                     </button>
                   )
