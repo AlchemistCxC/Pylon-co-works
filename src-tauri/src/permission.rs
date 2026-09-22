@@ -98,7 +98,7 @@ pub(crate) fn parse_permission_request_with_generation(
         .get("rawInput")
         .map(serde_json::Value::to_string)
         .unwrap_or_default();
-    let prompt: String = runtime_log::sanitize_message(raw_input)
+    let prompt: String = runtime_log::sanitize_message(&raw_input)
         .chars()
         .take(PERMISSION_PROMPT_MAX_CHARS)
         .collect();
