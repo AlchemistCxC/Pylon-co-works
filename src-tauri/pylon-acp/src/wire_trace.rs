@@ -165,7 +165,8 @@ pub struct WireJsonlSnapshot {
 
 impl AcpWireHub {
     pub fn new(correlation: RuntimeCorrelation, capacity: usize) -> Arc<Self> {
-        let trace_id: Arc<str> = Arc::from(format!("{}-{}", correlation.agent_id, next_trace_id()).as_str());
+        let trace_id: Arc<str> =
+            Arc::from(format!("{}-{}", correlation.agent_id, next_trace_id()).as_str());
         Arc::new(Self {
             identity: Arc::new(WireIdentity {
                 trace_id,
@@ -257,11 +258,7 @@ impl AcpWireHub {
         let index = self.canonical_correlations.lock().ok();
         ordinals
             .iter()
-            .map(|ordinal| {
-                index
-                    .as_ref()
-                    .and_then(|index| index.get(ordinal).cloned())
-            })
+            .map(|ordinal| index.as_ref().and_then(|index| index.get(ordinal).cloned()))
             .collect()
     }
 
@@ -628,7 +625,11 @@ mod tests {
         // 覆写已存在 key 不触发逐出
         hub.record_canonical_commit(
             9,
-            CanonicalCorrelation { event_id: "e-9-again".into(), sequence: 9, revision: 1 },
+            CanonicalCorrelation {
+                event_id: "e-9-again".into(),
+                sequence: 9,
+                revision: 1,
+            },
         );
         assert_eq!(
             hub.correlate(9).as_ref().map(|c| c.event_id.as_str()),
@@ -637,7 +638,11 @@ mod tests {
         // 插入比全部现有键都小的 1 → 逐出最小键 2，而非最早插入的 7
         hub.record_canonical_commit(
             1,
-            CanonicalCorrelation { event_id: "e-1".into(), sequence: 1, revision: 1 },
+            CanonicalCorrelation {
+                event_id: "e-1".into(),
+                sequence: 1,
+                revision: 1,
+            },
         );
         assert_eq!(hub.correlate(2), None, "最小 ordinal 2 必须被逐出");
         assert_eq!(
@@ -645,7 +650,10 @@ mod tests {
             Some("e-7".to_string()),
             "最早插入的 7 仍在（非 FIFO）"
         );
-        assert_eq!(hub.correlate(1).map(|c| c.event_id), Some("e-1".to_string()));
+        assert_eq!(
+            hub.correlate(1).map(|c| c.event_id),
+            Some("e-1".to_string())
+        );
     }
 
     #[test]
@@ -665,11 +673,16 @@ mod tests {
         let batched = hub.correlate_many(&ordinals);
         for (ordinal, correlation) in ordinals.iter().zip(&batched) {
             assert_eq!(
-                correlation, &hub.correlate(*ordinal),
+                correlation,
+                &hub.correlate(*ordinal),
                 "correlate_many 必须与逐条 correlate 一致"
             );
         }
-        assert_eq!(batched.iter().filter(|c| c.is_none()).count(), 1, "未记录的 ordinal 输出 None");
+        assert_eq!(
+            batched.iter().filter(|c| c.is_none()).count(),
+            1,
+            "未记录的 ordinal 输出 None"
+        );
     }
 
     #[test]
