@@ -534,3 +534,18 @@
 [2026-09-22 09] [Miyaki Kumo] [#232]
 
 **开工：release.yml 恢复 tag 触发自动发行（打 tag 即构建上传）+ 版本一致性/main 归属两道守卫。** 用户裁定（AskUserQuestion）。本轮文件域仅 `​.github/workflows/release.yml`、`.agents/L.md`，请勿改写、勿连带提交。
+
+---
+
+[2026-09-22 10] [Miyaki Kumo] [#233]
+
+**开工：性能基准改产品路径口径——废除 wasm↔TS 对照跑器（`scripts/compute-parity-{bench,memory}.mts`），新建 `scripts/perf-bench.mts`（绝对成本 + 派生单位成本），收编 markdown/高亮/投影/events 四个已接线开销点。** parity **门禁**（`scripts/compute-parity.test.mts` + 脚手架）保留不动。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 新增：`scripts/perf-bench.mts`、`scripts/perf-bench/**`（harness/suites/fixtures/README）
+- 删除：`scripts/compute-parity-bench.mts`、`scripts/compute-parity-memory.mts`
+- 修改：`scripts/compute-parity/harness.ts`（删性能/内存跑器两节，parity 跑器不动）、`scripts/compute-parity/README.md`
+- 文档：`.agents/spec/233-*.md`、`.agents/records/233-*.md`、`.agents/decisions/0019-*.md`、`docs/说明书/Pylon-模块维护地图.md`（仅「对照见 scripts/compute-parity/」那一句所在格）
+
+**我不碰**：`src/**`（零产品代码改动）、`src-tauri/**`、`scripts/compute-parity/{suites,baselines,fixtures,index.ts,vitest.config.ts,test.mts}`、`vitest.config.ts`、中控区、预设系统、他人在途域。
