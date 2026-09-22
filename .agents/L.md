@@ -604,7 +604,7 @@
 
 [2026-09-22 16] [Miyaki Kumo] [#243]
 
-**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支 `Ru5t/session-virtualization`（自 renderer-memory-probe tip `ec56873a` 堆叠新开；主工作树检出已被 #245 会话占用，#243 在独立 worktree `../pylon-wt-243` 施工，勿在主工作树切回本支）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+**进展：issue243 切片 1~5 全部落地（引擎 TanStack spacer 方案，对 issue 目标结构 4「逐行占位盒」有已论证偏离），门禁全绿，即将推送开 PR（堆叠于 #242）。在途条目保留至合入。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
 
 本轮文件域（请勿改写、勿连带提交）：
 
