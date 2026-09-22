@@ -617,3 +617,26 @@
 - 文档：`.agents/records/238-*-刀2*.md`、本文件
 
 **不碰**：槽位（刀3）、中控渲染、插件契约面、`src/domains/cc/widgetDefinitions.ts`（刀1 产物，本刀只读）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+---
+
+[2026-09-22 19] [Baryon] [#238 · 刀3]
+
+**续开工：刀3 拆掉槽位层，位置改由「锚点」表达（★ 有视觉变化）。** 分支**沿用** `feat/cc-widget-definition-table`（与刀1/刀2 同分支）。施工单 `元件定义表/05-施工单-刀3-拆掉槽位层.md`。前置刀2 已完工（结构对齐每次读盘跑）。
+
+**本刀（在刀1/刀2 文件域之上叠加）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（位置改两轴 `layout: {x,y,order}` + `floating` 声明；`footerLayout` 归属从系统桶挪到容器行）
+- `src/ccLayoutState.ts`（删 `CcSlot` / `SLOT_SET` / `placement.slot` 与全部槽位判定）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（删 `STATUS_SLOTS` / 三个槽位包装 div；改按「锚点+方位」成组；删属性面板「槽位」下拉；`data-widget-slot`→`data-widget-anchor`）
+- `src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（两个 12px 常量改读表 `gap`；做不到像素级即退回+守卫测试）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css` + `.../solid-workbench/WorkbenchChrome.css`（槽位类退场 + 新分组容器 + 分隔符规则同步）
+- `src/components/SettingsPreview.tsx`（失败占位里的槽位类）
+- `src/plugin-runtime/cc-widget/ccWidgetTypes.ts`（`slot`→`anchor` + 可选 `side`；**`rendererKey` / `isolated-surface` 不动**）
+- `src/domains/cc/widgetCatalog.ts`（两处 `defaultPlacement` 跟着改）
+- 测试：`domains/cc/__tests__/{widgetDefinitionTable,ccLayoutV8}.test.ts`、`domains/theme/__tests__/{themeSchemaV8Backfill,structuralAlignment,themeRehydrateAlignment}.test.ts`、`renderers/solid-workbench/__tests__/{mountSolidWorkbench.solid,settingsPreviewControlCenter.solid}.test.tsx`（**均为契约变更引起的写法同步，逐条点名**）
+- 文档：`.agents/records/238-*-刀3*.md`、本文件
+
+**不碰**：`src/zones/factory/**`（出厂区域预设落盘数据，文件头写明「生成脚本已删，请勿手改」）、占区碰撞约束（刀4）、`statusBg`/`statusBgImage`/命令行提示翻可拖（刀5）、`sendVariant`、属性面板按成员分块、缩放、死数据清理、`rendererKey`/`isolated-surface`、中控渲染以外的区域。
+
+**给后来者**：本刀**允许视觉变化**且**不写老数据迁移**（用户口径）；`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物（写死 devUrl 1430），实机验收要用普通 `cargo build` 的二进制。
