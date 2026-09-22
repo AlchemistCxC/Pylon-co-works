@@ -375,7 +375,7 @@
 .term-code-line { display:flex; align-items:stretch; line-height:1.25; }
 .term-code-gutter { flex-shrink:0; color:var(--text-dim); opacity:0.45; user-select:none; margin-right:var(--ui-space-2); white-space:pre; }
 
-/* ── starry-night 语法高亮（Peri base16-ocean.dark 配色）── */
+/* ── 代码高亮 `pl-*` 类（Lezer tag 映射；默认 Peri base16-ocean.dark 配色）── */
 .term-code-block .pl-k  { color:var(--syn-kw,#b48ead); }           /* keyword — mauve */
 .term-code-block .pl-s  { color:var(--syn-str,#96b5b4); }           /* string — teal */
 .term-code-block .pl-c  { color:var(--syn-cmt,#65737e); font-style:italic; } /* comment */

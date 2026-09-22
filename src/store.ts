@@ -54,7 +54,7 @@ export interface ThemeSettings {
   titlebarBg: string; titlebarTextColor: string
   sidebarBg: string; sidebarBgImage: string; sidebarWidth: number; sidebarTextColor: string; sidebarNameSize: number; sidebarGroupSize: number
   chatBg: string; chatBgImage: string; chatFont: string; chatFontSize: number; chatLineHeight: number; chatTextColor: string; chatCodeColor: string; chatCodeBg: string
-  // 语法高亮（starry-night pl-* 映射，默认 base16-ocean.dark 配色）
+  // 语法高亮 `--syn-*`（Lezer tag → `pl-*` 类的配色；默认值沿用 base16-ocean.dark）
   synKeyword: string; synString: string; synComment: string; synLiteral: string; synEntity: string; synFunction: string
   synVariable: string; synProperty: string; synRegex: string; synMarkupHeading: string; synCoReference: string; synSupport: string
   toolOk: string; toolRun: string; toolErr: string; userTagBg: string; userTagText: string

@@ -29,13 +29,14 @@ export async function buildPerfSuites(): Promise<PerfSuite[]> {
  * 列出来而不是只体现在「表里没有」：「没接线」是一个结论，得能被人核。
  * 判据统一为「`src/` 里有没有调用方」。
  *
- * 本清单覆盖**两个计算核的全部真实导出**（`pylon-compute` 6 个、`pylon-markdown` 5 个，
- * `initSync` 除外）：接线的是 **5 个**（本基准的 5 个 wasm pair 一一对应），未接线的是
- * **6 个**（下表）。不要只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute`
- * 的一半，且不含 `pylon-markdown`。
+ * 本清单覆盖**两个计算核的全部真实导出**（`pylon-compute` 6 个、`pylon-markdown` 3 个，
+ * `initSync` 除外；**#241 起高亮已不在 wasm**，故 markdown 核只剩解析面）：接线的是
+ * **4 个**（= 本基准的 4 条 wasm 路径），未接线的是 **5 个**（下表）。不要只按 parity
+ * 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute` 的一半，且不含 `pylon-markdown`。
  *
- * 变更是删除而非增加：`pylon-markdown` 原第 6 个导出 `scopeForLanguage` 已按 #236 删除
- * （无调用方 + 实测逐次调用比现役 TS 表慢约 18×），故不在此列。
+ * 两次收窄都是**删除**而非新增：`scopeForLanguage` 按 #236 删除（无调用方 + 逐次调用比
+ * 现役 TS 表慢约 18×）；`highlightBlock` / `highlightBlockJson` 按 #241 删除（高亮整体迁出
+ * wasm 到前端 Lezer）。已删的出口不在此列——「不在导出面上」与「在但没接线」是两件事。
  */
 export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonly reason: string }> = [
   {
@@ -55,11 +56,6 @@ export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonl
     reason: 'wasm-bindgen 编组变体，头注称「供宿主快照/调试工具（parity 快照 bin）」；'
       + '但 `src/bin/parity_snapshot.rs` 直接调纯内层 `pylon_markdown::parser::parse_markdown`，'
       + '**不经过这个壳** ⇒ JS 可见面全仓零引用（意图记过，消费者没落地过）',
-  },
-  {
-    name: 'highlightBlockJson',
-    reason: '同上：`parity_snapshot.rs` 调 `pylon_markdown::highlight::highlight_block`（纯内层），'
-      + '这个 JS 壳无引用',
   },
   {
     name: 'markdownEngineVersion',

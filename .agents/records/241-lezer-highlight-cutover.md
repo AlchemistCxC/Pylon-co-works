@@ -1,13 +1,13 @@
-# Dev Record — #241 高亮引擎改 Lezer（刀1 + 刀2 已落地；刀3/刀4 待做）
+# Dev Record — #241 高亮引擎改 Lezer（刀1 + 刀2 + 刀3 已落地；刀4 待做）
 
 > 入库保留。规格（一次性）见 `.agents/spec/241-lezer-highlight-migration.md`。
-> **本条为阶段记录**：刀 1（引擎并行落地）与刀 2（切流 + 实机验收）已完成，刀 3/4 未完。
+> **本条为阶段记录**：刀 1（引擎并行落地）、刀 2（切流 + 实机验收）、刀 3（退役 wasm 高亮）已完成，刀 4（说明书 + ADR-0018 修订）未完。
 
 ## 元信息
 
 - issue：https://github.com/AlchemistCxC/Pylon-co-works/issues/241（refactor；用户拍板「选C，开工」）
 - 路线决策：[`ADR-0020`](../decisions/0020-highlight-engine-lezer.md)
-- 分支：`Ru5t/Reflector`；提交：`27a53f4a`（刀1）、`b5f5cf7b`（刀2）
+- 分支：`Ru5t/Reflector`；提交：`27a53f4a`（刀1）、`b5f5cf7b`（刀2）、刀3 见下方「证据」
 - 日期：2026-09-22
 
 ## 目标与范围
@@ -24,6 +24,17 @@
 | `src/components/chat/codeHighlight.ts` | builtin 换引擎；语言门换判据；`scopeForLanguage` + `LANGUAGE_SCOPES` 退休；编排（缓存/去重/provider/拼 HTML）未动 | 修改（刀2） |
 | `src/components/chat/__tests__/codeHighlight.test.ts` | scope 表断言 → 语言门断言；cpp「已知限制」升级为正向断言 | 修改（刀2） |
 | `scripts/check-bundle-size.mjs` | 「主应用 chunk」改为从 `index.html` 解析入口 | 修改（刀2，见「门禁修正」） |
+| `src-tauri/pylon-markdown/{src/highlight.rs,src/theme.rs,src/tm_language.rs}` | syntect 语法机器、scope→类名主题表、tmLanguage→SyntaxSet 转换层 | **删除**（刀3） |
+| `src-tauri/pylon-markdown/assets/{grammars/*,starry-theme.json}`、`gen/generate-assets.mjs` | 14 份 vendored 语法（728KB）+ 主题资产 + 其机械化导出器（输入来自 starry-night） | **删除**（刀3） |
+| `src-tauri/pylon-markdown/{Cargo.toml,src/lib.rs,src/wasm_exit.rs}` | 摘 syntect（连带 `fancy-regex`/`yaml-load`）依赖；模块表只剩 `model`/`parser`/`wasm_exit`；删 `highlightBlock`/`highlightBlockJson` 两个出口 | 修改（刀3） |
+| `src-tauri/pylon-markdown/src/bin/parity_snapshot.rs`、`parity/corpus.json`、`parity/rust-snapshot.json` | 快照 bin 只导 markdown；语料摘掉 highlight 组（12 条）；快照重生成（117 条，顶层 key 只剩 `generator`/`markdown`） | 修改（刀3） |
+| `src-tauri/pylon-markdown/parity/{dump-ts.mjs,diff.mjs,ts-baseline.json,parity-report.json}`、`src/components/chat/starryCore.ts` | TS↔Rust 差分工具与 starry-night 派生的 TS 基线（基线侧已无对照物） | **删除**（刀3） |
+| `src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts` | 重写为**仅 markdown**（117 条对快照深相等）；highlight 半退役 | 修改（刀3） |
+| `src/infrastructure/compute/markdownCompute.ts` | 摘掉已死的 `highlightBlock` 成员与 `HighlightSpan`/`HighlightedLine` 类型；头注改为「只做 markdown 解析」 | 修改（刀3） |
+| `package.json` | `bun remove @wooorm/starry-night vscode-oniguruma` | 修改（刀3） |
+| `scripts/{check-bundle-size.mjs,build-wasm.mjs,audit-maintenance.mts}` | wasm 预算重定标；已退役资产的注释与模块根同步 | 修改（刀3） |
+| `scripts/perf-bench/{index.ts,README.md,suites/markdownHighlightSuite.ts}` | 高亮域改量 `highlightBlockWithLezer`（不再触 wasm）；导出记账 11→9、接线 5→4 | 修改（刀3） |
+| `src/{store.ts,domains/workbench/workbenchProjector.ts}`、`.../chat/ChatView.css`、两处测试注释 | 仅更正指向已退役引擎的过期表述（§6.2） | 修改（刀3） |
 
 ## 方案要点
 
@@ -65,6 +76,21 @@
 
 ⇒ **刀 2 的核心判据达成**：语法资产那 ~86MB 常驻与「+42MB 不可归还台阶」一起消失，而这一轮 8 个代码块（ts/python/go/css 多语言）都已正常高亮。
 
+### 刀 3 验收（退役 wasm 高亮）
+
+| 验收项 | 结果 |
+| --- | --- |
+| wasm 产物（glue 之外） | ✅ `pylon_markdown_bg.wasm` **2,872,825 → 428,930 B raw（−85.1%）**；glue 15,783 → 12,469 B |
+| wasm 预算（gzip，本门禁口径） | ✅ **962,801 → 198,431 B gzip（−79.4%）**；预算由 1,110,000 **下调**至 230,000（留 16% 余量）。markdown 侧现只剩 comrak 解析（144,838）+ compute 流式核（53,593） |
+| js 总量未因 Lezer 失控 | ✅ 总 gzip **1,461,516**（budget 1,615,000，余 9.5%）；Lezer 引擎在懒 chunk 里（`index-*.js` 236,660 B raw / 78,514 B gzip），未进主 chunk（主 chunk 仍 11,178 B） |
+| Rust 侧 | ✅ `cargo test -p pylon-markdown --lib` **16 passed**；`cargo clippy -p pylon-markdown --all-targets` 0 警告；`cargo fmt --check` exit 0 |
+| 全量 vitest | ✅ **623 文件 / 4673 用例通过**，0 失败（刀2 时 4678——差额正是退役的 highlight parity 半） |
+| `tsc -b` / `check:solid` / `check:docs` / `check:deps` / `eslint` | ✅ 全过（eslint 1 条既存 warning，非本改动） |
+| 依赖面 | ✅ `starry-night` + `vscode-oniguruma` 已移出 `package.json`；全仓无存活引用（余下命中全在 records/decisions/L.md 的历史记述里） |
+| 产品行为 | ✅ 高亮路径不变（仍走 `codeHighlight.ts` → `pl-*`），刀2 已实机验过；本轮是**删除**而非改写，消费方零改动 |
+
+**为什么 markdown 核保留**：`parseMarkdown`（comrak）仍在 wasm——它在同形状对照里是赢的那一半（markdown 流式形 12–25×），且**没有**语法资产那种「编译即常驻、不可归还」的成本。crate 不删。
+
 ### 门禁修正（本次改动暴露的歧义）
 
 `check-bundle-size.mjs` 的「主应用 chunk」原先用 `index-*.js` 通配 `find`——本次改动产生了**第二个** `index-*` 懒 chunk（高亮引擎 236,660 B），通配会挑错文件、把懒 chunk 当主应用（读数仍 PASS，但量错了对象）。改为从 `dist/index.html` 解析入口：读数 **11,178 B**（真入口），并已确认高亮引擎在懒 chunk 里（`index.html` 未 preload）。
@@ -73,28 +99,34 @@
 ## 测试处置
 
 - 修改：`src/components/chat/__tests__/codeHighlight.test.ts` —— ① `scopeForLanguage` 表断言（3 条：2 条别名表 + 1 条未知语言）改为 `hasHighlightLanguage` 断言（等价判据，别名集合不变）；② **cpp 的「已知限制」升级为正向断言**（旧实现每语法独立 SyntaxSet ⇒ cpp 顶层 include 的 source.c 未注册 ⇒ 静默零分词；Lezer 的 lang-cpp 自带基础语法 ⇒ 现在真的着色）。这正是 ADR-0020 记的**有意分叉**。
+- 修改（刀3）：`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts` —— **重写为仅 markdown**：删掉 `GRAMMAR_LOADERS`/`highlightHast`/`flattenTsTokens`/`flattenRustLines`/`report` 与 starry-night 装载，保留 script-run 快照/语料覆盖断言 + 「全部 117 条 case 与 `rust-snapshot.json` 深相等」。**这是契约变更型修改**：被删的一半所对照的两侧（TS 基线 `ts-baseline.json` 与 wasm `highlightBlock`）都已退役，门禁无可对照物。
 - 未修改但已复核：`FileTabView.readonly`（2 处 `pl-*`）、`issue221.codeBlockLifecycle`（1 处）在切流后**原样通过**。
 
 ## 证据
 
-- 提交：`27a53f4a`、`b5f5cf7b`（已推送 `github/Ru5t/Reflector`）。
+- 提交：`27a53f4a`、`b5f5cf7b`（已推送 `github/Ru5t/Reflector`）；刀 3 见本条所在提交。
 - 差分脚手架：`.agents/spec/241-lezer-diff.mts`（不入库；口径为逐字符 lost/gained/changed + 覆盖率）。
 - 实机：新构建 `pylon-0.2.6-Abc-win64.zip`（14:57，242 项 verify OK）装入实例；`data/pylon-data-v1.sqlite3` 与 `agents.yaml` 的 md5 替换前后一致（`md5sum -c` OK）；MCP 七步自检通过；per-PID 探针 30 轮。
+- 刀3 体积重测：`node scripts/build-wasm.mjs` + `bun run build` + `bun scripts/check-bundle-size.mjs`（输出见上表，全 PASS）；`bun scripts/perf-bench.mts`（`PERF_SCALE=xs`）跑通，`markdown-highlight` 域 9 case 全绿且「核线性Δ」列恒为 0（预期：本域不再触 wasm）。
 
 ## 与 spec 的偏差
 
 1. spec 说「CSS 零改动」——**成立**（新引擎继续产 `pl-*`，颜色定义未动）✓。
 2. spec 的「并排渲染比对」这一步**未做**：三档逐字符差分给了等价依据，且用户已直接裁定取 C 档。若后续觉得观感需要，再补。
 3. spec 未写、实际做了：`check-bundle-size.mjs` 的入口解析修正（本次改动暴露的歧义）。
+4. spec 未写、刀3 实际做了：**wasm 预算下调**（1,110,000 → 230,000）。原预算的定标依据里 909,563 B gzip 就是被删的 tmLanguage 语法；不随删随降等于把这一档放空 80%，回归将无法被发现。
+5. spec 未写、刀3 实际做了：`scripts/perf-bench` 的高亮域从 wasm 出口改量为 Lezer 出口。基准若留在旧出口，等于量一个不再是产品路径的死实现（违反 #233 的基准口径）。
 
-## 未解问题（刀 3/刀 4 待做）
+## 未解问题（刀 4 待做）
 
-1. **刀 3（退役 wasm 高亮）**：删 `pylon-markdown` 的 `highlight.rs` 语法机器 / `wasm_exit` 高亮出口 / `assets/grammars/*`（728KB/14 个）/ `assets/starry-theme.json` / `gen/generate-assets.mjs` 语法段 / `SOURCES.md` / `Cargo.toml` 的 syntect；`parity_snapshot.rs` 与 `parity/*.json` 的高亮半退役或重基线；`starryCore.ts` + `markdownComputeParity.test.ts` 的 highlight 半处理；退休 `@wooorm/starry-night` + `vscode-oniguruma`；**重定 wasm 预算**（`pylon-markdown` 只留 comrak，产物应显著变小）。**注意 `parseMarkdown` 留在 wasm，crate 不删。**
-2. **刀 4**：`docs/说明书` 两处（模块维护地图的 markdown 与高亮行、项目架构参考）+ **ADR-0018 修订**（高亮不再在 wasm）+ 记录。
-3. **真机未单独核的两面**：文件只读视图（`FileTabView`，由单测 `pl-*` 断言覆盖）、流式新代码块（同一条 `highlightCode` 路径，未在真机单独触发）。
-4. **首次延迟的隔离**：本次只测到「切会话 → 首个 span 121.3ms / 结算 421.8ms」（含投影与渲染）；旧引擎的编译阻塞（433/654ms）是**由构造消失**（不再有编译），不是同一指标的 A/B。
+1. **刀 4**：`docs/说明书` 两处（模块维护地图的 markdown 与高亮行、项目架构参考）+ **ADR-0018 修订**（高亮不再在 wasm）+ 记录收尾。
+2. **真机未单独核的两面**：文件只读视图（`FileTabView`，由单测 `pl-*` 断言覆盖）、流式新代码块（同一条 `highlightCode` 路径，未在真机单独触发）。
+3. **首次延迟的隔离**：刀2 只测到「切会话 → 首个 span 121.3ms / 结算 421.8ms」（含投影与渲染）；旧引擎的编译阻塞（433/654ms）是**由构造消失**（不再有编译），不是同一指标的 A/B。
+4. **`pl-smi` 类归属**（刀2 遗留）：Lezer 侧变量（`pl-v`）与「类名/成员」在部分语言里落到同一 tag；刀2 已按现状映射，未单独立项。
+5. **刀3 后未复跑实机**：本轮验证是「构建产物体积 + 全量门禁 + 基准跑通」，**产品行为**的实机证据仍来自刀2（那时消费路径已定且之后零改动）。若要更稳，可再装一次实例做同轮 A/B——判据不会变（高亮仍工作），故未做。
 
 ## 并行交集
 
 - `src/components/chat/{codeHighlight,lezerHighlight}.ts`、其测试、`scripts/check-bundle-size.mjs`。
-- 未触碰：`parseMarkdown`/comrak、markdown parity 快照锁、消费点三处（`CodeBlock.solid.tsx`/`MarkdownContent.solid.tsx`/`FileTabView.tsx`）、`codeBlockDomLifecycle.ts` 机制本体、其余在途域。
+- 刀3 另碰：`src-tauri/pylon-markdown/**`、`src/infrastructure/compute/markdownCompute.ts`、`package.json`/`bun.lock`、`scripts/{build-wasm.mjs,audit-maintenance.mts}`、`scripts/perf-bench/**`（highlight 域与记账）、`src/{store.ts,domains/workbench/workbenchProjector.ts}` 与 `ChatView.css` 的注释。
+- 未触碰：`parseMarkdown`/comrak、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`、`FileTabView.tsx`、`codeBlockDomLifecycle.ts` 机制本体、其余在途域。

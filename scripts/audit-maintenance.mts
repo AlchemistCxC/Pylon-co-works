@@ -37,11 +37,12 @@ export const moduleDefinitions = [
   // #220：前端计算核（Rust/WASM）。纯函数——不读时钟/store/registry、不做 IO、
   // 不发明活性判定；编排与 DOM 留在 JS 侧。
   { id: 'rust-compute', roots: ['src-tauri/pylon-compute/src/'], responsibility: '前端计算核：投影折叠与流式文本管线的计算层（wasm-bindgen 出口）' },
-  // #220 WP4：markdown 引擎（comrak）与代码高亮（syntect + vendored tmLanguage）。
-  // `gen/` 是从 starry-night 机械化导出语法与主题资产的生成器；`parity/` 是与
-  // TS 基线做差分对照的工具（快照 + 差异报告），都不是产品运行时依赖。
-  { id: 'rust-markdown', roots: ['src-tauri/pylon-markdown/src/'], responsibility: 'markdown 解析与代码高亮的计算层；整块进/整块（行数组）出' },
-  { id: 'markdown-parity-tooling', roots: ['src-tauri/pylon-markdown/gen/', 'src-tauri/pylon-markdown/parity/'], responsibility: 'WP4 的资产生成与 TS↔Rust 差分工具；不作为产品运行时 import 来源' },
+  // #220 WP4：markdown 引擎（comrak）。#241 起代码高亮已不在本 crate——syntect 语法
+  // 机器连同 `gen/` 资产生成器、vendored tmLanguage 与 TS↔Rust 差分工具一并退役，
+  // 高亮改由前端 Lezer 承担。`parity/` 只剩语料与 Rust 快照（JSON，不计行），
+  // 供 vitest 侧 markdown parity 门禁消费。
+  { id: 'rust-markdown', roots: ['src-tauri/pylon-markdown/src/'], responsibility: 'markdown 解析的计算层；整块进/整块（行数组）出' },
+  { id: 'markdown-parity-tooling', roots: ['src-tauri/pylon-markdown/parity/'], responsibility: 'markdown 语料与 Rust 快照，供 parity 门禁消费；无 JS 源，故计 0 行' },
   { id: 'rust-build', roots: ['src-tauri/*'], responsibility: '原生构建入口脚本；不属于运行时模块' },
   { id: 'tooling', roots: ['scripts/'], responsibility: '开发、校验与发布脚本；不作为产品运行时 import 来源' },
 ] as const
