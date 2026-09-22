@@ -168,6 +168,18 @@
   —— **无「状态信息」**；`状态信息字号`、`状态区背景`、`状态区背景图` 三串在整页 HTML 里均不存在；
   「输入与状态」行数 = **10**；「控件样式」里有「快捷提示字号」。
 
+- **⑧ 持久化实测**（读运行中应用的 `localStorage['pylon-theme']`，`schemaVersion` 11）：
+
+  ```
+  { "ccHintFontSize": 16, "footerLayout": "free", "appliedPreset": {"cc":"claude",...}, "custom": {"cc":true,...},
+    "hasCcStatusFontSize": false, "hasStatusBg": false }
+  ```
+
+  ⇒ 新字段**真的落了盘**（16 且能被读回）；被删的三项**没有以僵尸键残留**在用户状态里。
+  ★ 顺带说明：为量 peri 曾把「底部信息布局」切到「输入栏下方」再切回「独立状态行」（值已还原）。
+  该区 `custom.cc` 本来就是 `true`（其 `ccHidden` 里仍留着 `attach`、`ccScale` 里仍留着 `ekg`/`pct`
+  这些**本刀从未触碰**的旧 id ⇒ 早有偏离）⇒ **本次切换没有改变用户的基准标记**。
+
 ## 与 spec 的偏差
 
 1. **命令行提示升格（原施工单 §2.1）本轮未做，交回翻译另写单**（施工单 §4-3 / §4-4 停手条件命中）。
