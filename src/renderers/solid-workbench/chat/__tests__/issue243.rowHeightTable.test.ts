@@ -114,6 +114,19 @@ describe('rowHeightTable', () => {
     expect(table.indexForOffset(197)).toBe(2)
   })
 
+  it('invalidateAll 覆盖退役行：过期实测降级为估算（审查 P1-4）', () => {
+    const table = createRowHeightTable()
+    table.setKeys(['a', 'b'], () => 50)
+    table.measure('a', 120)
+    // a 退役
+    table.setKeys(['b'], () => 50)
+    table.invalidateAll(() => 33)
+    // a（退役）原值降级为估算——不再被重挂当实测命中；b 未实测，估算条目不动
+    expect(table.entry('a')).toEqual({ size: 33, source: 'estimated' })
+    expect(table.entry('b')).toEqual({ size: 50, source: 'estimated' })
+    expect(table.isMeasured('a')).toBe(false)
+  })
+
   it('reset 清空全部状态', () => {
     const table = createRowHeightTable()
     table.setKeys(['a'], () => 10)
