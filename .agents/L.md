@@ -629,3 +629,18 @@
 - 文档：`.agents/spec/240-*.md`（一次性）、`.agents/records/`、`docs/说明书/` 聊天渲染节、本文件、issue #243 回写
 
 **我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
+
+---
+
+[2026-09-23 01] [Miyaki Kumo] [#247]
+
+**开工：issue247（抽取 pylon-session 存储核与 pylon-acp 协议引擎核；error/correlation 下沉 foundations，agent_config/{types,load} 与 hermes 归位 pylon-core）。** spec 见 `.agents/spec/247-crate-extraction.md`。分支 `Ru5t/crate-extraction`（**叠放于 `Ru5t/host-src-regroup`=#246 之上，PR base 指向该分支**——存储/协议路径依赖 #245 的目录结构，合入顺序不可倒）。expand-contract：宿主经模块重导出保活 `crate::acp::`/`crate::session::event_repo::` 等全部既有路径，消费者零改动。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- 新 crate：`src-tauri/pylon-session/`、`src-tauri/pylon-acp/`（新增）
+- 迁移源：`src-tauri/src/{error,correlation}.rs` → pylon-foundations；`src-tauri/src/agent_config/{types,load}.rs`、`src-tauri/src/hermes/` → pylon-core；`src-tauri/src/acp/` 31 文件、`src-tauri/src/session/` 17 文件 → 对应新 crate
+- 门面与清单：`src-tauri/src/lib.rs`（重导出保活）、`src-tauri/Cargo.toml`（members + 依赖）、`scripts/audit-maintenance.mts`（crate 根登记）、`pylon-foundations/src/lib.rs`、`pylon-core/src/lib.rs`
+- 文档：`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/records/`、本文件
+
+**我不碰**：session 命令编排层（create/prompt/persist/inspector/fork/expiry/owner/control）、instance_registry、全部 harness 依赖型测试的行为；前端 `src/**`；他人在途域。
