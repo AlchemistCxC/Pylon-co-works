@@ -162,6 +162,8 @@ impl RuntimeLogHub {
 
     /// OBS-02：带 correlation context 的 push（统一身份进运行时日志）。
     /// correlation=None 时与旧 push 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #245：结构化字段面即 8 参（历史基线项，原 runtime_log.rs 路径随文件归目录迁移）。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_correlation(
         &self,
         timestamp: Timestamp,
@@ -187,6 +189,8 @@ impl RuntimeLogHub {
     /// LOG-03：带结构化上下文的 push（增量字段 code/category/recoverable/
     /// userActionRequired/rawAvailable 的唯一推进入口）。context 为缺省值时与
     /// `push_with_correlation` 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #245：同上——9 参为结构化上下文面，历史基线项随文件归目录迁移保留。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_context(
         &self,
         timestamp: Timestamp,
