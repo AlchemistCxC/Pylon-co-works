@@ -59,7 +59,9 @@ export function buildMarkdownHighlightSuite(): PerfSuite {
           units: code.length,
           unitLabel: '字符',
           ...(id === 'block-40k'
-            ? { note: '巨块：高亮成本随代码长度线性膨胀，而这块 DOM 在 #221 之前是整块常驻的。' }
+            ? { note: '巨块：高亮成本随代码长度线性膨胀（本机实测 ≈ 1.6ms 固定 + 0.465µs/字符），而这块 DOM 在 #221 之前是整块常驻的。'
+              + ' 注意这个形状是**修掉解析截断之后**才成立的：此前 `syntaxTree()` 只解析前 3006 字符，'
+              + '这些巨块 case 量的其实是「3006 字符的解析 + 剩余部分当纯文本」，读数因此看着又平又便宜（#241 评论）。' }
             : {}),
           run: () => highlightBlockWithLezer(code, 'ts'),
         } satisfies PerfCase
@@ -73,6 +75,10 @@ export function buildMarkdownHighlightSuite(): PerfSuite {
         name: 'highlightBlockWithLezer',
         domain: 'markdown-highlight',
         wiredAt: 'src/components/chat/codeHighlight.ts:76',
+        // 门槛 16000 的出处（本机实测，见 #241 评论）：本条路径的成本 ≈ 1.6ms 固定 + 0.465µs/字符。
+        // 固定开销 ≤20% 需要总量 ≥ 8ms ⇒ 约 14k 字符；取 16k。低于此的语料行不报单位成本，
+        // 免得把「固定开销 ÷ 工作量」当成引擎的每字符成本。
+        minUnitsForUnitCost: 16_000,
         note: '整块代码进、行数组出。这一列是**引擎那一段**：`codeHighlight.ts` 的同步语言门、'
           + '结果缓存（128 条）与并发去重、行数组拼 HTML 串，以及 #221 的视口降级/帧预算调度都不在其中。'
           + ' 另：本域**不触 wasm**，「核线性Δ」列恒为 0 是预期（旧 syntect 引擎在每种语言首行会显示数 MB–数十 MB 的不可归还增量）。',

@@ -1,7 +1,8 @@
-# Dev Record — #241 高亮引擎改 Lezer（刀1 + 刀2 + 刀3 + 刀4 已落地）
+# Dev Record — #241 高亮引擎改 Lezer（刀1~刀5 已落地）
 
 > 入库保留。规格（一次性）见 `.agents/spec/241-lezer-highlight-migration.md`。
-> **本条为阶段记录**：刀 1（引擎并行落地）、刀 2（切流 + 实机验收）、刀 3（退役 wasm 高亮）、刀 4（说明书 + ADR-0018 修订）均已完成，待合入。
+> **本条为阶段记录**：刀 1（引擎并行落地）、刀 2（切流 + 实机验收）、刀 3（退役 wasm 高亮）、
+> 刀 4（说明书 + ADR-0018 修订）、刀 5（基准跑出的截断缺陷修复）均已完成，待合入。
 
 ## 元信息
 
@@ -96,10 +97,68 @@
 `check-bundle-size.mjs` 的「主应用 chunk」原先用 `index-*.js` 通配 `find`——本次改动产生了**第二个** `index-*` 懒 chunk（高亮引擎 236,660 B），通配会挑错文件、把懒 chunk 当主应用（读数仍 PASS，但量错了对象）。改为从 `dist/index.html` 解析入口：读数 **11,178 B**（真入口），并已确认高亮引擎在懒 chunk 里（`index.html` 未 preload）。
 **注**：此前那个 `112,925` 是在有歧义的通配下读的，故不拿它做逐字对比；可比的量是总 js gzip（+2.1KB）。
 
+## 刀 5（2026-09-22，基准跑出来的缺陷修复）
+
+**来源**：跑 #233 的产品路径基准时读出反常——`markdown-highlight` 域的单位成本随规模**下降**
+（`block-4k` 0.592µs/字符 > `block-40k` 0.067µs/字符）。同一份合成料只放大十倍，这个方向不可能成立，
+顺着查下去发现的是**功能缺陷**，不是读数噪声。
+
+### 缺陷
+
+CodeMirror 对「不在编辑器视图里的 state」只做**分段同步解析**：`syntaxTree(EditorState.create(...))`
+拿到的树停在第一个同步块，本机实测**恒为 3006 字符**。整块一次性高亮这条路径没有视图替它推进解析，
+于是超出的部分**静默丢色**。产品路径实测（修前）：
+
+| 输入 | 着色字符 | 首个未着色且非空的行 |
+| --- | --- | --- |
+| 3,000 | 2,480 | —（截断点落在行内尾段） |
+| 3,200 | 2,486 | 第 81 行 |
+| 20,000 | 2,486 | 第 81 行 |
+| 40,000 | 2,486 | 第 81 行 |
+
+⇒ **超过 ~3k 字符的代码块，第 81 行往后全部失去高亮**。四条消费路径同此：聊天代码块、
+markdown 内嵌代码块、插件 provider、**只读文件视图 `FileTabView`**（整文件打开时最严重）。
+刀2 的实机验收没照出来，用的是 8 个小代码块（均 <3k）；单测的假高亮引擎也不经过真引擎。
+
+### 修复与验证
+
+- `lezerHighlight.ts`：`syntaxTree(state)` → **`ensureSyntaxTree(state, code.length, FULL_PARSE_BUDGET_MS)`**，
+  超时退回部分树。预算 200ms（解析是同步的；实测 40k ≈ 27ms、120k ≈ 46ms，故覆盖到约 45 万字符；
+  再大的输入宁可退回部分树也不冻结帧）。真想无上限，正路是保留解析状态做分帧增量（本记录「未解问题 4」）。
+- 回归测试：`src/components/chat/__tests__/codeHighlight.test.ts` 新增「大块整段着色」两条
+  （6k / 20k 的 ts 块，**末段必须有 `pl-*`**——截断的特征正是后半段标记数为 0，总数断言会在
+  「抬高截断点」的实现下假绿）。**红→绿已验**：还原修复后这 2 条红、其余 20 条绿；带修复 22 条全绿。
+- 修后产品路径：40k 输入 → 着色 33,070 字符，无未着色非空行。
+
+### 修掉截断后的真实成本（同机，Bun/JSC）
+
+高亮成本 ≈ **1.6ms 固定 + 0.465µs/字符**：4k 4.43ms / 12k 6.37ms / 40k 19.82ms / 200k 91.02ms
+（单位成本 4k 1.108、12k 0.531、40k 0.495、200k 0.455µs/字符）。基准 `full` 档重跑：
+`block-40k` **20.53ms**、`block-200k` **87.42ms**（修前两者都在 ~2.7ms —— 因为都只算了 3006 字符）。
+
+**连带更正 ADR-0020**：本 ADR 与对比 spike 里 Lezer 那侧的**延迟**读数（「4KB 1.13ms」「99.6ms → 1.13ms ≈90×」）
+同样是被截断的量；决策由内存驱动（不受影响），但延迟栏已更正（见该 ADR 修订 1）。
+
+### 顺带的基准口径修正（#233）
+
+该域固定开销（~1.6ms/次）是 wasm 出口（5–30µs/次）的约 50 倍，而全局单位成本门槛 32 字符照 wasm 定的
+⇒ 小语料行会印出「4.78µs/字符」这类由固定开销除出来的假读数。`PerfPair.minUnitsForUnitCost`
+改为可按 pair 声明，高亮域自报 **16000**（实测固定开销摊到 ≤20% 的规模）；表头与 README 同步说明。
+
+### 刀 5 的门禁
+
+| 门禁 | 结果 |
+| --- | --- |
+| 定向 vitest（`codeHighlight.test.ts`） | ✅ **22 passed**（含新增 2 条）；**红→绿已验**：去掉修复时这 2 条红、其余 20 绿 |
+| 全量 vitest | ✅ **623 文件 / 4675 用例通过**，0 失败（刀3 时 4673，+2 = 新增回归两条） |
+| `tsc -b` / `check:solid` / `check:bundle` / `eslint` | ✅ 全 exit 0（wasm 198,431 / 230,000 不变；eslint 1 条既存 warning 非本改动） |
+| 基准 | ✅ m 档与 full 档均跑通；修后读数见上（`block-40k` 20.53ms、`block-200k` 87.42ms） |
+
 ## 测试处置
 
 - 修改：`src/components/chat/__tests__/codeHighlight.test.ts` —— ① `scopeForLanguage` 表断言（3 条：2 条别名表 + 1 条未知语言）改为 `hasHighlightLanguage` 断言（等价判据，别名集合不变）；② **cpp 的「已知限制」升级为正向断言**（旧实现每语法独立 SyntaxSet ⇒ cpp 顶层 include 的 source.c 未注册 ⇒ 静默零分词；Lezer 的 lang-cpp 自带基础语法 ⇒ 现在真的着色）。这正是 ADR-0020 记的**有意分叉**。
 - 修改（刀3）：`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts` —— **重写为仅 markdown**：删掉 `GRAMMAR_LOADERS`/`highlightHast`/`flattenTsTokens`/`flattenRustLines`/`report` 与 starry-night 装载，保留 script-run 快照/语料覆盖断言 + 「全部 117 条 case 与 `rust-snapshot.json` 深相等」。**这是契约变更型修改**：被删的一半所对照的两侧（TS 基线 `ts-baseline.json` 与 wasm `highlightBlock`）都已退役，门禁无可对照物。
+- 新增（刀5）：`src/components/chat/__tests__/codeHighlight.test.ts` 的「大块整段着色（回归：同步解析上限截断）」两条（6k / 20k ts 块，末段必须有 `pl-*`）。判据选「末段有色」而非「总色数」：截断的特征恰是后半段标记数为 0，总数断言在「抬高截断点」的实现下会假绿。
 - 未修改但已复核：`FileTabView.readonly`（2 处 `pl-*`）、`issue221.codeBlockLifecycle`（1 处）在切流后**原样通过**。
 
 ## 证据

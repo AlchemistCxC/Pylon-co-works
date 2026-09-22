@@ -50,3 +50,46 @@
 - 内存机制与峰值来源：#240 的原生计数分配器 bisect（css 编译 churn 543MB、峰值 18.06MB；ts 峰值 12.67MB；裁剪那 10 条关键字表 → 峰值 −88%）。
 - 真机台阶：#240 的 per-PID 探针（css 块入视口 → 渲染器 private +42.0MB、go +1.4MB）。
 - 消费面与契约：`src/contracts/rendererContentPoints.ts:18`、`src/components/chat/codeHighlight.ts`、`src/plugins/core/renderer/builtinRenderContent.ts:260`、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`、`src/sheets/file/FileTabView.tsx:103`。
+
+---
+
+## 修订 1（2026-09-22）· 延迟栏更正：截断解析、以及它掩盖的功能缺陷
+
+**状态**：已生效（同日落地，issue #241）。
+
+### 更正什么
+
+本 ADR「后果 · 正面」写的「单次 4KB 高亮 **99.6ms → 1.13ms（≈90×）**」，以及对比 spike 里
+Lezer 那一侧的**延迟**读数，都是**在被截断的解析上**量的：spike 与首版实现都用
+`syntaxTree(EditorState.create(...))`（见 `.agents/spec/241-lezer-highlight-migration.md:49`），
+而 CodeMirror 对「不在编辑器视图里的 state」只做**分段同步解析**——树停在第
+一个同步块，本机实测恒为 **3006 字符**。
+
+⇒ 那个「1.13ms」量的是「解析 3006 字符 + 其余部分原样不解析」。修复后同机实测：
+**≈1.6ms 固定 + 0.465µs/字符**（4k ≈ 4.4ms、40k ≈ 20.5ms、200k ≈ 87.4ms，Bun/JSC）。
+
+### 更重要的：这不是精度问题，是功能缺陷
+
+同一处截断让**超过 ~3k 字符的代码块静默丢色**——实测 40k 的 ts 块只有前 **2486 字符**
+（第 80 行）有色，第 81 行往后全是纯文本。四条消费路径同此：聊天代码块、markdown 内嵌
+代码块、插件 provider、**只读文件视图 `FileTabView`**（整文件打开时最惨）。
+
+修法：改用 `ensureSyntaxTree(state, code.length, FULL_PARSE_BUDGET_MS)`（`lezerHighlight.ts`），
+预算 200ms（同步解析，约覆盖 45 万字符；超预算则退回部分树，不冻结帧）。
+回归测试：`codeHighlight.test.ts` 的「大块整段着色」两条（无修复时 2 红，修复后全绿）。
+
+**这次修正来自 #233 的基准**：巨块 case 的单位成本随规模**下降**（4k 0.592µs/字符 >
+40k 0.067µs/字符），这个方向不可能成立，顺着它才挖到截断。
+
+### 对原决策的影响
+
+**无。** 决策由**内存**驱动（语法资产 ~30% 不可归还），内存读数不经过解析路径，不受截断影响；
+「换一套没有按语言常驻资产的引擎」这个理由完整成立。受影响的是「延迟也顺带大幅改善」这句
+附带结论——Lezer 的延迟优势比原表述小得多，但它不再有 0.5–1s 的**首用编译阻塞**，这一点不变。
+
+### 顺带的基准口径修正（#233）
+
+该域的固定开销（~1.6ms/次）是 wasm 出口（5–30µs/次）的约 50 倍，而全局单位成本门槛 32 字符
+是照 wasm 定的 ⇒ 小语料行会印出「4.78µs/字符」这类由固定开销除出来的假读数。
+`PerfPair.minUnitsForUnitCost` 因此改为**可按 pair 声明**，高亮域自报 **16000 字符**（实测
+固定开销摊到 ≤20% 的规模）。
