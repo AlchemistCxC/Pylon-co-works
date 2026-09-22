@@ -599,3 +599,17 @@
 - 文档：`.agents/spec/241-*.md`、`.agents/records/241-*.md`、`.agents/decisions/0020-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/decisions/0018-*.md`（修订）
 
 **我不碰**：`parseMarkdown`（comrak）与 markdown parity 快照锁、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`（消费点应零改动）、`codeBlockDomLifecycle.ts` 的机制本体、中控区、预设系统、他人在途域。
+
+---
+
+[2026-09-22 16] [Miyaki Kumo] [#245]
+
+**开工：后端 `src-tauri/src/` 根目录散落文件归类（纯 `git mv` + 模块路径修正，零行为变更）。** spec 见 `.agents/spec/245-host-src-file-regroup.md`。分支 `Ru5t/host-src-regroup`（自 `github/main` 新开——Reflector 与 renderer-memory-probe 均压有未合并工作，本重构需要干净 diff，勿 merge 带走）。
+
+**我方本轮文件域（大体量移动，请勿改写、勿连带提交）**：
+
+- `src-tauri/src/` 根约 25 个文件 `git mv` 入家族目录（browser/gateway/hermes/mcp/pet/prism/workspaces/agent/session/runtime_log/acp），lib.rs 声明与全 crate `crate::X` 路径修正
+- `src-tauri/config-template.rs`（删除，全仓零引用的死脚手架）、`src-tauri/winds.c` → `src-tauri/tools/winds.c`（归档 + 头注释）
+- `docs/说明书/Pylon-项目架构参考.md`（文件表路径同步）、`.agents/records/`、本文件
+
+**我不碰**：`test_harness.rs`/`test_utils.rs`（原地不动）、全部实现逻辑（diff 只有路径/声明/use 行）、前端 `src/**`、pylon-* 子 crate、`tools/**`、他人在途域。
