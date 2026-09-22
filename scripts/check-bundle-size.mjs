@@ -67,8 +67,26 @@ const entries = files
   })
   .sort((a, b) => b.raw - a.raw)
 
-// 主 chunk：index-*.js（非 vendor）
-const main = entries.find(e => /^index-.*\.js$/.test(e.name) && !e.name.startsWith('vendor-'))
+// 主 chunk：**入口**（`index.html` 里 `<script type="module" src>` 指向的那个）。
+//
+// 为什么不再用 `index-*.js` 通配挑（#241 修正）：Vite 也会把**懒加载的共享 chunk** 命名成
+// `index-*`（本次高亮引擎 chunk 就是），一旦出现第二个匹配，`find` 会按 readdir 顺序挑中
+// 懒 chunk，于是「主应用 chunk」这个读数**量错了文件**且无人察觉。从 index.html 解析入口是
+// 确定性的，语义也对得上「主应用」。
+function resolveEntryChunk() {
+  try {
+    const html = readFileSync(resolve(distDir, '..', 'index.html'), 'utf8')
+    const match = html.match(/<script[^>]*type="module"[^>]*src="[^"]*?([^/"]+\.js)"/)
+    if (match) {
+      const found = entries.find(e => e.name === match[1])
+      if (found) return found
+    }
+  } catch {
+    /* 退通配兜底 */
+  }
+  return entries.find(e => /^index-.*\.js$/.test(e.name) && !e.name.startsWith('vendor-'))
+}
+const main = resolveEntryChunk()
 const totalGzip = entries.reduce((sum, e) => sum + e.gz, 0)
 
 // #220：wasm 产物按 raw + gzip 记账（此前完全不进本门禁）。
