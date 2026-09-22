@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { alignThemeStructure } from '../migration.ts'
 import { DEFAULTS } from '../themeDefaults.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
-import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout } from '../../../ccLayoutState.ts'
+import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout, type CcLayoutV3 } from '../../../ccLayoutState.ts'
 
 /**
  * #238 刀2 · 结构对齐（`alignThemeStructure`）的等价性 / 幂等 / 不覆盖用户值。
@@ -22,6 +22,10 @@ const defaults = {
 
 /** 用户手调过的一把值：offset/order + 若干已设字段。 */
 const USER_PLACEMENT = { slot: 'status-secondary' as const, order: 7, offsetX: 12, offsetY: -3 }
+
+/** 造一份"只有部分控件项"的旧布局（老浏览器里存的真实形状就是缺项）。 */
+const partialLayout = (version: number, placements: Record<string, unknown>): Partial<CcLayoutV3> =>
+  ({ version, placements }) as unknown as Partial<CcLayoutV3>
 
 type Aligned = {
   ccLayout: { version: number; placements: Record<string, unknown> }
@@ -82,14 +86,14 @@ describe('#238 刀2 · (b) 版本号是垃圾值 / 未来值 ⇒ 不再整份重
   const placements = { model: { ...USER_PLACEMENT } }
 
   it('版本 7（发布过、曾被白名单漏掉）⇒ 位置保留', () => {
-    const normalized = normalizeCcLayout({ version: 7, placements })
+    const normalized = normalizeCcLayout(partialLayout(7, placements))
     expect(normalized.placements.model).toEqual(USER_PLACEMENT)
     expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
   })
 
   it('版本 0 / 未来值 999 / 非数字 ⇒ 位置一律保留', () => {
     for (const version of [0, 1, 999, -1]) {
-      const normalized = normalizeCcLayout({ version, placements })
+      const normalized = normalizeCcLayout(partialLayout(version, placements))
       expect(normalized.placements.model, `version=${version}`).toEqual(USER_PLACEMENT)
     }
   })
@@ -139,7 +143,7 @@ describe('#238 刀2 · 幂等（连跑两次结果相同）', () => {
   })
 
   it('normalizeCcLayout 两次 = 一次', () => {
-    const once = normalizeCcLayout(legacy.ccLayout)
+    const once = normalizeCcLayout(partialLayout(legacy.ccLayout.version, legacy.ccLayout.placements))
     expect(normalizeCcLayout(once)).toEqual(once)
   })
 
