@@ -613,3 +613,19 @@
 - `docs/说明书/Pylon-项目架构参考.md`（文件表路径同步）、`.agents/records/`、本文件
 
 **我不碰**：`test_harness.rs`/`test_utils.rs`（原地不动）、全部实现逻辑（diff 只有路径/声明/use 行）、前端 `src/**`、pylon-* 子 crate、`tools/**`、他人在途域。
+
+---
+
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支沿用 `Ru5t/renderer-memory-probe`（#240 附六/探针所在支，PR #242 在途；#243 实现为堆叠提交）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 核心：`src/renderers/solid-workbench/chat/PlainMessageList.solid.tsx`、**新增** `src/renderers/solid-workbench/chat/rowHeightTable.ts`、`rowHeightEstimate.ts`
+- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅占位符行与杀停开关一节）
+- 依赖：`package.json`、`bun.lock`（**已** `bun add @tanstack/solid-virtual@3.13.40`，D9 裁定）
+- 测试：`chat/__tests__/PlainMessageList.solid.test.tsx`（**仅 issue 点名的 #212 三条窗口用例改写**，逐个登记；其余原样）、**新增** `chat/__tests__/issue243.*`、`__tests__/sessionScale.probe.solid.test.tsx`（切片 5 口径同步）
+- 文档：`.agents/spec/240-*.md`（一次性）、`.agents/records/`、`docs/说明书/` 聊天渲染节、本文件、issue #243 回写
+
+**我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
