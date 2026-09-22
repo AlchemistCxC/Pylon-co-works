@@ -679,3 +679,25 @@
 **不碰**：布局模型与锚点（刀3 已定）、碰撞约束（刀4）、缩放（刀7）、属性面板分块（刀6）、死数据清理（第③件）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
 **给后来者**：实机验收要用普通 `cargo build` 的二进制（`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物，跑不起来）。
+
+---
+
+[2026-09-23 00] [Baryon] [#238 · 刀5B]
+
+**续开工：刀5B 命令行提示升格（普通行内元件）+ 分隔点整族删除。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/08-施工单-刀5B-命令行提示升格.md`。前置刀5A 已完工（`61267ea1`）。
+
+**本刀（在刀1~刀5A 文件域之上叠加）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（★ 加 `inActiveSession: 'show'|'hide'` + `conditions` 两正交字段，替换 `alwaysVisibleInActiveSession`；加条件表 `CC_VISIBILITY_CONDITIONS`；`isWidgetVisible` 判定顺序改为 `ccHidden → inActiveSession → conditions`；`WidgetVisibilityCtx` 补 `hasSession`/`hintMode`；`cc-command-hint` 行 `draggable: false → true`）
+- `src/ccHeightState.ts`（计数调用方补新 ctx 字段；**计数逻辑本身不改**）
+- `src/themeFieldDefs.ts`（`ccHeight` 的 `minFn` 若需补 ctx）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（`renderBody` 加 `cc-command-hint` 分支；**删裸渲染** `commandHint()` 与两处调用；**删分隔点插入逻辑**）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css`（删分隔点样式族 + 旧 `::before` 规则；`.cc-command-hint` 去掉整行特化）
+- `.../solid-workbench/WorkbenchChrome.css`（删那处 `content:none !important` 收口）
+- 测试：`domains/cc/__tests__/widgetDefinitionTable.test.ts`、`renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx` 等（分隔点/名单/工具条断言同步，逐条点名）
+- 文档：`.agents/records/238-*-刀5B*.md`、本文件；仓外《中控元件总表》与第③件待办同步
+
+**不碰**：布局模型与锚点（刀3）、碰撞算法本体（刀4，**但要回归四条**）、缩放（刀7）、面板分块（刀6）、其余死数据（第③件）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**两处预期变化**：编辑工具条 **6 → 7**、**分隔点消失**。其余要求零变化（字号、文案、三档行为、非 cli 不显示）。
+★ cli 模式可能 **+25px**（提示成了那一行第 5 个元件，跨过"超过 4 个多留一行"的阈值）：用户已同意**先接受 + 实测**，**不许自行改阈值**。
