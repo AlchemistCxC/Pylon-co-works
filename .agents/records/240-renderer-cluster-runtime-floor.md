@@ -343,3 +343,40 @@ Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory
 Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory |
   Select-Object AvailableMBytes, StandbyCacheNormalPriorityBytes, CacheBytes, CommittedBytes, CommitLimit
 ```
+
+## 附四：削减方案（含实测的 flag 杠杆）
+
+### 先记一个能力：**WebView2 认 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`**
+
+实测：启动前设该环境变量，参数会**叠加**进 Pylon 的 WebView2 进程命令行（在浏览器进程与子进程里都出现）。
+⇒ **不必重建就能 A/B 浏览器 flag**。要"出厂生效"则走两条路之一：`tauri.conf.json` 的 `additionalBrowserArgs`（要重建），
+或应用在创建 webview 前 `std::env::set_var`（改代码但不改配置）。
+
+### 实测过的杠杆（冷启动、无会话；基线 7 进程 WS 515.4 MB / 私有 211.6 MB）
+
+| 配置 | 进程 | WS 求和 | 私有 | ΔWS | Δ私有 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 默认 | 7 | 515.4 | 211.6 | — | — | |
+| **`--in-process-gpu`** | **6** | **476.2** | **195.7** | **−39** | **−16** | GPU 并入 browser（201 MB WS / 73 MB 私有）；**截图验证渲染正常** |
+| `--disable-gpu-compositing` | 7 | 501.4 | 198.3 | −14 | −13 | 软件合成；GPU 进程私有 53 → 38 MB |
+| 两者叠加 | 6 | 476.6 | 196.8 | −39 | −15 | 无额外收益（GPU 已在进程内） |
+| `EmptyWorkingSet` 裁剪（重会话态） | 7 | 592 → 49 | 258 → 30 | 仅显示值 | | **commit 一字不变**；空置 22 s 回到 84 MB |
+
+### 方案（按「收益 ÷ 成本」排序）
+
+1. **`--in-process-gpu`（推荐先做）**：−39 MB 工作集 / −16 MB 私有，少一个进程，渲染已验证正常。
+   代价：GPU 隔离性没了（GPU 崩会带走 browser 进程）；需在滚动/流式动画下验体感（用 #221 的 longtask 观察法）。
+2. **窗口隐藏/最小化时裁一次工作集**（代码层 `EmptyWorkingSet`）：**只降显示值**，不改物理占用。
+   建议仅 on-hide 触发、不周期裁——否则就是烧 CPU 换任务管理器上的数字（实测 22 s 就涨回来）。
+3. **拆解宿主进程那 32 MB 私有**（我们自己最大的一块）：用 #240 那套**计数分配器**分档定位
+   （arena / 字体 / 插件 / WebView2 宿主侧共享缓冲）。先测量再动手，别凭猜。
+4. **长会话的 DOM 增长**（结构性杠杆）：当前 4.1 万字符 → 4225 节点 / JS 堆 13 MB（还很小）；
+   线性外推百万字符会话 ≈ 10 万节点、JS 堆可能上百 MB。**消息行虚拟化**（#221 已为代码块做过视口降级，同一套机制可复用）
+   是唯一能改这条斜率的手段。需要先拿一个大会话把斜率测出来。
+5. **CSS 规则数 3052**：Blink 的样式结构/匹配缓存与之相关；一次性成本，优先级低于 3/4，列为长期清理项。
+
+### 明确不建议 / 不可为
+
+- **不可以减的**：`msedge.dll` 的 93 MB 唯一常驻（运行时本体，与 Edge 浏览器 md5 相同）、Windows DLL、GPU 驱动栈（NVIDIA+Intel 两套 21 MB）。要动只能换渲染宿主——产品级决策，不在本仓范围。
+- **不建议**：周期性 `EmptyWorkingSet`（纯数字游戏 + page fault 成本）；`--disable-gpu`（未测，预计渲染器内存反升、CPU 更高）。
+- **不属于"我们"的**：WebView2 各进程基线（browser 34 MB 私有、utility 10 MB 等）；JS 堆 GC 后仅 13 MB，V8 侧没有可观的浪费。
