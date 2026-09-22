@@ -646,7 +646,6 @@
 - 文档：`.agents/records/258-*.md`（完工时新增）、本文件
 
 **我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
-=======
 
 ---
 
@@ -659,3 +658,17 @@
 - `.agents/records/259-*.md`（完工时新增）、本文件
 
 **我不碰**：`src/`（#257/#258 等在途域）、`src-tauri/**`、`tools/**`。全程 pathspec 提交。
+
+---
+
+[2026-09-23 07] [Miyaki Kumo] [#260]
+
+**开工：issue260（后端+前端开销清偿第二批——#258 扫描遗留 14 项，行为零变化）。** spec 见 `.agents/spec/260-overhead-paydown-batch2.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。四批文件域，请勿改写、勿连带提交：
+
+- 批次 A：`src-tauri/pylon-acp/src/wire_trace.rs`、`src-tauri/src/lifecycle/mod.rs`（仅 wire_trace_snapshot 命令段）、`src-tauri/pylon-acp/Cargo.toml` + 根 `Cargo.lock`（serde +rc）、`src-tauri/src/acp/{golden_trace_tests,p1_wire_regression_tests}.rs`、`src-tauri/src/test_harness.rs`（仅 WireRecord 字段类型跟随）
+- 批次 B：`src-tauri/pylon-acp/src/{engine,client,stderr_tail,turn_ledger}.rs`、`src-tauri/src/hook_bridge.rs`（仅 emit 段）
+- 批次 C：`src/domains/tool/toolPresentation.ts`、`src/components/chat/toolPresentationModel.ts`、`src/renderers/solid-workbench/chat/GenerationFooter.solid.tsx`、`src/components/sidebar/SessionsPanel.tsx`
+- 批次 D：**删除** `src/components/chat/spinnerVerbs.ts`；`src/plugin-runtime/storage/pluginStorageApi.ts`、`src/components/PetCompanion.tsx`、`src/identityStore.ts`
+- 文档：`.agents/records/260-*.md`（完工时新增）、本文件（顺手清掉 #259 条目上方残留的孤立 `=======` 行）
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）、中控区、预设系统、`scripts/**`（#259 域）。既有测试除编译必需的类型跟随外零修改。全程 pathspec 提交。
