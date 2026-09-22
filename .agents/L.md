@@ -581,3 +581,22 @@
 - 文档：`.agents/records/234-*.md`、`.agents/records/237-*.md`、本文件
 
 **我不碰**：`src/sheets/agent-workbench/**`、`src/domains/events/**`、`src/__tests__/replay/**`（判据侧）、`vitest.config.ts`、中控区、预设系统、他人在途域（`scripts/perf-bench/**` 除 projectorSuite 外一律不动）。
+
+---
+
+[2026-09-22 15] [Baryon] [#238]
+
+**开工：中控元件两级定义表·刀1（结构步，行为零变化）。** 分支 `feat/cc-widget-definition-table`（基于 `origin/main @ 94d88ede`）。施工单 `元件定义表/01-施工单-刀1-两级定义表立表.md`。**本刀要求像素级零变化**（默认布局 / 工具条 6 条 / 中文名逐字 / 属性面板字段序 / 契约快照除 `generatedAt` 外逐字节）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（两级定义表的新家）
+- `src/domains/cc/widgetCatalog.ts`（名字/类别/位置三份改派生）
+- `src/ccLayoutState.ts`（`DEFAULT_CC_LAYOUT` / `CC_REGISTERED_SLOT_IDS` 改派生）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（名单/标签改派生）
+- 新增测试 `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（不变量）
+- 文档：`.agents/records/238-*.md`、本文件
+
+**不碰**：`src/plugin-runtime/cc-widget/**`（插件契约面）、`src/themeFieldDefs.ts`（只读且禁运行时 import）、`src/ccHeightState.ts`、`src/domains/workbench/appearance.ts`、`ControlCenter.css`、`WorkbenchWidgets.solid.tsx`（12px 间距按施工单停手条件 7 原地保留）、`src/components/cc/widgetCatalogView.ts` 及其测试（第③件的东西，本刀不动）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**给后来者**：中控区另两件（状态左行撤槽、死数据清理）与本件文件重叠 ⇒ **不许并行开工**；顺序 = 本件 → 状态左行 → 死数据清理。
