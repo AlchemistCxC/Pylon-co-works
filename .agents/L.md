@@ -672,3 +672,18 @@
 - 文档：`.agents/records/260-*.md`（完工时新增）、本文件（顺手清掉 #259 条目上方残留的孤立 `=======` 行）
 
 **我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）、中控区、预设系统、`scripts/**`（#259 域）。既有测试除编译必需的类型跟随外零修改。全程 pathspec 提交。
+
+---
+
+[2026-09-23 08] [Miyaki Kumo] [#261]
+
+**开工：issue261（评估修复批次——注释漂移清理、session 重复逻辑去重、prompt 终态臂拆分、plugin_cmds spawn_blocking；行为零变化）。** spec 见 `.agents/spec/261-assessment-fix-batch.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/session/{model,create,persist,prompt,fork}.rs`
+- `src-tauri/src/gateway/{mod,credentials}.rs`、`src-tauri/src/gateway/qq/mod.rs`
+- `src-tauri/src/agent/runtime.rs`、`src-tauri/src/mcp/mod.rs`（均仅注释）
+- `src-tauri/src/plugin_cmds/transaction.rs`（如命令体在 mod.rs 则一并，声明 `plugin_cmds/**`）
+- `src/runtimeStore.ts`、`src/store.ts`、`src/workspaceStore.ts`（**仅注释行**，不碰逻辑/类型/导出）
+- 文档：`.agents/records/261-*.md`（完工时新增）、本文件
+
+**我不碰**：#260 四批次在途域（`lifecycle/mod.rs`、`identityStore.ts`、`pylon-acp/**`、`Cargo.lock`、hook_bridge、toolPresentation 族、spinnerVerbs）；`src-tauri/src/dispatcher/**`（#155 域）；中控区、预设系统；`scripts/**`。全程 pathspec 提交，工作树里 #260 批次 A 未提交 WIP 原样保留、绝不 stage。
