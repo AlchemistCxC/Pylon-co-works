@@ -191,9 +191,11 @@ pub(crate) async fn export_session(
     }
     drop(sessions);
     if replay.metadata.truncated {
-        return Err(PylonError::ReplayTruncated {
-            dropped_count: replay.metadata.dropped_count,
-        });
+        return Err(PylonError::Storage(
+            pylon_session::SessionError::ReplayTruncated {
+                dropped_count: replay.metadata.dropped_count,
+            },
+        ));
     }
     let messages = replay.events;
     let safe_messages = sanitize_export_messages(&messages);
