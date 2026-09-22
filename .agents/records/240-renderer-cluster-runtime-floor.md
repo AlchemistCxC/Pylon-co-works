@@ -443,7 +443,7 @@ Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory |
 - 行测量与锚定：`PlainMessageList` 有 per-row ResizeObserver（`226-237`、`295-303`）与**自管锚点**（`captureAnchor` 260-275 / `syncAnchorCompensation` 277-291，锚是「messageId+top」对，**没有行高表**；
   `messageListPort.ts:6` 的 `estimatedHeight` 字段全仓无消费点）。贴底跟随在 `WorkbenchContent` 用整体 ResizeObserver + rAF 合并写 scrollTop。
 
-### 二、实测斜率（探针 `__tests__/sessionScale.probe.test.tsx`，默认 `describe.skipIf` 跳过）
+### 二、实测斜率（探针 `__tests__/sessionScale.probe.solid.test.tsx`，默认 `describe.skipIf` 跳过）
 
 | 消息数 | 行数 | **实际挂载行** | DOM 节点 | 节点/行 | 投递 | 全渲染 | jsdom heapUsed |
 | --- | --- | --- | --- | --- | --- | --- | --- |

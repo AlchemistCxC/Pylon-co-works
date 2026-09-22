@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // 长会话规模探针：量「行数 → DOM 节点 / JS 堆 / 耗时」的斜率。
 //
-// **默认跳过**（须显式开）：`SESSION_SCALE_PROBE=1 bunx vitest run src/renderers/solid-workbench/__tests__/sessionScale.probe.test.tsx`
+// **默认跳过**（须显式开）：`SESSION_SCALE_PROBE=1 bunx vitest run src/renderers/solid-workbench/__tests__/sessionScale.probe.solid.test.tsx`
+// （`.solid.test.tsx` 后缀是硬约定：否则该文件落入 React 侧 tsconfig 编译范围，Solid 模块图被按 React JSX 语义检查而全红。）
 // 它是**读数装置**不是断言门禁——行虚拟化的取舍要靠这条斜率，故留在树上可复跑（数据见
 // `.agents/records/240-renderer-cluster-runtime-floor.md` 附六）。
 //
