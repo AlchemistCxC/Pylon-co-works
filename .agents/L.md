@@ -624,7 +624,7 @@
 
 [2026-09-23 03] [Miyaki Kumo] [#253 #254 #255]
 
-**开工准备就绪，即将施工**（分支 `Ru5t/prometheus`，基于 main 25cef7bb；#245/#247 已随 PR #246/#249 合入 main）。文件域，请勿改写、勿连带提交：
+**开工准备就绪，即将施工**（分支 `kumo/prometheus`——2026-09-23 前缀由 Ru5t/ 更名 kumo/，即原 Ru5t/prometheus，基于 main 25cef7bb；#245/#247 已随 PR #246/#249 合入 main）。文件域，请勿改写、勿连带提交：
 - #253：`src/components/chat/messageSearchIndex.ts` + `src/components/chat/__tests__/messageSearchIndex.test.ts`
 - #254：`src/sheets/OverviewSheetView.tsx` + `src/sheets/__tests__/OverviewSheetView.visual.test.tsx`
 - #255：**暂不动代码**（口径 a/b/c 待用户拍板，见 `.agents/spec/255-workspace-count-scope.md`）
