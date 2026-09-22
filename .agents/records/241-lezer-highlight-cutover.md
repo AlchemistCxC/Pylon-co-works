@@ -154,11 +154,92 @@ markdown 内嵌代码块、插件 provider、**只读文件视图 `FileTabView`*
 | `tsc -b` / `check:solid` / `check:bundle` / `eslint` | ✅ 全 exit 0（wasm 198,431 / 230,000 不变；eslint 1 条既存 warning 非本改动） |
 | 基准 | ✅ m 档与 full 档均跑通；修后读数见上（`block-40k` 20.53ms、`block-200k` 87.42ms） |
 
+## 刀 6（2026-09-22，用户「现在做」）：解析按时间切片 + 片间让出——消掉最后一个静默降级
+
+刀5 把「>3k 丢色」修成「整段解析」，但留下一个尾巴：解析是**同步**的，用 200ms 预算兜住，
+**超过预算（约 45 万字符）仍退回部分树——静默降级依然是降级**。这一刀把它做掉。
+
+### 排掉的三个不可行路径（都是实测，不是推断）
+
+| 路径 | 实测结果 |
+| --- | --- |
+| `ensureSyntaxTree(state, len, 小预算)` 反复调用，逐片抬高 | **不累积**：每片烧掉整个预算、树长不动（400k 文档 20 片全是 3001 字符）。该函数每次 `updateViewport` 并还原，推进被丢弃 |
+| 直接驱动 `state.field(Language.state).context.work(ms, upto)` | **能累积**（`parsedPos` 每片涨 1–2 万，22 片走完全文），但 `work` / `isDone` / `tree` **不在 `ParseContext` 的公开声明里**（只有 `state`/`fragments`/`viewport`/`skipUntilInView`），要伸进内部 |
+| `parser.startParse(code, 上一棵树作 fragment)` + `TreeFragment.addTree` | **抛异常**（`FragmentCursor.nodeAt` 读 undefined）：ranged/fragmented 复用的前置条件不满足 |
+
+### 采纳的形状（只用 Lezer 公开 API）
+
+`Parser.startParse(code, [])` 得到 `PartialParse`，**空转 `advance()` 直到它返回树**——`advance()`
+每次只推进约 1µs，未完成时返回 `null`，所以「攒够一个时间片就让出」是自然的：
+
+```ts
+const parse = parser.startParse(code, [])
+let sliceStartedAt = now()
+for (;;) {
+  const tree = parse.advance()
+  if (tree !== null) return tree
+  if (now() - sliceStartedAt >= PARSE_SLICE_MS) { await yieldToEventLoop(); sliceStartedAt = now() }
+}
+```
+
+CodeMirror 自己就是这么驱动它的空闲解析（`while (!(tree = parse.advance())) {}`）。
+等价性：与走 `Language` machinery（`EditorState` + `ensureSyntaxTree`）的结果**逐区间完全一致**
+（ts 9888 符文 / html 529 符文，含 html 的嵌套语言——html 是唯一有 `parseMixed` 的受支持语言，
+故用它做等价性判据最严）。根因也清楚：CM 的 `Language.state` 内部用的就是同一个
+`support.language.parser.startParse`。
+
+让出实现按运行时能力择一：`scheduler.yield()`（Chromium 129+，WebView2 153 有）→ `MessageChannel`
+（无 `setTimeout` 的 4ms 嵌套钳制）→ `setTimeout(0)`（jsdom 兜底）。
+
+### 顺带砍掉两块固定开销
+
+1. **去 `EditorState`**：解析改走 `support.language.parser` 后不再需要 state，随之去掉每次调用的
+   `@codemirror/state` / `@codemirror/language` 运行时 import。
+2. **去掉重复解析**：旧路径里 `EditorState` 的 `Language.state` 字段初始化会先同步解析一个块
+   （3006 字符），随后 `ensureSyntaxTree` 为了到 4000 又从头解析一遍 ⇒ **前 3006 字符解析两遍**。
+   单次 `startParse` 只解析一遍。
+3. `highlightTree` 与 `tags` 同在 `@lezer/highlight`，并入引擎缓存，不再每次动态 import。
+
+### 效果（同机，Bun/JSC）
+
+| 规模 | 刀5（`ensureSyntaxTree`，200ms 预算） | 刀6（切片驱动） |
+| --- | --- | --- |
+| 4,000 字符 | 4.43ms | **2.05ms** |
+| 12,000 | 6.37ms | **4.71ms** |
+| 40,000 | 19.82ms | **17.22ms** |
+| 200,000 | 91.02ms | **76.23ms** |
+| 500,000 | **201ms 后截断到 3001 字符**（冻结与丢色同时发生） | **235ms 全解析**（切片让出，无帧独占） |
+
+基准 m 档：`block-4k` 4.50→**2.84ms**、`block-40k` 18.31→**16.28ms**（0.407µs/字符）；
+`markdown-highlight` 域 Σ 25.05→**20.50ms**。js 总 gzip 1,461,516→**1,458,799**（−2.7KB）。
+切片总开销与一次性 `parse()` 同量级（400k：197ms vs 183ms，+7%）。
+
+### 测试（新增 4 条，全部用**注入**而非计时抖动）
+
+| 用例 | 判据 |
+| --- | --- |
+| 把分片预算压到 1ms（60k 必然超出） | 让出次数 > 0（切片路径确实走到）且**末段仍有色** |
+| 500k 的块 | 整段有色——这条对刀5 是红的（刀5 在 201ms 后停在 3001 字符） |
+| 小区块（19 字符） | 让出**零次**——不给小输入加成本（先热身一次以排除首调装载） |
+| 注入让出 vs 默认路径 | 产出逐行相等（让出不影响结果） |
+
+定向 `codeHighlight.test.ts` **26 passed**；全量 vitest **623 文件 / 4679 用例通过**，0 失败。
+`tsc -b` / `check:solid` / `check:bundle` / `eslint` 全 exit 0。
+
+### 代价与边界
+
+- **不设总量上限**：切片只限制「单次不让出多久」，总量随规模线性增长（1MB ≈ 0.47s，但分摊到帧）。
+  这是有意的：回到任何形式的「算一半」就是回到静默降级。
+- 让出把作业拉长到跨帧，`codeBlockDomLifecycle.ts` 的 8ms 帧预算调度器因此改口径（见该模块注释：
+  它继续管**作业顺序**，帧内让出交给引擎）。
+- 仍未做：**流式尾块复用解析状态**（每次调用仍从零解析）。那要保留 state 并做增量，属另一件事。
+
 ## 测试处置
 
 - 修改：`src/components/chat/__tests__/codeHighlight.test.ts` —— ① `scopeForLanguage` 表断言（3 条：2 条别名表 + 1 条未知语言）改为 `hasHighlightLanguage` 断言（等价判据，别名集合不变）；② **cpp 的「已知限制」升级为正向断言**（旧实现每语法独立 SyntaxSet ⇒ cpp 顶层 include 的 source.c 未注册 ⇒ 静默零分词；Lezer 的 lang-cpp 自带基础语法 ⇒ 现在真的着色）。这正是 ADR-0020 记的**有意分叉**。
 - 修改（刀3）：`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts` —— **重写为仅 markdown**：删掉 `GRAMMAR_LOADERS`/`highlightHast`/`flattenTsTokens`/`flattenRustLines`/`report` 与 starry-night 装载，保留 script-run 快照/语料覆盖断言 + 「全部 117 条 case 与 `rust-snapshot.json` 深相等」。**这是契约变更型修改**：被删的一半所对照的两侧（TS 基线 `ts-baseline.json` 与 wasm `highlightBlock`）都已退役，门禁无可对照物。
 - 新增（刀5）：`src/components/chat/__tests__/codeHighlight.test.ts` 的「大块整段着色（回归：同步解析上限截断）」两条（6k / 20k ts 块，末段必须有 `pl-*`）。判据选「末段有色」而非「总色数」：截断的特征恰是后半段标记数为 0，总数断言在「抬高截断点」的实现下会假绿。
+- 新增（刀6）：同文件「解析切片：不截断、片间让出」四条——1ms 预算下 60k 仍整段有色且确实让出、500k 整段有色（对刀5 为红）、小区块零让出、注入让出与默认路径结果逐行相等。
 - 未修改但已复核：`FileTabView.readonly`（2 处 `pl-*`）、`issue221.codeBlockLifecycle`（1 处）在切流后**原样通过**。
 
 ## 证据
@@ -181,7 +262,8 @@ markdown 内嵌代码块、插件 provider、**只读文件视图 `FileTabView`*
 1. **真机未单独核的两面**：文件只读视图（`FileTabView`，由单测 `pl-*` 断言覆盖）、流式新代码块（同一条 `highlightCode` 路径，未在真机单独触发）。
 2. **首次延迟的隔离**：刀2 只测到「切会话 → 首个 span 121.3ms / 结算 421.8ms」（含投影与渲染）；旧引擎的编译阻塞（433/654ms）是**由构造消失**（不再有编译），不是同一指标的 A/B。
 3. **`pl-smi` 类归属**（刀2 遗留）：Lezer 侧变量（`pl-v`）与「类名/成员」在部分语言里落到同一 tag；刀2 已按现状映射，未单独立项。
-4. **刀3 后未复跑实机**：本轮验证是「构建产物体积 + 全量门禁 + 基准跑通」，**产品行为**的实机证据仍来自刀2（那时消费路径已定且之后零改动）。若要更稳，可再装一次实例做同轮 A/B——判据不会变（高亮仍工作），故未做。
+4. **实机证据仍是刀2 那一轮**：刀3~刀6 的验证是「构建产物体积 + 全量门禁 + 基准 + 注入式行为测试」。刀5 的教训是**小代码块的实机验收不足以覆盖高亮路径**——若要做更强的实机验收，样本里必须包含一个 >3k 的块与一个只读大文件。
+5. **流式尾块的解析状态复用**（刀6 后仍待）：每次调用仍从零解析整段；流式场景逐帧增长的尾块若保留解析状态可再省一大截，属独立的增量解析议题。
 
 ## 刀 4（说明书与 ADR 同步，已完成）
 
