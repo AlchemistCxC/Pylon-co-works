@@ -528,3 +528,9 @@
 [2026-09-22 06] [Miyaki Kumo] [#228 进展：六批次全部落地]
 
 **A/B/C/D/E/F 十三笔功能提交已在 `Ru5t/Reflector`（`027ad83c..HEAD`），门禁全绿（vitest 622 文件/4678 用例、cargo test 1344、clippy 基线零新增、build 全链、生产产物排除 demo/mockTauri），开发记录 `.agents/records/228-tech-debt-paydown.md`。** 即将推送开 PR。文件域声明不变；**dispatcher 拆分仍延后**（#229/#230 条目在 L.md 期间不碰该文件），FileTabView 状态机与 CodeBlock 计时器接入两笔已定位为后续（见记录未解问题 2/3）。
+
+---
+
+[2026-09-22 09] [Miyaki Kumo] [#232]
+
+**开工：release.yml 恢复 tag 触发自动发行（打 tag 即构建上传）+ 版本一致性/main 归属两道守卫。** 用户裁定（AskUserQuestion）。本轮文件域仅 `​.github/workflows/release.yml`、`.agents/L.md`，请勿改写、勿连带提交。
