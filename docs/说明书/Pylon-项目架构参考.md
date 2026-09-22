@@ -243,6 +243,8 @@ Workbench 的底部跟随由 `followBottom` sticky seam 控制。`PlainMessageLi
 
 完成代码块的高亮 DOM 有显式生命周期（#221，`chat/codeBlockDomLifecycle.ts`）：高亮由共享 IntersectionObserver 门控（上下各一屏余量，进圈才发起、经帧预算调度器排队）；视口外的块把 token-per-span 树降级为纯文本行（`.term-code-line/gutter/text` 骨架与行高恒定，等宽字体下折行位不变），每行高亮 HTML 串留在 JS 缓存，重进视口先走缓存恢复、未命中才重高亮；出圈降级带 500ms 滞后带防滚动抖动。宿主无 IntersectionObserver（测试宿主）时整套机制旁路，行为与直接整块高亮一致。插件 provider 契约（`highlightCode`，HTML 串进出）与引擎「整块进、行数组出」边界不受影响（高亮引擎自 #241 起是前端 Lezer 的 `chat/lezerHighlight.ts`，不再是 wasm 计算核；边界形状未变，故本节机制与消费方零改动）。`.term-code-block` 另有 `contain: layout` 布局圈闭；消息行级圈闭不可行（`.copy-btn` 溢出行外）。
 
+长时间线会话的行虚拟化（#243，`chat/PlainMessageList.solid.tsx`）：行数与字符量双阈值（≥300 行且 ≥100k 字符，取「与」；prop 可强制，祖先带 `data-row-virtualization="off"` 杀停）之上的会话启用视口窗口——引擎 `@tanstack/solid-virtual`（headless，ADR 同 #243 决策 D9）只负责取窗与实测：按行 key 的尺寸缓存卸载不丢、`measureElement` 挂 ResizeObserver 回填实测、尺寸修正经 `shouldAdjustScrollPositionOnItemSizeChange` 姿态门控（仅 pin 姿态、仅视口起点之上、非上滚途中）。估算层是 `chat/rowHeightTable.ts`（按 key 的尺寸真值 + 最早脏索引增量重建的偏移数组）与 `chat/rowHeightEstimate.ts`（按渲染类型/内容量/toolOutputLines 的确定性估算，reasoning 折叠封顶），引擎仅在缓存未命中时经 `estimateSize` 回落。窗外的行不驻留 DOM，几何由容器内联 spacer 承载——高度取自同一张行高表，物化/卸载不改变布局总高，因此 prepend 不需要滚动补偿；滚动锚定仍走 #212 S4 的自管锚点（锚行恒在窗内）。`scrollTo` 命中窗外目标时走 `scrollToIndex`（自带动态尺寸收敛）只物化目标附近。短会话（低于阈值）保持 #212 渐进挂载窗口的原语义，DOM 结构逐字节不变。
+
 Host Port 的 `WorkbenchRuntime` Adapter 同时订阅 `document` 与 `generation` reader，并在微任务边界合并通知。该 seam 兼容 document/generation 分离的第三方 Suite，避免 generation-only 更新漏掉，同时不把两者重新聚合成单一事实状态。
 
 Agentsheet 空态使用输入优先的双层 Composer seam：context row 承载 workspace，输入区承载首条请求，选项 toolbar 承载模型/权限/思考强度；创建中、失败和乐观投影保持同一 DOM 结构。WorkspaceTitlebar 的应用控制与原生窗口控制分组，但共享统一 icon box、命中区和 focus contract，Presentation Profile 只提供外观差异。
