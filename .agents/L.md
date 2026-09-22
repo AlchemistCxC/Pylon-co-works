@@ -599,3 +599,19 @@
 - 文档：`.agents/spec/241-*.md`、`.agents/records/241-*.md`、`.agents/decisions/0020-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/decisions/0018-*.md`（修订）
 
 **我不碰**：`parseMarkdown`（comrak）与 markdown parity 快照锁、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`（消费点应零改动）、`codeBlockDomLifecycle.ts` 的机制本体、中控区、预设系统、他人在途域。
+
+---
+
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支 `Ru5t/session-virtualization`（自 renderer-memory-probe tip `ec56873a` 堆叠新开；主工作树检出已被 #245 会话占用，#243 在独立 worktree `../pylon-wt-243` 施工，勿在主工作树切回本支）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 核心：`src/renderers/solid-workbench/chat/PlainMessageList.solid.tsx`、**新增** `src/renderers/solid-workbench/chat/rowHeightTable.ts`、`rowHeightEstimate.ts`
+- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅占位符行与杀停开关一节）
+- 依赖：`package.json`、`bun.lock`（**已** `bun add @tanstack/solid-virtual@3.13.40`，D9 裁定）
+- 测试：`chat/__tests__/PlainMessageList.solid.test.tsx`（**仅 issue 点名的 #212 三条窗口用例改写**，逐个登记；其余原样）、**新增** `chat/__tests__/issue243.*`、`__tests__/sessionScale.probe.solid.test.tsx`（切片 5 口径同步）
+- 文档：`.agents/spec/240-*.md`（一次性）、`.agents/records/`、`docs/说明书/` 聊天渲染节、本文件、issue #243 回写
+
+**我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
