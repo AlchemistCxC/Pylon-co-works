@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { highlightCode, highlightCodeBuiltin } from '../codeHighlight.ts'
-import { hasHighlightLanguage } from '../lezerHighlight.ts'
+import { hasHighlightLanguage, highlightBlockWithLezer } from '../lezerHighlight.ts'
 
 describe('code highlight builtin', () => {
   it('resolves common file languages to grammars', () => {
@@ -103,6 +103,55 @@ describe('大块整段着色（回归：同步解析上限截断）', () => {
     const lines = html!.split('\n')
     expect(lines.length).toBeGreaterThan(50)
     const tail = lines.slice(Math.floor(lines.length * 2 / 3)).join('\n')
-    expect(tail).toMatch(/class="pl-[^"]"/)
+    expect(tail).toMatch(/class="pl-[^"]/)
+  })
+})
+
+// #241 刀6：解析改成「按时间切片 + 片间让出主线程」之后，有两条性质要锁住：
+// ① **预算再小也不截断**（截断正是 #241 那个静默丢色缺陷的形状）；② 小区块**不为让出付成本**。
+// 两条都用**注入**验证（让出函数可注入 + 分片预算可调），不依赖计时抖动。
+describe('解析切片：不截断、片间让出', () => {
+  const unit = 'export function sample(list: readonly string[]): number {\n'
+    + '  const mapped = list.map(item => item.length)\n'
+    + '  return mapped.reduce((a, b) => a + b, 0)\n'
+    + '}\n\n'
+  const block = (chars: number) => unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars)
+  /** 末段是否有色——判据同上一组：截断的特征就是后半段一个标记都没有。 */
+  const tailHasClass = (lines: readonly { spans: readonly { classes: readonly string[], text: string }[] }[]) => {
+    const cut = Math.floor(lines.length * 2 / 3)
+    return lines.slice(cut).some(line => line.spans.some(span => span.classes.length > 0 && span.text.trim() !== ''))
+  }
+
+  it('把分片预算压到 1ms（60k 的块必然超出）依然整段着色，且确实发生了让出', async () => {
+    let yields = 0
+    const lines = await highlightBlockWithLezer(block(60_000), 'ts', {
+      sliceBudgetMs: 1,
+      yieldToEventLoop: async () => { yields += 1 },
+    })
+    expect(lines).toBeDefined()
+    expect(lines!.length).toBeGreaterThan(500)
+    expect(yields).toBeGreaterThan(0)
+    expect(tailHasClass(lines!)).toBe(true)
+  })
+
+  it('超过旧的 200ms 总预算也不再截断（500k 的块整段有色）', async () => {
+    const lines = await highlightBlockWithLezer(block(500_000), 'ts')
+    expect(lines).toBeDefined()
+    expect(tailHasClass(lines!)).toBe(true)
+  }, 20_000)
+
+  it('小区块不为让出付成本：解析在片内完成，让出零次', async () => {
+    // 先跑一次把引擎装载与 JIT 预热掉，否则首调可能自己就超出一个分片
+    await highlightBlockWithLezer('const warm: number = 1\n', 'ts')
+    let yields = 0
+    await highlightBlockWithLezer('const x: number = 1\n', 'ts', { yieldToEventLoop: async () => { yields += 1 } })
+    expect(yields).toBe(0)
+  })
+
+  it('让出与否不影响结果：注入让出的产出与默认路径逐行一致', async () => {
+    const code = block(60_000)
+    const injected = await highlightBlockWithLezer(code, 'ts', { sliceBudgetMs: 1, yieldToEventLoop: async () => {} })
+    const normal = await highlightBlockWithLezer(code, 'ts')
+    expect(injected).toEqual(normal)
   })
 })

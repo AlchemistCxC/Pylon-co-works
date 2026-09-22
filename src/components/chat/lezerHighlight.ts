@@ -2,16 +2,23 @@
 //
 // 为什么是 Lezer 而不是继续用 wasm：见 ADR-0020 的四张实测表——语法资产占渲染器可控内存
 // ~30% 且**不可归还**（wasm 线性内存只涨不跌、GC 无效），首次用到某语言还要同步编译
-// 0.5–1s；Lezer 侧 12 个语法合计 ~8.9MB、单次 4KB 高亮 1.13ms、且与应用里的编辑器同一引擎。
+// 0.5–1s；Lezer 侧 12 个语法合计 ~8.9MB、且与应用里的编辑器同一引擎。
 //
 // 本模块只做**计算**：整块代码进、行数组出（每行一组 span）。**不做**缓存、不做语言别名门
 // 之外的编排、不产 HTML——那三层留在 `codeHighlight.ts`（消费方零改动的关键）。
 //
-// 两个刻意的形状选择：
+// 三个刻意的形状选择：
 // 1. **出口形状与 wasm 版一致**（`HighlightedLine[]`：每行一组 `{ classes, text }`），
 //    这样切流只换「行数组从哪来」，`codeHighlight.ts` 的拼 HTML / 转义 / 缓存一行不动。
 // 2. **CodeMirror 全部动态 import**：它们体量不小，静态 import 会进主 chunk 撞
 //    `check:bundle` 的 MAIN_BUDGET（编辑器侧同样是懒加载，见 FileCodeEditor 的注释）。
+//    引擎对象（语言清单 / tag→类名高亮器 / `highlightTree`）**在首次调用时一次性缓存**，
+//    之后每次调用不再有动态 import 的固定开销。
+// 3. **解析按时间切片 + 让出主线程**（`parseWholeDocument`）：整段同步解析在大块上会冻结帧，
+//    而「解析到一半就返回」正是 #241 出现过的**静默丢色**缺陷。二者都不取——切片推进到整段
+//    解析完，片间让出。
+
+import type { Language } from '@codemirror/language'
 
 /** 一行的行内片段：`classes` 为空表示该段无类（渲染成纯文本）。 */
 export interface LezerHighlightSpan {
@@ -144,27 +151,20 @@ async function buildTagToClass(): Promise<Array<{ tag: unknown, cls: string }>> 
 let enginePromise: Promise<{
   languages: readonly { extensions: readonly string[], name: string, load: () => Promise<unknown> }[]
   highlighter: unknown
+  highlightTree: (tree: unknown, highlighter: unknown, callback: (from: number, to: number, classes: string) => void) => void
 }> | undefined
 
 /**
- * 整段同步解析的时间预算（ms）。
+ * 懒装载引擎与语言清单（首次调用才付这份成本；与编辑器侧同一套包）。
  *
- * **为什么不能只用 `syntaxTree()`**：CodeMirror 对「不在编辑器视图里的 state」只做**分段同步解析**，
- * `syntaxTree(state)` 拿到的树停在第一个同步块（本机实测恒为 **3006 字符**）。整块一次性高亮这条路径
- * 没有视图替它继续推进解析，于是超出的部分**静默丢色**——实测 40k 字符的 ts 块只有前 2486 字符有色，
- * 第 81 行往后全是纯文本（只读文件视图、聊天代码块、markdown 内嵌块、插件 provider 四条路径同此）。
- * `ensureSyntaxTree(state, upto, timeout)` 会把解析同步推进到 `upto`，这才是「整块进、整块出」该有的调用。
- *
- * 预算的取舍：解析是**同步**的，超时会把主线程卡住。实测 40k 字符 ≈ 27ms、120k ≈ 46ms（JSC），
- * 故 200ms 覆盖到数十万字符量级；再大的输入**宁可退回部分树**（与修复前同形）也不冻结帧。
- * 真想支持无上限的巨块，正路是保留解析状态做**分帧增量**（#241 未决问题 4），不是继续抬这个预算。
+ * `highlightTree` 与 `tags` 同在 `@lezer/highlight`，故一并缓存——此前它走每次调用的
+ * 动态 import，实测在 Bun 下每次约 0.17ms（V8 下约 17µs），对本函数 0.5–1.6ms 的固定开销
+ * 是可观的一块（`@codemirror/state` 与 `@codemirror/language` 的运行时 import 已随解析改走
+ * 低层 API 一并去掉）。
  */
-const FULL_PARSE_BUDGET_MS = 200
-
-/** 懒装载引擎与语言清单（首次调用才付这份成本；与编辑器侧同一套包）。 */
 function loadEngine() {
   enginePromise ??= (async () => {
-    const [{ languages }, { tagHighlighter }] = await Promise.all([
+    const [{ languages }, { tagHighlighter, highlightTree }] = await Promise.all([
       import('@codemirror/language-data'),
       import('@lezer/highlight'),
     ])
@@ -172,38 +172,97 @@ function loadEngine() {
     return {
       languages: languages as never,
       highlighter: tagHighlighter(table.map(({ tag, cls }) => ({ tag: tag as never, class: cls })) as never),
+      highlightTree: highlightTree as never,
     }
   })()
   return enginePromise
 }
 
+/** 单次同步推进的时间预算（ms）：超过它就让出主线程，让出后继续推进到解析完。 */
+const PARSE_SLICE_MS = 8
+
+export interface LezerHighlightOptions {
+  /** 分片预算覆盖（测试用；缺省 8ms，与 #221 高亮调度的帧预算同量级）。 */
+  readonly sliceBudgetMs?: number
+  /** 让出主线程的实现覆盖（测试用；缺省按运行时能力选）。 */
+  readonly yieldToEventLoop?: () => Promise<void>
+}
+
+/**
+ * 让出主线程一次（宏任务，保证渲染有机会发生）。
+ *
+ * 顺序：`scheduler.yield()`（Chromium 129+，WebView2 当前 153 有）→ `MessageChannel`
+ * （无 setTimeout 的 4ms 嵌套钳制）→ `setTimeout(0)`（兜底，jsdom 等）。
+ */
+function defaultYieldToEventLoop(): Promise<void> {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
+  if (typeof scheduler?.yield === 'function') return scheduler.yield()
+  if (typeof MessageChannel === 'function') {
+    return new Promise(resolve => {
+      const channel = new MessageChannel()
+      channel.port1.onmessage = () => { channel.port1.close(); resolve() }
+      channel.port2.postMessage(null)
+    })
+  }
+  return new Promise(resolve => { setTimeout(resolve, 0) })
+}
+
+/**
+ * 解析整段代码，**一定推进到最后一个字符**；单次同步推进超过分片预算就让出主线程。
+ *
+ * 为什么不用 `syntaxTree()` / `ensureSyntaxTree()`：前者对「不在编辑器视图里的 state」只做
+ * 分段同步解析，树停在一个同步块（本机实测 3006 字符）⇒ 大块**静默丢色**；后者的超时分支会
+ * 丢弃本次推进（实测反复调用不累积），于是「要么一次算完（大块冻结帧）、要么算一半（丢色）」
+ * 二选一，两个都不能要。这两个坑都在 #241 里踩过（见 issue 评论与 ADR-0020 修订 1）。
+ *
+ * 这里直接用 Lezer 的公开解析 API：`Parser.startParse` 得到 `PartialParse`，空转
+ * `advance()` 直到它返回树——`advance()` 每次只推进一小步（实测约 1µs/次），未完成时返回
+ * `null`，因此**按时间让出**是自然的：攒够一个分片预算就让出一次，回来后接着空转。
+ * 总开销与一次性 `parser.parse()` 同量级（400k 字符实测 197ms vs 183ms，+7%）。
+ * CodeMirror 自己也用同一个对象驱动它的空闲解析（`while (!(tree = parse.advance())) {}`）。
+ */
+async function parseWholeDocument(
+  parser: Language['parser'],
+  code: string,
+  options: LezerHighlightOptions,
+): Promise<ReturnType<Language['parser']['parse']>> {
+  const sliceBudgetMs = options.sliceBudgetMs ?? PARSE_SLICE_MS
+  const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+  const parse = parser.startParse(code, [])
+  let sliceStartedAt = now()
+  for (;;) {
+    const tree = parse.advance()
+    if (tree !== null) return tree
+    if (now() - sliceStartedAt >= sliceBudgetMs) {
+      await yieldToEventLoop()
+      sliceStartedAt = now()
+    }
+  }
+}
+
 /**
  * 整块代码 → 行数组（每行一组 span）。语言未覆盖时返回 `undefined`（调用方回落纯文本）。
  *
- * 与旧 wasm 出口的差异只在内部：Lezer 是**增量解析器**，但本函数每次调用都新建
- * `EditorState`（一次性高亮，不持有文档状态）——所以「更快」来自没有编译期与过界编组，
- * 不来自增量。真要吃增量（流式尾块逐帧增长）需要保留 state，见 #241 未决问题 4 的说明。
+ * **永远整段解析**（`parseWholeDocument`）：不会为了赶帧而只染一半——「半染」在 #241 里
+ * 正是那个静默丢色缺陷的形状。大块的时间成本由**切片 + 让出**承担，见该函数说明。
+ * 与旧 wasm 出口的差异只在内部：没有编译期、没有过界编组，成本是纯 JS 的解析 + 遍历。
  */
 export async function highlightBlockWithLezer(
   code: string,
   language: string,
+  options: LezerHighlightOptions = {},
 ): Promise<readonly LezerHighlightedLine[] | undefined> {
   const hint = LANGUAGE_HINTS[language.toLowerCase()]
   if (hint === undefined) return undefined
-  const { languages, highlighter } = await loadEngine()
+  const { languages, highlighter, highlightTree } = await loadEngine()
   const description = languages.find((item) => {
     if (hint.name !== undefined && item.name.toLowerCase() === hint.name) return true
     return hint.extensions.some(extension => item.extensions.includes(extension))
   })
   if (description === undefined) return undefined
-  const support = await description.load()
-  const [{ EditorState }, { syntaxTree, ensureSyntaxTree }, { highlightTree }] = await Promise.all([
-    import('@codemirror/state'),
-    import('@codemirror/language'),
-    import('@lezer/highlight'),
-  ])
-  const state = EditorState.create({ doc: code, extensions: [support as never] })
-  const tree = ensureSyntaxTree(state, code.length, FULL_PARSE_BUDGET_MS) ?? syntaxTree(state)
+  const support = await description.load() as { language: Language }
+  const tree = await parseWholeDocument(support.language.parser, code, options)
 
   // 把「字符区间 → 类名」按行切成 span 数组（行内不含 '\n'，与旧出口同形状）。
   const lines: Array<LezerHighlightSpan[]> = [[]]

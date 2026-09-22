@@ -101,8 +101,13 @@ export interface HighlightSchedulerOptions {
 }
 
 /**
- * 作业串行是预算可信的前提：`highlightBlock` 的同步 wasm 成本发生在作业 Promise 的
- * microtask 段里，只有等上一个作业结算后再看钟，才把这段成本计入帧预算。
+ * 作业串行是预算可信的前提：只有等上一个作业结算后再看钟，才把它的成本计入帧预算。
+ *
+ * #241 刀6 起这条前提的两半都变了：引擎不再是 wasm（是前端 Lezer），且**解析自身**也会按时间
+ * 切片、片间让出主线程（`lezerHighlight.ts` 的 `parseWholeDocument`）。于是这里「本帧预算是否
+ * 用尽」的判据从「同步算力」变成了「作业是否已结算」——巨块作业会横跨若干帧，但它在帧内并不
+ * 独占主线程，故本调度器不需要（也不应该）按墙钟时长去打断或放弃作业：让出交给引擎，
+ * 本层继续负责**作业顺序**与**谁先发**。
  */
 export function createHighlightScheduler(options: HighlightSchedulerOptions): HighlightScheduler {
   const queue: HighlightJob[] = []
