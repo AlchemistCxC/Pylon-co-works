@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
@@ -14,6 +14,7 @@ import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCo
 import { toCssBackgroundImage } from '../../../backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
+import { parseTranslateOffset, resolveAllowedOffset, shouldBypassCollisionConstraint, type CcOffsetPair, type CcRectLike } from './ccPlacementCollision.ts'
 
 /**
  * ★★ #238 刀3：**槽位层已拆** —— 不再有「先分槽、再在槽里排序」两段式。
@@ -405,12 +406,10 @@ export function SolidControlCenter() {
     const start = appearance().ccLayout.placements[id]
     const move = (next: PointerEvent) => {
       if (next.pointerId !== pointerId) return
-      workbench.appearance.dispatch({
-        type: 'update-cc-placement', id,
-        placement: {
-          offsetX: start.offsetX + next.clientX - startX,
-          offsetY: start.offsetY + next.clientY - startY,
-        },
+      // ★ #238 刀4：**走带守卫的入口**（原先这里是直连 dispatch，会绕过占区不叠加约束）。
+      updatePlacement(id, {
+        offsetX: start.offsetX + next.clientX - startX,
+        offsetY: start.offsetY + next.clientY - startY,
       })
     }
     const stop = (next?: PointerEvent) => {
@@ -426,8 +425,61 @@ export function SolidControlCenter() {
     window.addEventListener('pointercancel', stop)
   }
 
+  /**
+   * ★★ #238 刀4「占区不叠加」——**两条通路共用**的守卫（拖拽与属性面板都走 `updatePlacement`）。
+   *
+   * 为什么必须共用一个入口：改偏移原本有两条通路，拖拽那条曾经**直连 dispatch**、
+   * 绕过了面板用的 `updatePlacement` ⇒ 只挂一条等于留个后门（在面板里把「水平微调」
+   * 直接输成重叠值一样能叠上去）。
+   *
+   * 放行条件（三者按序短路）：
+   * 1. **非编辑态** —— 直接放行 ⇒ 常态界面不跑任何几何（像素与性能零变化）；
+   * 2. **悬浮件**（`CC_FLOATING_WIDGET_IDS`，现只有发送按钮）—— 它本来就要压在输入栏上；
+   * 3. **只改 `order`** —— 改顺序是用户明确意图，不进本约束。
+   */
+  const measureWidgetBox = (id: string): { rect: CcRectLike; offset: CcOffsetPair } | undefined => {
+    const element = controlCenterElement?.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)
+    if (!element) return undefined
+    const box = element.getBoundingClientRect()
+    return {
+      rect: { left: box.left, top: box.top, right: box.right, bottom: box.bottom },
+      // ★ 与 `rect` 同源（同一 DOM 快照）：偏移从元素自己的 inline transform 读回，
+      //   **不**从 store 读 —— Solid 的事件里 DOM 更新可能还没落地，混用会算错一帧。
+      offset: parseTranslateOffset(element.style.transform),
+    }
+  }
+  const allowedPlacement = (id: CcLayoutWidgetId, partial: Partial<CcWidgetPlacement>): Partial<CcWidgetPlacement> => {
+    if (shouldBypassCollisionConstraint({
+      editMode: appearance().ccEditMode === true,
+      id,
+      floatingIds: CC_FLOATING_WIDGET_IDS,
+      touchesOffset: partial.offsetX !== undefined || partial.offsetY !== undefined,
+    })) return partial
+    const self = measureWidgetBox(id)
+    if (!self) return partial
+    const current = appearance().ccLayout.placements[id]
+    const candidate = {
+      offsetX: partial.offsetX ?? current.offsetX,
+      offsetY: partial.offsetY ?? current.offsetY,
+    }
+    // 障碍集 = 其他可拖元件里**不在悬浮名单**的（悬浮件既不当障碍也不受约束）。
+    // ★ 每次调用**重新测量**：拖动中可能换行回流（flex-wrap），缓存会失效且症状隐蔽。
+    const obstacles = CC_EDIT_TOOLBAR_IDS
+      .filter(other => other !== id && !CC_FLOATING_WIDGET_IDS.includes(other))
+      .map(other => measureWidgetBox(other)?.rect)
+      .filter((rect): rect is CcRectLike => rect !== undefined)
+    const allowed = resolveAllowedOffset({
+      applied: self.offset,
+      baseRect: self.rect,
+      candidate,
+      // 上一次被接受的位置 = 元素此刻渲染出来的位置（状态由 DOM 承载，无需另记）
+      previous: self.offset,
+      obstacles,
+    })
+    return { ...partial, offsetX: allowed.offsetX, offsetY: allowed.offsetY }
+  }
   const updatePlacement = (id: CcLayoutWidgetId, placement: Partial<CcWidgetPlacement>) => {
-    workbench.appearance.dispatch({ type: 'update-cc-placement', id, placement })
+    workbench.appearance.dispatch({ type: 'update-cc-placement', id, placement: allowedPlacement(id, placement) })
   }
   const beginHeightDrag = (event: PointerEvent) => {
     event.preventDefault()

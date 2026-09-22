@@ -17,6 +17,7 @@ import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 import { resolveCcWidgetGroup } from '../../../domains/cc/widgetDefinitions.ts'
+import { parseTranslateOffset } from '../input/ccPlacementCollision.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
@@ -1631,6 +1632,145 @@ describe('mountSolidWorkbench', () => {
     services.appearance.setTheme(theme)
     await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
     expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
+  })
+
+
+/**
+ * #238 刀4：jsdom 的 getBoundingClientRect 恒为零 ⇒ 几何规则在单测里"永远不撞"。
+ * 这个夹具按 `data-widget-id` 造一份确定布局，并**叠加元素当前的 translate 偏移**
+ * （与真实 DOM 一致：偏移由 inline transform 承载），让"占区不叠加"可被判定。
+ */
+function installFakeLayout(boxes: Record<string, { left: number; top: number; width: number; height: number }>) {
+  const original = Element.prototype.getBoundingClientRect
+  const calls = { count: 0 }
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    calls.count += 1
+    const id = this.getAttribute('data-widget-id') ?? ''
+    const box = boxes[id]
+    const offset = id ? parseTranslateOffset((this as HTMLElement).style.transform) : { offsetX: 0, offsetY: 0 }
+    const left = (box ? box.left : 0) + (box ? offset.offsetX : 0)
+    const top = (box ? box.top : 0) + (box ? offset.offsetY : 0)
+    const width = box ? box.width : 0
+    const height = box ? box.height : 0
+    return {
+      x: left, y: top, width, height, left, top, right: left + width, bottom: top + height,
+      toJSON: () => ({}),
+    } as DOMRect
+  }
+  return { calls, restore: () => { Element.prototype.getBoundingClientRect = original } }
+}
+
+/** 两个矩形的交集面积（验收用数值证据：挡住的判据是 0） */
+function overlapArea(a: DOMRect, b: DOMRect): number {
+  const width = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+  const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+  return Math.max(0, width) * Math.max(0, height)
+}
+
+
+  // ── #238 刀4 占区不叠加（编辑态碰撞约束）─────────────────────────────
+  // 真实布局里 model/thinking 之类的邻居相距只有 33px，而微调范围是 ±48/±16
+  // ⇒ 撞是常态；下面用固定布局把"挡 / 滑 / 旁路 / 豁免 / 常态"五件事钉住。
+
+  it('#238 刀4 · 拖拽：撞上邻居就停在**上一次被接受的位置**（不是弹回原点），且交集为 0', async () => {
+    const fake = installFakeLayout({
+      model: { left: 100, top: 200, width: 100, height: 28 },
+      reasoning: { left: 233, top: 200, width: 100, height: 28 }, // 与 model 相隔 33px（照真实布局）
+    })
+    try {
+      const { host, services } = mountPreview()
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      const model = await waitFor(() => {
+        const value = host.querySelector<HTMLElement>('[data-widget-id="model"]')
+        expect(value).not.toBeNull()
+        return value!
+      })
+      fireEvent.pointerDown(model, { clientX: 0, clientY: 0, pointerId: 1 })
+      // 先右移 20（120..220 与 233..333 不撞）⇒ 应当被接受
+      fireEvent.pointerMove(window, { clientX: 20, clientY: 0, pointerId: 1 })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model.offsetX).toBe(20))
+      // 再想右移 48（148..248 与 233..333 相交）⇒ 必须被挡
+      fireEvent.pointerMove(window, { clientX: 48, clientY: 0, pointerId: 1 })
+      fireEvent.pointerUp(window, { pointerId: 1 })
+      const placement = services.appearance.getSnapshot().ccLayout.placements.model
+      expect(placement.offsetX, '被挡：保持上一次被接受的位置（不是 0）').toBe(20)
+      const dragged = host.querySelector<HTMLElement>('[data-widget-id="model"]')!.getBoundingClientRect()
+      const neighbour = host.querySelector<HTMLElement>('[data-widget-id="reasoning"]')!.getBoundingClientRect()
+      expect(overlapArea(dragged, neighbour), '两者交集面积必须为 0').toBe(0)
+    } finally { fake.restore() }
+  })
+
+  it('#238 刀4 · 拖拽：推不动就贴着它滑（能水平走，不是整块卡死）', async () => {
+    const fake = installFakeLayout({
+      model: { left: 100, top: 200, width: 100, height: 28 },
+      input: { left: 0, top: 100, width: 900, height: 60 }, // 上方的输入栏：往上顶就会相交
+    })
+    try {
+      const { services } = mountPreview()
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccEditMode).toBe(true))
+      fireEvent.pointerDown(document.querySelector<HTMLElement>('[data-widget-id="model"]')!, { clientX: 0, clientY: 0, pointerId: 1 })
+      // 斜着往右上：全量 (40,-50) 会顶进输入栏 ⇒ 只保留水平分量
+      fireEvent.pointerMove(window, { clientX: 40, clientY: -50, pointerId: 1 })
+      fireEvent.pointerUp(window, { pointerId: 1 })
+      const placement = services.appearance.getSnapshot().ccLayout.placements.model
+      expect(placement.offsetX, '水平方向应当滑走').toBe(40)
+      expect(placement.offsetY, '垂直分量被输入栏挡住').toBe(0)
+    } finally { fake.restore() }
+  })
+
+  it('#238 刀4 ★ 面板旁路：在属性面板里把「水平微调」输成会重叠的值 ⇒ 同样被挡', async () => {
+    const fake = installFakeLayout({
+      model: { left: 100, top: 200, width: 100, height: 28 },
+      reasoning: { left: 233, top: 200, width: 100, height: 28 },
+    })
+    try {
+      const { services } = mountPreview()
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+      // 会撞的值：挡在 0（保持原值）
+      fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '48' } })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model.offsetX).toBe(0))
+      // 不撞的值仍然进得去（证明不是"面板整个失灵"）
+      fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '20' } })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model.offsetX).toBe(20))
+    } finally { fake.restore() }
+  })
+
+  it('#238 刀4 · 占区相交的非悬浮件被挡（与悬浮豁免互为对照）', async () => {
+    // 说明：**预览环境里发送按钮不渲染**（cc 元件注册表为空 ⇒ `ccSendButtonRegistered()` 为假），
+    // 所以"悬浮件放行"这一半没法在这里端到端测 —— 它由 `shouldBypassCollisionConstraint` 的
+    // 纯函数单测（`ccPlacementCollision.test.ts`）与实机数值证据承担。
+    // 这里钉住对照面：同一布局下，非悬浮件（model 与输入栏相交）的微调会被挡住。
+    const fake = installFakeLayout({
+      input: { left: 0, top: 100, width: 900, height: 60 },
+      model: { left: 0, top: 150, width: 100, height: 28 },
+    })
+    try {
+      const { services } = mountPreview()
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+      fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '48' } })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model.offsetX).toBe(0))
+    } finally { fake.restore() }
+  })
+
+  it('#238 刀4 · 常态零影响：非编辑态一次几何都不测', async () => {
+    const fake = installFakeLayout({
+      model: { left: 100, top: 200, width: 100, height: 28 },
+      reasoning: { left: 233, top: 200, width: 100, height: 28 },
+    })
+    try {
+      const { host, services } = mountPreview()
+      await waitFor(() => expect(host.querySelector('[data-widget-id="model"]')).not.toBeNull())
+      const before = fake.calls.count
+      // 常态下点一下元件本体：既不应进入拖拽，也不应触发任何测量
+      fireEvent.pointerDown(host.querySelector<HTMLElement>('[data-widget-id="model"]')!, { clientX: 0, clientY: 0, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40, pointerId: 1 })
+      fireEvent.pointerUp(window, { pointerId: 1 })
+      expect(fake.calls.count, '非编辑态不得跑几何').toBe(before)
+      expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 0, offsetY: 0 })
+    } finally { fake.restore() }
   })
 
   it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {
