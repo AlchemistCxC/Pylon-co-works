@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::acp::{self, PromptWaitOutcome};
+use crate::agent::runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::agent_config::AgentDef;
-use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
@@ -93,6 +93,13 @@ mod storage_write_bench;
 // 钳制收敛、session/load 复活零 selector RPC）。
 #[cfg(test)]
 mod model_switch_wire_tests;
+
+// #245：原 crate 根的 session_store.rs 与两个兄弟测试模块就近归入。
+#[cfg(test)]
+mod session_expiry_platform_tests;
+#[cfg(test)]
+mod session_info_tests;
+pub(crate) mod store;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
@@ -205,7 +212,7 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
     ) -> crate::agent_config::AcpProtocolConfig {
         self.agent_for_runtime(runtime)
-            .map(|agent| crate::hermes_runtime::effective_protocol(&agent))
+            .map(|agent| crate::hermes::runtime::effective_protocol(&agent))
             .unwrap_or_default()
     }
 
@@ -339,7 +346,7 @@ impl AppState {
         let generation = self.current_generation(runtime);
         // 方案 8 步骤 5：snapshot 锁内 clone、锁外组装（SessionStore 纪律）。
         let sessions =
-            crate::session_store::snapshot(runtime).map_err(|error| error.to_string())?;
+            crate::session::store::snapshot(runtime).map_err(|error| error.to_string())?;
         let matches: Vec<(String, String)> = sessions
             .iter()
             .filter(|(_, session)| session.peri_id == peri_id && session.generation == generation)
@@ -375,7 +382,7 @@ impl AppState {
     ) -> Result<T, String> {
         self.ensure_generation(runtime, generation)?;
         // 方案 8：委托 SessionStore（(peri_id, generation) 匹配 + 锁序纪律）。
-        crate::session_store::update_if_current(runtime, source, peri_id, generation, update)
+        crate::session::store::update_if_current(runtime, source, peri_id, generation, update)
             .map_err(|e| e.to_string())
     }
 
@@ -399,7 +406,7 @@ impl AppState {
         generation: u64,
     ) -> Result<bool, String> {
         // 方案 8：委托 SessionStore（匹配删除 + 锁外 prompt 锁收敛）。
-        crate::session_store::remove_if_current(runtime, source, peri_id, generation)
+        crate::session::store::remove_if_current(runtime, source, peri_id, generation)
             .map_err(|e| e.to_string())
     }
 
@@ -452,7 +459,7 @@ impl AppState {
             agent_id,
             start_status,
             log_action,
-            crate::agent_runtime::SessionContinuity::Invalidated,
+            crate::agent::runtime::SessionContinuity::Invalidated,
             true,
         )
         .await
@@ -487,9 +494,9 @@ impl AppState {
             .cloned()
             .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let continuity = if matches!(status, AgentLifecycleStatus::Crashed) {
-            crate::agent_runtime::SessionContinuity::Unknown
+            crate::agent::runtime::SessionContinuity::Unknown
         } else {
-            crate::agent_runtime::SessionContinuity::Invalidated
+            crate::agent::runtime::SessionContinuity::Invalidated
         };
         let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
         // 双检查：拿到生命周期锁后重查（防并发连接）
@@ -1688,7 +1695,7 @@ gateway:
         );
         assert!(matches!(
             runtime.binding_health.lock().unwrap().get("source-a"),
-            Some(crate::agent_runtime::SessionBindingHealth::Detached {
+            Some(crate::agent::runtime::SessionBindingHealth::Detached {
                 retryable: false,
                 ..
             })
@@ -1721,7 +1728,7 @@ gateway:
     #[tokio::test]
     async fn probing_binding_is_rejected_by_the_backend_send_gate() {
         let runtime = AgentRuntime::new_disconnected();
-        crate::session_store::insert(
+        crate::session::store::insert(
             &runtime,
             "source-a",
             SessionInfo::new("peri-1".into(), String::new(), ".".into(), true, 4),
@@ -1731,7 +1738,7 @@ gateway:
         .unwrap();
         runtime.binding_health.lock().unwrap().insert(
             "source-a".into(),
-            crate::agent_runtime::SessionBindingHealth::Probing {
+            crate::agent::runtime::SessionBindingHealth::Probing {
                 from_generation: 4,
                 target_generation: 5,
             },

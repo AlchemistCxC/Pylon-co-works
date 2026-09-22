@@ -35,11 +35,11 @@ use std::sync::Arc;
 use futures_util::{stream, StreamExt};
 
 use crate::acp::{AcpClient, AcpError};
-use crate::agent_config::{AgentDef, ToolDictEntry};
-use crate::agent_runtime::{
+use crate::agent::runtime::{
     status_after_connection_failure, AgentLifecycleStatus, ClientActivation, ClientEpoch,
     SessionContinuity,
 };
+use crate::agent_config::{AgentDef, ToolDictEntry};
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::AppState;
@@ -256,7 +256,7 @@ const SESSION_PROBE_HARD_CAP_SECS: u64 = 30;
 async fn probe_unknown_session_continuity(
     runtime: &Arc<AgentRuntime>,
     agent: &AgentDef,
-    candidates: Vec<crate::session_store::SessionProbeCandidate>,
+    candidates: Vec<crate::session::store::SessionProbeCandidate>,
     target_generation: u64,
 ) {
     if candidates.is_empty() {
@@ -279,7 +279,7 @@ async fn probe_unknown_session_continuity(
         .unwrap_or(false);
     if !load_supported {
         for candidate in candidates {
-            let _ = crate::session_store::mark_detached_if_current(
+            let _ = crate::session::store::mark_detached_if_current(
                 runtime,
                 &candidate.source,
                 &candidate.peri_id,
@@ -340,7 +340,7 @@ async fn probe_unknown_session_continuity(
                     .or_else(|| response.get("session_id"))
                     .and_then(serde_json::Value::as_str);
                 if returned_id.is_some_and(|id| id != candidate.peri_id) {
-                    let _ = crate::session_store::mark_detached_if_current(
+                    let _ = crate::session::store::mark_detached_if_current(
                         runtime,
                         &candidate.source,
                         &candidate.peri_id,
@@ -351,7 +351,7 @@ async fn probe_unknown_session_continuity(
                         false,
                     );
                 } else {
-                    let _ = crate::session_store::mark_attached_if_current(
+                    let _ = crate::session::store::mark_attached_if_current(
                         runtime,
                         &candidate.source,
                         &candidate.peri_id,
@@ -363,7 +363,7 @@ async fn probe_unknown_session_continuity(
             Ok(Err(error))
                 if error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::SessionMissing) =>
             {
-                let _ = crate::session_store::mark_detached_if_current(
+                let _ = crate::session::store::mark_detached_if_current(
                     runtime,
                     &candidate.source,
                     &candidate.peri_id,
@@ -387,7 +387,7 @@ async fn probe_unknown_session_continuity(
                     }
                     None => "session-probe-transport-error".into(),
                 };
-                let _ = crate::session_store::mark_detached_if_current(
+                let _ = crate::session::store::mark_detached_if_current(
                     runtime,
                     &candidate.source,
                     &candidate.peri_id,
@@ -399,7 +399,7 @@ async fn probe_unknown_session_continuity(
                 );
             }
             Err(_) => {
-                let _ = crate::session_store::mark_detached_if_current(
+                let _ = crate::session::store::mark_detached_if_current(
                     runtime,
                     &candidate.source,
                     &candidate.peri_id,
@@ -1279,7 +1279,7 @@ mod tests {
             ("source-missing", "remote-missing"),
             ("source-timeout", "remote-timeout"),
         ] {
-            crate::session_store::insert(
+            crate::session::store::insert(
                 &runtime,
                 source,
                 crate::session::SessionInfo::new(remote.into(), String::new(), ".".into(), true, 4),
@@ -1322,18 +1322,18 @@ mod tests {
         let health = runtime.binding_health.lock().unwrap();
         assert!(matches!(
             health["source-ok"],
-            crate::agent_runtime::SessionBindingHealth::Attached { generation: 5 }
+            crate::agent::runtime::SessionBindingHealth::Attached { generation: 5 }
         ));
         assert!(matches!(
             health["source-missing"],
-            crate::agent_runtime::SessionBindingHealth::Detached {
+            crate::agent::runtime::SessionBindingHealth::Detached {
                 retryable: false,
                 ..
             }
         ));
         assert!(matches!(
             health["source-timeout"],
-            crate::agent_runtime::SessionBindingHealth::Detached {
+            crate::agent::runtime::SessionBindingHealth::Detached {
                 retryable: true,
                 ..
             }

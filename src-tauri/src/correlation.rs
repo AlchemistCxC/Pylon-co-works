@@ -1,4 +1,4 @@
-//! OBS-02：身份 correlation contract（方案书 §5.2 的 Rust 实现）。
+//! 身份 correlation contract（方案书 §5.2 的 Rust 实现）。
 //!
 //! 统一所有日志和事件中的 identity——禁止只记录 `source` 或只记录 `sessionId`。
 //! 连接级字段（agentId/provider/source/clientGeneration）在连接建立时固定；
@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 统一身份 correlation context（方案书 §5.2 `RuntimeCorrelation`）。
+/// 统一身份 correlation context。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCorrelation {

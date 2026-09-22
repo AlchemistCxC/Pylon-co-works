@@ -7,6 +7,9 @@
 //! 两边兼容。注意：官方 schema 无 oauth 字段，OAuthConfig 仅作前端表单
 //! 校验保留，不序列化进 wire。
 
+#[cfg(test)]
+mod mcp_persist_tests;
+
 use agent_client_protocol_schema::v1::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
 };

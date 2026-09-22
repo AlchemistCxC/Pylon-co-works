@@ -14,6 +14,8 @@
 //! 锁序纪律：本模块绝不同时持有 workspaces 锁与 runtime.sessions 锁（workspace_root_for_context
 //! 先在 sessions 锁内 clone 所需字段、释放后再解析 workspace，避免两锁交叉形成死锁面）。
 
+pub(crate) mod cmds;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

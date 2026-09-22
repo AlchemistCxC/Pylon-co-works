@@ -181,10 +181,10 @@ flowchart TB
     end
 
     subgraph OTHERKERNEL[其他 Kernel adapters]
-      WORKSPACE[workspace_cmds/workspaces/git]
-      GATEWAY[gateway_cmds + GatewayCore/instances/credentials]
-      BROWSER[browser_cmds + BrowserManager]
-      RUNTIMELOG[runtime_log/logs_cmds]
+      WORKSPACE[workspaces/mod+cmds/git]
+      GATEWAY[gateway/mod+cmds GatewayCore/instances/credentials]
+      BROWSER[browser/mod+cmds BrowserManager]
+      RUNTIMELOG[runtime_log/mod+cmds]
       PYLONCLI[pylon_cli.rs]
       PRISM[prism / pet / mcp adapters]
     end

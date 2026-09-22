@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 
 use crate::acp::{AcpClient, RequestId};
-use crate::agent_runtime::{AgentRuntimeState, SessionBindingHealth};
+use crate::agent::runtime::{AgentRuntimeState, SessionBindingHealth};
 use crate::permission::PendingPermission;
 use crate::private_interaction::PrivateInteractionOwner;
 use crate::session::SessionInfo;

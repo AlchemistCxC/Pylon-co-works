@@ -1,5 +1,7 @@
 //! 结构化运行时日志：固定容量、查询过滤、截断和敏感字段脱敏。
 
+pub(crate) mod cmds;
+
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -160,6 +162,8 @@ impl RuntimeLogHub {
 
     /// OBS-02：带 correlation context 的 push（统一身份进运行时日志）。
     /// correlation=None 时与旧 push 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #245：结构化字段面即 8 参（历史基线项，原 runtime_log.rs 路径随文件归目录迁移）。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_correlation(
         &self,
         timestamp: Timestamp,
@@ -185,6 +189,8 @@ impl RuntimeLogHub {
     /// LOG-03：带结构化上下文的 push（增量字段 code/category/recoverable/
     /// userActionRequired/rawAvailable 的唯一推进入口）。context 为缺省值时与
     /// `push_with_correlation` 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #245：同上——9 参为结构化上下文面，历史基线项随文件归目录迁移保留。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_context(
         &self,
         timestamp: Timestamp,
@@ -440,7 +446,7 @@ pub struct FrontendLogThrottle {
 }
 
 /// R8：前端日志限流判定——放行则计数 +1 返回 true；超限返回 false（调用方丢弃）。
-/// 窗口滚动逻辑内聚于此（可单测）；logs_cmds::push_frontend_log 使用。
+/// 窗口滚动逻辑内聚于此（可单测）；cmds::push_frontend_log 使用。
 pub fn frontend_log_allowed(throttle: &mut FrontendLogThrottle, now_ms: u64) -> bool {
     if now_ms.saturating_sub(throttle.window_start_ms) >= 1000 {
         throttle.window_start_ms = now_ms;

@@ -29,6 +29,13 @@ pub use capabilities::CapabilityRegistry;
 pub use client::*;
 pub use error::*;
 
+// #245：原 crate 根的两个 ACP 相关测试模块就近归入（模块 basename 保持不变，
+// `cargo test --lib p1_wire` / `real_acp` 等既有 filter 命令继续有效）。
+#[cfg(test)]
+mod p1_wire_regression_tests;
+#[cfg(test)]
+mod real_acp_smoke;
+
 #[cfg(test)]
 mod catalog_driven_tests;
 #[cfg(test)]

@@ -6,8 +6,8 @@
 //! remove_session_if_matches），现有函数委托本模块——行为封闭，逐步切换。
 //! 锁序纪律：sessions → prompt_locks 单向；mapping_ready 通知在 insert 成功后。
 
-use crate::agent_runtime::session_mapping_matches;
-use crate::agent_runtime::{ClientActivation, SessionBindingHealth, SessionContinuity};
+use crate::agent::runtime::session_mapping_matches;
+use crate::agent::runtime::{ClientActivation, SessionBindingHealth, SessionContinuity};
 use crate::runtime::AgentRuntime;
 use crate::session::SessionInfo;
 
@@ -339,7 +339,7 @@ impl std::fmt::Display for SessionStoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runtime::{
+    use crate::agent::runtime::{
         ClientActivation, ClientEpoch, SessionBindingHealth, SessionContinuity,
     };
     use std::sync::Arc;

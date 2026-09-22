@@ -17,6 +17,8 @@
 //!   （名称 → `<home>/profiles/<name>`；路径原样/相对 base_dir 解析）。
 //! - [`hermes_home_override`]：由 AgentDef 计算应注入子进程的 `HERMES_HOME`。
 
+pub(crate) mod runtime;
+
 use crate::agent_config::AgentDef;
 use std::path::{Path, PathBuf};
 

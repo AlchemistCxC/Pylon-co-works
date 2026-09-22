@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::acp::AcpClient;
-use crate::agent_runtime;
-use crate::agent_runtime::{
+use crate::agent::runtime::{
     session_mapping_matches, source_for_peri_id_in_generation, AgentLifecycleStatus,
 };
 use crate::lifecycle::do_connect_and_replace;
@@ -1145,7 +1144,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     gateway: &crate::gateway::GatewayCore,
     sessions: &SessionsLock,
     binding_health: &std::sync::Mutex<
-        std::collections::HashMap<String, crate::agent_runtime::SessionBindingHealth>,
+        std::collections::HashMap<String, crate::agent::runtime::SessionBindingHealth>,
     >,
     pet: &std::sync::Mutex<PetState>,
     update_channels: &crate::runtime::UpdateChannelMap,
@@ -1178,8 +1177,8 @@ async fn handle_session_update<R: tauri::Runtime>(
                 Ok(health) => matches!(
                     health.get(source),
                     Some(
-                        crate::agent_runtime::SessionBindingHealth::Probing { .. }
-                            | crate::agent_runtime::SessionBindingHealth::Detached { .. }
+                        crate::agent::runtime::SessionBindingHealth::Probing { .. }
+                            | crate::agent::runtime::SessionBindingHealth::Detached { .. }
                     )
                 ),
                 Err(_) => true,
@@ -1763,7 +1762,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             // R7：remaining_attempts 局部预算 + attempt 退避指数。
                             // G2-07：重连策略参数化（默认值 = 现值 5/2000/30000，行为零变化）。
                             let mut remaining_attempts =
-                                agent_runtime::ReconnectPolicy::default().max_attempts;
+                                crate::agent::runtime::ReconnectPolicy::default().max_attempts;
                             let mut attempt: u32 = 1;
                             // O-4：退出闸门（外层循环）——内层循环因成功复查通过/提前放弃/
                             // 预算耗尽退出时，期间可能恰有一轮崩溃通知被处理（epoch 已变，
@@ -1789,11 +1788,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                         scheduled_epoch =
                                             epoch_for_reconnect.load(Ordering::Acquire);
                                         remaining_attempts =
-                                            agent_runtime::ReconnectPolicy::default().max_attempts;
+                                            crate::agent::runtime::ReconnectPolicy::default()
+                                                .max_attempts;
                                         attempt = 1;
                                     }
                                     tokio::time::sleep(std::time::Duration::from_millis(
-                                        agent_runtime::ReconnectPolicy::default()
+                                        crate::agent::runtime::ReconnectPolicy::default()
                                             .backoff_ms(attempt),
                                     ))
                                     .await;
@@ -1853,7 +1853,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                         None,
                                         AgentLifecycleStatus::Reconnecting,
                                         "auto-reconnect",
-                                        crate::agent_runtime::SessionContinuity::Unknown,
+                                        crate::agent::runtime::SessionContinuity::Unknown,
                                         true,
                                     )
                                     .await
@@ -1898,7 +1898,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     );
                                 scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
                                 remaining_attempts =
-                                    agent_runtime::ReconnectPolicy::default().max_attempts;
+                                    crate::agent::runtime::ReconnectPolicy::default().max_attempts;
                                 attempt = 1;
                             }
                             // R7：成功/放弃消费 ticket——循环结束（成功、提前放弃或预算耗尽）

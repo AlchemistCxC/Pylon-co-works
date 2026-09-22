@@ -84,7 +84,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             // 方案 8 步骤 4：删除委托 SessionStore（generation 匹配 + 锁内 updated_at
             // 复核防误杀刚活跃会话 + 锁外 prompt 锁收敛）。
             let generation = runtime.client_generation.load(Ordering::Acquire);
-            let removed = crate::session_store::remove_if_current_expired(
+            let removed = crate::session::store::remove_if_current_expired(
                 &runtime,
                 &source,
                 &peri_id,

@@ -17,6 +17,8 @@
 //! reload 热重载窗口下"旧绑定放行 → 新绑定投递"的混搭即二次读锁 bug
 //! （历史教训：`ingest()` 因此被删除，S5）。
 
+pub(crate) mod cmds;
+
 pub mod catalog;
 pub mod credentials;
 pub mod instance;

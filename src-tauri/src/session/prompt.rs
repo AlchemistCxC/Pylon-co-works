@@ -753,7 +753,7 @@ pub(crate) fn cleanup_ghost_session_mapping(
     if !prompt_error_indicates_missing_session(error) {
         return false;
     }
-    match crate::session_store::mark_detached_if_current(
+    match crate::session::store::mark_detached_if_current(
         runtime,
         source,
         peri_id,
@@ -1174,7 +1174,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     // Peri and custom agents.
     let hermes_force_recovery = state
         .agent_for_runtime(runtime)
-        .is_some_and(|agent| crate::hermes_runtime::should_apply(&agent));
+        .is_some_and(|agent| crate::hermes::runtime::should_apply(&agent));
     let runtime_for_recovery = runtime.clone();
     let expected_generation = flow.generation;
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。

@@ -426,7 +426,7 @@ pub(crate) fn resolve_local_source(
     };
     let mut candidates: Vec<String> = Vec::new();
     for (_, runtime) in scoped {
-        let Ok(sessions) = crate::session_store::snapshot(&runtime) else {
+        let Ok(sessions) = crate::session::store::snapshot(&runtime) else {
             continue;
         };
         for (source, info) in sessions {
@@ -915,7 +915,7 @@ mod tests {
         let state = crate::test_utils::TestStateBuilder::bare().build();
         let new_runtime_with = |source: &str, peri: &str| {
             let runtime = crate::runtime::AgentRuntime::new_disconnected();
-            crate::session_store::insert(
+            crate::session::store::insert(
                 &runtime,
                 source,
                 crate::session::SessionInfo::new(

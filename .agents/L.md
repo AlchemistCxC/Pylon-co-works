@@ -602,6 +602,24 @@
 
 ---
 
+[2026-09-22 16] [Miyaki Kumo] [#245]
+
+**开工：后端 `src-tauri/src/` 根目录散落文件归类（纯 `git mv` + 模块路径修正，零行为变更）。** spec 见 `.agents/spec/245-host-src-file-regroup.md`。分支 `Ru5t/host-src-regroup`（自 `github/main` 新开——Reflector 与 renderer-memory-probe 均压有未合并工作，本重构需要干净 diff，勿 merge 带走）。
+
+**我方本轮文件域（大体量移动，请勿改写、勿连带提交）**：
+
+- `src-tauri/src/` 根约 25 个文件 `git mv` 入家族目录（browser/gateway/hermes/mcp/pet/prism/workspaces/agent/session/runtime_log/acp），lib.rs 声明与全 crate `crate::X` 路径修正
+- `src-tauri/config-template.rs`（删除，全仓零引用的死脚手架）、`src-tauri/winds.c` → `src-tauri/tools/winds.c`（归档 + 头注释）
+- `docs/说明书/Pylon-项目架构参考.md`（文件表路径同步）、`.agents/records/`、本文件
+
+**我不碰**：`test_harness.rs`/`test_utils.rs`（原地不动）、全部实现逻辑（diff 只有路径/声明/use 行）、前端 `src/**`、pylon-* 子 crate、`tools/**`、他人在途域。
+
+---
+
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支沿用 `Ru5t/renderer-memory-probe`（#240 附六/探针所在支，PR #242 在途；#243 实现为堆叠提交）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
 [2026-09-22 16] [Miyaki Kumo] [#243]
 
 **进展：issue243 切片 1~5 全部落地（引擎 TanStack spacer 方案，对 issue 目标结构 4「逐行占位盒」有已论证偏离），门禁全绿，即将推送开 PR（堆叠于 #242）。在途条目保留至合入。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。

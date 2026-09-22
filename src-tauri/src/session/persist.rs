@@ -108,7 +108,7 @@ pub(crate) async fn load_persisted_session(
         &source,
         loading_session,
         true,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
     // A-02：锁内原子建立 replay capture，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     // 若同 owner 已有 load，拒绝新请求并撤销本次临时 slot，避免失败请求覆盖
@@ -213,7 +213,7 @@ pub(crate) async fn load_persisted_session(
                 restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
                 return Err(error.into());
             }
-            let attached = crate::session_store::mark_attached_if_current(
+            let attached = crate::session::store::mark_attached_if_current(
                 &runtime, &source, &peri_id, generation, generation,
             )
             .map_err(|error| PylonError::Protocol(error.to_string()))?;

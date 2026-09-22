@@ -1,4 +1,5 @@
-use super::*;
+// #245：文件自 crate 根迁入本目录；crate 根 glob 与原 `use super::*` 同名集。
+use crate::*;
 
 #[test]
 fn export_sanitizer_removes_secret_payloads() {
@@ -104,7 +105,7 @@ fn mode_falls_back_to_mode_config_option() {
 fn invalidated_activation_clears_sessions_and_drops_stale_prompt_locks() {
     let runtime = AgentRuntime::new_disconnected();
     for (source, remote) in [("source-a", "peri-1"), ("qq:u-123", "peri-2")] {
-        crate::session_store::insert(
+        crate::session::store::insert(
             &runtime,
             source,
             SessionInfo::new(remote.into(), "persona".into(), ".".into(), true, 1),
@@ -117,11 +118,11 @@ fn invalidated_activation_clears_sessions_and_drops_stale_prompt_locks() {
         prompt_lock_for(&runtime.prompt_locks, source);
     }
     assert_eq!(runtime.prompt_locks.lock().unwrap().len(), 3);
-    let activation = crate::agent_runtime::ClientActivation {
-        epoch: crate::agent_runtime::ClientEpoch(9),
-        continuity: crate::agent_runtime::SessionContinuity::Invalidated,
+    let activation = crate::agent::runtime::ClientActivation {
+        epoch: crate::agent::runtime::ClientEpoch(9),
+        continuity: crate::agent::runtime::SessionContinuity::Invalidated,
     };
-    let stale = crate::session_store::apply_client_activation(&runtime, activation).unwrap();
+    let stale = crate::session::store::apply_client_activation(&runtime, activation).unwrap();
     let stale_sources = stale
         .into_iter()
         .map(|candidate| candidate.source)
@@ -144,7 +145,7 @@ fn agent_status_exposes_only_binding_health_metadata() {
     let runtime = AgentRuntime::new_disconnected();
     runtime.binding_health.lock().unwrap().insert(
         "local:s1".into(),
-        crate::agent_runtime::SessionBindingHealth::Detached {
+        crate::agent::runtime::SessionBindingHealth::Detached {
             target_generation: 3,
             reason: "session-probe-timeout".into(),
             retryable: true,

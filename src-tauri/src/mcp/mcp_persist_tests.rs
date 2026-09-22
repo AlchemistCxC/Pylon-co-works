@@ -1,4 +1,5 @@
-use super::*;
+// #245：文件自 crate 根迁入本目录；crate 根 glob 与原 `use super::*` 同名集。
+use crate::*;
 
 use std::collections::HashMap;
 

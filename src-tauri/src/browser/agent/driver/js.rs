@@ -4,7 +4,7 @@
 //! 枚举/重查/高亮脚本保持纯函数可测（script builder + parse 分离）。
 
 use super::SnapshotElement;
-use crate::browser_agent::refs::{js_text_fingerprint, RefTarget};
+use crate::browser::agent::refs::{js_text_fingerprint, RefTarget};
 
 /// 单轮枚举可交互元素：role/name/中心点/选择器链/指纹。
 /// 无名 generic 跳过；布局外（display:none / 零尺寸）跳过；
