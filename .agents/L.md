@@ -619,3 +619,15 @@
 
 **我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
 
+
+---
+
+[2026-09-23 03] [Miyaki Kumo] [#253 #254 #255]
+
+**开工准备就绪，即将施工**（分支 `Ru5t/crate-extraction`）。文件域，请勿改写、勿连带提交：
+- #253：`src/components/chat/messageSearchIndex.ts` + `src/components/chat/__tests__/messageSearchIndex.test.ts`
+- #254：`src/sheets/OverviewSheetView.tsx` + `src/sheets/__tests__/OverviewSheetView.visual.test.tsx`
+- #255：**暂不动代码**（口径 a/b/c 待用户拍板，见 `.agents/spec/255-workspace-count-scope.md`）
+- `.agents/records/`（完工时各补一条开发记录）、`.agents/L.md`（本条）
+
+另 #250/#252 已登记在案（#250 修复未开工；#252 File 只读化未开工）。各条目完工合入后即撤。
