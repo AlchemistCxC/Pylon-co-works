@@ -1,16 +1,18 @@
-import { type CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_GROUPS } from './domains/cc/widgetDefinitions.ts'
+import type { CcRegisteredSlotId, CcWidgetId } from './domains/cc/widgetDefinitions.ts'
 
-export type { CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+export type { CcRegisteredSlotId, CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+export { CC_REGISTERED_SLOT_IDS } from './domains/cc/widgetDefinitions.ts'
 export type CcSlot = 'input' | 'status-primary' | 'status-secondary' | 'actions'
 
 /**
- * 注册轨里**占槽位**的控件 id（F1=A：legacy `send` 的槽位事实迁到这里）。
+ * `CC_REGISTERED_SLOT_IDS`（注册轨里**占槽位**的控件 id，F1=A：legacy `send` 的槽位事实
+ * 迁到这里）由 `domains/cc/widgetDefinitions.ts` 的定义表派生后在此转出：
  * 注册轨的另一项 `cc-surface`（「基础」）不开槽位、无 order/offset、无显隐，故不在名单内。
  */
-export const CC_REGISTERED_SLOT_IDS = ['cc-send-button'] as const
 
 /** 能落槽位的控件 id = 内置轨 ∪ 注册轨中占槽位者。 */
-export type CcLayoutWidgetId = CcWidgetId | (typeof CC_REGISTERED_SLOT_IDS)[number]
+export type CcLayoutWidgetId = CcWidgetId | CcRegisteredSlotId
 
 export interface CcWidgetPlacement {
   slot: CcSlot
@@ -31,16 +33,19 @@ export interface CcLayoutV3 {
 // 归一化时按别名读取，保留用户既有拖拽位置）。★ v8 仍在版本白名单内，老布局不重置。
 export const CC_LAYOUT_SCHEMA_VERSION = 9
 
+/**
+ * 默认布局 —— 由定义表各行的 `defaultPlacement` 派生（值逐条不变）。
+ * 只有**占槽位**的行才有 `defaultPlacement`（`cc-surface` 是容器，不占位）；
+ * 键序 = 表序（input → model → reasoning → mode → tokens → cc-send-button）。
+ */
+const DEFAULT_PLACEMENTS = {} as Record<CcLayoutWidgetId, CcWidgetPlacement>
+for (const row of CC_WIDGET_GROUPS) {
+  if (row.defaultPlacement) DEFAULT_PLACEMENTS[row.id as CcLayoutWidgetId] = { ...row.defaultPlacement }
+}
+
 export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   version: CC_LAYOUT_SCHEMA_VERSION,
-  placements: {
-    input: { slot: 'input', order: 0, offsetX: 0, offsetY: 0 },
-    model: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
-    reasoning: { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
-    mode: { slot: 'status-secondary', order: 4, offsetX: 0, offsetY: 0 },
-    tokens: { slot: 'status-secondary', order: 5, offsetX: 0, offsetY: 0 },
-    'cc-send-button': { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
-  },
+  placements: DEFAULT_PLACEMENTS,
 }
 
 const SLOT_SET = new Set<CcSlot>(['input', 'status-primary', 'status-secondary', 'actions'])

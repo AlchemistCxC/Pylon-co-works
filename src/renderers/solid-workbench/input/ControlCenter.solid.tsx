@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_WIDGET_LABELS, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcSlot, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
@@ -18,31 +18,15 @@ import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
 
 /**
- * 常态显示的状态控件（2026-09-14）——不受"活跃会话收起旧状态控件"影响。
- *
- * 背景：`showStatusSlots()` 原先只在空态或编辑模式放行状态行，目的是让活跃
- * 对话界面干净（旧控件多）。模型控件是每轮对话都要看的当前状态，不属于该类，
- * 故列此处常态放行。渲染过滤（idsForSlot）与状态行门户（statusRowContent）
- * 共用同一名单，保持单一真值。
- */
-const ALWAYS_VISIBLE_STATUS_WIDGETS: readonly CcWidgetId[] = ['model', 'reasoning', 'mode', 'tokens']
-/**
- * 编辑态可编辑控件 = 内置轨 ∪ 注册轨中**占槽位**的控件（刀4 的「内置轨 ∪ 注册轨」）。
+ * 编辑态可编辑控件 = 内置轨 ∪ 注册轨中**占槽位**的控件（刀4 的「内置轨 ∪ 注册轨」）——
+ * 两者都由定义表（`domains/cc/widgetDefinitions.ts`）派生，共 6 条。
  * 「基础」`cc-surface` 不开槽位、无 order/offset/显隐，故不进工具栏（其值在设置页编辑）。
  */
 const CC_EDIT_TOOLBAR_IDS: readonly CcLayoutWidgetId[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
-const WIDGET_LABELS: Readonly<Record<CcLayoutWidgetId, string>> = {
-  input: '输入栏', tokens: '用量', model: '模型', reasoning: '思考强度', mode: '权限模式',
-  'cc-send-button': '发送按钮',
-}
 
 // 04b：空态极简 —— 空态工作区选择器隐藏保留（用户 2026-09-19 拍板「先隐藏」）。
 // 置 true 即恢复显示；选择器实现（EmptyWorkspaceControl）与它用到的命令全部保留。
 const SHOW_EMPTY_WORKSPACE_CONTROL = false
-
-// 04b：空态只留输入栏 —— 空态追加隐藏的控件（`hiddenWidgetIds()` 的唯一真值）。
-// `cc-send-button` 是注册轨 id（不是刀4 前的 legacy `send`）。
-const EMPTY_STATE_HIDDEN_WIDGET_IDS: readonly CcLayoutWidgetId[] = ['cc-send-button', 'model', 'reasoning', 'mode', 'tokens']
 
 export function SolidControlCenter() {
   const workbench = useSolidWorkbench()
@@ -299,7 +283,7 @@ export function SolidControlCenter() {
   // 在活跃会话里也放行；其它状态控件仍受"活跃会话收起"约束。input 槽（输入栏）
   // 从不经过这个门户，否则活跃会话会把输入栏一并过滤掉。
   const passesStatusGate = (id: CcWidgetId, slot: CcSlot) =>
-    slot === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGETS.includes(id)
+    slot === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
   const idsForSlot = (slot: CcSlot) => visibleIds()
     .filter(id => appearance().ccLayout.placements[id]?.slot === slot)
     .filter(id => passesStatusGate(id, slot))
@@ -511,8 +495,8 @@ export function SolidControlCenter() {
   // Keep empty-state/edit-mode controls available for session setup and layout
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
-  // 例外（2026-09-14）：模型控件常态显示，见 ALWAYS_VISIBLE_STATUS_WIDGETS。
-  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGETS
+  // 例外（2026-09-14）：模型控件常态显示，见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS。
+  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGET_IDS
     .some(id => isWidgetVisible(id, visibilityContext()))
   const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
 
@@ -616,8 +600,8 @@ export function SolidControlCenter() {
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (
-      <div class="cc-prop-panel" role="dialog" aria-label={`${WIDGET_LABELS[id()]} 属性`}>
-        <div class="cc-prop-header"><span>{WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
+      <div class="cc-prop-panel" role="dialog" aria-label={`${CC_WIDGET_LABELS[id()]} 属性`}>
+        <div class="cc-prop-header"><span>{CC_WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
         <div class="cc-prop-body">
           <div class="cc-prop-sec">布局</div>
           <div class="cc-prop-field"><label>槽位</label><select class="set-select" aria-label="控件槽位" value={appearance().ccLayout.placements[id()].slot} onChange={event => updatePlacement(id(), { slot: event.currentTarget.value as CcSlot })}>
@@ -653,8 +637,8 @@ export function SolidControlCenter() {
         <For each={CC_EDIT_TOOLBAR_IDS}>{id => {
           const hidden = () => appearance().ccHidden.includes(id)
           return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
-            <button type="button" class="cc-edit-toolbar-chip" aria-label={`${WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {WIDGET_LABELS[id]}</button>
-            <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
+            <button type="button" class="cc-edit-toolbar-chip" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
+            <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
           </span>
         }}</For>
         <button type="button" class="cc-edit-toolbar-btn" aria-label="重置控件位置" onClick={() => workbench.appearance.dispatch({ type: 'reset-cc-layout' })}>↺ 重置位置</button>
