@@ -35,7 +35,8 @@ export function getMessageSearchText(message: Message): string {
     ? stringifySearchValue((message as Message & { semanticParts?: unknown }).semanticParts)
     : ''
   const text = [
-    message.sender,
+    // #253：不索引 message.sender——投影层的 sender 可能是内部键（local:{id}）或
+    // 角色标签，进搜索文本会让「local:」全命中、内部标识泄进片段。
     message.content,
     message.toolName,
     message.toolInput,
