@@ -285,7 +285,8 @@ def resolve_webview2_loader() -> Path:
     direct = RELEASE_DIR / "WebView2Loader.dll"
     if direct.is_file():
         return direct
-    target_dir = SRC_TAURI_DIR / "target"
+    # 与顶部 RELEASE_DIR 同源：CARGO_TARGET_DIR 指向哪，OUT_DIR 回退就搜哪。
+    target_dir = _TARGET_ROOT
     for profile in ("release", "debug"):
         pattern = f"{profile}/build/webview2-com-sys-*/out/x64/WebView2Loader.dll"
         for candidate in sorted(target_dir.glob(pattern)):
