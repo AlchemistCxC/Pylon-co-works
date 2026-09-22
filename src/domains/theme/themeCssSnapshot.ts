@@ -143,7 +143,6 @@ export function selectThemeCssSnapshot(
     '--chat-bg-image': toCssBackgroundImage(s.chatBgImage as string | undefined),
     '--right-bg-image': toCssBackgroundImage(s.rightBgImage as string | undefined),
     '--input-bg-image': toCssBackgroundImage(s.inputBgImage as string | undefined),
-    '--status-bg-image': toCssBackgroundImage(s.statusBgImage as string | undefined),
     // --global-font 覆盖继承入口；--font 覆盖仍显式引用旧 UI token 的第一方 Surface。
     // 代码、路径与终端继续使用独立的 --mono，不受这里影响。
     '--global-font': globalFontToken,

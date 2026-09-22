@@ -56,9 +56,9 @@ function fieldOwners(): Map<string, string[]> {
 }
 
 describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () => {
-  it('83 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
+  it('81 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(83)
+    expect(ccFields).toHaveLength(81)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -79,13 +79,15 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       reasoning: 7,
       mode: 9,
       tokens: 2,
-      'cc-command-hint': 1,
+      'cc-command-hint': 2,
       'cc-send-button': 9,
     })
     // ★ #238 刀3：`footerLayout` 由系统桶转入容器行（归属转移，字段与实现不动）⇒ 系统桶 7 → 6
-    expect(CC_SYSTEM_FIELDS).toHaveLength(6)
+    // ★ #238 刀5：桶里三项（ccStatusFontSize / statusBg / statusBgImage）删除 ⇒ 6 → 3；
+    //   命令行提示的字号 `ccHintFontSize` 由 `cc-command-hint` 成员自己认领（成员计数 1 → 2）。
+    expect(CC_SYSTEM_FIELDS).toHaveLength(3)
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(83)
+    expect(total).toBe(81)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -124,7 +126,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       ],
       'mode/menu': [],
       'tokens/pill': ['pillText', 'prismOnColor'],
-      'cc-command-hint/hint-line': ['cliHintMode'],
+      'cc-command-hint/hint-line': ['cliHintMode', 'ccHintFontSize'],
       'cc-send-button/button': ['inputSubmitButtonMode', 'sendButtonColor', 'sendButtonRadius', 'sendButtonBorderColor', 'sendVariant'],
       'cc-send-button/icon': ['sendButtonIcon', 'sendButtonIconGenerating', 'sendButtonIconRound', 'sendButtonIconColor'],
     })

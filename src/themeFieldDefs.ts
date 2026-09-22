@@ -244,7 +244,6 @@ export const THEME_FIELD_DEFS = {
   ccBg: { ...C('cc', '中控区背景'), default: '#808080', group: "基础", },
   ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "基础", percent: true, suffix: '%' },
   ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "外观风格", },
-  ccStatusFontSize: { ...N('cc', '状态信息字号', 14, 20), default: 16, group: "状态信息", unit: 'px' },
   // 变体切换组件读 store 值（data-cc-variant），不注入 CSS var
   ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), optionLabels: { terminal: '终端状态栏', glass: '玻璃工作台', pill: '轻量胶囊' }, default: 'terminal', group: "外观风格", noCssVar: true },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
@@ -292,10 +291,11 @@ export const THEME_FIELD_DEFS = {
   cliLinePadding: { ...N('cc', '命令行内边距', 0, 16), default: 6, group: "输入与状态", unit: 'px', advanced: true },
   cliContentOffsetY: { ...N('cc', '内容垂直偏移', -6, 6), default: 0, group: "控件样式", unit: 'px', advanced: true },
   cliHintMode: { ...S('cc', '快捷提示详细程度', ['hidden', 'compact', 'full']), optionLabels: { hidden: '隐藏', compact: '仅常用项', full: '显示全部' }, default: 'full', group: "控件样式", },
+  // ★ #238 刀5：命令行提示的字号从「整条信息行」收窄到**它自己**（原来是整行继承
+  // `ccStatusFontSize`，用 `0.86em` 折算）。默认 16 与原行字号同值 ⇒ 提示大小不变。
+  ccHintFontSize: { ...N('cc', '快捷提示字号', 12, 22, 1), default: 16, group: "控件样式", unit: 'px', cssVar: '--cc-hint-font-size' },
   footerLayout: { ...S('cc', '底部信息布局', ['free', 'peri']), optionLabels: { free: '独立状态行', peri: '输入栏下方' }, default: 'free', group: "控件样式", },
   cliOverflowMode: { ...S('cc', '多行输入行为', ['fixed-scroll', 'grow', 'overlay']), optionLabels: { 'fixed-scroll': '固定高度并滚动', grow: '随内容增高', overlay: '浮层展开' }, default: 'fixed-scroll', group: "控件样式", },
-  statusBg: { ...C('cc', '状态区背景'), default: 'transparent', group: "输入与状态", semanticRole: 'surface.panel', semanticSource: true },
-  statusBgImage: { ...T('cc', '状态区背景图'), default: '', control: 'bgImage', group: "输入与状态", },
   pillText: { ...C('cc', '用量胶囊文字'), default: '#999999', group: "波形与用量", semanticRole: 'content.text' },
   prismOnColor: { ...C('cc', 'Prism 已开启状态'), default: '#4EBA65', group: "波形与用量", semanticRole: 'state.success' },
   modelSwitchMode: { ...S('cc', '模型切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '模型控件', noCssVar: true },
@@ -419,7 +419,8 @@ export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: re
     { heading: '权限控件', groups: [{ title: '权限控件' }] },
     { heading: '附件按钮', groups: [] },
     { heading: '其他指示元素', groups: [] },
-    { groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '状态信息', defaultOpen: false }] },
+    // ★ #238 刀5：「状态信息」组随 `ccStatusFontSize` 删除而消失（该组只有这一项）。
+    { groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }] },
   ],
   right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }

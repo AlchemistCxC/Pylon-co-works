@@ -52,7 +52,6 @@ const WORKBENCH_THEME_KEYS = new Set<ThemeFieldKey>([
 const WORKBENCH_DERIVED_CSS_VARIABLES = [
   '--chat-bg-image',
   '--input-bg-image',
-  '--status-bg-image',
   '--global-font',
   '--font',
   '--mono',
@@ -111,7 +110,6 @@ function resolveCssVariables(theme: ThemeSettings): Record<string, string> {
   const variables: Record<string, string> = {
     '--chat-bg-image': toCssBackgroundImage(theme.chatBgImage),
     '--input-bg-image': toCssBackgroundImage(theme.inputBgImage),
-    '--status-bg-image': toCssBackgroundImage(theme.statusBgImage),
     '--global-font': globalFont,
     '--font': globalFont,
     '--mono': resolveFontToken(theme.codeFont ?? 'mono', 'code'),

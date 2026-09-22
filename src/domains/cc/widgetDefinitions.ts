@@ -425,7 +425,7 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'hint-line',
         label: '提示行',
-        fields: ['cliHintMode'],
+        fields: ['cliHintMode', 'ccHintFontSize'],
         visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
       },
     ],
@@ -571,13 +571,12 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, WidgetPropertyForm> = Ob
  * 跨元件的系统字段：不属于任何单个组/成员的字段。
  *
  * - `ccLayout` / `ccHidden` / `ccScale`：三份名单本体（值为元件名，属布局状态）。
- * - `ccStatusFontSize` / `statusBg` / `statusBgImage`：原「信息行」名下的项，作用面是**整条状态行**
- *   而非某个元件。其收尾（2 项僵尸废弃 / 字号收窄）属刀5。
- *   ★ `footerLayout` 已由 #238 刀3 移入容器行 `cc-surface`（只做归属转移，字段与实现不动）。
+ *   ★ 刀5 后这里**只剩这三项**：原「信息行」名下的 `ccStatusFontSize` / `statusBg` /
+ *   `statusBgImage` 已**删除**（前两项是僵尸，第三项的字号收窄成 `cc-command-hint`
+ *   成员自己的 `ccHintFontSize`）。`footerLayout` 已由刀3 移入容器行 `cc-surface`。
  */
 export const CC_SYSTEM_FIELDS = [
   'ccLayout', 'ccHidden', 'ccScale',
-  'ccStatusFontSize', 'statusBg', 'statusBgImage',
 ] as const satisfies readonly ThemeFieldKey[]
 
 export interface WidgetVisibilityCtx {

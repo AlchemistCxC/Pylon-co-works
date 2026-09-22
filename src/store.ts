@@ -76,7 +76,9 @@ export interface ThemeSettings {
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
   inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
-  statusBg: string; statusBgImage: string; pillText: string; prismOnColor: string
+  /** #238 刀5：命令行提示自己的字号（原为整条信息行继承 `ccStatusFontSize`，已删除） */
+  ccHintFontSize: number
+  pillText: string; prismOnColor: string
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
@@ -108,7 +110,6 @@ export interface ThemeSettings {
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
-  ccStatusFontSize: number
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
   ccVariant: string
   reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
