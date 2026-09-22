@@ -658,3 +658,24 @@
 **不碰**：`src/ccLayoutState.ts`（数据语义与 ±48/±16 clamp 不变）、`src/domains/workbench/**`（store 侧落点不动）、出厂数据 `src/zones/factory/**`、刀5/刀7 各项、插件契约面、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
 **约束（复审据此把关）**：只在编辑态跑几何（常态像素与性能零变化）；障碍集 = 其他可拖元件除去悬浮件；判据是矩形**相交**（面积 > 0），**允许贴合**、不加魔法间隙；**每次 move 重测**障碍（不缓存）；**不消解存量重叠**（用户口径：后续会做一次「强制重置到默认」）。
+
+---
+
+[2026-09-22 23] [Baryon] [#238 · 刀5]
+
+**续开工：刀5 项与名单收尾（三项字段删除 + 命令行提示升格为可拖元件，★ 有视觉变化）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/07-施工单-刀5-项与名单收尾.md`。前置刀1~刀4 均已完工。
+
+**本刀（在刀1~刀4 文件域之上叠加）**：
+
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ 先给 `renderBody` 加 `cc-command-hint` 分支，再删裸渲染 `commandHint()` 与两处调用）
+- `src/domains/cc/widgetDefinitions.ts`（`cc-command-hint` 行 `draggable: false → true`；`CC_SYSTEM_FIELDS` 删三项并同步注释）
+- `src/themeFieldDefs.ts`（删 `ccStatusFontSize` / `statusBg` / `statusBgImage`，含 `semanticSource` 兜底角色）、`src/store.ts`（类型字段）
+- `src/domains/theme/themeCssSnapshot.ts`、`src/domains/workbench/workbenchSkinContract.ts`（`--status-bg*` 变量行）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css`（信息行字号固定 16px；`.cc-command-hint` 字号改 `calc(var(--cc-hint-font-size,16px) * 0.86)`）
+- `src/zones/factory/terminal-cc.ts`、`src/zones/factory/gui-cc.ts`（出厂数据手改，生成脚本已删）
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts` 等契约变更引起的写法同步（逐条点名）
+- 文档：`.agents/records/238-*-刀5*.md`、本文件
+
+**不碰**：布局模型与锚点（刀3 已定）、碰撞约束（刀4）、缩放（刀7）、属性面板分块（刀6）、死数据清理（第③件）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**给后来者**：实机验收要用普通 `cargo build` 的二进制（`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物，跑不起来）。
