@@ -244,17 +244,19 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toEqual([
       'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-send-button',
     ])
-    // ★ #238 刀3：`slot` 退场；序号由「槽内序号」变「同落脚处组内序号」并整理成连续值
-    //（现状 2/3/4/5 中间有空档，是历史遗留）。用户数据里已存的序号不受影响（相对顺序不变 ⇒ 效果等价）。
+    // ★ #238 刀3：`slot` 退场；序号语义由「槽内序号」变为「同落脚处组内序号」。
+    // ★ 序号**沿用历史值**（2/3/4/5 的空档也照抄）：出厂区域预设的落盘数据（`zones/factory/**`，
+    //   生成脚本已删、不许手改）里就是这些值，改出厂默认会让 `presetAssembly.test.ts` 的
+    //   「归一 = 规范排布」不变量失去意义。
     expect(DEFAULT_CC_LAYOUT).toEqual({
       version: 9,
       placements: {
         input: { order: 0, offsetX: 0, offsetY: 0 },
-        model: { order: 1, offsetX: 0, offsetY: 0 },
-        reasoning: { order: 2, offsetX: 0, offsetY: 0 },
-        mode: { order: 3, offsetX: 0, offsetY: 0 },
-        tokens: { order: 4, offsetX: 0, offsetY: 0 },
-        'cc-send-button': { order: 1, offsetX: 0, offsetY: 0 },
+        model: { order: 2, offsetX: 0, offsetY: 0 },
+        reasoning: { order: 3, offsetX: 0, offsetY: 0 },
+        mode: { order: 4, offsetX: 0, offsetY: 0 },
+        tokens: { order: 5, offsetX: 0, offsetY: 0 },
+        'cc-send-button': { order: 0, offsetX: 0, offsetY: 0 },
       },
     })
   })
@@ -309,10 +311,10 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     ])
     expect(BUILTIN_CC_WIDGET_DEFINITIONS.map(entry => entry.defaultPlacement)).toEqual([
       { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
-      { anchor: 'cc-surface', side: 'left', order: 1, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 4, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
     ])
     // 用量控件不新增属性字段（S11 拍板）⇒ 目录里不带 propertyFields
     expect(BUILTIN_CC_WIDGET_DEFINITIONS.find(entry => entry.id === 'tokens')?.propertyFields).toBeUndefined()
@@ -320,7 +322,7 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     expect(BUILTIN_CC_SURFACE_CONTRIBUTION.defaultPlacement).toBeUndefined()
     expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.label).toBe('发送按钮')
     // ★ #238 刀3：插件契约的 `slot` 换成 `anchor` + 可选 `side`
-    expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.defaultPlacement).toEqual({ anchor: 'input', side: 'right', order: 1, offsetX: 0, offsetY: 0 })
+    expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.defaultPlacement).toEqual({ anchor: 'input', side: 'right', order: 0, offsetX: 0, offsetY: 0 })
   })
 })
 

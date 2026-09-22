@@ -45,6 +45,7 @@ describe('applyCustomPresetReducer — 业务状态隔离 + ccLayout 归一化�
       version: 3 as const,
       placements: {
         ...DEFAULT_CC_LAYOUT.placements,
+        // ★ 样本保留 legacy `slot`（老预设数据的真实形状）：#238 刀3 起读盘/归一化一律不读它
         input: { slot: 'input' as const, order: 999, offsetX: 999, offsetY: -999 },
       },
     },
@@ -83,7 +84,8 @@ describe('applyCustomPresetReducer — 业务状态隔离 + ccLayout 归一化�
   it('ccLayout 归一化：越界排布被 clamp', () => {
     const patch = applyCustomPresetReducer(makeState([preset]), 'custom-isolation')
     expect(patch!.ccLayout?.version).toBe(DEFAULT_CC_LAYOUT.version)
-    expect(patch!.ccLayout?.placements.input).toEqual({ slot: 'input', order: 99, offsetX: 48, offsetY: -16 })
+    // ★ #238 刀3：归一化结果里不再有 `slot`（老字段被丢掉，其余 clamp 语义不变）
+    expect(patch!.ccLayout?.placements.input).toEqual({ order: 99, offsetX: 48, offsetY: -16 })
   })
 
   it('路由：全 zone 记 id + 全 custom 清', () => {

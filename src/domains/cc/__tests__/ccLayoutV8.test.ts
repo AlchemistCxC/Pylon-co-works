@@ -8,9 +8,9 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     // 可落槽控件 = 内置轨 ∪ 注册轨中占槽位者（cc-send-button）
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements).sort()).toEqual([...CC_WIDGET_IDS, 'cc-send-button'].sort())
     // S11：pct 并入 tokens；用量控件默认排在权限控件右侧
-    expect(DEFAULT_CC_LAYOUT.placements.tokens).toMatchObject({ order: 4 })
+    expect(DEFAULT_CC_LAYOUT.placements.tokens).toMatchObject({ order: 5 })
     // 刀4：legacy `send` 的槽位事实迁到注册轨 id
-    expect(DEFAULT_CC_LAYOUT.placements['cc-send-button']).toMatchObject({ order: 1 })
+    expect(DEFAULT_CC_LAYOUT.placements['cc-send-button']).toMatchObject({ order: 0 })
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('pct')
     // 刀4 删除的 5 个 id 不得再出现在默认布局里
     for (const id of ['session', 'workspace', 'activity', 'ekg', 'send', 'tasks']) {

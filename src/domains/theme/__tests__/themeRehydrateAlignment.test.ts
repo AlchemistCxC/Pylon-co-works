@@ -52,7 +52,7 @@ describe('#238 刀2 · 读盘后无条件结构对齐（版本号相同、migrat
     })
 
     expect(Object.keys(layout.placements).sort()).toEqual(['cc-send-button', 'input', 'mode', 'model', 'reasoning', 'tokens'])
-    expect(layout.placements.reasoning).toMatchObject({ order: 2 })
+    expect(layout.placements.reasoning).toMatchObject({ order: 3 })
     // 用户值一样都没动（不拍平）
     expect(layout.placements.model).toEqual(USER_EXPECTED)
     expect(state.ccHeight).toBe(220)
@@ -81,7 +81,7 @@ describe('#238 刀2 · 版本号不匹配时仍是「迁移 + 对齐」，用户
     })
 
     expect(layout.placements.model).toEqual(USER_EXPECTED)
-    expect(layout.placements.reasoning).toMatchObject({ order: 2 })
+    expect(layout.placements.reasoning).toMatchObject({ order: 3 })
     expect(layout.version).toBe(9)
     // migrate 真的跑过 ⇒ 这一支会写盘（与刀2 之前一致：只在版本变化时写）
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').version).toBe(THEME_SCHEMA_VERSION)
