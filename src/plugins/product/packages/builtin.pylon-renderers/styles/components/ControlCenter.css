@@ -191,7 +191,8 @@
 .cc-widget.cc-natural > * { flex:none; }
 /* 按钮型控件恒不压缩：model / reasoning / mode / tasks 可点击，tokens（用量显示）
    为同款外观但不可点击。窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠
-   （S10 回归根因：槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
+   （S10 回归根因：当时承载它们的槽会被压到 300px 上下，而三控件自然宽共 450px；
+     #238 刀3 起那个槽已拆成 `.cc-status-group`，这条约束仍然必要）。
    新增"按钮型"控件时需登记到下面这组选择器。 */
 .cc-widget.cc-natural[data-widget-id='model'],
 .cc-widget.cc-natural[data-widget-id='reasoning'],
