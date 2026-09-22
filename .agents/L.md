@@ -581,3 +581,19 @@
 - 文档：`.agents/records/234-*.md`、`.agents/records/237-*.md`、本文件
 
 **我不碰**：`src/sheets/agent-workbench/**`、`src/domains/events/**`、`src/__tests__/replay/**`（判据侧）、`vitest.config.ts`、中控区、预设系统、他人在途域（`scripts/perf-bench/**` 除 projectorSuite 外一律不动）。
+
+---
+
+[2026-09-22 15] [Miyaki Kumo] [#241]
+
+**开工：高亮引擎改 Lezer（用户拍板）——退役 wasm/syntect 语法资产。** 依据为 #240 的内存定位 + 本轮引擎对比 spike（四张实测表在 issue 里）；ADR-0020 已落。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 前端：`src/components/chat/codeHighlight.ts`（**唯一**改动入口）、新增 Lezer 引擎模块、可能的 `issue221.codeBlockLifecycle` 注释、`src/plugins/core/renderer/builtinRenderContent.ts`（如需）
+- 测试：`src/components/chat/__tests__/codeHighlight.test.ts`、`src/renderers/solid-workbench/chat/__tests__/markdownComputeParity.test.ts`（highlight 半）、`src/sheets/file/__tests__/FileTabView.{edit,readonly}.test.tsx`、`src/renderers/solid-workbench/chat/__tests__/issue221.codeBlockLifecycle.solid.test.tsx`
+- Rust（**仅刀3**）：`src-tauri/pylon-markdown/{src/highlight.rs,src/wasm_exit.rs,src/bin/parity_snapshot.rs,assets/grammars/**,assets/starry-theme.json,gen/generate-assets.mjs,SOURCES.md,Cargo.toml}`、`parity/*.json`
+- 依赖/门禁：`package.json`（退休 starry-night/oniguruma）、`scripts/check-bundle-size.mjs`（预算重定标）
+- 文档：`.agents/spec/241-*.md`、`.agents/records/241-*.md`、`.agents/decisions/0020-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/decisions/0018-*.md`（修订）
+
+**我不碰**：`parseMarkdown`（comrak）与 markdown parity 快照锁、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`（消费点应零改动）、`codeBlockDomLifecycle.ts` 的机制本体、中控区、预设系统、他人在途域。
