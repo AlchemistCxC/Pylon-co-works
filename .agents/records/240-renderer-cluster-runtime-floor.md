@@ -123,55 +123,75 @@ CDP 侧：`Page.navigate` → `about:blank`（隔离我们的文档）→ `HeapP
 前面证明「地板是运行时」，但没回答「地板里到底是什么」。本节用 `VirtualQueryEx` 逐区域分类（`MEM_IMAGE`/`MEM_MAPPED`/`MEM_PRIVATE` × 可执行与否）+ `QueryWorkingSet` 把**常驻页**归到类别与模块，
 再用 `Win32_PerfFormattedData_PerfProc_Process.WorkingSetPrivate` 做独立交叉验证。窗口 1216×809、冷启动无会话（工作集合计 514.6 MB / 7 进程）。
 
-### 一、求和口径会骗人：六成是同一物理页被重复计入
+### 一、求和口径会骗人：约六成共享页被重复计入
 
 | 口径 | 值 |
 | --- | --- |
 | WS 合计（7 进程相加） | **514.6 MB** |
-| 其中**私有页**（`WorkingSetPrivate` 实测） | **198.5 MB** |
-| 其中**共享页**（差值） | **316.1 MB（61%）** |
+| 其中**私有页**（`WorkingSetPrivate` 实测，天然唯一） | **198.5 MB** |
+| 其中**共享页**（差值，**被各进程各记一次**） | **316.1 MB（61%）** |
 
-`msedge.dll` 一个文件就说明问题：它单独看是 **55.0 MB** 常驻，却**出现在 5 个进程里**（browser 51.5 / renderer 48.4 / gpu 16.9 / utility 16.1 / utility 9.4）。
-按名字去重（同名只计各进程最大值）后：镜像+映射 **162.9 MB**、私有 **183.1 MB**、共享匿名峰值 **10.1 MB**
-⇒ **唯一物理估计 ≈ 346–356 MB**（两法互证，与计数器口径的 ~371 MB 同量级）。
-**读任务管理器时要注意：把簇里各进程相加会高估约 30–60%。**
+> **修订（同一轮的第二次测量）**：本节初版用「同名模块取各进程最大值」做去重，得出唯一物理 ≈346–356 MB。
+> 那个口径**低估**了——它隐含假设「最大集包含其余进程的全部常驻页」。逐页偏移实测（下节）显示 `msedge.dll`
+> 不满足该假设（最大集 54.9 MB，五进程并集 **93.2 MB**）。**修正后的唯一物理 ≈ 400 MB**。
 
-### 二、唯一物理内存的归属（≈350 MB）
+### 二、逐页精确去重（同文件同偏移 = 同一物理页）
+
+同一文件的镜像在各进程里基底地址相同（实测 `msedge.dll` 五个进程同为 `0x7FFC...`），故「页偏移」可直接跨进程取并集。
+全量 173 个模块、7 进程：
+
+| 模块 | 各进程相加 | **唯一物理（页并集）** | 重复计数 | 进程数 |
+| --- | --- | --- | --- | --- |
+| **`msedge.dll`** | 148.9 MB | **93.2 MB** | **55.7 MB（37%）** | 5 |
+| `ntdll.dll` | 11.0 | 1.6 | 9.5（86%） | 7 |
+| `msedgewebview2.exe` | 9.6 | 1.6 | 7.9（83%） | 6 |
+| `combase.dll` | 7.6 | 1.8 | 5.8（77%） | 7 |
+| `KERNELBASE.dll` | 6.2 | 1.1 | 5.1（82%） | 7 |
+| `msedge_elf.dll` | 4.6 | 1.1 | 3.5 | 6 |
+| `RPCRT4` / `ucrtbase` / `KERNEL32` | 7.5 | 1.4 | 6.1 | 各 7 |
+| **镜像小计（173 模块）** | **289.4 MB** | **177.7 MB** | **111.6 MB（39%）** | — |
+
+**`msedge.dll` 是重复计数的最大单项**：求和 148.9 MB 里有 **55.7 MB 是同一个物理页**（37%）。
+但它同时也是**唯一物理里最大的镜像**（93.2 MB）——运行时本体被触达的代码面就这么多（镜像 333 MB）。
+
+各进程只触达 `msedge.dll` 的不同子集：browser 54.9、renderer 48.5、utility 18.7、gpu 17.1、utility 9.6 MB；
+**它们之间不嵌套**，所以「取最大」会低估 38 MB。
+
+**测量坑（一并记下）**：`QueryWorkingSet` 不返回条目数，若缓冲区未清零、按「读到 0 为止」读，会**重复读到上一次查询的残留页地址**，
+使「某模块驻留字节」虚高（本次首跑就中了：`ntdll.dll` 七个进程页集完全相同却报出 1.6/3.2/4.7 MB 三种值）。
+按页集去重（`SortedSet`）不受影响，故上表用页并集口径。
+
+### 三、唯一物理内存的归属（≈400 MB）
 
 | 类别 | MB | 说明 |
 | --- | --- | --- |
 | **私有堆（独占）** | **198.5** | renderer 70.3 + gpu 58.4 + browser 33.9 + **app(pylon.exe) 24.7** + utility 9.5 + crashpad 1.7 |
-| **镜像去重后** | **162.9** | 见下表 |
-| 文件映射 | 16.1 | 系统字体（msyh.ttc 0.85 / seguiemj 0.84 / cambria 0.61）、`icudtl.dat` 1.4、`Ruleset Data` 2.2 |
+| **镜像（页并集）** | **177.7** | 见上表 |
+| 文件映射 | 16.1 求和（唯一略低） | 系统字体（`msyh.ttc` 0.85 / `seguiemj` 0.84 / `cambria` 0.61）、`icudtl.dat` 1.4、`Ruleset Data` 2.2 |
 | 共享匿名（mojo/GPU 缓冲） | 22.4 求和 / 10.1 单进程峰值 | pagefile 支撑的共享内存 |
 
-镜像（去重后）最大的几笔：
+镜像里按归属分：`msedge.dll` **93.2**（运行时本体）、显卡驱动 **21.0**（NVIDIA `nvwgf2umx`+`nvgpucomp64`+`D3DCompiler_47` 13.4 + Intel `igc64`+`igd10um64xe` 7.6，**混合显卡机器两套 UMD 并存**）、
+**`pylon.exe` 10.7（我们）**、`EmbeddedBrowserWebView.dll` 3.4（我们）、其余为 Windows/运行时 DLL。
 
-| 模块 | 常驻 | 出现在几个进程 | 归属 |
-| --- | --- | --- | --- |
-| `msedge.dll` | **55.0 MB** | 5 | WebView2 运行时本体（磁盘 332 MB） |
-| `pylon.exe` | 10.7 MB | 1 | **我们**（镜像 34.3 MB） |
-| `nvwgf2umx.dll` + `nvgpucomp64.dll` + `D3DCompiler_47.dll` | 13.4 MB | 1（gpu） | NVIDIA 驱动 |
-| `igc64.dll` + `igd10um64xe.DLL` | 7.6 MB | 1（gpu） | Intel 驱动 |
-| `EmbeddedBrowserWebView.dll` | 3.4 MB | 1 | **我们**（WebView2 宿主加载器） |
-| `ntdll` / `combase` / `KERNELBASE` | 7.5 MB | 各 7 | Windows |
-| `icudtl.dat` / `msedgewebview2.exe` / `msedge_elf.dll` | 4.5 MB | 各 6 | 运行时 |
+### 四、结论：这一层里我们的代码 ≈ 55 MB（约 14%）
 
-### 三、结论：这一层里我们的代码 ≈ 55 MB
-
-- **我们**：宿主私有堆 24.7 + `pylon.exe` 镜像常驻 10.7 + `EmbeddedBrowserWebView.dll` 3.4 + renderer 里属外壳的那部分（空白页对照：renderer 私有 88.5 → 71.2 MB）≈ **55 MB（约 15%）**。
-- **其余 ≈ 295 MB**：WebView2 运行时（`msedge.dll` 常驻 55 MB + 各进程运行时基线）、Windows 系统 DLL（`ntdll`/`combase`/`KERNELBASE` × 7 进程）、**两套显卡驱动 UMD 并存 21 MB**（混合显卡机器上 NVIDIA 与 Intel 的驱动都被加载）、ICU/字体、以及 Chromium 每进程的固有 arena。
+- **我们**：宿主私有堆 24.7 + `pylon.exe` 镜像常驻 10.7 + `EmbeddedBrowserWebView.dll` 3.4 + renderer 里属外壳的那部分（空白页对照：renderer 私有 88.5 → 71.2 MB）≈ **55 MB**。
+- **其余 ≈ 345 MB**：WebView2 运行时（`msedge.dll` 唯一 93.2 MB + 各进程运行时基线）、Windows 系统 DLL、**两套显卡驱动 UMD 并存 21 MB**、ICU/字体、Chromium 每进程的固有 arena。
 - **顺带否掉一个旧假设**：`resources/fonts`（磁盘 40 MB）**没有**被映射进任何进程——宿主的文件映射驻留只有 0.33 MB，且 top 列表里没有任何字体文件。宿主 commit 偏高的成因不在它这里。
 
-### 四、这份拆解能改什么、不能改什么
+### 五、这份拆解能改什么、不能改什么
 
-- **改不了**：`msedge.dll` 55 MB、Windows DLL、ICU/字体、GPU 驱动栈、Chromium 各进程基线 —— 这些是「用 WebView2」的入场费。
+- **改不了**：`msedge.dll` 93 MB、Windows DLL、ICU/字体、GPU 驱动栈、Chromium 各进程基线 —— 这些是「用 WebView2」的入场费。
   想动只能换运行时分发方式或换渲染宿主（不是本仓能决定的事）。
 - **能改的**：我们自己的 ~55 MB（宿主私有堆 24.7 MB 最大一笔，未拆解到具体子系统）；以及 §未解 里的项。
-- **测量建议**：以后报簇内存时**不要用各进程相加**，至少同时给 `WorkingSetPrivate` 求和；否则会系统性高估三到六成。
+- **测量建议**：报簇内存时**不要用各进程相加**——共享页会被各进程各记一次（本次口径下共享部分 1.6×，`msedge.dll` 1.60×、`ntdll` 6.9×）。
+  至少同时给 `WorkingSetPrivate` 求和，并意识到**「同名取最大」只是个下界**：同一 DLL 的常驻页在不同角色间并不嵌套，要精确须按页偏移取并集。
 
 
 
 ## 并行交集
 
 只读探查，未改产品代码；删除了实例的 `EBWebView/Default/{Cache,Code Cache}`（可自建）并关闭了该实例。
+
+逐页去重的探针：`page-union.ps1`（对每个进程把模块常驻页按**页偏移**编码成区间，跨进程取并集）。
+注意 `QueryWorkingSet` 不返回条目数，缓冲区必须清零——否则会读到上次查询的残留页地址，把「某模块驻留」算高。
