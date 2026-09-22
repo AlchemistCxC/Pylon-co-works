@@ -4,7 +4,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-
 pub(crate) fn read_config_snapshot(
     path: &Path,
 ) -> Result<(String, HashMap<String, AgentDef>), ConfigError> {
@@ -450,4 +449,3 @@ pub(crate) fn write_new_config_under_lease(
     }
     Ok(config_revision_for_bytes(candidate))
 }
-

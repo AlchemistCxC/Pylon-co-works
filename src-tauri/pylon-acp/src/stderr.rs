@@ -129,7 +129,9 @@ pub fn spawn_stderr_reader(
                         correlation.clone(),
                         pylon_core::log_context::RuntimeLogContext {
                             code: extract_stderr_code(&l),
-                            category: Some(pylon_core::log_context::LOG_CATEGORY_STDERR.to_string()),
+                            category: Some(
+                                pylon_core::log_context::LOG_CATEGORY_STDERR.to_string(),
+                            ),
                             recoverable: None,
                             user_action_required: None,
                             raw_available: Some(true),

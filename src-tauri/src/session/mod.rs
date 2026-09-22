@@ -52,8 +52,8 @@ pub(crate) use persist::*;
 // 注入与命令层使用；MsgRepo 的 Connection 保持私有（只暴露 service 与 DTO）。
 // #247：msg_repo/event_repo/turn_rollup/retention/user_data/persistence_bootstrap
 // 存储核下沉 pylon-session crate；模块重导出保活 crate::session:: 既有路径。
-pub use pylon_session::msg_repo;
 pub(crate) use msg_repo::*;
+pub use pylon_session::msg_repo;
 // I13-A-FE-02：消息历史保留策略契约（模式/档位/默认值/回退语义；不含删除逻辑）。
 pub use pylon_session::retention;
 // I14-W5：用户数据仓库（versioned Profile/Session/activeProfileId，与消息同库 user_data 表；
@@ -62,14 +62,13 @@ pub use pylon_session::user_data;
 pub(crate) use user_data::*;
 // M3 EVT-02：canonical 事件仓库（方案书 §5.10——append-only 事件流；与消息同库
 // canonical_events 表 v6；独立连接 + busy_timeout；service/DTO/错误经本层 re-export）。
-pub use pylon_session::event_repo;
 pub(crate) use event_repo::*;
+pub use pylon_session::event_repo;
 // #81 L2/L3：turn 单元行构建（kernel 终结时追加）与 L3 裁剪校验。
-pub use pylon_session::turn_rollup;
 // Kernel persistence readiness barrier：三个同库 service 作为一个启动单元安装，
 // setup 返回前全部 ready；禁止半初始化与备用历史权威。
-pub use pylon_session::persistence_bootstrap;
 pub(crate) use persistence_bootstrap::*;
+pub use pylon_session::persistence_bootstrap;
 // M4 DEL-01：现有 schema/tombstone owner 化审计（方案书 §5.12——表/索引/FK/owner 缺口
 // 基线固化；只审计不迁移，DEL-02 升版时本基线断言必须同步演进）。
 // M4 DEL-02：tombstone 升级 owner/deletion state 迁移与写路径测试（方案书 §5.12——

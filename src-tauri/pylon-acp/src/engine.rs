@@ -440,11 +440,7 @@ pub struct ResponderHandle {
 
 impl ResponderHandle {
     /// 应答 agent 发来的 JSON-RPC 请求。
-    pub async fn respond(
-        self,
-        request_id: super::RequestId,
-        response: serde_json::Value,
-    ) -> bool {
+    pub async fn respond(self, request_id: super::RequestId, response: serde_json::Value) -> bool {
         let responder = self
             .pending_requests
             .lock()
@@ -540,9 +536,7 @@ pub async fn send_keep_rx_prepared(
 }
 
 /// 发送 + 等待匹配响应（SDK 走 outbound 泵）。
-pub async fn complete_prepared(
-    prepared: PreparedRpc,
-) -> Result<serde_json::Value, AcpError> {
+pub async fn complete_prepared(prepared: PreparedRpc) -> Result<serde_json::Value, AcpError> {
     let sdk = prepared.sdk;
     let (reply_tx, reply_rx) = oneshot::channel();
     sdk.outbound
@@ -1084,9 +1078,9 @@ pub fn spawn_sdk_engine(
 mod tests {
     use super::test_support::fake_acp_agent_stub;
     use super::*;
-    use pylon_core::correlation::RuntimeCorrelation;
     use agent_client_protocol::schema::v1::RequestId;
     use agent_client_protocol::{RawJsonRpcMessage, TransportFrame};
+    use pylon_core::correlation::RuntimeCorrelation;
     use std::time::Duration;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

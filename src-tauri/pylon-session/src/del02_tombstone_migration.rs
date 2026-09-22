@@ -9,8 +9,8 @@
 
 use rusqlite::Connection;
 
-use super::msg_repo::{connect, MsgRepo};
 use super::msg_repo::SCHEMA_VERSION;
+use super::msg_repo::{connect, MsgRepo};
 
 /// 模拟 v6 旧库：老形状 deleted_sessions + canonical_events（含反查行）+ user_version=6。
 /// 其余表由 migrate() 的 SCHEMA_SQL 补齐——与真实 v6 库升版路径一致。

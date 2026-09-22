@@ -17,8 +17,8 @@ pub use launch_plan::plan_for_agent;
 pub mod cause;
 pub mod initialize_plan;
 pub mod interaction_queue;
-pub mod runtime_sink;
 pub mod negotiated;
+pub mod runtime_sink;
 #[allow(unused_imports)] // CapabilityFact 供测试/诊断按路径引用，主链路暂未直用
 pub use negotiated::{CapabilityConsumer, CapabilityFact, NegotiatedCapabilitySnapshot};
 pub mod plan_policy;
@@ -31,7 +31,6 @@ pub use error::*;
 
 // #245：原 crate 根的两个 ACP 相关测试模块就近归入（模块 basename 保持不变，
 // `cargo test --lib p1_wire` / `real_acp` 等既有 filter 命令继续有效）。
-
 
 mod process;
 pub use process::ManagedChild;

@@ -366,8 +366,9 @@ pub fn validate_owner_key(owner_key: &str) -> Result<(), SessionError> {
 }
 
 fn legacy_tombstone_owner_key(session_id: &str) -> Result<String, SessionError> {
-    serde_json::to_string(&["*", "*", session_id])
-        .map_err(|error| SessionError::from(format!("legacy tombstone owner encode failed: {error}")))
+    serde_json::to_string(&["*", "*", session_id]).map_err(|error| {
+        SessionError::from(format!("legacy tombstone owner encode failed: {error}"))
+    })
 }
 
 fn repo_err(error: rusqlite::Error) -> SessionError {
@@ -1028,13 +1029,10 @@ impl MessageService {
 /// DEL-03（§5.13 步骤 1）：命令层 owner_key 校验——Some 时校验格式（3 元素 JSON 数组），
 /// 非法 → `UserDataError::InvalidOwnerKey`（B1.2 code=invalid_owner_key，前端可分支）；
 /// None（legacy 调用）直接放行，走会话作用域 legacy owner。
-pub fn validate_delete_owner(
-    owner_key: Option<String>,
-) -> Result<Option<String>, UserDataError> {
+pub fn validate_delete_owner(owner_key: Option<String>) -> Result<Option<String>, UserDataError> {
     if let Some(ref key) = owner_key {
         crate::msg_repo::validate_owner_key(key)
             .map_err(|error| UserDataError::InvalidOwnerKey(error.to_string()))?;
     }
     Ok(owner_key)
 }
-

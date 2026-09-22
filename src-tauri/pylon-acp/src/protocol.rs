@@ -33,6 +33,8 @@ pub enum SessionUpdateVariant {
 
 impl SessionUpdateVariant {
     /// wire 字符串 → 变体；未知变体返回 None（调用方按忽略处理，与旧 `_ => {}` 一致）。
+    // #247：固有关联函数（非 FromStr trait——这里不消费 Err 形态），名称沿用原实现。
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
             "agent_message_chunk" => Some(Self::AgentMessageChunk),

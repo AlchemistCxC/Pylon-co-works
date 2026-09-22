@@ -555,7 +555,10 @@ fn protocol_defaults_match_current_behavior() {
     assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
     assert_eq!(protocol.mcp_servers, McpServersMode::Always);
     let limits = protocol.attachment_limits();
-    assert_eq!(limits.max_attachments, crate::agent_config::DEFAULT_MAX_ATTACHMENTS);
+    assert_eq!(
+        limits.max_attachments,
+        crate::agent_config::DEFAULT_MAX_ATTACHMENTS
+    );
     assert_eq!(
         limits.max_attachment_bytes,
         crate::agent_config::DEFAULT_MAX_ATTACHMENT_BYTES

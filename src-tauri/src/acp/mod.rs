@@ -10,15 +10,15 @@ pub use pylon_acp::*;
 pub(crate) mod instance_registry;
 
 #[cfg(test)]
-mod tests;
+mod catalog_driven_tests;
 #[cfg(test)]
 mod golden_trace_tests;
-#[cfg(test)]
-mod catalog_driven_tests;
 #[cfg(test)]
 mod p1_wire_regression_tests;
 #[cfg(test)]
 mod real_acp_smoke;
+#[cfg(test)]
+mod tests;
 
 // #247：原 pylon-acp::error 内的实现随宿主类型（PylonError）留驻——
 // 孤儿规则要求本 impl 与 PylonError 同 crate；折回 protocol_error 的
@@ -26,7 +26,9 @@ mod real_acp_smoke;
 impl From<pylon_acp::AcpError> for crate::error::PylonError {
     fn from(error: pylon_acp::AcpError) -> Self {
         if let pylon_acp::AcpError::ReplayLoadInProgress = error {
-            return crate::error::PylonError::Storage(pylon_session::SessionError::ReplayLoadInProgress);
+            return crate::error::PylonError::Storage(
+                pylon_session::SessionError::ReplayLoadInProgress,
+            );
         }
         crate::error::PylonError::Protocol(error.to_string())
     }

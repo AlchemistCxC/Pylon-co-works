@@ -186,7 +186,8 @@ fn validate_db_header(conn: &Connection) -> Result<(), SessionError> {
 }
 
 fn validate_quick_check(conn: &Connection) -> Result<(), SessionError> {
-    let integrity_error = |error: rusqlite::Error| SessionError::DatabaseIntegrity(error.to_string());
+    let integrity_error =
+        |error: rusqlite::Error| SessionError::DatabaseIntegrity(error.to_string());
     let mut stmt = conn
         .prepare("PRAGMA quick_check(1)")
         .map_err(integrity_error)?;

@@ -12,8 +12,8 @@
 //! B7：messages 表已删除，迟到写矩阵从 msg_append 迁移到 evt_append。
 
 use super::event_repo::{parse_canonical_event, EventError, EventRepo};
-use super::msg_repo::{MessageError, MsgRepo};
 use super::msg_repo::validate_delete_owner;
+use super::msg_repo::{MessageError, MsgRepo};
 use super::user_data::UserDataError;
 
 /// wire 序列化 `{code, message}` 中的 code 提取（断言形状稳定）。

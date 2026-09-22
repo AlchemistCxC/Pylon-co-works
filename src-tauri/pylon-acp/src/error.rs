@@ -57,12 +57,7 @@ pub struct AgentConnectFailure {
 }
 
 impl AgentConnectFailure {
-    pub fn new(
-        stage: AgentConnectStage,
-        code: &str,
-        message: String,
-        retryable: bool,
-    ) -> Self {
+    pub fn new(stage: AgentConnectStage, code: &str, message: String, retryable: bool) -> Self {
         Self {
             stage,
             code: code.to_string(),
@@ -335,7 +330,6 @@ impl From<AcpError> for String {
     }
 }
 
-
 impl AcpError {
     /// H14 类型化：close 降级判定（session.rs:1619 错误串 contains 的声明式替代，
     /// G2-03 消费点）。JSON-RPC error 信封的 `code` 字段解析优先（-32601 =
@@ -372,7 +366,6 @@ impl AcpError {
 // | set_mode          | modeId                         | modeId                      |
 // 结论：wire 分叉仅切 model 途径。initialize 统一带 _meta.peri.*（Hermes 忽略
 // 无害）；close 降级保留为防御兜底（旧 Hermes 版本无此方法）。
-
 
 #[cfg(test)]
 mod resume_failure_tests {

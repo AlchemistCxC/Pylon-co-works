@@ -168,7 +168,10 @@ impl AcpWireHub {
 
     /// 从 AgentDef 构造（默认容量；client_generation 为连接所属代际）。
     /// 连接方在 `connect_with_logs`/`connect_with_generation` 使用。
-    pub fn for_agent(agent: &pylon_core::agent_config::AgentDef, client_generation: u64) -> Arc<Self> {
+    pub fn for_agent(
+        agent: &pylon_core::agent_config::AgentDef,
+        client_generation: u64,
+    ) -> Arc<Self> {
         Self::new(
             RuntimeCorrelation::from_agent(agent, client_generation),
             DEFAULT_WIRE_TRACE_CAPACITY,
@@ -194,6 +197,8 @@ impl AcpWireHub {
         self.enabled.load(Ordering::Relaxed)
     }
 
+    // #247：诊断面只暴露 len；空与否消费方走 is_enabled/订阅语义，不补 is_empty。
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.records
             .lock()
@@ -406,8 +411,12 @@ fn classify_id(id: Option<&serde_json::Value>) -> (WireIdKind, Option<serde_json
 
 /// 脱敏：Redact 策略（只 REDACT secret，不改写结构字段）。
 fn sanitize_wire(value: serde_json::Value) -> serde_json::Value {
-    pylon_foundations::sanitize::sanitize_value(pylon_foundations::sanitize::SanitizePolicy::Redact, "params", value)
-        .unwrap_or_else(|| serde_json::Value::String(pylon_foundations::sanitize::REDACTED.to_string()))
+    pylon_foundations::sanitize::sanitize_value(
+        pylon_foundations::sanitize::SanitizePolicy::Redact,
+        "params",
+        value,
+    )
+    .unwrap_or_else(|| serde_json::Value::String(pylon_foundations::sanitize::REDACTED.to_string()))
 }
 
 /// 在整条报文（params/result 子树）中按候选 key 顺序递归查找第一个字符串值。

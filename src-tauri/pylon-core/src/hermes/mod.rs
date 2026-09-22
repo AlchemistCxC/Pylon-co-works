@@ -189,6 +189,15 @@ pub fn hermes_home_override(agent: &AgentDef, base_dir: Option<&Path>) -> Option
 }
 
 #[cfg(test)]
+fn unique_temp(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("pylon-{label}-{}-{nanos}", std::process::id()))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
@@ -286,13 +295,4 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(profiles, vec!["profile-a", "profile-x", "shared"]);
     }
-}
-
-#[cfg(test)]
-fn unique_temp(label: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("pylon-{label}-{}-{nanos}", std::process::id()))
 }

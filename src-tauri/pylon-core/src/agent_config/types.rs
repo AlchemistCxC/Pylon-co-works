@@ -399,9 +399,7 @@ impl AcpProtocolConfig {
 /// D2 双格式反序列化：bool（true=set_model / false=config_option）或字符串
 /// （"set_model"/"config_option"/"none"）。未知值拒绝（E1：报错指明字段与可选值；
 /// agent id 上下文由 parse() 的逐 agent 反序列化包装补充）。
-pub fn deserialize_set_model_api<'de, D>(
-    deserializer: D,
-) -> Result<Option<SetModelApi>, D::Error>
+pub fn deserialize_set_model_api<'de, D>(deserializer: D) -> Result<Option<SetModelApi>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -425,9 +423,7 @@ where
 }
 
 /// D4 mcp_servers 字段形态反序列化：字符串 "always" | "omit_if_empty"。
-pub fn deserialize_mcp_servers_mode<'de, D>(
-    deserializer: D,
-) -> Result<McpServersMode, D::Error>
+pub fn deserialize_mcp_servers_mode<'de, D>(deserializer: D) -> Result<McpServersMode, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

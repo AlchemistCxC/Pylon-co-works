@@ -153,8 +153,7 @@ impl EventRepo {
     /// 打开（或创建）仓库并迁移到最新 schema（D-02 版本化迁移）。
     pub fn open(path: &Path) -> Result<EventRepo, EventError> {
         let mut conn = Connection::open(path).map_err(EventError::from)?;
-        crate::connect(&mut conn)
-            .map_err(|error| EventError::Unavailable(error.to_string()))?;
+        crate::connect(&mut conn).map_err(|error| EventError::Unavailable(error.to_string()))?;
         Ok(EventRepo {
             conn: Mutex::new(conn),
         })
@@ -164,8 +163,7 @@ impl EventRepo {
     #[allow(dead_code)] // 测试用内存仓库
     pub fn open_in_memory() -> Result<EventRepo, EventError> {
         let mut conn = Connection::open_in_memory().map_err(EventError::from)?;
-        crate::connect(&mut conn)
-            .map_err(|error| EventError::Unavailable(error.to_string()))?;
+        crate::connect(&mut conn).map_err(|error| EventError::Unavailable(error.to_string()))?;
         Ok(EventRepo {
             conn: Mutex::new(conn),
         })
@@ -596,10 +594,8 @@ impl EventRepo {
             ));
         }
         uncovered_sql.push_str(" ORDER BY sequence ASC");
-        let mut bind: Vec<&dyn rusqlite::ToSql> = vec![
-            &owner_key,
-            &crate::turn_rollup::TURN_UNIT_EVENT_TYPE,
-        ];
+        let mut bind: Vec<&dyn rusqlite::ToSql> =
+            vec![&owner_key, &crate::turn_rollup::TURN_UNIT_EVENT_TYPE];
         for (start, end) in &ranges {
             bind.push(start);
             bind.push(end);
@@ -658,8 +654,7 @@ impl EventRepo {
         let filtered: Vec<CanonicalEventRow> = all
             .into_iter()
             .filter(|row| {
-                row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE
-                    || !covered(row.sequence)
+                row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE || !covered(row.sequence)
             })
             .collect();
         Ok(fold_adjacent_delta_runs(filtered))
@@ -668,10 +663,7 @@ impl EventRepo {
     /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。
     /// 逐 turn 单事务；进度落 `rollup_migration_state`（trimmed/mismatch 永久跳过）。
     /// budget_ms 用尽即在 turn 边界暂停；全部完成后 VACUUM 回收（仅当本次有删行）。
-    pub fn rollup_trim(
-        &self,
-        budget_ms: Option<u64>,
-    ) -> Result<RollupTrimReport, EventError> {
+    pub fn rollup_trim(&self, budget_ms: Option<u64>) -> Result<RollupTrimReport, EventError> {
         let started = std::time::Instant::now();
         let mut report = RollupTrimReport::default();
         loop {

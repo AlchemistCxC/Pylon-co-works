@@ -1,7 +1,7 @@
 use super::*;
-use crate::agent_config::{DEFAULT_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENT_BYTES};
 #[cfg(test)]
 use crate::agent_config::McpServersMode;
+use crate::agent_config::{DEFAULT_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENT_BYTES};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;

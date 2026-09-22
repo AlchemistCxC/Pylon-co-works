@@ -154,10 +154,10 @@ mod tests {
             message.contains("source-a") && message.contains("probing")
         }));
 
-        let truncated = serde_json::to_value(
-            PylonError::Storage(pylon_session::SessionError::ReplayTruncated { dropped_count: 3 }),
-        )
-            .expect("serialize replay error DTO");
+        let truncated = serde_json::to_value(PylonError::Storage(
+            pylon_session::SessionError::ReplayTruncated { dropped_count: 3 },
+        ))
+        .expect("serialize replay error DTO");
         assert_eq!(truncated["code"], "replay_truncated");
         assert!(truncated["message"]
             .as_str()
@@ -173,12 +173,17 @@ mod tests {
         assert_eq!(PylonError::Io("x".into()).code(), "io_error");
         assert_eq!(PylonError::Protocol("x".into()).code(), "protocol_error");
         assert_eq!(
-            PylonError::CanonicalEvent(pylon_session::event_repo::EventError::Unavailable("x".into())).code(),
+            PylonError::CanonicalEvent(pylon_session::event_repo::EventError::Unavailable(
+                "x".into()
+            ))
+            .code(),
             "event_db_unavailable"
         );
         assert_eq!(
-            PylonError::MessagePersistence(pylon_session::msg_repo::MessageError::Conflict("x".into()))
-                .code(),
+            PylonError::MessagePersistence(pylon_session::msg_repo::MessageError::Conflict(
+                "x".into()
+            ))
+            .code(),
             "message_repo_conflict"
         );
         assert_eq!(
@@ -190,8 +195,10 @@ mod tests {
             "database_future_schema"
         );
         assert_eq!(
-            PylonError::Storage(pylon_session::SessionError::DatabaseSchemaInvalid("x".into()))
-                .code(),
+            PylonError::Storage(pylon_session::SessionError::DatabaseSchemaInvalid(
+                "x".into()
+            ))
+            .code(),
             "database_schema_invalid"
         );
         assert_eq!(

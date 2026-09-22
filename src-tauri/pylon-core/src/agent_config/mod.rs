@@ -28,7 +28,6 @@ pub fn effective_config_path() -> Option<PathBuf> {
     None
 }
 
-
 /// G1-05：DEFAULT_* 前缀统一；值不变。超时访问器（prompt_timeout/
 /// cancel_settle_timeout）在 AcpProtocolConfig（agent_config.rs），
 /// DEFAULT_* 为"无声明=现状"默认值的唯一事实源。

@@ -10,9 +10,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::correlation::RuntimeCorrelation;
 // #247：RuntimeLogContext 与功能域词汇下沉 pylon-core（引擎日志汇端口共享形状）。
-use pylon_core::log_context::{LOG_CATEGORY_FRONTEND, LOG_CATEGORY_STDERR, RuntimeLogContext};
-use pylon_acp::stderr::AGENT_STDERR_ECHO_TARGET;
 use crate::time::Timestamp;
+use pylon_acp::stderr::AGENT_STDERR_ECHO_TARGET;
+#[cfg(test)]
+use pylon_core::log_context::LOG_CATEGORY_STDERR;
+use pylon_core::log_context::{RuntimeLogContext, LOG_CATEGORY_FRONTEND};
 
 /// R18：生产 hub 注册处——run() 创建 hub 后写入，tracing Layer 按事件读取。
 /// 测试不安装 subscriber，Layer 不运行，无需注册。
@@ -30,16 +32,6 @@ pub const DEFAULT_CAPACITY: usize = 2000;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 #[cfg(test)]
 const REDACTED: &str = "[REDACTED]";
-
-/// LOG-01：agent stderr 行回声专用 tracing target——该 target 只作 console/外部日志
-/// 出口（fmt layer），`RuntimeLogLayer` 跳过它，hub 唯一归属 = stderr reader 的显式
-/// push（保留真实行文本 + agent + correlation，同一行只进 hub 一次，方案书 §5.14）。
-
-/// LOG-03：日志功能域分类词汇（集中定义防拼写漂移）。
-/// 本卡只填充可确定性判定的站点（stderr/frontend）；transport/session/permission/
-/// command/lifecycle 等域由后续结构化日志站点按此词汇填充（方案书 §5.14 增量字段
-/// `category`）。类别语义：`stderr`=agent 原始 stderr 行（可与结构化后端日志分离筛选），
-/// `frontend`=前端日志（source 亦固定为 frontend）。
 
 /// LOG-03：结构化日志上下文——RuntimeLogEntry 增量字段的推进入口（方案书 §5.14：
 /// code/category/agentId/provider/source/sessionId/clientGeneration/requestId/toolCallId/
@@ -146,6 +138,8 @@ impl RuntimeLogHub {
 
     /// OBS-02：带 correlation context 的 push（统一身份进运行时日志）。
     /// correlation=None 时与旧 push 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #247：结构化字段面即 8 参（历史基线项，原 runtime_log.rs 路径随存储核分域迁移）。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_correlation(
         &self,
         timestamp: Timestamp,
@@ -171,6 +165,8 @@ impl RuntimeLogHub {
     /// LOG-03：带结构化上下文的 push（增量字段 code/category/recoverable/
     /// userActionRequired/rawAvailable 的唯一推进入口）。context 为缺省值时与
     /// `push_with_correlation` 完全一致（wire 不新增字段，旧 UI 兼容）。
+    // #247：同上——9 参为结构化上下文面，历史基线项随 crate 分域保留。
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_context(
         &self,
         timestamp: Timestamp,
@@ -477,6 +473,33 @@ pub(crate) fn sanitize_message(message: String) -> String {
 
 fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
     crate::sanitize::sanitize_fields(fields)
+}
+
+// #247：引擎日志汇端口（pylon-acp::runtime_sink）的宿主侧实现——转发到
+// 同名固有方法，ring buffer/脱敏/查询语义零变化。
+impl crate::acp::runtime_sink::RuntimeLogSink for RuntimeLogHub {
+    fn push_with_context(
+        &self,
+        timestamp: Timestamp,
+        level: String,
+        source: String,
+        session: Option<String>,
+        message: String,
+        fields: Map<String, Value>,
+        correlation: Option<RuntimeCorrelation>,
+        context: RuntimeLogContext,
+    ) {
+        self.push_with_context(
+            timestamp,
+            level,
+            source,
+            session,
+            message,
+            fields,
+            correlation,
+            context,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1097,32 +1120,5 @@ mod tests {
         assert_eq!(context.recoverable, None);
         assert_eq!(context.user_action_required, None);
         assert_eq!(context.raw_available, None);
-    }
-}
-
-// #247：引擎日志汇端口（pylon-acp::runtime_sink）的宿主侧实现——转发到
-// 同名固有方法，ring buffer/脱敏/查询语义零变化。
-impl crate::acp::runtime_sink::RuntimeLogSink for RuntimeLogHub {
-    fn push_with_context(
-        &self,
-        timestamp: Timestamp,
-        level: String,
-        source: String,
-        session: Option<String>,
-        message: String,
-        fields: Map<String, Value>,
-        correlation: Option<RuntimeCorrelation>,
-        context: RuntimeLogContext,
-    ) {
-        self.push_with_context(
-            timestamp,
-            level,
-            source,
-            session,
-            message,
-            fields,
-            correlation,
-            context,
-        );
     }
 }

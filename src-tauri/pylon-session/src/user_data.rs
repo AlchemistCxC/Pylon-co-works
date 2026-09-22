@@ -285,8 +285,7 @@ fn validate_browser_agent_ops(payload: &serde_json::Value) -> Result<i64, UserDa
 /// 调用方须先创建 DB 父目录；失败返回 Err——启动路径不得静默回退。
 pub fn open_user_data_db(path: &Path) -> Result<UserDataStore, UserDataError> {
     let mut conn = Connection::open(path).map_err(UserDataError::from)?;
-    crate::connect(&mut conn)
-        .map_err(|error| UserDataError::Unavailable(error.to_string()))?;
+    crate::connect(&mut conn).map_err(|error| UserDataError::Unavailable(error.to_string()))?;
     Ok(UserDataStore {
         conn: Mutex::new(conn),
     })
@@ -303,8 +302,7 @@ impl UserDataStore {
     #[allow(dead_code)] // 测试用内存仓库
     pub fn open_in_memory() -> Result<UserDataStore, UserDataError> {
         let mut conn = Connection::open_in_memory().map_err(UserDataError::from)?;
-        crate::connect(&mut conn)
-            .map_err(|error| UserDataError::Unavailable(error.to_string()))?;
+        crate::connect(&mut conn).map_err(|error| UserDataError::Unavailable(error.to_string()))?;
         Ok(UserDataStore {
             conn: Mutex::new(conn),
         })
@@ -470,10 +468,7 @@ impl UserDataStore {
     /// 修正 activeProfileId，并同时落盘 profiles + sessions 两个 envelope。
     /// 任一失败整体回滚（跨 envelope 原子性由同一事务保证）；删除不存在的 profile
     /// → NotFound（不静默）。
-    pub fn delete_profile(
-        &self,
-        profile_id: &str,
-    ) -> Result<ProfileDeleteResult, UserDataError> {
+    pub fn delete_profile(&self, profile_id: &str) -> Result<ProfileDeleteResult, UserDataError> {
         let mut conn = self.conn.lock().map_err(lock_err)?;
         let tx = conn.transaction().map_err(UserDataError::from)?;
 
@@ -632,10 +627,7 @@ impl UserDataService {
         })
     }
 
-    pub async fn load(
-        &self,
-        key: UserDataKey,
-    ) -> Result<Option<UserDataEnvelope>, UserDataError> {
+    pub async fn load(&self, key: UserDataKey) -> Result<Option<UserDataEnvelope>, UserDataError> {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || store.load(key))
             .await

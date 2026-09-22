@@ -25,8 +25,11 @@ export const moduleDefinitions = [
   { id: 'test-support', roots: ['src/test-utils/'], responsibility: '测试共享支撑（mock 形状、fixture 工厂）；仅被测试代码 import，不进生产构建' },
   { id: 'demo', roots: ['src/demo/'], responsibility: '浏览器演示数据；不得把演示验证当作原生链路证据' },
   { id: 'frontend-root', roots: ['src/*', 'src/presets/', 'src/zones/'], responsibility: '旧根级 store、schema、入口和公共策略；按真实调用者逐步下沉' },
-  { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 协商、传输、实例生命周期和通知分发' },
-  { id: 'rust-session', roots: ['src-tauri/src/session/'], responsibility: '会话事务、replay 与持久化；保持 owner/generation 和提交顺序' },
+  { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 宿主适配：实例注册与 harness 依赖型表征测试' },
+  // #247：协议引擎核/存储核独立 crate；依赖方向 acp→core→foundations、session→core。
+  { id: 'rust-session', roots: ['src-tauri/src/session/'], responsibility: '会话命令编排：create/prompt/persist/inspector/expiry 与 owner 解析' },
+  { id: 'rust-acp-engine', roots: ['src-tauri/pylon-acp/src/'], responsibility: 'ACP 协议引擎核：engine/client/negotiated/replay/wire_trace/policies' },
+  { id: 'rust-session-storage', roots: ['src-tauri/pylon-session/src/'], responsibility: '会话存储核：event_repo/msg_repo/retention/turn_rollup，禁止触达 tauri' },
   { id: 'rust-host', roots: ['src-tauri/src/'], responsibility: 'Tauri 注册、native adapters、文件/终端/Gateway/插件服务' },
   { id: 'rust-core', roots: ['src-tauri/pylon-core/src/'], responsibility: '可复用 Agent catalog、检测与 preflight 能力' },
   { id: 'rust-foundations', roots: ['src-tauri/pylon-foundations/src/'], responsibility: '跨宿主基础类型与策略' },

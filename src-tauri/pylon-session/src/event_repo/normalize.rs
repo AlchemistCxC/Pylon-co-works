@@ -328,9 +328,7 @@ pub(super) fn normalize_kernel_event(
 /// 覆盖：eventId 非空、owner 五字段、generation/sequence 正整数域、eventType 非空、
 /// payloadVersion 版本化、occurred_at/received_at 存在、raw_payload 恒存、
 /// eventId 与 owner+sequence 推导一致性（rule 1）。unknown eventType 原样接受。
-pub fn parse_canonical_event(
-    value: &serde_json::Value,
-) -> Result<CanonicalEventRow, EventError> {
+pub fn parse_canonical_event(value: &serde_json::Value) -> Result<CanonicalEventRow, EventError> {
     let mut problems: Vec<String> = Vec::new();
     let obj = match value.as_object() {
         Some(obj) => obj,
