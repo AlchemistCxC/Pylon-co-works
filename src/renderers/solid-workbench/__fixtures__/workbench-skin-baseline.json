@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T14:47:25.095Z",
+  "generatedAt": "2026-09-22T11:43:36.861Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -217,37 +217,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -929,37 +923,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -3104,37 +3092,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -3455,37 +3437,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -3806,37 +3782,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -4523,37 +4493,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -4874,37 +4838,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
@@ -5180,37 +5138,31 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
