@@ -4,7 +4,8 @@
 // - parity 默认跑到 m 档（`COMPUTE_PARITY_SCALE=full` 加 l 档极量级）；
 // - mismatch 即红；known-diff（已过审引擎级差异）只记录不算红。
 //
-// 性能对照走 `node scripts/compute-parity-bench.mts`（同一套套件定义）。
+// 性能读数不在这里：产品路径基准走 `bun scripts/perf-bench.mts`（issue #233 起，
+// 已废除输出 wasm↔TS 比值的 `compute-parity-bench.mts`；本门禁继续只判等价性）。
 // @vitest-environment node
 // markdown 套件下线后，本门禁只剩 pylon-compute 的纯计算出口（无 DOM 依赖）——原先的
 // jsdom 是被「旧 unified 管线经 decode-named-character-reference 读 document」逼出来的，

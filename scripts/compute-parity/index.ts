@@ -1,9 +1,9 @@
 // 脚手架组装：wasm 装载上下文 + 套件注册表 + 「全计算出口」覆盖门。
 //
 // 消费方：
-// - `scripts/compute-parity.test.mts`（vitest parity 门禁）
-// - `scripts/compute-parity-bench.mts`（node 性能对照）
-// 共享同一份套件定义——对照面只有一份，改场景两入口同时生效。
+// - `scripts/compute-parity.test.mts`（vitest parity 门禁，本文件的主要消费者）
+// - `scripts/perf-bench/`（产品路径性能基准，issue #233）：只取本套件 pair 的 `wasm` 侧计时。
+//   #233 已废除 `scripts/compute-parity-bench.mts` 与 `-memory.mts`（双侧比值口径）。
 //
 // # 2026-09-21 scope 收窄（ADR-0018 修订）
 //

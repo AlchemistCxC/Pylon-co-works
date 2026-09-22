@@ -1,7 +1,16 @@
-# compute-parity · wasm 计算出口的 TS↔wasm 对照脚手架
+# compute-parity · wasm 计算出口的 TS↔wasm **parity 门禁**脚手架
 
-issue #220 的配套基建：对**仍在 wasm 里的计算出口**做同输入对照——parity（两侧归一后逐字节
-一致）、性能（同 harness 中位数比值）、内存（核线性高水位 + 每调用宿主保留量）共用同一份套件定义。
+issue #220 的配套基建：对**仍在 wasm 里的计算出口**做同输入对照——两侧归一后逐字节一致
+（parity）。**本脚手架是门禁，不是 benchmark。**
+
+> **性能读数不在这里（2026-09-22，issue #233）。** 原先的两个对照跑器
+> `scripts/compute-parity-bench.mts`（速度比值）与 `scripts/compute-parity-memory.mts`
+> （内存比值）已**废除**：它们输出的是 `wasm/ts` 比值，而 TS 侧是 `baselines/` ——
+> **不在任何生产路径**，所以那个比值不回答「产品这条路径一次要花多少」。产品路径的绝对成本
+> 基准改在 [`scripts/perf-bench/`](../perf-bench/README.md)：`bun scripts/perf-bench.mts`。
+>
+> 本脚手架的**套件定义与语料仍被那个基准借用**（它只取 pair 的 `wasm` 侧计时），所以改场景
+> 两边同时生效；但两边的读数口径互不替代：这里判「等价」，那里量「多快」。
 
 ## 现行 scope（2026-09-21 收窄，ADR-0018 修订 1）
 
@@ -25,25 +34,11 @@ issue #220 的配套基建：对**仍在 wasm 里的计算出口**做同输入�
 # parity 门禁（vitest，默认 m 档；COMPUTE_PARITY_SCALE=full 加 l 档）
 vitest run scripts/compute-parity.test.mts
 
-# 性能对照（默认 m 档、3 轮中位数；**必须 vite-node**——套件 import 的 src 模块链
-# 里有无扩展名相对 import，裸 node 解析不了）
-npx vite-node scripts/compute-parity-bench.mts
-COMPUTE_PARITY_SCALE=full COMPUTE_PARITY_ROUNDS=5 npx vite-node scripts/compute-parity-bench.mts
-
-# 内存对照（结果字节数 / 核线性内存高水位 / 每调用宿主保留量）
-# 注意：markdown 已不在对照面内 ⇒ 内存表里也不会出现 pylon-markdown 的线性内存。
-npx vite-node scripts/compute-parity-memory.mts
-COMPUTE_PARITY_REPEATS=16 npx vite-node scripts/compute-parity-memory.mts
-# 加 --expose-gc 才拿得到**精确**的保留量（否则读作上限，输出头会点明状态）
-NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
+# 针对既有产物跑（绕过共享 globalSetup 的重建检查；见文末「逃生门」）
+npx vitest run --config scripts/compute-parity/vitest.config.ts
 ```
 
-> 内存表三列的口径差别（**别混读**，详见 `harness.ts` 的「内存跑器」节）：
-> - `ts结果`/`wasm结果`：返回值 `stableJson` 后的字节数。确定性、与 GC 无关。
-> - `核线性Δ`：本 case 的**单次**调用把计算核线性内存的高水位抬高了多少。线性内存只涨
->   不跌，所以只有单次调用能给出这个数；`核高水位` 是跑完全表的累计值（越靠后的行越大，
->   不是该 case 的占用）。
-> - `wasm保留/次`：调用前后 `retained()` 差 / 重复次数。**没有 `--expose-gc` 时是上限**。
+**没有性能/内存跑法了**——那两档改到 `bun scripts/perf-bench.mts`（产品路径绝对成本）。
 
 > 逃生门：crate 上有他人**在途改动**导致 wasm 重建失败时，可
 > `npx vitest run --config scripts/compute-parity/vitest.config.ts`
@@ -54,12 +49,12 @@ NODE_OPTIONS=--expose-gc npx vite-node scripts/compute-parity-memory.mts
 
 | 路径 | 职责 |
 |---|---|
-| `harness.ts` | CaseSpec/PairSpec/Suite 类型、stableJson 比对口径、parity/性能/内存三跑器、维度过滤（scale × shape × edge × flow） |
+| `harness.ts` | CaseSpec/PairSpec/Suite 类型、stableJson 比对口径、**parity 跑器**、维度过滤（scale × shape × edge × flow） |
 | `index.ts` | wasm 装载上下文、全套件注册表、**覆盖门**（REQUIRED_EXPORTS 必须全部有对照 pair） |
-| `../compute-parity-{bench,memory}.mts` | 两个跑器入口（性能 / 内存），共用上面这套套件 |
 | `baselines/` | TS 侧基线实现（冻结/雕刻，见下）——**不在任何生产路径，不 import 进 src** |
-| `fixtures/` | 切分语料（`corpora.ts`） |
+| `fixtures/` | 语料（`corpora.ts`）——其中的 markdown / highlight 语料现在供 `scripts/perf-bench/` 用 |
 | `suites/` | 两个域套件：`streaming-split` / `streaming-budget` |
+| `../compute-parity.test.mts` | 唯一的入口：parity 门禁（vitest） |
 
 ## TS 基线的两种来源（`baselines/` 头注逐一声明出处）
 
@@ -101,8 +96,10 @@ JS `Map` 的 BTreeMap 深转回普通对象（与 `pylon-markdown/src/wasm_exit.
 Rust 字符串无法持有、serde 编组落成 U+FFFD，TS 原样保留。UTF-8/UTF-16 编组层固有损耗，
 非切分逻辑分歧（`harness.ts` 的 `normalizeBoundaryMaps` 与之同语义）。
 
-## 与既有 parity 门禁的关系
+## 与其它门禁/基准的关系
 
-`src/**/__tests__/*Parity*.test.ts` 剩下的门禁是**产品路径**的行为锁（快照 / corpus 驱动），
-例如 `markdownComputeParity.test.ts` 的 markdown 半（产品路径 vs `rust-snapshot.json`）；
-本脚手架是**计算核面**的差分基建：覆盖全部出口、可配维度、三跑器共用一套套件。两边互不替代。
+- `src/**/__tests__/*Parity*.test.ts` 剩下的门禁是**产品路径**的行为锁（快照 / corpus 驱动），
+  例如 `markdownComputeParity.test.ts` 的 markdown 半（产品路径 vs `rust-snapshot.json`）；
+  本脚手架是**计算核面**的差分基建：覆盖全部出口、可配维度。两边互不替代。
+- `scripts/perf-bench/`（issue #233）是**性能面**：单实现绝对成本 + 派生单位成本，不做双侧比值。
+  它借本脚手架的 case 定义与语料，但两者判的东西不同（等价 vs 多快），互不替代。
