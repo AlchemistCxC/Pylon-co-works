@@ -566,3 +566,18 @@
 - 文档：`.agents/records/236-*.md`、`.agents/records/233-*.md`（追加交叉引用）、`.agents/decisions/0019-*.md`（未接线计数 7→6）
 
 **我不碰**：`src/components/chat/codeHighlight.ts` 与 `codeHighlight.test.ts`（现役 TS 表一字不动）、`src-tauri/pylon-compute/**`、其余 6 个未接线出口（等用户考量）、他人在途域。
+
+---
+
+[2026-09-22 14] [Miyaki Kumo] [#234] + [#237]
+
+**开工两件：① #234 投影批量路径对 tool/diagnostic 密集 journal 的超线性；② #237 issue55.streamingContainers 在 CI 偶发红（断言抢在异步高亮落地前）。** ① 涉及 `workbenchProjector`（用户已裁定开工），② 纯测试侧。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- ① `src/domains/workbench/workbenchProjector.ts`（**单一文件**：批量路径的工作数组所有权与派生索引，不碰 `reduceWorkbenchEvent` 的 live 语义）
+- ② `src/renderers/solid-workbench/chat/__tests__/issue55.streamingContainers.solid.test.tsx`（仅加一处 await，不改判据）
+- 基准／探针：`scripts/perf-bench/suites/projectorSuite.ts`（如需补 case）、临时探针一次性
+- 文档：`.agents/records/234-*.md`、`.agents/records/237-*.md`、本文件
+
+**我不碰**：`src/sheets/agent-workbench/**`、`src/domains/events/**`、`src/__tests__/replay/**`（判据侧）、`vitest.config.ts`、中控区、预设系统、他人在途域（`scripts/perf-bench/**` 除 projectorSuite 外一律不动）。
