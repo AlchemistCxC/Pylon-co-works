@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\mem-accounting\mem-acc
 
 | 口径 | 含义 | 谁在用 |
 | --- | --- | --- |
-| **私有工作集之和**（`PrivateWS`/`private/resident`） | 只算各进程**独占**的常驻页——共享页天然只算一次 | **任务管理器**的 `Memory` 列（Win10/11 的 Processes 页即此口径）。所以 TM 显示的数**不存在重复计数** |
+| **私有工作集之和**（`PrivateWS`/`private/resident`） | 只算各进程**独占**的常驻页——共享页天然只算一次 | **任务管理器**的 `Memory` 列（Win10/11 的 Processes 页即此口径）。所以 TM 显示的数**不存在重复计数**。脚本口径与 TM 对齐的前提是 region 命中判定用真实区间（`RegionStart/Span`）——2026-09-23 修复前误用分配基址+单 region 大小，大镜像（msedge.dll）的区外常驻页被误计入 private（约 7-20%） |
 | **工作集之和**（`WS sum`） | 各进程常驻页直接相加——**同一个物理页会被算 N 次** | 资源监视器 / 你自己把 Details 的 `Working set` 列加起来时。这个数不能用来说「占了多少物理内存」 |
 
 脚本另给一个**去重物理估计**：`私有 + 文件映射并集 + 匿名共享[max..sum]`。

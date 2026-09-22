@@ -243,6 +243,10 @@ PE 段表（自己解的头，非推断）：
 
 用户问「任务管理器里的内存计数，能不能在代码层面避免重复」。先把口径对齐——**这是两件不同的事**：
 
+### 〇、工具口径更正（2026-09-23，审查发现）
+
+`tools/mem-accounting/mem-accounting.ps1` 的 region 命中判定曾误用「分配基址 + 单 region 大小」作为区间——同一分配（如 msedge.dll，190 个 region）中超出最大单 region 的常驻页（`.rdata`/`.pdata` 等）被误判为 private、不参与去重，实测使 private 合计偏高 ≈18MB（109 vs 真值 91，约 7-20%）。已改为真实区间（`RegionStart/Span`）命中、分配基址只作去重身份；修复后 `private/resident` 与任务管理器口径对齐。本记录附二中引用的旧读数如与复跑值有此量级出入，以修复后为准。
+
 ### 一、任务管理器已经在去重了
 
 任务管理器 Processes 页的 `Memory` 列读的是**私有工作集**（private working set）：只算各进程**独占**的常驻页。
