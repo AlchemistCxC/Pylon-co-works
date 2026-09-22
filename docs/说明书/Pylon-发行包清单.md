@@ -19,7 +19,7 @@
 - WebView2 兜底安装引导脚本（运行时按 Windows 自带处理，不再内置安装器——2026-09-19 决定）；
 - 包外的 SHA-256 文件和 manifest。
 
-默认发行**不携带** Hermes 的 PortableGit 运行时（2026-08-31 决定）：Windows 上 Hermes 解析 Bash 的顺序是包内 `resources/runtime/git` → `PYLON_HERMES_RUNTIME_DIR` → 本机健康的系统 Git Bash（探测校验，不盲信 `PATH`，避免命中 WSL 的 `bash.exe` 或残缺安装）。需要把完整运行时打进发行包时，对 `pack_release.py` 使用 `--with-runtime`；此时树必须完整。该运行时只给 `provider=hermes` 的 Windows subprocess ACP 子进程使用，不会改写系统 `PATH`，也不会让其他 Agent 自动使用它。
+默认发行**不携带** Hermes 的 PortableGit 运行时（2026-08-31 决定）：Windows 上 Hermes 解析 Bash 的顺序与 `pylon-core` 的 `hermes::runtime` 一致——① `PYLON_HERMES_RUNTIME_DIR`（开发/CI 覆盖）→ ② 包内 `resources/runtime/git`（仅 `--with-runtime` 包存在）→ ③ `HERMES_GIT_BASH_PATH`（agents.yaml env 或进程环境）→ ④ 本机健康的系统 Git Bash（探测校验，不盲信 `PATH`，避免命中 WSL 的 `bash.exe` 或残缺安装）。需要把完整运行时打进发行包时，对 `pack_release.py` 使用 `--with-runtime`；此时树必须完整。该运行时只给 `provider=hermes` 的 Windows subprocess ACP 子进程使用，不会改写系统 `PATH`，也不会让其他 Agent 自动使用它。
 
 ## 2. ZIP 内的目录和文件
 

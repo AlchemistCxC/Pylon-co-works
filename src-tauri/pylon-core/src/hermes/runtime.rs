@@ -7,10 +7,12 @@
 //! adaptation scoped to the normalized `hermes` provider and to the child
 //! `Command` that launches that provider.
 //!
-//! The release packager places a complete PortableGit tree at
-//! `resources/runtime/git`.  Development builds may use the same location,
-//! `PYLON_HERMES_RUNTIME_DIR`, or fall back to a healthy system Git Bash.  No
-//! process-global PATH or user environment variable is changed here.
+//! The default release does NOT carry PortableGit (2026-08-31 decision:
+//! `pack_release.py` strips `resources/runtime/git` unless `--with-runtime`
+//! is passed).  Selection probes, in order: the `PYLON_HERMES_RUNTIME_DIR`
+//! override (dev/CI), an optional pack-adjacent `resources/runtime/git`,
+//! `HERMES_GIT_BASH_PATH`, then a healthy system Git Bash.  No process-global
+//! PATH or user environment variable is changed here.
 
 use crate::agent_config::{AcpProtocolConfig, AgentDef};
 use std::collections::HashSet;
@@ -20,7 +22,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Hermes' supported environment override.  Hermes reads this before PATH
-/// lookup, so it is the most deterministic way to select the bundled Bash.
+/// lookup, so it is the most deterministic way to pin the Bash for a Hermes
+/// child regardless of where that runtime came from.
 pub const HERMES_GIT_BASH_PATH_ENV: &str = "HERMES_GIT_BASH_PATH";
 /// Coarse Hermes-side fallback for a wedged concurrent tool batch.  The fast
 /// user-visible liveness guard lives in Pylon's ACP prompt path; this value is
@@ -45,6 +48,9 @@ const BASH_EXTERNAL_PROBE: &str =
 pub struct HermesRuntimeSelection {
     pub bash_path: PathBuf,
     pub root: PathBuf,
+    /// True only for the pack-adjacent `resources/runtime/git` tree that
+    /// actually ships inside the app package (i.e. a `--with-runtime`
+    /// release).  Overrides and system Git installs are `false`.
     pub bundled: bool,
 }
 
@@ -167,7 +173,7 @@ pub fn apply_to_command(
     command.env(path_key, path);
 
     // Respect explicit values from agents.yaml or the parent environment;
-    // otherwise make the path behavior deterministic for the bundled MSYS.
+    // otherwise make the path behavior deterministic for the selected MSYS.
     set_child_default(command, agent, "MSYS_NO_PATHCONV", "1");
     set_child_default(command, agent, "MSYS2_ARG_CONV_EXCL", "*");
     set_child_default(
@@ -202,13 +208,13 @@ fn select_and_probe(
     let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
 
     // A developer/CI override is deliberately separate from Hermes' own env
-    // variable so a stale user value cannot outrank the packaged runtime.
+    // variable so a stale user value cannot outrank the pack-adjacent tree.
     if let Some(root) = std::env::var_os("PYLON_HERMES_RUNTIME_DIR") {
-        add_root_candidates(&mut candidates, PathBuf::from(root), true);
+        add_root_candidates(&mut candidates, PathBuf::from(root), false);
     }
 
-    for root in bundled_runtime_roots() {
-        add_root_candidates(&mut candidates, root, true);
+    for (root, bundled) in pack_runtime_roots() {
+        add_root_candidates(&mut candidates, root, bundled);
     }
 
     // Explicit agent configuration is considered only after the bundled tree.
@@ -256,7 +262,9 @@ fn select_and_probe(
 
     if failures.is_empty() {
         Err(HermesRuntimeError::missing(
-            "未找到可用的 Git for Windows Bash。Pylon 发布包应包含 resources\\runtime\\git。",
+            "未找到可用的 Git for Windows Bash。默认发行不携带 PortableGit：可安装 \
+             Git for Windows、设置 PYLON_HERMES_RUNTIME_DIR，或在 agents.yaml 的 \
+             HERMES_GIT_BASH_PATH 中指定 bash.exe。",
         ))
     } else {
         Err(HermesRuntimeError::invalid(format!(
@@ -266,20 +274,24 @@ fn select_and_probe(
     }
 }
 
-fn bundled_runtime_roots() -> Vec<PathBuf> {
+fn pack_runtime_roots() -> Vec<(PathBuf, bool)> {
     let mut roots = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            roots.push(parent.join("resources/runtime/git"));
+            // Only a `--with-runtime` package actually has this tree; probing
+            // it costs one stat when absent.
+            roots.push((parent.join("resources/runtime/git"), true));
         }
     }
 
     // `CARGO_MANIFEST_DIR` keeps `cargo run`/unit smoke usable when Tauri has
     // not copied resources to target/debug yet.  It is harmless in release
-    // builds and never outranks the executable-adjacent tree.
+    // builds and never outranks the executable-adjacent tree.  A dev-tree hit
+    // must NOT be reported as `bundled` — that is the build machine's
+    // checkout, not something the package carries.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    roots.push(manifest.join("../resources/runtime/git"));
-    roots.push(manifest.join("resources/runtime/git"));
+    roots.push((manifest.join("../resources/runtime/git"), false));
+    roots.push((manifest.join("resources/runtime/git"), false));
     roots
 }
 
@@ -406,8 +418,8 @@ fn probe_bash(bash: &Path, root: &Path) -> Result<(), String> {
 
     // Test the login path in an empty HOME so a user's interactive rc file
     // cannot make the runtime selection nondeterministic. Hermes itself has a
-    // fallback for a broken user login shell; this probe verifies the bundled
-    // `/etc/profile` and MSYS startup files are healthy.
+    // fallback for a broken user login shell; this probe verifies the selected
+    // runtime's `/etc/profile` and MSYS startup files are healthy.
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())

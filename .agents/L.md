@@ -648,15 +648,3 @@
 - 文档：`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/records/`、本文件
 
 **我不碰**：session 命令编排层（create/prompt/persist/inspector/fork/expiry/owner/control）、instance_registry、全部 harness 依赖型测试的行为；前端 `src/**`；他人在途域。
-
----
-
-[2026-09-23 02] [Miyaki Kumo] [#250 关联·表述修正]
-
-**开工：修正「默认携带 PortableGit」旧表述**（按 2026-08-31 决定口径收尾，用户指令）。文件域极小，请勿改写、勿连带提交：
-- `src-tauri/pylon-core/src/hermes/runtime.rs`（模块头注释 / bundled 标记 truthful 化 / 找不到 Bash 的错误文案）
-- `docs/说明书/Pylon-发行包清单.md`（Bash 解析顺序句与代码实际顺序对齐）
-- `.agents/records/2026-09-23-portablergit-wording.md`（新增开发记录）
-- `.agents/L.md`（本条）
-
-另：实机验收四项已合并登记 issue #250（窗口 ACL / draft 竞态 / 按钮溢出 / aria-label）。完工即撤本条。
