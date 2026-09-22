@@ -3,7 +3,7 @@
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
-pub(crate) fn classify_stderr_level(line: &str) -> &'static str {
+pub fn classify_stderr_level(line: &str) -> &'static str {
     // 1. 结构化 JSON 优先：`level` 字段权威（字符串 + 数字）
     if let Ok(serde_json::Value::Object(map)) =
         serde_json::from_str::<serde_json::Value>(line.trim())
@@ -51,7 +51,7 @@ pub(crate) fn classify_stderr_level(line: &str) -> &'static str {
     "info"
 }
 
-pub(crate) fn extract_stderr_code(line: &str) -> Option<String> {
+pub fn extract_stderr_code(line: &str) -> Option<String> {
     if let Ok(serde_json::Value::Object(map)) =
         serde_json::from_str::<serde_json::Value>(line.trim())
     {
@@ -65,11 +65,11 @@ pub(crate) fn extract_stderr_code(line: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn spawn_stderr_reader(
+pub fn spawn_stderr_reader(
     stderr: std::process::ChildStderr,
     agent_name: &str,
-    runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
-    correlation: Option<crate::correlation::RuntimeCorrelation>,
+    runtime_logs: &Option<Arc<dyn crate::runtime_sink::RuntimeLogSink>>,
+    correlation: Option<pylon_core::correlation::RuntimeCorrelation>,
     stderr_tail: Arc<super::StderrTail>,
 ) {
     let agent_name_stderr = agent_name.to_string();
@@ -78,7 +78,7 @@ pub(crate) fn spawn_stderr_reader(
         for l in BufReader::new(stderr).lines().map_while(Result::ok) {
             if !l.is_empty() {
                 stderr_tail.push(&l);
-                let safe = crate::runtime_log::sanitize_message(l.clone());
+                let safe = pylon_foundations::sanitize::sanitize_message(l.clone());
                 // LOG-01：stderr 行回声只作 console/外部日志出口（fmt layer），
                 // target 专属标记让 RuntimeLogLayer 跳过——hub 唯一归属下方显式 push，
                 // 同一行只进 hub 一次（方案书 §5.14，原 A/B 双写）。
@@ -89,19 +89,19 @@ pub(crate) fn spawn_stderr_reader(
                 // 必须是编译期常量（E0435）——target 用 const 路径、level 用 match 分支。
                 match classify_stderr_level(&l) {
                     "error" => tracing::error!(
-                        target: crate::runtime_log::AGENT_STDERR_ECHO_TARGET,
+                        target: AGENT_STDERR_ECHO_TARGET,
                         "{} stderr: {}",
                         agent_name_stderr,
                         safe
                     ),
                     "warn" => tracing::warn!(
-                        target: crate::runtime_log::AGENT_STDERR_ECHO_TARGET,
+                        target: AGENT_STDERR_ECHO_TARGET,
                         "{} stderr: {}",
                         agent_name_stderr,
                         safe
                     ),
                     _ => tracing::info!(
-                        target: crate::runtime_log::AGENT_STDERR_ECHO_TARGET,
+                        target: AGENT_STDERR_ECHO_TARGET,
                         "{} stderr: {}",
                         agent_name_stderr,
                         safe
@@ -117,9 +117,9 @@ pub(crate) fn spawn_stderr_reader(
                     // wire_code 词汇分离，不发明新码）；rawAvailable=true（真实行文本承载
                     // 于 message，区别于历史 B 型占位符"Agent stderr output"）。
                     hub.push_with_context(
-                        crate::time::Timestamp::now(),
-                        level,
-                        "agent-stderr",
+                        pylon_foundations::time::Timestamp::now(),
+                        level.to_string(),
+                        "agent-stderr".to_string(),
                         None,
                         safe,
                         serde_json::Map::from_iter([(
@@ -127,9 +127,9 @@ pub(crate) fn spawn_stderr_reader(
                             serde_json::Value::String(agent_name_stderr.clone()),
                         )]),
                         correlation.clone(),
-                        crate::runtime_log::RuntimeLogContext {
+                        pylon_core::log_context::RuntimeLogContext {
                             code: extract_stderr_code(&l),
-                            category: Some(crate::runtime_log::LOG_CATEGORY_STDERR.to_string()),
+                            category: Some(pylon_core::log_context::LOG_CATEGORY_STDERR.to_string()),
                             recoverable: None,
                             user_action_required: None,
                             raw_available: Some(true),
@@ -140,3 +140,6 @@ pub(crate) fn spawn_stderr_reader(
         }
     });
 }
+
+/// LOG-01：agent stderr 行回声的 tracing target（RuntimeLogLayer 据此跳过，hub 唯一归属显式 push）。
+pub const AGENT_STDERR_ECHO_TARGET: &str = "agent_stderr_echo";

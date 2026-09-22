@@ -13,22 +13,22 @@ use super::{
     AcpClient, AcpError, ClassifiedMessage, ReplayClassification, METHOD_SESSION_LOAD,
     NOTIF_SESSION_UPDATE,
 };
-use crate::agent_config::McpServersMode;
+use pylon_core::agent_config::McpServersMode;
 
 /// A transport-owned session/load capture. The receiver, request id, session
 /// binding and active registration are installed together by
 /// [`AcpClient::begin_replay_capture`].
 pub struct ReplayCapture {
     /// A1c：SDK 后端为唯一发送通道。
-    pub(crate) sdk_outbound: mpsc::Sender<crate::acp::engine::SdkOutbound>,
-    pub(crate) request_id: u64,
-    pub(crate) session_id: String,
-    pub(crate) crashed: Arc<AtomicBool>,
-    pub(crate) rx: broadcast::Receiver<ClassifiedMessage>,
+    pub sdk_outbound: mpsc::Sender<crate::engine::SdkOutbound>,
+    pub request_id: u64,
+    pub session_id: String,
+    pub crashed: Arc<AtomicBool>,
+    pub rx: broadcast::Receiver<ClassifiedMessage>,
     /// G1-02：回放等待超时（缺省 30s，替代 H9 字面量）。
-    pub(crate) rpc_timeout: std::time::Duration,
+    pub rpc_timeout: std::time::Duration,
     /// G1-02：回放收集上限（缺省 10_000，替代 H12 字面量）。
-    pub(crate) replay_max: usize,
+    pub replay_max: usize,
     /// RAII registration; dropping the capture clears the transport boundary.
     _active_replay: ActiveReplayRegistration,
 }
@@ -60,26 +60,26 @@ impl Drop for ActiveReplayRegistration {
 /// 作为确定性结束边界。
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ReplayBoundary {
-    pub(crate) kind: &'static str,
-    pub(crate) observed_count: u64,
-    pub(crate) retained_start_ordinal: Option<u64>,
-    pub(crate) retained_end_ordinal: Option<u64>,
+pub struct ReplayBoundary {
+    pub kind: &'static str,
+    pub observed_count: u64,
+    pub retained_start_ordinal: Option<u64>,
+    pub retained_end_ordinal: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ReplayMetadata {
-    pub(crate) complete: bool,
-    pub(crate) truncated: bool,
-    pub(crate) dropped_count: u64,
-    pub(crate) boundary: ReplayBoundary,
+pub struct ReplayMetadata {
+    pub complete: bool,
+    pub truncated: bool,
+    pub dropped_count: u64,
+    pub boundary: ReplayBoundary,
 }
 
 #[derive(Debug)]
-pub(crate) struct ReplayBatch {
-    pub(crate) events: Vec<serde_json::Value>,
-    pub(crate) metadata: ReplayMetadata,
+pub struct ReplayBatch {
+    pub events: Vec<serde_json::Value>,
+    pub metadata: ReplayMetadata,
 }
 
 impl AcpClient {
@@ -87,7 +87,7 @@ impl AcpClient {
     /// registry mutex also serializes stdout classification, so no notification
     /// can observe the receiver without its request/session binding (or vice
     /// versa). Same-owner loads are rejected deterministically.
-    pub(crate) fn begin_replay_capture(&self, session_id: &str) -> Result<ReplayCapture, AcpError> {
+    pub fn begin_replay_capture(&self, session_id: &str) -> Result<ReplayCapture, AcpError> {
         // #163：与其他发送守卫一致用 is_dead——主动停掉的连接同样立即拒绝。
         if self.is_dead() {
             return Err(AcpError::ConnectionClosed);
@@ -124,7 +124,7 @@ impl AcpClient {
 /// Load a persisted session and collect every replay notification before the response.
 /// The reader publishes notifications before resolving the matching response, so
 /// observing the response on this broadcast receiver is the deterministic replay boundary.
-pub(crate) async fn load_session_with_replay(
+pub async fn load_session_with_replay(
     capture: ReplayCapture,
     session_id: &str,
     cwd: &str,
@@ -163,7 +163,7 @@ async fn load_session_with_replay_sdk(
     let mut events = capture.rx;
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     outbound
-        .send(crate::acp::engine::SdkOutbound::RequestKeepRx {
+        .send(crate::engine::SdkOutbound::RequestKeepRx {
             method: METHOD_SESSION_LOAD.to_string(),
             params,
             ready: ready_tx,
@@ -246,12 +246,12 @@ async fn load_session_with_replay_sdk(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::{AcpKind, RawMessage};
+    use crate::{AcpKind, RawMessage};
 
     /// 测试夹具四件套：捕获器、SDK 出站接收端、事件广播发送端、活跃重放登记表。
     type TestHandles = (
         ReplayCapture,
-        mpsc::Receiver<crate::acp::engine::SdkOutbound>,
+        mpsc::Receiver<crate::engine::SdkOutbound>,
         broadcast::Sender<ClassifiedMessage>,
         Arc<Mutex<HashMap<u64, String>>>,
     );
@@ -283,10 +283,10 @@ mod tests {
 
     /// A1c：接受 SDK session/load 请求，并把测试控制的响应通道交回给收集器。
     async fn accept_load_request(
-        outbound_rx: &mut mpsc::Receiver<crate::acp::engine::SdkOutbound>,
+        outbound_rx: &mut mpsc::Receiver<crate::engine::SdkOutbound>,
     ) -> tokio::sync::oneshot::Sender<Result<serde_json::Value, AcpError>> {
         match outbound_rx.recv().await.expect("session/load request") {
-            crate::acp::engine::SdkOutbound::RequestKeepRx { method, ready, .. } => {
+            crate::engine::SdkOutbound::RequestKeepRx { method, ready, .. } => {
                 assert_eq!(method, METHOD_SESSION_LOAD);
                 let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
                 ready.send(Ok(resp_rx)).expect("ready must be delivered");

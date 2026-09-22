@@ -357,7 +357,7 @@ mod tests {
             }]
         );
         let response = RawMessage {
-            id: Some(crate::acp::RequestId::Number(1)),
+            id: Some(crate::RequestId::Number(1)),
             method: None,
             kind: AcpKind::Response,
             result: Some(serde_json::json!({})),

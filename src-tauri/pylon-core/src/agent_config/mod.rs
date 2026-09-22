@@ -1,9 +1,33 @@
 //! agents.yaml 的 AgentDef 值类型与协议默认值常量（#247 自宿主 agent_config/types.rs
 //! 归位——AgentDef 是 catalog/detection/launch plan/hermes 的共同输入，与 pylon-core
 //! 同域；load/patch 等编排层留在宿主）。
+use std::path::PathBuf;
+
 pub mod types;
 
 pub use types::*;
+
+// #247：配置定位（env 覆盖 + exe 同目录回退）随值类型同域；宿主 atomic_write 的
+// 读写编排经重导出继续消费。
+pub fn config_path() -> Option<PathBuf> {
+    std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
+}
+
+pub fn effective_config_path() -> Option<PathBuf> {
+    if let Some(path) = config_path() {
+        return Some(path);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let nearby = dir.join("agents.yaml");
+            if nearby.is_file() {
+                return Some(nearby);
+            }
+        }
+    }
+    None
+}
+
 
 /// G1-05：DEFAULT_* 前缀统一；值不变。超时访问器（prompt_timeout/
 /// cancel_settle_timeout）在 AcpProtocolConfig（agent_config.rs），

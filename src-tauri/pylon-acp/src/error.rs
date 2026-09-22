@@ -21,11 +21,11 @@ pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_
 /// Hermes unstable 扩展：session/set_model（官方 Rust schema 1.4 尚无此类型，
 /// Hermes Python 0.11.2 已实现——切 model 必须走它，set_config_option 对 Hermes 不生效）。
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
-/// session/update 通知名官方为 pub(crate)，保留本地常量。
+/// session/update 通知名官方为 pub，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 /// G3 Step 8a（4.2）：进程内崩溃伪通知常量迁移——事件名唯一来源收口到
 /// event_names 常量表，本名保持既有引用（dispatcher/reader/测试）零改动。
-pub use crate::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
+pub use pylon_foundations::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
 
 // ── 操作层错误类型（R6e：中间层 Result<_, String> 类型化）──
 //
@@ -57,7 +57,7 @@ pub struct AgentConnectFailure {
 }
 
 impl AgentConnectFailure {
-    pub(crate) fn new(
+    pub fn new(
         stage: AgentConnectStage,
         code: &str,
         message: String,
@@ -76,11 +76,11 @@ impl AgentConnectFailure {
         }
     }
 
-    pub(crate) fn preflight(code: &str, message: String) -> Self {
+    pub fn preflight(code: &str, message: String) -> Self {
         Self::new(AgentConnectStage::Preflight, code, message, false)
     }
 
-    pub(crate) fn spawn(executable: &str, error: std::io::Error) -> Self {
+    pub fn spawn(executable: &str, error: std::io::Error) -> Self {
         let retryable = matches!(
             error.kind(),
             std::io::ErrorKind::Interrupted
@@ -97,7 +97,7 @@ impl AgentConnectFailure {
         failure
     }
 
-    pub(crate) fn spawn_setup(message: String) -> Self {
+    pub fn spawn_setup(message: String) -> Self {
         Self::new(
             AgentConnectStage::Spawn,
             "agent_spawn_io_failed",
@@ -106,7 +106,7 @@ impl AgentConnectFailure {
         )
     }
 
-    pub(crate) fn initialize(error: AcpError, exit_code: Option<i32>) -> Self {
+    pub fn initialize(error: AcpError, exit_code: Option<i32>) -> Self {
         let retryable = matches!(
             &error,
             AcpError::ConnectionClosed
@@ -152,14 +152,14 @@ impl AgentConnectFailure {
                 // using the same parser-error policy as stderr diagnostics.
                 failure.message = format!(
                     "initialize RPC error: {}",
-                    crate::acp::stderr_tail::summarize_parser_error(raw)
+                    crate::stderr_tail::summarize_parser_error(raw)
                 );
             }
         }
         failure
     }
 
-    pub(crate) fn capability(message: String) -> Self {
+    pub fn capability(message: String) -> Self {
         Self::new(
             AgentConnectStage::Capability,
             "agent_capability_invalid",
@@ -213,7 +213,7 @@ pub enum AcpError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RpcFailureKind {
+pub enum RpcFailureKind {
     SessionMissing,
     MethodMissing,
     Other,
@@ -223,21 +223,21 @@ pub(crate) enum RpcFailureKind {
 /// `resume` and `load` share one classification, so every fallback in the
 /// `resume -> load -> new` chain records the same closed vocabulary (A3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RecoveryFailureClass {
+pub enum RecoveryFailureClass {
     Archived,
     Busy,
     Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RpcFailureDetails {
-    pub(crate) code: Option<i64>,
-    pub(crate) message: String,
-    pub(crate) kind: RpcFailureKind,
+pub struct RpcFailureDetails {
+    pub code: Option<i64>,
+    pub message: String,
+    pub kind: RpcFailureKind,
 }
 
 impl AcpError {
-    pub(crate) fn recovery_failure_class(&self) -> RecoveryFailureClass {
+    pub fn recovery_failure_class(&self) -> RecoveryFailureClass {
         let text = self.to_string().to_ascii_lowercase();
         if text.contains("archiv") || text.contains("expired") {
             RecoveryFailureClass::Archived
@@ -247,7 +247,7 @@ impl AcpError {
             RecoveryFailureClass::Unavailable
         }
     }
-    pub(crate) fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
+    pub fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
         let Self::Rpc(raw) = self else {
             return None;
         };
@@ -299,11 +299,11 @@ impl AcpError {
         })
     }
 
-    pub(crate) fn rpc_failure_kind(&self) -> Option<RpcFailureKind> {
+    pub fn rpc_failure_kind(&self) -> Option<RpcFailureKind> {
         self.rpc_failure_details().map(|details| details.kind)
     }
 
-    pub(crate) fn is_retryable_transport_failure(&self) -> bool {
+    pub fn is_retryable_transport_failure(&self) -> bool {
         matches!(
             self,
             Self::ConnectionClosed
@@ -335,15 +335,6 @@ impl From<AcpError> for String {
     }
 }
 
-impl From<AcpError> for crate::error::PylonError {
-    fn from(error: AcpError) -> Self {
-        if matches!(&error, AcpError::ReplayLoadInProgress) {
-            return crate::error::PylonError::ReplayLoadInProgress;
-        }
-        // R6e：保持既有 wire 语义——ACP 操作错误折叠为 protocol_error（code 不变）。
-        crate::error::PylonError::Protocol(error.to_string())
-    }
-}
 
 impl AcpError {
     /// H14 类型化：close 降级判定（session.rs:1619 错误串 contains 的声明式替代，

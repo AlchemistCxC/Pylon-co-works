@@ -42,10 +42,10 @@ pub const NOTIFICATION_CHAN_CAP: usize = 4096;
 /// 写通道/取消等待超时（秒）——agent 忙碌不读 stdin 时防止无限挂起。
 pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
 /// #99：控制帧 inbox 容量（agent 请求/崩溃广播走优先级通道，不被通知洪泛饿死）。
-pub(crate) const CONTROL_INBOX_CAP: usize = 64;
+pub const CONTROL_INBOX_CAP: usize = 64;
 /// #99：入站 spill 缓冲容量（inbox 满时的有界溢出区；溢出 = 显式过载终态）。
 /// inbox(4096) + spill(8192) 构成有界总内存，禁止用无限队列掩盖慢消费者。
-pub(crate) const INBOUND_SPILL_CAP: usize = 8192;
+pub const INBOUND_SPILL_CAP: usize = 8192;
 
 /// #99：入站投遥测（每连接一份）。
 ///
@@ -53,7 +53,7 @@ pub(crate) const INBOUND_SPILL_CAP: usize = 8192;
 /// 背压的可观测面——任何 drop 都必须显式记录（过载 gap 或下游关闭计数），
 /// 禁止静默丢帧。
 #[derive(Debug, Default)]
-pub(crate) struct InboundTelemetry {
+pub struct InboundTelemetry {
     next_seq: AtomicU64,
     spilled_total: AtomicU64,
     dropped_total: AtomicU64,
@@ -64,16 +64,16 @@ pub(crate) struct InboundTelemetry {
 /// 遥测快照（冷挂载/诊断只读投影；serde camelCase）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct InboundTelemetrySnapshot {
-    pub(crate) last_ingress_seq: u64,
-    pub(crate) spilled_total: u64,
-    pub(crate) dropped_total: u64,
-    pub(crate) closed_dropped: u64,
-    pub(crate) overloaded: bool,
+pub struct InboundTelemetrySnapshot {
+    pub last_ingress_seq: u64,
+    pub spilled_total: u64,
+    pub dropped_total: u64,
+    pub closed_dropped: u64,
+    pub overloaded: bool,
 }
 
 impl InboundTelemetry {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -82,7 +82,7 @@ impl InboundTelemetry {
         self.next_seq.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    pub(crate) fn snapshot(&self) -> InboundTelemetrySnapshot {
+    pub fn snapshot(&self) -> InboundTelemetrySnapshot {
         InboundTelemetrySnapshot {
             last_ingress_seq: self.next_seq.load(Ordering::Relaxed),
             spilled_total: self.spilled_total.load(Ordering::Relaxed),
@@ -115,12 +115,12 @@ struct SpillState {
 /// 崩溃收敛 + `dropped_total` 记录 gap），三选一策略取「spill + 过载终止」，
 /// 杜绝静默丢帧（issue #99 方案不变量 §1）。
 #[derive(Clone)]
-pub(crate) struct InboundRelay {
+pub struct InboundRelay {
     updates_tx: mpsc::Sender<ClassifiedMessage>,
     control_tx: mpsc::Sender<ClassifiedMessage>,
     spill: Arc<Mutex<SpillState>>,
     wake: Arc<tokio::sync::Notify>,
-    pub(crate) telemetry: Arc<InboundTelemetry>,
+    pub telemetry: Arc<InboundTelemetry>,
     shutdown: watch::Sender<bool>,
     crashed: Arc<AtomicBool>,
     crashed_watch: watch::Sender<bool>,
@@ -128,7 +128,7 @@ pub(crate) struct InboundRelay {
 
 /// 单帧投递结果（可观测背压的机器可判定面）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PublishOutcome {
+pub enum PublishOutcome {
     /// 已进入 inbox。
     Published,
     /// inbox 满已转入 spill（泵任务续投；消费端最终收到）。
@@ -262,7 +262,7 @@ impl InboundRelay {
     /// 测试构造：返回 (relay, updates_rx, control_rx, shutdown_rx)。
     /// 生产路径的构造在 `spawn_sdk_engine`（含真实 crash/shutdown 句柄）。
     #[cfg(test)]
-    pub(crate) fn for_test_with_receivers(
+    pub fn for_test_with_receivers(
         updates_cap: usize,
         control_cap: usize,
         spill_cap: usize,
@@ -307,7 +307,7 @@ impl InboundRelay {
 /// 退出条件（评审 E5/P2-3）：下游通道关闭（滞留帧计入 `closed_dropped`）、
 /// shutdown 触发（订阅 watch：空 spill 时现值检查 + changed；重试等待中亦
 /// 响应现值——连接收敛后不再向其投递滞留帧）、或过载终态后 spill 排空。
-pub(crate) fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle<()> {
+pub fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut shutdown_rx = relay.shutdown.subscribe();
         let retry = std::time::Duration::from_millis(5);
@@ -412,35 +412,35 @@ pub(crate) fn spawn_inbound_pump(relay: InboundRelay) -> tokio::task::JoinHandle
 ///
 /// 出站经有界 `outbound` 队列交给 `cx.spawn` 泵；入站直接产出
 /// [`ClassifiedMessage`]，与 legacy 共用同一条 Kernel inbox 语义。
-pub(crate) struct SdkBackend {
-    pub(crate) outbound: mpsc::Sender<SdkOutbound>,
+pub struct SdkBackend {
+    pub outbound: mpsc::Sender<SdkOutbound>,
     /// D12：Pylon 相关 id 的本地计数器（wire id 永不暴露）。
-    pub(crate) next_id: Arc<AtomicU64>,
-    pub(crate) inbound: NotificationInbox,
+    pub next_id: Arc<AtomicU64>,
+    pub inbound: NotificationInbox,
     /// #99：入站投递遥测（ingress 序列 cursor / spill / 过载 gap 计数）。
-    pub(crate) telemetry: Arc<InboundTelemetry>,
+    pub telemetry: Arc<InboundTelemetry>,
     /// A1b：入站帧的 replay 观察扇出（legacy `rx` 的对应物）。
-    pub(crate) replay_events: broadcast::Sender<ClassifiedMessage>,
+    pub replay_events: broadcast::Sender<ClassifiedMessage>,
     /// A1b：进行中的 replay 采集（Pylon id → sessionId），用于把匹配通知标记为 Replay。
-    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+    pub active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
     /// A1b：agent 发来的请求应答器（Pylon request id → Responder），供
     /// `ResponderHandle::Sdk` 在锁外应答。
-    pub(crate) pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
-    pub(crate) shutdown: watch::Sender<bool>,
-    pub(crate) join: Option<tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>>,
+    pub pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
+    pub shutdown: watch::Sender<bool>,
+    pub join: Option<tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>>,
     // A1c：`None` = 断开态（`AcpClient::disconnected()`），无引擎任务可 abort。
 }
 
 /// D11：后端中立应答句柄（在锁外使用，避免持锁等待写通道）。
 ///
 /// A1c：legacy 写通道实现已删除；应答统一经引擎登记的 `Responder` 完成。
-pub(crate) struct ResponderHandle {
-    pub(crate) pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
+pub struct ResponderHandle {
+    pub pending_requests: Arc<Mutex<HashMap<super::RequestId, Responder>>>,
 }
 
 impl ResponderHandle {
     /// 应答 agent 发来的 JSON-RPC 请求。
-    pub(crate) async fn respond(
+    pub async fn respond(
         self,
         request_id: super::RequestId,
         response: serde_json::Value,
@@ -457,7 +457,7 @@ impl ResponderHandle {
     }
 
     /// 以 JSON-RPC error 应答 agent 发来的请求。
-    pub(crate) async fn respond_error(
+    pub async fn respond_error(
         self,
         request_id: super::RequestId,
         rpc_code: i64,
@@ -479,7 +479,7 @@ impl ResponderHandle {
 
 /// 引擎连接配置（仅用于日志/诊断，不参与 canonical 身份）。
 #[derive(Debug, Clone)]
-pub(crate) struct SdkEngineConfig {
+pub struct SdkEngineConfig {
     /// 连接名（SDK 日志用）。
     pub name: String,
     pub wire: Arc<AcpWireHub>,
@@ -488,15 +488,15 @@ pub(crate) struct SdkEngineConfig {
 /// D12：`PreparedRpc` 的 SDK 专属状态（`id` 由 facade 持有）。
 ///
 /// `id` 是 **Pylon 相关 id**（本地计数器）；wire id 永不暴露。
-pub(crate) struct SdkPreparedRpc {
-    pub(crate) outbound: mpsc::Sender<SdkOutbound>,
-    pub(crate) method: String,
-    pub(crate) params: serde_json::Value,
-    pub(crate) rpc_timeout: std::time::Duration,
+pub struct SdkPreparedRpc {
+    pub outbound: mpsc::Sender<SdkOutbound>,
+    pub method: String,
+    pub params: serde_json::Value,
+    pub rpc_timeout: std::time::Duration,
 }
 
 /// 发送请求行，成功时返回响应接收器。
-pub(crate) async fn send_keep_rx_prepared(
+pub async fn send_keep_rx_prepared(
     prepared: PreparedRpc,
 ) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
     let pylon_id = prepared.id;
@@ -540,7 +540,7 @@ pub(crate) async fn send_keep_rx_prepared(
 }
 
 /// 发送 + 等待匹配响应（SDK 走 outbound 泵）。
-pub(crate) async fn complete_prepared(
+pub async fn complete_prepared(
     prepared: PreparedRpc,
 ) -> Result<serde_json::Value, AcpError> {
     let sdk = prepared.sdk;
@@ -568,8 +568,8 @@ pub(crate) async fn complete_prepared(
 /// 形式运行，不再是 spawn 代码内散落的 provider 分支。
 ///
 /// 进程归属不变（Windows Job Object / taskkill / Drop 均在 `ManagedChild`）。
-pub(crate) async fn spawn_agent_child(
-    agent: &crate::agent_config::AgentDef,
+pub async fn spawn_agent_child(
+    agent: &pylon_core::agent_config::AgentDef,
     base_dir: Option<&std::path::Path>,
 ) -> Result<super::ManagedChild, AcpError> {
     use std::process::{Command, Stdio};
@@ -586,7 +586,7 @@ pub(crate) async fn spawn_agent_child(
         )
         .into());
     }
-    let hermes_runtime = crate::hermes::runtime::prepare(agent)
+    let hermes_runtime = pylon_core::hermes::runtime::prepare(agent)
         .await
         .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
     // 托管运行时要现查 PATH 与 Git Bash，无法离线进入 plan；它作为显式的运行时
@@ -613,7 +613,7 @@ pub(crate) async fn spawn_agent_child(
         .stderr(Stdio::piped());
     super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
-        crate::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
+        pylon_core::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
     }
     let child = cmd
         .spawn()
@@ -622,7 +622,7 @@ pub(crate) async fn spawn_agent_child(
 }
 
 /// D12：SDK 后端的 `PreparedRpc` 构造（本地计数器分配 Pylon id，wire id 永不暴露）。
-pub(crate) fn prepared_sdk_rpc(
+pub fn prepared_sdk_rpc(
     sdk: &SdkBackend,
     method: &str,
     params: serde_json::Value,
@@ -644,7 +644,7 @@ pub(crate) fn prepared_sdk_rpc(
 ///
 /// SDK 的 dispatch loop 是单任务串行，因此出站一律经 `cx.spawn` 在独立任务中发送；
 /// 本类型只承载「方法 + 参数 + 应答通道」，不复制 Pylon 的 pending 表。
-pub(crate) enum SdkOutbound {
+pub enum SdkOutbound {
     /// 需要响应的 JSON-RPC 请求（非类型化）。
     Request {
         method: String,
@@ -671,7 +671,7 @@ pub(crate) enum SdkOutbound {
 ///
 /// 四个 Pylon 独有变体（`ReplayTimeout`/`ReplayLagged`/`ReplayStreamClosed`/
 /// `ReplayLoadInProgress`）由 Pylon 侧合成，不由 SDK 映射而来（施工书 A1-C6）。
-pub(crate) fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
+pub fn map_sdk_error(error: agent_client_protocol::Error) -> AcpError {
     if agent_client_protocol::is_incoming_transport_closed(&error) {
         return AcpError::ConnectionClosed;
     }
@@ -756,7 +756,7 @@ fn publish_inbound(
 /// 仅测试消费：生产拓扑（`spawn_sdk_engine`）的 child 侧不走独立 duplex 通道，
 /// 由 `ConnectTo::into_channel_and_future` 直接给出。
 #[cfg(test)]
-pub(crate) fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
+pub fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
     let (sdk_end, inspect_left) = Channel::duplex();
     let (inspect_right, child_end) = Channel::duplex();
     (sdk_end, inspect_left, inspect_right, child_end)
@@ -767,7 +767,7 @@ pub(crate) fn bridge_channels() -> (Channel, Channel, Channel, Channel) {
 /// 使用 SDK 的 `bridge_with_inspection`，在 SDK 与子进程之间原样转发帧并
 /// 记录 wire capture。该 API 对 batch 内每条消息调用 observer，因此保留
 /// `RequestId` 的 number/string/null 形态。
-pub(crate) async fn run_wire_bridge(
+pub async fn run_wire_bridge(
     inspect_left: Channel,
     inspect_right: Channel,
     hub: Arc<AcpWireHub>,
@@ -804,7 +804,7 @@ fn observe_message(
 
 /// 观测一条传输帧内的全部有效消息（batch 逐条）。
 /// 用 `tokio_util::compat::Compat` 把 tokio 读写半流适配成 SDK 需要的 futures 字节流。
-pub(crate) fn byte_streams<R, W>(read: R, write: W) -> ByteStreams<Compat<W>, Compat<R>>
+pub fn byte_streams<R, W>(read: R, write: W) -> ByteStreams<Compat<W>, Compat<R>>
 where
     R: tokio::io::AsyncRead + Send + 'static,
     W: tokio::io::AsyncWrite + Send + 'static,
@@ -819,7 +819,7 @@ where
     clippy::too_many_arguments,
     reason = "装配函数：参数量随 A1b replay 扇出增加；A1c 收敛后端后合并为结构体"
 )]
-pub(crate) fn spawn_sdk_client(
+pub fn spawn_sdk_client(
     config: SdkEngineConfig,
     relay: InboundRelay,
     mut outbound_rx: tokio::sync::mpsc::Receiver<SdkOutbound>,
@@ -989,8 +989,8 @@ const OUTBOUND_CHAN_CAP: usize = 256;
 /// 协议栈：std 管道 → `tokio::process::ChildStdin/Stdout::from_std`（非阻塞 + 注册
 /// runtime）→ `compat` → `ByteStreams` → 观测桥 → SDK client。
 /// client 代际由调用方在 `wire`（`AcpWireCapture` correlation）内携带，不再单独传参。
-pub(crate) fn spawn_sdk_engine(
-    agent: &crate::agent_config::AgentDef,
+pub fn spawn_sdk_engine(
+    agent: &pylon_core::agent_config::AgentDef,
     stdin: std::process::ChildStdin,
     stdout: std::process::ChildStdout,
     wire: Arc<AcpWireCapture>,
@@ -1082,8 +1082,9 @@ pub(crate) fn spawn_sdk_engine(
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::fake_acp_agent_stub;
     use super::*;
-    use crate::correlation::RuntimeCorrelation;
+    use pylon_core::correlation::RuntimeCorrelation;
     use agent_client_protocol::schema::v1::RequestId;
     use agent_client_protocol::{RawJsonRpcMessage, TransportFrame};
     use std::time::Duration;
@@ -1453,7 +1454,7 @@ mod tests {
     #[tokio::test]
     async fn wire_bridge_records_both_directions_with_id_kind() {
         let (mut sdk_end, inspect_left, inspect_right, child_end) = bridge_channels();
-        let agent = crate::test_utils::fake_acp_agent_stub("fake-acp-bridge");
+        let agent = fake_acp_agent_stub("fake-acp-bridge");
         let hub = AcpWireHub::for_agent(&agent, 1);
         let bridge = tokio::spawn(run_wire_bridge(inspect_left, inspect_right, hub.clone()));
 
@@ -1816,9 +1817,8 @@ pub enum RequestId {
 impl RequestId {
     /// 从 wire JSON value 原样解析（保留 variant）；null/absent/布尔/浮点 → None。
     ///
-    /// 仅测试消费（#228）：生产侧的 legacy stdout reader 已于 A1c 删除，现仅
-    /// golden_trace_tests 用它做 wire 回放断言；reader 重现时摘除 `#[cfg(test)]`。
-    #[cfg(test)]
+    /// 测试与 wire 回放断言消费（#228/#247：宿主 golden_trace_tests 跨 crate 使用，
+    /// 故为常态 pub；生产 legacy stdout reader 已于 A1c 删除）。
     pub fn from_json_value(value: &serde_json::Value) -> Option<RequestId> {
         match value {
             serde_json::Value::Number(n) => n.as_u64().map(RequestId::Number),
@@ -1854,7 +1854,7 @@ impl fmt::Display for RequestId {
 pub struct PreparedRpc {
     /// Pylon 相关 id（本地计数器）；wire id 永不暴露。
     pub id: u64,
-    pub(crate) sdk: SdkPreparedRpc,
+    pub sdk: SdkPreparedRpc,
 }
 
 impl PreparedRpc {
@@ -1876,7 +1876,7 @@ pub enum PromptTimeoutKind {
 }
 
 impl PromptTimeoutKind {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::FirstToken => "first-token",
             Self::Idle => "idle",
@@ -2089,6 +2089,57 @@ impl CrashReason {
             CrashReason::StdoutClosed => "stdout_closed",
             CrashReason::PendingLockPoisoned => "pending_lock_poisoned",
             CrashReason::Overloaded => "overloaded",
+        }
+    }
+}
+
+// #247：本文件测试的 fake agent 构造就地自持（原依赖宿主 test_utils——跨 crate 后
+// 不可见）。定位逻辑与宿主 test_utils::fake_agent_bin 保持一致。
+#[cfg(test)]
+mod test_support {
+    use pylon_core::agent_config::AgentDef;
+    use std::collections::HashMap;
+
+    pub fn fake_agent_bin() -> std::path::PathBuf {
+        if let Ok(path) = std::env::var("PYLON_FAKE_AGENT_BIN") {
+            if !path.trim().is_empty() {
+                return std::path::PathBuf::from(path);
+            }
+        }
+        let exe = std::env::current_exe().expect("current_exe must resolve");
+        let bin_names: &[&str] = if cfg!(windows) {
+            &["pylon-fake-agent.exe"]
+        } else {
+            &["pylon-fake-agent"]
+        };
+        for ancestor in exe.ancestors() {
+            for name in bin_names {
+                let candidate = ancestor.join(name);
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+        panic!(
+            "pylon-fake-agent bin not found（先构建：cargo build --bin pylon-fake-agent              --features test-agent；或设 PYLON_FAKE_AGENT_BIN 指向已有 bin）"
+        )
+    }
+
+    pub fn fake_acp_agent_stub(name: &str) -> AgentDef {
+        AgentDef {
+            name: name.to_string(),
+            provider: None,
+            transport: "subprocess".to_string(),
+            exe: fake_agent_bin().to_string_lossy().into_owned(),
+            args: vec!["--scenario".to_string(), "alive".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
         }
     }
 }

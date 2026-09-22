@@ -1,5 +1,5 @@
 //! Closed provider-specific parser/builder boundary.
-use crate::acp::{plan_policy, question_policy};
+use crate::{plan_policy, question_policy};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub enum PrivateBridge {
 impl PrivateBridge {
     /// 交互队列 canonical kind（#230：dispatcher admit 与 CLI
     /// interaction_list 投影共用此单一映射，防漂移）。
-    pub(crate) fn queue_kind(self) -> &'static str {
+    pub fn queue_kind(self) -> &'static str {
         match self {
             Self::GrokExitPlan => "approval",
             Self::Elicitation => "elicitation",

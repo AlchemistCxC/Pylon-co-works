@@ -13,7 +13,7 @@ pub struct AcpClient {
     child: ManagedChild,
     /// G1-02：per-agent 协议行为配置（connect_with_logs 从 agent.protocol() clone；
     /// disconnected() 用默认实例）。超时/限额/握手参数唯一读取点。
-    pub(crate) protocol: crate::agent_config::AcpProtocolConfig,
+    pub protocol: pylon_core::agent_config::AcpProtocolConfig,
     /// P1（能力协商暴露）：initialize 握手返回的 agentCapabilities（原始 Value，
     /// 含 loadSession/promptCapabilities/sessionCapabilities/mcpCapabilities 及
     /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
@@ -22,7 +22,7 @@ pub struct AcpClient {
     /// A1c：SDK 引擎是唯一后端（legacy 传输 `AcpBackend::Legacy` 已删除）。
     /// 共享字段（child/protocol/capability_registry/stderr_tail/wire_trace/
     /// crashed/crashed_watch）保留在 facade。
-    pub(crate) backend: SdkBackend,
+    pub backend: SdkBackend,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
     /// #163：主动 stop 标记（[`Self::kill`] 在杀进程前置位）。子进程死亡本身
@@ -39,7 +39,7 @@ pub struct AcpClient {
     /// OBS-01：本连接的 ACP wire 只读记录器（transport 边界，infallible）。
     /// 断开态为 None；连接后始终存在（容量上限 ring buffer，可 set_enabled 关闭）。
     wire_trace: Option<Arc<AcpWireCapture>>,
-    pub(crate) stderr_tail: Arc<StderrTail>,
+    pub stderr_tail: Arc<StderrTail>,
     /// B2：initialize 是否完成。session/new 之前必须为 true——守卫在
     /// `session_ready()` 消费，禁止任何绕过握手的会话建立。
     session_ready: AtomicBool,
@@ -95,13 +95,13 @@ fn declared_establishment_order(provider: Option<&str>) -> Vec<String> {
 /// #99：updates 与 control 双通道——控制帧（agent 请求/崩溃广播）走独立有界
 /// 通道，dispatcher 以 `biased` select 优先消费，不被通知洪泛饿死。
 #[derive(Clone)]
-pub(crate) struct NotificationInbox {
+pub struct NotificationInbox {
     updates: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
     control: Arc<tokio::sync::Mutex<mpsc::Receiver<ClassifiedMessage>>>,
 }
 
 impl NotificationInbox {
-    pub(crate) fn new(
+    pub fn new(
         updates: mpsc::Receiver<ClassifiedMessage>,
         control: mpsc::Receiver<ClassifiedMessage>,
     ) -> Self {
@@ -112,12 +112,12 @@ impl NotificationInbox {
     }
 
     /// 普通通知 lane（session/update 等）。
-    pub(crate) async fn recv(&self) -> Option<ClassifiedMessage> {
+    pub async fn recv(&self) -> Option<ClassifiedMessage> {
         self.updates.lock().await.recv().await
     }
 
     /// 控制帧 lane（agent JSON-RPC 请求 / 崩溃广播；优先消费）。
-    pub(crate) async fn recv_control(&self) -> Option<ClassifiedMessage> {
+    pub async fn recv_control(&self) -> Option<ClassifiedMessage> {
         self.control.lock().await.recv().await
     }
 }
@@ -166,24 +166,24 @@ pub struct RawMessage {
 /// by the Kernel inbox and replay observer. `_meta.periReplay` remains only a
 /// compatibility projection of this decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReplayClassification {
+pub enum ReplayClassification {
     Live,
     Replay { request_id: u64 },
     Boundary { request_id: u64 },
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ClassifiedMessage {
-    pub(crate) raw: RawMessage,
-    pub(crate) classification: ReplayClassification,
-    pub(crate) wire_ordinal: Option<u64>,
+pub struct ClassifiedMessage {
+    pub raw: RawMessage,
+    pub classification: ReplayClassification,
+    pub wire_ordinal: Option<u64>,
     /// #99：本连接入站帧的单调 ingress ordinal（1 起；publish_inbound 分配）。
     /// live/replay/boundary 共用同一序列模型；优先级 lane 不改写本序号。
-    pub(crate) ingress_seq: u64,
+    pub ingress_seq: u64,
 }
 
 impl ClassifiedMessage {
-    pub(crate) fn live(raw: RawMessage) -> Self {
+    pub fn live(raw: RawMessage) -> Self {
         Self {
             raw,
             classification: ReplayClassification::Live,
@@ -206,7 +206,7 @@ impl AcpClient {
         let (crashed_watch, crashed_watch_rx) = watch::channel(false);
         Self {
             child: ManagedChild::empty(),
-            protocol: crate::agent_config::AcpProtocolConfig::default(),
+            protocol: pylon_core::agent_config::AcpProtocolConfig::default(),
             capability_registry: CapabilityRegistry::default(),
             session_ready: AtomicBool::new(false),
             establishment_order: default_establishment_order(),
@@ -231,7 +231,7 @@ impl AcpClient {
     }
 
     /// D11：取后端中立应答句柄（锁内取、锁外 await）。
-    pub(crate) fn responder(&self) -> ResponderHandle {
+    pub fn responder(&self) -> ResponderHandle {
         ResponderHandle {
             pending_requests: self.backend.pending_requests.clone(),
         }
@@ -318,7 +318,7 @@ impl AcpClient {
     }
 
     /// P1：initialize 握手返回的 agentCapabilities（连接成功才有）。
-    pub(crate) fn agent_capabilities(&self) -> Option<&serde_json::Value> {
+    pub fn agent_capabilities(&self) -> Option<&serde_json::Value> {
         self.capabilities().raw()
     }
 
@@ -349,13 +349,14 @@ impl AcpClient {
         self.crashed_watch.subscribe()
     }
 
-    #[cfg(test)]
-    pub(crate) fn child_id(&self) -> Option<u32> {
+    /// #247：宿主 real_acp_smoke/tests 跨 crate 消费，常态可见（与 instance_pid
+    /// 同源的子进程 pid 诊断面）。
+    pub fn child_id(&self) -> Option<u32> {
         self.child.pid()
     }
 
     /// B3：实例注册表登记用的子进程 pid（诊断关联，非安全边界）。
-    pub(crate) fn instance_pid(&self) -> Option<u32> {
+    pub fn instance_pid(&self) -> Option<u32> {
         self.child.pid()
     }
 
@@ -397,8 +398,8 @@ impl AcpClient {
     /// OBS-02：client_generation 固定为 0（旧调用点/测试）。生产路径请用
     /// [`Self::connect_with_generation`] 传入连接所属真实代际。
     pub async fn connect_with_logs(
-        agent: &crate::agent_config::AgentDef,
-        runtime_logs: Option<Arc<crate::runtime_log::RuntimeLogHub>>,
+        agent: &pylon_core::agent_config::AgentDef,
+        runtime_logs: Option<Arc<dyn crate::runtime_sink::RuntimeLogSink>>,
     ) -> Result<Self, AcpError> {
         Self::connect_with_generation(agent, runtime_logs, 0).await
     }
@@ -406,13 +407,13 @@ impl AcpClient {
     /// 连接 ACP 子进程并指定连接所属 client 代际（OBS-02 correlation）。
     /// generation 在 runtime replacement 时递增（lifecycle::do_connect_and_replace
     /// 传 `runtime.client_generation + 1`），wire trace 据此区分代际记录。
-    pub(crate) async fn connect_with_generation(
-        agent: &crate::agent_config::AgentDef,
-        runtime_logs: Option<Arc<crate::runtime_log::RuntimeLogHub>>,
+    pub async fn connect_with_generation(
+        agent: &pylon_core::agent_config::AgentDef,
+        runtime_logs: Option<Arc<dyn crate::runtime_sink::RuntimeLogSink>>,
         client_generation: u64,
     ) -> Result<Self, AcpError> {
         let resolved_agent;
-        let base_dir: Option<PathBuf> = crate::agent_config::effective_config_path()
+        let base_dir: Option<PathBuf> = pylon_core::agent_config::effective_config_path()
             .and_then(|path| path.parent().map(Path::to_path_buf));
         let agent = if let Some(base_dir) = &base_dir {
             resolved_agent = agent.resolve_paths(base_dir);
@@ -471,7 +472,7 @@ impl AcpClient {
 
                 let mut client = AcpClient {
                     child,
-                    protocol: crate::hermes::runtime::effective_protocol(agent),
+                    protocol: pylon_core::hermes::runtime::effective_protocol(agent),
                     capability_registry: CapabilityRegistry::default(),
                     backend,
                     crashed,
@@ -542,7 +543,7 @@ impl AcpClient {
     }
 
     /// Obtain the one Kernel notification inbox for this connection generation.
-    pub(crate) fn notification_inbox(&self) -> NotificationInbox {
+    pub fn notification_inbox(&self) -> NotificationInbox {
         self.backend.inbound.clone()
     }
 }

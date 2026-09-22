@@ -15,7 +15,7 @@ use agent_client_protocol_schema::v1::{
 };
 
 use super::AcpError;
-use crate::agent_config::McpServersMode;
+use pylon_core::agent_config::McpServersMode;
 
 /// session/update 变体（wire 字符串 → 枚举；dispatcher/export 分支依据）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,7 +156,7 @@ mod session_mode_tests {
 }
 
 /// session/prompt 参数。仅被 `AcpClient::prepare_prompt` 内部使用。
-pub(crate) fn session_prompt_params(
+pub fn session_prompt_params(
     session_id: &str,
     prompt: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
@@ -182,7 +182,7 @@ pub fn session_set_model_params(
 }
 
 /// Extract and validate sessionId from a session/new response.
-pub(crate) fn session_id_from(response: &serde_json::Value) -> Result<String, AcpError> {
+pub fn session_id_from(response: &serde_json::Value) -> Result<String, AcpError> {
     let session_id = response
         .get("sessionId")
         .and_then(|value| value.as_str())
@@ -197,7 +197,7 @@ pub(crate) fn session_id_from(response: &serde_json::Value) -> Result<String, Ac
 }
 
 /// Validate a session/prompt response and return its stop reason.
-pub(crate) fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, AcpError> {
+pub fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, AcpError> {
     let stop_reason = response
         .get("stopReason")
         .and_then(|value| value.as_str())
@@ -215,10 +215,10 @@ pub(crate) fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, A
 
 /// Build prompt blocks (text + attachments) for session/prompt.
 /// G1-04：附件限制来自 AttachmentLimits（缺省 = 现状 8 / 10MB，wire 文案不变）。
-pub(crate) fn prompt_blocks(
+pub fn prompt_blocks(
     text: String,
     attachments: &[String],
-    limits: crate::agent_config::AttachmentLimits,
+    limits: pylon_core::agent_config::AttachmentLimits,
 ) -> Result<Vec<serde_json::Value>, String> {
     if attachments.len() > limits.max_attachments {
         return Err(format!(
@@ -302,7 +302,7 @@ pub(crate) fn prompt_blocks(
 /// session/load 参数（G1-07a mode 参数化，语义同 session/new）。schema 的
 /// mcpServers 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空
 /// 数组而非缺字段。E4 警告：OmitIfEmpty 与 agent 能力匹配（同 session/new）。
-pub(crate) fn load_params(
+pub fn load_params(
     session_id: &str,
     cwd: &str,
     mcp_servers: Vec<serde_json::Value>,
@@ -344,12 +344,12 @@ mod resume_tests {
 
 /// session/resume parameters. Resume carries only standard identity and cwd;
 /// Pylon-specific MCP JSON is deliberately not sent through this schema.
-pub(crate) fn resume_params(session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
+pub fn resume_params(session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
     let req = ResumeSessionRequest::new(session_id.to_string(), cwd.to_string());
     to_params(&req, "session/resume")
 }
 
-pub(crate) fn resume_capability_advertised(capabilities: &serde_json::Value) -> bool {
+pub fn resume_capability_advertised(capabilities: &serde_json::Value) -> bool {
     capabilities
         .get("sessionCapabilities")
         .and_then(|session| session.get("resume"))

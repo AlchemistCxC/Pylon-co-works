@@ -14,7 +14,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::time::Timestamp;
+use pylon_foundations::time::Timestamp;
 
 /// 入队条目的生命周期状态。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -266,7 +266,7 @@ async fn probe_unknown_session_continuity(
     // `loadSession` 裸路径判断（旧实现与标准嵌套 `sessionCapabilities.loadSession`
     // 不一致：同一 Agent 可能在建立时被判支持 load、重连探针却判不支持）。
     // 快照读取失败按 fail-closed 处理（等价不支持 load → 全部 detached 收敛）。
-    let load_supported = crate::acp::NegotiatedCapabilitySnapshot::capture(runtime)
+    let load_supported = crate::acp::capture_negotiated_snapshot(runtime)
         .await
         .map(|snapshot| {
             tracing::debug!(

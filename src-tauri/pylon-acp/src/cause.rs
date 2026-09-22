@@ -10,13 +10,13 @@
 //! 词表封闭性由测试锁定：`connect_failure_cause` 与 `crash_reason_cause` 的
 //! code 输出集合必须与这里登记的常量集合完全一致（新增 code 必须同步登记）。
 
-use crate::acp::error::AgentConnectFailure;
-use crate::acp::CrashReason;
+use crate::error::AgentConnectFailure;
+use crate::CrashReason;
 
 /// 与 preflight cause 同形的统一诊断 DTO（additive：action 可选）。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DiagnosticCause {
+pub struct DiagnosticCause {
     /// `ok | info | warn | fail`（与 `agent_diagnostics` 词表一致）。
     pub level: &'static str,
     /// 封闭 cause code（本模块映射出的失败恒为 `fail` 级）。
@@ -37,7 +37,7 @@ fn action_for(failure: &AgentConnectFailure) -> &'static str {
 
 /// initialize/session 握手失败 → 统一 cause（code 词表 =
 /// `AgentConnectFailure::code` 的既有封闭集，本函数不发明新 code）。
-pub(crate) fn connect_failure_cause(failure: &AgentConnectFailure) -> DiagnosticCause {
+pub fn connect_failure_cause(failure: &AgentConnectFailure) -> DiagnosticCause {
     DiagnosticCause {
         level: "fail",
         code: failure.code.clone(),
@@ -47,7 +47,7 @@ pub(crate) fn connect_failure_cause(failure: &AgentConnectFailure) -> Diagnostic
 }
 
 /// 运行时退出 → 统一 cause。code 词表 = `CrashReason::as_str` 的封闭集。
-pub(crate) fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
+pub fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
     let summary = match reason {
         CrashReason::WriterFailed => "Agent 进程 stdin 写入失败，连接已按崩溃收敛",
         CrashReason::WriterTimeout => "Agent 进程长时间不读 stdin（写超时），连接已按崩溃收敛",
@@ -65,7 +65,7 @@ pub(crate) fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
 
 /// 反向映射（崩溃 code → 枚举）：dispatcher 收到的 reason 是 `as_str` 字符串，
 /// 日志侧据此取回统一 cause。未知 code → None（fail-closed：不猜）。
-pub(crate) fn crash_reason_from_code(code: &str) -> Option<CrashReason> {
+pub fn crash_reason_from_code(code: &str) -> Option<CrashReason> {
     match code {
         "writer_failed" => Some(CrashReason::WriterFailed),
         "writer_timeout" => Some(CrashReason::WriterTimeout),
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn connect_cause_uses_the_existing_closed_code_vocabulary() {
         let failure = AgentConnectFailure {
-            stage: crate::acp::AgentConnectStage::Spawn,
+            stage: crate::AgentConnectStage::Spawn,
             code: "agent_executable_missing".into(),
             message: "exe 不存在".into(),
             exit_code: None,

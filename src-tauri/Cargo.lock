@@ -3156,6 +3156,7 @@ dependencies = [
  "libc",
  "log",
  "mimalloc",
+ "pylon-acp",
  "pylon-canonical-types",
  "pylon-core",
  "pylon-foundations",
@@ -3190,6 +3191,28 @@ dependencies = [
  "windows-sys 0.61.2",
  "zeroize",
  "zip",
+]
+
+[[package]]
+name = "pylon-acp"
+version = "0.2.6-Abc"
+dependencies = [
+ "agent-client-protocol",
+ "agent-client-protocol-schema",
+ "base64 0.23.1",
+ "futures-util",
+ "infer 0.22.0",
+ "pylon-core",
+ "pylon-foundations",
+ "regex",
+ "ringbuffer",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -32,7 +32,7 @@ unsafe impl Send for JobObject {}
 unsafe impl Sync for JobObject {}
 
 /// 被管理的 ACP 子进程（acp/mod.rs 的 `AcpClient.child` 持有）。
-pub(crate) struct ManagedChild {
+pub struct ManagedChild {
     child: Option<Child>,
     /// Windows：进程树清理 job。句柄关闭即终止整棵进程树（KILL_ON_JOB_CLOSE）；
     /// 创建/挂接失败时为 None，kill 时回退 taskkill。
@@ -41,7 +41,7 @@ pub(crate) struct ManagedChild {
 }
 
 impl ManagedChild {
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             child: None,
             #[cfg(windows)]
@@ -49,7 +49,7 @@ impl ManagedChild {
         }
     }
 
-    pub(crate) fn new(child: Child) -> Self {
+    pub fn new(child: Child) -> Self {
         let mut managed = Self {
             child: Some(child),
             #[cfg(windows)]
@@ -111,21 +111,21 @@ impl ManagedChild {
         self.job = Some(JobObject { handle: job });
     }
 
-    pub(crate) fn take_stdin(&mut self) -> Result<std::process::ChildStdin, AcpError> {
+    pub fn take_stdin(&mut self) -> Result<std::process::ChildStdin, AcpError> {
         self.child
             .as_mut()
             .and_then(|child| child.stdin.take())
             .ok_or(AcpError::Child("no stdin".to_string()))
     }
 
-    pub(crate) fn take_stdout(&mut self) -> Result<std::process::ChildStdout, AcpError> {
+    pub fn take_stdout(&mut self) -> Result<std::process::ChildStdout, AcpError> {
         self.child
             .as_mut()
             .and_then(|child| child.stdout.take())
             .ok_or(AcpError::Child("no stdout".to_string()))
     }
 
-    pub(crate) fn take_stderr(&mut self) -> Result<std::process::ChildStderr, AcpError> {
+    pub fn take_stderr(&mut self) -> Result<std::process::ChildStderr, AcpError> {
         self.child
             .as_mut()
             .and_then(|child| child.stderr.take())
@@ -133,11 +133,11 @@ impl ManagedChild {
     }
 
     /// 直接子进程 PID（AcpClient::child_id 测试辅助用；进程已退出/未 spawn 为 None）。
-    pub(crate) fn pid(&self) -> Option<u32> {
+    pub fn pid(&self) -> Option<u32> {
         self.child.as_ref().map(Child::id)
     }
 
-    pub(crate) fn has_child(&self) -> bool {
+    pub fn has_child(&self) -> bool {
         self.child.is_some()
     }
 
@@ -146,7 +146,7 @@ impl ManagedChild {
     /// Windows：`OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject(INFINITE)`；
     /// 其他平台暂不实现（返回 false）。用于 SDK 后端：SDK 的 EOF 语义在洪泛/
     /// 批量场景不可靠，子进程退出才是权威崩溃信号。
-    pub(crate) fn spawn_exit_watcher(pid: u32, on_exit: impl FnOnce() + Send + 'static) -> bool {
+    pub fn spawn_exit_watcher(pid: u32, on_exit: impl FnOnce() + Send + 'static) -> bool {
         #[cfg(windows)]
         {
             use windows_sys::Win32::Foundation::CloseHandle;
@@ -179,7 +179,7 @@ impl ManagedChild {
 
     /// Non-blocking process status used by supervisors that own their own
     /// protocol/event loops. `None` means the child is still running.
-    pub(crate) fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, AcpError> {
+    pub fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>, AcpError> {
         self.child
             .as_mut()
             .map(|child| child.try_wait())
@@ -190,7 +190,7 @@ impl ManagedChild {
 
     /// Request termination while retaining ownership for escalation. The
     /// Windows job-object/taskkill path terminates the complete process tree.
-    pub(crate) fn terminate_gracefully(&mut self) -> Result<(), AcpError> {
+    pub fn terminate_gracefully(&mut self) -> Result<(), AcpError> {
         let Some(child) = self.child.as_mut() else {
             return Ok(());
         };
@@ -212,7 +212,7 @@ impl ManagedChild {
             .unwrap_or(false)
     }
 
-    pub(crate) fn kill_and_wait(&mut self) -> Result<(), AcpError> {
+    pub fn kill_and_wait(&mut self) -> Result<(), AcpError> {
         let Some(mut child) = self.child.take() else {
             return Ok(());
         };

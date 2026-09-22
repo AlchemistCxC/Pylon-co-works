@@ -12,12 +12,12 @@
 //! 「catalog 声明顺序 ∩ 服务端能力」的交集规则产出——声明了 resume 但服务端
 //! 没广告，或反之，都不产生 resume 通道；`new` 是 ACP 必备通道，恒在最后。
 
-use crate::acp::error::{AcpError, AgentConnectFailure};
-use crate::agent_config::{AcpProtocolConfig, McpServersMode};
+use crate::error::{AcpError, AgentConnectFailure};
+use pylon_core::agent_config::{AcpProtocolConfig, McpServersMode};
 
 /// initialize 握手计划：三段参数的不可变成形。
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InitializePlan {
+pub struct InitializePlan {
     pub protocol_version: u16,
     pub client_capabilities: serde_json::Value,
     pub client_info: serde_json::Value,
@@ -27,7 +27,7 @@ pub(crate) struct InitializePlan {
 ///
 /// 非法 clientCapabilities 声明 → `agent_client_capabilities_invalid`
 /// （A3 裁定：显式 YAML 与 catalog 声明非法都当场失败，不静默回退默认）。
-pub(crate) fn build_initialize_plan(
+pub fn build_initialize_plan(
     protocol: &AcpProtocolConfig,
     provider: Option<&str>,
 ) -> Result<InitializePlan, AcpError> {
@@ -57,7 +57,7 @@ pub(crate) fn build_initialize_plan(
 
 impl InitializePlan {
     /// wire 上的 initialize params（三段顺序固定，便于 golden trace 逐字节比对）。
-    pub(crate) fn params(&self) -> serde_json::Value {
+    pub fn params(&self) -> serde_json::Value {
         serde_json::json!({
             "protocolVersion": self.protocol_version,
             "clientCapabilities": self.client_capabilities,
@@ -68,13 +68,13 @@ impl InitializePlan {
 
 /// session/new 计划：cwd + MCP 载荷 + MCP 模式（Always/OmitIfEmpty）。
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SessionNewPlan {
+pub struct SessionNewPlan {
     pub cwd: String,
     pub mcp_servers: Vec<serde_json::Value>,
     pub mcp_mode: McpServersMode,
 }
 
-pub(crate) fn build_session_new_plan(
+pub fn build_session_new_plan(
     cwd: String,
     mcp_servers: Vec<serde_json::Value>,
     mcp_mode: McpServersMode,
@@ -88,21 +88,21 @@ pub(crate) fn build_session_new_plan(
 
 impl SessionNewPlan {
     /// wire 上的 session/new params（MCP 键语义由 `session_new_params` 持有）。
-    pub(crate) fn params(&self) -> Result<serde_json::Value, String> {
-        crate::acp::session_new_params(&self.cwd, self.mcp_servers.clone(), self.mcp_mode)
+    pub fn params(&self) -> Result<serde_json::Value, String> {
+        crate::session_new_params(&self.cwd, self.mcp_servers.clone(), self.mcp_mode)
     }
 }
 
 /// 会话建立通道（revive 链的原子单位）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EstablishmentChannel {
+pub enum EstablishmentChannel {
     Resume,
     Load,
     New,
 }
 
 // 「catalog 声明顺序 ∩ 服务端能力」的交集规则自 #98 起真源收敛到
-// [`crate::acp::negotiated::NegotiatedCapabilitySnapshot::establishment_channels`]：
+// [`crate::negotiated::NegotiatedCapabilitySnapshot::establishment_channels`]：
 // session 建立、重连 continuity probe、agent_status 快照消费同一份协商结论，
 // 任何调用方不再各自拼接 capability path。本模块只保留通道类型与计划层。
 
@@ -139,8 +139,8 @@ mod tests {
         assert_eq!(failure.code, "agent_client_capabilities_invalid");
     }
 
-    fn registry(capabilities: serde_json::Value) -> crate::acp::CapabilityRegistry {
-        crate::acp::CapabilityRegistry::from_initialize_response(&json!({
+    fn registry(capabilities: serde_json::Value) -> crate::CapabilityRegistry {
+        crate::CapabilityRegistry::from_initialize_response(&json!({
             "agentCapabilities": capabilities
         }))
         .unwrap()
@@ -156,11 +156,11 @@ mod tests {
         assert!(omit.params().unwrap().get("mcpServers").is_none());
     }
 
-    /// 计划层引用的 [`crate::acp::negotiated`] 快照与旧内联交集同结论（金丝雀）：
+    /// 计划层引用的 [`crate::negotiated`] 快照与旧内联交集同结论（金丝雀）：
     /// 嵌套 object 广告产生通道、标量不算能力。矩阵全量语义见 negotiated.rs 测试。
     #[test]
     fn snapshot_establishment_channels_match_the_inline_intersection() {
-        use crate::acp::negotiated::NegotiatedCapabilitySnapshot;
+        use crate::negotiated::NegotiatedCapabilitySnapshot;
         let full = registry(json!({"sessionCapabilities": {"resume": {}, "loadSession": {}}}));
         let declared = vec!["resume".to_string(), "load".to_string(), "new".to_string()];
         let snapshot = NegotiatedCapabilitySnapshot::from_parts(

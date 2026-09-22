@@ -21,8 +21,8 @@ use pylon_core::agent_launch_plan::{
 /// `detection` carries what the detector proved about this provider (it is
 /// empty for the connection-test path, which trusts the explicit `AgentDef`).
 /// `runtime_env` is the managed-runtime environment computed by the caller.
-pub(crate) fn plan_for_agent(
-    agent: &crate::agent_config::AgentDef,
+pub fn plan_for_agent(
+    agent: &pylon_core::agent_config::AgentDef,
     base_dir: Option<&std::path::Path>,
     detection: &LaunchDetection,
     runtime_env: Vec<(String, String)>,
@@ -42,7 +42,7 @@ pub(crate) fn plan_for_agent(
         .iter()
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
-    if let Some(home) = crate::hermes::hermes_home_override(agent, base_dir) {
+    if let Some(home) = pylon_core::hermes::hermes_home_override(agent, base_dir) {
         tracing::info!(
             "agent {}: HERMES_HOME set to {} (hermes_profile)",
             agent.name,
@@ -76,7 +76,7 @@ pub(crate) fn plan_for_agent(
 ///
 /// Everything the plan declares is applied here; no caller adds arguments,
 /// environment or a working directory around it.
-pub(crate) fn apply_launch_plan(command: &mut Command, plan: &LaunchPlan) {
+pub fn apply_launch_plan(command: &mut Command, plan: &LaunchPlan) {
     command.args(&plan.args);
     if let Some(cwd) = &plan.cwd {
         command.current_dir(cwd);
@@ -91,8 +91,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn agent(provider: &str, exe: &str, args: &[&str]) -> crate::agent_config::AgentDef {
-        crate::agent_config::AgentDef {
+    fn agent(provider: &str, exe: &str, args: &[&str]) -> pylon_core::agent_config::AgentDef {
+        pylon_core::agent_config::AgentDef {
             name: provider.to_string(),
             provider: Some(provider.to_string()),
             transport: "subprocess".to_string(),

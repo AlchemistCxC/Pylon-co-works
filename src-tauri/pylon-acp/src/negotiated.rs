@@ -22,9 +22,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{OnceLock, RwLock};
 
-use crate::acp::capabilities::CapabilityRegistry;
-use crate::acp::initialize_plan::EstablishmentChannel;
-use crate::runtime::AgentRuntime;
+use crate::capabilities::CapabilityRegistry;
+use crate::initialize_plan::EstablishmentChannel;
 
 /// 能力事实四态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,23 +419,6 @@ impl NegotiatedCapabilitySnapshot {
             generation,
             declared: declared.to_vec(),
         }
-    }
-
-    /// 从运行时现场捕获（acp 锁内读 registry + establishment order，generation
-    /// 取当前 client_generation）。旧连接的快照随客户端替换自然失效。
-    pub async fn capture(runtime: &AgentRuntime) -> Result<Self, String> {
-        let generation = runtime
-            .client_generation
-            .load(std::sync::atomic::Ordering::Acquire);
-        let acp = runtime.acp.lock().await;
-        let declared: Vec<String> = acp.establishment_order().to_vec();
-        let consumers = registered_capability_consumers();
-        Ok(Self::from_parts(
-            acp.capabilities(),
-            &declared,
-            generation,
-            &consumers,
-        ))
     }
 
     pub fn decision(&self, id: &str) -> Option<&CapabilityDecision> {

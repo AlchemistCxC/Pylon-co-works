@@ -23,11 +23,11 @@ use std::sync::{Arc, Mutex};
 /// `turn_id` 使用 Pylon 本地出站 request id（`PreparedRpc.id`），同一连接内
 /// 唯一；generation 隔离后跨连接也不混淆。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TurnKey {
-    pub(crate) local_session_id: String,
-    pub(crate) remote_session_id: String,
-    pub(crate) generation: u64,
-    pub(crate) turn_id: u64,
+pub struct TurnKey {
+    pub local_session_id: String,
+    pub remote_session_id: String,
+    pub generation: u64,
+    pub turn_id: u64,
 }
 
 /// 回合终态的稳定语义类别（issue #99：不能用一个"连接失败"吞掉原因）。
@@ -40,7 +40,7 @@ pub(crate) struct TurnKey {
 /// `#[allow(dead_code)]`（预留，含摘除条件），不做模块/块级豁免。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum TurnTerminalCause {
+pub enum TurnTerminalCause {
     /// 正常完成且有文本产出。
     Completed,
     /// 成功但无文本产出（UI 不得停在 prompting）。
@@ -96,7 +96,7 @@ pub(crate) enum TurnTerminalCause {
 
 impl TurnTerminalCause {
     /// 稳定 snake_case wire code（诊断/日志用，禁止用错误文本正则反推）。
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Completed => "completed",
             Self::EmptyTurn { .. } => "empty_turn",
@@ -118,7 +118,7 @@ impl TurnTerminalCause {
 /// 成功但无文本的回合的细分原因（issue #99：empty-turn cause 必须显式）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum EmptyTurnCause {
+pub enum EmptyTurnCause {
     /// 有工具调用但无文本（tool-only 回合是合法成功）。
     ToolOnly,
     /// 回合被取消（取消本身解释了无文本）。
@@ -134,7 +134,7 @@ pub(crate) enum EmptyTurnCause {
 /// turn 生命周期阶段（issue #99 建议语义：Prompting → Streaming → Settling → 终态）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum TurnPhase {
+pub enum TurnPhase {
     /// 出站 session/prompt 已发送，等待首个活动。
     Prompting,
     /// 已收到本回合首个 live 活动（文本/思考/工具）。
@@ -152,44 +152,44 @@ pub(crate) enum TurnPhase {
 /// 终态记录（CAS 胜者写入，不可变）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TurnTerminal {
-    pub(crate) cause: TurnTerminalCause,
+pub struct TurnTerminal {
+    pub cause: TurnTerminalCause,
     /// 终态判定时刻（毫秒时间戳，快照/冷挂载用）。
-    pub(crate) settled_at_ms: u64,
+    pub settled_at_ms: u64,
     /// 诊断 detail（错误消息原文，可为空）。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) detail: Option<String>,
+    pub detail: Option<String>,
 }
 
 /// 单个 turn 的账本条目。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TurnRecord {
-    pub(crate) key: TurnKeySnapshot,
-    pub(crate) phase: TurnPhase,
-    pub(crate) started_at_ms: u64,
+pub struct TurnRecord {
+    pub key: TurnKeySnapshot,
+    pub phase: TurnPhase,
+    pub started_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) terminal: Option<TurnTerminal>,
+    pub terminal: Option<TurnTerminal>,
     /// 本 turn 观测到的最后一个入站 ingress sequence（诊断 cursor）。
-    pub(crate) last_ingress_seq: u64,
+    pub last_ingress_seq: u64,
     /// 本 turn 是否观测到 live 文本产出（empty-turn 判定输入）。
-    pub(crate) saw_text: bool,
+    pub saw_text: bool,
     /// 本 turn 是否观测到 live 工具调用（empty-turn 判定输入）。
-    pub(crate) saw_tool: bool,
+    pub saw_tool: bool,
 }
 
 /// [`TurnKey`] 的可序列化快照形态。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TurnKeySnapshot {
-    pub(crate) local_session_id: String,
-    pub(crate) remote_session_id: String,
-    pub(crate) generation: u64,
-    pub(crate) turn_id: u64,
+pub struct TurnKeySnapshot {
+    pub local_session_id: String,
+    pub remote_session_id: String,
+    pub generation: u64,
+    pub turn_id: u64,
 }
 
 impl TurnKey {
-    pub(crate) fn snapshot(&self) -> TurnKeySnapshot {
+    pub fn snapshot(&self) -> TurnKeySnapshot {
         TurnKeySnapshot {
             local_session_id: self.local_session_id.clone(),
             remote_session_id: self.remote_session_id.clone(),
@@ -201,14 +201,14 @@ impl TurnKey {
 
 /// `begin` 的结果：同一 turn 重复 begin 是协议异常，但必须幂等可观测。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BeginOutcome {
+pub enum BeginOutcome {
     Started,
     AlreadyActive,
 }
 
 /// `settle` 的 CAS 结果：只有 `Published` 拥有发布/持久化权。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SettleOutcome {
+pub enum SettleOutcome {
     /// 本调用是第一个终态：调用方获得发布权。
     Published,
     /// 迟到终态：已被拒绝发布，诊断计数 +1。
@@ -224,13 +224,13 @@ pub(crate) enum SettleOutcome {
 /// 内存上界（评审 E8）：settle 内建每会话终态保留裁剪，`drop_generation`
 /// 随代际退出收敛；`late_terminal_events` 为诊断计数（读取面见其方法文档）。
 #[derive(Debug, Default)]
-pub(crate) struct TurnLedger {
+pub struct TurnLedger {
     records: Mutex<HashMap<TurnKey, TurnRecord>>,
     late_terminal_events: AtomicU64,
 }
 
 impl TurnLedger {
-    pub(crate) fn new() -> Arc<Self> {
+    pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
 
@@ -239,13 +239,13 @@ impl TurnLedger {
     /// 仅测试消费（#228）：生产诊断出口（冷挂载快照/日志）尚未读取该计数，
     /// 接入时摘除 `#[cfg(test)]`。
     #[cfg(test)]
-    pub(crate) fn late_terminal_events(&self) -> u64 {
+    pub fn late_terminal_events(&self) -> u64 {
         self.late_terminal_events.load(Ordering::Relaxed)
     }
 
     /// 登记一个新 turn（Prompting 起点）。同一 key 重复 begin 幂等返回
     /// `AlreadyActive`（不重置已登记状态——原始 begin 的时间戳与阶段保持）。
-    pub(crate) fn begin(&self, key: TurnKey, started_at_ms: u64) -> BeginOutcome {
+    pub fn begin(&self, key: TurnKey, started_at_ms: u64) -> BeginOutcome {
         let mut records = self.lock();
         match records.entry(key.clone()) {
             std::collections::hash_map::Entry::Occupied(_) => BeginOutcome::AlreadyActive,
@@ -271,7 +271,7 @@ impl TurnLedger {
     /// `note_session_activity`（dispatcher 不持有 turn_id）；持有 turn_id 的
     /// 生产调用方出现时摘除 `#[cfg(test)]`。
     #[cfg(test)]
-    pub(crate) fn advance(&self, key: &TurnKey, phase: TurnPhase) {
+    pub fn advance(&self, key: &TurnKey, phase: TurnPhase) {
         let mut records = self.lock();
         if let Some(record) = records.get_mut(key) {
             if record.terminal.is_some() {
@@ -290,7 +290,7 @@ impl TurnLedger {
     /// Streaming。多活跃 turn（理论竞态）时取 turn_id 最小者，与
     /// `settle_by_session` 的选择语义一致（评审 E9）。
     /// 返回是否命中在途 turn（false = 回合未登记或已终态，迟到活动只算诊断）。
-    pub(crate) fn note_session_activity(
+    pub fn note_session_activity(
         &self,
         local_session_id: &str,
         remote_session_id: &str,
@@ -338,7 +338,7 @@ impl TurnLedger {
     /// 保留 [`TERMINAL_RETENTION_PER_SESSION`] 条最新终态，更旧的即时释放
     /// （`latest_session_snapshot` 的「最近终态」语义只需要一条）。在途记录
     /// 不受裁剪影响。
-    pub(crate) fn settle(
+    pub fn settle(
         &self,
         key: &TurnKey,
         cause: TurnTerminalCause,
@@ -428,7 +428,7 @@ impl TurnLedger {
     /// 仅测试消费（#228）：生产结算路径（session/prompt）持完整 `TurnKey`
     /// 直接走 `settle`；无 key 的生产结算方出现时摘除 `#[cfg(test)]`。
     #[cfg(test)]
-    pub(crate) fn settle_by_session(
+    pub fn settle_by_session(
         &self,
         local_session_id: &str,
         remote_session_id: &str,
@@ -456,7 +456,7 @@ impl TurnLedger {
     }
 
     /// 快照：指定 turn 的当前记录（冷挂载/诊断只读投影）。
-    pub(crate) fn snapshot(&self, key: &TurnKey) -> Option<TurnRecord> {
+    pub fn snapshot(&self, key: &TurnKey) -> Option<TurnRecord> {
         self.lock().get(key).cloned()
     }
 
@@ -465,7 +465,7 @@ impl TurnLedger {
     /// 冷挂载语义：有在途 turn 返回它（UI 恢复 prompting/streaming）；没有则
     /// 返回最近收敛的终态 turn（UI 恢复 terminalCause）；会话从未有 turn 返回
     /// None。不伪造状态——快照缺 turn 字段就是「本会话无已知 turn 事实」。
-    pub(crate) fn latest_session_snapshot(
+    pub fn latest_session_snapshot(
         &self,
         local_session_id: &str,
         remote_session_id: &str,
@@ -502,7 +502,7 @@ impl TurnLedger {
 
     /// generation 硬隔离清理：客户端替换后旧代际条目整体收敛。
     /// 返回被清理的条目数（诊断）。
-    pub(crate) fn drop_generation(&self, generation: u64) -> usize {
+    pub fn drop_generation(&self, generation: u64) -> usize {
         let mut records = self.lock();
         let stale: Vec<TurnKey> = records
             .keys()
@@ -548,7 +548,7 @@ fn phase_rank(phase: TurnPhase) -> u8 {
 ///
 /// 与 `prompt_stop_reason` 的接受集对齐：end_turn / max_turn_requests 是协议级
 /// 成功；refusal / cancelled 是协议级提前终止；其余/缺失 = protocol error。
-pub(crate) fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerminalCause {
+pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerminalCause {
     let stop_reason = result
         .get("stopReason")
         .and_then(|value| value.as_str())
@@ -567,7 +567,7 @@ pub(crate) fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> T
 /// 优先级：agent 明确取消/拒绝 → 它们本身就是"无文本"的权威解释；否则有工具
 /// 无文本 = tool-only（合法成功）；完全无产出 = agent-empty；把本函数用在
 /// 不代表"成功收尾"的终态上属于调用方契约破坏，防御性归 unknown（不猜）。
-pub(crate) fn empty_turn_cause(
+pub fn empty_turn_cause(
     terminal: &TurnTerminalCause,
     saw_text: bool,
     saw_tool: bool,

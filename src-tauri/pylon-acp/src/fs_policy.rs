@@ -21,7 +21,7 @@ pub struct FsAccessPolicy {
 }
 
 impl FsAccessPolicy {
-    pub(crate) fn from_roots(roots: Vec<PathBuf>) -> Self {
+    pub fn from_roots(roots: Vec<PathBuf>) -> Self {
         Self {
             read_roots: roots.clone(),
             write_roots: roots,

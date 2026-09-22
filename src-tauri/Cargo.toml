@@ -18,6 +18,7 @@ default-run = "pylon"
 members = [
     ".",
     "pylon-core",
+    "pylon-acp",
     "pylon-foundations",
     "pet-core",
     "pylon-canonical-types",
@@ -73,6 +74,7 @@ tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 serde_yml = "0.0.13"
 sha2 = "0.10"
+pylon-acp = { path = "pylon-acp" }
 pylon-core = { path = "pylon-core" }
 pylon-foundations = { path = "pylon-foundations" }
 # #220 WP1：canonical 事件 wire 契约的单源。写入侧（session/event_repo.rs）与

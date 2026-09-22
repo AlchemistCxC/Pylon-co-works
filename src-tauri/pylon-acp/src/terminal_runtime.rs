@@ -345,7 +345,7 @@ fn spawn_reader<R: Read + Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::terminal_policy::TerminalExitStatus;
+    use crate::terminal_policy::TerminalExitStatus;
 
     #[tokio::test]
     async fn healthy_long_running_terminal_has_no_error_deadline() {
