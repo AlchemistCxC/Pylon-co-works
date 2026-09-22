@@ -57,8 +57,14 @@ pub struct HighlightedLine {
     pub spans: Vec<HighlightSpan>,
 }
 
-/// 语言别名 → TextMate scope。与 TS 基线 `codeHighlight.ts` 的
-/// `LANGUAGE_SCOPES` 同表——两边各写一份是暂时的（TS 侧退役后此处即单源）。
+/// 语言别名 → TextMate scope。与 TS 的 `codeHighlight.ts` 的 `LANGUAGE_SCOPES` 同表。
+///
+/// **同表两份是既成事实，且不宜用「TS 侧改调 wasm」来收敛**：实测（issue #233 的对照，三次运行
+/// 17.99/18.14/18.08）经 wasm 出口查一次表比 TS 侧普通对象查表**慢约 18×**——每调用一次要过边界
+/// 并把 `Option<String>` 编成 JS 串，而语言门在 `codeHighlight.ts:89` 是逐代码块调用的同步门。
+/// 该 wasm 壳已按此删除（#236）。若仍要单源，正路是**代码生成**（先例：
+/// `scripts/generate-canonical-event-types.mjs` 从 `pylon-canonical-types` 生成 TS 词表），
+/// 本函数服务 `highlight_block` 的内部映射，保持 Rust 侧自持。
 pub fn scope_for_language(language: &str) -> Option<&'static str> {
     const LANGUAGE_SCOPES: &[(&str, &str)] = &[
         ("js", "source.js"),

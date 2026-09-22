@@ -29,10 +29,13 @@ export async function buildPerfSuites(): Promise<PerfSuite[]> {
  * 列出来而不是只体现在「表里没有」：「没接线」是一个结论，得能被人核。
  * 判据统一为「`src/` 里有没有调用方」。
  *
- * 本清单覆盖**两个计算核的全部真实导出**（`pylon-compute` 6 个、`pylon-markdown` 6 个，
+ * 本清单覆盖**两个计算核的全部真实导出**（`pylon-compute` 6 个、`pylon-markdown` 5 个，
  * `initSync` 除外）：接线的是 **5 个**（本基准的 5 个 wasm pair 一一对应），未接线的是
- * **7 个**（下表）。不要只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute`
+ * **6 个**（下表）。不要只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute`
  * 的一半，且不含 `pylon-markdown`。
+ *
+ * 变更是删除而非增加：`pylon-markdown` 原第 6 个导出 `scopeForLanguage` 已按 #236 删除
+ * （无调用方 + 实测逐次调用比现役 TS 表慢约 18×），故不在此列。
  */
 export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonly reason: string }> = [
   {
@@ -46,10 +49,6 @@ export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonl
   {
     name: 'findLastStableBlockBoundary',
     reason: '同上；src/ 内无调用方',
-  },
-  {
-    name: 'scopeForLanguage（wasm 出口）',
-    reason: '生产用 `src/components/chat/codeHighlight.ts:46` 的同名 TS 表做同步语言门——未知语言不过界，wasm 出口无调用方',
   },
   {
     name: 'parseMarkdownJson',

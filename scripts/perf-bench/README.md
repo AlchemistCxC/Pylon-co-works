@@ -48,7 +48,9 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `projector` | `projectWorkbench` | `src/domains/workbench/workbenchProjector.ts:444` |
 | `events` | `normalizeRawEvent` | `src/domains/events/canonicalNormalizer.ts:196` |
 
-**没接线的 not in the table.** 两个计算核共 **12 个**真实导出（`pylon-compute` 6 + `pylon-markdown` 6，`initSync` 除外）：**接线 5 个**（正是上表里 5 个 wasm 路径），**未接线 7 个** —— 三个被 #220 ends 出口取代的旧切分出口、wasm 的 `scopeForLanguage`（生产走 `codeHighlight.ts:46` 的同名 TS 同步语言门）、两个 `*Json` 编组变体、`markdownEngineVersion` 诊断出口。
+**没接线的 not in the table.** 两个计算核的**当前**真实导出共 **11 个**（`pylon-compute` 6 + `pylon-markdown` 5，`initSync` 除外）：**接线 5 个**（正是上表里 5 个 wasm 路径），**未接线 6 个** —— 三个被 #220 ends 出口取代的旧切分出口、两个 `*Json` 编组变体、`markdownEngineVersion` 诊断出口。
+
+（原第 12 个是 wasm 的 `scopeForLanguage`：生产走 `codeHighlight.ts:46` 的同名 TS 同步语言门，且实测逐次调用比 TS 表慢约 **18×** ⇒ 已按 #236 删除，不在此列。）
 
 它们不进基准，但**连理由一起打印在表尾**（`index.ts` 的 `EXCLUDED_WASM_EXITS`）：**排除本身是结论，得能被人核。**
 别只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute` 的一半，且不含 `pylon-markdown`。

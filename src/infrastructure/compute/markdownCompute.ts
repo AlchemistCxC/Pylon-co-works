@@ -36,9 +36,13 @@ export interface MarkdownCompute {
   parseMarkdown(text: string): unknown
   /** 整块代码 → 行数组高亮 span；语言未知 / 语法包缺失返回 `undefined`（null 语义）。 */
   highlightBlock(code: string, language: string): readonly HighlightedLine[] | undefined
-  /** 语言别名 → TextMate scope（与原 TS 基线 `scopeForLanguage` 同表）。 */
-  scopeForLanguage(language: string): string | undefined
-  /** 引擎版本标记（随 crate 版本走），供诊断与 parity 记录。 */
+  /**
+   * 引擎版本标记（随 crate 版本走），供诊断与 parity 记录。
+   *
+   * 曾经还有一个 `scopeForLanguage` 出口，已删（#236）：生产用的是
+   * `src/components/chat/codeHighlight.ts` 的**同步 TS 表**，该出口无调用方，
+   * 且实测逐次调用比 TS 表慢约 18×（每调用过 wasm 边界 + 编 JS 串）。
+   */
   markdownEngineVersion(): string
 }
 

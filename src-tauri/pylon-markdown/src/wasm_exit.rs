@@ -69,9 +69,3 @@ pub fn highlight_block_json(code: &str, language: &str) -> Result<String, JsErro
     serde_json::to_string(&lines)
         .map_err(|error| JsError::new(&format!("高亮 JSON 序列化失败: {error}")))
 }
-
-/// 语言别名 → TextMate scope（与 TS 基线 `scopeForLanguage` 同表）。
-#[wasm_bindgen(js_name = scopeForLanguage)]
-pub fn scope_for_language(language: &str) -> Option<String> {
-    crate::highlight::scope_for_language(language).map(str::to_string)
-}

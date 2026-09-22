@@ -53,7 +53,8 @@
 1. **一个 case = 一条已接线的生产路径 + 一份输入**（`PerfCase.run`），没有第二实现。
    于是「想量一个开销点」不再需要先造 TS 基线——投影与 events 这两面因此才量得了（它们的实现本来就在 TS 里）。
 2. **入册判据是接线点，不是 wasm 出口身份**：每 pair 强制 `wiredAt` 的 `file:line`；
-   没接线的 7 个出口进 `EXCLUDED_WASM_EXITS` 连理由一起**打印出来**——排除是结论，得能被人核。
+   没接线的 6 个出口进 `EXCLUDED_WASM_EXITS` 连理由一起**打印出来**——排除是结论，得能被人核。（原先 7 个，
+   `scopeForLanguage` 已按 #236 删除，见该记录。）
 3. **借存量资产按「已接线才借」**：切分/揭示**直接复用 parity 套件的 case 定义**（`pair.wasm` 就是生产出口，
    语料只有一份）；markdown 的「生产流式形状」构造与 projector 的 envelope 生成器从 git 历史恢复；
    `baselines/**` 一律不借。
@@ -86,7 +87,7 @@
 | 验收项 | 结果 |
 | --- | --- |
 | `bun scripts/perf-bench.mts` 退出 0、六域表、每行有 ms中位/单位成本/核线性Δ | ✅ 退出 0，64 case，六域齐全 |
-| 表里不出现没接线的 7 个 wasm 导出 | ✅ 路径列里没有 `splitStreamingMarkdown` / `splitStreamingMarkdownBlocks` / `findLastStableBlockBoundary` / `scopeForLanguage` / `parseMarkdownJson` / `highlightBlockJson` / `markdownEngineVersion`（`grep` 核过：出现的 `splitStreamingMarkdownBlockEnds` 是**已接线**的 ends 出口）；表尾印出七条的排除理由 |
+| 表里不出现没接线的 wasm 导出（当时 7 个，`scopeForLanguage` 后按 #236 删除） | ✅ 路径列里没有 `splitStreamingMarkdown` / `splitStreamingMarkdownBlocks` / `findLastStableBlockBoundary` / `scopeForLanguage` / `parseMarkdownJson` / `highlightBlockJson` / `markdownEngineVersion`（`grep` 核过：出现的 `splitStreamingMarkdownBlockEnds` 是**已接线**的 ends 出口）；表尾印出七条的排除理由 |
 | 无网络、未安装 vite-node 的树上可跑 | ✅ 两次全跑均无网络访问；`node_modules/vite-node` 不存在 |
 | parity 门禁仍绿且断言计数不变 | ✅ **126 项：ok 125 / known-diff 1 / mismatch 0**（与记录 220 同数） |
 | `tsc -b` 退出 0 | ✅ 退出 0 |
@@ -203,7 +204,7 @@ tool-only 18.73 → 1024.12µs/事件、24k 事件单次折叠 24.6 秒）。#20
 4. **`projector` 超线性已开 #234 但未修**（需先裁决是否动 `workbenchProjector`）。
 5. **`streaming-split` 的 `list-block-*` 成本行读起来「更快」**：单位成本低是因为它几乎不产出稳定块，
    不是更优。README 已写明「别把便宜当更优」，但这一列本身仍有被误读的空间。
-6. **7 个未接线 wasm 导出是否退役**：三个旧切分出口、wasm 的 `scopeForLanguage`、两个 `*Json` 编组变体、
+6. **未接线 wasm 导出是否退役**（当时 7 个：三个旧切分出口、wasm 的 `scopeForLanguage`、两个 `*Json` 编组变体、
    `markdownEngineVersion`——它们的 **JS 可见面**在 `src/`（含测试）里都没有调用方。
    **「为了性能而转正/退伍」这条路已在下一节实测后否掉**（没有一对满足「死实现更快且可靠」，
    两个可靠信号反而都指向现役更优）。剩下的只是**纯体积与维护面**该不该清，
@@ -264,7 +265,9 @@ tool-only 18.73 → 1024.12µs/事件、24k 事件单次折叠 24.6 秒）。#20
    所以它们的数字只作差距参考，入不了「谁替代谁」的判定。
    `markdownEngineVersion` 同理：它没有对照物（就是一个版本串 getter），无法用本规则评估。
 
-于是未解问题 6 的前半（**这 7 个是否该为了性能退役/转正**）**有了结论：不因性能动它们**。
+于是未解问题 6 的前半（**这些是否该为了性能退役/转正**）**有了结论：不因性能动它们**——
+**唯一的例外是 `scopeForLanguage`**：它落后现役 ~18×，达到用户当轮给的「落后 10 倍即直接删除」门槛，
+已按 **#236** 删除（`wasm_exit.rs` 的壳删掉、`highlight.rs` 的内层函数保留、接口成员删掉）。
 后半（纯体积与维护面该不该清）仍未决，且不取决于本轮读数——若要清，走的是「删死面」而不是
 「换实现」。
 

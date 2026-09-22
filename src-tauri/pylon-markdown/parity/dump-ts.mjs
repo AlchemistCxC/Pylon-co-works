@@ -8,7 +8,10 @@
 // 为什么不 import codeHighlight.ts：它顶部有 vite 专属的 `?url` 资源导入，bun 无法
 // 解析；这里直接用 starryCore（纯 re-export）+ 本文件内的 LANGUAGE_SCOPES 副本
 // （与 codeHighlight.ts 同表，两侧退役后此副本即为多余，差异清单过审时说明）。
-// 语言映射若有漂移，vitest parity 测试会经 scopeForLanguage 常驻对齐。
+// 语言映射的漂移由两侧各自的单测钉住（Rust `highlight.rs` 的
+// `scope_mapping_matches_ts_baseline` 与 TS `src/components/chat/__tests__/codeHighlight.test.ts`
+// 的映射表断言，期望值同表）。曾经还有一个 wasm 出口 `scopeForLanguage` 供跨侧对齐，
+// 已删（#236：无调用方，且逐次调用比 TS 表慢约 18×）。
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'

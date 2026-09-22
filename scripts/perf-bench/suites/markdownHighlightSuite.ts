@@ -1,17 +1,17 @@
 // markdown-highlight 域基准：生产出口 `highlightBlock`（wasm，syntect）。
 //
 // 接线点：`src/components/chat/codeHighlight.ts:91`——`highlightCodeBuiltin` 的语言门通过后
-// 调的就是它。**语言门之前的那截不在本读数内**（见下「没接线的两条」）。
+// 调的就是它。**语言门之前的那截不在本读数内**（见下）。
 //
 // 语料在树上 `scripts/compute-parity/fixtures/corpora.ts`（HIGHLIGHT_CORPUS）；那条套件
 // （`66671b92^:scripts/compute-parity/suites/markdownHighlightSuite.ts`）随 #220 下线 markdown
 // 装置一起删除，被删的 TS 基线 `oldHighlightEngine.ts`（starry-night 雕刻）**不借**。
 //
-// 没接线的两条（按「没接线的不用了」排除）：
-// - `scopeForLanguage` 的 **wasm 出口**：生产用的是 `codeHighlight.ts:15` 的 TS 映射表
-//   （同步门，未知语言根本不过界），wasm 那个出口在 `src/` 里没有调用方。
+// 两条不在本域内：
 // - `HIGHLIGHT_CORPUS` 里的 `unknown-language` case：生产在同步语言门就被挡住、不进计算核，
 //   拿它当产品路径 case 会量到一条生产永不走的路径。
+// - `scopeForLanguage` 的 wasm 出口：**已删**（#236）——生产用的是 `codeHighlight.ts:46` 的
+//   TS 映射表（同步门，未知语言根本不过界），该 wasm 出口无调用方，且实测逐次调用比 TS 表慢约 18×。
 
 import type { MarkdownCompute } from '../../../src/infrastructure/compute/markdownCompute.ts'
 import { loadMarkdownCompute } from '../../../src/infrastructure/compute/markdownCompute.ts'
