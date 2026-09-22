@@ -1284,7 +1284,6 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                 settle,
                 cancel_settle_timeout_secs,
                 protocol.prompt_timeout(),
-                prompt_started_at,
                 failure,
             )
             .await
@@ -1402,8 +1401,9 @@ async fn settle_prompt_connection_closed<R: tauri::Runtime>(
 /// 终态臂（原内联体逐行搬移，行为零变化）——#99 settle 窗口解析映射稳定终态、
 /// pending/权限请求收敛、B9 取消挂起权限、映射移除 + close RPC（方案 6）、
 /// G2-06 超时文案（真触发边界）与 M5 宠物感知、方案 I 内容状态区分日志。
-/// 15 参为 variant 载荷字段 + 等待期标量逐一传递，语义互不分组；结构体重构
+/// 14 参为 variant 载荷字段 + 等待期标量逐一传递，语义互不分组；结构体重构
 /// 收益低（先例：dispatcher reject_interaction_request 的 clippy 备注口径）。
+/// （CI 修复：`prompt_started_at` 在本臂未被消费，签名收窄。）
 #[allow(clippy::too_many_arguments)]
 async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     state: &AppState,
@@ -1419,7 +1419,6 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     settle: CancelSettleResolution,
     cancel_settle_timeout_secs: u64,
     configured_prompt_timeout_secs: u64,
-    prompt_started_at: std::time::Instant,
     failure: &mut Option<PromptFailureMetadata>,
 ) -> Result<String, PylonError> {
     // #99：settle 窗口解析映射到稳定终态——窗口内回的终态胜出（含空回合

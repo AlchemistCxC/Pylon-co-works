@@ -166,9 +166,9 @@ fn dead_target_gate(
     key: &str,
 ) -> Option<String> {
     let mut dead = dead_targets.lock().ok()?;
-    let Some((reason, marked_at)) = dead.get(key) else {
-        return None;
-    };
+    // CI 修复（clippy::question_mark）：`let...else { return None }` 与 `?` 逐
+    // 字等价；借助于 NLL，`marked_at` 末次使用后即可 `dead.remove`。
+    let (reason, marked_at) = dead.get(key)?;
     let reason = reason.clone();
     if dead_target_expired(&(reason.clone(), *marked_at)) {
         dead.remove(key);
