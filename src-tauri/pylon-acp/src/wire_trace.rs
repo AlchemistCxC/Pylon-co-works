@@ -15,7 +15,7 @@
 
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -64,19 +64,19 @@ pub enum WireIdKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WireRecord {
-    pub trace_id: String,
+    pub trace_id: Arc<str>,
     /// 单调递增序号（同一 trace 内按发送/接收顺序分配）。
     /// CR-003：方案书 §5.1 字段名对齐（monotonicSeq）。
     pub monotonic_seq: u64,
     pub timestamp: Timestamp,
-    pub agent_id: String,
+    pub agent_id: Arc<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
+    pub provider: Option<Arc<str>>,
     /// source 不是 owner——与 agentId + clientGeneration 合看。
-    pub source: String,
+    pub source: Arc<str>,
     /// Pylon 侧本地会话键（transport 边界不可知，由上层映射供给）。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_session_id: Option<String>,
+    pub local_session_id: Option<Arc<str>>,
     /// Agent 侧远端会话 id（best-effort 从 params/result 提取的 sessionId）。
     /// 与 local_session_id 分字段（remote ≠ local，方案书 §5.2）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,14 +115,26 @@ pub struct WireRecord {
 #[derive(Debug)]
 pub struct AcpWireHub {
     correlation: RuntimeCorrelation,
-    trace_id: String,
+    identity: Arc<WireIdentity>,
     next_seq: AtomicU64,
     enabled: AtomicBool,
     records: Mutex<AllocRingBuffer<Arc<WireRecord>>>,
     capacity: usize,
-    canonical_correlations: Mutex<HashMap<u64, CanonicalCorrelation>>,
+    canonical_correlations: Mutex<BTreeMap<u64, CanonicalCorrelation>>,
     inbound_ordinals: Mutex<VecDeque<u64>>,
     inbound_ordinal_overflowed: AtomicBool,
+}
+
+/// 连接级恒定身份（#260-A3：构造时固定一次，每条记录零重复分配；
+/// serde 输出仍是字符串，wire/JSONL 形状不变）。
+#[derive(Debug)]
+struct WireIdentity {
+    trace_id: Arc<str>,
+    agent_id: Arc<str>,
+    provider: Option<Arc<str>>,
+    source: Arc<str>,
+    local_session_id: Option<Arc<str>>,
+    client_generation: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,14 +165,22 @@ pub struct WireJsonlSnapshot {
 
 impl AcpWireHub {
     pub fn new(correlation: RuntimeCorrelation, capacity: usize) -> Arc<Self> {
+        let trace_id: Arc<str> = Arc::from(format!("{}-{}", correlation.agent_id, next_trace_id()).as_str());
         Arc::new(Self {
-            trace_id: format!("{}-{}", correlation.agent_id, next_trace_id()),
+            identity: Arc::new(WireIdentity {
+                trace_id,
+                agent_id: Arc::from(correlation.agent_id.as_str()),
+                provider: correlation.provider.as_deref().map(Arc::from),
+                source: Arc::from(correlation.source.as_str()),
+                local_session_id: correlation.local_session_id.as_deref().map(Arc::from),
+                client_generation: correlation.client_generation,
+            }),
             correlation,
             next_seq: AtomicU64::new(1),
             enabled: AtomicBool::new(true),
             records: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
-            canonical_correlations: Mutex::new(HashMap::new()),
+            canonical_correlations: Mutex::new(BTreeMap::new()),
             inbound_ordinals: Mutex::new(VecDeque::new()),
             inbound_ordinal_overflowed: AtomicBool::new(false),
         })
@@ -179,7 +199,7 @@ impl AcpWireHub {
     }
 
     pub fn trace_id(&self) -> &str {
-        &self.trace_id
+        &self.identity.trace_id
     }
 
     /// OBS-02：连接级 correlation context（stderr/runtime log 共享同一身份）。
@@ -208,10 +228,13 @@ impl AcpWireHub {
 
     /// Store the repository's actual commit identity for a wire ordinal.
     /// Values are supplied by EventService; no numeric inference occurs here.
+    /// (#260-A1) 逐出取**最小 ordinal**（与旧 `keys().min()` 逐一相同）：
+    /// canonical ordinal 来自共享 event repo、对单 hub 不保证单调，
+    /// BTreeMap 首键 O(1) 取到即是最小键，不做任何顺序假设。
     pub fn record_canonical_commit(&self, ordinal: u64, correlation: CanonicalCorrelation) {
         if let Ok(mut index) = self.canonical_correlations.lock() {
             if index.len() >= self.capacity && !index.contains_key(&ordinal) {
-                if let Some(oldest) = index.keys().min().copied() {
+                if let Some(oldest) = index.keys().next().copied() {
                     index.remove(&oldest);
                 }
             }
@@ -227,6 +250,21 @@ impl AcpWireHub {
             .cloned()
     }
 
+    /// 批量 correlate（#260-A2）：单次持锁按输入序产出，替代快照命令对
+    /// 每条记录各取一次锁的旧路径。锁中毒时全 None，与旧逐条 `.ok()?` 的
+    /// 逐条 None 输出一致。
+    pub fn correlate_many(&self, ordinals: &[u64]) -> Vec<Option<CanonicalCorrelation>> {
+        let index = self.canonical_correlations.lock().ok();
+        ordinals
+            .iter()
+            .map(|ordinal| {
+                index
+                    .as_ref()
+                    .and_then(|index| index.get(ordinal).cloned())
+            })
+            .collect()
+    }
+
     /// 记录一条原始 JSON 报文（必须是在 u64 窄化**之前**的原始 Value）。
     /// infallible：任何内部失败都静默跳过，绝不阻断业务。
     pub fn record(&self, direction: WireDirection, msg_val: &serde_json::Value) {
@@ -234,7 +272,7 @@ impl AcpWireHub {
             return;
         }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        let record = build_record(&self.trace_id, &self.correlation, seq, direction, msg_val);
+        let record = build_record(&self.identity, seq, direction, msg_val);
         let mut records = self
             .records
             .lock()
@@ -336,8 +374,7 @@ fn order_snapshot(mut records: Vec<WireRecord>) -> Vec<WireRecord> {
 }
 
 fn build_record(
-    trace_id: &str,
-    correlation: &RuntimeCorrelation,
+    identity: &WireIdentity,
     seq: u64,
     direction: WireDirection,
     msg_val: &serde_json::Value,
@@ -372,16 +409,17 @@ fn build_record(
     };
     let tool_call_id = extract_first_string(msg_val, &["toolCallId", "tool_call_id"]);
     WireRecord {
-        trace_id: trace_id.to_string(),
+        // 连接级恒定身份：Arc 克隆（引用计数 +1）替代逐帧五次堆分配（#260-A3）。
+        trace_id: Arc::clone(&identity.trace_id),
         monotonic_seq: seq,
         timestamp: Timestamp::now(),
-        agent_id: correlation.agent_id.clone(),
-        provider: correlation.provider.clone(),
-        source: correlation.source.clone(),
-        local_session_id: correlation.local_session_id.clone(),
+        agent_id: Arc::clone(&identity.agent_id),
+        provider: identity.provider.clone(),
+        source: Arc::clone(&identity.source),
+        local_session_id: identity.local_session_id.clone(),
         remote_session_id,
         peri_id,
-        client_generation: correlation.client_generation,
+        client_generation: identity.client_generation,
         request_id,
         direction,
         method,
@@ -486,9 +524,9 @@ mod tests {
 
     fn identity_fields(record: &WireRecord) -> Vec<&str> {
         vec![
-            record.agent_id.as_str(),
+            &*record.agent_id,
             record.provider.as_deref().unwrap_or(""),
-            record.source.as_str(),
+            &*record.source,
         ]
     }
 
@@ -568,6 +606,70 @@ mod tests {
         hub.record_canonical_commit(7, value.clone());
         assert_eq!(hub.correlate(7), Some(value));
         assert_eq!(hub.correlate(8), None);
+    }
+
+    #[test]
+    fn canonical_eviction_drops_smallest_ordinal_even_when_inserted_out_of_order() {
+        // #260-A1 语义钉子：canonical ordinal 来自共享 event repo，对单 hub 不保证
+        // 单调到达；逐出必须取**最小 ordinal**（与旧 keys().min() 逐一相同），
+        // 而非「最早插入」。
+        let hub = hub();
+        let ordinals = [7u64, 3, 9, 5, 2, 8, 4, 6];
+        for ordinal in ordinals {
+            hub.record_canonical_commit(
+                ordinal,
+                CanonicalCorrelation {
+                    event_id: format!("e-{ordinal}"),
+                    sequence: ordinal as i64,
+                    revision: 1,
+                },
+            );
+        }
+        // 覆写已存在 key 不触发逐出
+        hub.record_canonical_commit(
+            9,
+            CanonicalCorrelation { event_id: "e-9-again".into(), sequence: 9, revision: 1 },
+        );
+        assert_eq!(
+            hub.correlate(9).as_ref().map(|c| c.event_id.as_str()),
+            Some("e-9-again")
+        );
+        // 插入比全部现有键都小的 1 → 逐出最小键 2，而非最早插入的 7
+        hub.record_canonical_commit(
+            1,
+            CanonicalCorrelation { event_id: "e-1".into(), sequence: 1, revision: 1 },
+        );
+        assert_eq!(hub.correlate(2), None, "最小 ordinal 2 必须被逐出");
+        assert_eq!(
+            hub.correlate(7).map(|c| c.event_id),
+            Some("e-7".to_string()),
+            "最早插入的 7 仍在（非 FIFO）"
+        );
+        assert_eq!(hub.correlate(1).map(|c| c.event_id), Some("e-1".to_string()));
+    }
+
+    #[test]
+    fn correlate_many_matches_per_record_correlate() {
+        let hub = hub();
+        for ordinal in [3u64, 1, 4, 5] {
+            hub.record_canonical_commit(
+                ordinal,
+                CanonicalCorrelation {
+                    event_id: format!("e-{ordinal}"),
+                    sequence: ordinal as i64,
+                    revision: ordinal as i64,
+                },
+            );
+        }
+        let ordinals: Vec<u64> = vec![3, 999, 1, 4];
+        let batched = hub.correlate_many(&ordinals);
+        for (ordinal, correlation) in ordinals.iter().zip(&batched) {
+            assert_eq!(
+                correlation, &hub.correlate(*ordinal),
+                "correlate_many 必须与逐条 correlate 一致"
+            );
+        }
+        assert_eq!(batched.iter().filter(|c| c.is_none()).count(), 1, "未记录的 ordinal 输出 None");
     }
 
     #[test]
@@ -831,8 +933,8 @@ mod tests {
                 record.client_generation, 3,
                 "clientGeneration 来自构造时的 correlation"
             );
-            assert_eq!(record.agent_id, "test-agent");
-            assert_eq!(record.source, "subprocess");
+            assert_eq!(&*record.agent_id, "test-agent");
+            assert_eq!(&*record.source, "subprocess");
             assert_eq!(
                 record.local_session_id, None,
                 "transport 边界 local 键不可知"

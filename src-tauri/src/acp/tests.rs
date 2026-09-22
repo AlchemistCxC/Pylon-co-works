@@ -738,8 +738,8 @@ async fn wire_trace_preserves_id_kinds_and_full_sequence() {
     );
     // 身份逐条保留。
     for record in &snap {
-        assert_eq!(record.agent_id, "fake-acp-trace");
-        assert_eq!(record.source, "subprocess");
+        assert_eq!(&*record.agent_id, "fake-acp-trace");
+        assert_eq!(&*record.source, "subprocess");
     }
 
     client.kill().expect("explicit child cleanup must succeed");
