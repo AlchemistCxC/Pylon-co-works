@@ -53,14 +53,17 @@ export const EXCLUDED_WASM_EXITS: ReadonlyArray<{ readonly name: string, readonl
   },
   {
     name: 'parseMarkdownJson',
-    reason: 'wasm-bindgen 编组变体（serde_json → String）；全仓（含测试）零引用',
+    reason: 'wasm-bindgen 编组变体，头注称「供宿主快照/调试工具（parity 快照 bin）」；'
+      + '但 `src/bin/parity_snapshot.rs` 直接调纯内层 `pylon_markdown::parser::parse_markdown`，'
+      + '**不经过这个壳** ⇒ JS 可见面全仓零引用（意图记过，消费者没落地过）',
   },
   {
     name: 'highlightBlockJson',
-    reason: '同上：编组变体，全仓零引用',
+    reason: '同上：`parity_snapshot.rs` 调 `pylon_markdown::highlight::highlight_block`（纯内层），'
+      + '这个 JS 壳无引用',
   },
   {
     name: 'markdownEngineVersion',
-    reason: '诊断出口（头注称「供诊断与 parity 记录」）；只在 `markdownCompute.ts:42` 的接口里有声明，无调用方',
+    reason: '头注称「供 JS 侧诊断与 parity 记录」；JS 侧无调用方，parity 快照 bin 也没调它',
   },
 ]

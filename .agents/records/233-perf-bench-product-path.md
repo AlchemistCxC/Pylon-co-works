@@ -204,12 +204,18 @@ tool-only 18.73 → 1024.12µs/事件、24k 事件单次折叠 24.6 秒）。#20
 5. **`streaming-split` 的 `list-block-*` 成本行读起来「更快」**：单位成本低是因为它几乎不产出稳定块，
    不是更优。README 已写明「别把便宜当更优」，但这一列本身仍有被误读的空间。
 6. **7 个未接线 wasm 导出是否退役**：三个旧切分出口、wasm 的 `scopeForLanguage`、两个 `*Json` 编组变体、
-   `markdownEngineVersion`——它们在 `src/`（含测试）里都没有调用方，等于白付 wasm 体积与维护面。
+   `markdownEngineVersion`——它们的 **JS 可见面**在 `src/`（含测试）里都没有调用方。
    退役会**同时缩小 parity 覆盖门与计算核产物**（`pylon-compute` 现 120,581 B raw；
    `pylon-markdown` 2,873,113 B raw，其中 `*Json` 是整条 serde 编组路径）。
    本轮**只登记不处置**：体积收益没有实测，且退役属改计算核与 parity 契约面，得先裁决。
-   注意 `splitStreamingMarkdown*` 与 `findLastStableBlockBoundary` 是 parity 门禁的对照物，
-   退役要先解决「覆盖门拿什么当对照」。
+   两处需要分开看（核过 Rust 侧，别一刀切）：
+   - `splitStreamingMarkdown*` 与 `findLastStableBlockBoundary` 是 parity 门禁的对照物，
+     退役要先解决「覆盖门拿什么当对照」。
+   - 两个 `*Json` 的**意图**是「供宿主快照/调试工具（parity 快照 bin）」，但
+     `src/bin/parity_snapshot.rs` 直接调纯内层（`pylon_markdown::parser::parse_markdown` /
+     `::highlight::highlight_block`），**不经过这两个壳** ⇒ 消费者从未落地。
+     所以「退役 JS 壳」是安全的（bin 不依赖它），但「退役 Rust 函数」是另一个问题，
+     得看还有没有想走 JSON 串的诊断用途。
 
 ## 并行交集
 
