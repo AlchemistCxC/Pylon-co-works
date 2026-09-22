@@ -640,3 +640,21 @@
 **不碰**：`src/zones/factory/**`（出厂区域预设落盘数据，文件头写明「生成脚本已删，请勿手改」）、占区碰撞约束（刀4）、`statusBg`/`statusBgImage`/命令行提示翻可拖（刀5）、`sendVariant`、属性面板按成员分块、缩放、死数据清理、`rendererKey`/`isolated-surface`、中控渲染以外的区域。
 
 **给后来者**：本刀**允许视觉变化**且**不写老数据迁移**（用户口径）；`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物（写死 devUrl 1430），实机验收要用普通 `cargo build` 的二进制。
+
+---
+
+[2026-09-22 21] [Baryon] [#238 · 刀4]
+
+**续开工：刀4 占区不叠加（编辑态拖动/微调的碰撞约束）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/06-施工单-刀4-占区不叠加.md`。前置刀1/刀2/刀3 均已完工（位置现由定义表 `layout` 两轴声明）。
+
+**本刀（在刀1~刀3 文件域之上叠加）**：
+
+- **新增** `src/renderers/solid-workbench/input/ccPlacementCollision.ts`（**纯几何**：`rectsOverlap` / `resolveAllowedOffset` / `parseTranslateOffset`；不碰 DOM、不碰 store ⇒ node 可直接单测）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ **两条通路都接上守卫**：拖拽 `move` 改走带守卫的 `updatePlacement`，面板三个输入框本就走它；编辑态限定 + 悬浮豁免）
+- **新增** `src/renderers/solid-workbench/input/__tests__/ccPlacementCollision.test.ts`（纯函数单测）
+- `src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`（组件级：伪造布局 → 拖拽挡住 / 面板旁路挡住 / 悬浮豁免 / 常态零影响）
+- 文档：`.agents/records/238-*-刀4*.md`、本文件
+
+**不碰**：`src/ccLayoutState.ts`（数据语义与 ±48/±16 clamp 不变）、`src/domains/workbench/**`（store 侧落点不动）、出厂数据 `src/zones/factory/**`、刀5/刀7 各项、插件契约面、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**约束（复审据此把关）**：只在编辑态跑几何（常态像素与性能零变化）；障碍集 = 其他可拖元件除去悬浮件；判据是矩形**相交**（面积 > 0），**允许贴合**、不加魔法间隙；**每次 move 重测**障碍（不缓存）；**不消解存量重叠**（用户口径：后续会做一次「强制重置到默认」）。
