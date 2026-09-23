@@ -790,3 +790,9 @@
 - 文档：`.agents/records/252-*.md`（完工时新增）、本文件
 
 **我不碰**：`src/sheets/file/FileTabView.tsx`（只读/编辑双模式语义已参数化，零改动）、`FileCodeEditor.tsx`、`DispatchBar.tsx`（发令栏本就与编辑态解耦，读路径特性保留）、`FileSheetView.tsx`（导航层脏守卫已完备）、中控区、预设系统、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 07] [Miyaki Kumo] [#250]
+
+**开工：issue250（实机验收四项）**：①capabilities 补 `core:window:allow-set-size`；②#53 探测会话通知静音（dispatcher probe 注册表）；③扩展块 CTA 溢出；④右栏 aria-label 稳定文案。spec 见 `.agents/spec/250-acceptance-four-fixes.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：`src-tauri/capabilities/default.json`、`src-tauri/src/agent/runtime.rs`、`src-tauri/src/session/create.rs`、`src-tauri/src/dispatcher/mod.rs`、`src/components/sidebar/blocks/mockBlocks.tsx`、`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css`、`src/components/right-panel/ContextPanelHost.tsx`、对应测试、`.agents/records/250-*.md`、本文件。**我不碰**：#252 的 file 域、hermes/pylon-core/pylon-acp。全程 pathspec 提交。
