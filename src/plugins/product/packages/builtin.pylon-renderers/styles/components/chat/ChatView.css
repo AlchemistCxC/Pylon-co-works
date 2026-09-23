@@ -2250,6 +2250,11 @@
 .term-math math {
   font-family: "LM Math Web", "Latin Modern Math", "STIX Two Math", "Cambria Math", "Temml", math, serif;
 }
+/* 行内公式定高模型：comrak/Temml 产出的 math 在 Chromium MathML 里会被行盒
+   压小（client < scroll），溢出记账使公式可被滚轮/触摸板捕获（44/67 实测）。
+   padding 撑大 client 盒到 ≥ 内容 + 负 margin 抵消布局占位：行盒占位与
+   无公式时一致（定高），可滚动溢出归零，滚轮永远滚页面。 */
+.term-math-inline math { padding: 4px 3px; margin: -4px -3px; }
 .term-math-display { margin: 10px 0; font-size: 1.15em; }
 .term-math-inline { font-size: 1.02em; }
 

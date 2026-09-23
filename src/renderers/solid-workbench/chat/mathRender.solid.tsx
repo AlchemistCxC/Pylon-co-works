@@ -1,4 +1,4 @@
-import { Show, createMemo } from 'solid-js'
+import { createMemo } from 'solid-js'
 import temml from 'temml'
 
 /**
@@ -15,7 +15,7 @@ import temml from 'temml'
  * ——重复渲染退化为一次 Map 查找，失败（null）结果同样入缓存不重试。
  */
 const MATH_MARKUP_CACHE_LIMIT = 1024
-const mathMarkupCache = new Map<string, string>()
+const mathMarkupCache = new Map<string, string | null>()
 
 export function renderMathMarkup(latex: string, display: boolean): string | null {
   const key = `${display ? 'd' : 'i'}\u0000${latex}`
@@ -41,11 +41,14 @@ export function renderMathMarkup(latex: string, display: boolean): string | null
 
 export function MathRender(props: { latex: string; display: boolean }) {
   const markup = createMemo(() => renderMathMarkup(props.latex, props.display))
-  return (
-    <Show when={markup()} fallback={<span class="term-math-raw">{props.latex}</span>}>
-      {resolved => props.display
-        ? <div class="term-math term-math-display" innerHTML={resolved()} />
-        : <span class="term-math term-math-inline" innerHTML={resolved()} />}
-    </Show>
-  )
+  // 失败（null）回落 latex 原文；不使用 <Show>——其泛型不接受 string|null，
+  // 会连锁触发 React JSX 兜底类型误报（tsc -b 主 tsconfig 无 solid JSX 类型）。
+  const fallback = <span class="term-math-raw">{props.latex}</span>
+  return props.display
+    ? markup() === null
+      ? fallback
+      : <div class="term-math term-math-display" innerHTML={markup() ?? ''} />
+    : markup() === null
+      ? fallback
+      : <span class="term-math term-math-inline" innerHTML={markup() ?? ''} />
 }

@@ -113,3 +113,13 @@
 **解析侧（wasm comrak 开 math_dollars/footnotes）**——`scripts/perf-bench.mts` 产品路径实测（µs/字符）：heading 0.409 / list 0.598 / table 0.326 / code 0.299 / blockquote 0.389 / inline-mix 0.151，均在 comrak 正常区间，无回归信号（math_dollars 仅增加文本节的 `$` 定界扫描）。
 
 **字体**：Latin Modern Math OTF 717K + Temml woff2 9.2K 随 dist 内嵌进二进制，`font-display:swap` 不阻塞首绘，加载一次全 App 复用，无运行时持续开销。
+
+## 追加修复（2026-09-24，用户报告「行内公式有时可被滚动、滚轮无法正确滚动页面」）
+
+**定位**（MCP 实测）：67 个行内公式中 **44 个的 `math` 元素存在可滚动溢出**（client 10×8 < scroll 15×8 之类）——Chromium MathML 会把上下标/分数的墨迹溢出记进 scroll 尺寸，行盒（line-height 1.35）压小 math 的 client 盒后，公式本体成为可捕获的滚动区，触摸板/滚轮手势落在其上即被吃掉（「有时候」= 手势恰落在 44 个之一）。
+
+**定高模型**（实测驱动）：`.term-math-inline math { padding: 4px 3px; margin: -4px -3px; }`——padding 把 math 的 client 盒撑到 ≥ 内容（可滚动溢出归零），负 margin 完全抵消布局占位（行盒高度与无公式时一致，即用户要的「定高」；特别高的行内分数仍会撑行——那是内容固有高度，裁切会切字）。visual overflow 照常绘制，观感零变形（截图对比确认）。
+
+**终验**（生产重建版）：inline 可滚动溢出 44→**0**；CDP 可信滚轮落在行内公式上 → 页面正常滚动（2153→1753）、公式不动；17 显示 + 67 行内 MathML 渲染不变；LM Math Web 字体装载。display 块的 `overflow-x:auto`（长公式横滚）为有意设计保留。
+
+**调试成本教训**：standalone 跑 `*.solid.tsx` 之外的测试文件时，主 tsconfig 会把被排除的 `.solid.tsx` 经 import 拖回编译并以 React JSX 类型报错——导入 `.solid.tsx` 的测试一律命名 `*.solid.test.tsx`。

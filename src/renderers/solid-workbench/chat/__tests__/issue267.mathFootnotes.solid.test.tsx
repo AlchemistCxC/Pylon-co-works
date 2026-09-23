@@ -13,6 +13,7 @@
 import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
+import { renderMathMarkup } from '../mathRender.solid.tsx'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
 
 afterEach(() => {
@@ -63,5 +64,27 @@ describe('#267 GFM 脚注渲染', () => {
     render(() => <MarkdownContent text="Hi[^ghost]" />)
     await waitFor(() => expect(document.body.textContent).toContain('Hi[^ghost]'))
     expect(document.querySelector('sup')).toBeNull()
+  })
+})
+
+describe('#267 renderMathMarkup 结果缓存（性能守卫）', () => {
+  it('同输入第二次调用命中缓存（返回同一字符串实例）', () => {
+    const first = renderMathMarkup('a+b', false)
+    const second = renderMathMarkup('a+b', false)
+    expect(first).toBeTruthy()
+    expect(second).toBe(first)
+  })
+
+  it('display 与 inline 分别缓存（同 latex 不同形态不同输出）', () => {
+    const inline = renderMathMarkup('x', false)
+    const display = renderMathMarkup('x', true)
+    expect(inline).not.toBe(display)
+    expect(display).toContain('display="block"')
+  })
+
+  it('失败（null）同样入缓存：同输入不再重试', () => {
+    const a = renderMathMarkup('#267-probe-never-invalid', false)
+    const b = renderMathMarkup('#267-probe-never-invalid', false)
+    expect(a).toBe(b)
   })
 })
