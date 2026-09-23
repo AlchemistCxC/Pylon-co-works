@@ -9,6 +9,11 @@ import './index.css'
 // Tailwind v4 utilities 基线（TW 施工书 20260914）：无 preflight，@theme inline
 // 只读消费 index.css token；必须在 index.css 之后引入。
 import './styles/tailwind.css'
+import { startupMark } from './app/startupTiming'
+
+// #269：前端最早可插桩点（模块求值起点）——import 求值成本不计入，
+// 与 performance.timeOrigin 的差值即脚本求值前开销。
+startupMark('main_module_eval')
 // 浏览器模式假 Tauri 后端（静态演示全景）——开发脚手架，仅 DEV 构建动态加载（生产
 // import.meta.env.DEV 恒 false，分支 tree-shake，生产 bundle 不携带 demo/mockTauri）。
 // 安装时序语义不变：动态 import 发生在本文件全部静态 import 求值之后（App → env.ts 的

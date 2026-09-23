@@ -699,3 +699,82 @@
 
 ---
 
+
+---
+
+[2026-09-23 10] [Miyaki Kumo] [#267]
+
+**开工：issue267（markdown 数学公式 + GFM 脚注补全；ADR-0021）。** spec 见 `.agents/spec/267-markdown-math-footnotes.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/pylon-markdown/src/{parser.rs,model.rs(如需)}`、`parity/corpus.json` + `parity/rust-snapshot.json`（重生成）
+- `src/components/chat/markdownFastPath.ts`（补 math 触发模式）
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（math 特判 + sup/section 白名单）+ 新增 `MathRender` 组件文件（mathRender.tsx）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（math/footnotes 样式节）
+- `package.json`/`bun.lock`（新增 temml）、`scripts/check-bundle-size.mjs`（budget 重定标）
+- 文档：`.agents/decisions/0021-*.md`、`.agents/records/267-*.md`、本文件
+
+**我不碰**：`streamingMarkdownSplit.ts`/`streamingCompute.ts`（split 语义不动）、`markdownRenderModel.ts`（形状泛型已够用，除非 graft 判据需跟随——届时补声明）、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 01] [Miyaki Kumo] [#269]
+
+**开工：issue269（启动耗时测量基建——release 可用前后端时间线；#270/#271 度量前置）。** spec 见 `.agents/spec/269-startup-timing.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- **新增** `src/app/startupTiming.ts`、`src/app/__tests__/startupTiming.test.ts`
+- **新增** `src-tauri/src/startup_timing.rs`（进程 t0 + 相位表 + 上报 command 合并）；`src-tauri/src/startup.rs`（如 command 落此处则仅追加）
+- 插桩（每处 1~2 行 mark 调用，零逻辑改动）：`src/main.tsx`、`src/kernel/KernelRoot.tsx`、`src/kernel/kernelBootstrap.ts`、`src/plugin-runtime/pluginCompositionRoot.ts`、`src/app/bootstrap/bootstrapApplication.ts`、`src/App.tsx`
+- Rust 接线：`src-tauri/src/lib.rs`（mod 声明、invoke_handler 注册、`run()`/`run_setup_pipeline` 打点）、`src-tauri/src/main.rs`（t0 一行）
+- 文档：`.agents/records/269-*.md`（完工时新增）、`docs/说明书/Pylon-模块维护地图.md`（模块表两格）、本文件
+
+**我不碰**：`src-tauri/src/runtime_log/**` 既有逻辑（只读消费 hub push）、`src/obs05/**`、`src-tauri/src/acp/**`、`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`、中控区、预设系统、他人在途域。#270/#271 后续施工将各自动 `lib.rs`，届时在本文件对表。全程 pathspec 提交。
+
+---
+
+[2026-09-24 01] [Miyaki Kumo] [#272]
+
+**开工：issue272（GFM 表格列对齐渲染缺失——模型 align 属性透传 + CSS 属性选择器）。** 分支沿用 `kumo/prometheus`。文件域：
+
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（th/td align 透传）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（排版层追加对齐属性选择器）
+- `src/renderers/solid-workbench/chat/__tests__/issue267.mathFootnotes.solid.test.tsx`（追加表格对齐渲染用例）
+- `src/renderers/solid-workbench/chat/__tests__/ChatView.css.test.ts`（追加 CSS 契约断言）
+- 文档：`.agents/records/267-*` 追加节、本文件
+
+**我不碰**：其余全部。全程 pathspec 提交。
+
+---
+
+[2026-09-24 02] [Miyaki Kumo] [#270]
+
+**开工：issue270（窗口先见——默认 agent ACP 连接后台化；ADR-0022 已落）。** spec 见 `.agents/spec/270-window-first-background-connect.md`。分支沿用 `kumo/prometheus`（堆叠 PR #268）。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/lib.rs`（`run()` 删窗口前阻塞连接块 + Connecting 置位；`run_setup_pipeline` 后台连接 spawn + dispatcher Connecting 跳过；startup timing 相位迁移）
+- `src/sheets/agent-workbench/agentWorkbenchCommands.ts`（`send` 顶部 connecting 门控）
+- `src/sheets/agent-workbench/__tests__/agentWorkbenchCommands.test.ts`（新增门控用例）
+- 文档：`.agents/decisions/0022-*.md`（新增）、`.agents/records/270-*.md`（完工时新增）、`docs/说明书/Pylon-项目架构参考.md`（§6 启动序列一句 + 串行 activate 措辞顺带修正）、本文件
+
+**我不碰**：`src-tauri/src/lifecycle/**`、`src-tauri/src/session/**`、`src-tauri/src/agent/runtime.rs`（均只调用不修改）、`src-tauri/src/acp/**`、`src-tauri/src/startup_timing.rs`（#269 已收口，本 issue 只迁移 `default_agent_connect_settled` 相位调用点）、中控区、预设系统、#272 在途域（MarkdownContent.solid.tsx / ChatView.css / 其两测试）。全程 pathspec 提交。
+
+**域外追加（2026-09-24 03）**：`src-tauri/src/agent/runtime.rs` 的 `AgentLifecycleStatus::Error` 变体加一行 `#[allow(dead_code)]` + 注释——删掉旧启动连接块后它失去唯一生产构造点，但 wire 词汇与 test_harness 仍消费，变体必须保留。其余仍按上域。
+
+---
+
+[2026-09-24 04] [Miyaki Kumo] [#271]
+
+**开工：issue271（删启动诊断 hermes profile 探测链——保留连接期 HERMES_HOME 注入）。** 范围即 issue 正文删除清单。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/startup.rs`（删 HermesProfileView + hermes_profile 快照字段 + builder 参数 + 相关测试）
+- `src-tauri/src/lib.rs`（删 build_hermes_profile_view + 调用点）
+- `src/infrastructure/tauri/runtimeLogContracts.ts`（删 HermesProfileDiagnostics 契约 + normalize 分支）
+- `src/infrastructure/tauri/__tests__/tauriClients.test.ts`（删 2 个 hermes normalize 用例，保留域缺省用例）
+- `src/sheets/RuntimeSheetView.tsx`（删 hermes 徽章）、`src/demo/demoData.ts`（删样例字段）
+- 文档：`.agents/records/271-*.md`（完工时新增）、本文件
+
+**我不碰**：`src-tauri/pylon-core/src/hermes/**`、`src-tauri/pylon-acp/src/launch_plan.rs`（连接期注入链承重，#270 实测验证）；`src-tauri/src/agent/runtime.rs`、`src-tauri/src/session/**`、#272 在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 05] [Miyaki Kumo] [CI 转绿修复]
+
+**CI run 35894284095 四 job 红的修复（根因 + 接管声明）**：全部红收敛于 `mathRender.solid.tsx`——① `issue267.mathCache.test.ts`（主 tsconfig React 检查）import 该组件文件拖进 React JSX 语义 → TS2322 ×3（Rust 三 job 的前端构建前置连带全灭）；② 该文件 24 行死赋值 eslint 红。**修复**：纯函数 `renderMathMarkup` 拆入**新增** `mathMarkup.ts`；组件文件只留 MathRender；**恢复 #272 会话工作树内未提交的 mathCache 测试删除**并改导入指向纯模块（测试保住，缓存语义零变化）；顺带登记 #269 `startupTiming.ts` 直发 allowlist（CI 前序红修复后会暴露的下一处红）。详见 `.agents/records/2026-09-24-ci-green-math-render-split.md`。**文件域**：`src/renderers/solid-workbench/chat/{mathMarkup.ts(新),mathRender.solid.tsx,issue267.mathCache.test.ts}`、`scripts/check-runtime-boundaries.mts`、`.agents/records/2026-09-24-ci-green-*.md`、本文件。#267/#272 会话若对 mathCache 测试删除另有意图请对表。

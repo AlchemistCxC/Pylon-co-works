@@ -39,6 +39,7 @@ mod runtime;
 mod runtime_log;
 mod session;
 mod startup;
+mod startup_timing;
 // P5（#106）：harness 即门面——tests/ 集成目标经此消费产品表面；
 // AppState 等内部类型不加 pub，门面只出窄值（spec P5 五类面）。
 // cfg(test) 使既有 lib 内嵌测试不受 feature 影响；feature 使外部 test target 可见。
@@ -108,33 +109,6 @@ where
     if let Err(error) = window.emit(event, payload) {
         tracing::warn!("emit {event} failed: {error}");
     }
-}
-
-/// 构建 Hermes profile 诊断视图（方案 G 演进）：探测可用 profiles + 记录配置的
-/// `hermes_profile` 是否可解析。诊断只暴露 profile 名，不暴露 Hermes 根路径。
-fn build_hermes_profile_view(
-    agents: &HashMap<String, AgentDef>,
-) -> Option<crate::startup::HermesProfileView> {
-    let home = crate::hermes::detect_hermes_home();
-    let profiles = home
-        .as_deref()
-        .map(crate::hermes::list_profiles)
-        .unwrap_or_default();
-    let configured = agents
-        .values()
-        .find_map(|agent| agent.hermes_profile.clone());
-    let agent_with_profile = agents.values().find(|agent| agent.hermes_profile.is_some());
-    // 有 Hermes 探测信息或配置了 profile 才进诊断（避免无关配置塞空视图）。
-    if home.is_none() && configured.is_none() {
-        return None;
-    }
-    let resolved = agent_with_profile
-        .is_some_and(|agent| crate::hermes::resolve_profile_dir(agent, None).is_some());
-    Some(crate::startup::HermesProfileView {
-        profiles,
-        configured,
-        resolved,
-    })
 }
 
 /// 事件广播（B10.1）：WebView 始终接收；平台 source 同时经 gateway 投递平台适配器。
@@ -672,6 +646,11 @@ pub fn init_tracing() {
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
+/// #269：进程侧启动相位打点（main.rs 在 t0 处调用；供 lib 外的入口 facade 使用）。
+pub fn startup_mark(phase: &str) {
+    crate::startup_timing::mark(phase);
+}
+
 /// 会话过期判定（B10.3b，参考 Hermes reset policy）：返回过期原因，None = 未过期。
 ///
 /// - reset="off"：永不过期
@@ -784,6 +763,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
 // →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
 // run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
 pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    crate::startup_timing::mark("setup_enter");
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
@@ -802,6 +782,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
     // 时按需 clone（PathBuf 拷贝成本可忽略）。
     let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    crate::startup_timing::mark("data_dirs_resolved");
     // portable 首次启动自动迁移（2026-08-19 修复）：
     // AppData 旧数据 → data/。必须在此处（hydrate_workspaces 之前、
     // message_service 初始化之前）——服务打开后迁移命令会被拒绝，
@@ -924,6 +905,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             .map_err(|_| "event service slot lock poisoned".to_string())? = Some(services.event);
         tracing::info!("Kernel persistence services ready: {}", db_path.display());
     }
+    crate::startup_timing::mark("persistence_ready");
     // I12-W4：gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
     // → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按
     // `enabled && autoStart` 策略显式启动（失败可见，不静默）。损坏/IO 失败
@@ -1060,12 +1042,82 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
         }
     }
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+    // #270：Connecting 状态的默认 agent runtime 由下方后台任务完成初始连接，其
+    // 激活路径（replace_agent_client）自会启动 dispatcher；此处跳过，避免对
+    // 占位 client 启动监听（并在激活前误报崩溃/断开）。
+    let default_runtime_connecting = handles
+        .active_runtime()
+        .map(|runtime| {
+            runtime
+                .agent_runtime
+                .lock()
+                .map(|state| state.status == AgentLifecycleStatus::Connecting)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
     if let Some(runtime) = handles.active_runtime() {
-        start_notification_dispatcher(&handles, &runtime, window.clone());
+        if !default_runtime_connecting {
+            start_notification_dispatcher(&handles, &runtime, window.clone());
+        }
     }
     app.state::<AppState>()
         .inner()
         .start_runtime_log_dispatcher(window);
+    // #270（ADR-0022）：默认 agent 初始连接后台化——窗口先见。持 switch_lock →
+    // agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
+    // 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
+    // 覆盖新客户端（replace_agent_client 的 epoch 校验兜底）。announce=true 使
+    // Connecting/Connected/失败回落均经 agent-status 事件广播；连接期间前端发送
+    // 被 agentWorkbenchCommands 的 connecting 门控阻断（用户裁定：不做排队、
+    // 不做自动触发连接）。
+    if default_runtime_connecting {
+        let inner = app.state::<AppState>().inner();
+        let active_id = inner
+            .active_agent
+            .lock()
+            .map(|id| id.clone())
+            .unwrap_or_default();
+        let agent = inner
+            .agents
+            .lock()
+            .ok()
+            .and_then(|agents| agents.get(&active_id).cloned());
+        if let Some(agent) = agent {
+            let app_handle = app.handle().clone();
+            let connect_window = app.get_webview_window("main");
+            crate::startup_timing::mark("default_agent_connect_started");
+            tokio::spawn(async move {
+                let state = app_handle.state::<AppState>();
+                // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
+                let _switch_guard = state.inner().switch_lock.lock().await;
+                let runtime = match handles.active_runtime() {
+                    Some(runtime) => runtime,
+                    None => return,
+                };
+                let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+                let Some(connect_window) = connect_window else {
+                    tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
+                    return;
+                };
+                let result = state
+                    .inner()
+                    .connect_and_replace(
+                        &runtime,
+                        &connect_window,
+                        &agent,
+                        None,
+                        AgentLifecycleStatus::Connecting,
+                        "startup-connect",
+                    )
+                    .await;
+                crate::startup_timing::mark("default_agent_connect_settled");
+                match result {
+                    Ok(()) => tracing::info!("默认 agent 后台初始连接完成"),
+                    Err(error) => tracing::warn!("默认 agent 后台初始连接失败：{error}"),
+                }
+            });
+        }
+    }
     // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
     // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
     // （announce=false，不广播 GUI 状态）。
@@ -1271,6 +1323,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             }
         });
     }
+    crate::startup_timing::mark("setup_complete");
     Ok(())
 }
 pub fn run() {
@@ -1279,6 +1332,7 @@ pub fn run() {
     if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
         std::process::exit(crate::browser::bridge::run_stdio_bridge());
     }
+    crate::startup_timing::mark("run_entry");
     install_process_registrations();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
@@ -1306,6 +1360,7 @@ pub fn run() {
     };
     let default_agent = agents.get(&default_agent_id).cloned();
     let agents_for_state = agents;
+    crate::startup_timing::mark("config_loaded");
     // R5（P1-3）：prism 构造为纯同步，移出 async 块以便诊断快照一次构建。
     let prism = match PrismClient::from_env() {
         Ok(client) => client,
@@ -1315,17 +1370,16 @@ pub fn run() {
             PrismClient::unavailable(error)
         }
     };
-    // Hermes profile 探测（方案 G 演进）：agents 解析成功后，探测可用 profiles 并
-    // 记录配置的 hermes_profile 是否可解析（诊断只暴露 profile 名，不暴露路径）。
-    let hermes_profile = build_hermes_profile_view(&agents_for_state);
+    // Hermes profile 探测随 #271 移除（诊断链无消费依赖；连接期 HERMES_HOME
+    // 注入保留在 launch_plan）。
     let startup = Arc::new(crate::startup::build_startup_diagnostics(
         config_source,
         agents_error,
         gateway_error,
         prism.has_valid_configuration(),
         (!default_agent_id.is_empty()).then(|| default_agent_id.clone()),
-        hermes_profile,
     ));
+    crate::startup_timing::mark("startup_diagnostics_built");
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -1354,41 +1408,22 @@ pub fn run() {
         crate::gateway::platform_registry::bootstrap_env_adapters(&gateway);
         let runtimes = Arc::new(AgentRuntimeManager::new());
         let default_runtime = AgentRuntime::new_disconnected();
-        {
-            // 默认 agent 初始连接：成功 → Connected；失败 → Error（保留错误信息）
-            if let Some(agent) = &default_agent {
-                match AcpClient::connect_with_logs(agent, Some(runtime_logs.clone())).await {
-                    Ok(client) => {
-                        let mut acp = default_runtime.acp.lock().await;
-                        *acp = client;
-                        drop(acp);
-                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
-                            state.status = AgentLifecycleStatus::Connected;
-                            state.last_error = None;
-                            state.last_connected_at = Some(crate::time::Timestamp::now());
-                            state.activated_config_fingerprint = Some(agent.runtime_fingerprint());
-                        }
-                    }
-                    Err(error) => {
-                        // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                        eprintln!("Pylon ACP agent unavailable: {error}");
-                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
-                            state.status = AgentLifecycleStatus::Error;
-                            state.last_error = Some(error.to_string());
-                            state.last_connected_at = None;
-                        }
-                    }
-                }
-            } else {
-                // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                eprintln!("Pylon has no configured Agent; start in disconnected mode");
+        // #270（ADR-0022）：窗口先见——初始连接移入 run_setup_pipeline 的后台任务
+        // （复用 connect_and_replace 完整激活机器）。此处只声明 Connecting，窗口
+        // 创建不再被 CLI spawn+握手托底；连接完成/失败经 agent-status 事件广播。
+        if default_agent.is_some() {
+            if let Ok(mut state) = default_runtime.agent_runtime.lock() {
+                state.status = AgentLifecycleStatus::Connecting;
             }
+        } else {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
+            eprintln!("Pylon has no configured Agent; start in disconnected mode");
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
         }
 
-        tauri::Builder::default()
+        let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_fs::init())
@@ -1616,6 +1651,7 @@ pub fn run() {
                 crate::browser::agent_cmds::browser_agent_press,
                 crate::browser::agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
+                crate::startup::report_startup_timing,
                 crate::paths::migrate_appdata_to_portable,
             ])
             .setup(|app| run_setup_pipeline(app))
@@ -1624,18 +1660,19 @@ pub fn run() {
             // from within a runtime")。子进程清理依赖 AppState drop 链：
             // AcpClient → ManagedChild::drop → kill_and_wait（同步 std 操作，不依赖 tokio）。
             .build(tauri::generate_context!())
-            .expect("error while building tauri application")
-            .run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
-                if let tauri::RunEvent::Exit = event {
-                    // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
-                    // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
-                    crate::pet::cmds::drain_pet_dirty();
-                    // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
-                    let pet_arc = app_handle.state::<AppState>().pet.clone();
-                    if let Ok(pet) = pet_arc.try_lock() {
-                        persist_pet_if_possible(app_handle, &pet);
-                    };
-                }
-            });
+            .expect("error while building tauri application");
+        crate::startup_timing::mark("windows_created");
+        app.run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
+            if let tauri::RunEvent::Exit = event {
+                // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
+                // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
+                crate::pet::cmds::drain_pet_dirty();
+                // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
+                let pet_arc = app_handle.state::<AppState>().pet.clone();
+                if let Ok(pet) = pet_arc.try_lock() {
+                    persist_pet_if_possible(app_handle, &pet);
+                };
+            }
+        });
     });
 }

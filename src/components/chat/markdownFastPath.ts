@@ -9,6 +9,13 @@ const THEMATIC_BREAK_PATTERN = /(^|\n)\s{0,3}(?:\*\s*){3,}$|(^|\n)\s{0,3}(?:-\s*
 const HTML_PATTERN = /<\/?[A-Za-z][^>\n]*>/
 const EMPHASIS_PATTERN = /(^|[^\w])(?:\*\*|__)(?=\S)[\s\S]*?\S(?:\*\*|__)(?=$|[^\w])|(^|[^\w])(?:\*|_)(?=\S)[^\n]*?\S(?:\*|_)(?=$|[^\w])/u
 const TABLE_SEPARATOR_PATTERN = /(^|\n)\s{0,3}\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*($|\n)/
+// #267：数学公式触发模式——含 `$…$` / `$$…$$` 形状的文本不得走 fast path 直出，
+// 必须交给解析器（否则公式以裸文本呈现）。误报（如 "$5 and $10"）只是多走一次
+// 解析，解析结果与纯文本一致，安全。
+const MATH_PATTERN = /\$\$[\s\S]+?\$\$|\$(?!\s)[^$\n]+?\$/
+// #267：GFM 脚注引用触发模式——`[^name]` 无定义时解析器保持字面文本，有定义时
+// 渲染上标引用 + 文末脚注节；fast path 直出会丢失全部脚注结构。
+const FOOTNOTE_PATTERN = /\[\^[^\]\n]+\]/
 
 /**
  * 只允许没有可识别 Markdown 结构的文本走 raw text renderer。
@@ -29,5 +36,7 @@ export function isPlainTextContent(content: string): boolean {
     HTML_PATTERN,
     EMPHASIS_PATTERN,
     TABLE_SEPARATOR_PATTERN,
+    MATH_PATTERN,
+    FOOTNOTE_PATTERN,
   ].some(pattern => pattern.test(content))
 }

@@ -132,7 +132,7 @@ sequenceDiagram
   Kernel->>Composition: 调用显式 bootstrap action
   Composition->>Runtime: 构造唯一 product runtime
   loop 七个第一方插件
-    Composition->>Runtime: 按依赖图异步 activate
+    Composition->>Runtime: 按依赖图串行 activate
   end
   Shell->>Runtime: register Application contribution
   alt 全部 product-required 成功
@@ -144,7 +144,9 @@ sequenceDiagram
   App->>Tauri: hydration / listeners / external plugin initialize
 ```
 
-当前事实：Kernel recovery layer 先可见；第一方插件由 `KernelBootstrap` 显式启动。单插件失败进入可观察 degraded 状态，可定向 retry 或进入 Safe Mode，不再依赖 ESM import 副作用。
+当前事实：Kernel recovery layer 先可见；第一方插件由 `KernelBootstrap` 显式启动（依赖图拓扑排序后**串行 await** activate——activate 本体为同步注册，无并行收益）。单插件失败进入可观察 degraded 状态，可定向 retry 或进入 Safe Mode，不再依赖 ESM import 副作用。
+
+**窗口先见（#270，ADR-0022）**：Rust 侧窗口创建不再等待默认 agent 的 ACP 连接——`run()` 仅把 runtime 置 `Connecting`，`run_setup_pipeline` 以后台任务复用 `connect_and_replace` 完整激活机器（持 switch_lock → agent_lifecycle 双锁），连接完成/失败经 `pylon:agent-status` 事件广播；连接期间前端 `send` 门控阻断发送（不做排队/自动触发），左上角三灯黄（connecting）→ 绿（connected）/ 红（回落 Disconnected 携带 lastError）。启动耗时相位表见 `startup_timing.rs`（#269，runtime log `source="startup"` 一条时间线）。
 
 ## 7. 第一方 Product Plugin 拓扑
 

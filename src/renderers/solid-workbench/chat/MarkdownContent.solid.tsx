@@ -10,6 +10,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
+import { MathRender } from './mathRender.solid.tsx'
 import { splitOpenCodeFenceTail, splitStreamingMarkdownBlockEnds } from '../../../infrastructure/compute/streamingCompute.ts'
 import { noteStreamingRowSet } from './streamingRowCounters.ts'
 
@@ -292,8 +293,18 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
   }
   if (node.tagName === 'a') {
     const href = safeHref(node.properties.href)
+    // #267：脚注锚点需要 id（文末回链指回首引用锚）。
+    const anchorId = typeof node.properties.id === 'string' ? node.properties.id : undefined
+    // 纯锚点（#开头）原地跳转，不开新标签（脚注引用/回链的跳转语义）。
+    const isHashOnly = href?.startsWith('#') === true
     return href
-      ? <a href={href} target="_blank" rel="noopener noreferrer" class="term-link"><MarkdownChildren children={node.children} /></a>
+      ? <a
+          href={href}
+          id={anchorId}
+          target={isHashOnly ? undefined : '_blank'}
+          rel={isHashOnly ? undefined : 'noopener noreferrer'}
+          class="term-link"
+        ><MarkdownChildren children={node.children} /></a>
       : <span><MarkdownChildren children={node.children} /></span>
   }
   if (node.tagName === 'img') {
@@ -309,6 +320,26 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
   if (node.tagName === 'table') {
     return <div class="term-table-wrap"><table class="term-table"><MarkdownChildren children={node.children} /></table></div>
   }
+  // #267：数学公式（span.math-inline / div.math-display，解析侧 remark-math 形状）
+  // → Temml 渲染 MathML；失败回落 latex 原文（见 mathRender.tsx）。
+  if (node.tagName === 'span' || node.tagName === 'div') {
+    const classNames = normalizeClassNames(node.properties.className)
+    if (classNames.includes('math')) {
+      const latex = collectText(node)
+      return <MathRender latex={latex} display={classNames.includes('math-display')} />
+    }
+  }
+  // #267：GFM 脚注——引用上标与文末脚注节（解析侧 remark-gfm/rehype 形状）。
+  if (node.tagName === 'sup') {
+    const label = typeof node.properties.ariaLabel === 'string' ? node.properties.ariaLabel : undefined
+    return <sup class="term-footnote-ref" aria-label={label}><MarkdownChildren children={node.children} /></sup>
+  }
+  if (node.tagName === 'section') {
+    const classNames = normalizeClassNames(node.properties.className)
+    if (classNames.includes('footnotes')) {
+      return <section class="term-footnotes footnotes"><MarkdownChildren children={node.children} /></section>
+    }
+  }
 
   const tagName = allowedTagName(node.tagName)
   // CSS-02：Markdown heading 显式 class contract（§5.15 step 3）——h1-h6 输出 term-h1~term-h6，
@@ -323,7 +354,14 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
     : tagName === 'li'
       ? 'term-li'
       : headingClass
-  return <Dynamic component={tagName} class={blockClass}><MarkdownChildren children={node.children} /></Dynamic>
+  // #267：脚注条目的 `id`（user-content-fn-N）是回链锚点目标，通用路径透传。
+  const nodeId = typeof node.properties.id === 'string' ? node.properties.id : undefined
+  // #272：GFM 表格列对齐——解析层把 :---:/---: 落成 th/td 的 align 属性，
+  // 此处透传到 DOM（配合 ChatView.css 的 [align] 属性选择器生效）。
+  const cellAlign = (tagName === 'th' || tagName === 'td') && typeof node.properties.align === 'string'
+    ? node.properties.align
+    : undefined
+  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}><MarkdownChildren children={node.children} /></Dynamic>
 }
 
 function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {

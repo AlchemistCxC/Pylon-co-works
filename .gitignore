@@ -63,7 +63,10 @@ dist-plugin-devkit/
 
 # 本地个人文件（用户环境，不入库）
 nodejs/
-public/
+public/*
+# #267：数学字体资产（Latin Modern Math / Temml 补字形）入库；public 其余仍是本地个人文件
+!public/fonts/
+
 *.html
 
 # 本地 bun 运行时（项目本地便携工具）

@@ -246,3 +246,14 @@ describe('ChatView 基础样式守卫', () => {
     expect(css).toContain('.term-user code { font-family:var(--mono); font-size:inherit; }')
   })
 })
+
+// #272：表格列对齐——GFM 分隔符经模型 align 属性 + 此处属性选择器生效，
+// 特异性高于 text-align:left 基线规则（同文件更后 + 属性选择器）。
+describe('#272 表格列对齐契约', () => {
+  it('align 属性选择器规则存在（center/right；left 为无属性缺省）', () => {
+    expect(css).toContain(".term-assistant .term-table th[align='center'],")
+    expect(css).toContain(".term-assistant .term-table td[align='center'] { text-align:center; }")
+    expect(css).toContain(".term-assistant .term-table th[align='right'],")
+    expect(css).toContain(".term-assistant .term-table td[align='right'] { text-align:right; }")
+  })
+})
