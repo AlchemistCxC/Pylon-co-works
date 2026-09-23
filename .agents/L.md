@@ -723,3 +723,20 @@
 ✅ **已完工（2026-09-23）**：实现 `04af4717`（9 文件，纯删除）、记录 `.agents/records/238-cc-widget-definition-table-knife3-dead-data.md`。
 门禁五步全绿、全量 626 文件 / 4748 通过、快照除 `generatedAt` 外零差异、实机中控几何与刀5B 逐位相同。
 本分支（刀1~刀5B + 第③件）仍未 push、未开 PR；刀6「先放着」、刀7 单已出待开工（可续做）。
+
+---
+
+[2026-09-23 03] [Baryon] [#238 · 第③件补遗]
+
+**续开工：第③件补遗（三步：删两样零消费者残件 + 加一条「死数据不得回归」守卫测试 + 验收技能补一条坑）。** 分支**沿用** `feat/cc-widget-definition-table`。前置 = 第③件已完工（`04af4717`，翻译复核通过）。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetCatalog.ts`（删 `BUILTIN_CC_WIDGET_CONTRIBUTIONS` 导出 + `BuiltinCcWidgetId` / `CcWidgetRuntimeId` 两个类型名，连带 `CC_WIDGET_IDS` 的 import）
+- **新增** `src/domains/cc/__tests__/ccDeadDataGuard.test.ts`（守卫测试，仿 `workbenchChromeCss.solid.test.ts` 的先例写法）
+- `.agents/skills/webview2-acceptance/SKILL.md`（坑清单补一条：实机验收必须从当前源码重新构建产物）
+- 文档：`.agents/records/238-*-补遗*.md`、本文件；仓外第③件待办同步
+
+**不碰**：`rendererKey` / `isolated-surface`（用户已定保留）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`、
+插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、
+`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`；★ 本轮**不动**《中控元件总表》。
