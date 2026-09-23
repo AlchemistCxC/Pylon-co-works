@@ -786,3 +786,22 @@
 - 本文件
 
 **不碰**：`src/**` 一行不动（补验只做现场确认 + 文档）；不新增/修改断言；`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+---
+
+[2026-09-23 08] [Baryon] [#238 · 刀6]
+
+**续开工：刀6 设置页中控区改成「元件 → 子部件」分组（让成员层第一次被消费）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/11-施工单-刀6-设置页按元件与子部件分组.md`。前置：刀1~刀7、第③件、补遗、刀7 补验全部完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（78 个 cc 字段的 `group:` 值机械替换为所属**子部件 label**；`CC_MEMBER_FIELDS` 派生映射；`GROUP_ORDER.cc` 改派生；两个空标题随之消失）
+- `src/domains/cc/widgetDefinitions.ts`（`members[].fields` 手写清单**删除** ⇒ 真值收敛到 `def.group`；`CcWidgetMember.fields` 类型同步；注释指向新真值）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（4 处 `member.fields` 改读派生映射 —— §3.3 的必然连带）
+- **新增** `src/domains/cc/__tests__/ccSettingsGrouping.test.ts`（§4-2 的字段集合不变量）
+- `src/themeFieldRenderer.tsx`（★ **停手条件 2 的处置**：删掉只为旧 cc 标题服务的 `section.heading === '输入区'` 特例，它随本刀变成死代码）
+- `src/components/settings/__tests__/settingsChromeState.test.ts`（§3.5 的示例键替换）
+- 文档：`.agents/records/238-*-刀6*.md`、本文件；仓外《中控元件总表》
+
+**不碰**：中控渲染（刀3/4/5 地盘）、主题字段的**值**与默认值、`ccLayout`/`ccHidden`/`ccEditMode`（hidden ⇒ 保持无分组）、插件契约面、成员级显隐收编（已另立待办）、`ccVariant` 的存废（刀8）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+★ 与刀8 **不并行**（都改 `themeFieldDefs.ts` 与出厂数据），本刀先做。
