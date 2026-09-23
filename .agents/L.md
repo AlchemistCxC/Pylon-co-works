@@ -728,3 +728,17 @@
 - 文档：`.agents/records/269-*.md`（完工时新增）、`docs/说明书/Pylon-模块维护地图.md`（模块表两格）、本文件
 
 **我不碰**：`src-tauri/src/runtime_log/**` 既有逻辑（只读消费 hub push）、`src/obs05/**`、`src-tauri/src/acp/**`、`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`、中控区、预设系统、他人在途域。#270/#271 后续施工将各自动 `lib.rs`，届时在本文件对表。全程 pathspec 提交。
+
+---
+
+[2026-09-24 01] [Miyaki Kumo] [#272]
+
+**开工：issue272（GFM 表格列对齐渲染缺失——模型 align 属性透传 + CSS 属性选择器）。** 分支沿用 `kumo/prometheus`。文件域：
+
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（th/td align 透传）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（排版层追加对齐属性选择器）
+- `src/renderers/solid-workbench/chat/__tests__/issue267.mathFootnotes.solid.test.tsx`（追加表格对齐渲染用例）
+- `src/renderers/solid-workbench/chat/__tests__/ChatView.css.test.ts`（追加 CSS 契约断言）
+- 文档：`.agents/records/267-*` 追加节、本文件
+
+**我不碰**：其余全部。全程 pathspec 提交。
