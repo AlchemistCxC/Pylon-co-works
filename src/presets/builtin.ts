@@ -188,11 +188,6 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   ccHidden: [
     "cc-send-button"
   ],
-  ccScale: {
-    "tokens": 100,
-    "model": 100,
-    "mode": 100
-  },
   inputBg: "rgba(0,0,0,0.03)",
   inputTextColor: "rgba(0,0,0,0.80)",
   inputPlaceholder: "rgba(0,0,0,0.22)",

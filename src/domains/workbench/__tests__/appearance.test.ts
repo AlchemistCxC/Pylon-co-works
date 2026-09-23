@@ -51,7 +51,6 @@ describe('selectWorkbenchAppearance', () => {
       inputPlaceholder: DEFAULTS.inputPlaceholder,
       assistantDot: true,
       ccHidden: ['send'],
-      ccScale: { model: 125 },
       spinnerFramePreset: 'cc',
       spinnerVerbSet: 'engineering',
     })
@@ -68,14 +67,12 @@ describe('selectWorkbenchAppearance', () => {
       ccMarginBottom: DEFAULTS.ccMarginBottom,
       ccRadius: DEFAULTS.ccRadius,
       ccHidden: ['send'],
-      ccScale: { model: 125 },
       spinner: { framePreset: 'cc', verbSet: 'engineering' },
     })
     expect(Object.isFrozen(snapshot)).toBe(true)
     expect(Object.isFrozen(snapshot.ccLayout)).toBe(true)
     expect(Object.isFrozen(snapshot.ccLayout.placements.input)).toBe(true)
     expect(Object.isFrozen(snapshot.ccHidden)).toBe(true)
-    expect(Object.isFrozen(snapshot.ccScale)).toBe(true)
     expect(Object.isFrozen(snapshot.ccProperties)).toBe(true)
     expect(Object.isFrozen(snapshot.spinner)).toBe(true)
   })
@@ -171,19 +168,19 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.subscribe(listener)
 
     store.dispatch({ type: 'set-cc-hidden', id: 'tasks', hidden: true })
-    store.dispatch({ type: 'set-cc-scale', id: 'model', scale: 500 })
     store.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     expect(store.getSnapshot()).toMatchObject({
       ccHidden: ['tasks'],
-      ccScale: { model: 200 },
       ccEditMode: true,
-      revision: 3,
+      // ★ 刀7：原先这里还有一次 `set-cc-scale`（三条命令 ⇒ revision 3 / 通知 3 次）。
+      //   缩放命令已删 ⇒ 只剩两条命令，revision 与通知次数各随之下调 1。
+      revision: 2,
     })
 
     store.destroy()
     store.dispatch({ type: 'set-cc-edit-mode', enabled: false })
-    expect(listener).toHaveBeenCalledTimes(3)
+    expect(listener).toHaveBeenCalledTimes(2)
     expect(store.getSnapshot().ccEditMode).toBe(true)
   })
 
@@ -304,16 +301,13 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.destroy()
   })
 
-  it('非法数字编辑命令保留最后有效的中控布局与缩放', () => {
+  it('非法数字编辑命令保留最后有效的中控布局', () => {
     const store = createStaticWorkbenchAppearanceStore(theme())
     store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: 7, offsetX: 12 } })
-    store.dispatch({ type: 'set-cc-scale', id: 'model', scale: 125 })
 
     store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: Number.NaN, offsetX: Number.NaN } })
-    store.dispatch({ type: 'set-cc-scale', id: 'model', scale: Number.NaN })
 
     expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
-    expect(store.getSnapshot().ccScale.model).toBe(125)
     store.destroy()
   })
 

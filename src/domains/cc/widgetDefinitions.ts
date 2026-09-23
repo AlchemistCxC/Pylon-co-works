@@ -2,8 +2,8 @@
  * widgetDefinitions — 中控元件两级定义表（组 + 成员）单一真值。
  *
  * 表形（issue #238 刀1 立表 / 刀3 起位置改两轴）：
- * - **组**：可摆、可藏、可缩放的单元 —— 表里 `draggable` 的行才进
- *   `ccLayout` / `ccHidden` / `ccScale` 三份名单。共 8 行 = 控件 7 + 容器 1（`cc-surface`）。
+ * - **组**：可摆、可藏的单元 —— 表里 `draggable` 的行才进
+ *   `ccLayout` / `ccHidden` 两份名单（刀7 起缩放已删，原第三份 `ccScale` 退场）。共 8 行 = 控件 7 + 容器 1（`cc-surface`）。
  * - **成员**：组里一个有名字的部件 + 它自己那组字段 —— **只做归属**，不进任何名单。
  * - ★ **位置**（刀3）：每行自己声明 `layout: { x: {锚点, 方位, 间距?}, y: {…}, order }`
  *   —— 不再有「先分槽、再在槽里排序」两段式。渲染按**落脚处**（`ccWidgetLanding` =
@@ -162,7 +162,7 @@ export interface CcWidgetGroup {
   gap?: number
   /** ★ 声明为**悬浮**（不参与文档流成组；占区叠加约束对它豁免，见刀4） */
   floating?: boolean
-  /** 是否进 `ccLayout` / `ccHidden` / `ccScale` 三份名单 */
+  /** 是否进 `ccLayout` / `ccHidden` 两份名单 */
   draggable: boolean
   /**
    * ★ **活跃会话里显示还是收起**（#238 刀5B）—— 只有两个值，缺省 `'hide'`（= 活跃会话里收起）。
@@ -600,13 +600,14 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, WidgetPropertyForm> = Ob
 /**
  * 跨元件的系统字段：不属于任何单个组/成员的字段。
  *
- * - `ccLayout` / `ccHidden` / `ccScale`：三份名单本体（值为元件名，属布局状态）。
- *   ★ 刀5 后这里**只剩这三项**：原「信息行」名下的 `ccStatusFontSize` / `statusBg` /
- *   `statusBgImage` 已**删除**（前两项是僵尸，第三项的字号收窄成 `cc-command-hint`
- *   成员自己的 `ccHintFontSize`）。`footerLayout` 已由刀3 移入容器行 `cc-surface`。
+ * - `ccLayout` / `ccHidden`：两份名单本体（值为元件名，属布局状态）。
+ *   ★ 刀5 后「信息行」名下那三项（`ccStatusFontSize` / `statusBg` / `statusBgImage`）已**删除**
+ *   （前两项是僵尸，第三项的字号收窄成 `cc-command-hint` 成员自己的 `ccHintFontSize`）；
+ *   `footerLayout` 已由刀3 移入容器行 `cc-surface`；
+ *   ★ 刀7：`ccScale`（缩放）已**整体删除**（用户口径「我预期里没有缩放这一项」）⇒ 名单由三份变两份。
  */
 export const CC_SYSTEM_FIELDS = [
-  'ccLayout', 'ccHidden', 'ccScale',
+  'ccLayout', 'ccHidden',
 ] as const satisfies readonly ThemeFieldKey[]
 
 export interface WidgetVisibilityCtx {

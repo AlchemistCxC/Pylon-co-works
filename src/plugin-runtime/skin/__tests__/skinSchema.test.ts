@@ -73,7 +73,6 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
 
     expect(schema.fields.ccLayout?.default).toEqual(DEFAULTS.ccLayout)
     expect(schema.fields.ccHidden?.default).toEqual(DEFAULTS.ccHidden)
-    expect(schema.fields.ccScale?.default).toEqual(DEFAULTS.ccScale)
   })
 
   it('componentVariants 来自实际组件真值（无硬编码 variant 枚举）', () => {

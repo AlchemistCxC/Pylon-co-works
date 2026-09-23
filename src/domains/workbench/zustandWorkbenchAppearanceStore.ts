@@ -28,9 +28,6 @@ function dispatchAppearanceCommand(command: AppearanceCommand): void {
     case 'set-cc-hidden':
       state.setCcHidden(command.id, command.hidden)
       break
-    case 'set-cc-scale':
-      state.setCcScale(command.id, command.scale)
-      break
     case 'set-cc-height':
       state.setCcHeight(command.height)
       break

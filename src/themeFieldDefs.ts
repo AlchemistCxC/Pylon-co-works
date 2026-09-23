@@ -64,7 +64,7 @@ export interface ThemeFieldDef {
   hidden?: boolean
   /** META 字段：仅持久化、不进预设白名单（ccEditMode/appliedPreset/dirty） */
   meta?: boolean
-  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden/ccScale 及 appliedPreset/custom 无标量默认） */
+  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden 及 appliedPreset/custom 无标量默认） */
   default?: string | number | boolean
   /** W2-13（F3-A）：快速层基础字段标记（basic 清单来自 defs，组件不硬编码） */
   tier?: 'basic'
@@ -252,7 +252,6 @@ export const THEME_FIELD_DEFS = {
   ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), optionLabels: { terminal: '终端状态栏', glass: '玻璃工作台', pill: '轻量胶囊' }, default: 'terminal', group: "外观风格", noCssVar: true },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
-  ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
   // A6 输入区：本轮新增字段不投影 semanticRole/semanticSource；旧 inputBg 等字段保留。
   inputOffsetTop: { ...N('cc', '输入栏上间距', 0, 120), default: 10, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-offset-top' },
   inputHeight: { ...N('cc', '输入栏高度', 0, 200), default: 40, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-height' },

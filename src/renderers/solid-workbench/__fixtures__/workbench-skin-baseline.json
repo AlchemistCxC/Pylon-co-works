@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-23T03:02:40.371Z",
+  "generatedAt": "2026-09-23T04:20:18.540Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -14,7 +14,7 @@
       "focus-flow"
     ],
     "customPresetIds": [],
-    "themeSettingCount": 189,
+    "themeSettingCount": 188,
     "cssVariableCount": 96
   },
   "fixtures": [
@@ -251,7 +251,6 @@
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -603,11 +602,6 @@
             }
           }
         },
-        "ccScale": {
-          "tokens": 90,
-          "model": 90,
-          "mode": 90
-        },
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -958,11 +952,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 100,
-          "model": 100,
-          "mode": 100
         },
         "appliedPreset": {
           "global": "",
@@ -1319,11 +1308,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -1685,11 +1669,6 @@
             }
           }
         },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
-        },
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -2050,11 +2029,6 @@
             }
           }
         },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
-        },
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -2411,11 +2385,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -2777,11 +2746,6 @@
             }
           }
         },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
-        },
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3134,7 +3098,6 @@
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3480,7 +3443,6 @@
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3826,7 +3788,6 @@
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -4179,11 +4140,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -4539,9 +4495,6 @@
             }
           }
         },
-        "ccScale": {
-          "model": 125
-        },
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -4885,7 +4838,6 @@
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -5186,10 +5138,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "ekg": 50,
-          "tasks": 200
         },
         "appliedPreset": {
           "global": "",

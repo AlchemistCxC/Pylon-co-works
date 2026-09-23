@@ -111,7 +111,6 @@ export interface WorkbenchAppearanceSnapshot {
   ccRadius: number
   ccLayout: CcLayoutV3
   ccHidden: readonly string[]
-  ccScale: Readonly<Record<string, number>>
   ccEditMode: boolean
   ccProperties: Readonly<Pick<ThemeSettings, CcEditablePropertyKey>>
   showPet: boolean
@@ -121,7 +120,6 @@ export interface WorkbenchAppearanceSnapshot {
 export type AppearanceCommand =
   | { type: 'set-cc-edit-mode'; enabled: boolean }
   | { type: 'set-cc-hidden'; id: string; hidden: boolean }
-  | { type: 'set-cc-scale'; id: string; scale: number }
   | { type: 'set-cc-height'; height: number }
   | { type: 'update-cc-placement'; id: string; placement: Partial<CcWidgetPlacement> }
   | CcPropertyCommand
@@ -233,7 +231,6 @@ export function selectWorkbenchAppearance(
     ccRadius: theme.ccRadius,
     ccLayout: cloneCcLayout(theme.ccLayout),
     ccHidden: [...theme.ccHidden],
-    ccScale: { ...theme.ccScale },
     ccEditMode: theme.ccEditMode,
     ccProperties: selectCcProperties(theme),
     showPet: theme.showPet,
@@ -275,7 +272,6 @@ function freezeAppearanceSnapshot(snapshot: WorkbenchAppearanceSnapshot): Workbe
   for (const placement of Object.values(snapshot.ccLayout.placements)) Object.freeze(placement)
   Object.freeze(snapshot.ccLayout)
   Object.freeze(snapshot.ccHidden)
-  Object.freeze(snapshot.ccScale)
   Object.freeze(snapshot.ccProperties)
   Object.freeze(snapshot.spinner.frames)
   Object.freeze(snapshot.spinner.verbs)

@@ -1836,20 +1836,20 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(screen.queryByRole('toolbar', { name: '中控控件工具栏' })).toBeNull()
   })
 
-  it('属性面板可编辑顺序、偏移、缩放和 schema 外观字段', async () => {
+  it('属性面板可编辑顺序、偏移和 schema 外观字段', async () => {
     const { host, services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
 
     // ★ #238 刀3：槽位下拉整块删除（位置改由定义表声明，不再让用户选"放哪个槽"）
     expect(screen.queryByLabelText('控件槽位')).toBeNull()
+    // ★ #238 刀7：面板里的「缩放」输入框整块删除（用户口径「我预期里没有缩放这一项」）
+    expect(screen.queryByLabelText('控件缩放')).toBeNull()
     fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '7' } })
     fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '12' } })
-    fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '125' } })
     fireEvent.click(screen.getByRole('button', { name: '点击轮换' }))
 
     await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 }))
-    expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
     expect(services.appearance.getSnapshot().modelSwitchMode).toBe('cycle')
     expect(host.querySelector('[data-widget-id="model"] .cc-model-trigger')).toBeInTheDocument()
   })
@@ -1857,16 +1857,13 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
   it('属性面板数字输入清空时保留上次有效值', async () => {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: 7, offsetX: 12 } })
-    services.appearance.dispatch({ type: 'set-cc-scale', id: 'model', scale: 125 })
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
 
     fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '' } })
     fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '' } })
-    fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '' } })
 
     expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
-    expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
   })
 
   it('属性 schema 的联动字段和条件字段在 Solid 面板中保持响应式', async () => {
@@ -2101,6 +2098,12 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     // 且它是只读显示 —— 不得渲染成可点击控件。
     expect(host.querySelector('[data-widget-id="tokens"] .cc-usage-pill')).toBeInTheDocument()
     expect(host.querySelector('[data-widget-id="tokens"] button')).toBeNull()
+    // ★ #238 刀7：「缩放」已删 ⇒ 用量字号**直接等于基准字号**，不再有乘数。
+    //   这里断言内联字号逐字等于快照里的 `modelFontSize` —— 一旦有人把乘数加回来
+    //   （如 `calc(12px * 90 / 100)`），字符串不再是纯 `${n}px`，本条即红。
+    const usagePill = host.querySelector<HTMLElement>('[data-widget-id="tokens"] .cc-usage-pill')
+    expect(usagePill?.style.fontSize).toBe(`${services.appearance.getSnapshot().modelFontSize}px`)
+    expect(usagePill?.style.fontSize).not.toContain('calc(')
     expect(screen.getByText('canonical warning')).toBeInTheDocument()
   })
 

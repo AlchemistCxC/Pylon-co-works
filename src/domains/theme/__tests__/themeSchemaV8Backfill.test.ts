@@ -111,7 +111,7 @@ describe('theme schema v11：中控名单换代（刀4）', () => {
     expect(migrated.prismOnColor).toBe(DEFAULTS.prismOnColor)
   })
 
-  it('legacy `send` 的 ccHidden / ccScale 键迁移到注册轨 id', () => {
+  it('legacy `send` 的 ccHidden 键迁移到注册轨 id；已删的 `ccScale` 不再被改名', () => {
     const legacy: Record<string, unknown> = {
       ...DEFAULTS,
       ccHidden: ['send', 'tokens'],
@@ -121,6 +121,9 @@ describe('theme schema v11：中控名单换代（刀4）', () => {
     const migrated = themeDomainMigrate(legacy, defaults, 10)
 
     expect(migrated.ccHidden).toEqual(['cc-send-button', 'tokens'])
-    expect(migrated.ccScale).toEqual({ 'cc-send-button': 120, model: 90 })
+    // ★ #238 刀7：`ccScale` 字段整体删除 ⇒ 它的 legacy 键改名（`renameLegacyCcScaleKeys`）随之退场。
+    //   这条**不**断言旧值被清掉：读盘路径不做键清（`store.ts` 的 `partialize` 是白名单式，
+    //   下次写盘自然修剪）⇒ 这里如实锁住"值原样穿过、不再被改名"这一现状。
+    expect(migrated.ccScale).toEqual({ send: 120, model: 90 })
   })
 })

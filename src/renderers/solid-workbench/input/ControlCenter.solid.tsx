@@ -360,7 +360,9 @@ export function SolidControlCenter() {
         const pillStyle = () => ({
           height: `${appearance().modelHeight ?? 28}px`,
           'border-radius': `${appearance().modelRadius ?? 0}px`,
-          'font-size': `calc(${appearance().modelFontSize ?? 12}px * ${appearance().ccScale.tokens ?? 100} / 100)`,
+          // ★ #238 刀7：原先这里还乘一个「缩放」(`ccScale.tokens`)。缩放已整体删除
+          //   ⇒ 用量字号直接取基准字号（`modelFontSize`）。对没调过缩放的人（= 100）逐位相同。
+          'font-size': `${appearance().modelFontSize ?? 12}px`,
           background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
           color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
         })
@@ -680,10 +682,6 @@ export function SolidControlCenter() {
             const value = event.currentTarget.valueAsNumber
             if (Number.isFinite(value)) updatePlacement(id(), { offsetY: value })
           }} /><span>px</span></div>
-          <Show when={id() !== 'input'}><div class="cc-prop-field"><label>缩放</label><input type="number" class="set-num" aria-label="控件缩放" min="50" max="200" step="5" value={appearance().ccScale[id()] ?? 100} onInput={event => {
-            const value = event.currentTarget.valueAsNumber
-            if (Number.isFinite(value)) workbench.appearance.dispatch({ type: 'set-cc-scale', id: id(), scale: value })
-          }} /><span>%</span></div></Show>
           <For each={propertyFields(id())}>{(field, index) => renderPropertyField(field, index())}</For>
         </div>
         <div class="cc-prop-footer"><button type="button" class="ps-btn sm" onClick={() => {

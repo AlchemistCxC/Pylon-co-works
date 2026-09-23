@@ -5,7 +5,7 @@
  *   它是**唯一真值**：10 套出厂预设的有效值由它算出（`effectivePresetTheme`）——
  *   改这里的任何一个值，等于改掉所有引用它的预设。历史来源见 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
  * 值 = 生成时刻的 `pickZoneFields(GLOBAL_PRESETS[来源].theme, 'global')`，逐字段照抄
- * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden/ccScale 三个元件名单字段）。
+ * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden 两个元件名单字段）。
  */
 import type { ZonePresetEntry } from '../zonePresetPool.ts'
 

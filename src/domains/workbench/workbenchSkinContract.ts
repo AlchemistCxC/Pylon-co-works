@@ -169,7 +169,6 @@ function boundaryValue(key: ThemeFieldKey, edge: 'min' | 'max'): unknown {
   if (definition.type === 'color') return edge === 'min' ? '' : '#abcdef'
   if (key === 'ccLayout') return cloneCcLayout(DEFAULTS.ccLayout)
   if (key === 'ccHidden') return edge === 'min' ? [] : ['ekg', 'tasks']
-  if (key === 'ccScale') return edge === 'min' ? {} : { ekg: 50, tasks: 200 }
   return edge === 'min' ? '' : `fixture-${key}`
 }
 
@@ -206,7 +205,6 @@ function createDirtyTheme(): ThemeSettings {
     inputVariant: 'composer',
     inputMode: 'default',
     ccHidden: ['ekg'],
-    ccScale: { model: 125 },
     showPet: false,
   })
 }

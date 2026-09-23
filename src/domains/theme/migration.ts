@@ -42,6 +42,8 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
  *   在 `normalizeThemeMigrationState` 里显式清掉）；`ekg` 四形态仪表整体移除
  *   （实现留档见 `备份\ekg-留档\`，issue #170）；legacy `send` 的槽位/显隐/缩放三处键
  *   迁到注册轨 id `cc-send-button`（只改键名不改值）。
+ *   ★ 其中**「缩放」那一处改名已随 #238 刀7 删除**（`ccScale` 字段整体退场）⇒ 现在只剩槽位（在
+ *   `normalizeCcLayout` 内）与显隐（`renameLegacyCcHiddenKeys`）两处。
  *
  * ★ 上述前两次事故的**共同根因已在刀2 拔掉**：结构对齐不再依赖版本号 ⇒ 加控件/加字段
  * 不再需要 bump（"必须记得 bump"这套耦合消失）。
@@ -85,14 +87,6 @@ function renameLegacyCcHiddenKeys(value: unknown): unknown {
     : value
 }
 
-function renameLegacyCcScaleKeys(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([id, scale]) => [LEGACY_CC_KEY_RENAMES[id] ?? id, scale]),
-  )
-}
-
 export function normalizeThemeMigrationState(
   persisted: unknown,
   defaults: ThemeMigrationDefaults,
@@ -109,11 +103,13 @@ export function normalizeThemeMigrationState(
   for (const key of REMOVED_CC_THEME_KEYS) delete state[key]
   // ★ 只在**真有这个键**时才赋值：直接 `state.ccHidden = rename(undefined)` 会新建一个
   // 值为 undefined 的键，而下面的 `{...defaults.base, ...state}` 会让它**覆盖掉默认值** ——
-  // 读盘路径上表现为 ccHidden/ccScale 变成 undefined（渲染侧 `[...ccHidden]` 直接抛）。
-  // 旧路径只在"老数据恰好缺这两个键"时才会踩到；#238 刀2 把本函数放到了每次读盘路径上，
+  // 读盘路径上表现为 ccHidden 变成 undefined（渲染侧 `[...ccHidden]` 直接抛）。
+  // 旧路径只在"老数据恰好缺这个键"时才会踩到；#238 刀2 把本函数放到了每次读盘路径上，
   // 干净新装也会走，所以在源头修掉。
+  // ★ #238 刀7：`ccScale`（控件缩放）已整体删除 ⇒ 它那条同款改名（`renameLegacyCcScaleKeys`）
+  //   随之退场。老数据里残留的 `ccScale` 键不用在这里清 —— `store.ts` 的 `partialize` 是
+  //   `THEME_SETTING_KEYS` 白名单式，下次写盘自然修剪掉（与刀5A 删三个 cc 字段同一处置）。
   if (state.ccHidden !== undefined) state.ccHidden = renameLegacyCcHiddenKeys(state.ccHidden)
-  if (state.ccScale !== undefined) state.ccScale = renameLegacyCcScaleKeys(state.ccScale)
   const normalized: Record<string, unknown> = { ...defaults.base, ...state }
   // Older themes had one toolIndicator glyph. Preserve that choice when the
   // three state-specific fields are introduced instead of silently replacing

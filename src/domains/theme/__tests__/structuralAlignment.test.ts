@@ -36,9 +36,9 @@ const partialLayout = (version: number, placements: Record<string, unknown>): Pa
 type Aligned = {
   ccLayout: { version: number; placements: Record<string, unknown> }
   ccHidden: unknown
-  ccScale: unknown
   ccHeight: number
   modelWidth: number
+  ccBgImage: string
 }
 
 describe('#238 刀2 · (a) 缺项的旧版数据 ⇒ 自动补齐，用户 offset/order/已设字段原样保留', () => {
@@ -46,7 +46,9 @@ describe('#238 刀2 · (a) 缺项的旧版数据 ⇒ 自动补齐，用户 offse
     // 老浏览器里存下的清单：只有 model 一项，其余控件项都缺（新增控件时代没 bump）
     ccLayout: { version: 9, placements: { model: { ...USER_PLACEMENT } } },
     ccHidden: ['tokens'],
-    ccScale: { model: 120 },
+    // ★ 刀7：这里原本放的是 `ccScale: { model: 120 }`（"已设对象字段原样保留"的样本）。
+    //   缩放已删 ⇒ 改用一个**存活的 cc 区用户值**当样本，覆盖（"已设字段不拍平"）不丢。
+    ccBgImage: 'url(fixture.png)',
     ccHeight: 220,
     modelWidth: 150,
   }
@@ -66,7 +68,7 @@ describe('#238 刀2 · (a) 缺项的旧版数据 ⇒ 自动补齐，用户 offse
     expect(aligned.ccHeight).toBe(220)
     expect(aligned.modelWidth).toBe(150)
     expect(aligned.ccHidden).toEqual(['tokens'])
-    expect(aligned.ccScale).toEqual({ model: 120 })
+    expect(aligned.ccBgImage).toBe('url(fixture.png)')
   })
 
   it('多余项忽略（不在当前控件全集里的旧 id 自然丢弃）', () => {

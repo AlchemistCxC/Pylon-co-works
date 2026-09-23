@@ -141,8 +141,3 @@ export function setCcHiddenState(hiddenIds: string[], id: string, hidden: boolea
     ? Array.from(new Set([...hiddenIds, id]))
     : hiddenIds.filter(widgetId => widgetId !== id)
 }
-
-export function setCcScaleState(scales: Record<string, number>, id: string, scale: number): Record<string, number> {
-  if (!Number.isFinite(scale)) return scales
-  return { ...scales, [id]: Math.max(50, Math.min(200, scale)) }
-}

@@ -57,9 +57,9 @@ function fieldOwners(): Map<string, string[]> {
 }
 
 describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () => {
-  it('81 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
+  it('80 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(81)
+    expect(ccFields).toHaveLength(80)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -86,9 +86,10 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     // ★ #238 刀3：`footerLayout` 由系统桶转入容器行（归属转移，字段与实现不动）⇒ 系统桶 7 → 6
     // ★ #238 刀5：桶里三项（ccStatusFontSize / statusBg / statusBgImage）删除 ⇒ 6 → 3；
     //   命令行提示的字号 `ccHintFontSize` 由 `cc-command-hint` 成员自己认领（成员计数 1 → 2）。
-    expect(CC_SYSTEM_FIELDS).toHaveLength(3)
+    // ★ #238 刀7：`ccScale`（缩放）整体删除 ⇒ 系统桶 3 → 2；它原本就**不属于任何成员**（跨元件系统字段）。
+    expect(CC_SYSTEM_FIELDS).toHaveLength(2)
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(81)
+    expect(total).toBe(80)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -161,8 +162,8 @@ describe('#238 · 定义表不变量 3：类型计数 7 控件 + 1 容器', () =
   })
 })
 
-describe('#238 · 定义表不变量 4：成员与容器不进三份名单', () => {
-  it('ccLayout / ccHidden / ccScale 的取值名集合不含任何成员 id 与容器 id', () => {
+describe('#238 · 定义表不变量 4：成员与容器不进名单', () => {
+  it('ccLayout / ccHidden 的取值名集合不含任何成员 id 与容器 id', () => {
     const layoutNames = slotIds
     expect(layoutNames).not.toContain('cc-surface')
     const leaked = memberRows

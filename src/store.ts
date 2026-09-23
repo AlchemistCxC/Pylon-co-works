@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './ccLayoutState.ts'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
@@ -120,7 +120,6 @@ export interface ThemeSettings {
   ccHidden: string[]
   ccLayout: CcLayoutV3
   ccEditMode: boolean
-  ccScale: Record<string, number>  // naturalSize 控件独立缩放% (50-200) key=widget id
   appliedPreset: Record<string, string>
   custom: Record<string, boolean>
 }
@@ -144,7 +143,6 @@ type ThemeState = ThemeSettings & {
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
-  setCcScale: (id: string, scale: number) => void
   resetTheme: () => void
   /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
@@ -258,10 +256,6 @@ export const useStore = create<ThemeState>()(persist(
       ...markZoneCustom(state, 'cc'),
     }
   }),
-  setCcScale: (id, scale) => set(state => ({
-    ccScale: setCcScaleState(state.ccScale, id, scale),
-    ...markZoneCustom(state, 'cc'),
-  })),
 
   resetTheme: () => {
     recordSettingWrites('theme-reset', '*', Object.keys(DEFAULTS))
@@ -281,7 +275,7 @@ export const useStore = create<ThemeState>()(persist(
 
   resetZone: (zone) => set(state => {
     const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
-    // 只重置标量主题字段；ccLayout/ccHidden/ccScale 等对象字段走专用动作（避免误清用户排布）
+    // 只重置标量主题字段；ccLayout/ccHidden 等对象字段走专用动作（避免误清用户排布）
     const reset = Object.fromEntries(
       fields
         .filter(field => {
@@ -567,7 +561,7 @@ export const useStore = create<ThemeState>()(persist(
    */
   merge: (persisted, current) => ({ ...current, ...alignThemeStructure(persisted, THEME_MIGRATION_DEFAULTS) }),
   partialize: (state) => {
-    // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden/ccScale 对象）+ 显式 meta。
+    // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden 对象）+ 显式 meta。
     // 取代"排除式 partialize"——杜绝新增 action/临时字段误持久化，并修剪迁移遗留的旧键。
     const persisted: Record<string, unknown> = {}
     for (const key of THEME_SETTING_KEYS) persisted[key] = state[key]
