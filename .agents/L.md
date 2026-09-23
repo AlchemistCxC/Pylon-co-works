@@ -719,3 +719,7 @@
 **不碰**：`rendererKey` / `isolated-surface`（用户 2026-09-23 已定**保留**）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`（有意的未知 id 样本）、插件契约面 `ccWidgetTypes.ts`/`ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
 **与刀7（`10-施工单-刀7-删掉缩放.md`）的关系**：两者同改 `widgetDefinitionTable.test.ts` 与出厂数据 ⇒ **不许并行开工**，本刀先做。
+
+✅ **已完工（2026-09-23）**：实现 `04af4717`（9 文件，纯删除）、记录 `.agents/records/238-cc-widget-definition-table-knife3-dead-data.md`。
+门禁五步全绿、全量 626 文件 / 4748 通过、快照除 `generatedAt` 外零差异、实机中控几何与刀5B 逐位相同。
+本分支（刀1~刀5B + 第③件）仍未 push、未开 PR；刀6「先放着」、刀7 单已出待开工（可续做）。
