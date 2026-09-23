@@ -240,7 +240,7 @@ export const CC_WIDGET_GROUPS = [
     label: '输入栏',
     category: 'input',
     rail: 'builtin',
-    layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 0 },
+    layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 1 },
     draggable: true,
     // ★ 输入栏在活跃会话里**一直显示**（#238 刀5B 之前由门户里的 `id === 'input'` 特例承担）。
     //   写进表里让「活跃会话显隐」这条轴**对每一行都成立**，不必再留硬编码豁免。
@@ -420,7 +420,7 @@ export const CC_WIDGET_GROUPS = [
     label: '命令行提示',
     category: 'input',
     rail: 'builtin',
-    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 5 },
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 6 },
     gap: 0,
     draggable: true,
     // ★ 显示条件是**另一类**（有会话 + 命令行模式 + 详细档不为 hidden）⇒ 用 `conditions` 表达，
