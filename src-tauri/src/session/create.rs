@@ -1472,7 +1472,11 @@ pub(crate) async fn probe_agent_selectors(
         .await?;
     state.ensure_generation(&runtime, generation)?;
     let peri_id = crate::acp::session_id_from(&response)?;
-    // 面解析复用 apply_session_response（与用户会话同一套形状判定，零特判）。
+    // #250：登记探测会话 peri_id——本会话不落会话槽位，建会话后 agent 迟到的
+    // 元数据通知（available_commands_update 等）在 dispatcher 查无映射；登记后
+    // dispatcher 将其按预期孤儿静默降级（debug），不再逐条 warn。只进不出，
+    // TTL 自然失效（close 后迟到帧正是静音对象）。
+    runtime.probe_sessions.register(&peri_id);
     let mut probe_session = SessionInfo::new(
         peri_id.clone(),
         String::new(),

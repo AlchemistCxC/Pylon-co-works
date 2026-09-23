@@ -1157,6 +1157,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     classification: crate::acp::ReplayClassification,
     wire_ordinal: Option<u64>,
     turn_ledger: &Arc<crate::acp::TurnLedger>,
+    probe_sessions: &crate::runtime::ProbeSessionRegistry,
     ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
     pending_batch: Option<&mut Vec<PendingCanonicalPublish>>,
@@ -1230,6 +1231,12 @@ async fn handle_session_update<R: tauri::Runtime>(
             return true;
         }
         let Some(mapped) = mapped else {
+            // #250：探测会话（#53 空态选择器探测）不落会话槽位，其建会话后的
+            // 元数据通知按设计查无映射——按预期孤儿静默降级，不作异常告警。
+            if probe_sessions.contains(&peri_id) {
+                tracing::debug!("ACP notification for probe session {} dropped", peri_id);
+                return true;
+            }
             tracing::warn!("ACP notification for unknown session {}", peri_id);
             return true;
         };
@@ -2423,6 +2430,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 classification,
                 wire_ordinal,
                 &runtime_for_reconnect.turn_ledger,
+                &runtime_for_reconnect.probe_sessions,
                 ingress_seq,
                 wire_trace.clone(),
                 Some(&mut pending_batch),
