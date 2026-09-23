@@ -796,3 +796,9 @@
 [2026-09-24 07] [Miyaki Kumo] [#250]
 
 **开工：issue250（实机验收四项）**：①capabilities 补 `core:window:allow-set-size`；②#53 探测会话通知静音（dispatcher probe 注册表）；③扩展块 CTA 溢出；④右栏 aria-label 稳定文案。spec 见 `.agents/spec/250-acceptance-four-fixes.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：`src-tauri/capabilities/default.json`、`src-tauri/src/agent/runtime.rs`、`src-tauri/src/session/create.rs`、`src-tauri/src/dispatcher/mod.rs`、`src/components/sidebar/blocks/mockBlocks.tsx`、`src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css`、`src/components/right-panel/ContextPanelHost.tsx`、对应测试、`.agents/records/250-*.md`、本文件。**我不碰**：#252 的 file 域、hermes/pylon-core/pylon-acp。全程 pathspec 提交。
+
+---
+
+[2026-09-24 08] [Miyaki Kumo] [release 0.2.7-MAT]
+
+**开工：0.2.7-MAT 版本号升级 + release 便携包构建上传**。文件域：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/{pylon-acp,pylon-canonical-types,pylon-compute,pylon-markdown,pylon-session}/Cargo.toml`、`src-tauri/Cargo.lock`、本文件。构建按 #228 纪律 `CARGO_TARGET_DIR=D:\pylon-acceptance-target`（G 盘 97% 满），不写 G 盘 target。全程 pathspec 提交；完成后打 tag `v0.2.7-MAT`（指向本分支）并上传 GitHub Release。
