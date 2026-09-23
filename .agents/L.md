@@ -805,3 +805,14 @@
 
 **不碰**：中控渲染（刀3/4/5 地盘）、主题字段的**值**与默认值、`ccLayout`/`ccHidden`/`ccEditMode`（hidden ⇒ 保持无分组）、插件契约面、成员级显隐收编（已另立待办）、`ccVariant` 的存废（刀8）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 ★ 与刀8 **不并行**（都改 `themeFieldDefs.ts` 与出厂数据），本刀先做。
+
+✅ **已完工（2026-09-23）**：实现 `f064d6ce`（7 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife6-settings-grouping.md`。
+门禁五步全绿、全量 **628 文件 / 4758 通过 + 1 todo**（+1 文件 +6 用例 = 新不变量测试）；
+契约快照除时间戳外**逐字节相同**；实机 A/B：`.set-row` 78 → 78（项一个没少）、两个空标题消失、抽查三项值与位置已核。
+★ 三处已在记录「与 spec 的偏差」里说明，供复审推翻：① 停手条件 2 的处置（删掉 `themeFieldRenderer.tsx` 里只为旧
+cc 标题服务的 `'输入区'` 特例）；② `members[].fields` 的派生放在 `themeFieldDefs.ts`（定义表侧自算会成环）⇒
+定义表那栏位**删除**、`widgetDefinitionTable.test.ts` 4 处改读派生视图（§3.3 的必然连带）；
+③ 该测试里"归属逐条锁定"改按**集合**比对（派生顺序 = 字段定义顺序）。
+★ 实机发现两条**先于本刀存在**的现象（未处理，仅记录）：设置左侧导航的 cc 二级项现在也是子部件名（扁平）；
+`显示历史快捷提示` 的下拉显示 `true（已不可用）`（默认值是布尔 `true`、选项是字符串 ⇒ 匹配不上）。
+★ **本刀是这条线上原定刀序的最后一刀**；刀8（删 `ccVariant`）可开工。
