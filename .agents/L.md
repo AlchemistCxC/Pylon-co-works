@@ -699,3 +699,18 @@
 
 ---
 
+[2026-09-23 18] [Nashorn] [#266 · 成员级显隐收编]
+
+**开工：#266（成员 `visibility` 声明写了没人读 ⇒ 让它生效，并把重复的显隐条件收到子部件上）。** 施工单 `任务/工作台优化/元件定义表/14-施工单-成员级显隐收编.md`；分支 `refactor/cc-member-visibility`（从 `main@d360f9b0` 开，旧同名空分支直接沿用）。开工前核对阶段先起一条临时探针跑读数，核对结论可能触发单子 §4 停手条件。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（成员可见性派生，与 `CC_MEMBER_FIELDS` 同处）
+- `src/domains/cc/widgetDefinitions.ts`（**仅** `input` 行 `propertyFields` 里那三条 `cliLine*` 的 `showIf`）
+- `src/domains/cc/__tests__/`（新增断言文件；既有测试不改）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 与 `ControlCenter.css`（中控本体渲染/样式）、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
+
+---
+
