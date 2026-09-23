@@ -816,3 +816,30 @@ cc 标题服务的 `'输入区'` 特例）；② `members[].fields` 的派生放
 ★ 实机发现两条**先于本刀存在**的现象（未处理，仅记录）：设置左侧导航的 cc 二级项现在也是子部件名（扁平）；
 `显示历史快捷提示` 的下拉显示 `true（已不可用）`（默认值是布尔 `true`、选项是字符串 ⇒ 匹配不上）。
 ★ **本刀是这条线上原定刀序的最后一刀**；刀8（删 `ccVariant`）可开工。
+
+---
+
+[2026-09-23 10] [Baryon] [#238 · 刀8]
+
+**续开工：刀8 删掉「整体风格」（`ccVariant` 整套）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/12-施工单-刀8-删掉整体风格.md`。前置：刀6 已完工（冲突面已解除）。★ 备份已在仓外 `任务\预设修正\备份\ccVariant-留档\`（不搬进仓库）。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- 字段与状态：`src/themeFieldDefs.ts`、`src/store.ts`、`src/domains/workbench/appearance.ts`、`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`
+- CSS：`ControlCenter.css`（变体小节 + `.cc-tasks-pill` 两行）、`chat/StatusBar.css`
+- 错层来源与皮肤：`src/plugins/core/renderer/builtinPresentationProfiles.ts`（六个方案）、`src/presets/builtin.ts`、`src/plugin-runtime/skin/skinResolver.ts`（`data-cc-variant`）、`src/components/SettingsPreview.tsx`
+- 出厂数据手改：`src/zones/factory/{terminal-cc,gui-cc}.ts`（5 + 2）
+- 测试同步：`defaultPresets` / `effectivePresetTheme` / `ccSettingsGrouping` / `widgetDefinitionTable` / `ccDeadDataGuard` / `interfaceMode` / `themeFieldCopy` / `skinResolver` / `skinSchema` / `builtinPresentationProfiles` / `SettingsPreview.solidMigration`
+- 快照：`__fixtures__/workbench-skin-baseline.json`（**只能脚本重拍**）
+- 文档：`.agents/records/238-*-刀8*.md`、本文件；仓外《中控元件总表》
+
+**不碰**：中控定义表结构（刀6）、其它 cc 字段、插件契约面中除 `data-cc-variant` 之外的部分、`sendVariant`（先放着）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+✅ **已完工（2026-09-23）**：实现 `c0157a02`（24 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife8-remove-ccvariant.md`。
+门禁五步全绿；全量 **628 文件 / 4758 通过 + 1 todo**，**连跑两次一致**（施工单要求）；
+快照 diff = 15 行 `ccVariant` + 1 行 `themeSettingCount` 188→187（无其它差异）；
+实机逐模式 A/B：终端**零变化**、现代 GUI/战术蓝**失去玻璃层**（预期，已量并附可读性提示）；
+反向守卫（`ccDeadDataGuard` 加 `ccVariant` / `cc-variant-` / `ccVariant styles`）已反向验证红→绿。
+★ 偏差三处已在记录里说明：① 出厂数据处数与单子一致（7 处）；② 五份"清单外但引用被删字段"的测试属必然连带（其中四处本来编译不过）+ 预览里那个第四变体名 `cc-variant-peri` 一并删；③ **一次操作失误（已恢复，如实披露）**：A/B 取"改造前"时误执行了整树 `git checkout HEAD~1`（游离 HEAD），**分支引用未受影响**，事后 `git switch` 复原。
+★ 遗留一条要你定：现代 GUI / 战术蓝 下控件从"玻璃胶囊"变成"不透明白底黑字"，**观感变化明显**（黑底白字对比度反而更高，不算变差）—— 要不要给深色模式单独配一套控件底色/字色，属另一件事，本刀未自行配色。
+★ **本刀是这条线的最后一刀**：刀序全部完成，剩下的是整批进 PR 的收口。
