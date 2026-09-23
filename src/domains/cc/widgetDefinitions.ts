@@ -81,8 +81,13 @@ export interface CcWidgetMember {
   id: string
   /** 中文名（★ 照抄现状口径，渲染出来的字逐字相同） */
   label: string
-  /** 该成员拥有的字段键（★ 字符串键，不在运行时 import themeFieldDefs） */
-  fields: readonly ThemeFieldKey[]
+  /**
+   * ★ #238 刀6：这里**不再有 `fields`** —— 字段归属的**唯一真值 = 每个字段自己身上的 `group`**
+   * （值就是本成员的 `label`；用户口径「归属放在字段」）。
+   * 派生视图见 `themeFieldDefs.ts` 的 `CC_MEMBER_FIELDS` —— 那是唯一能同时看见两边的地方；
+   * 本表若自己算就得运行时 import `themeFieldDefs.ts`，正是表头写明的「头号雷」（成环、症状静默）。
+   * ⇒ 加字段时只改两处：字段定义（`group` 写本成员的中文名）+ 本表（若新增子部件行）。
+   */
   visibility: CcMemberVisibility
   /** 外观字段**借用**另一行（用量借模型）——显式化隐式耦合，不留暗线（规范 §5.3） */
   borrowsFrom?: string
@@ -224,7 +229,6 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'surface-body',
         label: '中控本体面',
-        fields: ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant', 'footerLayout'],
         visibility: { kind: 'always' },
       },
     ],
@@ -262,41 +266,29 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'textarea',
         label: '输入框本体',
-        fields: [
-          'inputOffsetTop', 'inputHeight', 'inputMarginX',
-          'inputSurfaceBg', 'inputSurfaceOpacity', 'inputFocusRingEnabled', 'inputFocusRingColor',
-          'inputHighlightOpacity', 'inputShadowEnabled', 'inputBg', 'inputBgImage',
-          'inputTextColor', 'inputPlaceholder', 'inputShowPlaceholder',
-          'inputBorderColor', 'inputFocusBorder', 'inputBorder', 'inputBorderWidth', 'inputBorderOpacity',
-          'inputRadius', 'inputFontSize', 'inputLineHeight', 'inputMinHeight',
-          'inputMode', 'inputVariant', 'cliTextColor', 'cliContentOffsetY', 'cliOverflowMode',
-        ],
         visibility: { kind: 'always' },
       },
       {
         id: 'cli-prefix',
         label: '提示符 ❯',
-        fields: ['cliPromptColor'],
         visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
       },
       {
         id: 'cli-lines',
         label: '上下两条线',
-        fields: ['cliLineWidth', 'cliLineColor', 'cliLinePadding'],
         visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
         note: '三个字段都带 showIf: inputMode === "cli"。',
       },
-      { id: 'command-palette', label: '/ 命令菜单', fields: [], visibility: { kind: 'content' } },
+      { id: 'command-palette', label: '/ 命令菜单', visibility: { kind: 'content' } },
       {
         id: 'history-hint',
         label: '历史快捷提示',
-        fields: ['inputShowHistoryHint'],
         visibility: { kind: 'field', field: 'inputShowHistoryHint', visibleWhen: ['shown', true] },
       },
-      { id: 'prediction', label: '输入预测', fields: [], visibility: { kind: 'content' } },
-      { id: 'queue', label: '待发送队列', fields: [], visibility: { kind: 'content' } },
-      { id: 'error', label: '报错条', fields: [], visibility: { kind: 'content' } },
-      { id: 'empty-slot', label: '空态插槽', fields: [], visibility: { kind: 'host' } },
+      { id: 'prediction', label: '输入预测', visibility: { kind: 'content' } },
+      { id: 'queue', label: '待发送队列', visibility: { kind: 'content' } },
+      { id: 'error', label: '报错条', visibility: { kind: 'content' } },
+      { id: 'empty-slot', label: '空态插槽', visibility: { kind: 'host' } },
     ],
     note: '间距不写死在表里：横向上/纵向上的实际数值由既有的两个 CSS 变量提供（`--cc-input-margin-x` = 输入栏左右间距、`--cc-input-offset-top` = 输入栏上间距，都是设置页字段），`x.side=stretch` + `y.side=top` 描述的就是它们。peri 下由 `.cc-footer-peri` 让它回到文档流当第一个，free 下由绝对定位浮起 —— 这套差值仍在 CSS 里（本刀不动）。',
   }),
@@ -331,10 +323,9 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'trigger',
         label: '模型触发器',
-        fields: ['modelSwitchMode', 'modelBgColor', 'modelWidth', 'modelHeight', 'modelRadius', 'modelFontSize', 'modelTextColor'],
         visibility: { kind: 'always' },
       },
-      { id: 'menu', label: '模型菜单', fields: [], visibility: { kind: 'content' } },
+      { id: 'menu', label: '模型菜单', visibility: { kind: 'content' } },
     ],
   }),
   widgetGroup({
@@ -362,10 +353,9 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'trigger',
         label: '思考强度触发器',
-        fields: ['reasoningSwitchMode', 'reasoningBgColor', 'reasoningWidth', 'reasoningHeight', 'reasoningRadius', 'reasoningFontSize', 'reasoningTextColor'],
         visibility: { kind: 'always' },
       },
-      { id: 'menu', label: '思考强度菜单', fields: [], visibility: { kind: 'content' } },
+      { id: 'menu', label: '思考强度菜单', visibility: { kind: 'content' } },
     ],
     note: 'gap=12 现状由控件内的 REASONING_GAP_PX 施加（本刀只记值不消费）。',
   }),
@@ -394,14 +384,10 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'trigger',
         label: '权限触发器',
-        fields: [
-          'permissionSwitchMode', 'permissionBgColor', 'permissionWidth', 'permissionHeight',
-          'permissionRadius', 'permissionFontSize', 'permissionTextColor', 'modeAutoColor', 'modeEditColor',
-        ],
         visibility: { kind: 'always' },
         note: 'permissionTextColor = "mode" 时不写 inline color，交给 CSS [data-mode] 语义色。',
       },
-      { id: 'menu', label: '权限菜单', fields: [], visibility: { kind: 'content' } },
+      { id: 'menu', label: '权限菜单', visibility: { kind: 'content' } },
     ],
     note: 'gap=12 现状由控件内的 PERMISSION_GAP_PX 施加（本刀只记值不消费）。',
   }),
@@ -421,7 +407,6 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'pill',
         label: '用量胶囊',
-        fields: ['pillText', 'prismOnColor'],
         visibility: { kind: 'always' },
         borrowsFrom: 'model',
         note: '★★ 自己没有外观字段，宽度/高度/圆角/字号/底色/文字色全部读 model 那一套 —— 显式化，不许留成暗耦合。',
@@ -447,7 +432,6 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'hint-line',
         label: '提示行',
-        fields: ['cliHintMode', 'ccHintFontSize'],
         visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
       },
     ],
@@ -472,14 +456,12 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'button',
         label: '按钮本体',
-        fields: ['inputSubmitButtonMode', 'sendButtonColor', 'sendButtonRadius', 'sendButtonBorderColor', 'sendVariant'],
         visibility: { kind: 'always' },
         note: 'sendVariant 是「能改没人读」的僵尸字段（规范 §11.3）：本刀照现状保留，只在表里标注。',
       },
       {
         id: 'icon',
         label: '图标层',
-        fields: ['sendButtonIcon', 'sendButtonIconGenerating', 'sendButtonIconRound', 'sendButtonIconColor'],
         visibility: { kind: 'always' },
       },
     ],

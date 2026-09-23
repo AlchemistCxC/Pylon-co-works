@@ -383,10 +383,12 @@ export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: Zon
             })
             return { ...group, fields }
           })
-          // Input区 deliberately includes placeholder subsections for controls
-          // scheduled in later passes; keep their headings visible even when
-          // no fields have been migrated yet.
-          .filter(group => group.fields.length > 0 || section.heading === '输入区')
+          // 只渲染**有字段**的组（空组会画出一个只有标题、点了没东西的分类）。
+          // ★ #238 刀6：原先这里还有个 `|| section.heading === '输入区'` 的例外 —— 那是给
+          //   手写时代的中控「输入区」保留占位小标题用的。cc 分组改成派生之后，
+          //   没有可调项的子部件**根本不进 `GROUP_ORDER`**（在派生处就滤掉了），该例外失去唯一
+          //   的适用对象（全仓已无 heading 叫「输入区」的分区）⇒ 一并删除。
+          .filter(group => group.fields.length > 0)
         if (groups.length === 0) {
           return section.heading
             ? <h3 key={section.heading}>{section.heading}</h3>

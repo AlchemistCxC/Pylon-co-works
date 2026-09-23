@@ -16,6 +16,7 @@ import {
   isWidgetVisible,
   resolveCcWidgetGroup,
   type CcMemberVisibility,
+  type CcWidgetMember,
 } from '../widgetDefinitions.ts'
 import {
   BUILTIN_CC_SEND_BUTTON_CONTRIBUTION,
@@ -27,7 +28,7 @@ import {
   type CcLayoutWidgetId,
 } from '../../../ccLayoutState.ts'
 import { resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
-import { ZONE_FIELDS } from '../../../themeFieldDefs.ts'
+import { ZONE_FIELDS, CC_MEMBER_FIELDS, type ThemeFieldKey } from '../../../themeFieldDefs.ts'
 
 /**
  * #238 刀1（结构步）不变量与零变化锁。
@@ -43,6 +44,15 @@ const memberRows = CC_WIDGET_GROUPS.flatMap(group =>
 )
 const slotIds: readonly string[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
 
+/**
+ * ★ #238 刀6：定义表里那份手写的 `members[].fields` 已删（真值收敛到字段自己的 `group`）。
+ * 成员名下有哪些字段，现在读**派生视图** `CC_MEMBER_FIELDS`（= 按 `def.group` 反查）。
+ * ⇒ 下面这些断言的**价值不变**：literal 仍是独立的一份，写错 `def.group` 照样红。
+ * ★ 注意顺序：派生列表 = 字段在 `themeFieldDefs.ts` 里的**定义顺序**（旧的手写顺序已随清单删除）。
+ *   "谁拥有哪些字段"才是契约，谁的列表排在前面不是 —— 故那条逐条锁定的断言按**集合**比对。
+ */
+const fieldsOf = (member: CcWidgetMember): readonly ThemeFieldKey[] => CC_MEMBER_FIELDS[member.label] ?? []
+
 /** 每个字段 → 拥有它的行（成员 id 或 'system'）。 */
 function fieldOwners(): Map<string, string[]> {
   const owners = new Map<string, string[]>()
@@ -50,7 +60,7 @@ function fieldOwners(): Map<string, string[]> {
     owners.set(field, [...(owners.get(field) ?? []), owner])
   }
   for (const { group, member } of memberRows) {
-    for (const field of member.fields) add(field, `${group.id}/${member.id}`)
+    for (const field of fieldsOf(member)) add(field, `${group.id}/${member.id}`)
   }
   for (const field of CC_SYSTEM_FIELDS) add(field, 'system')
   return owners
@@ -71,7 +81,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
   it('逐组字段计数（对账用；不等于这些数即表被改动）', () => {
     const counts = Object.fromEntries(CC_WIDGET_GROUPS.map(group => [
       group.id,
-      group.members.reduce((sum, member) => sum + member.fields.length, 0),
+      group.members.reduce((sum, member) => sum + fieldsOf(member).length, 0),
     ]))
     expect(counts).toEqual({
       'cc-surface': 9,
@@ -93,13 +103,17 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
   })
 
   it('成员字段必须落在 cc zone 内', () => {
-    const outside = memberRows.flatMap(({ member }) => member.fields.filter(field => !ccFields.includes(field)))
+    const outside = memberRows.flatMap(({ member }) => fieldsOf(member).filter(field => !ccFields.includes(field)))
     expect(outside).toEqual([])
   })
 
   it('成员 ↔ 字段的归属逐条锁定（挂到错的成员即红）', () => {
-    const map = Object.fromEntries(memberRows.map(({ group, member }) => [`${group.id}/${member.id}`, member.fields]))
-    expect(map).toEqual({
+    // ★ #238 刀6：派生列表的顺序 = 字段在 `themeFieldDefs.ts` 里的定义顺序，与旧的手写顺序不同
+    //   ⇒ 按**集合**比对。"谁拥有哪些字段"是契约；成员内部字段的呈现顺序由 `THEME_FIELD_KEYS` 决定。
+    const asSet = (entries: Record<string, readonly string[]>) =>
+      Object.fromEntries(Object.entries(entries).map(([member, keys]) => [member, [...keys].sort()]))
+    const map = asSet(Object.fromEntries(memberRows.map(({ group, member }) => [`${group.id}/${member.id}`, fieldsOf(member)])))
+    expect(map).toEqual(asSet({
       'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant', 'footerLayout'],
       'input/textarea': [
         'inputOffsetTop', 'inputHeight', 'inputMarginX',
@@ -131,7 +145,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       'cc-command-hint/hint-line': ['cliHintMode', 'ccHintFontSize'],
       'cc-send-button/button': ['inputSubmitButtonMode', 'sendButtonColor', 'sendButtonRadius', 'sendButtonBorderColor', 'sendVariant'],
       'cc-send-button/icon': ['sendButtonIcon', 'sendButtonIconGenerating', 'sendButtonIconRound', 'sendButtonIconColor'],
-    })
+    }))
   })
 
   it('成员的默认显隐只引用已有字段', () => {
@@ -389,7 +403,7 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
   it('属性表单指向的字段必须由本组的某个成员拥有（挂错成员即红）', () => {
     const violations: string[] = []
     for (const group of CC_WIDGET_GROUPS) {
-      const owned = new Set(group.members.flatMap(member => member.fields))
+      const owned = new Set(group.members.flatMap(member => fieldsOf(member)))
       for (const field of group.propertyFields ?? []) {
         if (field.kind === 'section') continue
         if (!owned.has(field.key)) violations.push(`${group.id}: ${field.key}`)
