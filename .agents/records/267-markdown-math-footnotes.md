@@ -73,3 +73,13 @@
 ## 并行交集
 
 本次触碰面见 L.md [2026-09-23 10] 条目；观察到 `scripts/`（#259 域）无冲突。
+
+## 追加修复（2026-09-23 23:20，用户目视反馈「公式都是行内形态、不如 LaTeX 好看」）
+
+实机 getComputedStyle 定位：`.term-math math` 被我初版 CSS 覆盖成 UI 无衬线字体栈（-apple-system/Segoe UI/PingFang），且 display 块字号与行内同为 15px——结构对、字体错，观感即「行内形态」。
+
+修复（ChatView.css）：
+- 数学字体栈改 `"Latin Modern Math", "STIX Two Math", "Cambria Math", math, serif`——装了 LM/STIX 用之，Windows 兜底自带的 **Cambria Math**（真数学字体）；不再继承 UI 字体
+- `.term-math-display` 加 `font-size: 1.15em`（LaTeX display 体感）
+
+复验（同一会话 MCP getComputedStyle + 截图）：displayFont=Latin Modern/STIX/Cambria 栈、display 17.25px/居中、`munderover` 上下限在位；截图目视 ∑ 上下限、分数、积分均标准 LaTeX 形态。Temml 自带 `Temml.woff2`（9.2KB 补字形）暂不引入——需要 url() 资产管道，若后续要像素级 Latin Modern 观感再上。

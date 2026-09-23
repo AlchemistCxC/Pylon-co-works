@@ -2203,12 +2203,19 @@
    MathML 由 WebView2 原生渲染，无字体资产；display 块居中并允许横向滚动
    （长公式不撑破消息栏）。 */
 .term-math { display: inline-block; }
-.term-math math { font-family: var(--chat-font, var(--font)); }
+/* 数学字体栈（用户实测「公式长得像正文」的修复）：继承 UI 无衬线会让公式
+   与正文无异，衬线数学字体才有 LaTeX 观感——Latin Modern/STIX 装了就用，
+   Windows 兜底自带的 Cambria Math；`math` 关键字交还浏览器默认数学字体。 */
+.term-math math {
+  font-family: "Latin Modern Math", "STIX Two Math", "Cambria Math", math, serif;
+}
 .term-math-display {
   display: block;
   overflow-x: auto;
   margin: var(--ui-space-2) 0;
   text-align: center;
+  /* LaTeX display 体感：比行内更大一号。 */
+  font-size: 1.15em;
 }
 .term-math-raw { font-family: var(--mono); font-size: 0.92em; }
 
