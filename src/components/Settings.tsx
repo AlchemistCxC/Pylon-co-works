@@ -46,7 +46,7 @@ import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { useRightRailStore } from '../rightRailStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import { useSettingsContributionCatalog } from './settings/useSettingsContributionCatalog.ts'
@@ -711,7 +711,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
       case 'pluginManager': {
         // P53：插件管理默认进入管理器插件提供的页面（贡献存在时）；
         // 包未激活/未授权时贡献不存在，回落宿主基础页（承载能力授权卡）。
-        const managerPage = pluginSettingsPages.find(entry => entry.contributionId === 'pylon-plugin-manager')
+        const managerPage = pluginSettingsPages.find(entry => entry.contributionId === HOSTED_PLUGIN_MANAGER_PAGE_ID)
         return managerPage ? <PluginSettingsPageHost pageId={managerPage.contributionId} /> : <PluginManager />
       }
       case 'hookDiagnostics':

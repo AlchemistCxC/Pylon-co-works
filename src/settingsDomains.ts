@@ -43,10 +43,22 @@ export type SettingsSectionId =
 export interface SettingsIntent {
   readonly domain: SettingsDomainId
   readonly section: SettingsSectionId
-  /** Plugin contribution id when the section is not a built-in section. */
-  readonly pluginPageId?: string
+  /**
+   * Plugin contribution id when the section is not a built-in section.
+   * null 是归一层（settingsSheetState）的显式清除信号：导航 patch 经浅合并
+   * 传递，「键缺失」无法表达清除（#274 导航被困）；runtime 契约不变——
+   * string 与缺省的行为与历史版本逐字节一致。
+   */
+  readonly pluginPageId?: string | null
   readonly agentId?: string
 }
+
+/**
+ * 宿主「插件管理」分区托管的贡献页 id：贡献存在时宿主分区直接渲染该页
+ * （P53 重定向，Settings.tsx），侧栏据此把它从独立插件页条目中隐去，
+ * 避免同一页面双入口（#274）。
+ */
+export const HOSTED_PLUGIN_MANAGER_PAGE_ID = 'pylon-plugin-manager'
 
 export interface SettingsDomain {
   id: SettingsDomainId
