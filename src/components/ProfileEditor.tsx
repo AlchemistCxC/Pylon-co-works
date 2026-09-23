@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Plus, X } from 'lucide-react'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import Select from './ui/Select.tsx'
@@ -7,7 +8,7 @@ import Select from './ui/Select.tsx'
 // 类（Settings.css 供给）原样保留；pe-textarea 类保留为 :has() 锚点；
 // rgba 遮罩与 --settings-* 域 token 均原样平移。
 const OVERLAY = 'fixed inset-0 z-[100] flex items-center justify-center p-6 max-[640px]:p-3 bg-[rgba(18,22,32,0.36)] backdrop-blur-[8px]'
-const EDITOR = 'settings-surface settings-dialog w-[min(720px,calc(100vw-32px))] max-h-[min(88vh,860px)] flex flex-col'
+const EDITOR = 'settings-surface settings-dialog agent-settings-dialog w-[min(720px,calc(100vw-32px))] max-h-[min(88vh,860px)] flex flex-col'
 const SECTION_TITLE = 'col-span-full mt-1 pt-4 border-t border-[var(--settings-border)] text-text text-[13px] font-[680] first-of-type:mt-0 first-of-type:pt-0 first-of-type:border-t-0 max-[640px]:col-span-1'
 const FIELD = 'min-w-0 has-[.pe-textarea]:col-span-full max-[640px]:has-[.pe-textarea]:col-span-1'
 const LABEL = 'block mb-1.5 text-text text-sm font-[620]'
@@ -72,15 +73,15 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
             <h3 id="profile-editor-title" className="settings-dialog-title">{creating ? '新建 Profile' : '编辑 Profile'}</h3>
             <p className="settings-dialog-description">定义这个 Profile 的身份信息、Persona 与默认模型。</p>
           </div>
-          <div className="pe-header-actions">
-            <button className="min-w-[72px]" onClick={startCreate} disabled={creating}>新建 Profile</button>
-            <button className="pe-close settings-dialog-close" onClick={requestClose} aria-label="关闭 Profile 设置">✕</button>
+          <div className="pe-header-actions flex shrink-0 items-center gap-2">
+            <button type="button" className="settings-action inline-flex items-center gap-2" onClick={startCreate} disabled={creating}><Plus size={14} aria-hidden="true" />新建 Profile</button>
+            <button type="button" className="pe-close settings-dialog-close" onClick={requestClose} aria-label="关闭 Profile 设置"><X size={16} aria-hidden="true" /></button>
           </div>
         </div>
         <div className="min-h-0 overflow-y-auto pt-[22px] px-6 pb-7 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-y-4 gap-x-[18px] max-[640px]:grid-cols-1 max-[640px]:px-[18px]">
           <div className={IDENTITY_PREVIEW}>
             <div className="w-[52px] h-[52px] shrink-0 basis-[52px] grid place-items-center overflow-hidden border border-[var(--settings-border)] rounded-[var(--settings-radius-lg)] bg-bg-active text-accent font-bold text-[18px] font-[family-name:var(--mono)]">{avatar ? <img src={avatar} alt="" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} /> : (name.trim()[0] || '?').toUpperCase()}</div>
-            <div><strong className="block text-text text-lg">{name.trim() || '未命名 Profile'}</strong><span className="block mt-1 text-text-dim text-[11px] font-[family-name:var(--mono)]">{model || '未选择默认模型'}</span></div>
+            <div className="min-w-0"><strong className="block truncate text-text text-lg">{name.trim() || '未命名 Profile'}</strong><span className="block mt-1 truncate text-text-dim text-[11px] font-[family-name:var(--mono)]">{model || '未选择默认模型'}</span></div>
           </div>
           <div className={SECTION_TITLE}>身份信息</div>
           <div className={FIELD}>

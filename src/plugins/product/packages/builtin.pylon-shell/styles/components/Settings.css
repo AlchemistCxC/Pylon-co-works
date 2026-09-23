@@ -1484,3 +1484,96 @@ body[data-interface-mode="tactical-blue"] .set-nav-btn:hover { background:#123f7
  body[data-interface-mode="tactical-blue"] .settings { animation:tactical-settings-enter 260ms cubic-bezier(.16,1,.3,1); }
  @keyframes tactical-settings-enter { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:none; } }
 }
+
+/* AgentSheet secondary surfaces also live in Radix body portals. Keep the same
+   semantic palette in both trees; no preset values or global dialog tokens change. */
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog {
+  --settings-surface:var(--surface-overlay);
+  --settings-raised:var(--surface-panel);
+  --settings-subtle:var(--bg-panel);
+  --settings-border:var(--border);
+  --settings-radius-lg:2px;
+  --settings-radius-md:0px;
+  --settings-radius-sm:0px;
+  --session-settings-surface:var(--surface-overlay);
+  --session-settings-text:var(--text);
+  --session-settings-input:var(--bg-input);
+  min-width:0;
+  border:1px solid var(--border);
+  border-radius:2px;
+  background:var(--surface-overlay);
+  color:var(--text);
+  box-shadow:var(--shadow-raised);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog.session-settings {
+  width:min(600px,calc(100vw - 32px));
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-dialog-header {
+  align-items:flex-start;
+  padding:20px 24px 16px;
+  gap:16px;
+  border-bottom:1px solid var(--settings-border);
+  background:var(--bg-panel);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-dialog-title {
+  font:600 16px/1.5 var(--mono);
+  letter-spacing:0;
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-dialog-description {
+  font-size:12px;
+  line-height:1.6;
+  color:var(--text-dim);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog :is(.settings-dialog-close,.settings-action,.ps-btn) {
+  border-radius:0;
+  font-family:var(--font);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-action.primary {
+  background:var(--accent-soft);
+  border-color:var(--accent-edge);
+  color:var(--text);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-control {
+  min-height:36px;
+  padding:8px 10px;
+  font-size:13px;
+  border-radius:0;
+  background:var(--bg-input);
+  color:var(--text);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-control:focus {
+  box-shadow:none;
+  outline:1px solid var(--accent);
+  outline-offset:-1px;
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog :is(.settings-section-title,.cwd-settings-section-head h3) {
+  font:600 13px/1.5 var(--font);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .cwd-settings-section {
+  padding:16px;
+  gap:12px;
+  background:var(--settings-raised);
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .cwd-settings-dialog-identity {
+  grid-template-columns:18px minmax(0,1fr);
+  margin:0 24px 16px;
+  padding-block:16px;
+  gap:4px 8px;
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .cwd-settings-dialog-identity > span { grid-column:2; }
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog > .cwd-settings { margin-inline:24px; gap:16px; }
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .cwd-settings-footer {
+  padding:12px 0;
+  background:var(--surface-overlay);
+  gap:12px;
+  flex-wrap:wrap;
+}
+:is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-dialog-footer {
+  padding:16px 24px;
+  gap:12px;
+  background:var(--bg-panel);
+}
+@media (max-width:640px) {
+  :is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog .settings-dialog-header { flex-wrap:wrap; padding:16px; }
+  :is(body,.app)[data-interface-mode="terminal-like"] .agent-settings-dialog > .cwd-settings { margin-inline:16px; }
+}

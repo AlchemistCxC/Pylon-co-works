@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Folder, FolderOpen, Inbox, Pin, PinOff, Plus, Settings } from 'lucide-react'
+import { Folder, FolderOpen, Inbox, Pin, PinOff, Plus, Settings, X } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -282,14 +282,14 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
       <Dialog.Root open={Boolean(editingWorkspace)} onOpenChange={open => { if (!open) setEditingCwdId(null) }}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          {editingWorkspace && <Dialog.Content className="dialog-content settings-surface cwd-settings-dialog" aria-describedby="cwd-settings-description">
+          {editingWorkspace && <Dialog.Content className="dialog-content settings-surface agent-settings-dialog cwd-settings-dialog" aria-describedby="cwd-settings-description">
             <Dialog.Title asChild>
               <header className="session-settings-header settings-dialog-header">
                 <div>
                   <h3 className="settings-dialog-title">工作区设置</h3>
                   <p id="cwd-settings-description" className="settings-dialog-description">管理工作区目录、能力与默认上下文。</p>
                 </div>
-                <Dialog.Close className="modal-close settings-dialog-close" aria-label="关闭工作区设置">✕</Dialog.Close>
+                <Dialog.Close className="modal-close settings-dialog-close" aria-label="关闭工作区设置"><X size={16} aria-hidden="true" /></Dialog.Close>
               </header>
             </Dialog.Title>
             <div className="cwd-settings-dialog-identity">

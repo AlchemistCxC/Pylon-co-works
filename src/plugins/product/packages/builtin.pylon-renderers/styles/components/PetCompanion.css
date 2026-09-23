@@ -136,3 +136,42 @@
 
 .app[data-ui-scheme="dark"] .pet-companion { --pet-body:#7fa7b7;--pet-mark:#c1dedf;--pet-eye:#10171c;--pet-glow:#8de8dd; }
 @media (prefers-reduced-motion:reduce) { .pet-companion,.pixel-creature,.pixel-shadow,.pixel-tail,.pixel-ear,.pixel-antenna,.pixel-sparks,.pixel-core,.pixel-arm,.pixel-leg,.pet-code-fragment,.pet-speech-bubble,.pet-tablet-screen i { animation:none!important;transition:none!important; } }
+
+/* Terminal companion inspector: opaque readable surface, shared controls and
+   scroll budget. The pixel creature and its animation/state machine are intact. */
+.app[data-interface-mode="terminal-like"] .pet-panel {
+  width:292px;
+  max-width:calc(100vw - 24px);
+  max-height:min(440px,60vh);
+  overflow-y:auto;
+  padding:16px;
+  background:var(--surface-overlay);
+  border-color:var(--border);
+  box-shadow:var(--shadow-raised);
+}
+.app[data-interface-mode="terminal-like"] .pet-panel header { margin-bottom:16px; }
+.app[data-interface-mode="terminal-like"] .pet-panel header strong { font:600 14px/1.5 var(--font); }
+.app[data-interface-mode="terminal-like"] .pet-panel header span { font-size:11px; }
+.app[data-interface-mode="terminal-like"] .pet-needs { padding-block:12px; gap:12px; }
+.app[data-interface-mode="terminal-like"] .pet-need { font-size:11px; }
+.app[data-interface-mode="terminal-like"] .pet-panel-label { margin:16px 0 8px; font:600 12px/1.4 var(--font); letter-spacing:0; }
+.app[data-interface-mode="terminal-like"] .pet-panel :is(.pet-care-controls button,.pet-cosmetic-list button) {
+  min-height:32px;
+  height:auto;
+  padding:6px 8px;
+  font-size:11px;
+  transition:background var(--motion-fast) var(--ease-standard),border-color var(--motion-fast) var(--ease-standard);
+}
+.app[data-interface-mode="terminal-like"] .pet-cosmetic-list button.equipped { background:var(--accent-soft); border-color:var(--accent-edge); }
+.app[data-interface-mode="terminal-like"] .pet-panel-empty { padding:8px 0; font-size:11px; line-height:1.6; }
+/* Memories and achievements are text entries, not the 7px clothing swatches. */
+.app[data-interface-mode="terminal-like"] .pet-memories .pet-cosmetic-swatch {
+  width:auto;
+  height:auto;
+  padding:8px;
+  border-radius:0;
+  background:var(--bg-panel);
+  color:var(--text-dim);
+  font:11px/1.6 var(--font);
+  overflow-wrap:anywhere;
+}

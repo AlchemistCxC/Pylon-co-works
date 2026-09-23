@@ -44,4 +44,4 @@
 .sess-workspace-name { color:var(--text); font-size:12px; font-weight:620; }
 .sess-workspace-root { color:var(--text-dim); font:11px/1.5 var(--mono); word-break:break-all; }
 
-# 样式绞杀 P93：session-settings 对话框本体规则已 utility 化删除；以下保留规则被其它面板/暗色 scheme 共享。
+/* 样式绞杀 P93：session-settings 对话框本体规则已 utility 化删除；以下保留规则被其它面板/暗色 scheme 共享。 */

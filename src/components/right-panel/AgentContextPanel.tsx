@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { FileCode2, Files, Search } from 'lucide-react'
 import { useIdentityStore } from '../../identityStore'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { toAgentContextKey } from '../../agentContext'
@@ -120,10 +121,10 @@ export default function AgentContextPanel({ sheet, ctx }: { sheet: SheetRecord; 
   const touchedFiles = touchedContext ? touchedFilesRecord[toAgentContextKey(touchedContext)] ?? [] : []
 
   return (
-    <div className="context-panel-contribution">
+    <div className="context-panel-contribution agent-context-panel">
       <div className="context-panel-subnav">
-        <button type="button" className={`context-panel-mode ${mode === 'search' ? 'active' : ''}`} onClick={() => setMode('search')}>搜索</button>
-        <button type="button" className={`context-panel-mode ${mode === 'relations' ? 'active' : ''}`} onClick={() => setMode('relations')}>关联</button>
+        <button type="button" aria-pressed={mode === 'search'} className={`context-panel-mode ${mode === 'search' ? 'active' : ''}`} onClick={() => setMode('search')}><Search size={14} aria-hidden="true" />搜索</button>
+        <button type="button" aria-pressed={mode === 'relations'} className={`context-panel-mode ${mode === 'relations' ? 'active' : ''}`} onClick={() => setMode('relations')}><Files size={14} aria-hidden="true" />关联</button>
       </div>
       {mode === 'search' && (
         <MessageSearchBar
@@ -136,16 +137,24 @@ export default function AgentContextPanel({ sheet, ctx }: { sheet: SheetRecord; 
           onClose={() => { setSearchQuery(''); setSearchIndex(0) }}
         />
       )}
+      {mode === 'search' && (!searchQuery.trim() || matches.length === 0) && (
+        <div className="agent-context-empty flex flex-col items-start gap-3 p-4">
+          <Search size={24} strokeWidth={1.5} aria-hidden="true" />
+          <strong className="text-sm font-medium text-text">{searchQuery.trim() ? '没有匹配的消息' : '查找当前会话'}</strong>
+          <p className="m-0 text-sm leading-relaxed text-text-dim">{searchQuery.trim() ? '尝试缩短关键词，或换一种表述。' : '输入关键词定位消息，使用 Enter / Shift+Enter 切换结果。'}</p>
+        </div>
+      )}
       {mode === 'relations' && (
         <div className="agent-relations">
           <div className="file-section-title">关联文件</div>
           {touchedFiles.length === 0 ? (
-            <p className="file-section-hint">agent 尚未改动文件</p>
+            <div className="agent-context-empty flex flex-col items-start gap-3 p-4"><Files size={24} strokeWidth={1.5} aria-hidden="true" /><p className="m-0 text-sm leading-relaxed text-text-dim">agent 尚未改动文件</p></div>
           ) : (
             <ul className="search-result-list">
               {touchedFiles.map(file => (
                 <li key={`${file.path}:${file.at}`}>
-                  <span className="search-result-path">{file.path}</span>
+                  <FileCode2 size={14} className="shrink-0 text-text-dim" aria-hidden="true" />
+                  <span className="search-result-path min-w-0 break-all font-[family-name:var(--mono)]">{file.path}</span>
                 </li>
               ))}
             </ul>
