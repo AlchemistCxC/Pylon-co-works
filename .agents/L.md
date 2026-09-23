@@ -699,3 +699,18 @@
 
 ---
 
+
+---
+
+[2026-09-23 10] [Miyaki Kumo] [#267]
+
+**开工：issue267（markdown 数学公式 + GFM 脚注补全；ADR-0021）。** spec 见 `.agents/spec/267-markdown-math-footnotes.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/pylon-markdown/src/{parser.rs,model.rs(如需)}`、`parity/corpus.json` + `parity/rust-snapshot.json`（重生成）
+- `src/components/chat/markdownFastPath.ts`（补 math 触发模式）
+- `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx`（math 特判 + sup/section 白名单）+ 新增 `MathRender` 组件文件（mathRender.tsx）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（math/footnotes 样式节）
+- `package.json`/`bun.lock`（新增 temml）、`scripts/check-bundle-size.mjs`（budget 重定标）
+- 文档：`.agents/decisions/0021-*.md`、`.agents/records/267-*.md`、本文件
+
+**我不碰**：`streamingMarkdownSplit.ts`/`streamingCompute.ts`（split 语义不动）、`markdownRenderModel.ts`（形状泛型已够用，除非 graft 判据需跟随——届时补声明）、他人在途域。全程 pathspec 提交。
