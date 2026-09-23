@@ -2308,3 +2308,10 @@
 /* ── 链接：下划线偏移 + hover 加重 ── */
 .term-assistant .term-link { text-underline-offset:3px; }
 .term-assistant .term-link:hover { text-decoration-thickness:2px; }
+
+/* ── #272 表格列对齐：GFM 分隔符（:---:/---:）→ 模型 align 属性 → 此处生效。
+   无 align 属性 = left 缺省；属性选择器特异性高于上方 text-align:left 基线。 ── */
+.term-assistant .term-table th[align='center'],
+.term-assistant .term-table td[align='center'] { text-align:center; }
+.term-assistant .term-table th[align='right'],
+.term-assistant .term-table td[align='right'] { text-align:right; }

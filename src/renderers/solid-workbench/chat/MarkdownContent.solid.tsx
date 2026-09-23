@@ -356,7 +356,12 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
       : headingClass
   // #267：脚注条目的 `id`（user-content-fn-N）是回链锚点目标，通用路径透传。
   const nodeId = typeof node.properties.id === 'string' ? node.properties.id : undefined
-  return <Dynamic component={tagName} class={blockClass} id={nodeId}><MarkdownChildren children={node.children} /></Dynamic>
+  // #272：GFM 表格列对齐——解析层把 :---:/---: 落成 th/td 的 align 属性，
+  // 此处透传到 DOM（配合 ChatView.css 的 [align] 属性选择器生效）。
+  const cellAlign = (tagName === 'th' || tagName === 'td') && typeof node.properties.align === 'string'
+    ? node.properties.align
+    : undefined
+  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}><MarkdownChildren children={node.children} /></Dynamic>
 }
 
 function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {

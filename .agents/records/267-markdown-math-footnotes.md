@@ -123,3 +123,11 @@
 **终验**（生产重建版）：inline 可滚动溢出 44→**0**；CDP 可信滚轮落在行内公式上 → 页面正常滚动（2153→1753）、公式不动；17 显示 + 67 行内 MathML 渲染不变；LM Math Web 字体装载。display 块的 `overflow-x:auto`（长公式横滚）为有意设计保留。
 
 **调试成本教训**：standalone 跑 `*.solid.tsx` 之外的测试文件时，主 tsconfig 会把被排除的 `.solid.tsx` 经 import 拖回编译并以 React JSX 类型报错——导入 `.solid.tsx` 的测试一律命名 `*.solid.test.tsx`。
+
+## 追加修复（2026-09-24，#272：GFM 表格列对齐未生效）
+
+用户对齐/居中现状盘点发现：表格列对齐「三层断两层」——解析层已把 `:---:`/`---:` 映射为 th/td 的 `align` 属性（parity 锁定），但 Solid 渲染通用路径只透传 class/id（实机唯一表格 0 个 align 属性），且 CSS 基线 `text-align:left` 会压过 HTML align 属性。对照业界（VS Code markdown-it 内联样式、GitHub、Zed PR #53465、ChatGPT/Claude）均为「写了分隔符就尊重」。
+
+修复：MarkdownNode 通用路径对 th/td 透传 `align`；ChatView.css 排版层追加属性选择器 `[align='center'/right]`（特异性高于 left 基线；无属性 = left 缺省）。display 公式居中（#267）与用户消息纯文本不受影响。
+
+验证：`issue272.tableAlignment.solid.test.tsx`（真实 wasm 解析链：`:---:`/`---:` → th/td align 属性存活）+ ChatView.css.test.ts 对齐契约；实机注入对齐表格 computed textAlign = left/center/right 逐列正确。build、check:first-party-styles、chat 相关 71 文件/535 用例绿。
