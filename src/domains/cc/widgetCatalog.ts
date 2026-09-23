@@ -1,4 +1,4 @@
-import { CC_WIDGET_IDS, resolveCcWidgetGroup } from './widgetDefinitions.ts'
+import { resolveCcWidgetGroup } from './widgetDefinitions.ts'
 import type { CcWidgetContribution } from '../../plugin-runtime/cc-widget/ccWidgetTypes.ts'
 
 /**
@@ -43,12 +43,3 @@ export const BUILTIN_CC_SEND_BUTTON_CONTRIBUTION: CcWidgetContribution = Object.
   defaultPlacement: defaultPlacementOf('cc-send-button')!,
   render: { kind: 'host-renderer' as const, rendererKey: 'cc-send-button' },
 })
-
-/** Registered builtin contributions exposed through the CC widget channel. */
-export const BUILTIN_CC_WIDGET_CONTRIBUTIONS = Object.freeze([
-  BUILTIN_CC_SURFACE_CONTRIBUTION,
-  BUILTIN_CC_SEND_BUTTON_CONTRIBUTION,
-] as const)
-
-export type BuiltinCcWidgetId = typeof CC_WIDGET_IDS[number]
-export type CcWidgetRuntimeId = BuiltinCcWidgetId | (string & {})
