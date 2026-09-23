@@ -817,3 +817,18 @@
 - 文档：`.agents/records/274-*.md`（完工时新增）、`docs/说明书/` 如涉设置 sheet 表述同步、本文件
 
 **我不碰**：`src/workspaceStore.ts`（patchSheetState 浅合并语义保持，codec null 透传已足）、`src/renderers/**`、中控区、预设系统、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 10] [Miyaki Kumo] [#276]
+
+**开工：issue276（FileTabView markdown 预览摘除 react-markdown，收敛到 wasm 计算核单一解析实现）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- **新增** `src/sheets/file/MarkdownPreview.tsx`（React 侧渲染模型→JSX 通用映射）+ 对应 `__tests__`
+- `src/infrastructure/compute/markdownCompute.ts`（仅新增模型类型导出 + `parseMarkdown` 返回类型收窄，零运行时改动）
+- `src/sheets/file/FileTabView.tsx`（仅 markdown 预览段：换用 MarkdownPreview、删 Suspense/markdownLazy import）
+- **删除** `src/components/chat/markdownLazy.tsx`
+- `package.json`、`bun.lock`（移除 react-markdown / remark-gfm / remark-parse / remark-rehype / unified）
+- 文档：`.agents/spec/276-*.md`（gitignore）、`.agents/records/276-*.md`（完工时新增）、`docs/说明书/` 如涉 react-markdown 表述同步、本文件
+
+**我不碰**：`src/renderers/solid-workbench/**`（Solid 侧渲染/缓存/流式切片零改动）、`src-tauri/**`（wasm/Rust 出口零改动）、首方 CSS（FileSheet.css 零改动）、中控区、预设系统、他人在途域。全程 pathspec 提交。
