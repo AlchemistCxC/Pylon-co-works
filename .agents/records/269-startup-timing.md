@@ -62,7 +62,7 @@
 - commit：本条（`4a6ffe54..`）
 - 测试：`bunx vitest run src/app/__tests__/startupTiming.test.ts` 5 passed；`cargo test --lib` **809 passed / 0 failed**（exit 0）；`bunx vitest run src/kernel src/plugin-runtime/__tests__/builtinPluginBootstrap.test.ts src/app` 30 文件/179 用例全绿；全量 `bunx vitest run` 结果见 issue 回写
 - 门禁：`check:ipc` ok（213/145 双向一致）；eslint（6 个改动/新增文件）0 诊断
-- 手工验证：实机时间线读数见 issue #269 评论（release 构建 + `list_runtime_logs` 查 `source="startup"`）
+- 手工验证：**实机验收已过**（vite build + cargo build + 真机启动，webview2 MCP `list_runtime_logs`）：恰一条 `source="startup"` 条目（id=11），`fields.process` 10 相位、`fields.frontend` 8 相位、`receivedEpochMs` 齐备。实测读数（2026-09-24，本机无默认 agent 配置）：`process_entry=0 → config_loaded=7 → windows_created=43 → setup_enter=543（插件初始化+WebView 创建为最大段）→ persistence_ready=561 → setup_complete=565`；前端 `main_module_eval=107 → builtins_activated=186 → app_bootstrap_start=237（App chunk≈51ms）→ hydrated=356 → ready=493`；进程起点→前端 ready 全程 **1021ms**；epochMs 单调不减 ✓。
 
 ## 与 spec 的偏差
 
@@ -71,8 +71,9 @@
 
 ## 未解问题
 
-1. **release 实机验收**：需 `bun run build` + cargo build 后实机启动一次，`list_runtime_logs` 应见恰一条 `source="startup"` 条目。注：`tsc -b` 在 HEAD 上有 6 个 #267 既有错误，会阻塞本地 `bun run build` 全链——在本会话内用 vite 构建验证或等 #267 修复后补验（见 #267 评论）。
+1. ~~release 实机验收~~ **已完成**（debug profile 实机：插桩非 DEV 门化，debug 即代表性）。正式 release profile 的数字留待 #270 前后对照时一并在 release 构建采集。
 2. `main_module_eval` 不含 import 求值与脚本前开销（与 timeOrigin 的差值可另行估算）；是否需要在 `index.html` 加内联最早 mark 受 CSP `script-src` 限制（生产无 `unsafe-inline`），当前不做。
+3. 首轮实测已给出的优化坐标（供 #270/#271 决策）：① `windows_created→setup_enter` ≈ 500ms 是进程侧最大段（Tauri 插件 init + WebView2 创建，属固定地板，#270 作用不在此）；② 本机无默认 agent，`default_agent_connect_settled=12ms`——#270 的收益需在**配置了真实 CLI agent**的机器上对照测量；③ 前端 module_eval→ready 386ms，其中 hydration 119ms + agents/dictionary/status/listeners 137ms。
 
 ## 并行交集
 
