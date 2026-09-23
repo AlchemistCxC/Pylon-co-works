@@ -772,3 +772,17 @@
 门禁五步全绿、全量 627 文件 / 4752 通过（与上一刀同数，纯断言同步）、快照 diff 全可解释、实机 A/B 两种情况均量过。
 ★ 两处清单外最小补齐（`zustandWorkbenchAppearanceStore.ts`、`migration.ts` 的 ccScale 改名链）已在记录「与 spec 的偏差」里说明，供复审推翻。
 ★ 实机实测订正了施工单一条前提：**出厂预设里有 6 套自带非 100 的缩放值（90/95）** ⇒ 用这些预设的人用量字号会变（不是"只有手动调过的人"）。
+
+---
+
+[2026-09-23 06] [Baryon] [#238 · 刀7 补验]
+
+**续开工：刀7 补验（现场实机 + 一条文档，不动代码）。** 分支**沿用** `feat/cc-widget-definition-table`。前置：刀7 已完工并复核通过（`73d50c03`）。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `.agents/skills/webview2-acceptance/SKILL.md`（坑清单补第二条：渲染器层的类型检查只在 `check:solid`）
+- `.agents/records/238-cc-widget-definition-table-knife7-remove-scale.md`（**追补验一节**，不新开文件）
+- 本文件
+
+**不碰**：`src/**` 一行不动（补验只做现场确认 + 文档）；不新增/修改断言；`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
