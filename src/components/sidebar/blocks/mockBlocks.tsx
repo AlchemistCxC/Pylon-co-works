@@ -35,7 +35,7 @@ const MOCK_TASKS = { running: 2, queued: 5, done: 18, total: 25 }
 function DemoBadge() {
   return (
     <span
-      className="inline-flex items-center rounded-[var(--ui-radius-xs)] border border-[color-mix(in_srgb,var(--warning)_45%,var(--border))] bg-[var(--warning-soft)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--warning)]"
+      className="inline-flex shrink-0 whitespace-nowrap items-center rounded-[var(--ui-radius-xs)] border border-[color-mix(in_srgb,var(--warning)_45%,var(--border))] bg-[var(--warning-soft)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--warning)]"
       title="演示区块：静态占位数据，尚未接入真实能力"
     >
       演示
@@ -47,7 +47,7 @@ export function ScheduledBlock({ presentation = 'block' }: Partial<AgentSidebarC
   const isPage = presentation === 'page'
   return (
     <div className={isPage ? 'mock-page' : undefined} data-demo="true">
-      <div className="mb-[var(--ui-space-2)]"><DemoBadge /></div>
+      <div className="sidebar-demo-caption flex items-center mb-1"><DemoBadge /></div>
       {isPage && <p className="mock-page-lead">按计划唤醒 Agent。这里只是占位，尚未接调度器。</p>}
       <ul className="sidebar-block-list" aria-label="定时任务">
         {MOCK_SCHEDULES.map(item => (
@@ -74,7 +74,7 @@ export function AutomationBlock({ presentation = 'block' }: Partial<AgentSidebar
   const isPage = presentation === 'page'
   return (
     <div className={isPage ? 'mock-page' : undefined} data-demo="true">
-      <div className="mb-[var(--ui-space-2)]"><DemoBadge /></div>
+      <div className="sidebar-demo-caption flex items-center mb-1"><DemoBadge /></div>
       {isPage && <p className="mock-page-lead">规则式自动化。占位内容，未接 hook 运行时。</p>}
       <ul className="sidebar-block-list" aria-label="自动化">
         {MOCK_AUTOMATIONS.map(item => (
@@ -94,7 +94,7 @@ export function AutomationBlock({ presentation = 'block' }: Partial<AgentSidebar
 export function TasksBlock() {
   return (
     <div className="sidebar-block-metrics" data-demo="true">
-      <div className="col-span-full"><DemoBadge /></div>
+      <div className="sidebar-demo-caption col-span-full flex items-center"><DemoBadge /></div>
       <div className="sidebar-block-metric"><strong>{MOCK_TASKS.running}</strong><span>进行中</span></div>
       <div className="sidebar-block-metric"><strong>{MOCK_TASKS.queued}</strong><span>待办</span></div>
       <div className="sidebar-block-metric"><strong>{MOCK_TASKS.done}</strong><span>已完成</span></div>

@@ -25,7 +25,11 @@ import { createComputeRuntime } from './wasmRuntime.ts'
 
 /** markdown 计算核出口（与 Rust 侧 `pylon_markdown::wasm_exit` 一一对应）。 */
 export interface MarkdownCompute {
-  /** markdown 文本 → 渲染模型（root 树， hast 同构）。 */
+  /**
+   * markdown 文本 → 渲染模型（root 树，hast 同构，形状见 `MarkdownModelRoot`）。
+   * 返回类型保持 `unknown`：过界值是信任边界，消费方各自显式转型/归一
+   * （Solid 侧 `normalizeRoot`，React 侧 `as MarkdownModelRoot`），不在出口处假装已验证。
+   */
   parseMarkdown(text: string): unknown
   /**
    * 引擎版本标记（随 crate 版本走），供诊断与 parity 记录。
@@ -37,6 +41,34 @@ export interface MarkdownCompute {
    */
   markdownEngineVersion(): string
 }
+
+// ── 渲染模型类型（#276 起为跨框架共享契约）────────────────────────────────
+//
+// Rust `pylon_markdown::model::RenderNode` 的 serde JSON 投影（字段逐一同名，
+// hast 同构：`type`/`tagName`/`properties`/`children`/`value`；`tagName` camelCase）。
+// Solid 侧消费在 `src/renderers/solid-workbench/chat/markdownRenderModel.ts`
+// （含 LRU/graft，暂保留其自有同名类型），React 侧消费在 `sheets/file/MarkdownPreview.tsx`。
+// 形状由 parity 快照（`src-tauri/pylon-markdown/parity/`）逐字段钉死。
+
+export interface MarkdownModelText {
+  type: 'text'
+  value: string
+}
+
+export interface MarkdownModelElement {
+  type: 'element'
+  tagName: string
+  /** hast 语义属性名（camelCase，如 `className`/`ariaLabel`/`dataFootnoteRef`）。 */
+  properties: Readonly<Record<string, string | number | boolean | readonly (string | number | boolean)[]>>
+  children: readonly MarkdownModelNode[]
+}
+
+export interface MarkdownModelRoot {
+  type: 'root'
+  children: readonly MarkdownModelNode[]
+}
+
+export type MarkdownModelNode = MarkdownModelElement | MarkdownModelText
 
 const runtime = createComputeRuntime('pylon-markdown', glue, () => init())
 

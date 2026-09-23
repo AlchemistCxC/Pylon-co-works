@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { sanitizeHtml } from '../../components/chat/htmlSanitizer'
 import { highlightCode } from '../../components/chat/codeHighlight'
-import { MarkdownRenderer } from '../../components/chat/markdownLazy'
+import { MarkdownPreview } from './MarkdownPreview'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
 import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
@@ -25,7 +25,7 @@ export interface FileSaveReceipt {
  * FileTabView — 文件视图（W2-04 只读 + I08-A-FE-02 编辑模式）。
  *
  * 只读：read_workspace_text → 代码（highlightCode + sanitizeHtml 安全路径，行号 gutter）或
- * markdown（复用导出 MarkdownRenderer，无 gutter）；truncated 状态可读。
+ * markdown（MarkdownPreview，wasm 计算核解析，无 gutter）；truncated 状态可读。
  * 编辑：模块私有 CodeMirror 6 承载内容，输入经 onContentChange 上报（不落盘）；选区经
  * onSelectionChange 报 1-based 行号。dirty 感知 touchVersion 重载：编辑中磁盘变化
  * 时若用户有未保存编辑 → onExternalChange 上报冲突（绝不静默覆盖）；无编辑 → 安全
@@ -321,9 +321,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     <div ref={readViewRef} className="file-tab-view" data-path={path}>
       {isMarkdown ? (
         <div className="file-tab-md">
-          <Suspense fallback={<p className="file-tab-hint">加载 Markdown…</p>}>
-            <MarkdownRenderer>{content}</MarkdownRenderer>
-          </Suspense>
+          <MarkdownPreview text={content} />
         </div>
       ) : (
         <div className="file-tab-code" data-file-code-layout="shared" data-lang={highlighted?.lang ?? languageFromPath(path)} data-highlighted={highlighted ? 'true' : 'false'}>

@@ -832,3 +832,7 @@
 - 文档：`.agents/spec/276-*.md`（gitignore）、`.agents/records/276-*.md`（完工时新增）、`docs/说明书/` 如涉 react-markdown 表述同步、本文件
 
 **我不碰**：`src/renderers/solid-workbench/**`（Solid 侧渲染/缓存/流式切片零改动）、`src-tauri/**`（wasm/Rust 出口零改动）、首方 CSS（FileSheet.css 零改动）、中控区、预设系统、他人在途域。全程 pathspec 提交。
+
+---
+[2026-09-24] [Codex-Aster] [AgentSheet terminal-like 视觉重构]
+范围：AgentSheet 左右栏展示组件、对应 workspace/shell CSS、工作区/Profile/宠物/会话设置视觉、验收与记录。保持所有业务及插件契约、预设数据、布局宽度与折叠语义。避开 #276 Markdown 文件域。共享树当前有他人在途改动，依 §2.1 暂不 merge/stage/commit；本声明暂未提交。

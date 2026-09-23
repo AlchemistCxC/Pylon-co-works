@@ -63,18 +63,12 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "codemirror": "^6.0.2",
-    "hast-util-to-html": "^9.0.5",
     "lucide-react": "^1.26.0",
     "motion": "^12.42.2",
     "react": "^19",
     "react-dom": "^19",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "remark-parse": "^11.0.0",
-    "remark-rehype": "^11.1.2",
     "solid-js": "^1.9.14",
     "temml": "^0.13.5",
-    "unified": "^11.0.5",
     "zustand": "^5"
   },
   "devDependencies": {

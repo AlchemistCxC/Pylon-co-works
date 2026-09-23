@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
@@ -116,7 +117,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
-          className="dialog-content settings-surface settings-dialog session-settings w-[min(760px,calc(100vw-32px))] max-w-[760px] max-h-[min(88vh,860px)] flex flex-col"
+          className="dialog-content settings-surface settings-dialog agent-settings-dialog session-settings w-[min(760px,calc(100vw-32px))] max-w-[760px] max-h-[min(88vh,860px)] flex flex-col"
           aria-describedby="session-settings-description"
         >
           <Dialog.Title asChild>
@@ -128,7 +129,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
               <Dialog.Close className="modal-close settings-dialog-close" onClick={event => {
                 event.preventDefault()
                 beforeClose()
-              }} aria-label="关闭会话设置">✕</Dialog.Close>
+              }} aria-label="关闭会话设置"><X size={16} aria-hidden="true" /></Dialog.Close>
             </header>
           </Dialog.Title>
 
@@ -140,7 +141,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
                   <p className="session-settings-section-description settings-section-description">用于侧栏识别。</p>
                 </div>
               </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(190px,.55fr)] gap-3.5 max-[640px]:grid-cols-1">
+              <div className="grid grid-cols-1 gap-3.5">
                 <div className="sess-field min-w-0">
                   <label htmlFor="session-name">名称</label>
                   <input id="session-name" className="settings-control" value={name} onChange={event => setName(event.target.value)} />
@@ -148,7 +149,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
               </div>
             </section>
 
-            <section className="session-settings-danger shrink-0 flex items-center justify-between gap-[22px] px-[18px] py-4 border border-[color-mix(in_srgb,var(--danger)_34%,var(--settings-border))] rounded-[var(--settings-radius-md)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] max-[640px]:items-stretch max-[640px]:flex-col" aria-labelledby="session-danger-title">
+            <section className="session-settings-danger shrink-0 flex items-center justify-between gap-4 p-4 border border-danger-edge rounded-[var(--settings-radius-md)] bg-danger-soft max-[640px]:items-stretch max-[640px]:flex-col" aria-labelledby="session-danger-title">
               <div>
                 <h4 id="session-danger-title" className="m-0 text-danger text-[13px] font-[680]">危险区域</h4>
                 <p className="mt-[5px] mb-0 text-text-dim text-sm leading-[1.5]">删除后会关闭后端会话并清理本地消息缓存，无法撤销。</p>

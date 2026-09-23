@@ -1,5 +1,5 @@
 import { Fragment, Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronsUpDown } from 'lucide-react'
+import { ChevronsUpDown, PawPrint, SlidersHorizontal } from 'lucide-react'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 
@@ -403,7 +403,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   // #154：本组件提供左栏内容；外壳挂共享几何类 .sidebar（宽度/竖直分割线/折叠可见性
   // 全归布局层，各 Sheet 不得自带宽度或边框）。
   return (
-    <aside className="sidebar">
+    <aside className="sidebar agent-sidebar">
       {/* 单一滚动容器：各模块都是内容高度，整栈一起滚。这样「模块」只有一种形状，
           会话不再是「另一个会自己滚动的分区」。 */}
       <div className="sidebar-modules" role="list">
@@ -418,15 +418,17 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       </div>
 
       <div className="profile-bar">
+        <div className="profile-list flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" aria-label="Profiles">
         {profiles.map(p => (
           <button key={p.id} className={`profile-avatar ${p.id === activeProfileId ? 'active' : ''}`}
+            type="button" title={p.name} aria-label={p.name} aria-pressed={p.id === activeProfileId}
             onClick={() => setActiveProfile(p.id)}>
             {p.avatar ? <img src={p.avatar} alt={p.name} /> : p.name[0]}
           </button>
         ))}
-        {/* #116 子项 4：同排宠物按钮的 title 已是中文，此处原为 "Edit Profile"。 */}
-        <button className="profile-edit" title="编辑当前 Profile" onClick={ctx.openProfileEdit}>✎</button>
-        <button className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}>🐾</button>
+        </div>
+        <button type="button" className="profile-edit" title="编辑当前 Profile" aria-label="编辑当前 Profile" onClick={ctx.openProfileEdit}><SlidersHorizontal size={15} aria-hidden="true" /></button>
+        <button type="button" className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-label={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}><PawPrint size={15} aria-hidden="true" /></button>
       </div>
     </aside>
   )

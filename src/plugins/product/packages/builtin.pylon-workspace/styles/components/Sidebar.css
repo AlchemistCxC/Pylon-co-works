@@ -282,42 +282,129 @@
 
 .session-empty { padding:20px 14px; text-align:center; color:var(--text-dim); font-size:13px; }
 
-/* Terminal-like session rail. 行是**单行紧凑**的（与全局基线一致，不再另开 40px 档）；
-   保留终端风格的硬边界与命令行选中标记，但把行距与内边距收到与全局同一量级——
-   旧值 40px + 5px 内边距让「空旷」在终端模式下更明显。 */
-.app[data-interface-mode="terminal-like"] .session-list {
-  display:flex;
-  flex-direction:column;
-  gap:2px;
-  padding:4px 6px 8px;
+/* Terminal AgentSheet: one rail, quiet rows, persistent selected marker.
+   Geometry, module ordering and collapse remain owned by the existing host. */
+.app[data-interface-mode="terminal-like"] .agent-sidebar {
+  --sidebar-rail-pad: 10px;
+  color:var(--sidebar-text-color,var(--text));
 }
-.app[data-interface-mode="terminal-like"] .session-item {
-  min-height:26px;
-  padding:1px 6px 1px calc(var(--sidebar-rail-pad, 6px) - 2px);
-  border-color:color-mix(in srgb,var(--border) 78%,transparent);
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-modules {
+  padding-block:8px 12px;
+  gap:4px;
+  scrollbar-gutter:stable;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-head {
+  min-height:32px;
+  gap:4px;
+  padding-block:4px;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-head:hover {
+  background:var(--bg-hover);
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-toggle {
+  min-height:24px;
+  color:inherit;
+  font-weight:600;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.sidebar-block-icon,.cwd-group-folder) {
+  color:var(--text-dim);
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block[data-page-open="true"] > .sidebar-block-head {
+  background:var(--accent-soft);
+  box-shadow:inset 2px 0 var(--accent);
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block[data-always-open="true"] > .sidebar-block-head {
+  background:var(--sidebar-bg,var(--surface-panel));
+  backdrop-filter:none;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.sidebar-block-action,.sidebar-block-collapse,.cwd-group-add) {
   border-radius:0;
-  background:color-mix(in srgb,var(--bg-panel) 28%,transparent);
+  min-height:24px;
 }
-.app[data-interface-mode="terminal-like"] .session-item:hover {
-  border-color:color-mix(in srgb,var(--accent) 42%,var(--border));
-  background:color-mix(in srgb,var(--accent) 5%,var(--bg-hover));
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-action {
+  padding-inline:4px;
 }
-.app[data-interface-mode="terminal-like"] .session-item.active {
-  /* 选中用阴影表达，不再画框：左侧强调条（inset）+ 一层柔和外阴影。 */
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-body-inner > [data-demo] {
+  margin:0 10px 4px;
+  padding:4px 0;
+  border:0;
+  background:transparent;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-list { padding:0; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-demo-caption { min-height:16px; line-height:1; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-row {
+  min-height:28px;
+  padding:4px 0;
+  border-radius:0;
+  background:transparent;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-row-copy {
+  display:flex;
+  flex-direction:row;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-row-meta { font-size:10px; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .sidebar-block-row-name {
+  font-size:var(--sidebar-name-size,14px);
+  font-weight:500;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .search-field {
+  min-height:32px;
+  margin-block:4px 8px;
+  border-radius:0;
+  background:var(--bg-input);
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .cwd-group {
+  border-radius:0;
+  margin-block:2px;
+}
+.app[data-interface-mode="terminal-like"] .agent-sidebar .cwd-group-head { min-height:30px; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .cwd-group-toggle { min-height:28px; border-radius:0; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .cwd-group-name { font-weight:600; color:inherit; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-list { display:flex; flex-direction:column; gap:2px; padding:0; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item {
+  min-height:28px;
+  padding:2px 6px 2px calc(var(--sidebar-rail-pad,6px) - 2px);
   border-color:transparent;
-  background:color-mix(in srgb,var(--accent) 11%,var(--bg-panel));
-  box-shadow:inset 3px 0 0 var(--accent),0 1px 2px color-mix(in srgb,var(--text) 12%,transparent),0 2px 8px color-mix(in srgb,var(--text) 7%,transparent);
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
 }
-.app[data-interface-mode="terminal-like"] .session-item.active::before {
-  display:none;
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item:hover { background:var(--bg-hover); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item.active {
+  border-color:transparent;
+  background:var(--accent-soft);
+  box-shadow:inset 3px 0 0 var(--accent);
 }
-.app[data-interface-mode="terminal-like"] .session-item.active .session-name {
-  color:var(--text);
-  font-weight:650;
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item.active::before { display:none; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item.active .session-name { color:var(--sidebar-text-color,var(--text)); font-weight:650; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .session-item.active .session-meta { color:var(--text-dim); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .profile-bar {
+  flex:0 0 auto;
+  min-height:48px;
+  padding:8px 10px;
+  gap:8px;
+  background:var(--bg-panel);
 }
-.app[data-interface-mode="terminal-like"] .session-item.active .session-meta {
-  color:color-mix(in srgb,var(--accent) 66%,var(--text-dim));
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet) {
+  display:grid;
+  place-items:center;
+  flex:0 0 28px;
+  width:28px;
+  height:28px;
+  padding:0;
+  border:1px solid transparent;
+  border-radius:0;
+  background:transparent;
+  color:var(--text-dim);
+  transition:background var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard);
 }
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet):hover { background:var(--bg-hover); color:var(--text); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .profile-avatar.active { border-color:var(--accent-edge); background:var(--accent-soft); color:var(--accent); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar .profile-pet[aria-pressed="true"] { color:var(--accent); background:var(--accent-soft); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet):focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 
 /* collapsed —— #154：折叠是**布局层状态**（`.layout[data-sidebar="collapsed"]`），
    不再由各 Sheet 自己加类。宽度已由 --sheet-sidebar-track-width 归零；这里把整列
@@ -546,14 +633,14 @@
 }
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover {
   color:var(--text);
-  border-color:color-mix(in srgb,var(--border) 76%,var(--accent));
-  background:color-mix(in srgb,var(--bg-hover) 72%,transparent);
+  border-color:var(--accent-edge);
+  background:var(--bg-hover);
 }
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:hover,
 .app[data-interface-mode="terminal-like"] .session-actions > .session-action:focus-visible {
   color:var(--text);
-  border-color:color-mix(in srgb,var(--border) 76%,var(--accent));
-  background:color-mix(in srgb,var(--bg-hover) 72%,transparent);
+  border-color:var(--accent-edge);
+  background:var(--bg-hover);
 }
 /* 键盘聚焦时给**真正的焦点环**：上面那条逗号列表里 :hover 与 :focus-visible 共用
    「描边 + 底色」的显形样式，对键盘用户不够明确（也与仓内其它 :focus-visible 用
