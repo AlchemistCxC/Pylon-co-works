@@ -66,8 +66,9 @@ describe('主题设置展示文案契约', () => {
 
   it('诊断中点名的模糊字段表达真实作用域', () => {
     expect(THEME_FIELD_DEFS.assistantDot.label).toBe('显示助手消息标记')
-    expect(THEME_FIELD_DEFS.ccVariant.label).toBe('整体风格')
     expect(THEME_FIELD_DEFS.footerLayout.label).toBe('底部信息布局')
+    // ★ #238 刀8：原「整体风格」（ccVariant）已整套删除 ⇒ 本条样本换成另一个 noCssVar 布尔/文本类字段
+    expect(THEME_FIELD_DEFS.ccLayout.label).toBe('布局')
   })
 
   it('中控属性面板与设置页使用同一套用户语言', () => {

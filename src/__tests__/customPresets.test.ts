@@ -23,7 +23,7 @@ describe('custom preset ID / theme whitelist（原 test-custom-preset-id.mts）'
   const upserted = upsertCustomPreset([first, second], updated)
   const pickedTheme = pickCustomPresetTheme({
     globalBgColor: '#abcdef',
-    ccScale: { input: 100 },
+    ccBgImage: 'url(fixture.png)',
     appliedPreset: { global: 'stale' },
     custom: { global: true },
     ccEditMode: true,
@@ -55,7 +55,7 @@ describe('custom preset ID / theme whitelist（原 test-custom-preset-id.mts）'
   })
 
   it('pickCustomPresetTheme 仅保留白名单键', () => {
-    expect(pickedTheme).toEqual({ globalBgColor: '#abcdef', ccScale: { input: 100 } })
+    expect(pickedTheme).toEqual({ globalBgColor: '#abcdef', ccBgImage: 'url(fixture.png)' })
   })
 })
 
@@ -73,6 +73,7 @@ describe('customPresets CRUD 与业务键隔离（原 test-custom-presets.mts）
     bgBlur: 12,
     barFillFollow: true,
     spinnerSize: 18,
+    // ★ 刀7：`ccScale` 已从主题字段表移除 ⇒ 与 barFillFollow 同样被白名单挡掉（样本保留，判据反转）
     ccScale: { tokens: 95 },
     appliedPreset: { global: 'glass' },
     custom: { global: true },
@@ -135,10 +136,11 @@ describe('customPresets CRUD 与业务键隔离（原 test-custom-presets.mts）
       globalFont: 'mono',
       bgBlur: 12,
       spinnerSize: 18,
-      ccScale: { tokens: 95 },
     })
     // 刀4：barFillFollow 已从主题字段表移除 → 与未知字段同样被白名单挡掉
     expect('barFillFollow' in picked).toBe(false)
+    // 刀7：ccScale 同理（用户口径「我预期里没有缩放这一项」；整字段删除，不留残留键）
+    expect('ccScale' in picked).toBe(false)
     expect('appliedPreset' in picked).toBe(false)
     expect('custom' in picked).toBe(false)
     expect('ccEditMode' in picked).toBe(false)

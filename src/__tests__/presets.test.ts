@@ -6,36 +6,39 @@ import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, prese
 import { effectivePresetTheme, pickZoneFields } from '../zones/index.ts'
 import { ZONE_FIELDS } from '../themeFieldDefs.ts'
 
-const field = 'ccStatusFontSize'
+// ★ #238 刀5：原样本字段 `ccStatusFontSize` 已删除（设置页三项收尾之一），
+//   故改用它旁边仍存在的 `inputFontSize` 作**同形样本** —— 下面锁的仍然是
+//   「cc zone 归属唯一 + pickZoneFields 只切本区 + 字段序契约」这三件事。
+const field = 'inputFontSize'
 
-describe('ccStatusFontSize zone 归属契约', () => {
+describe('cc zone 归属契约（样本字段 inputFontSize；#238 刀5 换样本）', () => {
   it('built-in 与 custom preset 路径都把字段保留在 cc zone，且不重复归属', () => {
     expect(ZONE_FIELDS.cc.includes(field)).toBe(true)
     expect(ZONE_FIELDS.cc.filter(item => item === field).length).toBe(1)
   })
 
-  it('cc zone 字段顺序契约：ccBgImage < ccStatusFontSize < ccVariant', () => {
+  it('cc zone 字段顺序契约：ccBgImage < inputTextColor < inputFontSize', () => {
     const ccIndexes = ZONE_FIELDS.cc.map(item => String(item))
     const bg = ccIndexes.indexOf('ccBgImage')
-    const size = ccIndexes.indexOf('ccStatusFontSize')
-    const style = ccIndexes.indexOf('ccVariant')
-    expect(bg >= 0 && size > bg && style > size).toBe(true)
+    const mid = ccIndexes.indexOf('inputTextColor')
+    const size = ccIndexes.indexOf('inputFontSize')
+    expect(bg >= 0 && mid > bg && size > mid).toBe(true)
   })
 
-  it('pickZoneFields 从 cc zone 提取 ccStatusFontSize，不提取 chat 字段', () => {
-    const explicitPresetTheme = pickZoneFields({ ccStatusFontSize: 17, chatFontSize: 99 }, 'cc')
-    expect(explicitPresetTheme.ccStatusFontSize).toBe(17)
+  it('pickZoneFields 从 cc zone 提取 inputFontSize，不提取 chat 字段', () => {
+    const explicitPresetTheme = pickZoneFields({ inputFontSize: 17, chatFontSize: 99 }, 'cc')
+    expect(explicitPresetTheme.inputFontSize).toBe(17)
     expect('chatFontSize' in explicitPresetTheme).toBe(false)
-    expect(pickZoneFields({ ccStatusFontSize: 17 }, 'chat').ccStatusFontSize).toBeUndefined()
+    expect(pickZoneFields({ inputFontSize: 17 }, 'chat').inputFontSize).toBeUndefined()
   })
 
-  it('built-in preset 应用提取子集后保留而非抹除 ccStatusFontSize', () => {
+  it('built-in preset 应用提取子集后保留而非抹除 inputFontSize', () => {
     // built-in preset 未覆写时可继承 DEFAULTS 的值；
     // 因此应用提取子集必须保留默认值而不是擦除它。
     for (const preset of GLOBAL_PRESETS) {
       const subset = pickZoneFields(effectivePresetTheme(preset), 'cc')
-      const applied = { ccStatusFontSize: 14, ...subset }
-      expect(typeof applied.ccStatusFontSize).toBe('number')
+      const applied = { inputFontSize: 12, ...subset }
+      expect(typeof applied.inputFontSize).toBe('number')
     }
   })
 })

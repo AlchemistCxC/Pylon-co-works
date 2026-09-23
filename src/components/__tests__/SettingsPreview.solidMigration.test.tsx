@@ -53,7 +53,6 @@ describe('SettingsPreview Solid 中控迁移', () => {
     template.style.setProperty('--cc-input-font-size', '18')
     template.style.setProperty('--cc-input-text', '#fafafa')
     template.style.setProperty('--cc-input-placeholder', '#b0b0b0')
-    template.style.setProperty('--cc-variant', 'pill')
     document.body.append(template)
 
     const view = render(<SettingsPreview zone="global" />, { container: template })
@@ -81,7 +80,8 @@ describe('SettingsPreview Solid 中控迁移', () => {
     expect(controlCenter.style.getPropertyValue('--cc-input-font-size')).toBe('18px')
     expect(controlCenter.style.getPropertyValue('--cc-input-text')).toBe('#fafafa')
     expect(controlCenter.style.getPropertyValue('--cc-input-placeholder')).toBe('#b0b0b0')
-    expect(controlCenter.classList.contains('cc-variant-pill')).toBe(true)
+    // ★ #238 刀8：变体类名（`cc-variant-*`）已整族删除 ⇒ 预览也不再带任何变体类
+    expect([...controlCenter.classList].some(name => name.startsWith('cc-variant-'))).toBe(false)
 
     view.unmount()
     template.remove()

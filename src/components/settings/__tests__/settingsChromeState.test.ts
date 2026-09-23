@@ -29,8 +29,10 @@ describe('折叠记忆', () => {
   it('空存储读出空 map；写多条后全量还原', () => {
     expect(readCollapsed(() => null)).toEqual({})
     const store = new Map<string,string>()
-    writeCollapsed({ 'chat.字体': false, 'cc.外观风格': true }, (_k, v) => store.set(k2('collapse'), v))
-    expect(readCollapsed(get2(store))).toEqual({ 'chat.字体': false, 'cc.外观风格': true })
+    // ★ #238 刀6：cc 区的组名换成了**子部件名**（本例取新分组里真实存在的 `输入框本体`）。
+    //   键的形状（`<zone>.<组名>`）不变 —— 这里只是取一个现役的组名当样本。
+    writeCollapsed({ 'chat.字体': false, 'cc.输入框本体': true }, (_k, v) => store.set(k2('collapse'), v))
+    expect(readCollapsed(get2(store))).toEqual({ 'chat.字体': false, 'cc.输入框本体': true })
   })
 })
 

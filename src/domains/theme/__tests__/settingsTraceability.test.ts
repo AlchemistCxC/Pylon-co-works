@@ -58,7 +58,6 @@ describe('settings traceability contract (D-trace)', () => {
       'ccEditMode',
       'ccHidden',
       'ccLayout',
-      'ccScale',
       'custom',
       'rightWidth',
       'showPet',

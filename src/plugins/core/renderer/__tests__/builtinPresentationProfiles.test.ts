@@ -12,7 +12,6 @@ const TERMINAL_CLASSIC_SNAPSHOT = {
     msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'system',
     msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', inputBg: 'rgba(0,0,0,0.02)',
     inputBorderColor: '', inputFocusBorder: 'rgba(0,0,0,0.22)', inputRadius: 0,
-    ccVariant: 'terminal',
     assistantDot: false, toolIndicator: '●', toolIndicatorRun: 'circle', toolIndicatorOk: 'circle', toolIndicatorErr: 'circle', toolIndicatorGlow: 0,
     toolConnectorMode: 'none', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
     cliHintMode: 'compact', footerLayout: 'free',
@@ -28,7 +27,7 @@ const COMPLETE_SURFACE_TOKENS = [
 
 const COMPLETE_CC_INPUT_TOKENS = [
   'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
-  'inputRadius', 'ccVariant', 'cliHintMode', 'footerLayout',
+  'inputRadius', 'cliHintMode', 'footerLayout',
 ] as const
 
 describe('built-in terminal-like presentation profiles', () => {

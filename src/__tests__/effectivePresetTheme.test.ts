@@ -24,10 +24,38 @@ import { THEME_DEFAULTS } from '../themeFieldDefs.ts'
 
 const REPO_ROOT = resolve(__dirname, '..', '..')
 
-/** 改造前 10 套预设的 `theme` 字段数（取自开工前导出 `global-presets-theme.json`，逐套手抄）。 */
+/**
+ * 逐套预设的 `theme` 字段数基线（原取自开工前导出 `global-presets-theme.json`，逐套手抄）。
+ *
+ * ★ #238 刀5：按**新的真实键数**重算过一次 —— 真值由 `.agents/spec/238-刀5-probe-preset-counts.mts`
+ * 跑出来（不是手推，也不是为了让测试绿而猜）。它的职责是「预设有效值不许**悄悄**丢键」；
+ * 字段表**显式**增删时基线随表同步演进，属正常生命周期。
+ *
+ * 本刀的账（6 套「完整快照」型预设 = 5 套 terminal + `gui/solarized`，它们的 cc 区切面带 `cliHintMode`）：
+ * `191 − 3（删 ccStatusFontSize / statusBg / statusBgImage）+ 1（加 ccHintFontSize）= 189`。
+ * 新增的 `ccHintFontSize: 16` 是**手补进那 6 套出厂 cc 条目**的（生成脚本已删，见施工单 §6.2）。
+ * 另外 4 套是**局部覆盖**型，值一个没动：
+ * - `glass` 69：其 cc 区 21 键，本来就没有那三项、也没有 `cliHintMode` ⇒ 不进不出；
+ * - `agent-command` / `agent-map` / `focus-flow` 各 36：cc 区仅 6 键，同理。
+ *
+ * ★ #238 刀7（删掉缩放）：`ccScale` 整字段删除 ⇒ 基线再按**真值**重算一次。
+ * 本刀的账：**含 `ccScale` 键的预设各 −1**
+ * - 6 套「完整快照」型（claude / nord / tokyo / solarized / amber / matrix）`189 → 188`；
+ * - `glass` `69 → 68`（它的 cc 区切面里有 `ccScale: {tokens:100, model:100, mode:100}`）；
+ * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区仅 6 键，从不含 `ccScale`）。
+ * ★ 真值由脚本实测得出（不是手推）：逐套打印 `Object.keys(effectivePresetTheme(p)).length` 与
+ * `'ccScale' in t`，结果与上面的账逐条一致（见刀7 开发记录「证据」）。
+ *
+ * ★ #238 刀8（删掉整体风格）：`ccVariant` 整字段删除 ⇒ 基线第三次按**真值**重算。
+ * 本刀的账：**含 `ccVariant` 键的预设各 −1**
+ * - 6 套「完整快照」型（claude / nord / tokyo / solarized / amber / matrix）`188 → 187`；
+ * - `glass` `68 → 67`（它的 cc 区切面里有 `ccVariant`）；
+ * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区不含 `ccVariant`）。
+ * ★ 同样由脚本实测（`Object.keys(...).length` + `'ccVariant' in t`），与上面的账逐条一致。
+ */
 const BASELINE_FIELD_COUNTS: Record<string, number> = {
-  claude: 191, glass: 69, nord: 191, tokyo: 191, solarized: 191,
-  amber: 191, matrix: 191, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
+  claude: 187, glass: 67, nord: 187, tokyo: 187, solarized: 187,
+  amber: 187, matrix: 187, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
 }
 
 /** 该预设的有效值 —— 用测试侧独立算法（直接并池里的 5 个切面），不复用被测函数。 */
@@ -57,7 +85,7 @@ describe('B1 有效值等价（视图 == 五区切面之并集）', () => {
       const padded = Object.keys(view).filter(key => !(key in unionOfZoneSlices(preset.name, preset.interfaceMode)))
       expect(padded, `${preset.name} 不得多出并集以外的键（"先铺默认值"会多出这些）`).toEqual([])
       for (const key of Object.keys(view)) {
-        expect(key in THEME_DEFAULTS || key === 'ccHidden' || key === 'ccLayout' || key === 'ccScale',
+        expect(key in THEME_DEFAULTS || key === 'ccHidden' || key === 'ccLayout',
           `${preset.name}/${key} 应是主题字段`).toBe(true)
       }
     }

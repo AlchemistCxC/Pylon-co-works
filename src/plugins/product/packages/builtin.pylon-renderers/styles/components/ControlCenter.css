@@ -18,10 +18,14 @@
   border-radius:inherit;
   z-index:0;
 }
+/* ★ #238 刀3：发送按钮的「贴输入栏右侧」现在由定义表声明（`x: { anchor:'input', side:'right', gap }`），
+   间距经 `--cc-send-anchor-gap` 注入；下面的 calc 是**档位**（inline 贴里侧 / external 贴外沿）
+   与运行期尺寸（输入栏高、按钮大小）的换算，不是可声明的常量。
+   ⚠ 垂直居中那段 top:calc(...) 原样保留 —— 锚点模型没有等价表达，强改必变像素（施工单 §2.5）。 */
 .cc-send-button {
   position:absolute;
   top:calc(var(--cc-input-offset-top,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
-  right:var(--cc-input-offset-top,10px);
+  right:calc(var(--cc-send-anchor-gap,0px) + var(--cc-input-offset-top,10px));
   z-index:3;
   width:var(--cc-send-size,32px);
   height:var(--cc-send-size,32px);
@@ -39,7 +43,7 @@
 .cc-send-icon--stroke.cc-send-icon--round { stroke-linejoin:round; stroke-linecap:round; }
 .cc-send-icon--solid { fill:var(--cc-send-icon-color,#fff); stroke:none; }
 .cc-send-button[data-mode="inline"] {
-  right:calc(var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
+  right:calc(var(--cc-send-anchor-gap,0px) + var(--cc-input-margin-x,10px) + var(--cc-input-height,40px) / 2 - var(--cc-send-size,32px) / 2);
 }
 .cc-send-button:disabled { cursor:default; }
 .cc-input-shadow-clip {
@@ -116,43 +120,32 @@
 .cc-footer-status { display:flex; flex-direction:column; gap:0; min-width:0; min-height:0; }
 .cc-footer-status-row {
   display:flex; align-items:center; min-width:0; min-height:18px;
-  /* 与 free 布局 .cc-status-row 对齐：否则 peri 布局信息栏继承父级大字号，widget 偏高 */
-  font-family:var(--mono); font-size:max(14px, var(--cc-status-font-size, 14px)); line-height:1.35;
+  /* 与 free 布局 .cc-status-row 对齐：否则 peri 布局信息栏继承父级大字号，widget 偏高。
+     ★ #238 刀5：行字号固定 16px —— 原来源是主题字段 `ccStatusFontSize`（已删除），
+     其现值就是 `max(14px, 16px)`。分隔点、空态控件大小因此逐项不变。 */
+  font-family:var(--mono); font-size:16px; line-height:1.35;
 }
 .cc-status-row {
   display:flex; align-items:center; justify-content:flex-start;
   gap:0; min-width:0; flex-wrap:wrap; row-gap:3px;
-  min-height:18px; font-family:var(--mono); font-size:max(14px, var(--cc-status-font-size, 14px)); line-height:1.35;
+  min-height:18px; font-family:var(--mono); font-size:16px; line-height:1.35;
 }
-.cc-status-primary, .cc-status-secondary, .cc-actions {
+/* ★ #238 刀3：信息控件容器 = **一个落脚处一个容器**（原三个槽位包装 div `.cc-status-primary`
+   / `-secondary` / `.cc-actions` 与它们的 `order:1/2/3` 已随槽位层拆除）。 */
+.cc-status-group {
   display:flex; align-items:center; gap:0; min-width:0;
 }
-.cc-status-secondary { order:1; }
-.cc-status-primary { order:2; }
-.cc-actions { order:3; }
 .cc-command-hint {
-  order:4; flex-basis:100%; width:100%; margin-left:0; padding-left:0;
-  color:var(--text-dim); font-size:0.86em; font-weight:400; opacity:0.72;
-  display:block; line-height:1.35; white-space:nowrap; text-align:right; transform:translateY(-3px);
+  /* ★ #238 刀5A：字号自己管自己（原来是整行的 `0.86em`）。默认 16px 与固定后的行字号同值
+     ⇒ 折算结果 13.76px。
+     ★ 刀5B：它已是**普通行内元件**（有多宽占多宽）⇒ **整行特化全部删除**
+     （`order` / `flex-basis:100%` / `width:100%` / `text-align:right` / `transform:translateY`），
+     这里只留"这几个字自己长什么样"。 */
+  color:var(--text-dim); font-size:calc(var(--cc-hint-font-size, 16px) * 0.86); font-weight:400; opacity:0.72;
+  line-height:1.35; white-space:nowrap;
 }
 .cc-command-hint-key { color:var(--text-dim); }
 .cc-command-hint i { padding:0 7px; color:var(--text-dim); font-style:normal; opacity:0.65; }
-/* 信息栏分隔：每两个实际可见控件之间只出现一个中点。
-   组内按相邻 widget 分隔，跨 slot 组按相邻非空组分隔。 */
-.cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before,
-.cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
-.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
-  content:' · '; padding:0 7px; color:var(--text-dim); opacity:0.65;
-}
-.cc-widget-separator {
-  display:inline-block;
-  flex:0 0 auto;
-  padding-inline:var(--ui-space-2);
-  color:var(--text-dim);
-  opacity:.48;
-  user-select:none;
-}
 .cc-widget { position:relative; overflow:visible; display:flex; align-items:center; }
 /* Widget failures must not participate in the status-row layout. Backend
    diagnostics can include an advertised model list and therefore be long. */
@@ -190,7 +183,8 @@
 .cc-widget.cc-natural > * { flex:none; }
 /* 按钮型控件恒不压缩：model / reasoning / mode / tasks 可点击，tokens（用量显示）
    为同款外观但不可点击。窄窗装不下时宁可让内容伸出容器，也不把按钮压扁到互相重叠
-   （S10 回归根因：槽 .cc-status-secondary 会被压到 300px 上下，而三控件自然宽共 450px）。
+   （S10 回归根因：当时承载它们的槽会被压到 300px 上下，而三控件自然宽共 450px；
+     #238 刀3 起那个槽已拆成 `.cc-status-group`，这条约束仍然必要）。
    新增"按钮型"控件时需登记到下面这组选择器。 */
 .cc-widget.cc-natural[data-widget-id='model'],
 .cc-widget.cc-natural[data-widget-id='reasoning'],
@@ -199,7 +193,6 @@
 
 @media (max-width:900px) {
   .cc-status-row { row-gap:2px; }
-  .cc-command-hint { width:100%; padding-left:0; text-align:right; }
   .cc-command-hint .cc-hint-tertiary { display:none; }
 }
 @media (max-width:720px) {
@@ -232,24 +225,14 @@
 }
 .control-center.cli-mode .cc-footer-peri { flex:0 0 auto; }
 .control-center.cli-mode .cc-footer-peri .cc-footer-status { flex:0 0 auto; }
-.control-center.cli-mode .cc-footer-peri .cc-command-hint { flex-basis:auto; width:100%; }
 .app[data-cli-overflow-mode="grow"] .control-center.cli-mode { height:auto; }
 .app[data-cli-overflow-mode="grow"] .control-center.cli-mode .cc-body { height:auto; min-height:var(--cc-min-height,64px); }
 .app[data-cli-overflow-mode="overlay"] .control-center.cli-mode,
 .app[data-cli-overflow-mode="fixed-scroll"] .control-center.cli-mode { height:var(--cc-height,76px); }
 
-/* ── ccVariant styles ── */
-.cc-variant-glass .cc-widget .pill,
-.cc-variant-glass .cc-widget button,
-.cc-variant-glass .cc-widget [class*="pill"] {
-  border-radius: 0; backdrop-filter:blur(10px); background:rgba(255,255,255,0.06) !important;
-  color:rgba(255,255,255,0.85) !important; border:1px solid rgba(255,255,255,0.08) !important;
-}
-.cc-variant-pill .cc-widget .pill,
-.cc-variant-pill .cc-widget button,
-.cc-variant-pill .cc-widget [class*="pill"] {
-  border-radius: 0;
-}
+/* ── 变体样式（`.cc-variant-*`）已于 #238 刀8 整族删除 ──
+   原「整体风格」三值（terminal/glass/pill）是"界面模式那一层"的东西、设置页那个入口是假入口
+   ⇒ 字段、类名与本段样式一并退场。原文留档（仓外）见 `任务\预设修正\备份\ccVariant-留档\`。 */
 
 /* ── Edit mode shell ── */
 .control-center.cc-editing { outline:2px dashed var(--accent); outline-offset:-2px; z-index:20; }
@@ -359,24 +342,15 @@
   padding-inline: var(--ui-space-1);
 }
 
-.cc-status-primary,
-.cc-status-secondary,
-.cc-actions {
+.cc-status-group {
   gap: var(--ui-space-1);
   /* 窄窗（面板被侧栏挤到约 300px 时）容不下按钮型控件的自然宽：
-     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让槽内换行，
+     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让组内换行，
      保证控件完整可见（宁可信息栏升到两行，也不压扁/裁掉控件）。 */
   flex-wrap: wrap;
   align-content: center;
 }
 
-.cc-status-row .cc-widget + .cc-widget::before,
-.cc-footer-status-row .cc-widget + .cc-widget::before,
-.cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
-.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
-  padding-inline: var(--ui-space-2);
-  opacity: .48;
-}
 
 .cc-widget.cc-natural > button,
 .cc-widget.cc-natural > [role="button"] {
@@ -407,9 +381,6 @@
 }
 .cc-tasks-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.cc-variant-glass .cc-tasks-pill { border-radius: 0; }
-.cc-variant-pill .cc-tasks-pill { border-radius: 0; }
-
 /* 会话创建上下文与运行态：新控件使用局部信息片，不改变旧 widget API。 */
 .cc-info-chip {
   display:inline-flex;
@@ -437,18 +408,8 @@
 }
 .app[data-presentation-profile="builtin.presentation.paper-low-contrast"] .cc-info-chip { border-radius:3px; background:rgba(163,128,72,.045); }
 .app[data-presentation-profile="builtin.presentation.console-glass"] .cc-info-chip { border-radius:10px; background:rgba(255,255,255,.07); backdrop-filter:blur(12px); }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-info-chip { border-radius:8px; background:color-mix(in srgb,var(--surface-raised) 76%,transparent); }
 @media (prefers-reduced-motion:reduce) { .cc-activity-chip[data-running="true"] > svg { animation:none; } }
 
-.app[data-interface-mode="modern-gui"] .modern-command-dock { position:absolute; z-index:8; left:clamp(14px,4vw,48px); right:clamp(14px,4vw,48px); bottom:14px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .control-center { height:auto; min-height:94px; overflow:visible; border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border)); border-radius:16px; background:color-mix(in srgb,var(--surface-overlay) 88%,transparent); box-shadow:0 18px 50px rgba(0,0,0,.16); backdrop-filter:blur(24px) saturate(1.15); }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-bg { border-radius:inherit; opacity:.42; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-body { padding:10px 12px 8px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-status-row,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-footer-status-row { font-family:var(--font); font-size:11px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-widget.cc-natural > button,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-widget.cc-natural > [role="button"],
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-tasks-pill { border-radius:8px; }
 .app[data-interface-mode="modern-gui"] .modern-replay-continue { left:clamp(14px,4vw,48px); right:clamp(14px,4vw,48px); bottom:14px; border-radius:13px; }
 
 /* Terminal command rail: the footer follows the textarea's text start while
@@ -457,9 +418,4 @@
   padding-left:1.4em;
   padding-right:0;
   align-items:baseline;
-}
-.app[data-interface-mode="terminal-like"] .control-center.cli-mode .cc-command-hint {
-  padding-left:0;
-  padding-right:0;
-  transform:translateY(-2px);
 }

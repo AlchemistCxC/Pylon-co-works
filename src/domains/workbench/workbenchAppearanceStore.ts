@@ -1,4 +1,4 @@
-import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, setCcScaleState, updateCcPlacementState } from '../../ccLayoutState.ts'
+import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../../ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
 import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
 import {
@@ -104,8 +104,6 @@ export function reduceAppearanceCommand(
       return { ...theme, ccEditMode: command.enabled }
     case 'set-cc-hidden':
       return settleCcHeight({ ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) })
-    case 'set-cc-scale':
-      return { ...theme, ccScale: setCcScaleState(theme.ccScale, command.id, command.scale) }
     case 'set-cc-height': {
       const ccHeight = clampCcHeight(command.height, {
         inputMode: theme.inputMode,

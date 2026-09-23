@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './ccLayoutState.ts'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
@@ -16,7 +16,7 @@ import {
 } from './zones/index.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
-import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration.ts'
+import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { defaultPresetForInterfaceMode } from './presets/index.ts'
@@ -76,7 +76,9 @@ export interface ThemeSettings {
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
   inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
-  statusBg: string; statusBgImage: string; pillText: string; prismOnColor: string
+  /** #238 刀5：命令行提示自己的字号（原为整条信息行继承 `ccStatusFontSize`，已删除） */
+  ccHintFontSize: number
+  pillText: string; prismOnColor: string
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
@@ -108,9 +110,7 @@ export interface ThemeSettings {
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
-  ccStatusFontSize: number
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
-  ccVariant: string
   reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
   modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; sendVariant: string
   permissionSwitchMode: string; permissionBgColor: string; permissionWidth: number; permissionHeight: number; permissionRadius: number; permissionFontSize: number; permissionTextColor: string
@@ -119,7 +119,6 @@ export interface ThemeSettings {
   ccHidden: string[]
   ccLayout: CcLayoutV3
   ccEditMode: boolean
-  ccScale: Record<string, number>  // naturalSize 控件独立缩放% (50-200) key=widget id
   appliedPreset: Record<string, string>
   custom: Record<string, boolean>
 }
@@ -145,7 +144,6 @@ type ThemeState = ThemeSettings & {
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
-  setCcScale: (id: string, scale: number) => void
   resetTheme: () => void
   /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
@@ -192,6 +190,14 @@ function sourceMarksZoneCustom(source: SettingWriteSource): boolean {
 
 let customPresetApplyRevision = 0
 let customPresetApplyTail: Promise<void> = Promise.resolve()
+
+/** 迁移 / 结构对齐共用的默认值包（base 传 DEFAULTS，避免域→store 循环）。 */
+const THEME_MIGRATION_DEFAULTS = {
+  base: DEFAULTS,
+  appliedPreset: DEFAULTS.appliedPreset,
+  custom: DEFAULTS.custom,
+  ccLayout: DEFAULTS.ccLayout,
+}
 
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
@@ -251,10 +257,6 @@ export const useStore = create<ThemeState>()(persist(
       ...markZoneCustom(state, 'cc'),
     }
   }),
-  setCcScale: (id, scale) => set(state => ({
-    ccScale: setCcScaleState(state.ccScale, id, scale),
-    ...markZoneCustom(state, 'cc'),
-  })),
 
   resetTheme: () => {
     recordSettingWrites('theme-reset', '*', Object.keys(DEFAULTS))
@@ -274,7 +276,7 @@ export const useStore = create<ThemeState>()(persist(
 
   resetZone: (zone) => set(state => {
     const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
-    // 只重置标量主题字段；ccLayout/ccHidden/ccScale 等对象字段走专用动作（避免误清用户排布）
+    // 只重置标量主题字段；ccLayout/ccHidden 等对象字段走专用动作（避免误清用户排布）
     const reset = Object.fromEntries(
       fields
         .filter(field => {
@@ -546,15 +548,21 @@ export const useStore = create<ThemeState>()(persist(
     },
     removeItem: key => localStorage.removeItem(key),
   })),
-  migrate: (persisted, version) =>
-  themeDomainMigrate(persisted, {
-    base: DEFAULTS,
-    appliedPreset: DEFAULTS.appliedPreset,
-    custom: DEFAULTS.custom,
-    ccLayout: DEFAULTS.ccLayout,
-  }, version),
+  migrate: (persisted, version) => themeDomainMigrate(persisted, THEME_MIGRATION_DEFAULTS, version),
+  /**
+   * ★★ #238 刀2：读盘后的**结构对齐**每次读盘无条件跑（不依赖版本号）。
+   *
+   * 挂钩为什么选 `merge` 而不是 `onRehydrateStorage`：zustand 的 hydrate 用**原始 set**
+   * 落 `merge` 的返回值（不触发写盘），只有真的跑过 `migrate` 才 `setItem()` ——
+   * 所以对齐**不产生任何额外写盘 / 订阅广播**；且 `migrate → merge` 的顺序保证
+   * 它跑在一次性语义转换之后。
+   *
+   * 语义：缺项补默认、多余项忽略、**用户手调的 offsetX/offsetY/order 与已设字段值一律保留**
+   * （既定口径：「布局归一化不是把用户排布拍平」）。幂等，见 `alignThemeStructure`。
+   */
+  merge: (persisted, current) => ({ ...current, ...alignThemeStructure(persisted, THEME_MIGRATION_DEFAULTS) }),
   partialize: (state) => {
-    // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden/ccScale 对象）+ 显式 meta。
+    // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden 对象）+ 显式 meta。
     // 取代"排除式 partialize"——杜绝新增 action/临时字段误持久化，并修剪迁移遗留的旧键。
     const persisted: Record<string, unknown> = {}
     for (const key of THEME_SETTING_KEYS) persisted[key] = state[key]

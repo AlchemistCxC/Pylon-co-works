@@ -83,3 +83,26 @@ function extractBlock(source: string, selector: string): string {
   const close = source.indexOf('}', open)
   return source.slice(open + 1, close).replaceAll(/\s+/g, '')
 }
+
+const controlCenterCss = css('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css')
+
+describe('#238 刀5B · 分隔点整族已删 + 命令行提示不再是整行元件（CSS 侧守卫）', () => {
+  it('分隔点那族在两张样式表里都没有残留（"删一半"会被这条抓到）', () => {
+    for (const [name, source] of [['ControlCenter.css', controlCenterCss], ['WorkbenchChrome.css', chromeCss]] as const) {
+      expect(source, `${name} 仍有 .cc-widget-separator`).not.toContain('cc-widget-separator')
+      expect(source, `${name} 仍有 element + element 的 ::before 分隔规则`).not.toContain('.cc-widget + .cc-widget::before')
+      expect(source, `${name} 仍有压住 ::before 的 content:none 收口`).not.toContain('content: none !important')
+    }
+  })
+
+  it('`.cc-command-hint` 没有整行特化：不占整行、不自己排到行尾、不做位移', () => {
+    // 断言前先剥掉注释 —— 块里的注释**会提到**被删掉的那些属性（说明"删了哪些"），不该被误判
+    const block = extractBlock(controlCenterCss, '.cc-command-hint').replaceAll(/\/\*[\s\S]*?\*\//g, '')
+    for (const banned of ['order:', 'flex-basis:', 'width:100%', 'text-align:', 'transform:']) {
+      expect(block, `.cc-command-hint 仍带整行特化 ${banned}`).not.toContain(banned)
+    }
+    // 该留的还在（有多宽占多宽 + 自己的字号）
+    expect(block).toContain('font-size:calc(var(--cc-hint-font-size,16px)*0.86)')
+    expect(block).toContain('white-space:nowrap')
+  })
+})

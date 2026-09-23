@@ -46,10 +46,12 @@ describe('Skin Resolver（S5-B）', () => {
     expect(defaults['data-msg-style']).toBe('terminal')
     expect(defaults['data-message-layout']).toBe('classic')
 
-    const overridden = resolveSkinDataAttributes({ uiScheme: 'dark', messageLayout: 'claude', ccVariant: 'glass' })
+    const overridden = resolveSkinDataAttributes({ uiScheme: 'dark', messageLayout: 'claude', cliOverflowMode: 'overlay' })
     expect(overridden['data-ui-scheme']).toBe('dark')
     expect(overridden['data-message-layout']).toBe('claude')
-    expect(overridden['data-cc-variant']).toBe('glass')
+    expect(overridden['data-cli-overflow-mode']).toBe('overlay')
+    // ★ #238 刀8：`data-cc-variant` 连生产者一起删除 ⇒ 该属性不再出现在皮肤数据属性里
+    expect('data-cc-variant' in overridden).toBe(false)
   })
 
   it('不修改输入 layer 对象', () => {

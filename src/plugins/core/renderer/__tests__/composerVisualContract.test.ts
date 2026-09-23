@@ -13,8 +13,7 @@ describe('non-classic composer visual contract', () => {
     expect(css).toContain(`[data-presentation-profile="${profileId}"] .input-bar:not(.cli-mode)`)
   })
 
-  it('Modern GUI 使用独立 command dock composer，经典终端被总作用域排除', () => {
-    expect(css).toContain('[data-interface-mode="modern-gui"] .modern-command-dock .input-bar:not(.cli-mode)')
+  it('经典终端被总作用域排除', () => {
     expect(css).toContain(':not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode)')
   })
 

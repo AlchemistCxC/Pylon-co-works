@@ -5,7 +5,7 @@
  *   它是**唯一真值**：10 套出厂预设的有效值由它算出（`effectivePresetTheme`）——
  *   改这里的任何一个值，等于改掉所有引用它的预设。历史来源见 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
  * 值 = 生成时刻的 `pickZoneFields(GLOBAL_PRESETS[来源].theme, 'cc')`，逐字段照抄
- * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden/ccScale 三个元件名单字段）。
+ * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden 两个元件名单字段）。
  */
 import type { ZonePresetEntry } from '../zonePresetPool.ts'
 
@@ -20,15 +20,9 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
     values: {
       ccHeight: 96,
       ccBg: "rgba(255,255,255,0.20)",
-      ccVariant: "pill",
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 100,
-        "model": 100,
-        "mode": 100
-      },
       inputBg: "rgba(0,0,0,0.03)",
       inputTextColor: "rgba(0,0,0,0.80)",
       inputPlaceholder: "rgba(0,0,0,0.22)",
@@ -62,8 +56,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       ccBg: "#fdf6e3",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -97,6 +89,11 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -108,11 +105,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 95,
-        "model": 95,
-        "mode": 95
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -154,10 +146,9 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "full",
+      ccHintFontSize: 16,
       footerLayout: "free",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "#586e75",
       prismOnColor: "#859900",
       modelSwitchMode: "cycle",

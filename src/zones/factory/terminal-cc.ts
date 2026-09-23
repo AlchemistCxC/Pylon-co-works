@@ -5,7 +5,7 @@
  *   它是**唯一真值**：10 套出厂预设的有效值由它算出（`effectivePresetTheme`）——
  *   改这里的任何一个值，等于改掉所有引用它的预设。历史来源见 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
  * 值 = 生成时刻的 `pickZoneFields(GLOBAL_PRESETS[来源].theme, 'cc')`，逐字段照抄
- * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden/ccScale 三个元件名单字段）。
+ * （含终端补全烘入的默认值；cc 区含 ccLayout/ccHidden 两个元件名单字段）。
  */
 import type { ZonePresetEntry } from '../zonePresetPool.ts'
 
@@ -25,8 +25,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#000000",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -60,6 +58,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -71,11 +74,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 90,
-        "model": 90,
-        "mode": 90
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -117,10 +115,9 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "full",
+      ccHintFontSize: 16,
       footerLayout: "peri",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "rgba(205,214,244,0.6)",
       prismOnColor: "#4ade80",
       modelSwitchMode: "cycle",
@@ -164,8 +161,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#252838",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -199,6 +194,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -210,11 +210,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 95,
-        "model": 95,
-        "mode": 95
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -256,10 +251,9 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "compact",
+      ccHintFontSize: 16,
       footerLayout: "free",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "rgba(136,192,208,0.75)",
       prismOnColor: "#a3be8c",
       modelSwitchMode: "cycle",
@@ -303,8 +297,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#1a1b26",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -338,6 +330,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -349,11 +346,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 95,
-        "model": 95,
-        "mode": 95
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -395,10 +387,9 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "compact",
+      ccHintFontSize: 16,
       footerLayout: "free",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "#a9b1d6",
       prismOnColor: "#9ece6a",
       modelSwitchMode: "cycle",
@@ -442,8 +433,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#120b00",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -477,6 +466,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -488,11 +482,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 95,
-        "model": 95,
-        "mode": 95
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -534,10 +523,9 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "compact",
+      ccHintFontSize: 16,
       footerLayout: "free",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "#cc8c00",
       prismOnColor: "#ffc24b",
       modelSwitchMode: "cycle",
@@ -581,8 +569,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#050f05",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccStatusFontSize: 16,
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -616,6 +602,11 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
             "offsetX": 0,
             "offsetY": 0
           },
+          "cc-command-hint": {
+            "order": 5,
+            "offsetX": 0,
+            "offsetY": 0
+          },
           "cc-send-button": {
             "slot": "actions",
             "order": 0,
@@ -627,11 +618,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
-      ccScale: {
-        "tokens": 95,
-        "model": 95,
-        "mode": 95
-      },
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -673,10 +659,9 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       cliLinePadding: 3,
       cliContentOffsetY: 0,
       cliHintMode: "compact",
+      ccHintFontSize: 16,
       footerLayout: "free",
       cliOverflowMode: "fixed-scroll",
-      statusBg: "transparent",
-      statusBgImage: "",
       pillText: "#39ff14",
       prismOnColor: "#39ff14",
       modelSwitchMode: "cycle",

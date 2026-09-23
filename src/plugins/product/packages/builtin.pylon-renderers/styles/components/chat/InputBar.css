@@ -237,21 +237,6 @@
   box-shadow:0 16px 42px rgba(15,23,42,.14),inset 0 1px 0 rgba(255,255,255,.28);
   backdrop-filter:blur(22px) saturate(1.18);
 }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-bar:not(.cli-mode) {
-  padding:8px 9px 9px;
-  border-radius:15px;
-  background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 7%,var(--surface-canvas)),color-mix(in srgb,var(--surface-canvas) 82%,transparent));
-  box-shadow:0 12px 30px rgba(15,23,42,.10),inset 0 1px 0 color-mix(in srgb,#fff 38%,transparent);
-}
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-composer-kind::after {
-  content:'PYLON';
-  margin-left:4px;
-  padding-left:8px;
-  border-left:1px solid color-mix(in srgb,var(--border) 76%,transparent);
-  color:var(--text-dim);
-  font-size:9px;
-  letter-spacing:.12em;
-}
 @media (max-width:760px) { .input-composer-shortcut { display:none; } }
 
 .input-bar.cli-mode { border:none; background:transparent; padding-top:0; overflow:visible; }
@@ -288,17 +273,6 @@
   color:var(--cli-prompt-color,var(--cli-text-color,#999)); font-family:var(--mono); font-size:var(--cc-input-font-size,var(--input-font-size,17px));
   font-weight:400; padding:0 8px 0 4px; line-height:1.4; transform:translateY(var(--cli-content-offset-y,0px));
 }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-row { gap:6px; padding:0; border:0; border-radius:0; background:transparent; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-textarea { min-height:46px; padding:10px 9px 8px; border:0; border-radius:0; background:transparent; font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--input-font-size,14px); line-height:var(--msg-line-height,var(--chat-line-height,1.35)); box-shadow:none; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-btn { width:38px; height:38px; margin:0; border:0; border-radius:10px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-btn.attach { background:transparent; color:var(--text-dim); }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-btn.send { background:var(--accent); color:#fff; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-btn svg { opacity:.8; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .command-palette,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .queued-message-list,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-history-hint,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-error,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .input-binding-status { border-radius:12px; box-shadow:0 16px 40px rgba(0,0,0,.18); }
 
 @media (prefers-reduced-motion:reduce) {
   .input-bar,

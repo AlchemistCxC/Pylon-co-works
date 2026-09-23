@@ -8,9 +8,9 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     // 可落槽控件 = 内置轨 ∪ 注册轨中占槽位者（cc-send-button）
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements).sort()).toEqual([...CC_WIDGET_IDS, 'cc-send-button'].sort())
     // S11：pct 并入 tokens；用量控件默认排在权限控件右侧
-    expect(DEFAULT_CC_LAYOUT.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
+    expect(DEFAULT_CC_LAYOUT.placements.tokens).toMatchObject({ order: 5 })
     // 刀4：legacy `send` 的槽位事实迁到注册轨 id
-    expect(DEFAULT_CC_LAYOUT.placements['cc-send-button']).toMatchObject({ slot: 'actions', order: 0 })
+    expect(DEFAULT_CC_LAYOUT.placements['cc-send-button']).toMatchObject({ order: 0 })
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).not.toContain('pct')
     // 刀4 删除的 5 个 id 不得再出现在默认布局里
     for (const id of ['session', 'workspace', 'activity', 'ekg', 'send', 'tasks']) {
@@ -26,9 +26,9 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     legacyPlacements.send = { slot: 'actions', order: 7, offsetX: 4, offsetY: -2 }
 
     const normalized = normalizeCcLayout({ version: 6, placements: legacyPlacements } as unknown as Partial<CcLayoutV3>)
-    expect(normalized.placements.model).toMatchObject({ slot: 'actions', order: 9, offsetX: 12, offsetY: -4 })
+    expect(normalized.placements.model).toMatchObject({ order: 9, offsetX: 12, offsetY: -4 })
     // 刀4 数据迁移：键名换、位置不动
-    expect(normalized.placements['cc-send-button']).toMatchObject({ slot: 'actions', order: 7, offsetX: 4, offsetY: -2 })
+    expect(normalized.placements['cc-send-button']).toMatchObject({ order: 7, offsetX: 4, offsetY: -2 })
   })
 
   it('v8 老布局不被重置（版本白名单显式含 8）', () => {
@@ -40,7 +40,7 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     }
     const normalized = normalizeCcLayout(v8 as unknown as Partial<CcLayoutV3>)
     expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
-    expect(normalized.placements.model).toMatchObject({ slot: 'actions', order: 9, offsetX: 11, offsetY: -3 })
+    expect(normalized.placements.model).toMatchObject({ order: 9, offsetX: 11, offsetY: -3 })
     // 未提供的老键回落默认布局
     expect(normalized.placements.tokens).toEqual(DEFAULT_CC_LAYOUT.placements.tokens)
   })
@@ -60,18 +60,27 @@ describe('Control Center layout v9（刀4 名单换代）', () => {
     const normalized = normalizeCcLayout(v7 as unknown as Partial<CcLayoutV3>)
     expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
     // 现役 id 的位置保留
-    expect(normalized.placements.model).toMatchObject({ slot: 'actions', order: 9, offsetX: 11, offsetY: -3 })
-    expect(normalized.placements.tokens).toMatchObject({ slot: 'status-primary', order: 1, offsetX: -2, offsetY: 4 })
+    expect(normalized.placements.model).toMatchObject({ order: 9, offsetX: 11, offsetY: -3 })
+    expect(normalized.placements.tokens).toMatchObject({ order: 1, offsetX: -2, offsetY: 4 })
     // legacy `send` 键名换、位置不动
-    expect(normalized.placements['cc-send-button']).toMatchObject({ slot: 'actions', order: 4, offsetX: 8, offsetY: -1 })
+    expect(normalized.placements['cc-send-button']).toMatchObject({ order: 4, offsetX: 8, offsetY: -1 })
     // 已删 id 自然丢弃
     expect(Object.keys(normalized.placements)).not.toContain('session')
     expect(Object.keys(normalized.placements)).not.toContain('ekg')
   })
 
-  it('不在白名单里的版本整份回落默认布局', () => {
+  // ★ #238 刀2 逐条点名：本用例的**样本一字未动**（版本 2 + 用户拖过的 model 位置），
+  // 只把**期望**从「整份回落默认布局」改成「不再整份重置、按 id 合并保留用户位置」。
+  // 改的原因：版本白名单整段退场 —— 旧写法把"磁盘上的版本号不在白名单里"当成
+  // "这份数据不可用"，而白名单内插了「当前版本」这个变量 ⇒ 每次升版本号就自动少一项，
+  // v7 就这么被漏掉过（磁盘上版本 7 的布局被整份丢弃、回落默认、不报错）。
+  // 现在版本号不再参与"用不用老数据"；结构对齐每次读盘无条件跑。
+  it('版本号是历史值/垃圾值也不再整份重置：按 id 合并并保留用户位置（#238 刀2）', () => {
     const v2 = { version: 2, placements: { model: { slot: 'actions' as const, order: 9, offsetX: 11, offsetY: -3 } } }
     const normalized = normalizeCcLayout(v2 as unknown as Partial<CcLayoutV3>)
-    expect(normalized.placements.model).toEqual(DEFAULT_CC_LAYOUT.placements.model)
+    expect(normalized.placements.model).toEqual({ order: 9, offsetX: 11, offsetY: -3 })
+    // 未提供的项仍补默认（"缺项补默认"是归一化的本职，与版本号无关）
+    expect(normalized.placements.tokens).toEqual(DEFAULT_CC_LAYOUT.placements.tokens)
+    expect(normalized.version).toBe(CC_LAYOUT_SCHEMA_VERSION)
   })
 })

@@ -39,7 +39,6 @@ function localTemplateCcTheme(host: HTMLElement): Record<string, unknown> {
   const ccSurfaceOpacity = readNumber('--cc-surface-opacity')
   const ccBg = template.style.getPropertyValue('--cc-bg').trim()
   const ccBgImage = template.style.getPropertyValue('--cc-bg-image').trim()
-  const ccVariant = template.style.getPropertyValue('--cc-variant').trim()
   const inputOffsetTop = readNumber('--cc-input-offset-top')
   const inputHeight = readNumber('--cc-input-height')
   const inputMarginX = readNumber('--cc-input-margin-x')
@@ -58,12 +57,11 @@ function localTemplateCcTheme(host: HTMLElement): Record<string, unknown> {
   if (ccRadius !== undefined) overrides.ccRadius = ccRadius
   if (ccSurfaceOpacity !== undefined) overrides.ccSurfaceOpacity = ccSurfaceOpacity
   if (ccBg) overrides.ccBg = ccBg
-  // Background-image and variant are logical values (not ordinary numeric /
-  // color vars), so they are projected explicitly when a template supplies
-  // the corresponding local custom properties. A CSS `none` value explicitly
-  // clears an inherited/global image rather than leaking it into this card.
+  // Background-image is a logical value (not an ordinary numeric / color var),
+  // so it is projected explicitly when a template supplies the corresponding
+  // local custom property. A CSS `none` value explicitly clears an
+  // inherited/global image rather than leaking it into this card.
   if (ccBgImage) overrides.ccBgImage = ccBgImage === 'none' ? '' : ccBgImage
-  if (ccVariant) overrides.ccVariant = ccVariant
   if (inputOffsetTop !== undefined) overrides.inputOffsetTop = inputOffsetTop
   if (inputHeight !== undefined) overrides.inputHeight = inputHeight
   if (inputMarginX !== undefined) overrides.inputMarginX = inputMarginX
@@ -116,10 +114,12 @@ function PvSolidControlCenter() {
     }
   }, [])
   if (failed) return (
-    <div className="control-center cc-variant-peri" style={{ pointerEvents: 'none' }} aria-label="中控预览占位">
-      <div className="cc-status-secondary" />
-      <div className="cc-status-primary" />
-      <div className="cc-actions" />
+    <div className="control-center" style={{ pointerEvents: 'none' }} aria-label="中控预览占位">
+      {/* ★ #238 刀3：占位结构随真实结构一起改 —— 原来的 `.cc-status-primary` /
+          `-secondary` / `.cc-actions` 三个槽位类已随槽位层删除（不只删中间那一个，
+          留着的两个会成为悬空类名）。 */}
+      <div className="cc-input-slot" />
+      <div className="cc-status-group" />
     </div>
   )
   return <div ref={hostRef} aria-label="Solid 中控预览" />

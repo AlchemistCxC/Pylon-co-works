@@ -38,7 +38,6 @@ const TERMINAL_CONTRACT = {
   messageLayout: 'classic',
   inputMode: 'cli',
   inputVariant: 'cli',
-  ccVariant: 'terminal',
 } as const
 const DEFAULT_NAMES: string[] = [DEFAULT_PRESETS.gui.name, DEFAULT_PRESETS.terminal.name]
 /**
@@ -141,7 +140,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     const guiDefault = themeSnapshot()
 
     withInterfaceMode('terminal-like')
-    useStore.setState({ accent: '#000000', msgStyle: 'bubble', inputMode: 'default', inputVariant: 'composer', ccVariant: 'pill' })
+    useStore.setState({ accent: '#000000', msgStyle: 'bubble', inputMode: 'default', inputVariant: 'composer' })
     useStore.getState().resetTheme()
 
     expect(themeSnapshot()).toEqual({ ...guiDefault, ...TERMINAL_CONTRACT })
@@ -151,7 +150,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     // 且确实落在了 glass 的外观上（不是「只带契约字段的 DEFAULTS」——否则这条测试
     // 在「重置忽略默认预设」的改坏下也能通过，等于没锁住终端那半）
     for (const zone of PRESET_ZONES) {
-      // glass 侧先摘掉契约字段（glass 自己设了 ccVariant:'pill'，终端默认要把它改成 'terminal'）
+      // glass 侧先摘掉契约字段（那是终端默认要覆盖过去的那几个）
       const glassSlice = Object.fromEntries(
         Object.entries(pickZoneFields(filterPresetTheme(effectivePresetTheme(GLASS)), zone))
           .filter(([key]) => !(key in TERMINAL_CONTRACT)),

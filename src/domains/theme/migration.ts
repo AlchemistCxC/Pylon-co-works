@@ -21,34 +21,32 @@ import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
  * 主题域 schema 版本（A4：独立于 PROFILE_SCHEMA_VERSION=4）。
  * 沿用共享编号的续号 5：保证存量数据（version 4）升级时触发 migrate。
  *
- * v8（2026-09-14）：中控新增 reasoning 控件。normalizeCcLayout 本会把旧布局补齐
- * 新增控件默认位置，但该逻辑只挂在 migrate 钩子上；而 migrate 仅在持久化版本
- * 变化时触发。旧安装存的是 v7，与当时常量同号 → 钩子不跑 → 老浏览器里
- * ccLayout.placements 缺 reasoning 项 → ControlCenter 的槽位过滤把它剔掉，
- * 控件永远不出现（刷新无效，因为布局存在 localStorage）。
- * bump 到 8 迫使存量安装再跑一次迁移，补入 reasoning（合并按 widget ID 进行，
- * 可重复执行且保留用户既有拖拽位置）。
+ * ★★ 版本号职责（#238 刀2 起收窄 —— **后来者请勿再往这里塞东西**）：
+ * 它**只表示「数据格式版本」**：只在**数据结构发生不可自动推导的变化、且需要一次显式
+ * 语义转换**时才 bump。
+ * ★ **明确反例：加控件、加字段、改槽位、改 id —— 一律不需要 bump。**
+ * 依据：「结构对齐」（补缺控件项 / 补校字段值 / 按 id 合并）已从 migrate 钩子摘出来，
+ * 改由**读盘路径每次无条件跑一次**（`alignThemeStructure`，挂钩在 `store.ts` 的 persist `merge`）。
+ * 在此之前它与版本号绑死 ⇒ 忘 bump 就**静默坏**，历史上已栽过三次（见下）。
  *
- * v9（权限选择控件）：新增 permission* 字段组（权限控件外观与交互）。控件 id `mode`
- * 早已存在、布局无需变更，但存量安装的 localStorage 里没有这 7 个键，而字段归一化
- * 只挂在 migrate 钩子上跑；不 bump 则它们永远是 undefined（控件尺寸会算成 NaN）。
+ * 历史：各版本 bump 背后的**一次性语义转换**内容
+ * - v6：普通界面退出"全局终端体"（升级一次后用户仍可在字体设置里主动选回等宽体）。
+ * - v8（2026-09-14）：中控新增 `reasoning` 控件。★ 事故：补位逻辑当时只挂在 migrate 上、
+ *   而 migrate 仅在版本变化时触发 ⇒ 存量 v7 安装里 `ccLayout.placements` 缺该项，
+ *   被 ControlCenter 的槽位过滤剔掉，控件永远不出现（刷新无效，因为布局存在 localStorage）。
+ * - v9（2026-09-15）：新增 `permission*` 字段组。★ 事故：不 bump ⇒ 存量安装里这 7 个键
+ *   永远是 undefined，权限控件按 **NaN 尺寸**渲染。
+ * - v10（用量控件 S11）：`pct` 并入 `tokens` 成单一「用量」控件，默认位从状态区首行移到次行。
+ * - v11（刀4 中控名单换代，2026-09-18）：中控元件名单旧 11 → 新 7 —— 删 5 个 id
+ *   （session / workspace / activity / ekg / tasks）连同它们的字段（存量数据里的这些键
+ *   在 `normalizeThemeMigrationState` 里显式清掉）；`ekg` 四形态仪表整体移除
+ *   （实现留档见 `备份\ekg-留档\`，issue #170）；legacy `send` 的槽位/显隐/缩放三处键
+ *   迁到注册轨 id `cc-send-button`（只改键名不改值）。
+ *   ★ 其中**「缩放」那一处改名已随 #238 刀7 删除**（`ccScale` 字段整体退场）⇒ 现在只剩槽位（在
+ *   `normalizeCcLayout` 内）与显隐（`renameLegacyCcHiddenKeys`）两处。
  *
- * v10（用量控件 S11）：`pct` 并入 `tokens` 成为单一「用量」控件，默认位置从状态区
- * 首行移到次行、紧跟权限控件。同样受「归一化只挂 migrate」限制 —— 不 bump 则存量
- * 布局里 tokens 仍停在旧位置（status-primary/3），新默认位不生效。
- * 本版同时把 CC_LAYOUT_SCHEMA_VERSION 7→8：归一化遇到 v7 布局不在接受列表
- * [3,4,5,6,8] 内 → 整份布局回落默认值（用户已确认接受排版重置的代价）。
- *
- * v11（刀4 中控名单换代，2026-09-18）：中控元件名单旧 11 → 新 7。
- * - 删 5 个 id（session / workspace / activity / ekg / tasks）连同它们的字段；
- *   存量数据里的这些键在这里显式清掉（否则会随 state 流入 store）。
- * - `ekg` 四形态仪表（wave / bar / ring / numeric）整体移除：`ccStyle` 与
- *   `ekgWidth` / `ekgGreen` / `ekgYellow` / `ekgRed` / `barTrackColor` /
- *   `barFillColor` / `barFillFollow` / `barHeight` 一并下线（实现留档见
- *   `备份\ekg-留档\`，issue #170）。
- * - legacy `send` 的槽位/显隐/缩放三处键迁到注册轨 id `cc-send-button`
- *   （只改键名不改值；`ccLayout.placements` 的别名读取在 normalizeCcLayout 内）。
- * 本版同时把 CC_LAYOUT_SCHEMA_VERSION 8→9，且白名单**显式保留 8** ⇒ 老布局不重置。
+ * ★ 上述前两次事故的**共同根因已在刀2 拔掉**：结构对齐不再依赖版本号 ⇒ 加控件/加字段
+ * 不再需要 bump（"必须记得 bump"这套耦合消失）。
  */
 export const THEME_SCHEMA_VERSION = 11
 
@@ -89,14 +87,6 @@ function renameLegacyCcHiddenKeys(value: unknown): unknown {
     : value
 }
 
-function renameLegacyCcScaleKeys(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([id, scale]) => [LEGACY_CC_KEY_RENAMES[id] ?? id, scale]),
-  )
-}
-
 export function normalizeThemeMigrationState(
   persisted: unknown,
   defaults: ThemeMigrationDefaults,
@@ -111,8 +101,15 @@ export function normalizeThemeMigrationState(
   delete state.ccLayoutVersion
   // v11（刀4）：名单换代的删键与改名（幂等；ccLayout.placements 的别名在 normalizeCcLayout 内）
   for (const key of REMOVED_CC_THEME_KEYS) delete state[key]
-  state.ccHidden = renameLegacyCcHiddenKeys(state.ccHidden)
-  state.ccScale = renameLegacyCcScaleKeys(state.ccScale)
+  // ★ 只在**真有这个键**时才赋值：直接 `state.ccHidden = rename(undefined)` 会新建一个
+  // 值为 undefined 的键，而下面的 `{...defaults.base, ...state}` 会让它**覆盖掉默认值** ——
+  // 读盘路径上表现为 ccHidden 变成 undefined（渲染侧 `[...ccHidden]` 直接抛）。
+  // 旧路径只在"老数据恰好缺这个键"时才会踩到；#238 刀2 把本函数放到了每次读盘路径上，
+  // 干净新装也会走，所以在源头修掉。
+  // ★ #238 刀7：`ccScale`（控件缩放）已整体删除 ⇒ 它那条同款改名（`renameLegacyCcScaleKeys`）
+  //   随之退场。老数据里残留的 `ccScale` 键不用在这里清 —— `store.ts` 的 `partialize` 是
+  //   `THEME_SETTING_KEYS` 白名单式，下次写盘自然修剪掉（与刀5A 删三个 cc 字段同一处置）。
+  if (state.ccHidden !== undefined) state.ccHidden = renameLegacyCcHiddenKeys(state.ccHidden)
   const normalized: Record<string, unknown> = { ...defaults.base, ...state }
   // Older themes had one toolIndicator glyph. Preserve that choice when the
   // three state-specific fields are introduced instead of silently replacing
@@ -180,20 +177,12 @@ export function normalizeThemeMigrationState(
 }
 
 /**
- * 完整迁移：键映射/legacy 删除 + defs 驱动归一化 + 历史字段特判 + ccHeight clamp。
- * store 侧 migrate 薄壳调用；defaults 传 store 的 DEFAULTS（避免域→store 循环）。
+ * 值层对齐：defs 驱动的通用值归一化 + 历史字段特判 + 中控高度 clamp + 自定义预设归一。
+ *
+ * 幂等（跑两次结果相同）、不依赖版本号 —— 这是「结构对齐」的两个组成部分之一
+ * （另一部分是 `normalizeThemeMigrationState` 的缺项合并）。
  */
-export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationDefaults, fromVersion = 0): Record<string, unknown> {
-  const state = normalizeThemeMigrationState(persisted, defaults)
-  // v6：普通界面退出“全局终端体”。升级一次后用户仍可在新字体设置中主动选回等宽体。
-  if (fromVersion < 6 && state.globalFont === 'mono') state.globalFont = 'system'
-  // v7：normalizeThemeMigrationState 已把旧中控布局升级到开放的 v7 widget 集合；
-  // bump 持久化版本确保同为主题 schema v6 的存量安装也执行该迁移。
-  // v8（2026-09-14）：新增 reasoning 控件后再次 bump，理由同 v7——normalizeCcLayout
-  // 的补位逻辑只在 migrate 内执行，存量 v7 安装不 bump 就永远不会补入新控件。
-  // v9（2026-09-15）：新增 permission* 字段组（权限选择控件）。控件 id `mode` 早已存在、
-  // 布局无需补位，但字段归一化同样只在 migrate 内执行——不 bump，存量安装里这 7 个键
-  // 永远是 undefined，权限控件会按 NaN 尺寸渲染。
+function normalizeThemeValues(state: Record<string, unknown>, base: object): Record<string, unknown> {
   // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
   Object.assign(state, normalizeThemeState(state))
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
@@ -207,21 +196,55 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
     ? state.inputVariant
     : state.inputMode === 'cli' ? 'cli' : 'composer'
   state.inputMode = resolveInputMode(String(state.inputVariant))
-  const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : String((defaults.base as Record<string, unknown>).inputMode ?? 'cli')
+  const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : String((base as Record<string, unknown>).inputMode ?? 'cli')
   const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
   const migratedFooterLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
   const migratedOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
-  state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : Number((defaults.base as Record<string, unknown>).ccHeight ?? 150), {
+  state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150), {
     inputMode: migratedInputMode as CcInputMode,
     footerLayout: migratedFooterLayout as CcFooterLayout,
     hintMode: migratedHintMode as CcHintMode,
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-        inputMode: migratedInputMode as CcInputMode,
-        submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
-      }),
+    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
+      inputMode: migratedInputMode as CcInputMode,
+      submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
+    }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state
 }
+
+/**
+ * ★★ 结构对齐（#238 刀2）：补缺控件项 / 补校字段值 / **按 id 合并**。
+ *
+ * **与版本号无关** —— 由读盘路径**每次读盘无条件跑一次**（挂钩在 `store.ts` 的
+ * persist `merge`），不再依赖"记得 bump 版本号"。这条正是本刀要拔的根：
+ * 以前它只挂在 migrate 钩子里，而 migrate 只在持久化版本变化时触发 ⇒ 忘 bump 即静默坏。
+ *
+ * - **缺项补默认**（`normalizeCcLayout` 按当前控件全集逐 id 合并）；
+ * - **多余项忽略**（不在全集里的旧 id 自然丢弃）；
+ * - **用户手调值一律保留**：`offsetX` / `offsetY` / `order` 与所有已设字段值
+ *   （既定口径：「布局归一化不是把用户排布拍平」）；
+ * - **幂等**：连续跑两次结果相同（`__tests__/structuralAlignment.test.ts` 钉住）。
+ */
+export function alignThemeStructure(persisted: unknown, defaults: ThemeMigrationDefaults): Record<string, unknown> {
+  return normalizeThemeValues(normalizeThemeMigrationState(persisted, defaults), defaults.base)
+}
+
+/**
+ * 完整迁移：**版本号变化时**的一次性语义转换（+ 一次结构对齐，幂等）。
+ *
+ * ★ 结构对齐**不是**本函数独有的职责 —— 每次读盘都会跑（见 `alignThemeStructure`）。
+ * 这里保留一次调用，是为了让 migrate 的返回值仍是一份完整可用的状态
+ * （zustand 的 migrate 结果会先合并进 store），并且与刀2 之前的行为逐字段相同。
+ */
+export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationDefaults, fromVersion = 0): Record<string, unknown> {
+  const state = normalizeThemeMigrationState(persisted, defaults)
+  // ★ 真正的一次性语义转换（v6）：普通界面退出"全局终端体"。只在从 <6 升上来时做一次，
+  // 之后用户仍可在新字体设置里主动选回等宽体。
+  // ★ 反例提醒：**加控件 / 加字段 / 改槽位 / 改 id 都不属于这里** —— 那些由每次读盘的结构对齐覆盖。
+  if (fromVersion < 6 && state.globalFont === 'mono') state.globalFont = 'system'
+  return normalizeThemeValues(state, defaults.base)
+}
+

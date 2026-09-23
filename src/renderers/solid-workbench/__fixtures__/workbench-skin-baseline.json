@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T14:47:25.095Z",
+  "generatedAt": "2026-09-23T07:27:44.089Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -14,8 +14,8 @@
       "focus-flow"
     ],
     "customPresetIds": [],
-    "themeSettingCount": 191,
-    "cssVariableCount": 98
+    "themeSettingCount": 187,
+    "cssVariableCount": 96
   },
   "fixtures": [
     {
@@ -133,8 +133,6 @@
         "ccBg": "#808080",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -176,10 +174,9 @@
         "cliLinePadding": 6,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -217,44 +214,42 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -273,7 +268,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -331,7 +325,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#808080",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -353,7 +346,7 @@
         "--cli-line-width": "2px",
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -482,8 +475,6 @@
         "ccBg": "#000000",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -525,10 +516,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "peri",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "rgba(205,214,244,0.6)",
         "prismOnColor": "#4ade80",
         "modelSwitchMode": "cycle",
@@ -597,6 +587,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -604,11 +599,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 90,
-          "model": 90,
-          "mode": 90
         },
         "appliedPreset": {
           "global": "",
@@ -628,7 +618,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -689,7 +678,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#000000",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -714,7 +702,7 @@
         "--cli-prompt-color": "#999999",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "rgba(205,214,244,0.6)",
         "--prism-on-color": "#4ade80",
         "--mode-auto-color": "#FFC107",
@@ -843,8 +831,6 @@
         "ccBg": "rgba(255,255,255,0.20)",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "pill",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -886,10 +872,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "rgba(0,0,0,0.50)",
         "prismOnColor": "#22c55e",
         "modelSwitchMode": "cycle",
@@ -929,47 +914,41 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 100,
-          "model": 100,
-          "mode": 100
         },
         "appliedPreset": {
           "global": "",
@@ -989,7 +968,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -1049,7 +1027,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "rgba(255,255,255,0.20)",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -1074,7 +1051,7 @@
         "--cli-prompt-color": "#6b7280",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "rgba(0,0,0,0.50)",
         "--prism-on-color": "#22c55e",
         "--mode-auto-color": "#f59e0b",
@@ -1203,8 +1180,6 @@
         "ccBg": "#252838",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -1246,10 +1221,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "compact",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "rgba(136,192,208,0.75)",
         "prismOnColor": "#a3be8c",
         "modelSwitchMode": "cycle",
@@ -1318,6 +1292,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -1325,11 +1304,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -1349,7 +1323,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -1413,7 +1386,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#252838",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -1438,7 +1410,7 @@
         "--cli-prompt-color": "#9aa7bd",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "rgba(136,192,208,0.75)",
         "--prism-on-color": "#a3be8c",
         "--mode-auto-color": "#ebcb8b",
@@ -1567,8 +1539,6 @@
         "ccBg": "#1a1b26",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -1610,10 +1580,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "compact",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#a9b1d6",
         "prismOnColor": "#9ece6a",
         "modelSwitchMode": "cycle",
@@ -1682,6 +1651,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -1689,11 +1663,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -1713,7 +1682,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -1777,7 +1745,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#1a1b26",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -1802,7 +1769,7 @@
         "--cli-prompt-color": "#7f89b0",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#a9b1d6",
         "--prism-on-color": "#9ece6a",
         "--mode-auto-color": "#e0af68",
@@ -1931,8 +1898,6 @@
         "ccBg": "#fdf6e3",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -1974,10 +1939,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#586e75",
         "prismOnColor": "#859900",
         "modelSwitchMode": "cycle",
@@ -2046,6 +2010,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -2053,11 +2022,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -2077,7 +2041,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -2138,7 +2101,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#fdf6e3",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -2163,7 +2125,7 @@
         "--cli-prompt-color": "#657b83",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#586e75",
         "--prism-on-color": "#859900",
         "--mode-auto-color": "#b58900",
@@ -2292,8 +2254,6 @@
         "ccBg": "#120b00",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -2335,10 +2295,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "compact",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#cc8c00",
         "prismOnColor": "#ffc24b",
         "modelSwitchMode": "cycle",
@@ -2407,6 +2366,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -2414,11 +2378,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -2438,7 +2397,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -2502,7 +2460,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#120b00",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -2527,7 +2484,7 @@
         "--cli-prompt-color": "#cc8c00",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#cc8c00",
         "--prism-on-color": "#ffc24b",
         "--mode-auto-color": "#ffb000",
@@ -2656,8 +2613,6 @@
         "ccBg": "#050f05",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -2699,10 +2654,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "compact",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#39ff14",
         "prismOnColor": "#39ff14",
         "modelSwitchMode": "cycle",
@@ -2771,6 +2725,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -2778,11 +2737,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -2802,7 +2756,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -2866,7 +2819,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#050f05",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -2891,7 +2843,7 @@
         "--cli-prompt-color": "#39ff14",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#39ff14",
         "--prism-on-color": "#39ff14",
         "--mode-auto-color": "#39ff14",
@@ -3020,8 +2972,6 @@
         "ccBg": "#0d192b",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -3063,10 +3013,9 @@
         "cliLinePadding": 6,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -3104,44 +3053,42 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3160,7 +3107,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -3220,7 +3166,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#0d192b",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -3242,7 +3187,7 @@
         "--cli-line-width": "2px",
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -3371,8 +3316,6 @@
         "ccBg": "#1a172b",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -3414,10 +3357,9 @@
         "cliLinePadding": 6,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -3455,44 +3397,42 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3511,7 +3451,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -3571,7 +3510,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#1a172b",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -3593,7 +3531,7 @@
         "--cli-line-width": "2px",
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -3722,8 +3660,6 @@
         "ccBg": "#201e19",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -3765,10 +3701,9 @@
         "cliLinePadding": 6,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -3806,44 +3741,42 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -3862,7 +3795,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -3922,7 +3854,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#201e19",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -3944,7 +3875,7 @@
         "--cli-line-width": "2px",
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -4073,8 +4004,6 @@
         "ccBg": "#120b00",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -4116,10 +4045,9 @@
         "cliLinePadding": 3,
         "cliContentOffsetY": 0,
         "cliHintMode": "compact",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#cc8c00",
         "prismOnColor": "#ffc24b",
         "modelSwitchMode": "cycle",
@@ -4188,6 +4116,11 @@
               "offsetX": 0,
               "offsetY": 0
             },
+            "cc-command-hint": {
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
             "cc-send-button": {
               "slot": "actions",
               "order": 0,
@@ -4195,11 +4128,6 @@
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "tokens": 95,
-          "model": 95,
-          "mode": 95
         },
         "appliedPreset": {
           "global": "",
@@ -4219,7 +4147,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -4283,7 +4210,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#120b00",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -4308,7 +4234,7 @@
         "--cli-prompt-color": "#cc8c00",
         "--cli-line-padding": "3px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#cc8c00",
         "--prism-on-color": "#ffc24b",
         "--mode-auto-color": "#ffb000",
@@ -4437,8 +4363,6 @@
         "ccBg": "#808080",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "",
-        "ccStatusFontSize": 16,
-        "ccVariant": "terminal",
         "inputOffsetTop": 10,
         "inputHeight": 40,
         "inputMarginX": 10,
@@ -4480,10 +4404,9 @@
         "cliLinePadding": 6,
         "cliContentOffsetY": 0,
         "cliHintMode": "full",
+        "ccHintFontSize": 16,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "transparent",
-        "statusBgImage": "",
         "pillText": "#999999",
         "prismOnColor": "#4EBA65",
         "modelSwitchMode": "menu",
@@ -4523,45 +4446,41 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "model": 125
         },
         "appliedPreset": {
           "global": "",
@@ -4581,7 +4500,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -4639,7 +4557,6 @@
         "--cc-radius": "25px",
         "--cc-bg": "#808080",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "16px",
         "--cc-input-offset-top": "10px",
         "--cc-input-height": "40px",
         "--cc-input-margin-x": "10px",
@@ -4661,7 +4578,7 @@
         "--cli-line-width": "2px",
         "--cli-line-padding": "6px",
         "--cli-content-offset-y": "0px",
-        "--status-bg": "transparent",
+        "--cc-hint-font-size": "16px",
         "--pill-text": "#999999",
         "--prism-on-color": "#4EBA65",
         "--mode-auto-color": "#FFC107",
@@ -4790,8 +4707,6 @@
         "ccBg": "",
         "ccSurfaceOpacity": 0,
         "ccBgImage": "",
-        "ccStatusFontSize": 14,
-        "ccVariant": "terminal",
         "inputOffsetTop": 0,
         "inputHeight": 0,
         "inputMarginX": 0,
@@ -4833,10 +4748,9 @@
         "cliLinePadding": 0,
         "cliContentOffsetY": -6,
         "cliHintMode": "hidden",
+        "ccHintFontSize": 12,
         "footerLayout": "free",
         "cliOverflowMode": "fixed-scroll",
-        "statusBg": "",
-        "statusBgImage": "",
         "pillText": "",
         "prismOnColor": "",
         "modelSwitchMode": "menu",
@@ -4874,44 +4788,42 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
         },
-        "ccScale": {},
         "appliedPreset": {
           "global": "",
           "sidebar": "",
@@ -4930,7 +4842,6 @@
       "cssVariables": {
         "--chat-bg-image": "none",
         "--input-bg-image": "none",
-        "--status-bg-image": "none",
         "--global-font": "var(--font-system, var(--font))",
         "--font": "var(--font-system, var(--font))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -4954,7 +4865,6 @@
         "--cc-margin-bottom": "0px",
         "--cc-radius": "0px",
         "--cc-surface-opacity": "0",
-        "--cc-status-font-size": "14px",
         "--cc-input-offset-top": "0px",
         "--cc-input-height": "0px",
         "--cc-input-margin-x": "0px",
@@ -4968,7 +4878,8 @@
         "--input-min-height": "32px",
         "--cli-line-width": "1px",
         "--cli-line-padding": "0px",
-        "--cli-content-offset-y": "-6px"
+        "--cli-content-offset-y": "-6px",
+        "--cc-hint-font-size": "12px"
       },
       "dataAttributes": {
         "data-ui-scheme": "light",
@@ -5093,8 +5004,6 @@
         "ccBg": "#abcdef",
         "ccSurfaceOpacity": 1,
         "ccBgImage": "fixture-ccBgImage",
-        "ccStatusFontSize": 20,
-        "ccVariant": "pill",
         "inputOffsetTop": 120,
         "inputHeight": 200,
         "inputMarginX": 120,
@@ -5136,10 +5045,9 @@
         "cliLinePadding": 16,
         "cliContentOffsetY": 6,
         "cliHintMode": "full",
+        "ccHintFontSize": 22,
         "footerLayout": "peri",
         "cliOverflowMode": "overlay",
-        "statusBg": "#abcdef",
-        "statusBgImage": "fixture-statusBgImage",
         "pillText": "#abcdef",
         "prismOnColor": "#abcdef",
         "modelSwitchMode": "cycle",
@@ -5180,46 +5088,41 @@
           "version": 9,
           "placements": {
             "input": {
-              "slot": "input",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             },
             "model": {
-              "slot": "status-secondary",
               "order": 2,
               "offsetX": 0,
               "offsetY": 0
             },
             "reasoning": {
-              "slot": "status-secondary",
               "order": 3,
               "offsetX": 0,
               "offsetY": 0
             },
             "mode": {
-              "slot": "status-secondary",
               "order": 4,
               "offsetX": 0,
               "offsetY": 0
             },
             "tokens": {
-              "slot": "status-secondary",
+              "order": 5,
+              "offsetX": 0,
+              "offsetY": 0
+            },
+            "cc-command-hint": {
               "order": 5,
               "offsetX": 0,
               "offsetY": 0
             },
             "cc-send-button": {
-              "slot": "actions",
               "order": 0,
               "offsetX": 0,
               "offsetY": 0
             }
           }
-        },
-        "ccScale": {
-          "ekg": 50,
-          "tasks": 200
         },
         "appliedPreset": {
           "global": "",
@@ -5239,7 +5142,6 @@
       "cssVariables": {
         "--chat-bg-image": "url(\"fixture-chatBgImage\")",
         "--input-bg-image": "url(\"fixture-inputBgImage\")",
-        "--status-bg-image": "url(\"fixture-statusBgImage\")",
         "--global-font": "var(--font-mono-default, var(--mono))",
         "--font": "var(--font-mono-default, var(--mono))",
         "--mono": "var(--font-mono-default, var(--mono))",
@@ -5304,7 +5206,6 @@
         "--cc-radius": "30px",
         "--cc-bg": "#abcdef",
         "--cc-surface-opacity": "1",
-        "--cc-status-font-size": "20px",
         "--cc-input-offset-top": "120px",
         "--cc-input-height": "200px",
         "--cc-input-margin-x": "120px",
@@ -5330,7 +5231,7 @@
         "--cli-prompt-color": "#abcdef",
         "--cli-line-padding": "16px",
         "--cli-content-offset-y": "6px",
-        "--status-bg": "#abcdef",
+        "--cc-hint-font-size": "22px",
         "--pill-text": "#abcdef",
         "--prism-on-color": "#abcdef",
         "--mode-auto-color": "#abcdef",

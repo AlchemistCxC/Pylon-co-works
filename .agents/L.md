@@ -583,21 +583,320 @@
 
 ---
 
-[2026-09-22 15] [Miyaki Kumo] [#241]
+[2026-09-23 10] [Baryon] [#238 · 刀8]
 
-**进行中：高亮引擎改 Lezer（用户拍板）——退役 wasm/syntect 语法资产。** 依据为 #240 的内存定位 + 本轮引擎对比 spike（四张实测表在 issue 里）；ADR-0020 已落。
-**刀1~刀6 均已落地并推送本分支**，等合入 main；L.md 条目待合入后移除。刀5 = 基准跑出的**截断缺陷**修复（`syntaxTree` 只解析 3006 字符 ⇒ >3k 代码块静默丢色）；刀6 = 解析改**按时间切片 + 片间让出主线程**（消掉 >200ms 输入退回部分树的静默降级）。
+**续开工：刀8 删掉「整体风格」（`ccVariant` 整套）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/12-施工单-刀8-删掉整体风格.md`。前置：刀6 已完工（冲突面已解除）。★ 备份已在仓外 `任务\预设修正\备份\ccVariant-留档\`（不搬进仓库）。
 
-本轮文件域（请勿改写、勿连带提交）：
+**本刀文件域（请勿改写、勿连带提交）**：
 
-- 前端：`src/components/chat/codeHighlight.ts`（**唯一**改动入口）、`src/components/chat/lezerHighlight.ts`（新增引擎）、`src/store.ts` 与 `src/domains/workbench/workbenchProjector.ts` 与 `.../chat/ChatView.css`（**仅更正指向已退役引擎的过期注释**）
-- 测试：`src/components/chat/__tests__/codeHighlight.test.ts`、`src/renderers/solid-workbench/chat/__tests__/{markdownComputeParity,MarkdownContent.solid}.test.tsx`、`src/renderers/solid-workbench/chat/__tests__/issue221.codeBlockLifecycle.solid.test.tsx`
-- Rust（**刀3 已落**）：`src-tauri/pylon-markdown/{src/{lib,wasm_exit}.rs,src/bin/parity_snapshot.rs,Cargo.toml}`、`parity/{corpus,rust-snapshot}.json`；**已删** `src/{highlight,theme,tm_language}.rs`、`assets/**`、`gen/**`、`parity/{dump-ts.mjs,diff.mjs,ts-baseline.json,parity-report.json}`
-- 依赖/门禁：`package.json`（退休 starry-night/oniguruma）、`scripts/check-bundle-size.mjs`（wasm 预算 1,110,000 → **230,000**，实测 198,431）、`scripts/{build-wasm.mjs,audit-maintenance.mts}`（注释/模块根同步）
-- 基准：`scripts/perf-bench/{index.ts,README.md,suites/markdownHighlightSuite.ts}`（highlight 域改量 Lezer）
-- 文档：`.agents/spec/241-*.md`、`.agents/records/241-*.md`、`.agents/decisions/0020-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/decisions/0018-*.md`（修订）
+- 字段与状态：`src/themeFieldDefs.ts`、`src/store.ts`、`src/domains/workbench/appearance.ts`、`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`
+- CSS：`ControlCenter.css`（变体小节 + `.cc-tasks-pill` 两行）、`chat/StatusBar.css`
+- 错层来源与皮肤：`src/plugins/core/renderer/builtinPresentationProfiles.ts`（六个方案）、`src/presets/builtin.ts`、`src/plugin-runtime/skin/skinResolver.ts`（`data-cc-variant`）、`src/components/SettingsPreview.tsx`
+- 出厂数据手改：`src/zones/factory/{terminal-cc,gui-cc}.ts`（5 + 2）
+- 测试同步：`defaultPresets` / `effectivePresetTheme` / `ccSettingsGrouping` / `widgetDefinitionTable` / `ccDeadDataGuard` / `interfaceMode` / `themeFieldCopy` / `skinResolver` / `skinSchema` / `builtinPresentationProfiles` / `SettingsPreview.solidMigration`
+- 快照：`__fixtures__/workbench-skin-baseline.json`（**只能脚本重拍**）
+- 文档：`.agents/records/238-*-刀8*.md`、本文件；仓外《中控元件总表》
 
-**我不碰**：`parseMarkdown`（comrak）与 markdown parity 快照锁、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`（消费点应零改动）、`codeBlockDomLifecycle.ts` 的机制本体、中控区、预设系统、他人在途域。
+**不碰**：中控定义表结构（刀6）、其它 cc 字段、插件契约面中除 `data-cc-variant` 之外的部分、`sendVariant`（先放着）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+✅ **已完工（2026-09-23）**：实现 `c0157a02`（24 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife8-remove-ccvariant.md`。
+门禁五步全绿；全量 **628 文件 / 4758 通过 + 1 todo**，**连跑两次一致**（施工单要求）；
+快照 diff = 15 行 `ccVariant` + 1 行 `themeSettingCount` 188→187（无其它差异）；
+实机逐模式 A/B：终端**零变化**、现代 GUI/战术蓝**失去玻璃层**（预期，已量并附可读性提示）；
+反向守卫（`ccDeadDataGuard` 加 `ccVariant` / `cc-variant-` / `ccVariant styles`）已反向验证红→绿。
+★ 偏差三处已在记录里说明：① 出厂数据处数与单子一致（7 处）；② 五份"清单外但引用被删字段"的测试属必然连带（其中四处本来编译不过）+ 预览里那个第四变体名 `cc-variant-peri` 一并删；③ **一次操作失误（已恢复，如实披露）**：A/B 取"改造前"时误执行了整树 `git checkout HEAD~1`（游离 HEAD），**分支引用未受影响**，事后 `git switch` 复原。
+★ 遗留一条要你定：现代 GUI / 战术蓝 下控件从"玻璃胶囊"变成"不透明白底黑字"，**观感变化明显**（黑底白字对比度反而更高，不算变差）—— 要不要给深色模式单独配一套控件底色/字色，属另一件事，本刀未自行配色。
+★ **本刀是这条线的最后一刀**：刀序全部完成，剩下的是整批进 PR 的收口。
+[2026-09-23 09] [Miyaki Kumo] [#262]
+
+**开工：issue262（CI 修复——shadow parity 背压探针路径随 #247 抽取失效 + clippy 基线两条新增）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `scripts/check-acp-shadow-parity.mjs`（仅 runBackpressureCheck 探针命令与测试名）
+- `src-tauri/src/session/prompt.rs`（仅 settle_prompt_cancelled_after_timeout 签名收窄 + 调用点，#261 已收工）
+- `src-tauri/src/gateway/qq/mod.rs`（仅 dead_target_gate let-else → `?`，#261 已收工）
+
+**我不碰**：其余全部。全程 pathspec 提交。
+[2026-09-23 08] [Baryon] [#238 · 刀6]
+
+**续开工：刀6 设置页中控区改成「元件 → 子部件」分组（让成员层第一次被消费）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/11-施工单-刀6-设置页按元件与子部件分组.md`。前置：刀1~刀7、第③件、补遗、刀7 补验全部完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（78 个 cc 字段的 `group:` 值机械替换为所属**子部件 label**；`CC_MEMBER_FIELDS` 派生映射；`GROUP_ORDER.cc` 改派生；两个空标题随之消失）
+- `src/domains/cc/widgetDefinitions.ts`（`members[].fields` 手写清单**删除** ⇒ 真值收敛到 `def.group`；`CcWidgetMember.fields` 类型同步；注释指向新真值）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（4 处 `member.fields` 改读派生映射 —— §3.3 的必然连带）
+- **新增** `src/domains/cc/__tests__/ccSettingsGrouping.test.ts`（§4-2 的字段集合不变量）
+- `src/themeFieldRenderer.tsx`（★ **停手条件 2 的处置**：删掉只为旧 cc 标题服务的 `section.heading === '输入区'` 特例，它随本刀变成死代码）
+- `src/components/settings/__tests__/settingsChromeState.test.ts`（§3.5 的示例键替换）
+- 文档：`.agents/records/238-*-刀6*.md`、本文件；仓外《中控元件总表》
+
+**不碰**：中控渲染（刀3/4/5 地盘）、主题字段的**值**与默认值、`ccLayout`/`ccHidden`/`ccEditMode`（hidden ⇒ 保持无分组）、插件契约面、成员级显隐收编（已另立待办）、`ccVariant` 的存废（刀8）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+★ 与刀8 **不并行**（都改 `themeFieldDefs.ts` 与出厂数据），本刀先做。
+
+✅ **已完工（2026-09-23）**：实现 `f064d6ce`（7 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife6-settings-grouping.md`。
+门禁五步全绿、全量 **628 文件 / 4758 通过 + 1 todo**（+1 文件 +6 用例 = 新不变量测试）；
+契约快照除时间戳外**逐字节相同**；实机 A/B：`.set-row` 78 → 78（项一个没少）、两个空标题消失、抽查三项值与位置已核。
+★ 三处已在记录「与 spec 的偏差」里说明，供复审推翻：① 停手条件 2 的处置（删掉 `themeFieldRenderer.tsx` 里只为旧
+cc 标题服务的 `'输入区'` 特例）；② `members[].fields` 的派生放在 `themeFieldDefs.ts`（定义表侧自算会成环）⇒
+定义表那栏位**删除**、`widgetDefinitionTable.test.ts` 4 处改读派生视图（§3.3 的必然连带）；
+③ 该测试里"归属逐条锁定"改按**集合**比对（派生顺序 = 字段定义顺序）。
+★ 实机发现两条**先于本刀存在**的现象（未处理，仅记录）：设置左侧导航的 cc 二级项现在也是子部件名（扁平）；
+`显示历史快捷提示` 的下拉显示 `true（已不可用）`（默认值是布尔 `true`、选项是字符串 ⇒ 匹配不上）。
+★ **本刀是这条线上原定刀序的最后一刀**；刀8（删 `ccVariant`）可开工。
+
+---
+
+[2026-09-23 08] [Miyaki Kumo] [#261]
+
+**开工：issue261（评估修复批次——注释漂移清理、session 重复逻辑去重、prompt 终态臂拆分、plugin_cmds spawn_blocking；行为零变化）。** spec 见 `.agents/spec/261-assessment-fix-batch.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/session/{model,create,persist,prompt,fork}.rs`
+- `src-tauri/src/gateway/{mod,credentials}.rs`、`src-tauri/src/gateway/qq/mod.rs`
+- `src-tauri/src/agent/runtime.rs`、`src-tauri/src/mcp/mod.rs`（均仅注释）
+- `src-tauri/src/plugin_cmds/transaction.rs`（如命令体在 mod.rs 则一并，声明 `plugin_cmds/**`）
+- `src/runtimeStore.ts`、`src/store.ts`、`src/workspaceStore.ts`（**仅注释行**，不碰逻辑/类型/导出）
+- 文档：`.agents/records/261-*.md`（完工时新增）、本文件
+
+**我不碰**：#260 四批次在途域（`lifecycle/mod.rs`、`identityStore.ts`、`pylon-acp/**`、`Cargo.lock`、hook_bridge、toolPresentation 族、spinnerVerbs）；`src-tauri/src/dispatcher/**`（#155 域）；中控区、预设系统；`scripts/**`。全程 pathspec 提交，工作树里 #260 批次 A 未提交 WIP 原样保留、绝不 stage。
+
+---
+
+[2026-09-23 07] [Miyaki Kumo] [#260]
+
+**开工：issue260（后端+前端开销清偿第二批——#258 扫描遗留 14 项，行为零变化）。** spec 见 `.agents/spec/260-overhead-paydown-batch2.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。四批文件域，请勿改写、勿连带提交：
+
+- 批次 A：`src-tauri/pylon-acp/src/wire_trace.rs`、`src-tauri/src/lifecycle/mod.rs`（仅 wire_trace_snapshot 命令段）、`src-tauri/pylon-acp/Cargo.toml` + 根 `Cargo.lock`（serde +rc）、`src-tauri/src/acp/{golden_trace_tests,p1_wire_regression_tests}.rs`、`src-tauri/src/test_harness.rs`（仅 WireRecord 字段类型跟随）
+- 批次 B：`src-tauri/pylon-acp/src/{engine,client,stderr_tail,turn_ledger}.rs`、`src-tauri/src/hook_bridge.rs`（仅 emit 段）
+- 批次 C：`src/domains/tool/toolPresentation.ts`、`src/components/chat/toolPresentationModel.ts`、`src/renderers/solid-workbench/chat/GenerationFooter.solid.tsx`、`src/components/sidebar/SessionsPanel.tsx`
+- 批次 D：**删除** `src/components/chat/spinnerVerbs.ts`；`src/plugin-runtime/storage/pluginStorageApi.ts`、`src/components/PetCompanion.tsx`、`src/identityStore.ts`
+- 文档：`.agents/records/260-*.md`（完工时新增）、本文件（顺手清掉 #259 条目上方残留的孤立 `=======` 行）
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）、中控区、预设系统、`scripts/**`（#259 域）。既有测试除编译必需的类型跟随外零修改。全程 pathspec 提交。
+
+---
+
+[2026-09-23 06] [Baryon] [#238 · 刀7 补验]
+
+**续开工：刀7 补验（现场实机 + 一条文档，不动代码）。** 分支**沿用** `feat/cc-widget-definition-table`。前置：刀7 已完工并复核通过（`73d50c03`）。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `.agents/skills/webview2-acceptance/SKILL.md`（坑清单补第二条：渲染器层的类型检查只在 `check:solid`）
+- `.agents/records/238-cc-widget-definition-table-knife7-remove-scale.md`（**追补验一节**，不新开文件）
+- 本文件
+
+**不碰**：`src/**` 一行不动（补验只做现场确认 + 文档）；不新增/修改断言；`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+---
+
+[2026-09-23 06] [Miyaki Kumo] [#259]
+
+**开工：issue259（code-stats crate 清单漂移修复——pylon-acp/pylon-session 入表，清单改随 Cargo workspace members 动态解析）。** 分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`
+- `.agents/skills/code-stats/SKILL.md`（口径同步）
+- `.agents/records/259-*.md`（完工时新增）、本文件
+
+**我不碰**：`src/`（#257/#258 等在途域）、`src-tauri/**`、`tools/**`。全程 pathspec 提交。
+
+---
+
+[2026-09-23 05] [Miyaki Kumo] [#258]
+
+**开工：issue258（stderr 处理管线去重与分配削减——不改行为纯性能/质量）。** spec 见 `.agents/spec/258-stderr-pipeline-dedup.md`。分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `src-tauri/pylon-acp/src/stderr.rs`（解析收敛一次 + 新增分类钉子测试）
+- `src-tauri/pylon-acp/src/stderr_tail.rs`（`sanitize_diagnostic` is_match 守卫 + `summarize_parser_error` OnceLock 预编译；**既有测试不动**）
+- `src-tauri/pylon-foundations/src/sanitize.rs`（仅 `sanitize_message` 签名 `String`→`&str`，函数体不变）
+- `src-tauri/src/runtime_log/mod.rs`（仅 `sanitize_message` 薄包装签名跟随 + `:192` 调用点）
+- `src-tauri/src/permission.rs`（仅 `:101` 调用点借用化一行）
+- 文档：`.agents/records/258-*.md`（完工时新增）、本文件
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
+
+---
+
+[2026-09-23 04] [Baryon] [#238 · 刀7 删掉缩放]
+
+**续开工：刀7 删掉「缩放」（`ccScale` 整套）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/10-施工单-刀7-删掉缩放.md`。前置：第③件 + 补遗均已完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- 字段与默认值：`src/themeFieldDefs.ts`、`src/domains/theme/themeDefaults.ts`
+- 名单与状态：`src/domains/cc/widgetDefinitions.ts`（`CC_SYSTEM_FIELDS` 3 → 2）、`src/store.ts`（类型 + `setCcScale` 动作）、`src/ccLayoutState.ts`（`setCcScaleState`）
+- 外观快照与命令：`src/domains/workbench/appearance.ts`（快照字段 + `set-cc-scale` 命令联合）、`src/domains/workbench/workbenchAppearanceStore.ts`（命令分支）
+- 渲染：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ 唯一应用点：用量字号；★ 编辑态面板「缩放」输入框整块）
+- 夹具与预设字面量：`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/builtin.ts`（`GLASS_THEME`）
+- ★ **迁移**（**清单外**，理由见下）：`src/domains/theme/migration.ts`（`renameLegacyCcScaleKeys` 及其调用点随字段一并退场）
+- 出厂数据手改：`src/zones/factory/*.ts`（10 文件；真值处数在记录里逐文件列出）
+- 测试同步：`widgetDefinitionTable` / `structuralAlignment` / `themeSchemaV8Backfill` / `appearance` / `settingsTraceability` / `skinSchema` / `mountSolidWorkbench` / `customPresets` / `effectivePresetTheme`
+- 快照：`src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（**只能脚本重拍**）
+- 文档：`.agents/records/238-*-刀7*.md`、本文件；仓外《中控元件总表》
+
+**★ 一处清单外改动的说明（供复审把关）**：施工单 §1 未列 `migration.ts`，但那里有 `renameLegacyCcScaleKeys`
+（v11/刀4 的 legacy `send` → `cc-send-button` 键改名，专为 `ccScale` 而写）。字段删掉后它变成**读一个已不存在的域字段**的死代码；
+且施工单 §1-13 已把引用它的 `themeSchemaV8Backfill.test.ts` 列入"待同步" ⇒ 本刀按**最小改动**删掉该函数与其调用点
+（**不**把 `ccScale` 加进 `REMOVED_CC_THEME_KEYS` —— 那个机制的注释写明它只服务"被删**元件**的字段"，且刀5A 删三个 cc 字段时也没动它）。
+
+**不碰**：位置与宽高字段（`modelWidth` 等）、碰撞约束（刀4）、`rendererKey` / `isolated-surface`、`sendVariant`、
+插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+✅ **已完工（2026-09-23）**：实现 `73d50c03`（32 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife7-remove-scale.md`。
+门禁五步全绿、全量 627 文件 / 4752 通过（与上一刀同数，纯断言同步）、快照 diff 全可解释、实机 A/B 两种情况均量过。
+★ 两处清单外最小补齐（`zustandWorkbenchAppearanceStore.ts`、`migration.ts` 的 ccScale 改名链）已在记录「与 spec 的偏差」里说明，供复审推翻。
+★ 实机实测订正了施工单一条前提：**出厂预设里有 6 套自带非 100 的缩放值（90/95）** ⇒ 用这些预设的人用量字号会变（不是"只有手动调过的人"）。
+
+---
+
+[2026-09-23 03] [Baryon] [#238 · 第③件补遗]
+
+**续开工：第③件补遗（三步：删两样零消费者残件 + 加一条「死数据不得回归」守卫测试 + 验收技能补一条坑）。** 分支**沿用** `feat/cc-widget-definition-table`。前置 = 第③件已完工（`04af4717`，翻译复核通过）。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetCatalog.ts`（删 `BUILTIN_CC_WIDGET_CONTRIBUTIONS` 导出 + `BuiltinCcWidgetId` / `CcWidgetRuntimeId` 两个类型名，连带 `CC_WIDGET_IDS` 的 import）
+- **新增** `src/domains/cc/__tests__/ccDeadDataGuard.test.ts`（守卫测试，仿 `workbenchChromeCss.solid.test.ts` 的先例写法）
+- `.agents/skills/webview2-acceptance/SKILL.md`（坑清单补一条：实机验收必须从当前源码重新构建产物）
+- 文档：`.agents/records/238-*-补遗*.md`、本文件；仓外第③件待办同步
+
+**不碰**：`rendererKey` / `isolated-surface`（用户已定保留）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`、
+插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、
+`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`；★ 本轮**不动**《中控元件总表》。
+
+---
+
+[2026-09-23 03] [Miyaki Kumo] [#253 #254 #255]
+
+**开工准备就绪，即将施工**（分支 `kumo/prometheus`——2026-09-23 前缀由 Ru5t/ 更名 kumo/，即原 Ru5t/prometheus，基于 main 25cef7bb；#245/#247 已随 PR #246/#249 合入 main）。文件域，请勿改写、勿连带提交：
+- #253：`src/components/chat/messageSearchIndex.ts` + `src/components/chat/__tests__/messageSearchIndex.test.ts`
+- #254：`src/sheets/OverviewSheetView.tsx` + `src/sheets/__tests__/OverviewSheetView.visual.test.tsx`
+- #255：**暂不动代码**（口径 a/b/c 待用户拍板，见 `.agents/spec/255-workspace-count-scope.md`）
+- `.agents/records/`（完工时各补一条开发记录）、`.agents/L.md`（本条）
+
+另 #250/#252 已登记在案（#250 修复未开工；#252 File 只读化未开工）。各条目完工合入后即撤。
+
+---
+
+[2026-09-23 01] [Baryon] [#238 · 第③件]
+
+**续开工：第③件 中控死数据清理（★ 纯删除 ⇒ 零变化）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/09-施工单-第③件-死数据清理.md`。前置刀1~刀5B 全部完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- 删：`src/components/cc/widgetCatalogView.ts`、`src/components/cc/__tests__/widgetCatalogView.test.ts`（整文件）
+- 改：`src/domains/cc/widgetCatalog.ts`（删 `BUILTIN_CC_WIDGET_DEFINITIONS` 及只为它存在的 `groupOf`/`defaultPlacementOf` 辅助；两个内建贡献的 `propertyFields` 删除）、`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（三条引用旧目录视图的断言改写成直接读表）
+- CSS：`.../builtin.pylon-renderers/styles/components/ControlCenter.css`（`.modern-command-dock` 一族）、`.../components/chat/InputBar.css`（同族）、`.../components/chat/StatusBar.css`（`.status-bar` 两块）
+- 测：`src/plugins/core/renderer/__tests__/composerVisualContract.test.ts`（删那条"CSS 文本存在"断言）
+- 文档：`.agents/records/238-*-第3件*.md`、本文件；仓外《中控元件总表》与第③件待办同步
+
+**不碰**：`rendererKey` / `isolated-surface`（用户 2026-09-23 已定**保留**）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`（有意的未知 id 样本）、插件契约面 `ccWidgetTypes.ts`/`ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**与刀7（`10-施工单-刀7-删掉缩放.md`）的关系**：两者同改 `widgetDefinitionTable.test.ts` 与出厂数据 ⇒ **不许并行开工**，本刀先做。
+
+✅ **已完工（2026-09-23）**：实现 `04af4717`（9 文件，纯删除）、记录 `.agents/records/238-cc-widget-definition-table-knife3-dead-data.md`。
+门禁五步全绿、全量 626 文件 / 4748 通过、快照除 `generatedAt` 外零差异、实机中控几何与刀5B 逐位相同。
+本分支（刀1~刀5B + 第③件）仍未 push、未开 PR；刀6「先放着」、刀7 单已出待开工（可续做）。
+
+---
+
+[2026-09-23 00] [Baryon] [#238 · 刀5B]
+
+**续开工：刀5B 命令行提示升格（普通行内元件）+ 分隔点整族删除。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/08-施工单-刀5B-命令行提示升格.md`。前置刀5A 已完工（`61267ea1`）。
+
+**本刀（在刀1~刀5A 文件域之上叠加）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（★ 加 `inActiveSession: 'show'|'hide'` + `conditions` 两正交字段，替换 `alwaysVisibleInActiveSession`；加条件表 `CC_VISIBILITY_CONDITIONS`；`isWidgetVisible` 判定顺序改为 `ccHidden → inActiveSession → conditions`；`WidgetVisibilityCtx` 补 `hasSession`/`hintMode`；`cc-command-hint` 行 `draggable: false → true`）
+- `src/ccHeightState.ts`（计数调用方补新 ctx 字段；**计数逻辑本身不改**）
+- `src/themeFieldDefs.ts`（`ccHeight` 的 `minFn` 若需补 ctx）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（`renderBody` 加 `cc-command-hint` 分支；**删裸渲染** `commandHint()` 与两处调用；**删分隔点插入逻辑**）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css`（删分隔点样式族 + 旧 `::before` 规则；`.cc-command-hint` 去掉整行特化）
+- `.../solid-workbench/WorkbenchChrome.css`（删那处 `content:none !important` 收口）
+- 测试：`domains/cc/__tests__/widgetDefinitionTable.test.ts`、`renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx` 等（分隔点/名单/工具条断言同步，逐条点名）
+- 文档：`.agents/records/238-*-刀5B*.md`、本文件；仓外《中控元件总表》与第③件待办同步
+
+**不碰**：布局模型与锚点（刀3）、碰撞算法本体（刀4，**但要回归四条**）、缩放（刀7）、面板分块（刀6）、其余死数据（第③件）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**两处预期变化**：编辑工具条 **6 → 7**、**分隔点消失**。其余要求零变化（字号、文案、三档行为、非 cli 不显示）。
+★ cli 模式可能 **+25px**（提示成了那一行第 5 个元件，跨过"超过 4 个多留一行"的阈值）：用户已同意**先接受 + 实测**，**不许自行改阈值**。
+
+---
+
+[2026-09-22 23] [Baryon] [#238 · 刀5]
+
+**续开工：刀5 项与名单收尾（三项字段删除 + 命令行提示升格为可拖元件，★ 有视觉变化）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/07-施工单-刀5-项与名单收尾.md`。前置刀1~刀4 均已完工。
+
+**本刀（在刀1~刀4 文件域之上叠加）**：
+
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ 先给 `renderBody` 加 `cc-command-hint` 分支，再删裸渲染 `commandHint()` 与两处调用）
+- `src/domains/cc/widgetDefinitions.ts`（`cc-command-hint` 行 `draggable: false → true`；`CC_SYSTEM_FIELDS` 删三项并同步注释）
+- `src/themeFieldDefs.ts`（删 `ccStatusFontSize` / `statusBg` / `statusBgImage`，含 `semanticSource` 兜底角色）、`src/store.ts`（类型字段）
+- `src/domains/theme/themeCssSnapshot.ts`、`src/domains/workbench/workbenchSkinContract.ts`（`--status-bg*` 变量行）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css`（信息行字号固定 16px；`.cc-command-hint` 字号改 `calc(var(--cc-hint-font-size,16px) * 0.86)`）
+- `src/zones/factory/terminal-cc.ts`、`src/zones/factory/gui-cc.ts`（出厂数据手改，生成脚本已删）
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts` 等契约变更引起的写法同步（逐条点名）
+- 文档：`.agents/records/238-*-刀5*.md`、本文件
+
+**不碰**：布局模型与锚点（刀3 已定）、碰撞约束（刀4）、缩放（刀7）、属性面板分块（刀6）、死数据清理（第③件）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**给后来者**：实机验收要用普通 `cargo build` 的二进制（`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物，跑不起来）。
+
+---
+
+[2026-09-22 21] [Baryon] [#238 · 刀4]
+
+**续开工：刀4 占区不叠加（编辑态拖动/微调的碰撞约束）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/06-施工单-刀4-占区不叠加.md`。前置刀1/刀2/刀3 均已完工（位置现由定义表 `layout` 两轴声明）。
+
+**本刀（在刀1~刀3 文件域之上叠加）**：
+
+- **新增** `src/renderers/solid-workbench/input/ccPlacementCollision.ts`（**纯几何**：`rectsOverlap` / `resolveAllowedOffset` / `parseTranslateOffset`；不碰 DOM、不碰 store ⇒ node 可直接单测）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ **两条通路都接上守卫**：拖拽 `move` 改走带守卫的 `updatePlacement`，面板三个输入框本就走它；编辑态限定 + 悬浮豁免）
+- **新增** `src/renderers/solid-workbench/input/__tests__/ccPlacementCollision.test.ts`（纯函数单测）
+- `src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`（组件级：伪造布局 → 拖拽挡住 / 面板旁路挡住 / 悬浮豁免 / 常态零影响）
+- 文档：`.agents/records/238-*-刀4*.md`、本文件
+
+**不碰**：`src/ccLayoutState.ts`（数据语义与 ±48/±16 clamp 不变）、`src/domains/workbench/**`（store 侧落点不动）、出厂数据 `src/zones/factory/**`、刀5/刀7 各项、插件契约面、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**约束（复审据此把关）**：只在编辑态跑几何（常态像素与性能零变化）；障碍集 = 其他可拖元件除去悬浮件；判据是矩形**相交**（面积 > 0），**允许贴合**、不加魔法间隙；**每次 move 重测**障碍（不缓存）；**不消解存量重叠**（用户口径：后续会做一次「强制重置到默认」）。
+
+---
+
+[2026-09-22 19] [Baryon] [#238 · 刀3]
+
+**续开工：刀3 拆掉槽位层，位置改由「锚点」表达（★ 有视觉变化）。** 分支**沿用** `feat/cc-widget-definition-table`（与刀1/刀2 同分支）。施工单 `元件定义表/05-施工单-刀3-拆掉槽位层.md`。前置刀2 已完工（结构对齐每次读盘跑）。
+
+**本刀（在刀1/刀2 文件域之上叠加）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（位置改两轴 `layout: {x,y,order}` + `floating` 声明；`footerLayout` 归属从系统桶挪到容器行）
+- `src/ccLayoutState.ts`（删 `CcSlot` / `SLOT_SET` / `placement.slot` 与全部槽位判定）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（删 `STATUS_SLOTS` / 三个槽位包装 div；改按「锚点+方位」成组；删属性面板「槽位」下拉；`data-widget-slot`→`data-widget-anchor`）
+- `src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（两个 12px 常量改读表 `gap`；做不到像素级即退回+守卫测试）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css` + `.../solid-workbench/WorkbenchChrome.css`（槽位类退场 + 新分组容器 + 分隔符规则同步）
+- `src/components/SettingsPreview.tsx`（失败占位里的槽位类）
+- `src/plugin-runtime/cc-widget/ccWidgetTypes.ts`（`slot`→`anchor` + 可选 `side`；**`rendererKey` / `isolated-surface` 不动**）
+- `src/domains/cc/widgetCatalog.ts`（两处 `defaultPlacement` 跟着改）
+- 测试：`domains/cc/__tests__/{widgetDefinitionTable,ccLayoutV8}.test.ts`、`domains/theme/__tests__/{themeSchemaV8Backfill,structuralAlignment,themeRehydrateAlignment}.test.ts`、`renderers/solid-workbench/__tests__/{mountSolidWorkbench.solid,settingsPreviewControlCenter.solid}.test.tsx`（**均为契约变更引起的写法同步，逐条点名**）
+- 文档：`.agents/records/238-*-刀3*.md`、本文件
+
+**不碰**：`src/zones/factory/**`（出厂区域预设落盘数据，文件头写明「生成脚本已删，请勿手改」）、占区碰撞约束（刀4）、`statusBg`/`statusBgImage`/命令行提示翻可拖（刀5）、`sendVariant`、属性面板按成员分块、缩放、死数据清理、`rendererKey`/`isolated-surface`、中控渲染以外的区域。
+
+**给后来者**：本刀**允许视觉变化**且**不写老数据迁移**（用户口径）；`src-tauri/target/debug/pylon.exe` 是 `tauri dev` 产物（写死 devUrl 1430），实机验收要用普通 `cargo build` 的二进制。
+
+---
+
+[2026-09-22 16] [Baryon] [#238 · 刀2]
+
+**续开工：刀2 归一化解耦（把「结构对齐」从版本号上摘下来）。** 分支**沿用** `feat/cc-widget-definition-table`（与刀1 在 `src/ccLayoutState.ts` 有重叠）。施工单 `元件定义表/04-施工单-刀2-归一化解耦.md`。本刀**对外行为零变化**（改的是"什么时候对齐"）：对齐搬到**每次读盘后无条件跑**，版本白名单整段退场。
+
+**本刀（在刀1 文件域之上叠加）**：
+
+- `src/domains/theme/migration.ts`（拆「结构对齐」与「一次性语义转换」）
+- `src/ccLayoutState.ts`（删 `normalizeCcLayout` 的版本白名单判定 + 版本号职责注释）
+- `src/store.ts`（persist 增加 `merge`：读盘后无条件结构对齐）
+- 新增测试 `src/domains/theme/__tests__/{structuralAlignment,themeRehydrateAlignment}.test.ts`（等价性 / 幂等 / 真实读盘路径）
+- `src/domains/cc/__tests__/ccLayoutV8.test.ts`（**只调整 **"不在白名单里的版本整份回落默认布局" 那条用例的**写法**，样本保留）
+- 文档：`.agents/records/238-*-刀2*.md`、本文件
+
+**不碰**：槽位（刀3）、中控渲染、插件契约面、`src/domains/cc/widgetDefinitions.ts`（刀1 产物，本刀只读）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
 ---
 
@@ -622,80 +921,40 @@
 
 ---
 
-[2026-09-23 03] [Miyaki Kumo] [#253 #254 #255]
+[2026-09-22 15] [Baryon] [#238]
 
-**开工准备就绪，即将施工**（分支 `kumo/prometheus`——2026-09-23 前缀由 Ru5t/ 更名 kumo/，即原 Ru5t/prometheus，基于 main 25cef7bb；#245/#247 已随 PR #246/#249 合入 main）。文件域，请勿改写、勿连带提交：
-- #253：`src/components/chat/messageSearchIndex.ts` + `src/components/chat/__tests__/messageSearchIndex.test.ts`
-- #254：`src/sheets/OverviewSheetView.tsx` + `src/sheets/__tests__/OverviewSheetView.visual.test.tsx`
-- #255：**暂不动代码**（口径 a/b/c 待用户拍板，见 `.agents/spec/255-workspace-count-scope.md`）
-- `.agents/records/`（完工时各补一条开发记录）、`.agents/L.md`（本条）
+**开工：中控元件两级定义表·刀1（结构步，行为零变化）。** 分支 `feat/cc-widget-definition-table`（基于 `origin/main @ 94d88ede`）。施工单 `元件定义表/01-施工单-刀1-两级定义表立表.md`。**本刀要求像素级零变化**（默认布局 / 工具条 6 条 / 中文名逐字 / 属性面板字段序 / 契约快照除 `generatedAt` 外逐字节）。
 
-另 #250/#252 已登记在案（#250 修复未开工；#252 File 只读化未开工）。各条目完工合入后即撤。
+**我方本轮文件域（请勿改写、勿连带提交）**：
 
----
+- `src/domains/cc/widgetDefinitions.ts`（两级定义表的新家）
+- `src/domains/cc/widgetCatalog.ts`（名字/类别/位置三份改派生）
+- `src/ccLayoutState.ts`（`DEFAULT_CC_LAYOUT` / `CC_REGISTERED_SLOT_IDS` 改派生）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（名单/标签改派生）
+- 新增测试 `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（不变量）
+- 文档：`.agents/records/238-*.md`、本文件
 
-[2026-09-23 05] [Miyaki Kumo] [#258]
+**不碰**：`src/plugin-runtime/cc-widget/**`（插件契约面）、`src/themeFieldDefs.ts`（只读且禁运行时 import）、`src/ccHeightState.ts`、`src/domains/workbench/appearance.ts`、`ControlCenter.css`、`WorkbenchWidgets.solid.tsx`（12px 间距按施工单停手条件 7 原地保留）、`src/components/cc/widgetCatalogView.ts` 及其测试（第③件的东西，本刀不动）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
 
-**开工：issue258（stderr 处理管线去重与分配削减——不改行为纯性能/质量）。** spec 见 `.agents/spec/258-stderr-pipeline-dedup.md`。分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
-
-- `src-tauri/pylon-acp/src/stderr.rs`（解析收敛一次 + 新增分类钉子测试）
-- `src-tauri/pylon-acp/src/stderr_tail.rs`（`sanitize_diagnostic` is_match 守卫 + `summarize_parser_error` OnceLock 预编译；**既有测试不动**）
-- `src-tauri/pylon-foundations/src/sanitize.rs`（仅 `sanitize_message` 签名 `String`→`&str`，函数体不变）
-- `src-tauri/src/runtime_log/mod.rs`（仅 `sanitize_message` 薄包装签名跟随 + `:192` 调用点）
-- `src-tauri/src/permission.rs`（仅 `:101` 调用点借用化一行）
-- 文档：`.agents/records/258-*.md`（完工时新增）、本文件
-
-**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
+**给后来者**：中控区另两件（状态左行撤槽、死数据清理）与本件文件重叠 ⇒ **不许并行开工**；顺序 = 本件 → 状态左行 → 死数据清理。
 
 ---
 
-[2026-09-23 06] [Miyaki Kumo] [#259]
+[2026-09-22 15] [Miyaki Kumo] [#241]
 
-**开工：issue259（code-stats crate 清单漂移修复——pylon-acp/pylon-session 入表，清单改随 Cargo workspace members 动态解析）。** 分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+**进行中：高亮引擎改 Lezer（用户拍板）——退役 wasm/syntect 语法资产。** 依据为 #240 的内存定位 + 本轮引擎对比 spike（四张实测表在 issue 里）；ADR-0020 已落。
+**刀1~刀6 均已落地并推送本分支**，等合入 main；L.md 条目待合入后移除。刀5 = 基准跑出的**截断缺陷**修复（`syntaxTree` 只解析 3006 字符 ⇒ >3k 代码块静默丢色）；刀6 = 解析改**按时间切片 + 片间让出主线程**（消掉 >200ms 输入退回部分树的静默降级）。
 
-- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`
-- `.agents/skills/code-stats/SKILL.md`（口径同步）
-- `.agents/records/259-*.md`（完工时新增）、本文件
+本轮文件域（请勿改写、勿连带提交）：
 
-**我不碰**：`src/`（#257/#258 等在途域）、`src-tauri/**`、`tools/**`。全程 pathspec 提交。
+- 前端：`src/components/chat/codeHighlight.ts`（**唯一**改动入口）、`src/components/chat/lezerHighlight.ts`（新增引擎）、`src/store.ts` 与 `src/domains/workbench/workbenchProjector.ts` 与 `.../chat/ChatView.css`（**仅更正指向已退役引擎的过期注释**）
+- 测试：`src/components/chat/__tests__/codeHighlight.test.ts`、`src/renderers/solid-workbench/chat/__tests__/{markdownComputeParity,MarkdownContent.solid}.test.tsx`、`src/renderers/solid-workbench/chat/__tests__/issue221.codeBlockLifecycle.solid.test.tsx`
+- Rust（**刀3 已落**）：`src-tauri/pylon-markdown/{src/{lib,wasm_exit}.rs,src/bin/parity_snapshot.rs,Cargo.toml}`、`parity/{corpus,rust-snapshot}.json`；**已删** `src/{highlight,theme,tm_language}.rs`、`assets/**`、`gen/**`、`parity/{dump-ts.mjs,diff.mjs,ts-baseline.json,parity-report.json}`
+- 依赖/门禁：`package.json`（退休 starry-night/oniguruma）、`scripts/check-bundle-size.mjs`（wasm 预算 1,110,000 → **230,000**，实测 198,431）、`scripts/{build-wasm.mjs,audit-maintenance.mts}`（注释/模块根同步）
+- 基准：`scripts/perf-bench/{index.ts,README.md,suites/markdownHighlightSuite.ts}`（highlight 域改量 Lezer）
+- 文档：`.agents/spec/241-*.md`、`.agents/records/241-*.md`、`.agents/decisions/0020-*.md`、`docs/说明书/Pylon-模块维护地图.md`、`Pylon-项目架构参考.md`、`.agents/decisions/0018-*.md`（修订）
 
----
-
-[2026-09-23 07] [Miyaki Kumo] [#260]
-
-**开工：issue260（后端+前端开销清偿第二批——#258 扫描遗留 14 项，行为零变化）。** spec 见 `.agents/spec/260-overhead-paydown-batch2.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。四批文件域，请勿改写、勿连带提交：
-
-- 批次 A：`src-tauri/pylon-acp/src/wire_trace.rs`、`src-tauri/src/lifecycle/mod.rs`（仅 wire_trace_snapshot 命令段）、`src-tauri/pylon-acp/Cargo.toml` + 根 `Cargo.lock`（serde +rc）、`src-tauri/src/acp/{golden_trace_tests,p1_wire_regression_tests}.rs`、`src-tauri/src/test_harness.rs`（仅 WireRecord 字段类型跟随）
-- 批次 B：`src-tauri/pylon-acp/src/{engine,client,stderr_tail,turn_ledger}.rs`、`src-tauri/src/hook_bridge.rs`（仅 emit 段）
-- 批次 C：`src/domains/tool/toolPresentation.ts`、`src/components/chat/toolPresentationModel.ts`、`src/renderers/solid-workbench/chat/GenerationFooter.solid.tsx`、`src/components/sidebar/SessionsPanel.tsx`
-- 批次 D：**删除** `src/components/chat/spinnerVerbs.ts`；`src/plugin-runtime/storage/pluginStorageApi.ts`、`src/components/PetCompanion.tsx`、`src/identityStore.ts`
-- 文档：`.agents/records/260-*.md`（完工时新增）、本文件（顺手清掉 #259 条目上方残留的孤立 `=======` 行）
-
-**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）、中控区、预设系统、`scripts/**`（#259 域）。既有测试除编译必需的类型跟随外零修改。全程 pathspec 提交。
+**我不碰**：`parseMarkdown`（comrak）与 markdown parity 快照锁、`src/renderers/solid-workbench/chat/{CodeBlock,MarkdownContent}.solid.tsx`（消费点应零改动）、`codeBlockDomLifecycle.ts` 的机制本体、中控区、预设系统、他人在途域。
 
 ---
 
-[2026-09-23 08] [Miyaki Kumo] [#261]
-
-**开工：issue261（评估修复批次——注释漂移清理、session 重复逻辑去重、prompt 终态臂拆分、plugin_cmds spawn_blocking；行为零变化）。** spec 见 `.agents/spec/261-assessment-fix-batch.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。文件域（请勿改写、勿连带提交）：
-
-- `src-tauri/src/session/{model,create,persist,prompt,fork}.rs`
-- `src-tauri/src/gateway/{mod,credentials}.rs`、`src-tauri/src/gateway/qq/mod.rs`
-- `src-tauri/src/agent/runtime.rs`、`src-tauri/src/mcp/mod.rs`（均仅注释）
-- `src-tauri/src/plugin_cmds/transaction.rs`（如命令体在 mod.rs 则一并，声明 `plugin_cmds/**`）
-- `src/runtimeStore.ts`、`src/store.ts`、`src/workspaceStore.ts`（**仅注释行**，不碰逻辑/类型/导出）
-- 文档：`.agents/records/261-*.md`（完工时新增）、本文件
-
-**我不碰**：#260 四批次在途域（`lifecycle/mod.rs`、`identityStore.ts`、`pylon-acp/**`、`Cargo.lock`、hook_bridge、toolPresentation 族、spinnerVerbs）；`src-tauri/src/dispatcher/**`（#155 域）；中控区、预设系统；`scripts/**`。全程 pathspec 提交，工作树里 #260 批次 A 未提交 WIP 原样保留、绝不 stage。
-
----
-
-[2026-09-23 09] [Miyaki Kumo] [#262]
-
-**开工：issue262（CI 修复——shadow parity 背压探针路径随 #247 抽取失效 + clippy 基线两条新增）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
-
-- `scripts/check-acp-shadow-parity.mjs`（仅 runBackpressureCheck 探针命令与测试名）
-- `src-tauri/src/session/prompt.rs`（仅 settle_prompt_cancelled_after_timeout 签名收窄 + 调用点，#261 已收工）
-- `src-tauri/src/gateway/qq/mod.rs`（仅 dead_target_gate let-else → `?`，#261 已收工）
-
-**我不碰**：其余全部。全程 pathspec 提交。

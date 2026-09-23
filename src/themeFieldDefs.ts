@@ -1,5 +1,6 @@
 import type { ThemeSettings } from './store'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { CC_WIDGET_GROUPS } from './domains/cc/widgetDefinitions.ts'
 import type { FontRole } from './plugin-runtime/fonts/fontContributionTypes.ts'
 import type { VisualSemanticRole } from './domains/theme/visualSemantics.ts'
 
@@ -64,7 +65,7 @@ export interface ThemeFieldDef {
   hidden?: boolean
   /** META 字段：仅持久化、不进预设白名单（ccEditMode/appliedPreset/dirty） */
   meta?: boolean
-  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden/ccScale 及 appliedPreset/custom 无标量默认） */
+  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden 及 appliedPreset/custom 无标量默认） */
   default?: string | number | boolean
   /** W2-13（F3-A）：快速层基础字段标记（basic 清单来自 defs，组件不硬编码） */
   tier?: 'basic'
@@ -233,95 +234,96 @@ export const THEME_FIELD_DEFS = {
         hiddenIds: t.ccHidden || [],
         inputMode: t.inputMode,
         submitButtonMode: t.inputSubmitButtonMode || 'inline',
+        // ★ #238 刀5B：命令行提示的可见性含 `'hint-visible'` 条件 ⇒ 把档位传进去；
+        //   `hasSession` 在这里**拿不到**（this 是主题对象，没有会话信息），故不传
+        //   ⇒ 含 `'has-session'` 的行在此按"不可见"计（保守：不改写用户已落盘的高度）。
+        hintMode: t.cliHintMode || 'full',
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
     }),
-  group: "基础",
+    group: "中控本体面",
   },
-  ccMarginX: { ...N('cc', '左右边距（对称）', 0, 100), default: 15, group: "基础", unit: 'px', suffix: 'px' },
-  ccMarginBottom: { ...N('cc', '底边距', 0, 100), default: 15, group: "基础", unit: 'px', suffix: 'px' },
-  ccRadius: { ...N('cc', '圆角', 0, 30), default: 25, group: "基础", unit: 'px', suffix: 'px' },
-  ccBg: { ...C('cc', '中控区背景'), default: '#808080', group: "基础", },
-  ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "基础", percent: true, suffix: '%' },
-  ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "外观风格", },
-  ccStatusFontSize: { ...N('cc', '状态信息字号', 14, 20), default: 16, group: "状态信息", unit: 'px' },
-  // 变体切换组件读 store 值（data-cc-variant），不注入 CSS var
-  ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), optionLabels: { terminal: '终端状态栏', glass: '玻璃工作台', pill: '轻量胶囊' }, default: 'terminal', group: "外观风格", noCssVar: true },
+  ccMarginX: { ...N('cc', '左右边距（对称）', 0, 100), default: 15, group: "中控本体面", unit: 'px', suffix: 'px' },
+  ccMarginBottom: { ...N('cc', '底边距', 0, 100), default: 15, group: "中控本体面", unit: 'px', suffix: 'px' },
+  ccRadius: { ...N('cc', '圆角', 0, 30), default: 25, group: "中控本体面", unit: 'px', suffix: 'px' },
+  ccBg: { ...C('cc', '中控区背景'), default: '#808080', group: "中控本体面", },
+  ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "中控本体面", percent: true, suffix: '%' },
+  ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "中控本体面", },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
-  ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
   // A6 输入区：本轮新增字段不投影 semanticRole/semanticSource；旧 inputBg 等字段保留。
-  inputOffsetTop: { ...N('cc', '输入栏上间距', 0, 120), default: 10, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-offset-top' },
-  inputHeight: { ...N('cc', '输入栏高度', 0, 200), default: 40, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-height' },
-  inputMarginX: { ...N('cc', '输入栏左右间距', 0, 120), default: 10, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-margin-x' },
-  inputSurfaceBg: { ...C('cc', '输入栏背景色'), default: '#FFFFFF', group: '输入栏', cssVar: '--cc-input-surface' },
-  inputSurfaceOpacity: { ...N('cc', '输入栏背景透明度', 0, 1, 0.05), default: 1, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-surface-opacity' },
-  inputFocusRingEnabled: { ...S('cc', '焦点光环开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
-  inputFocusRingColor: { ...C('cc', '焦点光环颜色'), default: 'var(--accent)', group: '输入栏' },
-  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 0, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-highlight-opacity' },
-  inputShadowEnabled: { ...S('cc', '输入栏阴影开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入栏' },
-  inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入与状态", semanticRole: 'surface.raised', semanticSource: true },
-  inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },
-  inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: '输入栏', cssVar: '--cc-input-text' },
-  inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: '输入栏', cssVar: '--cc-input-placeholder' },
-  sendButtonColor: { ...C('cc', '发送按钮颜色'), default: '#000000', group: '发送按钮', noCssVar: true },
-  sendButtonRadius: { ...S('cc', '发送按钮圆角', ['0', '0.25', '0.33', '0.5']), optionLabels: { '0': '直角', '0.25': '四分之一', '0.33': '三分之一', '0.5': '圆形' }, default: '0.5', group: '发送按钮', noCssVar: true },
-  sendButtonBorderColor: { ...S('cc', '发送按钮边框', ['white', 'black']), optionLabels: { white: '纯白', black: '纯黑' }, default: 'white', group: '发送按钮', noCssVar: true },
-  sendButtonIcon: { ...S('cc', '图标形状', ['arrow', 'triangle', 'double-arrow']), optionLabels: { arrow: '箭头', triangle: '三角', 'double-arrow': '双箭头' }, default: 'arrow', group: '发送按钮', noCssVar: true },
-  sendButtonIconGenerating: { ...S('cc', '生成中图标', ['square', 'cross']), optionLabels: { square: '方块', cross: '叉' }, default: 'square', group: '发送按钮', noCssVar: true },
-  sendButtonIconRound: { ...S('cc', '图标圆角', ['on', 'off']), optionLabels: { on: '圆角', off: '直角' }, default: 'on', group: '发送按钮', noCssVar: true },
-  sendButtonIconColor: { ...S('cc', '图标颜色', ['white', 'gray', 'black']), optionLabels: { white: '纯白', gray: '50 灰', black: '纯黑' }, default: 'white', group: '发送按钮', noCssVar: true },
-  inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入与状态", semanticRole: 'stroke.default', semanticSource: true },
-  inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入与状态", semanticRole: 'state.focusRing', semanticSource: true },
-  inputBorder: { ...C('cc', '输入栏边框色'), default: 'transparent', group: '输入栏', cssVar: '--cc-input-border' },
-  inputBorderWidth: { ...N('cc', '输入栏边框粗细', 0, 8), default: 1, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-border-width' },
-  inputBorderOpacity: { ...N('cc', '输入栏边框透明度', 0, 1, 0.05), default: 0, group: '输入栏', percent: true, suffix: '%', cssVar: '--cc-input-border-opacity' },
-  inputRadius: { ...N('cc', '输入栏圆角', 0, 28), default: 20, group: '输入栏', unit: 'px', suffix: 'px', cssVar: '--cc-input-radius' },
-  inputFontSize: { ...N('cc', '输入字号', 12, 22, 1), tier: 'basic', default: 15, group: '输入栏', unit: 'px', cssVar: '--cc-input-font-size' },
-  inputLineHeight: { ...S('cc', '输入行距', ['0.5', '1', '1.5']), default: '1', group: '输入栏', cssVar: '--cc-input-line-height' },
-  inputMinHeight: { ...N('cc', '输入栏最小高度', 32, 120), default: 56, group: "输入与状态", unit: 'px', advanced: true },
-  inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', control: 'segmented', group: "输入与状态", },
-  inputVariant: { ...S('cc', '输入栏外观', ['cli', 'composer', 'compact', 'command']), optionLabels: { cli: '命令行', composer: '标准编辑器', compact: '紧凑输入', command: '命令面板' }, default: 'cli', syncOnChange: ['inputMode'], group: "控件样式", },
-  inputShowPlaceholder: { ...S('cc', '显示输入提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "控件样式", },
-  inputShowHistoryHint: { ...S('cc', '显示历史快捷提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "控件样式", },
-  inputSubmitButtonMode: { ...S('cc', '发送按钮位置', ['inline', 'external', 'hidden']), optionLabels: { inline: '输入栏内', external: '独立按钮', hidden: '隐藏' }, default: 'inline', group: '发送按钮', },
-  cliLineWidth: { ...N('cc', '命令行边框宽度', 1, 4), default: 2, group: "输入与状态", unit: 'px' },
-  cliLineColor: { ...C('cc', '命令行边框颜色'), default: '', group: "输入与状态", semanticRole: 'connector.default' },
-  cliTextColor: { ...C('cc', '命令行文字颜色'), default: '', group: "输入与状态", semanticRole: 'content.text' },
-  cliPromptColor: { ...C('cc', '提示符颜色'), default: '', group: "控件样式", semanticRole: 'accent' },
-  cliLinePadding: { ...N('cc', '命令行内边距', 0, 16), default: 6, group: "输入与状态", unit: 'px', advanced: true },
-  cliContentOffsetY: { ...N('cc', '内容垂直偏移', -6, 6), default: 0, group: "控件样式", unit: 'px', advanced: true },
-  cliHintMode: { ...S('cc', '快捷提示详细程度', ['hidden', 'compact', 'full']), optionLabels: { hidden: '隐藏', compact: '仅常用项', full: '显示全部' }, default: 'full', group: "控件样式", },
-  footerLayout: { ...S('cc', '底部信息布局', ['free', 'peri']), optionLabels: { free: '独立状态行', peri: '输入栏下方' }, default: 'free', group: "控件样式", },
-  cliOverflowMode: { ...S('cc', '多行输入行为', ['fixed-scroll', 'grow', 'overlay']), optionLabels: { 'fixed-scroll': '固定高度并滚动', grow: '随内容增高', overlay: '浮层展开' }, default: 'fixed-scroll', group: "控件样式", },
-  statusBg: { ...C('cc', '状态区背景'), default: 'transparent', group: "输入与状态", semanticRole: 'surface.panel', semanticSource: true },
-  statusBgImage: { ...T('cc', '状态区背景图'), default: '', control: 'bgImage', group: "输入与状态", },
-  pillText: { ...C('cc', '用量胶囊文字'), default: '#999999', group: "波形与用量", semanticRole: 'content.text' },
-  prismOnColor: { ...C('cc', 'Prism 已开启状态'), default: '#4EBA65', group: "波形与用量", semanticRole: 'state.success' },
-  modelSwitchMode: { ...S('cc', '模型切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '模型控件', noCssVar: true },
-  modelBgColor: { ...S('cc', '模型背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '模型控件', noCssVar: true },
-  modelWidth: { ...N('cc', '模型宽度', 40, 400, 1), default: 120, group: '模型控件', noCssVar: true },
-  modelHeight: { ...N('cc', '模型高度', 16, 80, 1), default: 28, group: '模型控件', noCssVar: true },
-  modelRadius: { ...N('cc', '模型圆角', 0, 40, 1), default: 0, group: '模型控件', noCssVar: true },
-  modelFontSize: { ...N('cc', '模型字号', 8, 32, 1), default: 12, group: '模型控件', noCssVar: true },
-  modelTextColor: { ...S('cc', '模型文字颜色', ['black', 'white']), optionLabels: { black: '黑', white: '白' }, default: 'black', group: '模型控件', noCssVar: true },
-  reasoningSwitchMode: { ...S('cc', '思考强度切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '思考强度控件', noCssVar: true },
-  reasoningBgColor: { ...S('cc', '思考强度背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '思考强度控件', noCssVar: true },
-  reasoningWidth: { ...N('cc', '思考强度宽度', 40, 400, 1), default: 120, group: '思考强度控件', noCssVar: true },
-  reasoningHeight: { ...N('cc', '思考强度高度', 16, 80, 1), default: 28, group: '思考强度控件', noCssVar: true },
-  reasoningRadius: { ...N('cc', '思考强度圆角', 0, 40, 1), default: 0, group: '思考强度控件', noCssVar: true },
-  reasoningFontSize: { ...N('cc', '思考强度字号', 8, 32, 1), default: 12, group: '思考强度控件', noCssVar: true },
-  reasoningTextColor: { ...S('cc', '思考强度文字颜色', ['black', 'white']), optionLabels: { black: '黑', white: '白' }, default: 'black', group: '思考强度控件', noCssVar: true },
-  permissionSwitchMode: { ...S('cc', '权限切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '权限控件', noCssVar: true },
-  permissionBgColor: { ...S('cc', '权限背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '权限控件', noCssVar: true },
-  permissionWidth: { ...N('cc', '权限宽度', 40, 400, 1), default: 120, group: '权限控件', noCssVar: true },
-  permissionHeight: { ...N('cc', '权限高度', 16, 80, 1), default: 28, group: '权限控件', noCssVar: true },
-  permissionRadius: { ...N('cc', '权限圆角', 0, 40, 1), default: 0, group: '权限控件', noCssVar: true },
-  permissionFontSize: { ...N('cc', '权限字号', 8, 32, 1), default: 12, group: '权限控件', noCssVar: true },
-  permissionTextColor: { ...S('cc', '权限文字颜色', ['mode', 'black', 'white']), optionLabels: { mode: '跟模式', black: '黑', white: '白' }, default: 'mode', group: '权限控件', noCssVar: true },
-  sendVariant: { ...S('cc', '发送按钮外观', ['icon', 'square', 'minimal']), optionLabels: { icon: '圆形图标', square: '方形按钮', minimal: '极简图标' }, default: 'icon', group: "控件样式", },
-  modeAutoColor: { ...C('cc', '自动模式颜色'), default: '#FFC107', group: "控件样式", advanced: true, semanticRole: 'state.warning' },
-  modeEditColor: { ...C('cc', '编辑模式颜色'), default: '#A2A9E4', group: "控件样式", advanced: true, semanticRole: 'accent' },
+  inputOffsetTop: { ...N('cc', '输入栏上间距', 0, 120), default: 10, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-offset-top' },
+  inputHeight: { ...N('cc', '输入栏高度', 0, 200), default: 40, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-height' },
+  inputMarginX: { ...N('cc', '输入栏左右间距', 0, 120), default: 10, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-margin-x' },
+  inputSurfaceBg: { ...C('cc', '输入栏背景色'), default: '#FFFFFF', group: '输入框本体', cssVar: '--cc-input-surface' },
+  inputSurfaceOpacity: { ...N('cc', '输入栏背景透明度', 0, 1, 0.05), default: 1, group: '输入框本体', percent: true, suffix: '%', cssVar: '--cc-input-surface-opacity' },
+  inputFocusRingEnabled: { ...S('cc', '焦点光环开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入框本体' },
+  inputFocusRingColor: { ...C('cc', '焦点光环颜色'), default: 'var(--accent)', group: '输入框本体' },
+  inputHighlightOpacity: { ...N('cc', '输入栏高光透明度', 0, 1, 0.05), default: 0, group: '输入框本体', percent: true, suffix: '%', cssVar: '--cc-input-highlight-opacity' },
+  inputShadowEnabled: { ...S('cc', '输入栏阴影开关', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: 'shown', group: '输入框本体' },
+  inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入框本体", semanticRole: 'surface.raised', semanticSource: true },
+  inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入框本体", },
+  inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: '输入框本体', cssVar: '--cc-input-text' },
+  inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: '输入框本体', cssVar: '--cc-input-placeholder' },
+  sendButtonColor: { ...C('cc', '发送按钮颜色'), default: '#000000', group: '按钮本体', noCssVar: true },
+  sendButtonRadius: { ...S('cc', '发送按钮圆角', ['0', '0.25', '0.33', '0.5']), optionLabels: { '0': '直角', '0.25': '四分之一', '0.33': '三分之一', '0.5': '圆形' }, default: '0.5', group: '按钮本体', noCssVar: true },
+  sendButtonBorderColor: { ...S('cc', '发送按钮边框', ['white', 'black']), optionLabels: { white: '纯白', black: '纯黑' }, default: 'white', group: '按钮本体', noCssVar: true },
+  sendButtonIcon: { ...S('cc', '图标形状', ['arrow', 'triangle', 'double-arrow']), optionLabels: { arrow: '箭头', triangle: '三角', 'double-arrow': '双箭头' }, default: 'arrow', group: '图标层', noCssVar: true },
+  sendButtonIconGenerating: { ...S('cc', '生成中图标', ['square', 'cross']), optionLabels: { square: '方块', cross: '叉' }, default: 'square', group: '图标层', noCssVar: true },
+  sendButtonIconRound: { ...S('cc', '图标圆角', ['on', 'off']), optionLabels: { on: '圆角', off: '直角' }, default: 'on', group: '图标层', noCssVar: true },
+  sendButtonIconColor: { ...S('cc', '图标颜色', ['white', 'gray', 'black']), optionLabels: { white: '纯白', gray: '50 灰', black: '纯黑' }, default: 'white', group: '图标层', noCssVar: true },
+  inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入框本体", semanticRole: 'stroke.default', semanticSource: true },
+  inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入框本体", semanticRole: 'state.focusRing', semanticSource: true },
+  inputBorder: { ...C('cc', '输入栏边框色'), default: 'transparent', group: '输入框本体', cssVar: '--cc-input-border' },
+  inputBorderWidth: { ...N('cc', '输入栏边框粗细', 0, 8), default: 1, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-border-width' },
+  inputBorderOpacity: { ...N('cc', '输入栏边框透明度', 0, 1, 0.05), default: 0, group: '输入框本体', percent: true, suffix: '%', cssVar: '--cc-input-border-opacity' },
+  inputRadius: { ...N('cc', '输入栏圆角', 0, 28), default: 20, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-radius' },
+  inputFontSize: { ...N('cc', '输入字号', 12, 22, 1), tier: 'basic', default: 15, group: '输入框本体', unit: 'px', cssVar: '--cc-input-font-size' },
+  inputLineHeight: { ...S('cc', '输入行距', ['0.5', '1', '1.5']), default: '1', group: '输入框本体', cssVar: '--cc-input-line-height' },
+  inputMinHeight: { ...N('cc', '输入栏最小高度', 32, 120), default: 56, group: "输入框本体", unit: 'px', advanced: true },
+  inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', control: 'segmented', group: "输入框本体", },
+  inputVariant: { ...S('cc', '输入栏外观', ['cli', 'composer', 'compact', 'command']), optionLabels: { cli: '命令行', composer: '标准编辑器', compact: '紧凑输入', command: '命令面板' }, default: 'cli', syncOnChange: ['inputMode'], group: "输入框本体", },
+  inputShowPlaceholder: { ...S('cc', '显示输入提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "输入框本体", },
+  inputShowHistoryHint: { ...S('cc', '显示历史快捷提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "历史快捷提示", },
+  inputSubmitButtonMode: { ...S('cc', '发送按钮位置', ['inline', 'external', 'hidden']), optionLabels: { inline: '输入栏内', external: '独立按钮', hidden: '隐藏' }, default: 'inline', group: '按钮本体', },
+  cliLineWidth: { ...N('cc', '命令行边框宽度', 1, 4), default: 2, group: "上下两条线", unit: 'px' },
+  cliLineColor: { ...C('cc', '命令行边框颜色'), default: '', group: "上下两条线", semanticRole: 'connector.default' },
+  cliTextColor: { ...C('cc', '命令行文字颜色'), default: '', group: "输入框本体", semanticRole: 'content.text' },
+  cliPromptColor: { ...C('cc', '提示符颜色'), default: '', group: "提示符 ❯", semanticRole: 'accent' },
+  cliLinePadding: { ...N('cc', '命令行内边距', 0, 16), default: 6, group: "上下两条线", unit: 'px', advanced: true },
+  cliContentOffsetY: { ...N('cc', '内容垂直偏移', -6, 6), default: 0, group: "输入框本体", unit: 'px', advanced: true },
+  cliHintMode: { ...S('cc', '快捷提示详细程度', ['hidden', 'compact', 'full']), optionLabels: { hidden: '隐藏', compact: '仅常用项', full: '显示全部' }, default: 'full', group: "提示行", },
+  // ★ #238 刀5：命令行提示的字号从「整条信息行」收窄到**它自己**（原来是整行继承
+  // `ccStatusFontSize`，用 `0.86em` 折算）。默认 16 与原行字号同值 ⇒ 提示大小不变。
+  ccHintFontSize: { ...N('cc', '快捷提示字号', 12, 22, 1), default: 16, group: "提示行", unit: 'px', cssVar: '--cc-hint-font-size' },
+  footerLayout: { ...S('cc', '底部信息布局', ['free', 'peri']), optionLabels: { free: '独立状态行', peri: '输入栏下方' }, default: 'free', group: "中控本体面", },
+  cliOverflowMode: { ...S('cc', '多行输入行为', ['fixed-scroll', 'grow', 'overlay']), optionLabels: { 'fixed-scroll': '固定高度并滚动', grow: '随内容增高', overlay: '浮层展开' }, default: 'fixed-scroll', group: "输入框本体", },
+  pillText: { ...C('cc', '用量胶囊文字'), default: '#999999', group: "用量胶囊", semanticRole: 'content.text' },
+  prismOnColor: { ...C('cc', 'Prism 已开启状态'), default: '#4EBA65', group: "用量胶囊", semanticRole: 'state.success' },
+  modelSwitchMode: { ...S('cc', '模型切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '模型触发器', noCssVar: true },
+  modelBgColor: { ...S('cc', '模型背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '模型触发器', noCssVar: true },
+  modelWidth: { ...N('cc', '模型宽度', 40, 400, 1), default: 120, group: '模型触发器', noCssVar: true },
+  modelHeight: { ...N('cc', '模型高度', 16, 80, 1), default: 28, group: '模型触发器', noCssVar: true },
+  modelRadius: { ...N('cc', '模型圆角', 0, 40, 1), default: 0, group: '模型触发器', noCssVar: true },
+  modelFontSize: { ...N('cc', '模型字号', 8, 32, 1), default: 12, group: '模型触发器', noCssVar: true },
+  modelTextColor: { ...S('cc', '模型文字颜色', ['black', 'white']), optionLabels: { black: '黑', white: '白' }, default: 'black', group: '模型触发器', noCssVar: true },
+  reasoningSwitchMode: { ...S('cc', '思考强度切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '思考强度触发器', noCssVar: true },
+  reasoningBgColor: { ...S('cc', '思考强度背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '思考强度触发器', noCssVar: true },
+  reasoningWidth: { ...N('cc', '思考强度宽度', 40, 400, 1), default: 120, group: '思考强度触发器', noCssVar: true },
+  reasoningHeight: { ...N('cc', '思考强度高度', 16, 80, 1), default: 28, group: '思考强度触发器', noCssVar: true },
+  reasoningRadius: { ...N('cc', '思考强度圆角', 0, 40, 1), default: 0, group: '思考强度触发器', noCssVar: true },
+  reasoningFontSize: { ...N('cc', '思考强度字号', 8, 32, 1), default: 12, group: '思考强度触发器', noCssVar: true },
+  reasoningTextColor: { ...S('cc', '思考强度文字颜色', ['black', 'white']), optionLabels: { black: '黑', white: '白' }, default: 'black', group: '思考强度触发器', noCssVar: true },
+  permissionSwitchMode: { ...S('cc', '权限切换方式', ['menu', 'cycle']), optionLabels: { menu: '弹菜单', cycle: '点击轮换' }, default: 'menu', group: '权限触发器', noCssVar: true },
+  permissionBgColor: { ...S('cc', '权限背景色', ['white', 'black']), optionLabels: { white: '白', black: '黑' }, default: 'white', group: '权限触发器', noCssVar: true },
+  permissionWidth: { ...N('cc', '权限宽度', 40, 400, 1), default: 120, group: '权限触发器', noCssVar: true },
+  permissionHeight: { ...N('cc', '权限高度', 16, 80, 1), default: 28, group: '权限触发器', noCssVar: true },
+  permissionRadius: { ...N('cc', '权限圆角', 0, 40, 1), default: 0, group: '权限触发器', noCssVar: true },
+  permissionFontSize: { ...N('cc', '权限字号', 8, 32, 1), default: 12, group: '权限触发器', noCssVar: true },
+  permissionTextColor: { ...S('cc', '权限文字颜色', ['mode', 'black', 'white']), optionLabels: { mode: '跟模式', black: '黑', white: '白' }, default: 'mode', group: '权限触发器', noCssVar: true },
+  sendVariant: { ...S('cc', '发送按钮外观', ['icon', 'square', 'minimal']), optionLabels: { icon: '圆形图标', square: '方形按钮', minimal: '极简图标' }, default: 'icon', group: "按钮本体", },
+  modeAutoColor: { ...C('cc', '自动模式颜色'), default: '#FFC107', group: "权限触发器", advanced: true, semanticRole: 'state.warning' },
+  modeEditColor: { ...C('cc', '编辑模式颜色'), default: '#A2A9E4', group: "权限触发器", advanced: true, semanticRole: 'accent' },
 
   // ── right ──
   rightBg: { ...C('right', '右栏背景色'), default: 'rgba(0,0,0,0.02)', group: "外观", semanticRole: 'surface.panel', semanticSource: true },
@@ -397,9 +399,37 @@ export function fieldToCssVar(key: string): string {
 }
 
 /**
+ * 成员 label → 它名下的字段键（★ #238 刀6 起**派生**，定义表里那份手写清单已删除）。
+ *
+ * 真值只有一处：**每个字段自己身上的 `group`**（用户口径「归属放在字段」= `def.group` 的值就是子部件名）。
+ * 派生只能放在**这一侧**：定义表若要自己算，就得运行时 import 本文件 —— 那正是该表表头
+ * 写明的「头号雷」（会成环，症状是静默的 undefined）。方向仍是一条：本文件 → 定义表。
+ */
+export const CC_MEMBER_FIELDS: Readonly<Record<string, readonly ThemeFieldKey[]>> = Object.freeze(
+  Object.fromEntries(
+    CC_WIDGET_GROUPS.flatMap(row => row.members.map(member => [
+      member.label,
+      THEME_FIELD_KEYS.filter(key => {
+        const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+        return def.zone === 'cc' && def.group === member.label
+      }),
+    ])),
+  ),
+)
+
+/** 该子部件名下**能在设置页渲染出来**的字段（`hidden` 的不算）—— 决定这个子部件要不要出现在分组表里。 */
+function renderableMemberFields(label: string): readonly ThemeFieldKey[] {
+  return (CC_MEMBER_FIELDS[label] ?? []).filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).hidden)
+}
+
+/**
  * Settings 分组映射（声明式 UI 按此渲染字段组）。
  * 纯字段组由渲染器自动生成；含自定义内容的组（预设/强调色/布局骨架/
  * 窗口/配置备份/布局编辑）保留在 Settings 手写。
+ *
+ * ★ #238 刀6：`cc` 区改成**派生** —— 分区（h3）= 定义表里各**元件**的 label，
+ *   组 = 该元件下**有可调项**的子部件 label（顺序同表）。其余 zone 仍是手写表。
+ *   没有可调项的子部件**不进列表**（否则渲染出一个只有标题、点了没东西的分类 —— 那正是本刀要清的病）。
  */
 export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: readonly { title: string; compact?: boolean; defaultOpen?: boolean }[] }[]> = {
   global: [{ groups: [{ title: '个人信息' }, { title: '强调色' }, { title: '布局骨架' }, { title: '玻璃效果' }, { title: '标题栏' }, { title: '字体' }] }],
@@ -410,17 +440,14 @@ export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: re
     { heading: '工具调用', groups: [{ title: '指示器与连接线' }, { title: '用户标签', compact: true }, { title: '代码差异', defaultOpen: false }, { title: '等待动画' }] },
     { heading: '消息渲染', groups: [{ title: '风格', compact: true }, { title: '消息外观', compact: true }, { title: '助手标记', defaultOpen: false }, { title: '文件编辑器', defaultOpen: false }] },
   ],
-  cc: [
-    { groups: [{ title: '基础' }] },
-    { heading: '输入区', groups: [{ title: '输入栏' }] },
-    { heading: '发送按钮', groups: [{ title: '发送按钮' }] },
-    { heading: '模型控件', groups: [{ title: '模型控件' }] },
-    { heading: '思考强度控件', groups: [{ title: '思考强度控件' }] },
-    { heading: '权限控件', groups: [{ title: '权限控件' }] },
-    { heading: '附件按钮', groups: [] },
-    { heading: '其他指示元素', groups: [] },
-    { groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '状态信息', defaultOpen: false }] },
-  ],
+  cc: CC_WIDGET_GROUPS
+    .map(row => ({
+      heading: row.label,
+      groups: row.members
+        .filter(member => renderableMemberFields(member.label).length > 0)
+        .map(member => ({ title: member.label })),
+    }))
+    .filter(section => section.groups.length > 0),
   right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }
 /** W2-13（F3-A）：快速层基础字段清单（来自 defs 单一真值，组件不硬编码） */

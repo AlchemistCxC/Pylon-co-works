@@ -115,8 +115,9 @@ export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfa
  * 外观来源（用户拍板）：
  * - GUI：取 `glass` 的四区切面（刀3 起是**字面量快照**，值等于 glass 的有效值）；
  * - 终端：**复制** `glass`（最早那款浅色；深色的 nord/tokyo/amber/matrix/claude 用户已否决）
- *   + 终端契约字段（`msgStyle` / `messageLayout` / `inputMode` / `inputVariant` / `ccVariant`，
- *   即刀3 拆掉的那层终端补全里的同一组契约字段）。
+ *   + 终端契约字段（`msgStyle` / `messageLayout` / `inputMode` / `inputVariant`，
+ *   即刀3 拆掉的那层终端补全里的同一组契约字段）。★ #238 刀8：原第 5 项
+ *   「整体风格」已整套删除（字段不存在了，不再是契约字段）。
  *   其中 `inputVariant` 与 `inputMode` 必须同写——`inputMode==='cli' ⟺ inputVariant==='cli'`
  *   是本仓既有的联动不变量（`presetReducer.resolveInputMode`）。
  */
@@ -131,7 +132,8 @@ export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfa
  * **拷贝**（刀1 的原话「终端默认是 `glass` 的拷贝而不是引用，用引用表达错了语义」），
  * 所以它们各自持有一份自己的值是正确的表达。漂移由测试钉住（★ 守卫在 `defaultPresets.test.ts`
  * 的 `:85` 与 `:209`，不在 `effectivePresetTheme.test.ts` —— 那里只断言"视图对默认预设 == 它自己的 theme"）：
- * `DEFAULT_PRESETS.gui.theme` 必须逐字段等于 glass 的有效值，终端默认 = 它 + 5 个终端契约字段。
+ * `DEFAULT_PRESETS.gui.theme` 必须逐字段等于 glass 的有效值，终端默认 = 它 + 4 个终端契约字段
+ * （★ #238 刀8：原为 5 个，其中「整体风格」已整套删除）。
  *
  * 值取自刀2 落盘的工厂数据（glass 的 5 个区域切面之并集，键序 = `PRESET_ZONES` 顺序）。
  */
@@ -184,15 +186,9 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   msgLineHeight: 1.75,
   ccHeight: 96,
   ccBg: "rgba(255,255,255,0.20)",
-  ccVariant: "pill",
   ccHidden: [
     "cc-send-button"
   ],
-  ccScale: {
-    "tokens": 100,
-    "model": 100,
-    "mode": 100
-  },
   inputBg: "rgba(0,0,0,0.03)",
   inputTextColor: "rgba(0,0,0,0.80)",
   inputPlaceholder: "rgba(0,0,0,0.22)",
@@ -220,7 +216,6 @@ const TERMINAL_DEFAULT_THEME: Partial<ThemeSettings> = {
   messageLayout: 'classic',
   inputMode: 'cli',
   inputVariant: 'cli',
-  ccVariant: 'terminal',
 }
 
 /**

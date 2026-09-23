@@ -29,10 +29,10 @@ describe('theme schema v8：老安装补入 reasoning 控件', () => {
     }, defaults, 7) as unknown as Migrated
 
     expect(migrated.ccLayout.placements.reasoning).toBeTruthy()
-    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ slot: 'status-secondary', order: 3 })
+    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ order: 3 })
     // 既有控件不被踩掉：补位是按 widget ID 合并，不是整表替换
-    expect(migrated.ccLayout.placements.mode).toMatchObject({ slot: 'status-secondary', order: 4 })
-    expect(migrated.ccLayout.placements.model).toMatchObject({ slot: 'status-secondary', order: 2 })
+    expect(migrated.ccLayout.placements.mode).toMatchObject({ order: 4 })
+    expect(migrated.ccLayout.placements.model).toMatchObject({ order: 2 })
   })
 
   it('用户已拖过的 reasoning 位置不被默认值覆盖（迁移可重复执行）', () => {
@@ -44,7 +44,7 @@ describe('theme schema v8：老安装补入 reasoning 控件', () => {
       ccLayout: { version: CC_LAYOUT_SCHEMA_VERSION, placements },
     }, defaults, 8) as unknown as Migrated
 
-    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ slot: 'actions', order: 9 })
+    expect(migrated.ccLayout.placements.reasoning).toMatchObject({ order: 9 })
   })
 })
 
@@ -87,7 +87,7 @@ describe('theme schema v10：用量控件（S11）', () => {
     const migrated = themeDomainMigrate({ ccLayout: legacy }, defaults, 9) as unknown as Migrated
 
     expect(migrated.ccLayout.placements.pct).toBeUndefined()
-    expect(migrated.ccLayout.placements.tokens).toMatchObject({ slot: 'status-secondary', order: 5 })
+    expect(migrated.ccLayout.placements.tokens).toMatchObject({ order: 5 })
   })
 })
 
@@ -111,7 +111,7 @@ describe('theme schema v11：中控名单换代（刀4）', () => {
     expect(migrated.prismOnColor).toBe(DEFAULTS.prismOnColor)
   })
 
-  it('legacy `send` 的 ccHidden / ccScale 键迁移到注册轨 id', () => {
+  it('legacy `send` 的 ccHidden 键迁移到注册轨 id；已删的 `ccScale` 不再被改名', () => {
     const legacy: Record<string, unknown> = {
       ...DEFAULTS,
       ccHidden: ['send', 'tokens'],
@@ -121,6 +121,9 @@ describe('theme schema v11：中控名单换代（刀4）', () => {
     const migrated = themeDomainMigrate(legacy, defaults, 10)
 
     expect(migrated.ccHidden).toEqual(['cc-send-button', 'tokens'])
-    expect(migrated.ccScale).toEqual({ 'cc-send-button': 120, model: 90 })
+    // ★ #238 刀7：`ccScale` 字段整体删除 ⇒ 它的 legacy 键改名（`renameLegacyCcScaleKeys`）随之退场。
+    //   这条**不**断言旧值被清掉：读盘路径不做键清（`store.ts` 的 `partialize` 是白名单式，
+    //   下次写盘自然修剪）⇒ 这里如实锁住"值原样穿过、不再被改名"这一现状。
+    expect(migrated.ccScale).toEqual({ send: 120, model: 90 })
   })
 })

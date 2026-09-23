@@ -19,10 +19,15 @@ describe('settingsPreviewControlCenter（P52 D4 Solid 中控预览）', () => {
     expect(host.querySelector('textarea, input, .cc-input, [class*="input" i]')).toBeTruthy()
     // A6-3 更新（2026-09-14）：模型控件常态显示（每轮对话都要看的当前状态）；
     // 2026-09-15 起：思考强度、权限模式、用量显示控件一并常态显示；其余旧状态控件在会话态仍然隐藏。
+    // ★ #238 刀3（写法同步）：三个槽位包装节点（`.cc-status-primary/-secondary/.cc-actions`）
+    // 已随槽位层拆除 —— 信息控件现在都在**一个落脚处容器** `.cc-status-group` 里，按序号排。
     const statusWidgetIds = [...host.querySelectorAll(
-      '.cc-status-primary [data-widget-id], .cc-status-secondary [data-widget-id], .cc-actions [data-widget-id]',
+      '.cc-status-group [data-widget-id]',
     )].map(el => el.getAttribute('data-widget-id'))
-    expect(statusWidgetIds).toEqual(['model', 'reasoning', 'mode', 'tokens'])
+    // ★ #238 刀5B：命令行提示升格为普通元件后也在这条行里（活跃会话 + cli ⇒ 三条条件满足）
+    expect(statusWidgetIds).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
+    // 那三个槽位节点确实不再存在（DOM 级验收）
+    expect(host.querySelector('.cc-status-primary:not(.cc-status-group), .cc-status-secondary, .cc-actions')).toBeNull()
 
     handle.destroy()
     expect(host.childElementCount).toBe(0)
