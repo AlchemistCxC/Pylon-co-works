@@ -8,6 +8,7 @@ import { shouldExposeKernelAcceptanceControls } from './kernelAcceptanceControls
 import { listRendererDiagnosticsKeys, readRendererDiagnostics } from '../plugin-runtime/renderers/rendererDiagnosticsRegistry.ts'
 import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import { kernelBootstrap } from './kernelBootstrapServices.ts'
+import { startupMark } from '../app/startupTiming.ts'
 import type { KernelBootstrap } from './kernelBootstrap.ts'
 import type { ApplicationRuntime } from '../application/applicationRuntime.ts'
 
@@ -28,7 +29,7 @@ export function KernelRoot({
     bootstrap.getSnapshot,
     bootstrap.getSnapshot,
   )
-  useEffect(() => { void bootstrap.startNormal() }, [bootstrap])
+  useEffect(() => { startupMark('kernel_root_effect'); void bootstrap.startNormal() }, [bootstrap])
 
   useEffect(() => {
     if (typeof window === 'undefined') return

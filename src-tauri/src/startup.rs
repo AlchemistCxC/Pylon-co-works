@@ -224,6 +224,29 @@ pub(crate) async fn startup_diagnostics(
         })
 }
 
+/// #269：前端启动相位上报——与进程相位表合并为一条 runtime log（source="startup"）。
+/// 观测性旁路：前端每次启动至多调用一次，失败由前端静默吞掉，不影响启动。
+#[tauri::command]
+pub(crate) async fn report_startup_timing(
+    state: tauri::State<'_, crate::AppState>,
+    phases: Vec<crate::startup_timing::FrontendPhase>,
+) -> Result<(), crate::error::PylonError> {
+    let fields = crate::startup_timing::build_timeline_fields(
+        crate::startup_timing::process_phases(),
+        &phases,
+        crate::startup_timing::epoch_millis_now(),
+    );
+    state.runtime_logs.push(
+        crate::time::Timestamp::now(),
+        "info",
+        "startup",
+        None,
+        "startup timeline",
+        fields,
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

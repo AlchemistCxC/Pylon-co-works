@@ -1,6 +1,7 @@
 import { BUILTIN_PYLON_SHELL_ID } from '../plugins/product/productPluginIds.ts'
 import type { ApplicationMountPort } from '../application/applicationMountPort.ts'
 import { reportRuntimeError } from '../runtimeError.ts'
+import { startupMark } from '../app/startupTiming.ts'
 
 export type PluginBootstrapStage = 'activate' | 'dependency' | 'capability-consent' | 'user-packages' | 'mount'
 
@@ -111,6 +112,7 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
       if (mountedApplicationId !== BUILTIN_PYLON_SHELL_ID) {
         mountApplication(BUILTIN_PYLON_SHELL_ID)
         mountedApplicationId = BUILTIN_PYLON_SHELL_ID
+        startupMark('shell_mounted')
       }
     } catch (error) {
       const detail = reportRuntimeError('挂载 Kernel 应用', error)
@@ -188,11 +190,13 @@ export function createKernelBootstrap(actions: KernelBootstrapActions): KernelBo
     },
     startNormal() {
       return runExclusive(async () => {
+        startupMark('kernel_bootstrap_start')
         safeModeActive = false
         publish({ kind: 'starting' })
         let builtins: BuiltinBootstrapResult
         try {
           builtins = await actions.bootstrapBuiltins('normal')
+          startupMark('builtins_activated')
         } catch (error) {
           publish({
             kind: 'degraded',

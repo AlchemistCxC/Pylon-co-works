@@ -39,6 +39,7 @@ mod runtime;
 mod runtime_log;
 mod session;
 mod startup;
+mod startup_timing;
 // P5（#106）：harness 即门面——tests/ 集成目标经此消费产品表面；
 // AppState 等内部类型不加 pub，门面只出窄值（spec P5 五类面）。
 // cfg(test) 使既有 lib 内嵌测试不受 feature 影响；feature 使外部 test target 可见。
@@ -672,6 +673,11 @@ pub fn init_tracing() {
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
+/// #269：进程侧启动相位打点（main.rs 在 t0 处调用；供 lib 外的入口 facade 使用）。
+pub fn startup_mark(phase: &str) {
+    crate::startup_timing::mark(phase);
+}
+
 /// 会话过期判定（B10.3b，参考 Hermes reset policy）：返回过期原因，None = 未过期。
 ///
 /// - reset="off"：永不过期
@@ -784,6 +790,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
 // →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
 // run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
 pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    crate::startup_timing::mark("setup_enter");
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
@@ -802,6 +809,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
     // 时按需 clone（PathBuf 拷贝成本可忽略）。
     let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    crate::startup_timing::mark("data_dirs_resolved");
     // portable 首次启动自动迁移（2026-08-19 修复）：
     // AppData 旧数据 → data/。必须在此处（hydrate_workspaces 之前、
     // message_service 初始化之前）——服务打开后迁移命令会被拒绝，
@@ -924,6 +932,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             .map_err(|_| "event service slot lock poisoned".to_string())? = Some(services.event);
         tracing::info!("Kernel persistence services ready: {}", db_path.display());
     }
+    crate::startup_timing::mark("persistence_ready");
     // I12-W4：gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
     // → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按
     // `enabled && autoStart` 策略显式启动（失败可见，不静默）。损坏/IO 失败
@@ -1271,6 +1280,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             }
         });
     }
+    crate::startup_timing::mark("setup_complete");
     Ok(())
 }
 pub fn run() {
@@ -1279,6 +1289,7 @@ pub fn run() {
     if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
         std::process::exit(crate::browser::bridge::run_stdio_bridge());
     }
+    crate::startup_timing::mark("run_entry");
     install_process_registrations();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
@@ -1306,6 +1317,7 @@ pub fn run() {
     };
     let default_agent = agents.get(&default_agent_id).cloned();
     let agents_for_state = agents;
+    crate::startup_timing::mark("config_loaded");
     // R5（P1-3）：prism 构造为纯同步，移出 async 块以便诊断快照一次构建。
     let prism = match PrismClient::from_env() {
         Ok(client) => client,
@@ -1326,6 +1338,7 @@ pub fn run() {
         (!default_agent_id.is_empty()).then(|| default_agent_id.clone()),
         hermes_profile,
     ));
+    crate::startup_timing::mark("startup_diagnostics_built");
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -1387,8 +1400,9 @@ pub fn run() {
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
         }
+        crate::startup_timing::mark("default_agent_connect_settled");
 
-        tauri::Builder::default()
+        let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_fs::init())
@@ -1616,6 +1630,7 @@ pub fn run() {
                 crate::browser::agent_cmds::browser_agent_press,
                 crate::browser::agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
+                crate::startup::report_startup_timing,
                 crate::paths::migrate_appdata_to_portable,
             ])
             .setup(|app| run_setup_pipeline(app))
@@ -1624,18 +1639,19 @@ pub fn run() {
             // from within a runtime")。子进程清理依赖 AppState drop 链：
             // AcpClient → ManagedChild::drop → kill_and_wait（同步 std 操作，不依赖 tokio）。
             .build(tauri::generate_context!())
-            .expect("error while building tauri application")
-            .run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
-                if let tauri::RunEvent::Exit = event {
-                    // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
-                    // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
-                    crate::pet::cmds::drain_pet_dirty();
-                    // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
-                    let pet_arc = app_handle.state::<AppState>().pet.clone();
-                    if let Ok(pet) = pet_arc.try_lock() {
-                        persist_pet_if_possible(app_handle, &pet);
-                    };
-                }
-            });
+            .expect("error while building tauri application");
+        crate::startup_timing::mark("windows_created");
+        app.run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
+            if let tauri::RunEvent::Exit = event {
+                // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
+                // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
+                crate::pet::cmds::drain_pet_dirty();
+                // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
+                let pet_arc = app_handle.state::<AppState>().pet.clone();
+                if let Ok(pet) = pet_arc.try_lock() {
+                    persist_pet_if_possible(app_handle, &pet);
+                };
+            }
+        });
     });
 }

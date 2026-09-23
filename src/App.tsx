@@ -34,6 +34,7 @@ import { createInteractionRejectionController } from './infrastructure/acp/inter
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
+import { startupMark, reportStartupTiming } from './app/startupTiming'
 import PermissionDialog from './components/PermissionDialog'
 import ErrorCenter from './components/ErrorCenter'
 import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog'
@@ -203,12 +204,16 @@ export default function App() {
   // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener
   const [bootstrapRetry, setBootstrapRetry] = useState(0)
   useEffect(() => {
+    // #269：App chunk 已加载并进入 bootstrap 事务（打点在前一帧的 shell_mounted
+    // 与本点之间即 chunk 拉取耗时）。
+    startupMark('app_bootstrap_start')
     const bootstrapRun = startApplicationBootstrap({
       isTauri: IS_TAURI && !isBrowserMockRuntime(),
       // I14-W6：bootstrap 等待 identity hydration（Tauri 后端读回 / browser 本地）
       // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
       hydrateDomains: async () => {
         await hydrateIdentityAndWorkspace(consumeLegacyProfilePayload())
+        startupMark('hydrated')
       },
       fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => {
@@ -256,7 +261,14 @@ export default function App() {
         },
       }),
       resolveError: action => resolveRuntimeErrors({ key: bootstrapKey(action), scope: bootstrapScope }),
-      setStatus: (status, error) => useHydrationStore.getState().setStatus(status, error),
+      // #269：ready 即启动事务终点——打点并一次性上报前后端启动时间线。
+      setStatus: (status, error) => {
+        if (status === 'ready') {
+          startupMark('ready')
+          reportStartupTiming()
+        }
+        useHydrationStore.getState().setStatus(status, error)
+      },
     })
     return bootstrapRun.dispose
   }, [bootstrapRetry])
