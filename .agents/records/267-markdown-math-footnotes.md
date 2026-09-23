@@ -95,3 +95,21 @@
 **文档排版层**（`.term-assistant` 作用域，ChatView.css 末尾确定性赢级联）：标题分级尺度 + h1/h2 下边框；列表嵌套子弹（•/◦/▪，accent 色）+ 任务框 accent；引用 accent 左条 + 面板背板圆角；表格横线风 + 表头加重 + 行 hover；行内代码 pill；分隔线渐隐；图片限宽圆角；链接下划线偏移 + hover 加重。实机截图确认整体文档观感。
 
 **门禁复核**：check:bundle 通过（wasm 206,291/230,000——含 #267 解析代码的最终 wasm）；check:first-party-styles、check:csp 绿；vitest 全量 632/4797 绿。字体不占 js/wasm 预算（随 dist 内嵌，二进制 +~730KB）。
+
+## 性能验收（用户问询「新引擎开销是否过大」后的实测结论，2026-09-23 23:55）
+
+**渲染侧（Temml，主线程同步）**——node 实测（`temml.renderToString`，预热后取均值）：
+
+| 输入 | 单次耗时 |
+| --- | --- |
+| 短行内（`E=mc^{2}`） | 0.010 ms |
+| 中等行内（积分式） | 0.027 ms |
+| Basel 显示式（sum+frac+zeta） | 0.034 ms |
+| 病态 2K 字符式 | 0.571 ms |
+| **Basel 会话全量重渲（67 行内 + 17 显示）** | **0.754 ms** |
+
+结论：单会话最坏情况（全部公式重渲一次）<1ms，虚拟化滚动重挂载与流式 tick 的重复渲染无感知。仍加了**有界 FIFO 结果缓存**（1024 条，`display\0latex` 键，失败结果同样缓存）把重复渲染压到一次 Map 查找（Basel 会话 21.5µs，~35×）；防病态长公式 × 流式逐 tick 的乘积效应。行为钉子 `issue267.mathCache.test.ts` 3 条。
+
+**解析侧（wasm comrak 开 math_dollars/footnotes）**——`scripts/perf-bench.mts` 产品路径实测（µs/字符）：heading 0.409 / list 0.598 / table 0.326 / code 0.299 / blockquote 0.389 / inline-mix 0.151，均在 comrak 正常区间，无回归信号（math_dollars 仅增加文本节的 `$` 定界扫描）。
+
+**字体**：Latin Modern Math OTF 717K + Temml woff2 9.2K 随 dist 内嵌进二进制，`font-display:swap` 不阻塞首绘，加载一次全 App 复用，无运行时持续开销。
