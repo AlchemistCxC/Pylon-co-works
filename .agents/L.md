@@ -772,3 +772,9 @@
 - 文档：`.agents/records/271-*.md`（完工时新增）、本文件
 
 **我不碰**：`src-tauri/pylon-core/src/hermes/**`、`src-tauri/pylon-acp/src/launch_plan.rs`（连接期注入链承重，#270 实测验证）；`src-tauri/src/agent/runtime.rs`、`src-tauri/src/session/**`、#272 在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 05] [Miyaki Kumo] [CI 转绿修复]
+
+**CI run 35894284095 四 job 红的修复（根因 + 接管声明）**：全部红收敛于 `mathRender.solid.tsx`——① `issue267.mathCache.test.ts`（主 tsconfig React 检查）import 该组件文件拖进 React JSX 语义 → TS2322 ×3（Rust 三 job 的前端构建前置连带全灭）；② 该文件 24 行死赋值 eslint 红。**修复**：纯函数 `renderMathMarkup` 拆入**新增** `mathMarkup.ts`；组件文件只留 MathRender；**恢复 #272 会话工作树内未提交的 mathCache 测试删除**并改导入指向纯模块（测试保住，缓存语义零变化）；顺带登记 #269 `startupTiming.ts` 直发 allowlist（CI 前序红修复后会暴露的下一处红）。详见 `.agents/records/2026-09-24-ci-green-math-render-split.md`。**文件域**：`src/renderers/solid-workbench/chat/{mathMarkup.ts(新),mathRender.solid.tsx,issue267.mathCache.test.ts}`、`scripts/check-runtime-boundaries.mts`、`.agents/records/2026-09-24-ci-green-*.md`、本文件。#267/#272 会话若对 mathCache 测试删除另有意图请对表。

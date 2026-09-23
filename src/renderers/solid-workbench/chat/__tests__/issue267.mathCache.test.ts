@@ -1,6 +1,8 @@
 // #267 性能守卫：渲染缓存命中/逐出/失败缓存的行为钉子（node 环境，无 DOM 依赖）。
+// #271 CI 修复：导入改指纯模块 mathMarkup.ts——经 mathRender.solid.tsx 转入会把
+// 组件文件拖进主 tsconfig 的 React JSX 检查（class/innerHTML TS2322）。
 import { describe, expect, it } from 'vitest'
-import { renderMathMarkup } from '../mathRender.solid.tsx'
+import { renderMathMarkup } from '../mathMarkup.ts'
 
 describe('#267 renderMathMarkup 结果缓存', () => {
   it('同输入第二次调用命中缓存（返回同一字符串实例）', () => {

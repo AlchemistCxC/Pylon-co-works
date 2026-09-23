@@ -57,6 +57,10 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   // 内核 hook 桥：与 pylonCliBridge 同形态的基础设施 IPC 桥（Rust 锚点缝 ↔ HookRuntime），
   // 非产品 domain client；P55 D1（3bc8ef13）引入时漏登记，2026-09-10 经架构师裁定按先例登记。
   'src/infrastructure/hooks/hookBridgeDispatcher.ts',
+  // #269 启动相位上报：观测旁路的叶子模块（ready 时一次性 fire-and-forget，失败
+  // 静默），与 hookBridgeDispatcher 同形态的基础设施级 IPC 缝，不构成产品 domain
+  // client 依赖方向。
+  'src/app/startupTiming.ts',
   'src/sheets/agent-workbench/agentWorkbenchLifecycle.ts',
   'src/infrastructure/skin/skinHostPorts.ts',
   'src/obs04/devTrigger.ts',
