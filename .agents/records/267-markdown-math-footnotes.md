@@ -131,3 +131,7 @@
 修复：MarkdownNode 通用路径对 th/td 透传 `align`；ChatView.css 排版层追加属性选择器 `[align='center'/right]`（特异性高于 left 基线；无属性 = left 缺省）。display 公式居中（#267）与用户消息纯文本不受影响。
 
 验证：`issue272.tableAlignment.solid.test.tsx`（真实 wasm 解析链：`:---:`/`---:` → th/td align 属性存活）+ ChatView.css.test.ts 对齐契约；实机注入对齐表格 computed textAlign = left/center/right 逐列正确。build、check:first-party-styles、chat 相关 71 文件/535 用例绿。
+
+## #272 实机验收通过（2026-09-24）
+
+真实会话（Hermes\Riccati + deepseek-v4-flash）端到端：指令要求输出 `| :--- | :---: | ---: |` 三列表格，agent 回复渲染后 MCP 读取 DOM——表头与全部单元格 attr/computed text-align = left/center/right 逐列正确；无分隔符表格回退左对齐不受影响。截图留档。
