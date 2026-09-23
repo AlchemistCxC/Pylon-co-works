@@ -108,9 +108,11 @@ export function TasksBlock() {
 export function ExtensionsBlock() {
   return (
     <div className="sidebar-block-summary" data-demo="true">
-      <div className="flex items-center gap-[var(--ui-space-2)]">
+      {/* min-w-0：flex 项默认 min-width:auto 会让 nowrap 的 meta 文本撑死本组，
+          挤压右侧 CTA 竖排溢出（#250）——放开收缩后行内 ellipsis 才能生效。 */}
+      <div className="flex min-w-0 items-center gap-[var(--ui-space-2)]">
         <DemoBadge />
-        <span className="sidebar-block-row-meta">已启用 3 个扩展 · 1 个待重启</span>
+        <span className="sidebar-block-row-meta min-w-0">已启用 3 个扩展 · 1 个待重启</span>
       </div>
       <button type="button" className="sidebar-block-cta" disabled>管理…</button>
     </div>

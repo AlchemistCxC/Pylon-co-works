@@ -199,7 +199,9 @@
 .sidebar-block-progress { grid-column:1/-1; height:4px; background:var(--bg-input); border:1px solid var(--border); overflow:hidden; }
 .sidebar-block-progress > span { display:block; height:100%; background:var(--accent); }
 .sidebar-block-summary { display:flex; align-items:center; justify-content:space-between; gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
-.sidebar-block-cta { min-height:24px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); font-size:11px; }
+/* #250：CTA 永不收缩、永不换行——窄栏挤压由 meta 组（min-w-0 + ellipsis）承担，
+   按钮被压到竖排溢出属期望外行为。 */
+.sidebar-block-cta { min-height:24px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); font-size:11px; white-space:nowrap; flex-shrink:0; }
 .sidebar-block-cta:disabled { opacity:.5; }
 
 .sidebar-actions { display:flex; gap:2px; }
