@@ -135,33 +135,15 @@ describe('gatewayClient', () => {
 })
 
 describe('normalizeStartupDiagnostics', () => {
-  it('hermesProfile 宽容 normalize（含 configured/resolved/profiles）', () => {
-    const diagnostics = normalizeStartupDiagnostics({
-      agentConfig: { status: 'ready' },
-      gatewayConfig: { status: 'ready' },
-      prism: { status: 'ready' },
-      hermesProfile: {
-        profiles: ['profile-x', 'profile-a'],
-        configured: 'profile-a',
-        resolved: true,
-      },
-    })
-    expect(diagnostics.hermesProfile).toEqual({
-      profiles: ['profile-x', 'profile-a'],
-      configured: 'profile-a',
-      resolved: true,
-    })
-  })
-
-  it('hermesProfile 缺失/损坏时保持缺省（不抛错）', () => {
+  it('缺失/损坏域保持缺省（不抛错）', () => {
     const diagnostics = normalizeStartupDiagnostics({
       agentConfig: { status: 'ready' },
       gatewayConfig: { status: 'ready' },
       prism: { status: 'ready' },
     })
-    expect(diagnostics.hermesProfile).toBeUndefined()
-    const broken = normalizeStartupDiagnostics({ agentConfig: null, gatewayConfig: null, prism: null, hermesProfile: 'bad' })
-    expect(broken.hermesProfile).toBeUndefined()
+    expect(diagnostics.agentConfig).toEqual({ status: 'ready' })
+    const broken = normalizeStartupDiagnostics({ agentConfig: null, gatewayConfig: null, prism: null, storage: 'bad' })
+    expect(broken.storage).toBeUndefined()
   })
 })
 

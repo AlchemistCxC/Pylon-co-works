@@ -100,20 +100,12 @@ export interface StartupDiagnosticEntry {
   message?: string
 }
 
-export interface HermesProfileDiagnostics {
-  profiles: string[]
-  configured?: string
-  resolved: boolean
-}
-
 export interface StartupDiagnostics {
   agentConfig: StartupDiagnosticEntry | null
   gatewayConfig: StartupDiagnosticEntry | null
   prism: StartupDiagnosticEntry | null
   defaultAgentId?: string
   configSource?: { kind: string; fileName?: string }
-  /** Hermes profile 探测结果（release-issues #1 方案 G 演进；无 Hermes 时缺失） */
-  hermesProfile?: HermesProfileDiagnostics
   /** 施工文档 §7.4：存储模式诊断（setup 解析 DataDirs 后写入） */
   storage?: StorageDiagnostics
 }
@@ -131,15 +123,6 @@ function normalizeDiagnosticEntry(value: unknown): StartupDiagnosticEntry | null
   return {
     status,
     ...(typeof value.message === 'string' && value.message.length > 0 ? { message: value.message } : {}),
-  }
-}
-
-function normalizeHermesProfile(value: unknown): HermesProfileDiagnostics | undefined {
-  if (!isPlainObject(value)) return undefined
-  return {
-    profiles: Array.isArray(value.profiles) ? value.profiles.filter((item): item is string => typeof item === 'string') : [],
-    ...(typeof value.configured === 'string' && value.configured.length > 0 ? { configured: value.configured } : {}),
-    resolved: value.resolved === true,
   }
 }
 
@@ -163,7 +146,6 @@ export function normalizeStartupDiagnostics(raw: unknown): StartupDiagnostics {
     ...(isPlainObject(raw.configSource)
       ? { configSource: { kind: typeof raw.configSource.kind === 'string' ? raw.configSource.kind : 'unknown', ...(typeof raw.configSource.fileName === 'string' ? { fileName: raw.configSource.fileName } : {}) } }
       : {}),
-    ...(normalizeHermesProfile(raw.hermesProfile) ? { hermesProfile: normalizeHermesProfile(raw.hermesProfile)! } : {}),
     ...(normalizeStorageDiagnostics(raw.storage) ? { storage: normalizeStorageDiagnostics(raw.storage)! } : {}),
   }
 }

@@ -128,13 +128,6 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
               <DiagnosticChip label="gateway" entry={diagnostics.gatewayConfig} />
               <DiagnosticChip label="prism" entry={diagnostics.prism} />
               {diagnostics.configSource && <span className="runtime-diagnostics-source text-[11px] text-text-dim">config: {diagnostics.configSource.fileName || diagnostics.configSource.kind}</span>}
-              {diagnostics.hermesProfile && (
-                <span className={`runtime-diagnostics-source text-[11px] text-text-dim ${diagnostics.hermesProfile.resolved ? '' : 'text-[var(--danger,#e5484d)]'}`}
-                  title={`可用 profiles: ${diagnostics.hermesProfile.profiles.join(', ') || '（未探测到）'}`}>
-                  hermes: {diagnostics.hermesProfile.configured ? `profile=${diagnostics.hermesProfile.configured}` : '未配置 profile'}
-                  {diagnostics.hermesProfile.resolved ? ' ✓' : ' ✗'}
-                </span>
-              )}
             </div>
           </div>
         )}
