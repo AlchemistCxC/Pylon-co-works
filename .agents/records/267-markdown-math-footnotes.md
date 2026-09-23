@@ -83,3 +83,15 @@
 - `.term-math-display` 加 `font-size: 1.15em`（LaTeX display 体感）
 
 复验（同一会话 MCP getComputedStyle + 截图）：displayFont=Latin Modern/STIX/Cambria 栈、display 17.25px/居中、`munderover` 上下限在位；截图目视 ∑ 上下限、分数、积分均标准 LaTeX 形态。Temml 自带 `Temml.woff2`（9.2KB 补字形）暂不引入——需要 url() 资产管道，若后续要像素级 Latin Modern 观感再上。
+
+## 追加：字体资产 + 文档级排版层（2026-09-23 23:45，用户裁定「准许接入更多资产，目的是极致的数学观感、markdown 观感」）
+
+**字体资产**（`public/fonts/`，随 frontendDist 内嵌进二进制；`.gitignore` 为 `public/*` 加精确豁免）：
+- `LatinModern-Math.otf`（717K，CTAN `fonts/lm-math` 包）——LaTeX 同源数学字体，@font-face 族名 `LM Math Web`
+- `Temml.woff2`（9.2K，temml 官方补字形，逐字回退兜底）
+
+**公式字体栈**：`"LM Math Web" → "Latin Modern Math"（系统装了优先）→ "STIX Two Math" → "Cambria Math"（Windows 自带兜底）→ "Temml" → math → serif`。实机 `document.fonts.check('16px "LM Math Web"')=true` 且 computed fontFamily 首位即内嵌 LM——公式以 **LaTeX 原版字体**渲染。
+
+**文档排版层**（`.term-assistant` 作用域，ChatView.css 末尾确定性赢级联）：标题分级尺度 + h1/h2 下边框；列表嵌套子弹（•/◦/▪，accent 色）+ 任务框 accent；引用 accent 左条 + 面板背板圆角；表格横线风 + 表头加重 + 行 hover；行内代码 pill；分隔线渐隐；图片限宽圆角；链接下划线偏移 + hover 加重。实机截图确认整体文档观感。
+
+**门禁复核**：check:bundle 通过（wasm 206,291/230,000——含 #267 解析代码的最终 wasm）；check:first-party-styles、check:csp 绿；vitest 全量 632/4797 绿。字体不占 js/wasm 预算（随 dist 内嵌，二进制 +~730KB）。
