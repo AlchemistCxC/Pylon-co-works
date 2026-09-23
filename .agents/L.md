@@ -712,5 +712,7 @@
 
 **我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 与 `ControlCenter.css`（中控本体渲染/样式）、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
 
+**⏸ 停手待分流（2026-09-23 21:20）**：开工前核对触发施工单 §4-1 —— 那三条 `cliLine*` 的 `showIf` **不在** `themeFieldDefs.ts`，真身在 `widgetDefinitions.ts:261-263` 的 `input.propertyFields`（属性面板）；设置页侧这三个字段**本来没有条件**。实测：设置页 cc 区在 cli / 标准两模式下均渲染 **77 项、差集为空** ⇒ 若让成员门在设置页生效，标准模式下会新藏 **6 项**（`cliPromptColor`、`cliLineWidth/Color/Padding`、`cliHintMode`、`ccHintFontSize`），与单子「可见行为零变化 / 逐项一致 / 差集必须为空」互斥。已停手，未改任何源码，等口径。探针（一次性）已删，工作树干净。
+
 ---
 
