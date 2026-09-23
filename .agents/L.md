@@ -714,3 +714,17 @@
 - 文档：`.agents/decisions/0021-*.md`、`.agents/records/267-*.md`、本文件
 
 **我不碰**：`streamingMarkdownSplit.ts`/`streamingCompute.ts`（split 语义不动）、`markdownRenderModel.ts`（形状泛型已够用，除非 graft 判据需跟随——届时补声明）、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 01] [Miyaki Kumo] [#269]
+
+**开工：issue269（启动耗时测量基建——release 可用前后端时间线；#270/#271 度量前置）。** spec 见 `.agents/spec/269-startup-timing.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- **新增** `src/app/startupTiming.ts`、`src/app/__tests__/startupTiming.test.ts`
+- **新增** `src-tauri/src/startup_timing.rs`（进程 t0 + 相位表 + 上报 command 合并）；`src-tauri/src/startup.rs`（如 command 落此处则仅追加）
+- 插桩（每处 1~2 行 mark 调用，零逻辑改动）：`src/main.tsx`、`src/kernel/KernelRoot.tsx`、`src/kernel/kernelBootstrap.ts`、`src/plugin-runtime/pluginCompositionRoot.ts`、`src/app/bootstrap/bootstrapApplication.ts`、`src/App.tsx`
+- Rust 接线：`src-tauri/src/lib.rs`（mod 声明、invoke_handler 注册、`run()`/`run_setup_pipeline` 打点）、`src-tauri/src/main.rs`（t0 一行）
+- 文档：`.agents/records/269-*.md`（完工时新增）、`docs/说明书/Pylon-模块维护地图.md`（模块表两格）、本文件
+
+**我不碰**：`src-tauri/src/runtime_log/**` 既有逻辑（只读消费 hub push）、`src/obs05/**`、`src-tauri/src/acp/**`、`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`、中控区、预设系统、他人在途域。#270/#271 后续施工将各自动 `lib.rs`，届时在本文件对表。全程 pathspec 提交。
