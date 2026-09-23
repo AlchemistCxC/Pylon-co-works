@@ -757,3 +757,18 @@
 **我不碰**：`src-tauri/src/lifecycle/**`、`src-tauri/src/session/**`、`src-tauri/src/agent/runtime.rs`（均只调用不修改）、`src-tauri/src/acp/**`、`src-tauri/src/startup_timing.rs`（#269 已收口，本 issue 只迁移 `default_agent_connect_settled` 相位调用点）、中控区、预设系统、#272 在途域（MarkdownContent.solid.tsx / ChatView.css / 其两测试）。全程 pathspec 提交。
 
 **域外追加（2026-09-24 03）**：`src-tauri/src/agent/runtime.rs` 的 `AgentLifecycleStatus::Error` 变体加一行 `#[allow(dead_code)]` + 注释——删掉旧启动连接块后它失去唯一生产构造点，但 wire 词汇与 test_harness 仍消费，变体必须保留。其余仍按上域。
+
+---
+
+[2026-09-24 04] [Miyaki Kumo] [#271]
+
+**开工：issue271（删启动诊断 hermes profile 探测链——保留连接期 HERMES_HOME 注入）。** 范围即 issue 正文删除清单。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/startup.rs`（删 HermesProfileView + hermes_profile 快照字段 + builder 参数 + 相关测试）
+- `src-tauri/src/lib.rs`（删 build_hermes_profile_view + 调用点）
+- `src/infrastructure/tauri/runtimeLogContracts.ts`（删 HermesProfileDiagnostics 契约 + normalize 分支）
+- `src/infrastructure/tauri/__tests__/tauriClients.test.ts`（删 2 个 hermes normalize 用例，保留域缺省用例）
+- `src/sheets/RuntimeSheetView.tsx`（删 hermes 徽章）、`src/demo/demoData.ts`（删样例字段）
+- 文档：`.agents/records/271-*.md`（完工时新增）、本文件
+
+**我不碰**：`src-tauri/pylon-core/src/hermes/**`、`src-tauri/pylon-acp/src/launch_plan.rs`（连接期注入链承重，#270 实测验证）；`src-tauri/src/agent/runtime.rs`、`src-tauri/src/session/**`、#272 在途域。全程 pathspec 提交。
