@@ -1,6 +1,6 @@
 [package]
 name = "pylon-session"
-version = "0.2.6-Abc"
+version = "0.2.7-MAT"
 edition = "2021"
 
 [dependencies]

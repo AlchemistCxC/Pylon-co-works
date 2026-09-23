@@ -48,6 +48,60 @@ impl AgentContextKey {
 pub type UpdateChannelMap =
     std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
 
+/// #250：#53 空态选择器探测会话登记簿（peri_id → 探测时刻）。
+///
+/// 探测会话「不落会话槽位」（`probe_agent_selectors`），其建会话后迟到的
+/// 元数据通知（`available_commands_update` 等）在 dispatcher 查无映射，逐条
+/// `warn!` 成噪音。登记簿只做一件事：让 dispatcher 能区分「探测会话的预期
+/// 无映射通知」与「真未知会话」。只进不出——close 之后的迟到帧恰是静音
+/// 对象，条目带 TTL 自然失效，FIFO 有界防泄漏。
+pub struct ProbeSessionRegistry {
+    entries: Mutex<std::collections::VecDeque<(String, std::time::Instant)>>,
+}
+
+impl ProbeSessionRegistry {
+    const CAPACITY: usize = 32;
+    const TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+    pub fn new() -> Self {
+        Self {
+            entries: Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+
+    /// 登记一个探测会话 peri_id；超容量丢最旧（探测频率 ≤ 每 agent 每 TTL 一次，
+    /// 正常远达不到上界，上界只为兜底）。
+    pub fn register(&self, peri_id: &str) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        entries.push_back((peri_id.to_string(), std::time::Instant::now()));
+        while entries.len() > Self::CAPACITY {
+            entries.pop_front();
+        }
+    }
+
+    /// 是否为 TTL 内登记过的探测会话；查询时顺带剪枝过期项。
+    pub fn contains(&self, peri_id: &str) -> bool {
+        let Ok(mut entries) = self.entries.lock() else {
+            return false;
+        };
+        while entries
+            .front()
+            .is_some_and(|(_, at)| at.elapsed() > Self::TTL)
+        {
+            entries.pop_front();
+        }
+        entries.iter().any(|(id, _)| id == peri_id)
+    }
+}
+
+impl Default for ProbeSessionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -87,6 +141,8 @@ pub struct AgentRuntime {
     /// #99：prompt/turn 终态账本——本 runtime 的 live turn 权威状态
     /// （CAS 单终态、generation 硬隔离、冷挂载快照数据源）。
     pub turn_ledger: Arc<crate::acp::TurnLedger>,
+    /// #250：#53 选择器探测会话登记簿——dispatcher 对其无映射通知静默降级（debug）。
+    pub probe_sessions: Arc<crate::runtime::ProbeSessionRegistry>,
     /// ADR-0017/#217：「在途回合标记为真而账本已无在途 turn」的失配计数。
     /// 由 `cold_mount_turn_snapshot` 查询时判定并累加（诊断读数：标记与终态事件
     /// 失配会造出更难自查的永久生成中，必须显形）。
@@ -119,6 +175,7 @@ impl AgentRuntime {
                 crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
             )),
             turn_ledger: crate::acp::TurnLedger::new(),
+            probe_sessions: Arc::new(crate::runtime::ProbeSessionRegistry::new()),
             turn_in_flight_anomalies: AtomicU64::new(0),
         })
     }
@@ -588,5 +645,58 @@ mod tests {
             Arc::ptr_eq(&manager.get("peri").unwrap(), &first),
             "注册表必须登记同一实例"
         );
+    }
+
+    #[test]
+    fn probe_registry_reports_registered_ids_only() {
+        // #250：探测会话登记后 contains 命中；未登记 id 不误伤——dispatcher 只对
+        // 真探测会话静音，未知会话告警语义保持不变。
+        let registry = ProbeSessionRegistry::new();
+        assert!(!registry.contains("probe-a"), "空登记簿不得命中");
+        registry.register("probe-a");
+        registry.register("probe-b");
+        assert!(registry.contains("probe-a"));
+        assert!(registry.contains("probe-b"));
+        assert!(!registry.contains("real-session"), "未登记 id 不得命中");
+    }
+
+    #[test]
+    fn probe_registry_fifo_bound_discards_oldest() {
+        let registry = ProbeSessionRegistry::new();
+        for index in 0..ProbeSessionRegistry::CAPACITY as u32 {
+            registry.register(&format!("probe-{index}"));
+        }
+        registry.register("probe-new");
+        assert!(!registry.contains("probe-0"), "超容量必须丢最旧（FIFO）");
+        assert!(
+            registry.contains(&format!(
+                "probe-{}",
+                ProbeSessionRegistry::CAPACITY as u32 - 1
+            )),
+            "容量内最后一条必须保留"
+        );
+        assert!(registry.contains("probe-new"));
+    }
+
+    #[test]
+    fn probe_registry_expires_entries_after_ttl() {
+        let registry = ProbeSessionRegistry::new();
+        registry.register("probe-stale");
+        // 把登记时刻回拨到 TTL 之外（Instant 不可直接构造过去值，经 checked_sub
+        // 得到）；contains 查询时顺带剪枝，命中必须转否。
+        let expired = std::time::Instant::now()
+            .checked_sub(ProbeSessionRegistry::TTL + std::time::Duration::from_secs(1))
+            .expect("测试环境必须支持 Instant 回拨");
+        {
+            let mut entries = registry.entries.lock().unwrap();
+            for (_, at) in entries.iter_mut() {
+                *at = expired;
+            }
+        }
+        assert!(!registry.contains("probe-stale"), "TTL 外条目必须失效");
+        {
+            let entries = registry.entries.lock().unwrap();
+            assert!(entries.is_empty(), "查询必须顺带剪枝过期项");
+        }
     }
 }

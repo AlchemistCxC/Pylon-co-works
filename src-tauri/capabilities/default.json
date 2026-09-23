@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-set-fullscreen",
+    "core:window:allow-set-size",
     "core:event:default",
     "shell:default",
     "dialog:default",

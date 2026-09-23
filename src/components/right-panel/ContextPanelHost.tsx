@@ -111,8 +111,11 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
     </>
   }
 
+  // aria-label 用稳定文案（#250）：sheet.title 是建会话时刻的快照，会话切换/
+  // 重命名后陈旧，实机 a11y 树出现指向过期会话的右栏名；归属上下文已由页签与
+  // 下方面板 tablist 承载，这里不需要会话名。
   return (
-    <aside className="context-panel" aria-label={`${sheet.title} 右栏`} style={{ '--right-width': `${rightWidth}px` } as CSSProperties}>
+    <aside className="context-panel" aria-label="右栏" style={{ '--right-width': `${rightWidth}px` } as CSSProperties}>
       <div className="context-panel-head">
         {/* 切换器列出**所有可显示的面板**（`when` 闸门之上的全部），不再按 Sheet 种类裁剪：
             按种类裁剪时，单面板的 Sheet 只剩一个撑满的标签，看上去是标题而不是切换器

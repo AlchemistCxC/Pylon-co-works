@@ -30,6 +30,8 @@ function deferred<T>() {
 }
 
 async function editAndType(value = 'const x = 2') {
+  // #252：默认只读预览——显式点「编辑」才进编辑态
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   const editor = await waitForFileEditor('const x = 1')
   replaceFileEditorValue(editor, value)
   return editor
@@ -40,6 +42,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     resetStores()
     localStorage.clear()
     invoke.mockReset()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     invoke.mockImplementation((cmd: string) => {
       if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1'))
       if (cmd === 'write_workspace_text') return Promise.resolve(readTextResult('const x = 2'))
@@ -47,14 +50,22 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     })
   })
 
-  it('打开文件直接进入 CodeMirror 编辑态，并可切换回只读；truncated 时禁用编辑', async () => {
+  it('打开文件默认只读预览（无编辑器/无保存/无「编辑中」）；点「编辑」进编辑态，退出回只读（#252）', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    expect(document.querySelector('.file-code-editor')).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
+    expect(screen.queryByText('编辑中')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     await waitForFileEditor('const x = 1')
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '退出编辑' })).toBeInTheDocument()
+    expect(screen.getByText('编辑中')).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
     expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+    expect(window.confirm).not.toHaveBeenCalled()
   })
 
   it('truncated 文件：编辑按钮禁用（内容不完整不可编辑）', async () => {
@@ -70,7 +81,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
 
   it('保存成功：write 带 source/relativePath/content/expectedBaseline=基线/force=false，状态栏已保存、dirty 清除', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     await screen.findByText(/未保存/)
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -88,7 +98,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
 
   it('CodeMirror 内 Ctrl/Cmd+S 复用保存按钮的基线校验事务', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     const editor = await editAndType()
 
     fireEvent.keyDown(editor.contentDOM, { key: 's', ctrlKey: true })
@@ -108,7 +117,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText(/磁盘文件已被外部修改/)
@@ -131,7 +139,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText(/磁盘文件已被外部修改/)
@@ -155,7 +162,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText(/磁盘文件已被外部修改/)
@@ -169,7 +175,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
 
   it('working-diff：编辑中显示未保存统计 + 变更预览面板（additions/deletions）', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     await screen.findByText(/未保存/)
     expect(screen.getByText('+1 −1 未保存')).toBeInTheDocument()
@@ -185,7 +190,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText('保存响应异常，请重试')
@@ -194,13 +198,13 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     expect(screen.queryByText('保存中…')).toBeNull()
   })
 
-  it('tab 切换重置编辑瞬态并保持新文件编辑态（dirty 清除、保存态归 idle）', async () => {
+  it('tab 切换重置编辑瞬态并回到只读默认态（dirty 清除、保存态归 idle，#252）', async () => {
     const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType()
     await screen.findByText(/未保存/)
     rerender(<FileViewHost source="ws-a" tab={otherTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
+    await screen.findByText('const x = 1')
+    expect(document.querySelector('.file-code-editor')).toBeNull()
     expect(screen.queryByText(/未保存/)).toBeNull()
     expect(screen.queryByText('已保存')).toBeNull()
   })
@@ -213,14 +217,31 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType('unsaved from workspace a')
 
     rerender(<FileViewHost source="ws-b" tab={fileTab} onCloseTab={vi.fn()} />)
 
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
     expect(screen.queryByText(/未保存/)).toBeNull()
-    expect(screen.getByRole('button', { name: '退出编辑' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+  })
+
+  it('脏态退出编辑先确认：取消留在编辑态；确认丢弃并重拉磁盘（#252）', async () => {
+    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await editAndType()
+    await screen.findByText(/未保存/)
+
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
+    expect(window.confirm).toHaveBeenCalledWith('放弃未保存的修改并退出编辑吗？')
+    expect(fileEditorView()).not.toBeNull()
+    expect(screen.getByText(/未保存/)).toBeInTheDocument()
+
+    vi.mocked(window.confirm).mockReturnValueOnce(true)
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
+    await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
+    await waitFor(() => expect(screen.queryByText(/未保存/)).toBeNull())
+    expect(screen.getByText('const x = 1')).toBeInTheDocument()
   })
 
   it('旧 workspace 的迟到保存结果不能污染新 workspace 的保存状态', async () => {
@@ -233,12 +254,12 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     await editAndType('workspace a edit')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText('保存中…')
 
     rerender(<FileViewHost source="ws-b" tab={fileTab} onCloseTab={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     await waitForFileEditor('workspace b')
     await act(async () => { write.resolve(readTextResult('workspace a saved')); await write.promise })
 
@@ -254,7 +275,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await waitForFileEditor('const x = 1')
     const editor = await editAndType('const x = 2')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText('保存中…')
