@@ -355,9 +355,12 @@ const backpressure = runBackpressureCheck();
 if (backpressure.status !== 0)
   fail("backpressure behavior check failed", backpressure.stdout + backpressure.stderr);
 
-const clientSource = readFileSync(resolve(root, "src-tauri/src/acp/client.rs"), "utf8");
+// #247 抽取后 ACP 核驻 `pylon-acp` crate：A1c legacy 守卫对准现址读 client.rs，
+// legacy 三文件在新旧两处均不得存在（防旧栈借抽取复活）。
+const clientSource = readFileSync(resolve(root, "src-tauri/pylon-acp/src/client.rs"), "utf8");
 const legacyFiles = ["transport.rs", "jsonrpc.rs", "request_id.rs"].filter((name) =>
-  existsSync(resolve(root, "src-tauri/src/acp", name)),
+  existsSync(resolve(root, "src-tauri/pylon-acp/src", name))
+    || existsSync(resolve(root, "src-tauri/src/acp", name)),
 );
 if (legacyFiles.length > 0) fail("A1c legacy ACP files still exist", legacyFiles.join(", "));
 if (clientSource
