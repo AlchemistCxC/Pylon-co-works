@@ -701,3 +701,21 @@
 
 **两处预期变化**：编辑工具条 **6 → 7**、**分隔点消失**。其余要求零变化（字号、文案、三档行为、非 cli 不显示）。
 ★ cli 模式可能 **+25px**（提示成了那一行第 5 个元件，跨过"超过 4 个多留一行"的阈值）：用户已同意**先接受 + 实测**，**不许自行改阈值**。
+
+---
+
+[2026-09-23 01] [Baryon] [#238 · 第③件]
+
+**续开工：第③件 中控死数据清理（★ 纯删除 ⇒ 零变化）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/09-施工单-第③件-死数据清理.md`。前置刀1~刀5B 全部完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- 删：`src/components/cc/widgetCatalogView.ts`、`src/components/cc/__tests__/widgetCatalogView.test.ts`（整文件）
+- 改：`src/domains/cc/widgetCatalog.ts`（删 `BUILTIN_CC_WIDGET_DEFINITIONS` 及只为它存在的 `groupOf`/`defaultPlacementOf` 辅助；两个内建贡献的 `propertyFields` 删除）、`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（三条引用旧目录视图的断言改写成直接读表）
+- CSS：`.../builtin.pylon-renderers/styles/components/ControlCenter.css`（`.modern-command-dock` 一族）、`.../components/chat/InputBar.css`（同族）、`.../components/chat/StatusBar.css`（`.status-bar` 两块）
+- 测：`src/plugins/core/renderer/__tests__/composerVisualContract.test.ts`（删那条"CSS 文本存在"断言）
+- 文档：`.agents/records/238-*-第3件*.md`、本文件；仓外《中控元件总表》与第③件待办同步
+
+**不碰**：`rendererKey` / `isolated-surface`（用户 2026-09-23 已定**保留**）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`（有意的未知 id 样本）、插件契约面 `ccWidgetTypes.ts`/`ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+**与刀7（`10-施工单-刀7-删掉缩放.md`）的关系**：两者同改 `widgetDefinitionTable.test.ts` 与出厂数据 ⇒ **不许并行开工**，本刀先做。
