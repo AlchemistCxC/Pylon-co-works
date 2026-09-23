@@ -58,6 +58,11 @@ const BANNED_TOKENS = [
   { token: 'mergeCcWidgetCatalog', what: '目录合并视图（文件已整删）' },
   { token: 'modern-command-dock', what: '一族无渲染方的 CSS（ControlCenter.css / InputBar.css）' },
   { token: '--status-bg', what: 'statusBg / statusBgImage 留下的 CSS 变量引用' },
+  // ★ #238 刀8：「整体风格」整套删除（字段 / 类名 / 三段变体 CSS / 皮肤属性 data-cc-variant / 预览读取）。
+  //   三个 token 分别对应：字段与快照名、渲染类名前缀、CSS 小节标题。
+  { token: 'ccVariant', what: '「整体风格」字段（刀8 整套删除）' },
+  { token: 'cc-variant-', what: '变体类名前缀（CSS 与 class 模板，刀8 整族删除）' },
+  { token: 'ccVariant styles', what: 'CSS 里的变体小节（刀8 整段删除）' },
 ] as const
 
 describe('#238 第③件 · 死数据不得回归', () => {

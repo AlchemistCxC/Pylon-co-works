@@ -111,7 +111,6 @@ export interface ThemeSettings {
   ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
-  ccVariant: string
   reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
   modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; sendVariant: string
   permissionSwitchMode: string; permissionBgColor: string; permissionWidth: number; permissionHeight: number; permissionRadius: number; permissionFontSize: number; permissionTextColor: string

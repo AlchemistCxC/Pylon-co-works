@@ -39,7 +39,6 @@ export const SKIN_DATA_ATTRIBUTES = [
   'data-message-layout',
   'data-footer-layout',
   'data-cli-overflow-mode',
-  'data-cc-variant',
 ] as const
 
 export function resolveSkinDataAttributes(tokens: Record<string, unknown>): Record<string, string> {
@@ -49,7 +48,6 @@ export function resolveSkinDataAttributes(tokens: Record<string, unknown>): Reco
     'data-message-layout': typeof tokens.messageLayout === 'string' && tokens.messageLayout ? tokens.messageLayout : 'classic',
     'data-footer-layout': typeof tokens.footerLayout === 'string' && tokens.footerLayout ? tokens.footerLayout : 'free',
     'data-cli-overflow-mode': typeof tokens.cliOverflowMode === 'string' && tokens.cliOverflowMode ? tokens.cliOverflowMode : 'fixed-scroll',
-    'data-cc-variant': typeof tokens.ccVariant === 'string' && tokens.ccVariant ? tokens.ccVariant : 'terminal',
   }
 }
 

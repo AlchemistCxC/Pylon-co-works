@@ -25,7 +25,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#000000",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -162,7 +161,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#252838",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -299,7 +297,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#1a1b26",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -436,7 +433,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#120b00",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {
@@ -573,7 +569,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccBg: "#050f05",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {

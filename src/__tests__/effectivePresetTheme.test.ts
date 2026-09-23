@@ -45,10 +45,17 @@ const REPO_ROOT = resolve(__dirname, '..', '..')
  * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区仅 6 键，从不含 `ccScale`）。
  * ★ 真值由脚本实测得出（不是手推）：逐套打印 `Object.keys(effectivePresetTheme(p)).length` 与
  * `'ccScale' in t`，结果与上面的账逐条一致（见刀7 开发记录「证据」）。
+ *
+ * ★ #238 刀8（删掉整体风格）：`ccVariant` 整字段删除 ⇒ 基线第三次按**真值**重算。
+ * 本刀的账：**含 `ccVariant` 键的预设各 −1**
+ * - 6 套「完整快照」型（claude / nord / tokyo / solarized / amber / matrix）`188 → 187`；
+ * - `glass` `68 → 67`（它的 cc 区切面里有 `ccVariant`）；
+ * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区不含 `ccVariant`）。
+ * ★ 同样由脚本实测（`Object.keys(...).length` + `'ccVariant' in t`），与上面的账逐条一致。
  */
 const BASELINE_FIELD_COUNTS: Record<string, number> = {
-  claude: 188, glass: 68, nord: 188, tokyo: 188, solarized: 188,
-  amber: 188, matrix: 188, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
+  claude: 187, glass: 67, nord: 187, tokyo: 187, solarized: 187,
+  amber: 187, matrix: 187, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
 }
 
 /** 该预设的有效值 —— 用测试侧独立算法（直接并池里的 5 个切面），不复用被测函数。 */

@@ -12,16 +12,22 @@ import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, CC_MEMBER_FIELDS, type
  * **改造前后"能渲染出来的 cc 字段集合"完全相同**（只是归属变了，一个不多一个不少）。
  *
  * 判据分三层（任一层红都说明归属坏了）：
- * 1. **冻结清单**：可渲染集合 == 改造前那份 78 项（下面是逐字冻结的清单，不靠推导）；
+ * 1. **冻结清单**：可渲染集合 == 那份 77 项（下面是逐字冻结的清单，不靠推导）；
  * 2. **值合法**：每个可渲染字段的 `group` 必须**恰好等于某个子部件的 label**（写错字/写成旧标签即红）；
  * 3. **分组表一致**：`GROUP_ORDER.cc` 的分区标题 = 定义表里各元件的 label（顺序同表），
  *    每个有字段的子部件都出现在它所属元件的 groups 里，且**没有空组**。
  */
 const defs = THEME_FIELD_DEFS as Record<string, ThemeFieldDef>
 
-/** 改造前（#238 刀6 之前）设置页中控区**能渲染出来的 cc 字段集合** —— 逐字冻结，排序后比对。 */
+/**
+ * 设置页中控区**能渲染出来的 cc 字段集合** —— 逐字冻结，排序后比对。
+ *
+ * ★ #238 刀8：原为刀6 落地时的 78 项；「整体风格」（`ccVariant`）整字段删除后变 **77** 项 ⇒
+ * 清单同步 −1（本刀是**字段真的不存在了**，不是归属写坏 —— 这条不变量照样守得住：
+ * 除它以外的任何增减都会红）。
+ */
 const RENDERABLE_CC_FIELDS_BEFORE: readonly string[] = [
-  'ccBg', 'ccBgImage', 'ccHeight', 'ccHintFontSize', 'ccMarginBottom', 'ccMarginX', 'ccRadius', 'ccSurfaceOpacity', 'ccVariant',
+  'ccBg', 'ccBgImage', 'ccHeight', 'ccHintFontSize', 'ccMarginBottom', 'ccMarginX', 'ccRadius', 'ccSurfaceOpacity',
   'cliContentOffsetY', 'cliHintMode', 'cliLineColor', 'cliLinePadding', 'cliLineWidth', 'cliOverflowMode', 'cliPromptColor', 'cliTextColor',
   'footerLayout',
   'inputBg', 'inputBgImage', 'inputBorder', 'inputBorderColor', 'inputBorderOpacity', 'inputBorderWidth', 'inputFocusBorder',

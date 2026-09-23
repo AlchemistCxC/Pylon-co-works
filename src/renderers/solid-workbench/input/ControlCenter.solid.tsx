@@ -578,7 +578,7 @@ export function SolidControlCenter() {
 
   return <div
     ref={node => { controlCenterElement = node }}
-    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''} cc-variant-${appearance().ccVariant}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
+    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
     data-creation-state={sessionEntering() ? 'entering' : submitting() ? 'creating' : undefined}
     role={!input().sessionId ? 'region' : undefined}

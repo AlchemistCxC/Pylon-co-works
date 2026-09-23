@@ -46,7 +46,6 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
 
     // noCssVar 字段不得暴露 cssVar
     expect(schema.fields.userColor?.cssVar).toBeUndefined()
-    expect(schema.fields.ccVariant?.cssVar).toBeUndefined()
     expect(schema.fields.barTrackColor?.cssVar).toBeUndefined()
   })
 
@@ -69,7 +68,8 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
     const schema = getSkinSchema()
 
     expect(schema.fields.inputVariant?.options).toEqual([...(THEME_FIELD_DEFS.inputVariant.options ?? [])])
-    expect(schema.fields.ccVariant?.options).toEqual([...(THEME_FIELD_DEFS.ccVariant.options ?? [])])
+    // ★ #238 刀8：原样本「整体风格」（ccVariant）已整套删除 ⇒ 换一个同样是 select 的 cc 字段
+    expect(schema.fields.cliHintMode?.options).toEqual([...(THEME_FIELD_DEFS.cliHintMode.options ?? [])])
 
     expect(schema.fields.ccLayout?.default).toEqual(DEFAULTS.ccLayout)
     expect(schema.fields.ccHidden?.default).toEqual(DEFAULTS.ccHidden)

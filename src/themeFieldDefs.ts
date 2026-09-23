@@ -249,8 +249,6 @@ export const THEME_FIELD_DEFS = {
   ccBg: { ...C('cc', '中控区背景'), default: '#808080', group: "中控本体面", },
   ccSurfaceOpacity: { ...N('cc', '透明度', 0, 1, 0.05), default: 1, group: "中控本体面", percent: true, suffix: '%' },
   ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "中控本体面", },
-  // 变体切换组件读 store 值（data-cc-variant），不注入 CSS var
-  ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), optionLabels: { terminal: '终端状态栏', glass: '玻璃工作台', pill: '轻量胶囊' }, default: 'terminal', group: "中控本体面", noCssVar: true },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
   // A6 输入区：本轮新增字段不投影 semanticRole/semanticSource；旧 inputBg 等字段保留。

@@ -101,7 +101,6 @@ export interface WorkbenchAppearanceSnapshot {
   cliHintMode: string
   footerLayout: string
   cliOverflowMode: string
-  ccVariant: string
   ccHeight: number
   ccBg: string
   ccBgImage: string
@@ -221,7 +220,6 @@ export function selectWorkbenchAppearance(
     cliHintMode: theme.cliHintMode,
     footerLayout: theme.footerLayout,
     cliOverflowMode: theme.cliOverflowMode,
-    ccVariant: theme.ccVariant,
     ccHeight: theme.ccHeight,
     ccBg: theme.ccBg,
     ccBgImage: theme.ccBgImage,

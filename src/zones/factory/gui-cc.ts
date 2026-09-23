@@ -20,7 +20,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
     values: {
       ccHeight: 96,
       ccBg: "rgba(255,255,255,0.20)",
-      ccVariant: "pill",
       ccHidden: [
         "cc-send-button"
       ],
@@ -57,7 +56,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       ccBg: "#fdf6e3",
       ccSurfaceOpacity: 1,
       ccBgImage: "",
-      ccVariant: "terminal",
       ccLayout: {
         "version": 9,
         "placements": {

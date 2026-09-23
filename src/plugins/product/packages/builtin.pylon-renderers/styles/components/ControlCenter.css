@@ -230,18 +230,9 @@
 .app[data-cli-overflow-mode="overlay"] .control-center.cli-mode,
 .app[data-cli-overflow-mode="fixed-scroll"] .control-center.cli-mode { height:var(--cc-height,76px); }
 
-/* ── ccVariant styles ── */
-.cc-variant-glass .cc-widget .pill,
-.cc-variant-glass .cc-widget button,
-.cc-variant-glass .cc-widget [class*="pill"] {
-  border-radius: 0; backdrop-filter:blur(10px); background:rgba(255,255,255,0.06) !important;
-  color:rgba(255,255,255,0.85) !important; border:1px solid rgba(255,255,255,0.08) !important;
-}
-.cc-variant-pill .cc-widget .pill,
-.cc-variant-pill .cc-widget button,
-.cc-variant-pill .cc-widget [class*="pill"] {
-  border-radius: 0;
-}
+/* ── 变体样式（`.cc-variant-*`）已于 #238 刀8 整族删除 ──
+   原「整体风格」三值（terminal/glass/pill）是"界面模式那一层"的东西、设置页那个入口是假入口
+   ⇒ 字段、类名与本段样式一并退场。原文留档（仓外）见 `任务\预设修正\备份\ccVariant-留档\`。 */
 
 /* ── Edit mode shell ── */
 .control-center.cc-editing { outline:2px dashed var(--accent); outline-offset:-2px; z-index:20; }
@@ -389,9 +380,6 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .cc-tasks-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-.cc-variant-glass .cc-tasks-pill { border-radius: 0; }
-.cc-variant-pill .cc-tasks-pill { border-radius: 0; }
 
 /* 会话创建上下文与运行态：新控件使用局部信息片，不改变旧 widget API。 */
 .cc-info-chip {

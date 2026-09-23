@@ -67,9 +67,9 @@ function fieldOwners(): Map<string, string[]> {
 }
 
 describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () => {
-  it('80 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
+  it('79 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(80)
+    expect(ccFields).toHaveLength(79)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -84,7 +84,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       group.members.reduce((sum, member) => sum + fieldsOf(member).length, 0),
     ]))
     expect(counts).toEqual({
-      'cc-surface': 9,
+      'cc-surface': 8,
       input: 33,
       model: 7,
       reasoning: 7,
@@ -97,9 +97,10 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     // ★ #238 刀5：桶里三项（ccStatusFontSize / statusBg / statusBgImage）删除 ⇒ 6 → 3；
     //   命令行提示的字号 `ccHintFontSize` 由 `cc-command-hint` 成员自己认领（成员计数 1 → 2）。
     // ★ #238 刀7：`ccScale`（缩放）整体删除 ⇒ 系统桶 3 → 2；它原本就**不属于任何成员**（跨元件系统字段）。
+    // ★ #238 刀8：`ccVariant`（整体风格）整体删除 ⇒ 容器行成员计数 9 → **8**（它属「中控本体面」成员）。
     expect(CC_SYSTEM_FIELDS).toHaveLength(2)
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(80)
+    expect(total).toBe(79)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -114,7 +115,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       Object.fromEntries(Object.entries(entries).map(([member, keys]) => [member, [...keys].sort()]))
     const map = asSet(Object.fromEntries(memberRows.map(({ group, member }) => [`${group.id}/${member.id}`, fieldsOf(member)])))
     expect(map).toEqual(asSet({
-      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'ccVariant', 'footerLayout'],
+      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'footerLayout'],
       'input/textarea': [
         'inputOffsetTop', 'inputHeight', 'inputMarginX',
         'inputSurfaceBg', 'inputSurfaceOpacity', 'inputFocusRingEnabled', 'inputFocusRingColor',

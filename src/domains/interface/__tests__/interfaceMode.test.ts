@@ -16,7 +16,7 @@ const registrations: AsyncDisposable[] = []
 
 const CC_INPUT_TOKEN_KEYS = [
   'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
-  'inputRadius', 'ccVariant', 'cliHintMode', 'footerLayout',
+  'inputRadius', 'cliHintMode', 'footerLayout',
 ] as const
 
 function resetAppearanceState(): void {
