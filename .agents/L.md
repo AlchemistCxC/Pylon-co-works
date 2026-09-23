@@ -699,3 +699,20 @@
 
 ---
 
+[2026-09-23 23] [Vernier] [#266 遗留⑦]
+
+**开工：issue266 遗留⑦（出厂区域数据立一条机器校验 + `order` 序号值整理；序号只改写法、不改相对次序 ⇒ 渲染零变化）。** 施工单 `元件定义表/15-施工单-出厂数据校验与序号整理.md`。分支 `test/cc-factory-zone-data-guard`（基于 main `d360f9b0`，工作树干净）。文件域（请勿改写、勿连带提交）：
+
+- `src/zones/factory/terminal-cc.ts`、`src/zones/factory/gui-cc.ts`（**仅** ccLayout 里 `input` / `cc-command-hint` 两处 `order` 数值）
+- `src/domains/cc/widgetDefinitions.ts`（**仅** `input` 与 `cc-command-hint` 两行的 `layout.order`）
+- **新增** `src/zones/__tests__/factoryZonePresetLayoutGuard.test.ts`（出厂数据 ↔ 定义表位置一致性守卫）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（**仅** `DEFAULT_CC_LAYOUT` 字面量两条序号 + 随之失效的注释）
+- `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（`--write` 重拍：序号随真值变）
+- 文档：`.agents/records/266-*.md`（完工时新增）、本文件、issue #266 回写
+
+★ **与另两条 #266 支线的重叠提醒**（施工单 §3 写「文件面不重叠」，实测不成立）：`refactor/cc-member-visibility` 与 `feat/cc-widget-free-colors` 都改了 `src/domains/cc/widgetDefinitions.ts`、`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`，后者还改了同一份契约快照与 `src/zones/factory/{terminal-cc,gui-cc}.ts`。三条各自基于 main ⇒ 后合入者会在这几个文件上冲突（本件只动 2 个数值，冲突面极小）。两条支线本地已完工、当前不在改，故不阻塞。
+
+**我不碰**：预设系统其余部分、中控渲染（`ControlCenter.solid.tsx` / `WorkbenchWidgets.solid.tsx` 等）、上面两条在途分支各自的域、他人在途域。全程 pathspec 提交。
+
+---
+
