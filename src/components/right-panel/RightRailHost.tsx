@@ -28,15 +28,15 @@ export default function RightRailHost({ sheet, ctx, activeAgent }: { sheet: Shee
   const [dragWidth, setDragWidth] = useState<number | null>(null)
   const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null)
   const panelSnapshot = useSyncExternalStore(subscribe, snapshot, snapshot)
-  const shellContext = {
+  const shellContext = useMemo(() => ({
     workspaceKind: sheet?.kind,
     sheetId: sheet?.id ?? null,
     activeSessionId: ctx.activeSession,
     activeAgent,
-  }
+  }), [sheet?.kind, sheet?.id, ctx.activeSession, activeAgent])
   // 面板清单**不再按 Sheet 种类过滤**（种类只决定默认选中谁）：用户显式选过的面板跨 Sheet 保持，
   // 没选过才回落到当前种类的亲和面板。见 `contextPanelSelection.ts`。
-  const entries = useMemo(() => selectContextPanels(panelSnapshot.entries, shellContext), [panelSnapshot, sheet?.kind, sheet?.id, ctx.activeSession, activeAgent])
+  const entries = useMemo(() => selectContextPanels(panelSnapshot.entries, shellContext), [panelSnapshot, shellContext])
   const effectivePanelId = entries.some(entry => entry.contributionId === activePanelId)
     ? activePanelId
     : resolveContextPanelDefault(entries, sheet?.kind)?.contributionId
