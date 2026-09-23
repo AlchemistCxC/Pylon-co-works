@@ -6,6 +6,7 @@ import {
   SETTINGS_DOMAIN_BY_ID,
   SETTINGS_DOMAIN_MENU_META,
   SETTINGS_SECTION_LABELS,
+  HOSTED_PLUGIN_MANAGER_PAGE_ID,
   sectionZone,
   type SettingsDomainId,
   type SettingsSectionId,
@@ -155,15 +156,19 @@ export default function SettingsSheetSidebar({ sheet, state }: WorkspaceViewProp
               </div>
             )
           })}
-          {state.domain === 'plugins' && pluginSettingsPages.map(entry => (
-            <button type="button" key={entry.contributionId}
-              className={`set-nav-btn plugin-page ${state.pluginPageId === entry.contributionId ? 'active' : ''}`}
-              onClick={() => navigate({ pluginPageId: entry.contributionId })}
-              title={entry.value.description}>
-              <span>{entry.value.label}</span>
-              <small>{entry.ownerPluginId}</small>
-            </button>
-          ))}
+          {state.domain === 'plugins' && pluginSettingsPages
+            // #274：宿主「插件管理」分区在贡献存在时已直接渲染该页（Settings.tsx P53
+            // 重定向），再列独立条目即同一页面双入口——托管的这条不再单列。
+            .filter(entry => entry.contributionId !== HOSTED_PLUGIN_MANAGER_PAGE_ID)
+            .map(entry => (
+              <button type="button" key={entry.contributionId}
+                className={`set-nav-btn plugin-page ${state.pluginPageId === entry.contributionId ? 'active' : ''}`}
+                onClick={() => navigate({ pluginPageId: entry.contributionId })}
+                title={entry.value.description}>
+                <span>{entry.value.label}</span>
+                <small>{entry.ownerPluginId}</small>
+              </button>
+            ))}
         </div>
       </div>
 

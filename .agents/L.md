@@ -802,3 +802,33 @@
 [2026-09-24 08] [Miyaki Kumo] [release 0.2.7-MAT]
 
 **开工：0.2.7-MAT 版本号升级 + release 便携包构建上传**。文件域：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/{pylon-acp,pylon-canonical-types,pylon-compute,pylon-markdown,pylon-session}/Cargo.toml`、`src-tauri/Cargo.lock`、本文件。构建按 #228 纪律 `CARGO_TARGET_DIR=D:\pylon-acceptance-target`（G 盘 97% 满），不写 G 盘 target。全程 pathspec 提交；完成后打 tag `v0.2.7-MAT`（指向本分支）并上传 GitHub Release。
+
+---
+
+[2026-09-24 09] [Miyaki Kumo] [#274]
+
+**开工：issue274（设置 sheet 插件贡献页导航被困——pluginPageId 无法清除 + 侧栏双入口重复）。** spec 见 `.agents/spec/274-settings-plugin-page-navigation.md`。分支沿用 `kumo/prometheus`（基线 e0414dbd）。文件域（请勿改写、勿连带提交）：
+
+- `src/settingsDomains.ts`（pluginPageId 类型放宽 `string|null` + 新增托管贡献 id 常量；域/分区/深链契约不动）
+- `src/workspace-sheets/settingsSheetState.ts`（normalize 显式 null=清除信号；serialize 剥 null，落盘形状零变化）
+- `src/sheets/SettingsSheetSidebar.tsx`（plugins 域插件页列表过滤宿主托管贡献，去重）
+- `src/components/Settings.tsx`（仅 `:714` 硬编码换常量一行）
+- 测试：`src/workspace-sheets/__tests__/settingsSheetState.test.ts`（形状断言跟随 + 新增回归）、`src/sheets/__tests__/settingsSheetNavigation.test.ts`（新增逃逸用例）、新增 `src/components/__tests__/Settings.pluginPageDedupe.test.tsx`
+- 文档：`.agents/records/274-*.md`（完工时新增）、`docs/说明书/` 如涉设置 sheet 表述同步、本文件
+
+**我不碰**：`src/workspaceStore.ts`（patchSheetState 浅合并语义保持，codec null 透传已足）、`src/renderers/**`、中控区、预设系统、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 10] [Miyaki Kumo] [#276]
+
+**开工：issue276（FileTabView markdown 预览摘除 react-markdown，收敛到 wasm 计算核单一解析实现）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- **新增** `src/sheets/file/MarkdownPreview.tsx`（React 侧渲染模型→JSX 通用映射）+ 对应 `__tests__`
+- `src/infrastructure/compute/markdownCompute.ts`（仅新增模型类型导出 + `parseMarkdown` 返回类型收窄，零运行时改动）
+- `src/sheets/file/FileTabView.tsx`（仅 markdown 预览段：换用 MarkdownPreview、删 Suspense/markdownLazy import）
+- **删除** `src/components/chat/markdownLazy.tsx`
+- `package.json`、`bun.lock`（移除 react-markdown / remark-gfm / remark-parse / remark-rehype / unified）
+- 文档：`.agents/spec/276-*.md`（gitignore）、`.agents/records/276-*.md`（完工时新增）、`docs/说明书/` 如涉 react-markdown 表述同步、本文件
+
+**我不碰**：`src/renderers/solid-workbench/**`（Solid 侧渲染/缓存/流式切片零改动）、`src-tauri/**`（wasm/Rust 出口零改动）、首方 CSS（FileSheet.css 零改动）、中控区、预设系统、他人在途域。全程 pathspec 提交。

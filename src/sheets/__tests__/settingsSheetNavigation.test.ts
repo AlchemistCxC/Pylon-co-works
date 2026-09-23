@@ -38,4 +38,20 @@ describe('openOrFocusSettingsSheet（#154 阶段 4）', () => {
     const sheet = useWorkspaceStore.getState().workspaceSheets.sheets.find(item => item.id === id)
     expect(sheet?.state).toMatchObject({ domain: 'appearance', section: 'renderers' })
   })
+
+  it('#274 回归：卡死的 pluginPageId 经任意深链入口可逃逸', () => {
+    const id = openOrFocusSettingsSheet({ domain: 'plugins' })
+    expect(id).toBeTruthy()
+    const store = useWorkspaceStore.getState()
+    // 模拟旧构建写入的卡死状态（贡献页直指）
+    store.patchSheetState(id!, { pluginPageId: 'pylon-plugin-manager' })
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(item => item.id === id)?.state)
+      .toMatchObject({ pluginPageId: 'pylon-plugin-manager' })
+    // 任意深链（不带贡献 id）都构成完整目的地：pluginPageId 被清除
+    openOrFocusSettingsSheet({ domain: 'appearance' })
+    const state = useWorkspaceStore.getState().workspaceSheets.sheets.find(item => item.id === id)?.state as
+      Record<string, unknown> & { pluginPageId?: unknown }
+    expect(state.pluginPageId ?? null).toBeNull()
+    expect(state).toMatchObject({ domain: 'appearance', section: 'templates' })
+  })
 })
