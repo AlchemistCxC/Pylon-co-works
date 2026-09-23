@@ -154,6 +154,29 @@ fn dead_target_expired(entry: &(String, Instant)) -> bool {
     entry.1.elapsed() >= DEAD_TARGET_TTL
 }
 
+/// 单锁完成死目标判定与过期清除：TTL 内返回 `Some(标记原因)`（调用方跳过本条，
+/// 原因供短路日志使用）；已过期则移除标记并返回 None（放行本条做探测发送，
+/// B8：失败重新标记，成功自愈）；条目不存在或锁中毒返回 None（放行，与原
+/// 两步锁形态下 None/毒锁行为一致）。#261：deliver_text 与 send_loop 的 guard
+/// 样板收敛到单点，顺带消除「get(clone) → 判断 → 再 lock remove」两步锁的
+/// TOCTOU 窗口（过期条目在两步之间被并发重标时会被误删；单锁后该窗口消失，
+/// 可观察行为不变）。
+fn dead_target_gate(
+    dead_targets: &Mutex<HashMap<String, (String, Instant)>>,
+    key: &str,
+) -> Option<String> {
+    let mut dead = dead_targets.lock().ok()?;
+    // CI 修复（clippy::question_mark）：`let...else { return None }` 与 `?` 逐
+    // 字等价；借助于 NLL，`marked_at` 末次使用后即可 `dead.remove`。
+    let (reason, marked_at) = dead.get(key)?;
+    let reason = reason.clone();
+    if dead_target_expired(&(reason.clone(), *marked_at)) {
+        dead.remove(key);
+        return None;
+    }
+    Some(reason)
+}
+
 /// QQ 目标类型（R14：字符串枚举化——parse_source / send_message 不再以裸 &str
 /// 拼路径，非法 chat_type 在类型层不可表达）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,32 +501,23 @@ impl PlatformAdapter for QqAdapter {
             .and_then(|dedup| dedup.latest_for(&key).map(str::to_string));
         // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递；TTL 过期则清除标记
         // 放行本条做探测发送（B8：失败重新标记，成功自愈）
-        if let Some(entry) = self
-            .dead_targets
-            .lock()
-            .ok()
-            .and_then(|d| d.get(&key).cloned())
-        {
-            if !dead_target_expired(&entry) {
-                // O43：告警节流——死目标期间每条 agent 输出都触发 deliver，逐条
-                // warn 会刷屏；同 key 1s 内至多一条，过期条目随检查顺带清理。
-                let mut warns = self
-                    .short_circuit_warns
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let now = self.clock.now();
-                warns.retain(|_, last| now.duration_since(*last) < DEAD_TARGET_WARN_INTERVAL);
-                if !warns.contains_key(&key) {
-                    tracing::warn!(
-                        "QQ deliver 短路（死目标 {key}: {}），丢弃 {:.60}...",
-                        entry.0,
-                        text
-                    );
-                    warns.insert(key.clone(), now);
-                }
-                return Ok(());
+        if let Some(reason) = dead_target_gate(&self.dead_targets, &key) {
+            // O43：告警节流——死目标期间每条 agent 输出都触发 deliver，逐条
+            // warn 会刷屏；同 key 1s 内至多一条，过期条目随检查顺带清理。
+            let mut warns = self
+                .short_circuit_warns
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let now = self.clock.now();
+            warns.retain(|_, last| now.duration_since(*last) < DEAD_TARGET_WARN_INTERVAL);
+            if !warns.contains_key(&key) {
+                tracing::warn!(
+                    "QQ deliver 短路（死目标 {key}: {reason}），丢弃 {:.60}...",
+                    text
+                );
+                warns.insert(key.clone(), now);
             }
-            self.dead_targets.lock().ok().map(|mut d| d.remove(&key));
+            return Ok(());
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return Err("QQ deliver 需要 tokio runtime".to_string());
@@ -648,12 +662,9 @@ impl QqAdapter {
             // 死目标跳过：TTL 内跳过；过期则清除标记放行本条做探测发送（B8）。
             // O43：降级 debug——队列内逐条跳过是批量场景，warn 由 deliver_text
             // 短路节流兜底（每条目 1s 至多一条），此处逐条 warn 会刷屏。
-            if let Some(entry) = dead_targets.lock().ok().and_then(|d| d.get(&key).cloned()) {
-                if !dead_target_expired(&entry) {
-                    tracing::debug!("QQ send_loop 跳过死目标 {}", msg.chat_id);
-                    continue;
-                }
-                dead_targets.lock().ok().map(|mut d| d.remove(&key));
+            if dead_target_gate(&dead_targets, &key).is_some() {
+                tracing::debug!("QQ send_loop 跳过死目标 {}", msg.chat_id);
+                continue;
             }
             // 修复（P2-4）：token 瞬时失败指数退避重试（1s/2s），当前消息原地保留不丢；
             // 连续超 TOKEN_RETRY_ATTEMPTS 次仍未成功 → 记录日志并丢弃该消息

@@ -292,7 +292,8 @@ impl AcpClient {
     /// 与意外崩溃共享同一信号，必须先立「这是主动停」的证词再动手。
     pub fn kill(&mut self) -> Result<(), AcpError> {
         self.stopped.store(true, Ordering::Release);
-        if self.stderr_tail.tail_since(0, 1, 512).lines.is_empty() {
+        // (#260-B6) 语义等价的零分配判定（含「最新行超 512 字节即视为无证据」边界）。
+        if !self.stderr_tail.has_recent_evidence(512) {
             tracing::debug!("ACP connection closing without stderr evidence");
         }
         let _ = self.backend.shutdown.send(true);

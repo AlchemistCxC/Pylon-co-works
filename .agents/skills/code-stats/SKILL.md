@@ -20,6 +20,7 @@ bunx vitest run scripts/code-stats.test.mts   # 口径回归用例
 ## 口径（脚本头注释与实现一致，此处是人话版）
 
 - **计入语言**：TS/TSX/JS/JSX、Rust、CSS、HTML、Python、Shell、C。JSON/TOML/YAML/Markdown 是配置与文档不计入——锁文件因此天然排除（另显式排除 `.d.ts`）。
+- **crate 区域清单随 Cargo workspace**：动态解析 `src-tauri/Cargo.toml` 的 `[workspace] members`（剔除主包 `.`），新拆 crate 无需改脚本（#247 拆分曾造成硬编码清单漂移，见 #259）；解析失败退回脚本内 `CRATES_FALLBACK` 静态快照（改 workspace 结构时顺手核对快照）。
 - **排除面**（单列存照，不隐瞒）：
   - 插件开发 SDK：`src/sdk/`（SDK 源码，`build-plugin-sdk.mjs` 的输入）与 `src-tauri/resources/`（发行包内嵌 SDK + 数据）；
   - `examples/` 示例插件、`src-tauri/vendor/` 第三方；
@@ -28,7 +29,7 @@ bunx vitest run scripts/code-stats.test.mts   # 口径回归用例
   - TS/JS 文件级：`__tests__`/`__fixtures__`/`__mocks__`/`test`/`tests`/`test-utils` 目录、`*.test.*`/`*.spec.*`。注意 `mockBlocks.tsx` 这类 **mock/demo 数据不是测试**，算生产；
   - Rust **行级**：`#[cfg(test)]`（含 any/all/not 组合求值）标注的 item 区域用词法器从生产文件里切出——词法器处理 raw string（可跨行）、嵌套块注释、char 与生命周期歧义；
   - Rust 测试专属文件：父模块 `#[cfg(test)] mod x;` 声明的文件（如 `*_tests.rs`、`test_utils.rs`）、`tests/` 集成测试、`src-tauri/src/bin/pylon-fake-agent.rs`（test-agent 门控）。
-- **行类型**：代码行 = 非空非纯注释；注释行 = 整行均为注释；行内尾注计入代码行。
+- **行类型**：代码行 = 非空非纯注释；注释行 = 整行均为注释；空行 = 纯空白；行内尾注计入代码行。跨行字符串（含 raw string）与块注释的**内部行按内容归类**——有内容算 code/comment，内部纯空行仍是空行（#259 前内部行一律被误计为空行，注释行因此被大幅低估）。
 
 ## 解读与坑
 

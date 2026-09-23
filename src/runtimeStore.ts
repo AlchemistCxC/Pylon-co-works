@@ -20,10 +20,11 @@ export interface SessionConfig {
 }
 
 /**
- * runtimeStore — 运行时状态域（阶段 1：store 按域拆分）。
+ * runtimeStore — 运行时状态域。
  *
  * 承载：live 用量/生成源、每会话 live stats/modes/config、Agent 状态。
- * 不持久化（persist 域仅 themeStore）。
+ * 本 store 不持久化。persist 域各自独立：themeStore（pylon-theme）之外另有
+ * workspaceStore（pylon-workspace-sheets）、interface-mode、presentation-preferences 等。
  * 跨域联动（会话删除清 runtime 等）由调用方（identityStore 组合 action）经 getState 触发。
  */
 

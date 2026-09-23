@@ -803,10 +803,14 @@ pub(crate) async fn acp_wire_trace_snapshot(
             .map_err(|error| PylonError::Acp(format!("wire JSONL export failed: {error}")));
     }
     let records = trace.snapshot();
+    // #260-A2：单次持锁批量 correlate，替代逐条记录各取一次锁的旧路径；输出不变。
+    let ordinals: Vec<u64> = records.iter().map(|record| record.monotonic_seq).collect();
+    let correlations = trace.correlate_many(&ordinals);
     let canonical_correlations: Vec<_> = records
         .iter()
-        .filter_map(|record| {
-            trace.correlate(record.monotonic_seq).map(|correlation| {
+        .zip(correlations)
+        .filter_map(|(record, correlation)| {
+            correlation.map(|correlation| {
                 serde_json::json!({
                     "ordinal": record.monotonic_seq,
                     "correlation": correlation,

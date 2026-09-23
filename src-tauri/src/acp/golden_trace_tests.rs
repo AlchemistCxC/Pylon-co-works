@@ -438,12 +438,12 @@ fn wrapper_scenarios_carry_their_catalog_provider() {
 #[test]
 fn golden_trace_normalization_drops_volatile_fields() {
     let record = WireRecord {
-        trace_id: "fake-acp-golden-42".to_string(),
+        trace_id: "fake-acp-golden-42".into(),
         monotonic_seq: 7,
         timestamp: crate::time::Timestamp::new(1_700_000_000_000),
-        agent_id: "fake-acp-golden".to_string(),
+        agent_id: "fake-acp-golden".into(),
         provider: None,
-        source: "acp".to_string(),
+        source: "acp".into(),
         local_session_id: None,
         remote_session_id: Some(SESSION_ID.to_string()),
         peri_id: None,

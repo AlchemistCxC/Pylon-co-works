@@ -167,6 +167,20 @@ const DEFAULT_PROFILES: Profile[] = [
   { id: 'local', name: 'Local', persona: '', model: '' },
 ]
 
+/**
+ * Owner 推断 hint：workspace sheet 状态里各 Agent 的 activeSessionId（ISSUE-01
+ * 语义）。三个 hydrate 路径（后端/本地/强制本地）共用同一构造（#260-D14），
+ * 防三份逐字拷贝漂移。
+ */
+function ownerHintsFromSheetStates(): OwnerHints {
+  return {
+    activeSessionByAgent: Object.fromEntries(
+      Object.entries(useWorkspaceStore.getState().sheetAgentStates)
+        .map(([agentId, sheetState]) => [agentId, sheetState.activeSessionId]),
+    ),
+  }
+}
+
 export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   profiles: DEFAULT_PROFILES,
   activeProfileId: DEFAULT_PROFILES[0].id,
@@ -242,12 +256,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
       }
       if (sessionsEnv) {
-        const hints: OwnerHints = {
-          activeSessionByAgent: Object.fromEntries(
-            Object.entries(useWorkspaceStore.getState().sheetAgentStates)
-              .map(([agentId, sheetState]) => [agentId, sheetState.activeSessionId]),
-          ),
-        }
+        const hints = ownerHintsFromSheetStates()
         const result = normalizeSessions(sessionsEnv.payload, get().profiles, hints)
         const sessionHydration: SessionHydrationState = result.kind === 'ready'
           ? { kind: 'ready' }
@@ -647,12 +656,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
             queueMicrotask(syncIdentityToBackend)
             return
           }
-          const hints: OwnerHints = {
-            activeSessionByAgent: Object.fromEntries(
-              Object.entries(useWorkspaceStore.getState().sheetAgentStates)
-                .map(([agentId, sheetState]) => [agentId, sheetState.activeSessionId]),
-            ),
-          }
+          const hints = ownerHintsFromSheetStates()
           const result = normalizeSessions(envelope.payload, get().profiles, hints)
           const sessionHydration: SessionHydrationState = result.kind === 'ready'
             ? { kind: 'ready' }
@@ -701,12 +705,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     // 本地路径（browser / 后端无数据 / 后端失败 / 导入强制本地）：原同步逻辑
     try {
       // ISSUE-01：owner 推断 hint 来自 workspace sheet 状态（唯一 Agent 的 activeSessionId）
-      const hints: OwnerHints = {
-        activeSessionByAgent: Object.fromEntries(
-          Object.entries(useWorkspaceStore.getState().sheetAgentStates)
-            .map(([agentId, sheetState]) => [agentId, sheetState.activeSessionId]),
-        ),
-      }
+      const hints = ownerHintsFromSheetStates()
       const result = loadSessions(localStorage, get().profiles, hints)
       const sessionHydration: SessionHydrationState = result.kind === 'ready'
         ? { kind: 'ready' }

@@ -4,10 +4,12 @@ import {
   analyzeTsLike,
   attrExcludesFromProduction,
   classifyPath,
+  CRATES_FALLBACK,
   displayWidth,
   formatNumber,
   isTestPathRust,
   isTestPathTs,
+  parseWorkspaceCrates,
   rustParentCandidates,
 } from './code-stats.mts'
 
@@ -129,6 +131,30 @@ pub mod test_utils;
     const a = analyzeRust(src)
     expect(a.lineClass).toEqual(['code'])
   })
+
+  it('多行字符串：空行与 \\<换行> 续行都各占一个物理行（#259 回归）', () => {
+    const BS = String.fromCharCode(92)
+    const LF = String.fromCharCode(10)
+    // println! 续行后跟字符串内空行、再跟内容行——6 个物理行一个不许丢
+    const src = [
+      'fn help() {',
+      '    println!("' + BS,
+      '',
+      '用法：',
+      'step");',
+      '}',
+    ].join(LF)
+    const a = analyzeRust(src)
+    expect(a.lineClass.length).toBe(6)
+    expect(a.lineClass).toEqual(['code', 'code', 'blank', 'code', 'code', 'code'])
+    // 块注释内部：有内容的行是 comment，空行仍是 blank
+    const cmt = ['/* 第一行', '', '第三行 */', 'fn after() { }'].join(LF)
+    const b = analyzeRust(cmt)
+    expect(b.lineClass.length).toBe(4)
+    expect(b.lineClass[1]).toBe('blank')
+    expect(b.lineClass[2]).toBe('comment')
+    expect(b.lineClass[3]).toBe('code')
+  })
 })
 
 describe('TS/JS 行分类', () => {
@@ -212,6 +238,42 @@ describe('路径分类', () => {
     expect(rustParentCandidates('src-tauri/src/lib.rs')).toEqual([])
     expect(rustParentCandidates('src-tauri/src/bin/pylon-cli.rs')).toEqual([])
     expect(rustParentCandidates('src-tauri/pylon-core/src/agent_detection.rs')).toContain('src-tauri/pylon-core/src/lib.rs')
+  })
+})
+
+describe('crate 清单随 Cargo workspace（issue #259）', () => {
+  it('parseWorkspaceCrates 解析 members 数组、剔除主包 "."、保持声明顺序', () => {
+    const toml = [
+      '[workspace]',
+      'members = [',
+      '    ".",',
+      '    "pylon-core",',
+      '    "pylon-acp",',
+      '    "pylon-session",',
+      '    "pet-core",',
+      ']',
+      'resolver = "2"',
+    ].join('\n')
+    expect(parseWorkspaceCrates(toml)).toEqual(['pylon-core', 'pylon-acp', 'pylon-session', 'pet-core'])
+  })
+  it('无 members 段返回空数组（调用方据此退回兜底清单）', () => {
+    expect(parseWorkspaceCrates('[package]\nname = "x"\n')).toEqual([])
+    expect(parseWorkspaceCrates('')).toEqual([])
+  })
+  it('注入的 crate 清单生效——新拆 crate 落 crate:* 区域而非 rust-app 兜底', () => {
+    const crates = ['pylon-acp', 'pylon-session']
+    expect(classifyPath('src-tauri/pylon-acp/src/engine.rs', undefined, crates))
+      .toMatchObject({ bucket: 'production', area: 'crate:pylon-acp' })
+    expect(classifyPath('src-tauri/pylon-session/src/owner.rs', undefined, crates))
+      .toMatchObject({ bucket: 'production', area: 'crate:pylon-session' })
+    expect(classifyPath('src-tauri/src/session/prompt.rs', undefined, crates))
+      .toMatchObject({ bucket: 'production', area: 'rust-app' })
+  })
+  it('兜底清单为 2026-09 workspace 8 成员快照（Cargo.toml 不可读时的存照）', () => {
+    expect([...CRATES_FALLBACK].sort()).toEqual([
+      'pet-core', 'pylon-acp', 'pylon-canonical-types', 'pylon-compute',
+      'pylon-core', 'pylon-foundations', 'pylon-markdown', 'pylon-session',
+    ].sort())
   })
 })
 

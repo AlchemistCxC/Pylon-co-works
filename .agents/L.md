@@ -601,3 +601,101 @@
 
 ---
 
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支沿用 `Ru5t/renderer-memory-probe`（#240 附六/探针所在支，PR #242 在途；#243 实现为堆叠提交）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
+[2026-09-22 16] [Miyaki Kumo] [#243]
+
+**进展：issue243 切片 1~5 全部落地（引擎 TanStack spacer 方案，对 issue 目标结构 4「逐行占位盒」有已论证偏离），门禁全绿，即将推送开 PR（堆叠于 #242）。在途条目保留至合入。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 核心：`src/renderers/solid-workbench/chat/PlainMessageList.solid.tsx`、**新增** `src/renderers/solid-workbench/chat/rowHeightTable.ts`、`rowHeightEstimate.ts`
+- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅占位符行与杀停开关一节）
+- 依赖：`package.json`、`bun.lock`（**已** `bun add @tanstack/solid-virtual@3.13.40`，D9 裁定）
+- 测试：`chat/__tests__/PlainMessageList.solid.test.tsx`（**仅 issue 点名的 #212 三条窗口用例改写**，逐个登记；其余原样）、**新增** `chat/__tests__/issue243.*`、`__tests__/sessionScale.probe.solid.test.tsx`（切片 5 口径同步）
+- 文档：`.agents/spec/240-*.md`（一次性）、`.agents/records/`、`docs/说明书/` 聊天渲染节、本文件、issue #243 回写
+
+**我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
+
+
+---
+
+[2026-09-23 03] [Miyaki Kumo] [#253 #254 #255]
+
+**开工准备就绪，即将施工**（分支 `kumo/prometheus`——2026-09-23 前缀由 Ru5t/ 更名 kumo/，即原 Ru5t/prometheus，基于 main 25cef7bb；#245/#247 已随 PR #246/#249 合入 main）。文件域，请勿改写、勿连带提交：
+- #253：`src/components/chat/messageSearchIndex.ts` + `src/components/chat/__tests__/messageSearchIndex.test.ts`
+- #254：`src/sheets/OverviewSheetView.tsx` + `src/sheets/__tests__/OverviewSheetView.visual.test.tsx`
+- #255：**暂不动代码**（口径 a/b/c 待用户拍板，见 `.agents/spec/255-workspace-count-scope.md`）
+- `.agents/records/`（完工时各补一条开发记录）、`.agents/L.md`（本条）
+
+另 #250/#252 已登记在案（#250 修复未开工；#252 File 只读化未开工）。各条目完工合入后即撤。
+
+---
+
+[2026-09-23 05] [Miyaki Kumo] [#258]
+
+**开工：issue258（stderr 处理管线去重与分配削减——不改行为纯性能/质量）。** spec 见 `.agents/spec/258-stderr-pipeline-dedup.md`。分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `src-tauri/pylon-acp/src/stderr.rs`（解析收敛一次 + 新增分类钉子测试）
+- `src-tauri/pylon-acp/src/stderr_tail.rs`（`sanitize_diagnostic` is_match 守卫 + `summarize_parser_error` OnceLock 预编译；**既有测试不动**）
+- `src-tauri/pylon-foundations/src/sanitize.rs`（仅 `sanitize_message` 签名 `String`→`&str`，函数体不变）
+- `src-tauri/src/runtime_log/mod.rs`（仅 `sanitize_message` 薄包装签名跟随 + `:192` 调用点）
+- `src-tauri/src/permission.rs`（仅 `:101` 调用点借用化一行）
+- 文档：`.agents/records/258-*.md`（完工时新增）、本文件
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）；前端全部；`tools/**`。全程 pathspec 提交。
+
+---
+
+[2026-09-23 06] [Miyaki Kumo] [#259]
+
+**开工：issue259（code-stats crate 清单漂移修复——pylon-acp/pylon-session 入表，清单改随 Cargo workspace members 动态解析）。** 分支沿用 `kumo/prometheus`。文件域，请勿改写、勿连带提交：
+
+- `scripts/code-stats.mts`、`scripts/code-stats.test.mts`
+- `.agents/skills/code-stats/SKILL.md`（口径同步）
+- `.agents/records/259-*.md`（完工时新增）、本文件
+
+**我不碰**：`src/`（#257/#258 等在途域）、`src-tauri/**`、`tools/**`。全程 pathspec 提交。
+
+---
+
+[2026-09-23 07] [Miyaki Kumo] [#260]
+
+**开工：issue260（后端+前端开销清偿第二批——#258 扫描遗留 14 项，行为零变化）。** spec 见 `.agents/spec/260-overhead-paydown-batch2.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。四批文件域，请勿改写、勿连带提交：
+
+- 批次 A：`src-tauri/pylon-acp/src/wire_trace.rs`、`src-tauri/src/lifecycle/mod.rs`（仅 wire_trace_snapshot 命令段）、`src-tauri/pylon-acp/Cargo.toml` + 根 `Cargo.lock`（serde +rc）、`src-tauri/src/acp/{golden_trace_tests,p1_wire_regression_tests}.rs`、`src-tauri/src/test_harness.rs`（仅 WireRecord 字段类型跟随）
+- 批次 B：`src-tauri/pylon-acp/src/{engine,client,stderr_tail,turn_ledger}.rs`、`src-tauri/src/hook_bridge.rs`（仅 emit 段）
+- 批次 C：`src/domains/tool/toolPresentation.ts`、`src/components/chat/toolPresentationModel.ts`、`src/renderers/solid-workbench/chat/GenerationFooter.solid.tsx`、`src/components/sidebar/SessionsPanel.tsx`
+- 批次 D：**删除** `src/components/chat/spinnerVerbs.ts`；`src/plugin-runtime/storage/pluginStorageApi.ts`、`src/components/PetCompanion.tsx`、`src/identityStore.ts`
+- 文档：`.agents/records/260-*.md`（完工时新增）、本文件（顺手清掉 #259 条目上方残留的孤立 `=======` 行）
+
+**我不碰**：`src-tauri/src/session/**`、`src-tauri/src/dispatcher/**`（#155 域）、中控区、预设系统、`scripts/**`（#259 域）。既有测试除编译必需的类型跟随外零修改。全程 pathspec 提交。
+
+---
+
+[2026-09-23 08] [Miyaki Kumo] [#261]
+
+**开工：issue261（评估修复批次——注释漂移清理、session 重复逻辑去重、prompt 终态臂拆分、plugin_cmds spawn_blocking；行为零变化）。** spec 见 `.agents/spec/261-assessment-fix-batch.md`。分支沿用 `kumo/prometheus`（堆叠 PR #257）。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/session/{model,create,persist,prompt,fork}.rs`
+- `src-tauri/src/gateway/{mod,credentials}.rs`、`src-tauri/src/gateway/qq/mod.rs`
+- `src-tauri/src/agent/runtime.rs`、`src-tauri/src/mcp/mod.rs`（均仅注释）
+- `src-tauri/src/plugin_cmds/transaction.rs`（如命令体在 mod.rs 则一并，声明 `plugin_cmds/**`）
+- `src/runtimeStore.ts`、`src/store.ts`、`src/workspaceStore.ts`（**仅注释行**，不碰逻辑/类型/导出）
+- 文档：`.agents/records/261-*.md`（完工时新增）、本文件
+
+**我不碰**：#260 四批次在途域（`lifecycle/mod.rs`、`identityStore.ts`、`pylon-acp/**`、`Cargo.lock`、hook_bridge、toolPresentation 族、spinnerVerbs）；`src-tauri/src/dispatcher/**`（#155 域）；中控区、预设系统；`scripts/**`。全程 pathspec 提交，工作树里 #260 批次 A 未提交 WIP 原样保留、绝不 stage。
+
+---
+
+[2026-09-23 09] [Miyaki Kumo] [#262]
+
+**开工：issue262（CI 修复——shadow parity 背压探针路径随 #247 抽取失效 + clippy 基线两条新增）。** 分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `scripts/check-acp-shadow-parity.mjs`（仅 runBackpressureCheck 探针命令与测试名）
+- `src-tauri/src/session/prompt.rs`（仅 settle_prompt_cancelled_after_timeout 签名收窄 + 调用点，#261 已收工）
+- `src-tauri/src/gateway/qq/mod.rs`（仅 dead_target_gate let-else → `?`，#261 已收工）
+
+**我不碰**：其余全部。全程 pathspec 提交。

@@ -5,6 +5,8 @@
  * - 扫描基础：git 工作树（tracked + 未跟踪未忽略），**含他人在途 WIP**——这是「当前真实状态」。
  * - 计入语言：TS/TSX/JS/JSX、Rust、CSS、HTML、Python、Shell、C。JSON/TOML/YAML/Markdown 属配置与
  *   文档不计入（锁文件因此天然排除，另显式排除 .d.ts 声明文件）。
+ * - crate 区域清单：动态解析 `src-tauri/Cargo.toml` 的 `[workspace] members`（剔除主包 "."），
+ *   解析失败才退回 CRATES_FALLBACK 静态快照——新拆 crate 不再需要改本脚本（#247 拆分 → #259 漂移修复）。
  * - 插件开发 SDK 不计入生产/测试：`src/sdk/`（SDK 源码，build-plugin-sdk.mjs 的输入）与
  *   `src-tauri/resources/`（发行包内嵌 SDK 与数据）。`examples/`、`src-tauri/vendor/`、构建产物同属排除面，
  *   但在「排除面」表中**单列存照，不隐瞒**。
@@ -16,6 +18,7 @@
  *   · Rust 测试专属文件：父模块中 `#[cfg(test)] mod x;` 声明的文件、`tests/` 目录（集成测试）、
  *     `src-tauri/src/bin/pylon-fake-agent.rs`（test-agent 专属假 agent）。
  * - 行类型：代码行=非空非纯注释；注释行=整行均为注释；空行=纯空白；行内尾注计入代码行。
+ *   跨行字符串/块注释的内部行按内容归类（code/comment），内部纯空行仍为空行（#259 前内部行一律误计空行）。
  * - 工具链（scripts/、tools/、markdown gen+parity、根配置）与排除面一样不计入生产口径，单列存照。
  */
 import { execFileSync } from 'node:child_process'
@@ -61,13 +64,23 @@ export interface Classification {
   lang: LangId
 }
 
-// 生产口径的区域：前端 + Tauri 本体 + 各子 crate。
-const CRATES = ['pet-core', 'pylon-canonical-types', 'pylon-compute', 'pylon-core', 'pylon-foundations', 'pylon-markdown'] as const
+// 生产口径的区域：前端 + Tauri 本体 + 各子 crate。crate 清单的唯一事实源是 Cargo workspace 成员
+// （main 动态解析注入）；此兜底清单仅在 Cargo.toml 不可读时生效，为 2026-09 快照存照（#259）。
+export const CRATES_FALLBACK = [
+  'pet-core', 'pylon-acp', 'pylon-canonical-types', 'pylon-compute',
+  'pylon-core', 'pylon-foundations', 'pylon-markdown', 'pylon-session',
+] as const
+
+/** 解析 `[workspace] members = [...]`：剔除主包 "."，保持声明顺序；无 members 段返回空数组。 */
+export function parseWorkspaceCrates(toml: string): string[] {
+  const m = /^\s*members\s*=\s*\[([^\]]*)\]/m.exec(toml)
+  if (!m) return []
+  return [...m[1].matchAll(/"([^"]*)"/g)].map(x => x[1]).filter(name => name !== '.')
+}
 
 export const AREA_LABEL: Record<string, string> = {
   frontend: '前端 src/',
   'rust-app': 'Tauri 本体 src-tauri/src',
-  ...Object.fromEntries(CRATES.map(c => [`crate:${c}`, `crate ${c}`])),
   'tooling-scripts': '工具链 scripts/',
   'tooling-tools': '工具链 tools/（webview2-mcp）',
   'tooling-markdown': '工具链 markdown gen+parity',
@@ -78,8 +91,17 @@ export const AREA_LABEL: Record<string, string> = {
   'root-misc': '根目录散置',
 }
 
-/** 纯路径规则；Rust 父模块声明判定由调用方注入（需要读父文件）。返回 null = 不计入任何口径。 */
-export function classifyPath(path: string, rustParentTestMods?: ReadonlySet<string>): Classification | null {
+/** `crate:*` 区域的标签随 workspace 成员动态生成，其余查静态表。 */
+export function areaLabel(id: string): string {
+  return id.startsWith('crate:') ? `crate ${id.slice('crate:'.length)}` : AREA_LABEL[id] ?? id
+}
+
+/** 纯路径规则；Rust 父模块声明与 crate 清单由调用方注入（需要读父文件/Cargo.toml）。返回 null = 不计入任何口径。 */
+export function classifyPath(
+  path: string,
+  rustParentTestMods?: ReadonlySet<string>,
+  crates: readonly string[] = CRATES_FALLBACK,
+): Classification | null {
   const ext = path.includes('.') ? path.slice(path.lastIndexOf('.') + 1) : ''
   const lang = LANG_BY_EXT[ext]
   if (!lang) return null
@@ -108,7 +130,7 @@ export function classifyPath(path: string, rustParentTestMods?: ReadonlySet<stri
   // 生产区域
   let area: string
   let bucket: Bucket
-  const crate = CRATES.find(c => path.startsWith(`src-tauri/${c}/`))
+  const crate = crates.find(c => path.startsWith(`src-tauri/${c}/`))
   if (crate) { area = `crate:${crate}`; bucket = 'production' }
   else if (path.startsWith('src-tauri/')) { area = 'rust-app'; bucket = 'production' }
   else if (path.startsWith('src/')) { area = 'frontend'; bucket = 'production' }
@@ -250,11 +272,15 @@ function skipQuoted(text: string, i: number): number {
   return text.length
 }
 
-/** TS/JS 语义的单行字符串（不可跨行，`\<换行>` 续行除外）。 */
-function skipEscapedString(text: string, i: number): number {
+/** TS/JS 语义的单行字符串（不可跨行，`\<换行>` 续行除外）。step 用于把续行换行计入物理行。 */
+function skipEscapedString(text: string, i: number, step?: (j: number) => number): number {
   for (let j = i + 1; j < text.length; j++) {
     const ch = text[j]
-    if (ch === '\\') { j++; continue }
+    if (ch === '\\') {
+      const nx = text[j + 1]
+      if (step && (nx === '\n' || nx === '\r')) { j = step(j + 1) - 1; continue } // 续行：换行仍占一个物理行
+      j++; continue
+    }
     if (ch === '"') return j + 1
     if (ch === '\n' || ch === '\r') return j // 未闭合容错
   }
@@ -367,7 +393,9 @@ class RustScanner extends LineScanner {
       let depth = 0
       i += 2
       while (i < n) {
-        i = this.stepInner(text, i)
+        const stepped = this.stepInner(text, i)
+        if (stepped !== i) { i = stepped; continue } // 换行已消费，禁止再 i++（否则吞掉下一行首字符乃至空行）
+        this.markComment() // 注释内部行：有内容即 comment（空行仍为 blank）
         if (text[i] === '/' && text[i + 1] === '*') { depth++; i += 2; continue }
         if (text[i] === '*' && text[i + 1] === '/') {
           if (depth === 0) return i + 2
@@ -465,11 +493,18 @@ class RustScanner extends LineScanner {
     return i + 1
   }
 
-  /** Rust 常规字符串：可跨行，`\` 转义。 */
+  /** Rust 常规字符串：可跨行，`\` 转义；字符串内部有内容的行按 code 计（空行仍为 blank）。 */
   private skipRustString(text: string, i: number): number {
     for (let j = i + 1; j < text.length; j++) {
-      if (text[j] === '\\') { j++; continue }
-      j = this.stepInner(text, j)
+      if (text[j] === '\\') {
+        this.markCode()
+        const nx = text[j + 1]
+        if (nx === '\n' || nx === '\r') { j = this.stepInner(text, j + 1) - 1; continue }
+        j++; continue
+      }
+      const stepped = this.stepInner(text, j)
+      if (stepped !== j) { j = stepped - 1; continue } // 抵消 for 的 j++：换行已消费
+      this.markCode()
       if (text[j] === '"') return j + 1
     }
     return text.length
@@ -481,6 +516,7 @@ class RustScanner extends LineScanner {
     while (j < n) {
       const next = this.stepInner(text, j)
       if (next !== j) { j = next; continue }
+      this.markCode() // raw string 内部行：有内容即 code，否则整行会被误计为 blank
       if (text[j] === '"') {
         let k = j + 1
         let cnt = 0
@@ -499,7 +535,21 @@ class RustScanner extends LineScanner {
     const start = j
     while (j < text.length) {
       const ch = text[j]
-      if (ch === '"') { j = skipQuoted(text, j) + 1; continue }
+      if (ch === '"') {
+        j++
+        while (j < text.length) {
+          if (text[j] === '\\') {
+            const nx = text[j + 1]
+            if (nx === '\n' || nx === '\r') { j = this.stepInner(text, j + 1); continue }
+            j += 2; continue
+          }
+          const stepped = this.stepInner(text, j)
+          if (stepped !== j) { j = stepped; continue }
+          if (text[j] === '"') { j++; break }
+          j++
+        }
+        continue
+      }
       const stepped = this.stepInner(text, j)
       if (stepped !== j) { j = stepped; continue }
       if (ch === '[') depth++
@@ -563,7 +613,11 @@ class TsScanner extends LineScanner {
 
     if (top.kind === 'template') {
       this.markCode()
-      if (ch === '\\') return i + 2
+      if (ch === '\\') {
+        const nx = text[i + 1]
+        if (nx === '\n' || nx === '\r') return this.stepInner(text, i + 1) // 模板内续行：换行仍是物理行
+        return i + 2
+      }
       if (ch === '`') { this.stack.pop(); this.noteSig('`'); return i + 1 }
       if (ch === '$' && text[i + 1] === '{') {
         this.stack.push({ kind: 'code', brace: 0 })
@@ -585,7 +639,9 @@ class TsScanner extends LineScanner {
       i += 2
       while (i < n) {
         if (text[i] === '*' && text[i + 1] === '/') { this.noteSig('/'); return i + 2 }
-        i = this.stepInner(text, i)
+        const stepped = this.stepInner(text, i)
+        if (stepped !== i) { i = stepped; continue } // 换行已消费，禁止再 i++
+        this.markComment()
         i++
       }
       return i
@@ -609,7 +665,7 @@ class TsScanner extends LineScanner {
     if (ch === '"' || ch === '\'') {
       this.markCode()
       this.noteSig(ch)
-      return skipEscapedString(text, i)
+      return skipEscapedString(text, i, this.stepInner.bind(this))
     }
     if (ch === '`') {
       this.markCode()
@@ -668,12 +724,14 @@ class CssScanner extends LineScanner {
       i += 2
       while (i < text.length) {
         if (text[i] === '*' && text[i + 1] === '/') return i + 2
-        i = this.stepInner(text, i)
+        const stepped = this.stepInner(text, i)
+        if (stepped !== i) { i = stepped; continue } // 换行已消费，禁止再 i++
+        this.markComment()
         i++
       }
       return i
     }
-    if (text[i] === '"' || text[i] === "'") { this.markCode(); return skipEscapedString(text, i) }
+    if (text[i] === '"' || text[i] === "'") { this.markCode(); return skipEscapedString(text, i, this.stepInner.bind(this)) }
     this.markCode()
     return i + 1
   }
@@ -686,12 +744,14 @@ class HtmlScanner extends LineScanner {
       i += 4
       while (i < text.length) {
         if (text.slice(i, i + 3) === '-->') return i + 3
-        i = this.stepInner(text, i)
+        const stepped = this.stepInner(text, i)
+        if (stepped !== i) { i = stepped; continue } // 换行已消费，禁止再 i++
+        this.markComment()
         i++
       }
       return i
     }
-    if (text[i] === '"' || text[i] === "'") { this.markCode(); return skipEscapedString(text, i) }
+    if (text[i] === '"' || text[i] === "'") { this.markCode(); return skipEscapedString(text, i, this.stepInner.bind(this)) }
     this.markCode()
     return i + 1
   }
@@ -708,7 +768,7 @@ class HashCommentScanner extends LineScanner {
       return i
     }
     this.markCode()
-    if (ch === '"' || ch === "'") { this.prev = ch; return skipEscapedString(text, i) }
+    if (ch === '"' || ch === "'") { this.prev = ch; return skipEscapedString(text, i, this.stepInner.bind(this)) }
     this.prev = ch
     return i + 1
   }
@@ -729,12 +789,14 @@ class PythonScanner extends LineScanner {
         const close = text.indexOf(triple, i + 3)
         if (close < 0) return text.length
         for (let j = i + 3; j < close; j++) {
-          j = this.stepInner(text, j)
+          const stepped = this.stepInner(text, j)
+          if (stepped !== j) { j = stepped - 1; continue } // 抵消 for 的 j++：换行已消费
+          this.markCode() // 三引号内部行：有内容即 code
         }
         return close + 3
       }
       this.markCode()
-      return skipEscapedString(text, i)
+      return skipEscapedString(text, i, this.stepInner.bind(this))
     }
     this.markCode()
     return i + 1
@@ -754,12 +816,14 @@ class CScanner extends LineScanner {
       i += 2
       while (i < text.length) {
         if (text[i] === '*' && text[i + 1] === '/') return i + 2
-        i = this.stepInner(text, i)
+        const stepped = this.stepInner(text, i)
+        if (stepped !== i) { i = stepped; continue } // 换行已消费，禁止再 i++
+        this.markComment()
         i++
       }
       return i
     }
-    if (ch === '"' || ch === "'") { this.markCode(); return skipEscapedString(text, i) }
+    if (ch === '"' || ch === "'") { this.markCode(); return skipEscapedString(text, i, this.stepInner.bind(this)) }
     this.markCode()
     return i + 1
   }
@@ -793,7 +857,7 @@ function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' })
 }
 
-function collect(root: string): FileRecord[] {
+function collect(root: string, crates: readonly string[]): FileRecord[] {
   const paths = git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
     .split('\0')
     .filter(p => p.length > 0)
@@ -819,7 +883,7 @@ function collect(root: string): FileRecord[] {
       }
     }
 
-    const cls = classifyPath(path, parentMods)
+    const cls = classifyPath(path, parentMods, crates)
     if (!cls) continue
 
     const src = readFileSync(resolve(root, path), 'utf8')
@@ -891,11 +955,21 @@ const firstSegmentUnder = (path: string, rootDir: string) => {
   return '(其它)'
 }
 
+/** crate 清单唯一事实源是 Cargo workspace 成员；Cargo.toml 不可读或无 members 段时退回兜底快照。 */
+function loadWorkspaceCrates(root: string): string[] {
+  try {
+    const parsed = parseWorkspaceCrates(readFileSync(resolve(root, 'src-tauri/Cargo.toml'), 'utf8'))
+    if (parsed.length > 0) return parsed
+  } catch { /* 落到兜底 */ }
+  return [...CRATES_FALLBACK]
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 async function main() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-  const records = collect(root)
+  const crates = loadWorkspaceCrates(root)
+  const records = collect(root, crates)
   const head = git(root, ['rev-parse', '--short', 'HEAD']).trim()
   const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()
 
@@ -942,7 +1016,7 @@ async function main() {
       bump(areas, cls.area, rec)
       if (cls.area === 'frontend') bump(moduleFrontend, firstSegmentUnder(rec.path, 'src'), rec)
       else if (cls.area === 'rust-app') bump(moduleRust, firstSegmentUnder(rec.path, 'src-tauri/src'), rec)
-      else if (cls.area.startsWith('crate:')) bump(moduleRust, AREA_LABEL[cls.area], rec)
+      else if (cls.area.startsWith('crate:')) bump(moduleRust, areaLabel(cls.area), rec)
 
       if (cls.lang === 'rs') rustTestAttrCount += rec.rustTestAttrs ?? 0
       if (cls.lang === 'rs' && cls.bucket === 'production' && rec.test.total > 0) {
@@ -972,7 +1046,7 @@ async function main() {
   const out: string[] = []
   out.push(`Pylon 代码量统计 · ${localDate()} · ${branch}@${head}`)
   out.push('口径：生产代码 vs 测试代码；排除插件开发 SDK（src/sdk、resources）、examples、vendor、锁文件与 .d.ts；')
-  out.push('扫描基础：git 工作树（tracked + 未跟踪未忽略，含他人在途 WIP）。')
+  out.push(`crate 区域随 Cargo workspace members（当前 ${crates.length} 个）；扫描基础：git 工作树（tracked + 未跟踪未忽略，含他人在途 WIP）。`)
 
   const langOrder: LangId[] = ['ts', 'tsx', 'js', 'jsx', 'rs', 'css', 'html', 'py', 'sh', 'c', 'ps1']
   const langRows = langOrder.filter(l => prodByLang.has(l)).map(l => {
@@ -1009,7 +1083,7 @@ async function main() {
     [...areas.entries()]
       .filter(([id]) => id === 'frontend' || id === 'rust-app' || id.startsWith('crate:'))
       .sort((a, b) => b[1].prod.total - a[1].prod.total)
-      .map(([id, r]) => [AREA_LABEL[id] ?? id, String(r.files), formatNumber(r.prod.code), formatNumber(r.prod.total), pct(r.prod.total, production.total)]),
+      .map(([id, r]) => [areaLabel(id), String(r.files), formatNumber(r.prod.code), formatNumber(r.prod.total), pct(r.prod.total, production.total)]),
     ['l', 'r', 'r', 'r', 'r'],
   ))
 
@@ -1018,7 +1092,7 @@ async function main() {
     ['类别', '文件', '代码行', '合计行'],
     [...excludedAreas.entries()]
       .sort((a, b) => b[1].stat.total - a[1].stat.total)
-      .map(([id, r]) => [AREA_LABEL[id] ?? id, String(r.files), formatNumber(r.stat.code), formatNumber(r.stat.total)]),
+      .map(([id, r]) => [areaLabel(id), String(r.files), formatNumber(r.stat.code), formatNumber(r.stat.total)]),
     ['l', 'r', 'r', 'r'],
   ))
 

@@ -215,6 +215,11 @@ pub(crate) async fn session_fork(
     child_source: String,
 ) -> Result<serde_json::Value, PylonError> {
     // 解析 parent 所属 runtime（fork 按会话归属路由，不按 active agent 猜测）。
+    // 注意：本遍历是 source → runtime 的反向扫描，形态上即 owner.rs 契约宣布移除的
+    // ACP-05 `find_runtime_for_source`（双 Agent 同名 source 时取首个命中、归属不定）。
+    // 此处豁免保留的依据：fork 的 source 由前端 identity 层保证跨 agent 唯一；且
+    // 找不到时显式报 SessionNotFound，不存在「串线静默投递」后果。若 source 唯一性
+    // 前提变化，此处须改走显式 agentId 路由（resolve_agent_runtime）。
     let resolved = state
         .runtimes
         .all_with_ids()

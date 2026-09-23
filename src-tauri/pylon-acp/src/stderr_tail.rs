@@ -70,6 +70,18 @@ impl StderrTail {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).next
     }
 
+    /// (#260-B6) kill 路径的「有无 stderr 证据」判定：与旧
+    /// `tail_since(0, 1, max_bytes).lines.is_empty()` **逐一等价**——tail 从
+    /// 最新行开始装、首行超字节预算即整片为空，因此旧判空 ⟺ 无任何行或最新行
+    /// 超过 max_bytes。零分配替代（旧实现为判空构造整个 TailSlice）。
+    pub fn has_recent_evidence(&self, max_bytes: usize) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.lines.back() {
+            Some((_, line)) => line.len() <= max_bytes,
+            None => false,
+        }
+    }
+
     pub fn tail_since(&self, mark: u64, max_lines: usize, max_bytes: usize) -> TailSlice {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let recent: Vec<&String> = inner
@@ -175,12 +187,16 @@ fn denylist() -> &'static Vec<(Regex, &'static str)> {
 }
 
 /// Redact credential-shaped text before it can reach UI or remote diagnostics.
+/// (#258) 无命中规则直接跳过：`replace_all` 无命中时返回 `Cow::Borrowed`，旧实现的
+/// `.into_owned()` 等于每规则一次全量拷贝（16 条规则 = 每行最多 17 次堆分配）。
 pub fn sanitize_diagnostic(value: &str) -> String {
-    denylist()
-        .iter()
-        .fold(value.to_owned(), |text, (regex, replacement)| {
-            regex.replace_all(&text, *replacement).into_owned()
-        })
+    let mut text = value.to_owned();
+    for (regex, replacement) in denylist() {
+        if regex.is_match(&text) {
+            text = regex.replace_all(&text, *replacement).into_owned();
+        }
+    }
+    text
 }
 
 fn collapse_whitespace(value: &str) -> String {
@@ -292,14 +308,67 @@ fn safe_expectation(value: &str) -> bool {
     any
 }
 
+/// parser 摘要的预编译 pattern 集（#258：原实现每次调用现场 `Regex::new` 最多 7 次）。
+/// `Option<Regex>` 保留旧实现的 `.ok()` 语义：静态 pattern 若意外失效则对应分支跳过。
+struct ParserErrorPatterns {
+    position: Option<Regex>,
+    missing_field: Option<Regex>,
+    categories: Vec<(&'static str, bool, Regex)>,
+}
+
+fn parser_error_patterns() -> &'static ParserErrorPatterns {
+    static PATTERNS: OnceLock<ParserErrorPatterns> = OnceLock::new();
+    PATTERNS.get_or_init(|| ParserErrorPatterns {
+        position: Regex::new(r"\bat line \d+ column \d+").ok(),
+        missing_field: Regex::new(r"^missing field \\`(?P<field>[^\\`]*)\\`").ok(),
+        categories: [
+            (
+                "invalid type",
+                false,
+                r"^invalid type:.*?,\s*expected\s+(?P<exp>.+)$",
+            ),
+            (
+                "invalid value",
+                false,
+                r"^invalid value:.*?,\s*expected\s+(?P<exp>.+)$",
+            ),
+            (
+                "invalid length",
+                false,
+                r"^invalid length.*?,\s*expected\s+(?P<exp>.+)$",
+            ),
+            (
+                "unknown variant",
+                true,
+                r"^unknown variant\s+`[^`]*`,\s*expected\s+(?P<exp>.+)$",
+            ),
+            (
+                "unknown field",
+                true,
+                r"^unknown field\s+`[^`]*`,\s*expected\s+(?P<exp>.+)$",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(category, payload, pattern)| {
+            Regex::new(pattern)
+                .ok()
+                .map(|regex| (category, payload, regex))
+        })
+        .collect(),
+    })
+}
+
 /// Reduce parser errors to a payload-free, bounded summary (default deny).
 pub fn summarize_parser_error(error: &str) -> String {
+    let patterns = parser_error_patterns();
     let first = collapse_whitespace(error.lines().next().unwrap_or("").trim());
-    let position = Regex::new(r"\bat line \d+ column \d+")
-        .ok()
+    let position = patterns
+        .position
+        .as_ref()
         .and_then(|regex| regex.find(&first).map(|m| m.as_str().to_owned()));
-    let body = if let Some(caps) = Regex::new(r"^missing field \\`(?P<field>[^\\`]*)\\`")
-        .ok()
+    let body = if let Some(caps) = patterns
+        .missing_field
+        .as_ref()
         .and_then(|r| r.captures(&first))
     {
         let field = caps.name("field").map(|m| m.as_str()).unwrap_or("");
@@ -308,42 +377,18 @@ pub fn summarize_parser_error(error: &str) -> String {
         } else {
             "missing field (redacted)".to_owned()
         }
-    } else if let Some((category, payload, captures)) = [
-        (
-            "invalid type",
-            false,
-            "^invalid type:.*?,\\s*expected\\s+(?P<exp>.+)$",
-        ),
-        (
-            "invalid value",
-            false,
-            "^invalid value:.*?,\\s*expected\\s+(?P<exp>.+)$",
-        ),
-        (
-            "invalid length",
-            false,
-            "^invalid length.*?,\\s*expected\\s+(?P<exp>.+)$",
-        ),
-        (
-            "unknown variant",
-            true,
-            "^unknown variant\\s+`[^`]*`,\\s*expected\\s+(?P<exp>.+)$",
-        ),
-        (
-            "unknown field",
-            true,
-            "^unknown field\\s+`[^`]*`,\\s*expected\\s+(?P<exp>.+)$",
-        ),
-    ]
-    .iter()
-    .find_map(|(category, payload, pattern)| {
-        Regex::new(pattern)
-            .ok()
-            .and_then(|r| r.captures(&first).map(|c| (*category, *payload, c)))
-    }) {
+    } else if let Some((category, payload, captures)) =
+        patterns
+            .categories
+            .iter()
+            .find_map(|(category, payload, regex)| {
+                regex.captures(&first).map(|c| (*category, *payload, c))
+            })
+    {
         let exp = captures.name("exp").map(|m| m.as_str()).unwrap_or("");
-        let exp = Regex::new(r"\bat line \d+ column \d+")
-            .ok()
+        let exp = patterns
+            .position
+            .as_ref()
             .map(|r| r.replace(exp, "").into_owned())
             .unwrap_or_else(|| exp.to_owned());
         let exp = exp.trim().trim_end_matches(',').trim();

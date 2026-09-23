@@ -36,7 +36,7 @@ export interface FrameState {
 }
 
 export function resolveFrame(
-  frames: string[],
+  frames: readonly string[],
   elapsedMs: number,
   intervalMs: number,
   motion: SpinnerMotionKind,

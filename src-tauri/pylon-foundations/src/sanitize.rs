@@ -173,12 +173,12 @@ pub fn sanitize_value(policy: SanitizePolicy, key: &str, value: Value) -> Option
 }
 
 /// 消息 sanitize（runtime_log 语义：整体 REDACTED 或截断）。
-pub fn sanitize_message(message: String) -> String {
+pub fn sanitize_message(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
     if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
         REDACTED.to_string()
     } else {
-        truncate(message, MAX_MESSAGE_BYTES)
+        truncate(message.to_owned(), MAX_MESSAGE_BYTES)
     }
 }
 

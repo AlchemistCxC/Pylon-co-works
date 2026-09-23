@@ -364,17 +364,9 @@ impl SessionInfo {
                     .or_else(|| response.get("mode"))
                     .and_then(value_as_string)
             });
-        if let Some(usage) = response
-            .get("usage")
-            .or_else(|| {
-                response
-                    .get("sessionInfo")
-                    .and_then(|info| info.get("usage"))
-            })
-            .cloned()
-        {
-            self.usage_snapshot = Some(usage);
-        }
+        // usage 不在此内联提取——函数尾 capture_session_state 经注册表
+        // capture_usage 单点写入 usage_snapshot（提取链与原内联块逐字相同，
+        // #261 去重：消除同一次响应路径上的同逻辑双写）。
         // P56/D1.2：按响应形状刷新模型面（configOptions 优先，models.availableModels
         // 兜底，都没有 → None 只读）。D97-1：models 状态解析走与初值计划
         // （plan_initial_model）同一 helper——根级 availableModels/available_models
@@ -675,6 +667,18 @@ fn normalized_token(value: &str) -> String {
         .collect()
 }
 
+/// 宽松键归一化（`-`/空格 → `_` + 小写；**不 trim、不处理 `.`**）：current/
+/// identity 提取的历史语义，与 [`normalized_token`]（含 trim 与 `.`→`_`）是
+/// **两组不同语义，不得合并**——wire 键含 `.` 时两组判定不同（#261 去重按
+/// 语义分组收敛，等价性论证见 .agents/records/261-*）。
+pub(crate) fn loose_normalized_key(value: &str) -> String {
+    value
+        .replace(['-', ' '], "_")
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 /// 语义键别名表（find_config_option 与 config_option_key_matches 共用）。
 fn semantic_aliases(wanted: &str) -> &'static [&'static str] {
     match wanted {
@@ -824,18 +828,7 @@ fn config_option_current_value_with(
     .find_map(|key| {
         object
             .iter()
-            .find(|(candidate, _)| {
-                candidate
-                    .replace(['-', ' '], "_")
-                    .chars()
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>()
-                    == key
-                        .replace(['-', ' '], "_")
-                        .chars()
-                        .flat_map(char::to_lowercase)
-                        .collect::<String>()
-            })
+            .find(|(candidate, _)| loose_normalized_key(candidate) == loose_normalized_key(key))
             .and_then(|(_, value)| extract(value))
     })
 }
@@ -919,20 +912,30 @@ fn config_option_identity(option: &serde_json::Value) -> Option<String> {
     .filter(|id| !id.is_empty())
 }
 
-/// P56/D1：select 选项宣告的 choice machine id 集合（保持宣告顺序、去重；
-/// 无 machine id 的 choice 直接丢弃，不降级为显示名——与 TS modelChoices 同契约）。
-/// #97/D97-6：control 层对依赖 option（reasoning 组）发送校验复用。
-pub(crate) fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String> {
-    fn collect(value: &serde_json::Value, depth: usize, seen: &mut Vec<String>) {
+/// 递归收集选项 choices 候选值的共享骨架：machine-id 轨（[`config_option_choice_ids`]）
+/// 与 create.rs 初始协商宽容轨（`option_choices`）共用。两轨候选键集合一致（wild 观测
+/// 键名的同一份清单），迭代序取本清单顺序——宽容轨收集后 sort+dedup，键序对输出无
+/// 影响，故共享骨架对两轨输出逐字节等价（#261 去重）。depth 截断与数组短路两轨一致；
+/// 值提取经 `extract` 参数化（machine-id-only vs 宽容 string/{value}/{valueId}），
+/// 去重策略由调用方自留（保序去重 vs 排序去重）。
+pub(crate) fn collect_config_choice_values(
+    option: &serde_json::Value,
+    extract: fn(&serde_json::Value) -> Option<String>,
+    out: &mut Vec<String>,
+) {
+    fn collect(
+        value: &serde_json::Value,
+        depth: usize,
+        extract: fn(&serde_json::Value) -> Option<String>,
+        out: &mut Vec<String>,
+    ) {
         if depth > 4 {
             return;
         }
         if let Some(list) = value.as_array() {
             for item in list {
-                if let Some(id) = value_as_machine_id(item) {
-                    if !seen.contains(&id) {
-                        seen.push(id);
-                    }
+                if let Some(choice) = extract(item) {
+                    out.push(choice);
                 }
             }
             return;
@@ -952,12 +955,29 @@ pub(crate) fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String
             "option_values",
         ] {
             if let Some(nested) = object.get(key) {
-                collect(nested, depth + 1, seen);
+                collect(nested, depth + 1, extract, out);
             }
         }
     }
+    collect(option, 0, extract, out);
+}
+
+/// P56/D1：select 选项宣告的 choice machine id 集合（保持宣告顺序、去重；
+/// 无 machine id 的 choice 直接丢弃，不降级为显示名——与 TS modelChoices 同契约）。
+/// #97/D97-6：control 层对依赖 option（reasoning 组）发送校验复用。
+pub(crate) fn config_option_choice_ids(option: &serde_json::Value) -> Vec<String> {
     let mut choices = Vec::new();
-    collect(option, 0, &mut choices);
+    collect_config_choice_values(option, value_as_machine_id, &mut choices);
+    // 保序去重（保留首个出现位）——与原 walk 内联 seen 检查的输出逐一相同。
+    let mut seen: Vec<String> = Vec::new();
+    choices.retain(|id| {
+        if seen.contains(id) {
+            false
+        } else {
+            seen.push(id.clone());
+            true
+        }
+    });
     choices
 }
 

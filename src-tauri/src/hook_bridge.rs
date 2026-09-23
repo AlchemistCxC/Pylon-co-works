@@ -188,36 +188,39 @@ impl HookBridge {
             payload,
             timeout_ms: timeout_ms.clamp(1, MAX_TIMEOUT_MS),
         };
+        // (#260-B5) emit 前留存标量句柄，emit 移动原值——省去含 payload 的整请求深克隆。
+        let request_id = request.request_id.clone();
+        let timeout_ms = request.timeout_ms;
         let (sender, receiver) = oneshot::channel();
         if let Ok(mut pending) = self.pending.lock() {
             pending.insert(request.request_id.clone(), sender);
         } else {
             return HookDispatchOutcome::Failed("Pylon hook pending lock poisoned".into());
         }
-        if let Err(error) = emitter.emit(crate::event_names::PYLON_HOOK_REQUEST, request.clone()) {
+        if let Err(error) = emitter.emit(crate::event_names::PYLON_HOOK_REQUEST, request) {
             self.pending
                 .lock()
                 .ok()
-                .and_then(|mut pending| pending.remove(&request.request_id));
+                .and_then(|mut pending| pending.remove(&request_id));
             return HookDispatchOutcome::Failed(format!("emit hook request failed: {error}"));
         }
-        match tokio::time::timeout(Duration::from_millis(request.timeout_ms), receiver).await {
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), receiver).await {
             Ok(Ok(result)) => match result {
                 Ok(value) => HookDispatchOutcome::Answered(value),
                 Err(error) => HookDispatchOutcome::Failed(error),
             },
             Ok(Err(_)) => {
-                self.remove_pending(&request.request_id);
+                self.remove_pending(&request_id);
                 HookDispatchOutcome::Failed(
                     "Pylon hook frontend response channel closed".to_string(),
                 )
             }
             Err(_) => {
                 // 超时：摘表 + 通知前端取消（前端 abort 该请求的 handler 执行）。
-                self.cancel(emitter, &request.request_id, "hook request timed out");
+                self.cancel(emitter, &request_id, "hook request timed out");
                 HookDispatchOutcome::Failed(format!(
                     "Pylon hook request timed out after {}ms",
-                    request.timeout_ms
+                    timeout_ms
                 ))
             }
         }

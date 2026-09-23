@@ -24,7 +24,7 @@ export function touchedFileVersionKey(context: AgentContext, path: string): stri
 }
 
 /**
- * workspaceStore — Workspace Sheet 状态域（阶段 1：store 按域拆分）。
+ * workspaceStore — Workspace Sheet 状态域。
  *
  * 承载：workspaceSheets / sheetAgentStates / 布局三字段（sidebarWidth/sidebarCollapsed/
  * rightPanelCollapsed，W1-01 F2-B 从主题迁出——预设不覆盖布局状态）与 showPet（独立

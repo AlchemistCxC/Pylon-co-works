@@ -139,7 +139,7 @@ impl ReconnectPolicy {
 
 /// G2-07：会话槽位策略（E9 拍板 per-agent：sessions 表本就在 runtime 内，上限按
 /// runtime 生效，默认 100 = 现状全局常量值；G1 `acp.max_sessions` 落地后按 agent
-/// 解析覆盖）。消费：session.rs replace_session_slot / create_session_slot。
+/// 解析覆盖）。消费：session/create.rs replace_session_slot / create_session_slot。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSlotPolicy {
     pub max_sessions: usize,

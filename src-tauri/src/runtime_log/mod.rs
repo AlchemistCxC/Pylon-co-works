@@ -189,7 +189,7 @@ impl RuntimeLogHub {
             level: normalize_level(level.into()),
             source: truncate(source.into(), MAX_MESSAGE_BYTES),
             session: session.map(|value| truncate(value, MAX_MESSAGE_BYTES)),
-            message: sanitize_message(message.into()),
+            message: sanitize_message(&message.into()),
             fields: sanitize_fields(fields),
             correlation,
             code: context.code,
@@ -467,7 +467,7 @@ fn truncate(value: String, max_bytes: usize) -> String {
 
 /// R21：脱敏实现统一到 crate::sanitize（策略参数化：runtime_log 走 Redact）。
 /// 此处仅保留 push/acp/permission 与测试所需的薄包装，hub 区（43-150）零改动。
-pub(crate) fn sanitize_message(message: String) -> String {
+pub(crate) fn sanitize_message(message: &str) -> String {
     crate::sanitize::sanitize_message(message)
 }
 
