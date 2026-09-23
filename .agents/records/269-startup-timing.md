@@ -73,7 +73,7 @@
 
 1. ~~release 实机验收~~ **已完成**（debug profile 实机：插桩非 DEV 门化，debug 即代表性）。正式 release profile 的数字留待 #270 前后对照时一并在 release 构建采集。
 2. `main_module_eval` 不含 import 求值与脚本前开销（与 timeOrigin 的差值可另行估算）；是否需要在 `index.html` 加内联最早 mark 受 CSP `script-src` 限制（生产无 `unsafe-inline`），当前不做。
-3. 首轮实测已给出的优化坐标（供 #270/#271 决策）：① `windows_created→setup_enter` ≈ 500ms 是进程侧最大段（Tauri 插件 init + WebView2 创建，属固定地板，#270 作用不在此）；② 本机无默认 agent，`default_agent_connect_settled=12ms`——#270 的收益需在**配置了真实 CLI agent**的机器上对照测量；③ 前端 module_eval→ready 386ms，其中 hydration 119ms + agents/dictionary/status/listeners 137ms。
+3. 首轮实测已给出的优化坐标（供 #270/#271 决策）：① `windows_created→setup_enter` ≈ 500ms 是进程侧最大段（Tauri 插件 init + WebView2 创建，属固定地板，#270 作用不在此）；② 本机无默认 agent，`default_agent_connect_settled=12ms`——#270 的收益需在**配置了真实 CLI agent**的机器上对照测量；③ 前端 module_eval→ready 386ms，其中 hydration 119ms + agents/dictionary/status/listeners 137ms。**2026-09-24 补**：②已补测——`PYLON_AGENTS_CONFIG` 指向安装版真实 agents.yaml（默认 agent=Hermes/riccati）实测 `default_agent_connect_settled=2004ms`、`windows_created=2021ms`（连接托底窗口 2 秒），基线已回写 #270 评论区。
 
 ## 并行交集
 
