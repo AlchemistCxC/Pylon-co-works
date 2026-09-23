@@ -38,17 +38,28 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
     })
   })
 
-  it('file 模式：打开后直接保持编辑态，read 经 typed client 带 source/相对路径', async () => {
+  it('file 模式：打开默认只读预览（#252），点「编辑」才进编辑态；read 经 typed client 带 source/相对路径', async () => {
     const { container } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     // 挂载与首读完成是两拍渲染：只等元素存在会在 data-path 尚未落入 DOM 时断言（P91 C 批退役 retry 后暴露的游走 flake）。
     await waitFor(() => {
       expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
       expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
     })
-    expect(await waitForFileEditor('const x = 1')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
+    // 只读预览：无 CodeMirror、无「保存」、无「编辑中」徽标
+    await waitFor(() => expect(screen.getByText('const x = 1')).toBeTruthy())
+    expect(document.querySelector('.file-code-editor')).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
+    expect(screen.queryByText('编辑中')).toBeNull()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy()
     expect(screen.getByText('1 行')).toBeTruthy()
     expect(screen.getAllByText('ws-a').length).toBeGreaterThan(0)
+
+    // 显式「编辑」→ CodeMirror 承载 + 保存出现
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(await waitForFileEditor('const x = 1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '退出编辑' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
+    expect(screen.getByText('编辑中')).toBeTruthy()
   })
 
   it('diff 模式：渲染 DiffView 复用 DiffCard，git_diff 带 source/path/staged', async () => {

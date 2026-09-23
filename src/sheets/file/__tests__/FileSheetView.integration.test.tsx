@@ -10,7 +10,7 @@ import { createSheetState } from '../../../workspace-sheets/sheetState'
 import { fileTabKey, parseFileTabs, serializeFileTabs, type FileTabRecord, type FileTabState } from '../fileSheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../identityStore'
-import { fileEditorView, replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
+import { replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
 import { closeWorkspace } from '../../../workspace-sheets/workspaceController.ts'
 import { FILE_NAVIGATION_METADATA_KEY } from '../fileSheetNavigation.ts'
 
@@ -276,6 +276,8 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     ]
     seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
     renderHarness()
+    // #252：默认只读——先显式进编辑态再制造未保存修改
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     const editor = await waitForFileEditor('const x = 1')
     replaceFileEditorValue(editor, 'unsaved edit')
     await screen.findByText(/未保存/)
@@ -298,6 +300,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
       openTabs: serializeFileTabs({ version: 3, tabs: [tab], activeKey: fileTabKey(tab) }),
     })
     renderHarness()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'unsaved edit')
     await screen.findByText(/未保存/)
 
@@ -331,6 +334,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     ]
     seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
     renderHarness()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'const x = 2')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText('保存中…')
@@ -422,9 +426,10 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     fireEvent.click(screen.getByLabelText('搜索'))
     fireEvent.click(await screen.findByTitle('src/result.ts:42'))
 
+    // #252：默认只读预览——定位契约落在只读视图的行级 reveal（不再假设编辑器选区）
     await waitFor(() => {
-      const view = fileEditorView()
-      expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(42)
+      expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/result.ts')
+      expect(document.querySelector('[data-line="42"]')?.getAttribute('data-revealed')).toBe('true')
     })
     const persisted = parseFileTabs(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.openTabs)
     expect(persisted.tabs[0]).toEqual(expect.objectContaining({ path: 'src/result.ts', line: 42 }))

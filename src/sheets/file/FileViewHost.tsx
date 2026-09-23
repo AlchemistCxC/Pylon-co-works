@@ -44,10 +44,9 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [instruction, setInstruction] = useState('')
   const [selection, setSelection] = useState<DispatchSelection | null>(null)
   const [fileContent, setFileContent] = useState('')
-  // Open text tabs directly in the editor.  Keeping one editing surface from
-  // the first loaded snapshot avoids the read-only → editor typography/layout
-  // swap that used to shift line wrapping by a few pixels.
-  const [editing, setEditing] = useState(true)
+  // #252：打开文件默认只读预览——阅读是 File 工作台的高频路径，显式点「编辑」才
+  // 进入编辑态（高危的「可写入真实仓库文件」状态不设为默认态）。
+  const [editing, setEditing] = useState(false)
   const [baseline, setBaseline] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle')
   const [saveError, setSaveError] = useState('')
@@ -87,7 +86,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setTruncated(cleared.truncated)
     setInstruction(cleared.instruction)
     setFileContent(cleared.fileContent)
-    setEditing(true)
+    setEditing(false)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
@@ -141,6 +140,26 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setReloadToken(token => token + 1)
   }
 
+  // #252：退出编辑即离开「可写面」。有未保存改动时先确认——确认则丢弃并重拉磁盘
+  // （与 conflict 的「重新加载」同一条 discard 路径），取消则留在编辑态；只读视图
+  // 因此恒等于磁盘真值，不会出现「保存按钮已消失但内容仍非磁盘」的陷阱中间态。
+  const handleExitEdit = () => {
+    if (dirty && !window.confirm('放弃未保存的修改并退出编辑吗？')) return
+    if (dirty) discardAndReload()
+    else {
+      setEditing(false)
+      setSelection(null)
+    }
+  }
+
+  const handleToggleEdit = () => {
+    if (editing) handleExitEdit()
+    else {
+      setSelection(null)
+      setEditing(true)
+    }
+  }
+
   if (!tab) {
     return (
       <div className="file-tab-empty">
@@ -184,9 +203,9 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         <button
           type="button"
           className="file-edit-toggle"
-          onClick={() => { setEditing(value => !value); setSelection(null) }}
-          disabled={truncated || !target}
-          title={truncated ? '内容不完整（truncated）不可编辑' : undefined}
+          onClick={handleToggleEdit}
+          disabled={truncated || !target || saveState === 'saving'}
+          title={truncated ? '内容不完整（truncated）不可编辑' : saveState === 'saving' ? '保存进行中，请稍候' : undefined}
         >
           {editing ? '退出编辑' : '编辑'}
         </button>
@@ -225,9 +244,8 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         editing={editing}
         onTruncated={value => {
           setTruncated(value)
-          // A truncated response is intentionally read-only.  Opening normal
-          // files starts in edit mode, but never grants an incomplete buffer
-          // an editable surface.
+          // A truncated response is intentionally read-only.  Never grant an
+          // incomplete buffer an editable surface, whatever mode was active.
           if (value) setEditing(false)
         }}
         onContentReady={content => { setFileContent(content); setBaseline(content) }}
