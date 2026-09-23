@@ -30,13 +30,19 @@
 import type { ThemeSettings } from '../../store.ts'
 import type { ThemeFieldKey } from '../../themeFieldDefs.ts'
 
-export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor'
+export type CcColorPropertyKey =
+  | 'inputBg' | 'inputTextColor' | 'cliLineColor'
+  // ★ #266 遗留①：三组控件的底色/文字色由「白/黑枚举」改成自由选色 ⇒ 属性面板按取色输入渲染
+  //   （`permissionTextColor` 留空 = 跟模式，输入框清空即可回到语义色）。
+  | 'modelBgColor' | 'modelTextColor'
+  | 'reasoningBgColor' | 'reasoningTextColor'
+  | 'permissionBgColor' | 'permissionTextColor'
 export type CcNumberPropertyKey =
   | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
   | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
   | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'modelSwitchMode' | 'modelBgColor' | 'modelTextColor' | 'sendVariant' | 'reasoningSwitchMode' | 'reasoningBgColor' | 'reasoningTextColor' | 'permissionSwitchMode' | 'permissionBgColor' | 'permissionTextColor'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'modelSwitchMode' | 'sendVariant' | 'reasoningSwitchMode' | 'permissionSwitchMode'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey
 
 export type WidgetPropertyField =
@@ -312,12 +318,12 @@ export const CC_WIDGET_GROUPS = [
           { value: 'cycle', label: '点击轮换' },
         ],
       },
-      { kind: 'chips', key: 'modelBgColor', label: '模型背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+      { kind: 'color', key: 'modelBgColor', label: '模型背景色' },
       { kind: 'number', key: 'modelWidth', label: '模型宽度', min: 40, max: 400, step: 1 },
       { kind: 'number', key: 'modelHeight', label: '模型高度', min: 16, max: 80, step: 1 },
       { kind: 'number', key: 'modelRadius', label: '模型圆角', min: 0, max: 40, step: 1 },
       { kind: 'number', key: 'modelFontSize', label: '模型字号', min: 8, max: 32, step: 1 },
-      { kind: 'chips', key: 'modelTextColor', label: '模型文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
+      { kind: 'color', key: 'modelTextColor', label: '模型文字颜色' },
     ],
     members: [
       {
@@ -342,12 +348,12 @@ export const CC_WIDGET_GROUPS = [
     propertyFields: [
       { kind: 'section', title: '思考强度控件' },
       { kind: 'chips', key: 'reasoningSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
-      { kind: 'chips', key: 'reasoningBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+      { kind: 'color', key: 'reasoningBgColor', label: '背景色' },
       { kind: 'number', key: 'reasoningWidth', label: '宽度', min: 40, max: 400, step: 1 },
       { kind: 'number', key: 'reasoningHeight', label: '高度', min: 16, max: 80, step: 1 },
       { kind: 'number', key: 'reasoningRadius', label: '圆角', min: 0, max: 40, step: 1 },
       { kind: 'number', key: 'reasoningFontSize', label: '字号', min: 8, max: 32, step: 1 },
-      { kind: 'chips', key: 'reasoningTextColor', label: '文字颜色', options: [{ value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
+      { kind: 'color', key: 'reasoningTextColor', label: '文字颜色' },
     ],
     members: [
       {
@@ -373,19 +379,19 @@ export const CC_WIDGET_GROUPS = [
     propertyFields: [
       { kind: 'section', title: '权限控件' },
       { kind: 'chips', key: 'permissionSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
-      { kind: 'chips', key: 'permissionBgColor', label: '背景色', options: [{ value: 'white', label: '白' }, { value: 'black', label: '黑' }] },
+      { kind: 'color', key: 'permissionBgColor', label: '背景色' },
       { kind: 'number', key: 'permissionWidth', label: '宽度', min: 40, max: 400, step: 1 },
       { kind: 'number', key: 'permissionHeight', label: '高度', min: 16, max: 80, step: 1 },
       { kind: 'number', key: 'permissionRadius', label: '圆角', min: 0, max: 40, step: 1 },
       { kind: 'number', key: 'permissionFontSize', label: '字号', min: 8, max: 32, step: 1 },
-      { kind: 'chips', key: 'permissionTextColor', label: '文字颜色', options: [{ value: 'mode', label: '跟模式' }, { value: 'black', label: '黑' }, { value: 'white', label: '白' }] },
+      { kind: 'color', key: 'permissionTextColor', label: '文字颜色' },
     ],
     members: [
       {
         id: 'trigger',
         label: '权限触发器',
         visibility: { kind: 'always' },
-        note: 'permissionTextColor = "mode" 时不写 inline color，交给 CSS [data-mode] 语义色。',
+        note: 'permissionTextColor 留空时不写 inline color，交给 CSS [data-mode] 语义色（清空输入框即回到该档）。',
       },
       { id: 'menu', label: '权限菜单', visibility: { kind: 'content' } },
     ],

@@ -81,6 +81,39 @@ const REMOVED_CC_THEME_KEYS = [
 /** v11（刀4）：legacy `send` → 注册轨 id（槽位事实的继任者）。 */
 const LEGACY_CC_KEY_RENAMES: Readonly<Record<string, string>> = Object.freeze({ send: 'cc-send-button' })
 
+/**
+ * ★ #266 遗留①：三组控件（模型/思考强度/权限）的底色与文字色由「白/黑枚举」改成**自由选色**
+ * ⇒ 老数据里存的枚举字面量要搬成**等价颜色**，否则老用户看到的是无效色值。
+ *
+ * ★ 只映射这 6 个字段 —— `sendButtonBorderColor` / `sendButtonIconColor` 用的是**同名枚举但仍是枚举**，
+ *   不许顺手一起改（那是另一件事）。★ 幂等：颜色值再跑一遍不变。
+ */
+const LEGACY_CC_COLOR_ENUM_FIELDS = [
+  'modelBgColor', 'modelTextColor',
+  'reasoningBgColor', 'reasoningTextColor',
+  'permissionBgColor', 'permissionTextColor',
+] as const
+/** 枚举字面量 → 等价颜色（★ 求等价，不求"调深/调浅"） */
+const LEGACY_CC_COLOR_ENUM_VALUES: Readonly<Record<string, string>> = Object.freeze({
+  white: '#ffffff',
+  black: '#000000',
+})
+
+function normalizeLegacyCcColorEnums(state: Record<string, unknown>): void {
+  for (const key of LEGACY_CC_COLOR_ENUM_FIELDS) {
+    const value = state[key]
+    if (typeof value !== 'string') continue
+    // `permissionTextColor` 多一档 `'mode'`（跟模式）⇒ 自由选色下的等价表达是**留空**
+    // （不写 inline color，交 CSS `[data-mode]` 语义色）。★ 有意的语义变化，见开发记录。
+    if (key === 'permissionTextColor' && value === 'mode') {
+      state[key] = ''
+      continue
+    }
+    const equivalent = LEGACY_CC_COLOR_ENUM_VALUES[value]
+    if (equivalent !== undefined) state[key] = equivalent
+  }
+}
+
 function renameLegacyCcHiddenKeys(value: unknown): unknown {
   return Array.isArray(value)
     ? value.map(id => LEGACY_CC_KEY_RENAMES[String(id)] ?? id)
@@ -186,6 +219,8 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
   Object.assign(state, normalizeThemeState(state))
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
+  // ★ #266 遗留①：先搬老枚举（`white`/`black`/`mode`）→ 等价颜色，再让下面的规则按颜色值走
+  normalizeLegacyCcColorEnums(state)
   state.inputShowPlaceholder = state.inputShowPlaceholder !== false
   state.inputShowHistoryHint = state.inputShowHistoryHint !== false
   // These select fields historically accepted booleans. Persist the enum

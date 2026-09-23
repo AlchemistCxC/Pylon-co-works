@@ -375,19 +375,19 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
       'number:cliLineWidth', 'color:cliLineColor', 'number:cliLinePadding',
     ])
     expect(strip('model')).toEqual([
-      'section:模型控件', 'chips:modelSwitchMode', 'chips:modelBgColor',
+      'section:模型控件', 'chips:modelSwitchMode', 'color:modelBgColor',
       'number:modelWidth', 'number:modelHeight', 'number:modelRadius',
-      'number:modelFontSize', 'chips:modelTextColor',
+      'number:modelFontSize', 'color:modelTextColor',
     ])
     expect(strip('reasoning')).toEqual([
-      'section:思考强度控件', 'chips:reasoningSwitchMode', 'chips:reasoningBgColor',
+      'section:思考强度控件', 'chips:reasoningSwitchMode', 'color:reasoningBgColor',
       'number:reasoningWidth', 'number:reasoningHeight', 'number:reasoningRadius',
-      'number:reasoningFontSize', 'chips:reasoningTextColor',
+      'number:reasoningFontSize', 'color:reasoningTextColor',
     ])
     expect(strip('mode')).toEqual([
-      'section:权限控件', 'chips:permissionSwitchMode', 'chips:permissionBgColor',
+      'section:权限控件', 'chips:permissionSwitchMode', 'color:permissionBgColor',
       'number:permissionWidth', 'number:permissionHeight', 'number:permissionRadius',
-      'number:permissionFontSize', 'chips:permissionTextColor',
+      'number:permissionFontSize', 'color:permissionTextColor',
     ])
     expect(strip('tokens')).toEqual([])
   })

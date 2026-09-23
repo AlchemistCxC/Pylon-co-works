@@ -363,8 +363,10 @@ export function SolidControlCenter() {
           // ★ #238 刀7：原先这里还乘一个「缩放」(`ccScale.tokens`)。缩放已整体删除
           //   ⇒ 用量字号直接取基准字号（`modelFontSize`）。对没调过缩放的人（= 100）逐位相同。
           'font-size': `${appearance().modelFontSize ?? 12}px`,
-          background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
-          color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
+          // ★ #266 遗留①：直读模型控件的颜色字段（借用关系见定义表 `borrowsFrom: 'model'`）——
+          //   模型底色/文字色改成自由选色后，胶囊跟着模型走。
+          background: appearance().modelBgColor,
+          color: appearance().modelTextColor,
         })
         return <span class="cc-usage-pill" style={pillStyle()}>
           <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
