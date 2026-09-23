@@ -1,5 +1,4 @@
 /* ── StatusBar ── */
-.status-bar { display:flex; align-items:center; gap:10px; padding:6px 0; cursor:pointer; user-select:none; background:var(--status-bg,transparent); background-image:var(--status-bg-image,none); background-size:cover; background-position:center; }
 
 .pill-mono { font-size:inherit; color:var(--text-dim); padding:0; border-radius: 0; background:transparent; font-family:var(--mono); border:0; flex-shrink:0; }
 
@@ -23,12 +22,6 @@
 .cc-permission-trigger[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
 .cc-permission-trigger[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
 .cc-permission-trigger[data-mode="default"]{ color:var(--text-dim,#999); }
-
-@media (prefers-reduced-motion:reduce) {
-  .status-bar button { transition:none!important; }
-}
-
-/* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 
 .cc-variant-terminal .cc-model-minimal,
 .cc-variant-terminal .pill-mono {

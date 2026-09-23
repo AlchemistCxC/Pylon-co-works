@@ -20,7 +20,6 @@ import {
 import {
   BUILTIN_CC_SEND_BUTTON_CONTRIBUTION,
   BUILTIN_CC_SURFACE_CONTRIBUTION,
-  BUILTIN_CC_WIDGET_DEFINITIONS,
 } from '../widgetCatalog.ts'
 import {
   CC_LAYOUT_SCHEMA_VERSION,
@@ -311,8 +310,13 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     })
   })
 
-  it('目录三份（名字 / 类别 / 位置）由表派生后内容不变', () => {
-    expect(BUILTIN_CC_WIDGET_DEFINITIONS.map(entry => [entry.id, entry.label, entry.category])).toEqual([
+  it('目录三份（名字 / 类别 / 位置）直接读表后内容不变', () => {
+    // ★ #238 第③件：旧目录视图 `BUILTIN_CC_WIDGET_DEFINITIONS` 已删（生产侧零消费者）。
+    //   这三条原本锁的是「表派生出来的目录内容」；**简单删掉等于白丢一层保护**
+    //   ⇒ 改成**直接读表**：名字 / 类别 / 位置的真值本来就在表里，去掉目录这层中转后
+    //   断言的仍然是同一批值（`offsetX/offsetY` 是插件契约形状里的固定 0，一并锁住）。
+    const rows = CC_WIDGET_IDS.map(id => resolveCcWidgetGroup(id)!)
+    expect(rows.map(row => [row.id, row.label, row.category])).toEqual([
       ['input', '输入栏', 'input'],
       ['model', '模型', 'runtime'],
       ['reasoning', '思考强度', 'runtime'],
@@ -321,7 +325,13 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       // ★ 刀5B：提示升格 ⇒ 目录（由表派生）多一条
       ['cc-command-hint', '命令行提示', 'input'],
     ])
-    expect(BUILTIN_CC_WIDGET_DEFINITIONS.map(entry => entry.defaultPlacement)).toEqual([
+    expect(rows.map(row => ({
+      anchor: row.layout!.x.anchor,
+      side: row.layout!.x.side,
+      order: row.layout!.order,
+      offsetX: 0,
+      offsetY: 0,
+    }))).toEqual([
       { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
@@ -329,8 +339,8 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
     ])
-    // 用量控件不新增属性字段（S11 拍板）⇒ 目录里不带 propertyFields
-    expect(BUILTIN_CC_WIDGET_DEFINITIONS.find(entry => entry.id === 'tokens')?.propertyFields).toBeUndefined()
+    // 用量控件不新增属性字段（S11 拍板）⇒ 表里它的属性表单为空
+    expect(WIDGET_PROPERTY_FIELDS.tokens).toEqual([])
     expect(BUILTIN_CC_SURFACE_CONTRIBUTION.label).toBe('中控本体背景板')
     expect(BUILTIN_CC_SURFACE_CONTRIBUTION.defaultPlacement).toBeUndefined()
     expect(BUILTIN_CC_SEND_BUTTON_CONTRIBUTION.label).toBe('发送按钮')

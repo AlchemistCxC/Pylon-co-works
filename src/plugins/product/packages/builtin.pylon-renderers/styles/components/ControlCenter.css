@@ -420,18 +420,8 @@
 }
 .app[data-presentation-profile="builtin.presentation.paper-low-contrast"] .cc-info-chip { border-radius:3px; background:rgba(163,128,72,.045); }
 .app[data-presentation-profile="builtin.presentation.console-glass"] .cc-info-chip { border-radius:10px; background:rgba(255,255,255,.07); backdrop-filter:blur(12px); }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-info-chip { border-radius:8px; background:color-mix(in srgb,var(--surface-raised) 76%,transparent); }
 @media (prefers-reduced-motion:reduce) { .cc-activity-chip[data-running="true"] > svg { animation:none; } }
 
-.app[data-interface-mode="modern-gui"] .modern-command-dock { position:absolute; z-index:8; left:clamp(14px,4vw,48px); right:clamp(14px,4vw,48px); bottom:14px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .control-center { height:auto; min-height:94px; overflow:visible; border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border)); border-radius:16px; background:color-mix(in srgb,var(--surface-overlay) 88%,transparent); box-shadow:0 18px 50px rgba(0,0,0,.16); backdrop-filter:blur(24px) saturate(1.15); }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-bg { border-radius:inherit; opacity:.42; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-body { padding:10px 12px 8px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-status-row,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-footer-status-row { font-family:var(--font); font-size:11px; }
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-widget.cc-natural > button,
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-widget.cc-natural > [role="button"],
-.app[data-interface-mode="modern-gui"] .modern-command-dock .cc-tasks-pill { border-radius:8px; }
 .app[data-interface-mode="modern-gui"] .modern-replay-continue { left:clamp(14px,4vw,48px); right:clamp(14px,4vw,48px); bottom:14px; border-radius:13px; }
 
 /* Terminal command rail: the footer follows the textarea's text start while
