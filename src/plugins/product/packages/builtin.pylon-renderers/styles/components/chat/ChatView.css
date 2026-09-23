@@ -2229,3 +2229,77 @@
   color: var(--text-dim);
 }
 .term-footnotes .footnote-backref { text-decoration: none; }
+
+/* ═══ #267b 文档级 markdown 排版层（极致观感）═══
+   作用域 .term-assistant 正文；置于文件末尾以确定性赢得级联。
+   不触 user 消息（.term-user）、工具卡与终端 ANSI 形态。 */
+
+/* ── 数学字体（ADR-0021 追加：内嵌 LaTeX 同源字体）──
+   LM Math Web = 内嵌 latinmodern-math.otf（LaTeX 同源字体，回链锚点/形状最正）；
+   'Temml' 为官方 9.2KB 补字形字体（unicode 缺口逐字回退）；再退系统数学字体。 */
+@font-face {
+  font-family: "LM Math Web";
+  src: url("/fonts/LatinModern-Math.otf") format("opentype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Temml";
+  src: url("/fonts/Temml.woff2") format("woff2");
+  font-display: swap;
+}
+.term-math math {
+  font-family: "LM Math Web", "Latin Modern Math", "STIX Two Math", "Cambria Math", "Temml", math, serif;
+}
+.term-math-display { margin: 10px 0; font-size: 1.15em; }
+.term-math-inline { font-size: 1.02em; }
+
+/* ── 标题层级：章节节奏 + h1/h2 下边框（文档风）── */
+.term-assistant .term-h1 { font-size:1.45em; font-weight:700; margin:16px 0 8px; padding-bottom:4px; border-bottom:1px solid var(--border); letter-spacing:-0.01em; }
+.term-assistant .term-h2 { font-size:1.26em; font-weight:650; margin:14px 0 6px; padding-bottom:3px; border-bottom:1px solid var(--border); }
+.term-assistant .term-h3 { font-size:1.1em; font-weight:650; margin:10px 0 4px; }
+.term-assistant .term-h4 { font-size:1.02em; font-weight:650; margin:8px 0 4px; }
+.term-assistant .term-h5 { font-size:0.96em; font-weight:650; margin:8px 0 4px; }
+.term-assistant .term-h6 { font-size:0.88em; font-weight:600; margin:8px 0 4px; color:var(--text-dim); }
+
+/* ── 段落呼吸 ── */
+.term-assistant .term-p { margin:5px 0; }
+
+/* ── 列表：嵌套感知子弹（•/◦/▪）+ 任务框对齐 ── */
+.term-assistant ul > .term-li::before { content:'•  '; color:var(--accent); }
+.term-assistant ul ul > .term-li::before { content:'◦  '; color:var(--text-dim); }
+.term-assistant ul ul ul > .term-li::before { content:'▪  '; color:var(--text-dim); }
+.term-assistant .term-li { margin:2px 0; }
+.term-assistant input[type='checkbox'] { margin:0 4px 0 0; vertical-align:middle; accent-color:var(--accent); }
+
+/* ── 引用：accent 左条 + 面板背板 ── */
+.term-assistant .term-blockquote {
+  margin-block:var(--ui-space-2);
+  padding:var(--ui-space-2) var(--ui-space-3);
+  border-left:3px solid var(--accent);
+  background:var(--bg-panel);
+  border-radius:4px;
+  color:var(--text);
+}
+
+/* ── 表格：横线风 + 表头加重 + 行 hover（替代密网格）── */
+.term-assistant .term-table th, .term-assistant .term-table td { padding:5px 12px; border:0; border-bottom:1px solid var(--border); text-align:left; }
+.term-assistant .term-table th { font-weight:650; border-bottom-width:2px; }
+.term-assistant .term-table tbody tr:hover { background:var(--bg-hover); }
+
+/* ── 行内代码：pill ── */
+.term-assistant .term-inline-code {
+  background:var(--bg-panel);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:0 5px;
+}
+
+/* ── 分隔线：居中渐隐 ── */
+.term-assistant hr { margin:12px 0; border:0; height:1px; background:linear-gradient(90deg, transparent, var(--border) 20%, var(--border) 80%, transparent); }
+
+/* ── 图片：限宽 + 圆角 ── */
+.term-assistant .term-markdown-image { max-width:100%; border-radius:6px; margin:4px 0; }
+
+/* ── 链接：下划线偏移 + hover 加重 ── */
+.term-assistant .term-link { text-underline-offset:3px; }
+.term-assistant .term-link:hover { text-decoration-thickness:2px; }
