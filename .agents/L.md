@@ -767,3 +767,8 @@
 
 **不碰**：位置与宽高字段（`modelWidth` 等）、碰撞约束（刀4）、`rendererKey` / `isolated-surface`、`sendVariant`、
 插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
+
+✅ **已完工（2026-09-23）**：实现 `73d50c03`（32 文件）、记录 `.agents/records/238-cc-widget-definition-table-knife7-remove-scale.md`。
+门禁五步全绿、全量 627 文件 / 4752 通过（与上一刀同数，纯断言同步）、快照 diff 全可解释、实机 A/B 两种情况均量过。
+★ 两处清单外最小补齐（`zustandWorkbenchAppearanceStore.ts`、`migration.ts` 的 ccScale 改名链）已在记录「与 spec 的偏差」里说明，供复审推翻。
+★ 实机实测订正了施工单一条前提：**出厂预设里有 6 套自带非 100 的缩放值（90/95）** ⇒ 用这些预设的人用量字号会变（不是"只有手动调过的人"）。
