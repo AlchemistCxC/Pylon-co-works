@@ -86,6 +86,11 @@ pub enum AgentLifecycleStatus {
     Reconnecting,
     Crashed,
     Disconnected,
+    /// #270 起生产路径无构造点：连接失败经 status_after_connection_failure
+    /// 回落 Disconnected（announce 载荷携带 lastError 别名）。变体保留——
+    /// wire 词汇（前端归一化 "error"）与 test_harness 的 LifecycleStatusView
+    /// 仍双向消费。
+    #[allow(dead_code)]
     Error,
 }
 

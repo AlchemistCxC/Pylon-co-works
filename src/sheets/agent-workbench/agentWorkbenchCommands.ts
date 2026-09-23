@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
+import { useRuntimeStore } from '../../runtimeStore.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
@@ -114,6 +115,13 @@ export function createAgentWorkbenchCommandFacade(
     const content = command.text.trim()
     if (!session) return { status: 'rejected', error: 'session_not_found' }
     if (!content) return { status: 'rejected', error: 'message_empty' }
+    // #270：窗口先见——默认 agent 初始连接在后台进行，connecting 期间禁止发送
+    //（用户裁定：不做排队、不做自动触发连接）。给出明确提示而非后端错误栈；
+    // send_message 对未就绪连接的失败仍是后端兜底，其余状态维持既有行为。
+    const agentStatus = useRuntimeStore.getState().agentStatuses[session.agentId]
+    if (agentStatus?.status === 'connecting') {
+      return { status: 'rejected', error: 'Agent 正在连接，请稍候再发送' }
+    }
     const clientMessageId = dependencies.nextClientMessageId(session.source)
     // Solid renders the Kernel-committed WorkbenchDocument, not the legacy chat
     // runtime. Persisting this temporary echo would race the Kernel user row and

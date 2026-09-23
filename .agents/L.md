@@ -755,3 +755,5 @@
 - 文档：`.agents/decisions/0022-*.md`（新增）、`.agents/records/270-*.md`（完工时新增）、`docs/说明书/Pylon-项目架构参考.md`（§6 启动序列一句 + 串行 activate 措辞顺带修正）、本文件
 
 **我不碰**：`src-tauri/src/lifecycle/**`、`src-tauri/src/session/**`、`src-tauri/src/agent/runtime.rs`（均只调用不修改）、`src-tauri/src/acp/**`、`src-tauri/src/startup_timing.rs`（#269 已收口，本 issue 只迁移 `default_agent_connect_settled` 相位调用点）、中控区、预设系统、#272 在途域（MarkdownContent.solid.tsx / ChatView.css / 其两测试）。全程 pathspec 提交。
+
+**域外追加（2026-09-24 03）**：`src-tauri/src/agent/runtime.rs` 的 `AgentLifecycleStatus::Error` 变体加一行 `#[allow(dead_code)]` + 注释——删掉旧启动连接块后它失去唯一生产构造点，但 wire 词汇与 test_harness 仍消费，变体必须保留。其余仍按上域。

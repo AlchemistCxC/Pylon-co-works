@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '../../../identityStore.ts'
+import { useRuntimeStore } from '../../../runtimeStore.ts'
 import { createAgentWorkbenchCommandFacade } from '../agentWorkbenchCommands.ts'
 import type { InteractionResponseIdentity } from '../../../domains/agent/agentContracts.ts'
 
@@ -218,5 +219,44 @@ describe('Agent Workbench production commands', () => {
     expect(openResource).toHaveBeenCalledWith(session, resource)
     expect(revealResource).toHaveBeenCalledWith(session, resource)
     await expect(commands.openResource('missing', resource)).resolves.toEqual({ ok: false, error: 'session_not_found' })
+  })
+
+  it('#270 窗口先见：agent 连接中（connecting）时发送被阻断且不触达后端', async () => {
+    const sendMessage = vi.fn(async () => undefined)
+    useRuntimeStore.setState({
+      agentStatuses: { peri: { agent: 'peri', agentId: 'peri', status: 'connecting' } },
+    })
+    try {
+      const commands = createAgentWorkbenchCommandFacade({
+        resolveSession: id => id === session.id ? session : undefined,
+        sendMessage,
+      })
+
+      await expect(commands.send(session.id, { text: 'hello' }))
+        .resolves.toMatchObject({ status: 'rejected', error: 'Agent 正在连接，请稍候再发送' })
+      expect(sendMessage).not.toHaveBeenCalled()
+    } finally {
+      // 门控读的是真实 zustand store——用例后清掉，不污染同文件其它用例。
+      useRuntimeStore.setState({ agentStatuses: {} })
+    }
+  })
+
+  it('#270 窗口先见：connected 状态发送不受门控影响', async () => {
+    const sendMessage = vi.fn(async () => undefined)
+    useRuntimeStore.setState({
+      agentStatuses: { peri: { agent: 'peri', agentId: 'peri', status: 'connected' } },
+    })
+    try {
+      const commands = createAgentWorkbenchCommandFacade({
+        resolveSession: id => id === session.id ? session : undefined,
+        sendMessage,
+      })
+
+      await expect(commands.send(session.id, { text: 'hello' }))
+        .resolves.toMatchObject({ status: 'sent' })
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+    } finally {
+      useRuntimeStore.setState({ agentStatuses: {} })
+    }
   })
 })

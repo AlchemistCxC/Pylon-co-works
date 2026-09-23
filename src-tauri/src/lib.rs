@@ -1069,12 +1069,82 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
         }
     }
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+    // #270：Connecting 状态的默认 agent runtime 由下方后台任务完成初始连接，其
+    // 激活路径（replace_agent_client）自会启动 dispatcher；此处跳过，避免对
+    // 占位 client 启动监听（并在激活前误报崩溃/断开）。
+    let default_runtime_connecting = handles
+        .active_runtime()
+        .map(|runtime| {
+            runtime
+                .agent_runtime
+                .lock()
+                .map(|state| state.status == AgentLifecycleStatus::Connecting)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
     if let Some(runtime) = handles.active_runtime() {
-        start_notification_dispatcher(&handles, &runtime, window.clone());
+        if !default_runtime_connecting {
+            start_notification_dispatcher(&handles, &runtime, window.clone());
+        }
     }
     app.state::<AppState>()
         .inner()
         .start_runtime_log_dispatcher(window);
+    // #270（ADR-0022）：默认 agent 初始连接后台化——窗口先见。持 switch_lock →
+    // agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
+    // 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
+    // 覆盖新客户端（replace_agent_client 的 epoch 校验兜底）。announce=true 使
+    // Connecting/Connected/失败回落均经 agent-status 事件广播；连接期间前端发送
+    // 被 agentWorkbenchCommands 的 connecting 门控阻断（用户裁定：不做排队、
+    // 不做自动触发连接）。
+    if default_runtime_connecting {
+        let inner = app.state::<AppState>().inner();
+        let active_id = inner
+            .active_agent
+            .lock()
+            .map(|id| id.clone())
+            .unwrap_or_default();
+        let agent = inner
+            .agents
+            .lock()
+            .ok()
+            .and_then(|agents| agents.get(&active_id).cloned());
+        if let Some(agent) = agent {
+            let app_handle = app.handle().clone();
+            let connect_window = app.get_webview_window("main");
+            crate::startup_timing::mark("default_agent_connect_started");
+            tokio::spawn(async move {
+                let state = app_handle.state::<AppState>();
+                // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
+                let _switch_guard = state.inner().switch_lock.lock().await;
+                let runtime = match handles.active_runtime() {
+                    Some(runtime) => runtime,
+                    None => return,
+                };
+                let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+                let Some(connect_window) = connect_window else {
+                    tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
+                    return;
+                };
+                let result = state
+                    .inner()
+                    .connect_and_replace(
+                        &runtime,
+                        &connect_window,
+                        &agent,
+                        None,
+                        AgentLifecycleStatus::Connecting,
+                        "startup-connect",
+                    )
+                    .await;
+                crate::startup_timing::mark("default_agent_connect_settled");
+                match result {
+                    Ok(()) => tracing::info!("默认 agent 后台初始连接完成"),
+                    Err(error) => tracing::warn!("默认 agent 后台初始连接失败：{error}"),
+                }
+            });
+        }
+    }
     // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
     // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
     // （announce=false，不广播 GUI 状态）。
@@ -1367,40 +1437,20 @@ pub fn run() {
         crate::gateway::platform_registry::bootstrap_env_adapters(&gateway);
         let runtimes = Arc::new(AgentRuntimeManager::new());
         let default_runtime = AgentRuntime::new_disconnected();
-        {
-            // 默认 agent 初始连接：成功 → Connected；失败 → Error（保留错误信息）
-            if let Some(agent) = &default_agent {
-                match AcpClient::connect_with_logs(agent, Some(runtime_logs.clone())).await {
-                    Ok(client) => {
-                        let mut acp = default_runtime.acp.lock().await;
-                        *acp = client;
-                        drop(acp);
-                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
-                            state.status = AgentLifecycleStatus::Connected;
-                            state.last_error = None;
-                            state.last_connected_at = Some(crate::time::Timestamp::now());
-                            state.activated_config_fingerprint = Some(agent.runtime_fingerprint());
-                        }
-                    }
-                    Err(error) => {
-                        // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                        eprintln!("Pylon ACP agent unavailable: {error}");
-                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
-                            state.status = AgentLifecycleStatus::Error;
-                            state.last_error = Some(error.to_string());
-                            state.last_connected_at = None;
-                        }
-                    }
-                }
-            } else {
-                // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                eprintln!("Pylon has no configured Agent; start in disconnected mode");
+        // #270（ADR-0022）：窗口先见——初始连接移入 run_setup_pipeline 的后台任务
+        // （复用 connect_and_replace 完整激活机器）。此处只声明 Connecting，窗口
+        // 创建不再被 CLI spawn+握手托底；连接完成/失败经 agent-status 事件广播。
+        if default_agent.is_some() {
+            if let Ok(mut state) = default_runtime.agent_runtime.lock() {
+                state.status = AgentLifecycleStatus::Connecting;
             }
+        } else {
+            // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
+            eprintln!("Pylon has no configured Agent; start in disconnected mode");
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
         }
-        crate::startup_timing::mark("default_agent_connect_settled");
 
         let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
