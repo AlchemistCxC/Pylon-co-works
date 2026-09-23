@@ -742,3 +742,16 @@
 - 文档：`.agents/records/267-*` 追加节、本文件
 
 **我不碰**：其余全部。全程 pathspec 提交。
+
+---
+
+[2026-09-24 02] [Miyaki Kumo] [#270]
+
+**开工：issue270（窗口先见——默认 agent ACP 连接后台化；ADR-0022 已落）。** spec 见 `.agents/spec/270-window-first-background-connect.md`。分支沿用 `kumo/prometheus`（堆叠 PR #268）。文件域（请勿改写、勿连带提交）：
+
+- `src-tauri/src/lib.rs`（`run()` 删窗口前阻塞连接块 + Connecting 置位；`run_setup_pipeline` 后台连接 spawn + dispatcher Connecting 跳过；startup timing 相位迁移）
+- `src/sheets/agent-workbench/agentWorkbenchCommands.ts`（`send` 顶部 connecting 门控）
+- `src/sheets/agent-workbench/__tests__/agentWorkbenchCommands.test.ts`（新增门控用例）
+- 文档：`.agents/decisions/0022-*.md`（新增）、`.agents/records/270-*.md`（完工时新增）、`docs/说明书/Pylon-项目架构参考.md`（§6 启动序列一句 + 串行 activate 措辞顺带修正）、本文件
+
+**我不碰**：`src-tauri/src/lifecycle/**`、`src-tauri/src/session/**`、`src-tauri/src/agent/runtime.rs`（均只调用不修改）、`src-tauri/src/acp/**`、`src-tauri/src/startup_timing.rs`（#269 已收口，本 issue 只迁移 `default_agent_connect_settled` 相位调用点）、中控区、预设系统、#272 在途域（MarkdownContent.solid.tsx / ChatView.css / 其两测试）。全程 pathspec 提交。
