@@ -740,3 +740,30 @@
 **不碰**：`rendererKey` / `isolated-surface`（用户已定保留）、`sendVariant`（先放着）、夹具里的 `ekg`/`tasks`、
 插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、缩放（刀7）、面板分块（刀6）、
 `src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`；★ 本轮**不动**《中控元件总表》。
+
+---
+
+[2026-09-23 04] [Baryon] [#238 · 刀7 删掉缩放]
+
+**续开工：刀7 删掉「缩放」（`ccScale` 整套）。** 分支**沿用** `feat/cc-widget-definition-table`。施工单 `元件定义表/10-施工单-刀7-删掉缩放.md`。前置：第③件 + 补遗均已完工。
+
+**本刀文件域（请勿改写、勿连带提交）**：
+
+- 字段与默认值：`src/themeFieldDefs.ts`、`src/domains/theme/themeDefaults.ts`
+- 名单与状态：`src/domains/cc/widgetDefinitions.ts`（`CC_SYSTEM_FIELDS` 3 → 2）、`src/store.ts`（类型 + `setCcScale` 动作）、`src/ccLayoutState.ts`（`setCcScaleState`）
+- 外观快照与命令：`src/domains/workbench/appearance.ts`（快照字段 + `set-cc-scale` 命令联合）、`src/domains/workbench/workbenchAppearanceStore.ts`（命令分支）
+- 渲染：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（★ 唯一应用点：用量字号；★ 编辑态面板「缩放」输入框整块）
+- 夹具与预设字面量：`src/domains/workbench/workbenchSkinContract.ts`、`src/presets/builtin.ts`（`GLASS_THEME`）
+- ★ **迁移**（**清单外**，理由见下）：`src/domains/theme/migration.ts`（`renameLegacyCcScaleKeys` 及其调用点随字段一并退场）
+- 出厂数据手改：`src/zones/factory/*.ts`（10 文件；真值处数在记录里逐文件列出）
+- 测试同步：`widgetDefinitionTable` / `structuralAlignment` / `themeSchemaV8Backfill` / `appearance` / `settingsTraceability` / `skinSchema` / `mountSolidWorkbench` / `customPresets` / `effectivePresetTheme`
+- 快照：`src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（**只能脚本重拍**）
+- 文档：`.agents/records/238-*-刀7*.md`、本文件；仓外《中控元件总表》
+
+**★ 一处清单外改动的说明（供复审把关）**：施工单 §1 未列 `migration.ts`，但那里有 `renameLegacyCcScaleKeys`
+（v11/刀4 的 legacy `send` → `cc-send-button` 键改名，专为 `ccScale` 而写）。字段删掉后它变成**读一个已不存在的域字段**的死代码；
+且施工单 §1-13 已把引用它的 `themeSchemaV8Backfill.test.ts` 列入"待同步" ⇒ 本刀按**最小改动**删掉该函数与其调用点
+（**不**把 `ccScale` 加进 `REMOVED_CC_THEME_KEYS` —— 那个机制的注释写明它只服务"被删**元件**的字段"，且刀5A 删三个 cc 字段时也没动它）。
+
+**不碰**：位置与宽高字段（`modelWidth` 等）、碰撞约束（刀4）、`rendererKey` / `isolated-surface`、`sendVariant`、
+插件契约面 `ccWidgetTypes.ts` / `ccWidgetRegistry.ts`、面板分块（刀6）、`src/ui-demo/`、`src/layout-sketch/`、`docs/前端接口地图.md`。
