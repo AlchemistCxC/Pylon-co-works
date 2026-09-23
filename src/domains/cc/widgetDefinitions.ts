@@ -57,7 +57,11 @@ export type CcPropertyCommand =
 export type WidgetPropertyVisibilityContext = Pick<ThemeSettings, 'inputMode'>
 
 export interface WidgetPropertyDef {
-  /** 条件显示（cli 字段只在 inputMode==='cli' 时出现） */
+  /**
+   * 条件显示钩子。★ **当前无任何声明方使用**（2026-09-23 起：`cliLine*` 三项改常态显示，
+   * 全表再无 `showIf`）；读取点仍在 `ControlCenter.solid.tsx` 的属性面板过滤里。
+   * 口径 = 属性项一律常态显示，值由预设给、用户自己改 ⇒ **不要再往这里加条件**。
+   */
   showIf?: (theme: WidgetPropertyVisibilityContext) => boolean
 }
 
@@ -68,12 +72,20 @@ export type WidgetPropertyForm = readonly (WidgetPropertyField & WidgetPropertyD
 // ── 成员层（两级中的第二级）──
 
 /**
- * 成员显隐：**引用已有字段，不新增字段**（规范 §4.3）。
- * `field` 取值命中 `visibleWhen` 即显示；`content` = 内容驱动；`host` = 宿主注入。
+ * 成员显隐：**只作说明，不构成显隐门**。
+ *
+ * ★ 2026-09-23 用户口径：「不要这个判明条件，常态显示，预设里我手动改」⇒
+ * 原 `{ kind: 'field'; field; visibleWhen }`（按字段值判明）**已从类型上删除**，
+ * 防后人再实现这条路。三类保留值各自只说明该子部件的性质：
+ * - `always` = 常态可见（是成员行的默认）；
+ * - `content` = 由内容驱动（有没有东西可显示，如菜单/队列/报错条）；
+ * - `host` = 宿主注入（由外层挂载，元件表不生产它）。
+ *
+ * ★ 这三类**都不被任何代码读取**（渲染真值在各子部件自己的渲染分支里）；本表这一列是**文档**，
+ * 不是门。要改某个子部件出不出现在界面上，改它的渲染分支 —— 别在这儿加条件。
  */
 export type CcMemberVisibility =
   | { kind: 'always' }
-  | { kind: 'field'; field: ThemeFieldKey; visibleWhen: readonly (string | boolean)[] }
   | { kind: 'content' }
   | { kind: 'host' }
 
@@ -258,9 +270,11 @@ export const CC_WIDGET_GROUPS = [
           { value: 'cli', label: '命令行', sync: { key: 'inputVariant', value: 'cli' } },
         ],
       },
-      { kind: 'number', key: 'cliLineWidth', label: '边框宽度', min: 1, max: 6, step: 0.1, showIf: t => t.inputMode === 'cli' },
-      { kind: 'color', key: 'cliLineColor', label: '边框颜色', showIf: t => t.inputMode === 'cli' },
-      { kind: 'number', key: 'cliLinePadding', label: '内边距', min: 0, max: 24, step: 0.1, showIf: t => t.inputMode === 'cli' },
+      // ★ 2026-09-23 用户口径：命令行边框三项**不再按输入模式判明**，两模式常态显示
+      //   （值由预设给、用户自己改）。此前三条 `showIf: t => t.inputMode === 'cli'` 已删。
+      { kind: 'number', key: 'cliLineWidth', label: '边框宽度', min: 1, max: 6, step: 0.1 },
+      { kind: 'color', key: 'cliLineColor', label: '边框颜色' },
+      { kind: 'number', key: 'cliLinePadding', label: '内边距', min: 0, max: 24, step: 0.1 },
     ],
     members: [
       {
@@ -271,19 +285,23 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'cli-prefix',
         label: '提示符 ❯',
-        visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
+        // ★ 原为 `{kind:'field', field:'inputMode', visibleWhen:['cli']}`（2026-09-23 删）：
+        //   真身判据在渲染分支（`InputBar.solid.tsx` 的 `inputVariant() === 'cli'`），本列不构成门。
+        visibility: { kind: 'always' },
       },
       {
         id: 'cli-lines',
         label: '上下两条线',
-        visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
-        note: '三个字段都带 showIf: inputMode === "cli"。',
+        // ★ 同上：原 `field/inputMode` 声明已删；两条线是 cli 变体块上的 CSS 边框。
+        visibility: { kind: 'always' },
       },
       { id: 'command-palette', label: '/ 命令菜单', visibility: { kind: 'content' } },
       {
         id: 'history-hint',
         label: '历史快捷提示',
-        visibility: { kind: 'field', field: 'inputShowHistoryHint', visibleWhen: ['shown', true] },
+        // ★ 原为 `field/inputShowHistoryHint, visibleWhen:['shown', true]`（2026-09-23 删）：
+        //   真身判据在渲染分支（`InputBar.solid.tsx` 的 `inputShowHistoryHint && …`）。
+        visibility: { kind: 'always' },
       },
       { id: 'prediction', label: '输入预测', visibility: { kind: 'content' } },
       { id: 'queue', label: '待发送队列', visibility: { kind: 'content' } },
@@ -432,7 +450,9 @@ export const CC_WIDGET_GROUPS = [
       {
         id: 'hint-line',
         label: '提示行',
-        visibility: { kind: 'field', field: 'inputMode', visibleWhen: ['cli'] },
+        // ★ 原为 `{kind:'field', field:'inputMode', visibleWhen:['cli']}`（2026-09-23 删）：
+        //   真正管它出不出现的是**组层** `conditions: ['has-session','cli-mode','hint-visible']`。
+        visibility: { kind: 'always' },
       },
     ],
     note: '★ #238 刀5B：已升格为**普通行内元件**（有多宽占多宽）—— 不再是裸渲染、也不再整行特化；进编辑工具条、受占区约束、也当障碍。',

@@ -15,7 +15,6 @@ import {
   coerceInputLanding,
   isWidgetVisible,
   resolveCcWidgetGroup,
-  type CcMemberVisibility,
   type CcWidgetMember,
 } from '../widgetDefinitions.ts'
 import {
@@ -149,13 +148,17 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     }))
   })
 
-  it('成员的默认显隐只引用已有字段', () => {
-    type FieldRef = Extract<CcMemberVisibility, { kind: 'field' }>
-    const refs = memberRows
-      .map(({ member }) => member.visibility)
-      .filter((visibility): visibility is FieldRef => visibility.kind === 'field')
-    expect(refs.length).toBeGreaterThan(0)
-    expect(refs.filter(ref => !ccFields.includes(ref.field))).toEqual([])
+  it('成员显隐只是说明列：不承载"按字段判明"（四类子部件归入 always）', () => {
+    // ★ 2026-09-23 口径：成员 `visibility` 是**说明**，不是门；类型上的 `field` 变体已删。
+    //   这四类原先靠 `{kind:'field'}` 声明判明的子部件，现在一律声明常态可见 ——
+    //   它们真正出不出现的判据在各渲染分支（inputVariant / inputShowHistoryHint / 组层 conditions）。
+    const kindByLabel = new Map(memberRows.map(({ member }) => [member.label, member.visibility.kind]))
+    for (const label of ['提示符 ❯', '上下两条线', '历史快捷提示', '提示行']) {
+      expect(kindByLabel.get(label), `${label} 应声明为常态可见（判明门已撤）`).toBe('always')
+    }
+    // 反向确认没被"空手放过"：三类说明值都真实存在，且没有第四类冒出来
+    expect([...new Set(memberRows.map(({ member }) => member.visibility.kind))].sort())
+      .toEqual(['always', 'content', 'host'])
   })
 })
 
@@ -392,13 +395,21 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
     expect(strip('tokens')).toEqual([])
   })
 
-  it('cli 三个字段仍带 showIf（面板在非命令行模式仍按旧规则隐藏）', () => {
-    const fields = WIDGET_PROPERTY_FIELDS.input.filter(field => field.kind !== 'section' && 'showIf' in field && field.showIf)
-    expect(fields.map(field => field.kind === 'section' ? '' : field.key)).toEqual(['cliLineWidth', 'cliLineColor', 'cliLinePadding'])
-    for (const field of fields) {
-      expect(field.kind !== 'section' && field.showIf!({ inputMode: 'cli' })).toBe(true)
-      expect(field.kind !== 'section' && field.showIf!({ inputMode: 'default' })).toBe(false)
+  it('命令行边框三项不再带 showIf（两模式常态显示）', () => {
+    // ★ 2026-09-23 用户口径：「不要这个判明条件，常态显示，预设里我手动改」
+    //   ⇒ 原三条 `showIf: t => t.inputMode === 'cli'` 删除。这条断言的**靶子反了过来**：
+    //   原先锁"仍带 showIf"，现在锁"还在表里、且一个条件都没有"。
+    const fields = WIDGET_PROPERTY_FIELDS.input.filter(field => field.kind !== 'section')
+    for (const key of ['cliLineWidth', 'cliLineColor', 'cliLinePadding'] as const) {
+      const field = fields.find(candidate => candidate.key === key)
+      expect(field, `${key} 不该从属性表单里消失（撤条件 ≠ 删项）`).toBeDefined()
+      expect(field && 'showIf' in field ? field.showIf : undefined, `${key} 不该再带条件显示`).toBeUndefined()
     }
+    // 全表零 showIf：这条路已撤，防回摆（有人再挂一条即红）
+    const withShowIf = Object.values(WIDGET_PROPERTY_FIELDS)
+      .flat()
+      .filter(field => field.kind !== 'section' && field.showIf)
+    expect(withShowIf).toEqual([])
   })
 
   it('属性表单指向的字段必须由本组的某个成员拥有（挂错成员即红）', () => {
