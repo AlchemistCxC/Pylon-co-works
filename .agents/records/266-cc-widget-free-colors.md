@@ -151,3 +151,175 @@
   `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`。
 - ★ 与 #266「成员级显隐收编」那条线**文件域重叠**（`themeFieldDefs.ts` / `widgetDefinitions.ts`）：那条线已**停手待分流**
   （`refactor/cc-member-visibility` 上只有 L.md 两条登记，无源码改动）⇒ 本分支从 `d360f9b0` 干净开出，无冲突。
+
+---
+
+# 遗留② · 发送按钮边框色 / 图标色改「自由选色」（2026-09-23，追加）
+
+> **约定**：本件与 ① 同分支同 issue，**追加在同一份记录**里（施工单 §4-6 给的二选一）。
+> 施工单：`E:\Acode\FILES\任务\工作台优化\元件定义表\16-施工单-发送按钮颜色改自由选色.md`
+> 提交范围：`5619b62c`（L.md 声明）→ `f0b3e1c9`（实现）
+
+## 目标与范围
+
+把发送按钮的 **`sendButtonBorderColor`（边框）** 与 **`sendButtonIconColor`（图标颜色）** 从「白/黑/灰枚举」
+改成**自由选色**——与 ① 同口径（属性声明走值）。
+
+★ **命门 = 等价色不是纯白纯黑**：旧渲染侧（`ControlCenter.solid.tsx:630-631`）把枚举翻成
+**半透明**颜色，所以新默认值 / 老数据归一化值必须照抄"现在实际输出"：
+
+| 字段 | 枚举 | 等价色（写进字段/默认值） |
+| --- | --- | --- |
+| `sendButtonBorderColor` | `white` / `black` | `rgba(255,255,255,.5)` / `rgba(0,0,0,.5)`（**都半透明**） |
+| `sendButtonIconColor` | `white` / `gray` / `black` | `#ffffff` / `rgba(0,0,0,.5)` / `#000000` |
+
+**不做**：`sendButtonColor`（早已是自由色，一行未动）；`sendButtonRadius` / `sendButtonIcon` /
+`sendButtonIconGenerating` / `sendButtonIconRound`（形状与圆角，仍是枚举）；① 已改的 6 个字段；
+`ControlCenter.css`（只读变量，没枚举逻辑）；出厂数据的深浅（仍是"白底按钮"，不等价之外一个字没改）。
+
+## 改动清单
+
+| 文件 | 范围 | 性质 |
+| --- | --- | --- |
+| `src/themeFieldDefs.ts` | 两字段 `S(...)` → `C(...)`、去 `optionLabels`、默认取等价色 | 修改 |
+| `src/domains/theme/migration.ts` | ① 的枚举映射表改成**「字段名 → 字面量」两层**（理由见下）+ 加这两键；改掉 `:88` 那句"仍是枚举"的注释 | 修改 |
+| `src/renderers/solid-workbench/input/ControlCenter.solid.tsx` | **仅** 630-631 两行：去掉枚举→颜色的转换，直读字段值 | 修改 |
+| `src/zones/factory/gui-cc.ts` | 出厂数据 1 套 × 2 字段 = 2 行 | 修改 |
+| `src/zones/factory/terminal-cc.ts` | 出厂数据 5 套 × 2 字段 = 10 行 | 修改 |
+| `src/domains/theme/__tests__/ccControlColorFreePick.test.ts` | 头部第 3 条改写 +「不越界」拆成「用户值原样穿过」+ **新增**遗留② 5 条 | 修改 |
+| `src/renderers/solid-workbench/__tests__/mountSolidControlCenterPreview.solid.test.tsx` | 默认值与改值断言换等价色字面量 | 修改 |
+| `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json` | 契约快照重拍（脚本，不手改） | 修改 |
+
+## 方案要点
+
+1. **映射表改成两层（① 的单层平表放不下本件）**：同一个 `'white'` 在边框字段上的等价色是**半透明**
+   `rgba(255,255,255,.5)`、在图标字段上是纯白 `#ffffff` ⇒ 必须"按字段名 + 字面量"两级查表。
+   改结构的同时删掉了冗余的 `LEGACY_CC_COLOR_ENUM_FIELDS` 白名单（键即表项，一处真值）。
+   仍是**按字段名**而不是按值全局替换 ⇒ 幂等与"不越界"性质不变。
+2. **转换点归零**：ControlCenter 那两行改直读字段值后，全仓已**没有任何地方**按枚举判断这两个字段
+   （`grep sendButtonBorderColor|sendButtonIconColor` 只剩类型声明、定义表、出厂数据、测试与快照）
+   ⇒ 施工单 §5-1 的停手条件未触发。
+3. **`widgetDefinitions.ts` 一字未动**：发送按钮是**注册轨**控件、**没有属性面板表单**
+   （定义表里它只给布局四项）⇒ ① 里那 6 项的 `chips → color` 在本件没有对应面。
+4. **`noCssVar: true` 保留**：与 `sendButtonColor` 等既有无 var 自由色字段同写法，也满足
+   `settingsCompleteness` 的「color 字段必有 CSS var 消费，`noCssVar` 豁免」。
+
+### ★ 空值的新含义（写进记录以免后来者困惑）
+
+自由色**允许空串**。`sendButtonBorderColor = ''` / `sendButtonIconColor = ''` 时 CSS 变量为空 ⇒
+`ControlCenter.css` 的 fallback 生效（边框 `rgba(255,255,255,.5)` / 图标 `#fff`）。
+契约快照的 `schema-boundary-min` fixture 正是取空串（color 类型 min 档统一如此，与 ① 的 6 个字段同款）。
+
+## 验收标准与结果
+
+| 验收项 | 结果 |
+| --- | --- |
+| 门禁五步（lint → build:example-plugin → build → check:solid → test） | ✅ 全绿；全量**跑了 4 次**：① 632 文件 / 4802 用例通过；② **1 红**（无关游走 flake，见下）；③④ 连续全绿 632 / 4802 |
+| ★★ 零变化证据：老数据归一化后**画出来的颜色**与改造前逐项相同，半透明档没丢 | ✅ 单测（浏览器规范化后逐档比对 + 非空守卫）+ **实机**（用户磁盘上就是 `"white"`×2 的老数据） |
+| 实机：改成任意颜色（含带 alpha 的 `rgba`）⇒ 边框/图标跟着变 | ✅ 变量与**渲染后的** `border-color` / `stroke` / `fill` 逐项命中（见证据） |
+| 反向验证：把这两键从映射里拿掉 ⇒ 等价断言必红 | ✅ 3 条变红（含"半透明"那条），原文已留证 |
+| 契约快照重拍 + 逐条 diff | ✅ 31 增 31 删，**逐条可解释** |
+| 开发记录（追加）/《中控元件总表》/ #266 回写 | ✅ 本节 + 仓外总表（发送按钮行 + §10）+ issue 评论 |
+
+## 测试处置
+
+| 测试 | 处置 | 原因 |
+| --- | --- | --- |
+| `ccControlColorFreePick.test.ts` | 头部第 3 条"不越界"改写成"遗留② 同口径"；原「不越界」用例的**两条枚举断言**换成"用户值原样穿过"；**新增** 5 条（默认档等价 / 逐档等价 / 半透明专测 / 缺键补默认 / 幂等） | 施工单点名：它**故意**钉住"这两项仍是枚举"，与新口径矛盾 |
+| `mountSolidControlCenterPreview.solid.test.tsx` | 断言/夹具换 §1 等价色字面量（详见"与单的偏差"第 2 条） | 同文件同契约面，施工单点名 |
+| `widgetDefinitionTable.test.ts` / `ccSettingsGrouping.test.ts` | **未改**（只列键名，键名不变） | 施工单 §3 明示不用改；全量绿复核 |
+
+## 证据
+
+- **门禁**（关键行）：
+
+  ```text
+  bun run lint                → EXIT=0  ✖ 1 problem (0 errors, 1 warning)   ← 存量 warning，非本单文件
+  bun run build:example-plugin→ EXIT=0  dist/entry.js … 已由 src/ 重建
+  bun run build               → EXIT=0  ✓ built in 9.01s
+  bun run check:solid         → EXIT=0  ZONE_FIELDS 一致性契约通过（187 个主题字段）/ CSS 消费审计通过（死注入与悬空引用均为 0）
+  bun run test                → 632 passed | 1 skipped (633) / 4802 passed | 1 skipped | 1 todo (4804)   （跑 4 次，见下）
+  ```
+
+- **全量 4 轮的真相（不遮红）**：第 2 轮红 1 条 ——
+  `src/renderers/solid-workbench/chat/__tests__/PlainMessageList.solid.test.tsx > #243：换代把窗口收敛到新会话尾部，不按旧会话规模扩满`
+  `AssertionError: expected [ 'b0', 'b1', 'b2', 'b3', 'b4', …(7) ] to include 'b299'`。
+  判定为**并发饱和型游走 flake、非本单产物**，依据三条：
+  ① 本单 diff 不触碰 `chat/**`、虚拟化、滚动或测量链（8 个文件逐一可核）；
+  ② 该文件**隔离连跑 3 次全绿**（`Tests 16 passed`）；
+  ③ 紧随其后的第 3、4 轮**连续全绿**（同机同负载）。属于 #141 / #175 / issue-129 那类既有案底
+  ⇒ **未修**（不在本单文件域内），已在"未解问题"留档。
+- **反向验证（原文）**：把 `sendButtonBorderColor` / `sendButtonIconColor` 两键从映射表注释掉后 ——
+
+  ```text
+  FAIL … #266 遗留② … > 两个字段的枚举字面量被搬成等价颜色（默认档）
+    AssertionError: expected { sendButtonBorderColor: 'white', …(1) } to deeply equal { sendButtonBorderColor: 'rgba(255,255,255,.5)', …(1) }
+  FAIL … > ★ 等价性：归一化后画出来的颜色与改造前逐档相同
+    AssertionError: sendButtonBorderColor：老枚举 white 画出来应是同一个色: expected { sendButtonBorderColor: 'white' } to deeply equal { Object (sendButtonBorderColor) }
+  FAIL … > ★ 半透明那一档没丢：边框白档仍是 rgba(255,255,255,.5)，不是纯白
+    AssertionError: expected 'white' to be 'rgba(255, 255, 255, 0.5)'
+  Test Files 1 failed (1) / Tests 3 failed | 7 passed (10)
+  ```
+
+  改回后：`Test Files 1 passed (1) / Tests 10 passed (10)`。
+- **契约快照 diff（31 增 31 删）逐条解释**：`generatedAt` 时间戳 1 条（脚本设计如此）；
+  **13 个 fixture** × 2 字段 `white → rgba(255,255,255,.5)` / `#ffffff`；
+  `schema-boundary-min` × 2 字段 → `""`（color 型 min 档统一空串，见"空值的新含义"）；
+  `schema-boundary-max` × 2 字段 → `"#abcdef"`（该 fixture 原先就是这两个字段的 `black` 档）。
+  ⇒ 15 个 fixture × 2 字段 = 30 行 + 时间戳，无第 4 类差异；`主题字段 187 个`不变。
+- **实机**（`bun run build` → `cargo build --manifest-path src-tauri/Cargo.toml --bin pylon`（44.25s，确实重编译并内嵌新 dist）
+  → 启动 `src-tauri/target/debug/pylon.exe`（调试端点 9222，`tauri.conf.json` 内置）→ 页面目标 `8A5F7343…`，`http://tauri.localhost/`）：
+  自检 `typeof window.__TAURI_INTERNALS__.invoke` = `"function"`。
+  量法：在**真实 `[data-control-center]` 内**插入按钮与图标的**真类名**探针（`.cc-send-button` /
+  `.cc-send-icon--stroke` / `--solid`，与 `WorkbenchWidgets.solid.tsx:133-145` 同构），读 `getComputedStyle`
+  后立即移除 —— 量的是**真实 WebView2 + 真实样式表 + 真实继承来的 CSS 变量**。
+
+  | 场景（写盘 → 重载走真实读盘路径） | 变量 | **渲染结果** |
+  | --- | --- | --- |
+  | ★ 用户磁盘上的老数据 `"white"` / `"white"`（未改动） | `rgba(255,255,255,.5)` / `#ffffff` | 边框 `rgba(255, 255, 255, 0.5)`、图标 `rgb(255, 255, 255)` ← 与改造前逐位相同 |
+  | 老枚举 `"black"` / `"gray"` | `rgba(0,0,0,.5)` / `rgba(0,0,0,.5)` | 边框 `rgba(0, 0, 0, 0.5)`、图标 `rgba(0, 0, 0, 0.5)` |
+  | 自由色 `rgba(0,128,255,.25)` / `#ff00aa` | 原样 | 边框 `rgba(0, 128, 255, 0.25)`（**alpha 保留**）、图标 `rgb(255, 0, 170)` |
+  | 还原用户原值 `"white"` / `"white"` | 回到 `rgba(255,255,255,.5)` / `#ffffff` | 回到 `rgba(255, 255, 255, 0.5)` / `rgb(255, 255, 255)` |
+
+  取证后**已关闭带调试端口的实例**（`tasklist` 无 `pylon.exe`）；开工前备份在仓外
+  `%TEMP%\pylon-backup-266-legacy2-224004\`（Roaming 全量 + Local 全量），**只改过 `pylon-theme` 里那两个键**、
+  已还原并复核。
+- 未改任何契约快照以外的 JSON；快照由 `bun scripts/check-workbench-theme-contract.mts --write` 重拍。
+  ★ 顺带确认该脚本**不带 `--write` 时只做内存自校验、不与磁盘快照比对**（原样返回"通过"）——
+  与 00 文档「只写不验」一致，别把它当"快照仍一致"的证据。
+
+## 与施工单的偏差
+
+1. **映射表结构从"单层平表"改成"两层按字段表"**（施工单 §3-3 只说"把这两个键加进那张表"）：
+   同一个 `'white'` 在两字段上的等价色不同，平表**表达不了**；两层表在"单表"语义内是唯一不引入
+   第二张平行表的写法。副作用：删掉了 ① 的字段白名单常量（表键即白名单），净减一处结构。
+2. **点名的测试文件里多改了几行**（施工单 §3-6 列的是 `:162/:166/:187/:192/:194`）——
+   同一文件、同一类改动（"换成 §1 的等价色字面量"），但为让该文件与新契约自洽必须一并改：
+   `:182` `'#fff'`→`'#ffffff'`、`:191` 同、`:195` `'#000'`→`'#000000'`。
+   （`:190`/`:193` 未动，因为我把 `:187`/`:192` 的**改值**直接取成与既有期望相同的等价色。）
+3. **放宽了共享助手 `asCssColor` 的参数类型**（`'background' | 'color'` → 追加 `'borderColor' | 'stroke'`）：
+   纯类型放宽，既有 6 个字段的调用与行为不变；不放宽 `bun run build` 的 `tsc -b` 直接 TS2345。
+4. **新增的等价断言里加了"非空守卫"**（对照臂必须是有效色）：避免将来 jsdom 解析退化时，
+   `'' === ''` 让这条断言变成**永远绿的空断言**。
+
+## 未解问题
+
+1. ★ **`PlainMessageList.solid.test.tsx` 的 `#243` 窗口收敛用例在全量并发下偶发红**（本轮第 2 次全量命中 1 条，
+   隔离连跑 3 次全绿、随后两轮全量全绿）。属既有游走 flake 家族（#141 / #175 / issue-129 案底），
+   **不在本单文件域**，未修。复现线索：失败时窗口停在会话**头部**（`b0..b11`）而非尾部，
+   是"`waitFor` 抢在虚拟化测量/贴底收敛之前"的时序型断言。建议归属渲染器线处置。
+2. **设置页外观未在本机点开**（同 ① 的取证限制）：打开设置会写入持久化的设置页导航状态
+   （ADR-0013），对用户数据有额外副作用 ⇒ 不拿它做验收动作。该面由契约测试兜底：
+   两字段仍在 `cc-settings-grouping` 的**可渲染 cc 字段集合（77 项）**里，全量绿。
+   ★ 另注：发送按钮**没有属性面板**（注册轨控件，定义表只给布局四项），所以"用户怎么改"只有设置页一条路。
+3. **出厂深色预设仍是"半透明白边框 + 白图标"**（终端 5 套 + GUI 3 套 `uiScheme: 'dark'`）：
+   等价替换的必然结果，**不给深色预设填值**是既定口径（① 同款遗留），留作后续内容决定。
+
+## 并行交集
+
+- 本轮触碰的共享文件（供其他人避让）：`src/themeFieldDefs.ts`、`src/domains/theme/migration.ts`、
+  `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（**仅 630-631 两行**）、
+  `src/zones/factory/*-cc.ts`、`src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`、
+  `src/domains/theme/__tests__/ccControlColorFreePick.test.ts`、
+  `src/renderers/solid-workbench/__tests__/mountSolidControlCenterPreview.solid.test.tsx`。
+- 与 ① 的差异：**未触碰** `src/domains/cc/widgetDefinitions.ts`、`WorkbenchWidgets.solid.tsx`。
