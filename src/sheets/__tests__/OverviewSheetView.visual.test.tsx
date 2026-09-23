@@ -46,7 +46,7 @@ beforeEach(() => {
     ],
     sessions: [{
       id: 'session-1', agentId: 'peri', periId: 'remote-1', name: '视觉验收会话', source: 'local:visual',
-      profileId: 'profile-a', createdAt: 1, lastActiveAt: Date.now(), platform: 'local', workdir: 'G:/Pylon',
+      profileId: 'default', createdAt: 1, lastActiveAt: Date.now(), platform: 'local', workdir: 'G:/Pylon',
       workspaceId: 'workspace-1', sessionPrompt: '', skills: [], hooks: [], autoName: '视觉验收会话',
     }],
   })
@@ -86,6 +86,51 @@ describe('Overview visual workbench', () => {
     expect(screen.getByRole('button', { name: /Hermes.*0 个会话.*错误/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /视觉验收会话.*Pylon Desktop.*Peri/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Pylon Desktop.*G:\/Pylon.*1 会话/ })).toBeInTheDocument()
+  })
+
+  it('#254：同名 Agent 的 Fleet 卡以 agentId 区分', () => {
+    useIdentityStore.setState({
+      agents: [
+        { id: 'peri', name: 'Peri', provider: 'ACP' },
+        { id: 'hermes', name: 'Hermes', provider: 'ACP' },
+        { id: 'hermes-2', name: 'Hermes', provider: 'hermes' },
+      ],
+    })
+    const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
+    render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
+
+    // 两张同名「Hermes」卡，副标题必须露出各自的 agentId
+    expect(screen.getByRole('button', { name: /Hermes.*hermes · 0 个会话/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Hermes.*hermes-2 · 0 个会话/ })).toBeInTheDocument()
+  })
+
+  it('#255：工作区卡双口径——关联数与当前可见数分叉时并列标注，一致时退回单数字', () => {
+    useIdentityStore.setState({
+      activeProfileId: 'default',
+      sessions: [
+        {
+          id: 'session-1', agentId: 'peri', periId: 'remote-1', name: '当前可见会话', source: 'local:cur',
+          profileId: 'default', createdAt: 1, lastActiveAt: Date.now(), platform: 'local', workdir: 'G:/Pylon',
+          workspaceId: 'workspace-1', sessionPrompt: '', skills: [], hooks: [], autoName: '当前可见会话',
+        },
+        {
+          id: 'session-2', agentId: 'hermes', periId: 'remote-2', name: '他 Agent 会话', source: 'local:other',
+          profileId: 'default', createdAt: 2, lastActiveAt: Date.now() - 1000, platform: 'local', workdir: 'G:/Pylon',
+          workspaceId: 'workspace-1', sessionPrompt: '', skills: [], hooks: [], autoName: '他 Agent 会话',
+        },
+        {
+          id: 'session-3', agentId: 'peri', periId: 'remote-3', name: '归档会话', source: 'local:arch',
+          profileId: 'default', createdAt: 3, lastActiveAt: Date.now() - 2000, platform: 'local', workdir: 'G:/Pylon',
+          workspaceId: 'workspace-1', sessionPrompt: '', skills: [], hooks: [], autoName: '归档会话',
+          archivedAt: 5,
+        },
+      ],
+    })
+    const ctx = { openSheet: vi.fn(), selectSession: vi.fn() } as unknown as SheetContext
+    render(<OverviewSheetView sheet={sheet} ctx={ctx} />)
+
+    // 关联 3（workspaceId 全计）；当前可见 1（default profile + peri + 未归档，与左栏树同口径）
+    expect(screen.getByRole('button', { name: /Pylon Desktop.*3 关联 · 1 当前/ })).toBeInTheDocument()
   })
 
   it('opens the existing Agent settings domain from the hero action', () => {

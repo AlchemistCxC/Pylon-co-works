@@ -17,6 +17,8 @@
 //! reload 热重载窗口下"旧绑定放行 → 新绑定投递"的混搭即二次读锁 bug
 //! （历史教训：`ingest()` 因此被删除，S5）。
 
+pub(crate) mod cmds;
+
 pub mod catalog;
 pub mod credentials;
 pub mod instance;
@@ -297,11 +299,11 @@ impl GatewayCore {
     }
 
     /// 平台源判定：注册的适配器前缀命中 或 静态绑定命中。
-    /// 语义与 check_session_expiry 现有闭包（session.rs:618-623）逐字一致——
+    /// check_session_expiry（session/expiry.rs）以本函数为统一入口——
     /// "有注册适配器 OR 有 binding"（与 deliver_all 出站白名单的前置条件等价，E14 封闭）。
     /// 注意：QQ 适配器未注册（无 PYLON_QQ_APP_ID 凭据启动）时，qq:* 源仅 binding
     /// 命中才返回 true；两者皆无 → false。若未来引入运行时注册（B10.5），需同步收严。
-    /// 消费：session.rs（C1/C3/C4 GUI 冒名校验与平台判定）+ lib.rs（C5 回滚）。
+    /// 消费：session/（C1/C3/C4 GUI 冒名校验与平台判定，经 expiry.rs 统一入口）+ lib.rs（C5 回滚）。
     pub fn is_platform_source(&self, source: &str) -> bool {
         let prefix_hit = {
             let key = Self::platform_key_of(source);

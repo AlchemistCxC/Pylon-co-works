@@ -33,6 +33,13 @@ class ResizeObserverMock {
   unobserve = vi.fn()
 }
 
+/** 组件自己的 RO：引擎（有 scrollViewport 时 adapter onMount 先建）与 #243 的内容
+ * 容器观察器也在 instances 里，以「观察了列表容器」这一特征定位，不依赖顺序。 */
+function componentObserver() {
+  return ResizeObserverMock.instances.find(m =>
+    m.observe.mock.calls.some(c => (c[0] as HTMLElement | undefined)?.classList?.contains('plain-message-list')))!
+}
+
 beforeEach(() => {
   ResizeObserverMock.instances = []
   vi.stubGlobal('ResizeObserver', ResizeObserverMock)
@@ -220,28 +227,59 @@ describe('PlainMessageList', () => {
     })
   })
 
-  it('#212 S3b：冷开时按窗口渐进挂载（尾部优先），逐帧扩满', async () => {
+  /**
+   * #243 改写（原 #212 S3b「冷开时按窗口渐进挂载（尾部优先），逐帧扩满」）：
+   * 长会话的窗口语义从「尾部只增」改为「视口窗口」——冷开只物化尾部一个有界窗
+   * （视口 + overscan，「尾部优先」由上层贴底姿态把 scrollTop 钉到底部实现），
+   * 其余行是等高占位盒；不再有「逐帧扩满」——DOM 规模从此不随历史行数增长。
+   * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
+   */
+  it('#243：冷开长会话只物化尾部有界窗，其余为占位盒；窗口随滚动步进（D2）', async () => {
     let port!: MessageListPort
+    const scroller = document.createElement('div')
+    document.body.append(scroller)
+    let scrollTop = 0
+    Object.defineProperty(scroller, 'offsetHeight', { value: 300, configurable: true })
+    Object.defineProperty(scroller, 'scrollTop', {
+      get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
+    })
+    // 视口高 300px；「row N」行估算高 76px ⇒ 视口内 ~4 行 + 上下 overscan 各 8
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 300, left: 0, right: 100, width: 100, height: 300, x: 0, y: 0, toJSON() {} })
     const result = render(() => (
-      <PlainMessageList initialItems={[]} onPortReady={value => { port = value }} renderItem={item => item.key} />
-    ))
-    const ids = () => [...result.container.querySelectorAll('[data-message-id]')]
-      .map(node => node.getAttribute('data-message-id'))
+      <PlainMessageList
+        initialItems={[]} virtualization="on" scrollViewport={() => scroller}
+        onPortReady={value => { port = value }} renderItem={item => item.key}
+      />
+    ), { container: scroller })
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))
     const hundred = createMessageListItems(Array.from({ length: 100 }, (_, index) => descriptor({
       id: `m${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
     })))
 
     port.setItems(hundred)
-    // 首帧只挂窗口，且锚在**尾部**（用户先看到最新内容，历史从上方长出来）
-    expect(ids()).toHaveLength(16)
-    expect(ids()[0]).toBe('m84')
-    expect(ids().at(-1)).toBe('m99')
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    // 物化行有界（≤ 视口 + 2×overscan），窗外行不驻留 DOM
+    expect(ids().length).toBeLessThanOrEqual(24)
+    // 上层贴底姿态钉住 scrollTop ⇒ 尾部行在窗内
+    scrollTop = 99999
+    scroller.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(ids()).toContain('m99'))
+    expect(ids().length).toBeLessThanOrEqual(24)
 
-    // 逐帧扩满
-    await waitFor(() => expect(ids()).toHaveLength(100))
+    // 滚到中部：窗口随视口步进（增量回卷 = 窗随滚动逐行扩出历史），物化行仍有界
+    scrollTop = 3000
+    scroller.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(ids()).toContain('m40'))
+    expect(ids().length).toBeLessThanOrEqual(24)
   })
 
-  it('#212 S3b：增量增长不缩窗（小列表整挂）', () => {
+  /**
+   * #243 改写（原 #212 S3b「增量增长不缩窗（小列表整挂）」，断言原样保留）：
+   * 该用例钉的是**短会话**（低于 D3 双阈值 ⇒ 虚拟化不启用）的既有契约——整挂且
+   * 追加不缩窗，属「短会话行为逐字节不变」验收的一部分。标题更新以点明路径归属。
+   * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
+   */
+  it('#243：短会话（低于阈值，legacy 路径）整挂且追加不缩窗', () => {
     let port!: MessageListPort
     const result = render(() => (
       <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} renderItem={item => item.key} />
@@ -264,6 +302,7 @@ describe('PlainMessageList', () => {
     const scroller = document.createElement('div')
     document.body.append(scroller)
     let scrollTop = 100
+    Object.defineProperty(scroller, 'offsetHeight', { value: 300, configurable: true })
     Object.defineProperty(scroller, 'scrollTop', {
       get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
     })
@@ -291,7 +330,7 @@ describe('PlainMessageList', () => {
   it('#212 S4：pin 姿态下上方行高度变化时补偿 scrollTop（自管锚点）', () => {
     const { scroller, readScrollTop, shiftContent } = mountInScroller({ posture: 'pin' })
     const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-    const observer = ResizeObserverMock.instances.at(-1)!
+    const observer = componentObserver()
     // 文档空间 top = rect.top - 视口顶(0) + scrollTop(100)。row0 全在视口上方 ⇒ 不参与；
     // row1 从视口顶开始 ⇒ 它是锚。
     rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
@@ -310,7 +349,7 @@ describe('PlainMessageList', () => {
   it('#212 S4：follow 姿态不补偿（贴底跟随才是意图）', () => {
     const { scroller, readScrollTop } = mountInScroller({ posture: 'follow' })
     const rows = [...scroller.querySelectorAll<HTMLElement>('[data-message-id]')]
-    const observer = ResizeObserverMock.instances.at(-1)!
+    const observer = componentObserver()
     rows[0]!.getBoundingClientRect = () => rectOf(-180, -100)
     rows[1]!.getBoundingClientRect = () => rectOf(-100, 30)
     observer.emit()
@@ -337,19 +376,42 @@ describe('PlainMessageList', () => {
     expect(second.container.querySelector('[data-streaming="true"]')).not.toBeNull()
   })
 
-  it('#212 S3b：换代中途挂起的扩窗不得按旧会话行数收敛', async () => {
+  /**
+   * #243 改写（原 #212 S3b「换代中途挂起的扩窗不得按旧会话行数收敛」）：
+   * 虚拟化路径没有「挂起的扩窗」可被旧总长污染，但同一威胁换了形态——换代必须把
+   * 窗口收敛到**新会话尾部**的有界窗，而不是沿用旧会话的滚动位置/窗口规模全开。
+   * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
+   */
+  it('#243：换代把窗口收敛到新会话尾部，不按旧会话规模扩满', async () => {
     let port!: MessageListPort
+    const scroller = document.createElement('div')
+    document.body.append(scroller)
+    let scrollTop = 0
+    Object.defineProperty(scroller, 'offsetHeight', { value: 300, configurable: true })
+    Object.defineProperty(scroller, 'scrollTop', {
+      get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
+    })
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 300, left: 0, right: 100, width: 100, height: 300, x: 0, y: 0, toJSON() {} })
     const result = render(() => (
-      <PlainMessageList initialItems={[]} onPortReady={value => { port = value }} renderItem={item => item.key} />
-    ))
-    const ids = () => result.container.querySelectorAll('[data-message-id]').length
+      <PlainMessageList
+        initialItems={[]} virtualization="on" scrollViewport={() => scroller}
+        onPortReady={value => { port = value }} renderItem={item => item.key}
+      />
+    ), { container: scroller })
+    const ids = () => [...result.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))
     const mk = (count: number, prefix: string) => createMessageListItems(Array.from({ length: count }, (_, index) => descriptor({
       id: `${prefix}${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
     })))
     port.setItems(mk(100, 'a'))
-    // 同一 tick 内换到更长的会话：挂起的扩窗必须改用新总长
+    await waitFor(() => expect(ids().length).toBeGreaterThan(0))
+    scrollTop = 99999
+    scroller.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(ids()).toContain('a99'))
+
+    // 同一 流 内换到更长的会话：窗口必须收敛到新会话尾部附近的有界窗
     port.setItems(mk(300, 'b'))
-    await waitFor(() => expect(ids()).toBe(300))
+    await waitFor(() => expect(ids()).toContain('b299'))
+    expect(ids().length).toBeLessThanOrEqual(24)
   })
 
   it('invalidation 与 ResizeObserver 更新 revision；destroy 幂等并清理 observer/DOM', () => {
@@ -359,7 +421,7 @@ describe('PlainMessageList', () => {
       <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} onContentResize={onContentResize} renderItem={item => item.key} />
     ))
     const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
-    const observer = ResizeObserverMock.instances[0]!
+    const observer = componentObserver()
 
     port!.invalidateMeasurements('theme-changed')
     expect(container.dataset.measurementRevision).toBe('1')

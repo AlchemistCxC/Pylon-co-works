@@ -4,10 +4,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub(crate) fn config_path() -> Option<PathBuf> {
-    std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
-}
-
 pub(crate) fn read_config_snapshot(
     path: &Path,
 ) -> Result<(String, HashMap<String, AgentDef>), ConfigError> {
@@ -452,19 +448,4 @@ pub(crate) fn write_new_config_under_lease(
         )));
     }
     Ok(config_revision_for_bytes(candidate))
-}
-
-pub fn effective_config_path() -> Option<PathBuf> {
-    if let Some(path) = config_path() {
-        return Some(path);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let nearby = dir.join("agents.yaml");
-            if nearby.is_file() {
-                return Some(nearby);
-            }
-        }
-    }
-    None
 }

@@ -41,10 +41,12 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   const [now, setNow] = createSignal(clock().now())
   const [displayedTokens, setDisplayedTokens] = createSignal(0)
   const [paused, setPaused] = createSignal(false)
-  const configuredVerbs = () => {
+  // (#260-C9) memo 化：line/copy 两个每 tick 重算的 memo 都经 fallbackVerb 调到这里，
+  // 此前每次调用都 map+filter 重新分配；verbs 来自冻结的 appearance 快照（整体替换）。
+  const configuredVerbs = createMemo(() => {
     const verbs = props.appearance.verbs.map(value => value.trim()).filter(Boolean)
     return verbs.length > 0 ? verbs : ['思考中']
-  }
+  })
   const verbSignature = createMemo(() => `${props.appearance.verbSet}\u0000${configuredVerbs().join('\u0001')}`)
   const copyMachine = createGenerationIndicatorCopyMachine()
   let generationSerial = 0
@@ -310,8 +312,10 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   })
 
   const elapsedMs = () => Math.max(0, now() - effectiveStartTime())
+  // (#260-C9) frames 来自冻结的 appearance 快照（resolveFrame/resolveSpinnerMarker
+  // 只读不突变），防御性展开是每 tick 一次的纯拷贝，删除。
   const frame = () => resolveFrame(
-    [...props.appearance.frames],
+    props.appearance.frames,
     elapsedMs(),
     props.appearance.intervalMs,
     props.reducedMotion ? 'static' : props.appearance.motion,
@@ -321,7 +325,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   const shownTokens = () => Math.min(displayedTokens(), Math.max(0, props.tokenCount))
   const summaryMarker = () => props.summary
     ? resolveSpinnerMarker(
-      [...props.appearance.frames],
+      props.appearance.frames,
       props.summary.reason === 'cancelled'
         ? props.appearance.cancelledMarkerMode
         : props.summary.reason === 'error'
@@ -385,10 +389,12 @@ function SolidSpinnerGlimmer(props: {
   reducedMotion: boolean
   color?: string
 }) {
-  const graphemes = () => segmentGraphemes(props.text)
-  const activeIndex = () => props.reducedMotion || !props.active || graphemes().length === 0
+  // (#260-C9) 每 tick 只重算一次：此前 activeIndex 在 data 属性与每字素的
+  // intensity 里各调一次，每次都整段重新切分并重算光扫窗口。
+  const graphemes = createMemo(() => segmentGraphemes(props.text))
+  const activeIndex = createMemo(() => props.reducedMotion || !props.active || graphemes().length === 0
     ? -1
-    : resolveGlimmer(props.text, props.elapsedMs, GLIMMER_CYCLE_MS).glimmerIndex
+    : resolveGlimmer(props.text, props.elapsedMs, GLIMMER_CYCLE_MS).glimmerIndex)
   return (
     <span
       class="spinner-verb"

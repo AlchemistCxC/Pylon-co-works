@@ -13,7 +13,8 @@
 mod atomic_write;
 mod load;
 mod patch;
-mod types;
+// #247：AgentDef/ConfigError 值类型归位 pylon-core，这里重导出保活既有路径。
+pub use pylon_core::agent_config::*;
 
 #[cfg(test)]
 mod tests;
@@ -21,4 +22,3 @@ mod tests;
 pub(crate) use atomic_write::*;
 pub(crate) use load::*;
 pub(crate) use patch::*;
-pub(crate) use types::*;

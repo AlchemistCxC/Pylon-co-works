@@ -753,7 +753,7 @@ pub(crate) fn cleanup_ghost_session_mapping(
     if !prompt_error_indicates_missing_session(error) {
         return false;
     }
-    match crate::session_store::mark_detached_if_current(
+    match crate::session::store::mark_detached_if_current(
         runtime,
         source,
         peri_id,
@@ -1174,7 +1174,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     // Peri and custom agents.
     let hermes_force_recovery = state
         .agent_for_runtime(runtime)
-        .is_some_and(|agent| crate::hermes_runtime::should_apply(&agent));
+        .is_some_and(|agent| crate::hermes::runtime::should_apply(&agent));
     let runtime_for_recovery = runtime.clone();
     let expected_generation = flow.generation;
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
@@ -1238,82 +1238,29 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
-            // #99：wire 终态判定先于展示/持久化——ensure_generation 等后续失败
-            // 也不能让 turn 悬在账本外；一个 prompt 至多一个 terminal transition。
-            settle_turn_from_response(runtime, &turn_key, &raw);
-            state.ensure_generation(runtime, flow.generation)?;
-            if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
-                return Err(PylonError::Protocol(format!(
-                    "stale session mapping for source: {source}"
-                )));
-            }
-            if let Some(error) = raw.error {
-                let error = error.to_string();
-                *failure = Some(PromptFailureMetadata {
-                    source: "provider",
-                    actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
-                    provider_message: Some(error.clone()),
-                    ..Default::default()
-                });
-                let typed_error = AcpError::Rpc(error.clone());
-                let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
-                // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
-                // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
-                cleanup_ghost_session_mapping(
-                    state,
-                    runtime,
-                    source,
-                    &flow.peri_id,
-                    flow.generation,
-                    &typed_error,
-                );
-                Err(PylonError::Protocol(error))
-            } else {
-                // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
-                // pylon:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
-                let data = raw.result.unwrap_or(serde_json::Value::Null);
-                finalize_response(&mut flow, data).await
-            }
+            settle_prompt_response(
+                state,
+                runtime,
+                source,
+                &mut flow,
+                &turn_key,
+                raw,
+                prompt_started_at,
+                failure,
+            )
+            .await
         }
         PromptWaitOutcome::ConnectionClosed => {
-            // #99：连接关闭 = 回合终态 ConnectionLost（不再悬置）。
-            report_settle(runtime, &turn_key, TurnTerminalCause::ConnectionLost, None);
-            *failure = Some(PromptFailureMetadata {
-                source: "connection",
-                actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
-                ..Default::default()
-            });
-            runtime.acp.lock().await.remove_pending(flow.request_id);
-            // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
-            // session/load probe 收敛 Attached/Detached；删除会丢失待验证证据。
-            // 方案 I：连接关闭日志携带 request/session/agent 上下文，便于
-            // 对齐 ACP wire 时间线定位终态缺失点。
-            state.log_runtime_summary(
-                "error",
-                "prompt",
-                Some(source.to_string()),
-                "Prompt connection closed",
-                serde_json::Map::from_iter([
-                    (
-                        "requestId".to_string(),
-                        serde_json::Value::from(flow.request_id),
-                    ),
-                    (
-                        "sessionId".to_string(),
-                        serde_json::Value::String(flow.peri_id.clone()),
-                    ),
-                    (
-                        "agentId".to_string(),
-                        serde_json::Value::String(
-                            state
-                                .agent_for_runtime(runtime)
-                                .map(|a| a.name)
-                                .unwrap_or_default(),
-                        ),
-                    ),
-                ]),
-            );
-            Err(PylonError::Protocol("ACP connection closed".to_string()))
+            settle_prompt_connection_closed(
+                state,
+                runtime,
+                source,
+                &flow,
+                &turn_key,
+                prompt_started_at,
+                failure,
+            )
+            .await
         }
         PromptWaitOutcome::CancelledAfterTimeout {
             response,
@@ -1323,153 +1270,289 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             elapsed,
             settle,
         } => {
-            // #99：settle 窗口解析映射到稳定终态——窗口内回的终态胜出（含空回合
-            // 细分）；窗口超时 = CancelSettleTimeout（触发超时类别进 detail）；
-            // 响应通道消失（引擎任务终止）= ConnectionLost。
-            let (cause, settle_detail) = match (response.as_ref(), settle) {
-                (Some(raw), CancelSettleResolution::Responded) => {
-                    let detail = raw.error.as_ref().map(|error| error.to_string());
-                    let cause = if raw.error.is_some() {
-                        TurnTerminalCause::ProtocolError
-                    } else {
-                        let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
-                        terminal_cause_from_prompt_result(&data)
-                    };
-                    (refine_empty_turn(runtime, &turn_key, cause), detail)
-                }
-                (None, CancelSettleResolution::SettleTimeout) => (
-                    TurnTerminalCause::CancelSettleTimeout,
-                    Some(format!("triggered_by:{}", timeout_kind.as_str())),
-                ),
-                (_, CancelSettleResolution::ResponderDropped) => {
-                    (TurnTerminalCause::ConnectionLost, None)
-                }
-                // 理论不可达（Responded 必有 response / SettleTimeout 必无）：
-                // 保守按协议错误收敛，不猜。
-                (Some(_), CancelSettleResolution::SettleTimeout)
-                | (None, CancelSettleResolution::Responded) => (
-                    TurnTerminalCause::ProtocolError,
-                    Some("inconsistent cancel settle resolution".to_string()),
-                ),
-            };
-            report_settle(runtime, &turn_key, cause, settle_detail);
-            runtime.acp.lock().await.remove_pending(flow.request_id);
-            if let Some(cancel_error) = cancel_error {
-                tracing::warn!("cancel timed-out prompt {}: {}", flow.peri_id, cancel_error);
-            }
-            // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
-            crate::permission::respond_pending_permissions_cancelled(runtime, &flow.peri_id).await;
-            if response.is_none() {
-                match state.remove_session_if_matches(
-                    runtime,
-                    source,
-                    &flow.peri_id,
-                    flow.generation,
-                ) {
-                    Ok(true) => {
-                        tracing::error!(
-                            "cancelled prompt {} did not settle within {}s; removed local session mapping",
-                            flow.peri_id,
-                            cancel_settle_timeout_secs
-                        );
-                        // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
-                        let _ = close_session_rpc(
-                            state,
-                            runtime,
-                            &flow.peri_id,
-                            flow.generation,
-                            false,
-                        )
-                        .await;
-                    }
-                    Ok(false) => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            // G2-06：超时文案必须使用真正触发的边界，而不是把 prompt 总预算
-            // 冒充成 idle/first-token 的实际等待时长。保留旧的前缀，兼容已有
-            // provider/前端按 "timed out after Ns" 的轻量解析。
-            // 方案 I：区分"流式内容已到、终态缺失"与"完全无输出"——本回合是否收到过
-            // assistant 内容（dispatcher 经 collect_response_chunk 写入 last_response_text）。
-            let has_streamed_content = {
-                let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                sessions
-                    .get(source)
-                    .map(|s| !s.last_response_text.trim().is_empty())
-                    .unwrap_or(false)
-            };
-            let timeout_label = match timeout_kind {
-                PromptTimeoutKind::FirstToken => "first-token",
-                PromptTimeoutKind::Idle => "idle",
-            };
-            let timeout_secs = timeout_bound.as_secs().max(1);
-            let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
-            *failure = Some(PromptFailureMetadata {
-                source: "prompt-timeout",
-                timeout_kind: Some(timeout_label),
-                configured_timeout_secs: Some(protocol.prompt_timeout()),
-                triggered_timeout_secs: Some(timeout_secs),
-                actual_elapsed_ms: Some(actual_elapsed_ms),
-                ..Default::default()
-            });
-            let error = format!(
-                "timed out after {timeout_secs}s ({timeout_label} timeout; elapsed {actual_elapsed_ms}ms)"
-            );
-            // M5 感知：超时 → 发呆（区别于普通失败）
-            let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
-            // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
-            state.log_runtime_summary(
-                "error",
-                "prompt",
-                Some(source.to_string()),
-                if has_streamed_content {
-                    "Prompt timed out (streamed content, missing final response)"
-                } else {
-                    "Prompt timed out (no content streamed)"
-                },
-                serde_json::Map::from_iter([
-                    (
-                        "result".to_string(),
-                        serde_json::Value::String("timeout".to_string()),
-                    ),
-                    (
-                        "hasStreamedContent".to_string(),
-                        serde_json::Value::Bool(has_streamed_content),
-                    ),
-                    (
-                        "timeoutKind".to_string(),
-                        serde_json::Value::String(timeout_label.to_string()),
-                    ),
-                    (
-                        "timeoutBoundSecs".to_string(),
-                        serde_json::Value::from(timeout_secs),
-                    ),
-                    (
-                        "actualElapsedMs".to_string(),
-                        serde_json::Value::from(actual_elapsed_ms),
-                    ),
-                    (
-                        "requestId".to_string(),
-                        serde_json::Value::from(flow.request_id),
-                    ),
-                    (
-                        "sessionId".to_string(),
-                        serde_json::Value::String(flow.peri_id.clone()),
-                    ),
-                    (
-                        "agentId".to_string(),
-                        serde_json::Value::String(
-                            state
-                                .agent_for_runtime(runtime)
-                                .map(|a| a.name)
-                                .unwrap_or_default(),
-                        ),
-                    ),
-                ]),
-            );
-            Err(PylonError::Protocol(error))
+            settle_prompt_cancelled_after_timeout(
+                state,
+                runtime,
+                source,
+                &flow,
+                &turn_key,
+                response,
+                cancel_error,
+                timeout_kind,
+                timeout_bound,
+                elapsed,
+                settle,
+                cancel_settle_timeout_secs,
+                protocol.prompt_timeout(),
+                failure,
+            )
+            .await
         }
     }
+}
+
+/// #261 拆分：`send_prompt_core_impl` 的 `PromptWaitOutcome::Response` 终态臂
+/// （原内联体逐行搬移，行为零变化）——账本结算 → generation/映射复核 →
+/// provider 错误（failure 元数据 + 宠物感知 + S3 幽灵映射清理）或成功收尾
+/// （R33c finalize_response）。
+#[allow(clippy::too_many_arguments)]
+async fn settle_prompt_response<R: tauri::Runtime>(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    flow: &mut PromptFlow<'_, R>,
+    turn_key: &TurnKey,
+    raw: crate::acp::RawMessage,
+    prompt_started_at: std::time::Instant,
+    failure: &mut Option<PromptFailureMetadata>,
+) -> Result<String, PylonError> {
+    // #99：wire 终态判定先于展示/持久化——ensure_generation 等后续失败
+    // 也不能让 turn 悬在账本外；一个 prompt 至多一个 terminal transition。
+    settle_turn_from_response(runtime, turn_key, &raw);
+    state.ensure_generation(runtime, flow.generation)?;
+    if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
+    }
+    if let Some(error) = raw.error {
+        let error = error.to_string();
+        *failure = Some(PromptFailureMetadata {
+            source: "provider",
+            actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+            provider_message: Some(error.clone()),
+            ..Default::default()
+        });
+        let typed_error = AcpError::Rpc(error.clone());
+        let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
+        // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
+        // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
+        cleanup_ghost_session_mapping(
+            state,
+            runtime,
+            source,
+            &flow.peri_id,
+            flow.generation,
+            &typed_error,
+        );
+        Err(PylonError::Protocol(error))
+    } else {
+        // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
+        // pylon:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
+        let data = raw.result.unwrap_or(serde_json::Value::Null);
+        finalize_response(flow, data).await
+    }
+}
+
+/// #261 拆分：`send_prompt_core_impl` 的 `PromptWaitOutcome::ConnectionClosed`
+/// 终态臂（原内联体逐行搬移，行为零变化）——#99 回合终态 ConnectionLost、
+/// failure 元数据、pending 清理；崩溃不在此删除映射（自动重连先置 Probing
+/// 再收敛，删除会丢待验证证据）。
+async fn settle_prompt_connection_closed<R: tauri::Runtime>(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    flow: &PromptFlow<'_, R>,
+    turn_key: &TurnKey,
+    prompt_started_at: std::time::Instant,
+    failure: &mut Option<PromptFailureMetadata>,
+) -> Result<String, PylonError> {
+    // #99：连接关闭 = 回合终态 ConnectionLost（不再悬置）。
+    report_settle(runtime, turn_key, TurnTerminalCause::ConnectionLost, None);
+    *failure = Some(PromptFailureMetadata {
+        source: "connection",
+        actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
+        ..Default::default()
+    });
+    runtime.acp.lock().await.remove_pending(flow.request_id);
+    // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
+    // session/load probe 收敛 Attached/Detached；删除会丢失待验证证据。
+    // 方案 I：连接关闭日志携带 request/session/agent 上下文，便于
+    // 对齐 ACP wire 时间线定位终态缺失点。
+    state.log_runtime_summary(
+        "error",
+        "prompt",
+        Some(source.to_string()),
+        "Prompt connection closed",
+        serde_json::Map::from_iter([
+            (
+                "requestId".to_string(),
+                serde_json::Value::from(flow.request_id),
+            ),
+            (
+                "sessionId".to_string(),
+                serde_json::Value::String(flow.peri_id.clone()),
+            ),
+            (
+                "agentId".to_string(),
+                serde_json::Value::String(
+                    state
+                        .agent_for_runtime(runtime)
+                        .map(|a| a.name)
+                        .unwrap_or_default(),
+                ),
+            ),
+        ]),
+    );
+    Err(PylonError::Protocol("ACP connection closed".to_string()))
+}
+
+/// #261 拆分：`send_prompt_core_impl` 的 `PromptWaitOutcome::CancelledAfterTimeout`
+/// 终态臂（原内联体逐行搬移，行为零变化）——#99 settle 窗口解析映射稳定终态、
+/// pending/权限请求收敛、B9 取消挂起权限、映射移除 + close RPC（方案 6）、
+/// G2-06 超时文案（真触发边界）与 M5 宠物感知、方案 I 内容状态区分日志。
+/// 14 参为 variant 载荷字段 + 等待期标量逐一传递，语义互不分组；结构体重构
+/// 收益低（先例：dispatcher reject_interaction_request 的 clippy 备注口径）。
+/// （CI 修复：`prompt_started_at` 在本臂未被消费，签名收窄。）
+#[allow(clippy::too_many_arguments)]
+async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    flow: &PromptFlow<'_, R>,
+    turn_key: &TurnKey,
+    response: Option<crate::acp::RawMessage>,
+    cancel_error: Option<String>,
+    timeout_kind: PromptTimeoutKind,
+    timeout_bound: std::time::Duration,
+    elapsed: std::time::Duration,
+    settle: CancelSettleResolution,
+    cancel_settle_timeout_secs: u64,
+    configured_prompt_timeout_secs: u64,
+    failure: &mut Option<PromptFailureMetadata>,
+) -> Result<String, PylonError> {
+    // #99：settle 窗口解析映射到稳定终态——窗口内回的终态胜出（含空回合
+    // 细分）；窗口超时 = CancelSettleTimeout（触发超时类别进 detail）；
+    // 响应通道消失（引擎任务终止）= ConnectionLost。
+    let (cause, settle_detail) = match (response.as_ref(), settle) {
+        (Some(raw), CancelSettleResolution::Responded) => {
+            let detail = raw.error.as_ref().map(|error| error.to_string());
+            let cause = if raw.error.is_some() {
+                TurnTerminalCause::ProtocolError
+            } else {
+                let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
+                terminal_cause_from_prompt_result(&data)
+            };
+            (refine_empty_turn(runtime, turn_key, cause), detail)
+        }
+        (None, CancelSettleResolution::SettleTimeout) => (
+            TurnTerminalCause::CancelSettleTimeout,
+            Some(format!("triggered_by:{}", timeout_kind.as_str())),
+        ),
+        (_, CancelSettleResolution::ResponderDropped) => (TurnTerminalCause::ConnectionLost, None),
+        // 理论不可达（Responded 必有 response / SettleTimeout 必无）：
+        // 保守按协议错误收敛，不猜。
+        (Some(_), CancelSettleResolution::SettleTimeout)
+        | (None, CancelSettleResolution::Responded) => (
+            TurnTerminalCause::ProtocolError,
+            Some("inconsistent cancel settle resolution".to_string()),
+        ),
+    };
+    report_settle(runtime, turn_key, cause, settle_detail);
+    runtime.acp.lock().await.remove_pending(flow.request_id);
+    if let Some(cancel_error) = cancel_error {
+        tracing::warn!("cancel timed-out prompt {}: {}", flow.peri_id, cancel_error);
+    }
+    // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
+    crate::permission::respond_pending_permissions_cancelled(runtime, &flow.peri_id).await;
+    if response.is_none() {
+        match state.remove_session_if_matches(runtime, source, &flow.peri_id, flow.generation) {
+            Ok(true) => {
+                tracing::error!(
+                    "cancelled prompt {} did not settle within {}s; removed local session mapping",
+                    flow.peri_id,
+                    cancel_settle_timeout_secs
+                );
+                // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
+                let _ =
+                    close_session_rpc(state, runtime, &flow.peri_id, flow.generation, false).await;
+            }
+            Ok(false) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    // G2-06：超时文案必须使用真正触发的边界，而不是把 prompt 总预算
+    // 冒充成 idle/first-token 的实际等待时长。保留旧的前缀，兼容已有
+    // provider/前端按 "timed out after Ns" 的轻量解析。
+    // 方案 I：区分"流式内容已到、终态缺失"与"完全无输出"——本回合是否收到过
+    // assistant 内容（dispatcher 经 collect_response_chunk 写入 last_response_text）。
+    let has_streamed_content = {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        sessions
+            .get(source)
+            .map(|s| !s.last_response_text.trim().is_empty())
+            .unwrap_or(false)
+    };
+    let timeout_label = match timeout_kind {
+        PromptTimeoutKind::FirstToken => "first-token",
+        PromptTimeoutKind::Idle => "idle",
+    };
+    let timeout_secs = timeout_bound.as_secs().max(1);
+    let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+    *failure = Some(PromptFailureMetadata {
+        source: "prompt-timeout",
+        timeout_kind: Some(timeout_label),
+        configured_timeout_secs: Some(configured_prompt_timeout_secs),
+        triggered_timeout_secs: Some(timeout_secs),
+        actual_elapsed_ms: Some(actual_elapsed_ms),
+        ..Default::default()
+    });
+    let error = format!(
+        "timed out after {timeout_secs}s ({timeout_label} timeout; elapsed {actual_elapsed_ms}ms)"
+    );
+    // M5 感知：超时 → 发呆（区别于普通失败）
+    let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
+    // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
+    state.log_runtime_summary(
+        "error",
+        "prompt",
+        Some(source.to_string()),
+        if has_streamed_content {
+            "Prompt timed out (streamed content, missing final response)"
+        } else {
+            "Prompt timed out (no content streamed)"
+        },
+        serde_json::Map::from_iter([
+            (
+                "result".to_string(),
+                serde_json::Value::String("timeout".to_string()),
+            ),
+            (
+                "hasStreamedContent".to_string(),
+                serde_json::Value::Bool(has_streamed_content),
+            ),
+            (
+                "timeoutKind".to_string(),
+                serde_json::Value::String(timeout_label.to_string()),
+            ),
+            (
+                "timeoutBoundSecs".to_string(),
+                serde_json::Value::from(timeout_secs),
+            ),
+            (
+                "actualElapsedMs".to_string(),
+                serde_json::Value::from(actual_elapsed_ms),
+            ),
+            (
+                "requestId".to_string(),
+                serde_json::Value::from(flow.request_id),
+            ),
+            (
+                "sessionId".to_string(),
+                serde_json::Value::String(flow.peri_id.clone()),
+            ),
+            (
+                "agentId".to_string(),
+                serde_json::Value::String(
+                    state
+                        .agent_for_runtime(runtime)
+                        .map(|a| a.name)
+                        .unwrap_or_default(),
+                ),
+            ),
+        ]),
+    );
+    Err(PylonError::Protocol(error))
 }
 
 #[cfg(test)]

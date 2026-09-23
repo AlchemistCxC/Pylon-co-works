@@ -10,8 +10,9 @@
  * 合计是负收益，故回退。回退后：**文档只有一份**，没有「核就绪」这回事，也没有跨语言
  * 编组/线性内存高水位。
  *
- * 保留 wasm 的只有 markdown 解析/高亮与流式切分/揭示——那两块在同形状对照里是赢的
- * （markdown 流式形 12–25×、切分大输入 2–3×）。
+ * 保留 wasm 的只有 markdown 解析与流式切分/揭示——那两块在同形状对照里是赢的
+ * （markdown 流式形 12–25×、切分大输入 2–3×）。高亮直到 #241 也在 wasm，后因语法资产
+ * 的不可归还内存而整体迁到前端 Lezer，故不在此列。
  *
  * 本文件是**读层 + 折叠层**：输入已归一化、带 sequence 的 semantic envelope，输出可丢弃的
  * WorkbenchDocument；不读时钟、store、registry 或 IO——live、restart、recovery 只要喂同一组

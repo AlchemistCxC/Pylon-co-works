@@ -4,57 +4,40 @@
 #[global_allocator]
 static PYLON_GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+// #245：家族成员归入专业子目录（browser/gateway/hermes/mcp/pet/prism/
+// workspaces/agent/session/runtime_log），cmds 与兄弟测试模块随宿主目录；
+// 根目录只留单一横切职责的单文件。原 `crate::X` 路径经纯机械重写，
+// 行为零变更（issue #245）。
 mod acp;
 pub use pylon_core::agent_catalog;
+pub mod agent;
 mod agent_config;
-pub mod agent_detection;
-mod agent_runtime;
-mod browser;
-mod browser_agent;
-mod browser_agent_cmds;
-pub mod browser_bridge;
-mod browser_cmds;
-mod correlation;
+pub mod browser;
+// #247：correlation/hermes/provider_adapter 归位 pylon-core，路径经重导出保活。
+pub(crate) use pylon_core::correlation;
 mod cwd;
 mod dispatcher;
 mod error;
 mod export;
 mod gateway;
-mod gateway_cmds;
-mod hermes;
-mod hermes_runtime;
+pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
 mod lifecycle;
-mod logs_cmds;
 mod mcp;
-#[cfg(test)]
-mod mcp_persist_tests;
-#[cfg(test)]
-#[cfg(test)]
-mod p1_wire_regression_tests;
 mod paths;
 mod permission;
 mod pet;
-mod pet_cmds;
 mod plugin_cmds;
 mod plugin_process;
 mod prism;
-mod prism_cmds;
 mod private_interaction;
 mod protocol_adapter;
-pub mod provider_adapter;
+pub use pylon_core::provider_adapter;
 pub mod pylon_cli;
-#[cfg(test)]
-mod real_acp_smoke;
 mod runtime;
 mod runtime_log;
 mod session;
-#[cfg(test)]
-mod session_expiry_platform_tests;
-#[cfg(test)]
-mod session_info_tests;
-mod session_store;
 mod startup;
 // P5（#106）：harness 即门面——tests/ 集成目标经此消费产品表面；
 // AppState 等内部类型不加 pub，门面只出窄值（spec P5 五类面）。
@@ -65,7 +48,6 @@ pub mod test_harness;
 #[cfg(any(test, feature = "test-agent"))]
 #[doc(hidden)]
 pub mod test_utils;
-mod workspace_cmds;
 mod workspaces;
 
 // P58 阶段一拆分：event_names/sanitize/time/workspace/git 迁入 pylon-foundations
@@ -75,8 +57,8 @@ mod workspaces;
 pub(crate) use pylon_foundations::{event_names, git, sanitize, time, workspace};
 
 use acp::AcpClient;
+use agent::runtime::AgentLifecycleStatus;
 use agent_config::AgentDef;
-use agent_runtime::AgentLifecycleStatus;
 use gateway::GatewayCore;
 use prism::PrismClient;
 use runtime::{AgentRuntime, AgentRuntimeManager};
@@ -90,7 +72,7 @@ use tauri::{Emitter, Manager, Runtime};
 use crate::time::Timestamp;
 
 #[cfg(test)]
-use agent_runtime::AgentRuntimeState;
+use agent::runtime::AgentRuntimeState;
 #[cfg(test)]
 use session::SessionInfo;
 
@@ -100,7 +82,7 @@ use session::SessionInfo;
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::load_mcp_persisted;
 use crate::permission::check_pending_permission_timeouts;
-use crate::pet_cmds::persist_pet_if_possible;
+use crate::pet::cmds::persist_pet_if_possible;
 use crate::session::{check_session_expiry, send_prompt_core};
 
 #[cfg(test)]
@@ -191,7 +173,7 @@ pub(crate) struct AppState {
     pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     pub(crate) runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
-    pub(crate) browser_agent: Arc<browser_agent::hub::BrowserAgentHub>,
+    pub(crate) browser_agent: Arc<crate::browser::agent::hub::BrowserAgentHub>,
     pub(crate) prism: PrismClient,
     pub(crate) gateway: Arc<GatewayCore>,
     /// R5（P1-3）：启动诊断快照（run() 构建主体，setup 解析 DataDirs 后补写 storage）。
@@ -525,8 +507,8 @@ impl AppStateHandles {
         agent_id: Option<String>,
         new_acp: AcpClient,
         window: tauri::WebviewWindow<R>,
-        activation: crate::agent_runtime::ClientActivation,
-    ) -> Result<Vec<crate::session_store::SessionProbeCandidate>, String> {
+        activation: crate::agent::runtime::ClientActivation,
+    ) -> Result<Vec<crate::session::store::SessionProbeCandidate>, String> {
         if new_acp.is_crashed() {
             return Err("new ACP client crashed before activation".to_string());
         }
@@ -565,10 +547,10 @@ impl AppStateHandles {
                     activation.epoch.0
                 ));
             }
-            let affected = crate::session_store::apply_client_activation(runtime, activation)
+            let affected = crate::session::store::apply_client_activation(runtime, activation)
                 .map_err(|error| error.to_string())?;
             let stale_sources =
-                if activation.continuity == crate::agent_runtime::SessionContinuity::Invalidated {
+                if activation.continuity == crate::agent::runtime::SessionContinuity::Invalidated {
                     affected
                         .iter()
                         .map(|candidate| candidate.source.clone())
@@ -577,7 +559,7 @@ impl AppStateHandles {
                     Vec::new()
                 };
             let probe_candidates =
-                if activation.continuity == crate::agent_runtime::SessionContinuity::Unknown {
+                if activation.continuity == crate::agent::runtime::SessionContinuity::Unknown {
                     affected
                 } else {
                     Vec::new()
@@ -767,7 +749,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         gateway,
         startup: Arc::new(RwLock::new(startup)),
         approval_mode: Arc::new(Mutex::new("default".to_string())),
-        browser_agent: Arc::new(browser_agent::hub::BrowserAgentHub::new()),
+        browser_agent: Arc::new(crate::browser::agent::hub::BrowserAgentHub::new()),
         pet_write_lock: tokio::sync::Mutex::new(()),
         switch_lock: tokio::sync::Mutex::new(()),
         mcp_write_lock: tokio::sync::Mutex::new(()),
@@ -1295,7 +1277,7 @@ pub fn run() {
     // issue #82：浏览器 MCP 桥以 `pylon.exe browser-bridge` 子命令形态运行
     // （零发行包变更）。必须在 GUI 启动前分发：桥复用主二进制但不进 Tauri。
     if std::env::args().nth(1).as_deref() == Some("browser-bridge") {
-        std::process::exit(browser_bridge::run_stdio_bridge());
+        std::process::exit(crate::browser::bridge::run_stdio_bridge());
     }
     install_process_registrations();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
@@ -1423,45 +1405,45 @@ pub fn run() {
                 startup: (*startup).clone(),
             }))
             .invoke_handler(tauri::generate_handler![
-                crate::prism_cmds::prism_health,
-                crate::prism_cmds::prism_status,
-                crate::prism_cmds::prism_state,
-                crate::prism_cmds::prism_scenarios,
-                crate::prism_cmds::prism_sources,
-                crate::prism_cmds::prism_aliases,
-                crate::prism_cmds::prism_config,
-                crate::prism_cmds::prism_logs,
-                crate::prism_cmds::prism_chronicle,
-                crate::prism_cmds::prism_history,
-                crate::prism_cmds::prism_scenario,
-                crate::prism_cmds::prism_blocks,
-                crate::prism_cmds::prism_inject,
-                crate::prism_cmds::prism_command,
-                crate::prism_cmds::prism_create_scenario,
-                crate::prism_cmds::prism_delete_scenario,
-                crate::prism_cmds::prism_create_source,
-                crate::prism_cmds::prism_delete_source,
-                crate::prism_cmds::prism_source_detail,
-                crate::prism_cmds::prism_source_files,
-                crate::prism_cmds::prism_read_source_file,
-                crate::prism_cmds::prism_write_source_file,
-                crate::prism_cmds::prism_delete_source_file,
-                crate::prism_cmds::prism_source_entries,
-                crate::prism_cmds::prism_source_entry,
-                crate::prism_cmds::prism_add_source_entry,
-                crate::prism_cmds::prism_edit_source_entry,
-                crate::prism_cmds::prism_delete_source_entry,
-                crate::prism_cmds::prism_update_config,
-                crate::prism_cmds::prism_update_scenario,
-                crate::prism_cmds::prism_create_block,
-                crate::prism_cmds::prism_update_block,
-                crate::prism_cmds::prism_delete_block,
-                crate::prism_cmds::prism_add_scenario_block,
-                crate::prism_cmds::prism_edit_scenario_block,
-                crate::prism_cmds::prism_delete_scenario_block,
-                crate::prism_cmds::prism_reorder_scenario_blocks,
-                crate::prism_cmds::prism_reload,
-                crate::prism_cmds::prism_llm_test,
+                crate::prism::cmds::prism_health,
+                crate::prism::cmds::prism_status,
+                crate::prism::cmds::prism_state,
+                crate::prism::cmds::prism_scenarios,
+                crate::prism::cmds::prism_sources,
+                crate::prism::cmds::prism_aliases,
+                crate::prism::cmds::prism_config,
+                crate::prism::cmds::prism_logs,
+                crate::prism::cmds::prism_chronicle,
+                crate::prism::cmds::prism_history,
+                crate::prism::cmds::prism_scenario,
+                crate::prism::cmds::prism_blocks,
+                crate::prism::cmds::prism_inject,
+                crate::prism::cmds::prism_command,
+                crate::prism::cmds::prism_create_scenario,
+                crate::prism::cmds::prism_delete_scenario,
+                crate::prism::cmds::prism_create_source,
+                crate::prism::cmds::prism_delete_source,
+                crate::prism::cmds::prism_source_detail,
+                crate::prism::cmds::prism_source_files,
+                crate::prism::cmds::prism_read_source_file,
+                crate::prism::cmds::prism_write_source_file,
+                crate::prism::cmds::prism_delete_source_file,
+                crate::prism::cmds::prism_source_entries,
+                crate::prism::cmds::prism_source_entry,
+                crate::prism::cmds::prism_add_source_entry,
+                crate::prism::cmds::prism_edit_source_entry,
+                crate::prism::cmds::prism_delete_source_entry,
+                crate::prism::cmds::prism_update_config,
+                crate::prism::cmds::prism_update_scenario,
+                crate::prism::cmds::prism_create_block,
+                crate::prism::cmds::prism_update_block,
+                crate::prism::cmds::prism_delete_block,
+                crate::prism::cmds::prism_add_scenario_block,
+                crate::prism::cmds::prism_edit_scenario_block,
+                crate::prism::cmds::prism_delete_scenario_block,
+                crate::prism::cmds::prism_reorder_scenario_blocks,
+                crate::prism::cmds::prism_reload,
+                crate::prism::cmds::prism_llm_test,
                 crate::session::new_session,
                 crate::session::probe_agent_selectors,
                 crate::session::send_message,
@@ -1490,16 +1472,16 @@ pub fn run() {
                 crate::lifecycle::test_agent_connection,
                 crate::lifecycle::test_agent_candidate,
                 crate::protocol_adapter::protocol_adapter_catalog,
-                crate::agent_detection::detect_agent_runtimes,
-                crate::agent_detection::cancel_detection_refresh,
+                crate::agent::detection::detect_agent_runtimes,
+                crate::agent::detection::cancel_detection_refresh,
                 crate::acp::instance_registry::acp_instance_overview,
                 crate::permission::approve_tool_call,
                 crate::permission::respond_interaction,
                 crate::permission::set_approval_mode,
                 crate::permission::get_approval_mode,
                 crate::permission::interaction_list,
-                crate::pet_cmds::get_pet,
-                crate::pet_cmds::pet_action,
+                crate::pet::cmds::get_pet,
+                crate::pet::cmds::pet_action,
                 crate::session::send_message_streaming,
                 crate::session::load_persisted_session,
                 crate::session::list_persisted_sessions,
@@ -1520,26 +1502,26 @@ pub fn run() {
                 crate::session::retention_preview,
                 crate::session::retention_prune,
                 crate::export::export_session,
-                crate::logs_cmds::list_runtime_logs,
-                crate::logs_cmds::clear_runtime_logs,
-                crate::logs_cmds::push_frontend_log,
-                crate::logs_cmds::set_runtime_log_live,
-                crate::workspace_cmds::get_workspace_root,
-                crate::workspace_cmds::list_workspace_entries,
-                crate::workspace_cmds::read_workspace_text,
-                crate::workspace_cmds::write_workspace_text,
-                crate::workspace_cmds::git_status,
-                crate::workspace_cmds::git_status_with_branch,
-                crate::workspace_cmds::git_diff,
-                crate::workspace_cmds::git_history,
-                crate::workspace_cmds::git_stage,
-                crate::workspace_cmds::git_unstage,
-                crate::workspace_cmds::git_commit,
-                crate::workspace_cmds::git_create_branch,
-                crate::workspace_cmds::git_switch_branch,
-                crate::workspace_cmds::git_pull,
-                crate::workspace_cmds::git_push,
-                crate::workspace_cmds::workspace_search,
+                crate::runtime_log::cmds::list_runtime_logs,
+                crate::runtime_log::cmds::clear_runtime_logs,
+                crate::runtime_log::cmds::push_frontend_log,
+                crate::runtime_log::cmds::set_runtime_log_live,
+                crate::workspaces::cmds::get_workspace_root,
+                crate::workspaces::cmds::list_workspace_entries,
+                crate::workspaces::cmds::read_workspace_text,
+                crate::workspaces::cmds::write_workspace_text,
+                crate::workspaces::cmds::git_status,
+                crate::workspaces::cmds::git_status_with_branch,
+                crate::workspaces::cmds::git_diff,
+                crate::workspaces::cmds::git_history,
+                crate::workspaces::cmds::git_stage,
+                crate::workspaces::cmds::git_unstage,
+                crate::workspaces::cmds::git_commit,
+                crate::workspaces::cmds::git_create_branch,
+                crate::workspaces::cmds::git_switch_branch,
+                crate::workspaces::cmds::git_pull,
+                crate::workspaces::cmds::git_push,
+                crate::workspaces::cmds::workspace_search,
                 crate::workspaces::workspace_create,
                 crate::workspaces::workspace_list,
                 crate::workspaces::workspace_restore,
@@ -1578,61 +1560,61 @@ pub fn run() {
                 crate::hook_bridge::pylon_hook_ready,
                 crate::hook_bridge::pylon_hook_respond,
                 crate::hook_bridge::hook_registry_sync,
-                crate::gateway_cmds::gateway_status,
-                crate::gateway_cmds::reload_gateway,
-                crate::gateway_cmds::gateway_sessions,
-                crate::gateway_cmds::gateway_catalog,
-                crate::gateway_cmds::gateway_instances,
-                crate::gateway_cmds::gateway_instance_create,
-                crate::gateway_cmds::gateway_instance_update,
-                crate::gateway_cmds::gateway_instance_remove,
-                crate::gateway_cmds::gateway_instance_start,
-                crate::gateway_cmds::gateway_instance_stop,
-                crate::gateway_cmds::gateway_instance_restart,
-                crate::gateway_cmds::gateway_instance_set_credentials,
-                crate::browser_cmds::browser_start,
-                crate::browser_cmds::browser_new_tab,
-                crate::browser_cmds::browser_open_tab,
-                crate::browser_cmds::browser_select_tab,
-                crate::browser_cmds::browser_close_tab,
-                crate::browser_cmds::browser_status,
-                crate::browser_cmds::browser_navigate,
-                crate::browser_cmds::browser_back,
-                crate::browser_cmds::browser_forward,
-                crate::browser_cmds::browser_reload,
-                crate::browser_cmds::browser_snapshot,
-                crate::browser_cmds::browser_download,
-                crate::browser_cmds::browser_click,
-                crate::browser_cmds::browser_type,
-                crate::browser_cmds::browser_press,
-                crate::browser_cmds::browser_scroll,
-                crate::browser_cmds::browser_set_bounds,
-                crate::browser_cmds::browser_set_visible,
-                crate::browser_cmds::browser_set_zoom,
-                crate::browser_cmds::browser_close,
-                crate::browser_agent_cmds::browser_agent_get_settings,
-                crate::browser_agent_cmds::browser_agent_set_settings,
-                crate::browser_agent_cmds::browser_agent_resolve_access,
-                crate::browser_agent_cmds::browser_agent_exe_path,
-                crate::browser_agent_cmds::browser_agent_claim_status,
-                crate::browser_agent_cmds::browser_agent_user_activity,
-                crate::browser_agent_cmds::browser_agent_recent_ops,
-                crate::browser_agent_cmds::browser_agent_navigate,
-                crate::browser_agent_cmds::browser_agent_snapshot,
-                crate::browser_agent_cmds::browser_agent_tab_list,
-                crate::browser_agent_cmds::browser_agent_tab_new,
-                crate::browser_agent_cmds::browser_agent_tab_select,
-                crate::browser_agent_cmds::browser_agent_tab_close,
-                crate::browser_agent_cmds::browser_agent_screenshot,
-                crate::browser_agent_cmds::browser_agent_save_page,
-                crate::browser_agent_cmds::browser_agent_read_network,
-                crate::browser_agent_cmds::browser_agent_wait,
-                crate::browser_agent_cmds::browser_agent_scroll,
-                crate::browser_agent_cmds::browser_agent_emulate,
-                crate::browser_agent_cmds::browser_agent_click,
-                crate::browser_agent_cmds::browser_agent_type,
-                crate::browser_agent_cmds::browser_agent_press,
-                crate::browser_agent_cmds::browser_agent_download,
+                crate::gateway::cmds::gateway_status,
+                crate::gateway::cmds::reload_gateway,
+                crate::gateway::cmds::gateway_sessions,
+                crate::gateway::cmds::gateway_catalog,
+                crate::gateway::cmds::gateway_instances,
+                crate::gateway::cmds::gateway_instance_create,
+                crate::gateway::cmds::gateway_instance_update,
+                crate::gateway::cmds::gateway_instance_remove,
+                crate::gateway::cmds::gateway_instance_start,
+                crate::gateway::cmds::gateway_instance_stop,
+                crate::gateway::cmds::gateway_instance_restart,
+                crate::gateway::cmds::gateway_instance_set_credentials,
+                crate::browser::cmds::browser_start,
+                crate::browser::cmds::browser_new_tab,
+                crate::browser::cmds::browser_open_tab,
+                crate::browser::cmds::browser_select_tab,
+                crate::browser::cmds::browser_close_tab,
+                crate::browser::cmds::browser_status,
+                crate::browser::cmds::browser_navigate,
+                crate::browser::cmds::browser_back,
+                crate::browser::cmds::browser_forward,
+                crate::browser::cmds::browser_reload,
+                crate::browser::cmds::browser_snapshot,
+                crate::browser::cmds::browser_download,
+                crate::browser::cmds::browser_click,
+                crate::browser::cmds::browser_type,
+                crate::browser::cmds::browser_press,
+                crate::browser::cmds::browser_scroll,
+                crate::browser::cmds::browser_set_bounds,
+                crate::browser::cmds::browser_set_visible,
+                crate::browser::cmds::browser_set_zoom,
+                crate::browser::cmds::browser_close,
+                crate::browser::agent_cmds::browser_agent_get_settings,
+                crate::browser::agent_cmds::browser_agent_set_settings,
+                crate::browser::agent_cmds::browser_agent_resolve_access,
+                crate::browser::agent_cmds::browser_agent_exe_path,
+                crate::browser::agent_cmds::browser_agent_claim_status,
+                crate::browser::agent_cmds::browser_agent_user_activity,
+                crate::browser::agent_cmds::browser_agent_recent_ops,
+                crate::browser::agent_cmds::browser_agent_navigate,
+                crate::browser::agent_cmds::browser_agent_snapshot,
+                crate::browser::agent_cmds::browser_agent_tab_list,
+                crate::browser::agent_cmds::browser_agent_tab_new,
+                crate::browser::agent_cmds::browser_agent_tab_select,
+                crate::browser::agent_cmds::browser_agent_tab_close,
+                crate::browser::agent_cmds::browser_agent_screenshot,
+                crate::browser::agent_cmds::browser_agent_save_page,
+                crate::browser::agent_cmds::browser_agent_read_network,
+                crate::browser::agent_cmds::browser_agent_wait,
+                crate::browser::agent_cmds::browser_agent_scroll,
+                crate::browser::agent_cmds::browser_agent_emulate,
+                crate::browser::agent_cmds::browser_agent_click,
+                crate::browser::agent_cmds::browser_agent_type,
+                crate::browser::agent_cmds::browser_agent_press,
+                crate::browser::agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
                 crate::paths::migrate_appdata_to_portable,
             ])
@@ -1647,7 +1629,7 @@ pub fn run() {
                 if let tauri::RunEvent::Exit = event {
                     // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
                     // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
-                    crate::pet_cmds::drain_pet_dirty();
+                    crate::pet::cmds::drain_pet_dirty();
                     // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
                     let pet_arc = app_handle.state::<AppState>().pet.clone();
                     if let Ok(pet) = pet_arc.try_lock() {

@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(test)]
 use crate::agent_config::McpServersMode;
+use crate::agent_config::{DEFAULT_MAX_ATTACHMENTS, DEFAULT_MAX_ATTACHMENT_BYTES};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -737,8 +738,8 @@ async fn wire_trace_preserves_id_kinds_and_full_sequence() {
     );
     // 身份逐条保留。
     for record in &snap {
-        assert_eq!(record.agent_id, "fake-acp-trace");
-        assert_eq!(record.source, "subprocess");
+        assert_eq!(&*record.agent_id, "fake-acp-trace");
+        assert_eq!(&*record.source, "subprocess");
     }
 
     client.kill().expect("explicit child cleanup must succeed");

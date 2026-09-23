@@ -50,9 +50,9 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(h1).toBeTruthy()
     expect(screen.getByText('第一段已完成')).toBeTruthy()
     // 代码块内容与增长尾部都应出现。高亮自 #220 起在测试环境同样真实工作
-    // （wasm highlightBlock，旧 starry 引擎在 vitest 里装载 oniguruma 失败而回退
-    // 纯文本），代码行被拆成 pl-* span——testing-library 的 getByText 只看直接
-    // 文本节点，这里改按行的 textContent 断言同一内容完整性。
+    // （#241 起是纯 JS 的 Lezer 引擎，无 wasm/oniguruma 装载依赖），代码行被拆成
+    // pl-* span——testing-library 的 getByText 只看直接文本节点，这里改按行的
+    // textContent 断言同一内容完整性。
     await waitFor(() => {
       const line = [...document.querySelectorAll('.term-code-text')]
         .find(node => node.textContent?.includes('const x = 1'))

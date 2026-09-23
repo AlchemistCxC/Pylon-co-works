@@ -13,6 +13,10 @@ import { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from './pluginStorage
 export { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from './pluginStorageContract.ts'
 const STORE_KEY = 'pylon-plugin-storage'
 
+// (#260-D12) TextEncoder 无状态，模块级单例复用——serializedSize 在每次插件
+// 存储写入都会调用（同仓 canonicalEventBatch.ts 的 byteEncoder 先例）。
+const byteEncoder = new TextEncoder()
+
 type StorageTree = Record<string, Record<string, unknown>>
 
 let cache: StorageTree | null = null
@@ -61,7 +65,7 @@ function serializedSize(value: unknown): number {
     )
   }
   if (serialized === undefined) throw new PluginStorageError('serialize', '插件存储值必须可 JSON 序列化')
-  return new TextEncoder().encode(serialized).byteLength
+  return byteEncoder.encode(serialized).byteLength
 }
 
 /**

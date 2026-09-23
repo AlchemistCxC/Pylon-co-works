@@ -207,17 +207,19 @@ pub enum LifecycleStatusView {
 }
 
 impl LifecycleStatusView {
-    fn to_internal(self) -> crate::agent_runtime::AgentLifecycleStatus {
+    fn to_internal(self) -> crate::agent::runtime::AgentLifecycleStatus {
         match self {
-            LifecycleStatusView::Connected => crate::agent_runtime::AgentLifecycleStatus::Connected,
-            LifecycleStatusView::Crashed => crate::agent_runtime::AgentLifecycleStatus::Crashed,
+            LifecycleStatusView::Connected => {
+                crate::agent::runtime::AgentLifecycleStatus::Connected
+            }
+            LifecycleStatusView::Crashed => crate::agent::runtime::AgentLifecycleStatus::Crashed,
             LifecycleStatusView::Reconnecting => {
-                crate::agent_runtime::AgentLifecycleStatus::Reconnecting
+                crate::agent::runtime::AgentLifecycleStatus::Reconnecting
             }
             LifecycleStatusView::Disconnected => {
-                crate::agent_runtime::AgentLifecycleStatus::Disconnected
+                crate::agent::runtime::AgentLifecycleStatus::Disconnected
             }
-            LifecycleStatusView::Error => crate::agent_runtime::AgentLifecycleStatus::Error,
+            LifecycleStatusView::Error => crate::agent::runtime::AgentLifecycleStatus::Error,
         }
     }
 }
@@ -599,9 +601,9 @@ impl TestHarness {
             &self.window,
             &agent,
             None,
-            crate::agent_runtime::AgentLifecycleStatus::Reconnecting,
+            crate::agent::runtime::AgentLifecycleStatus::Reconnecting,
             "reconnect",
-            crate::agent_runtime::SessionContinuity::Invalidated,
+            crate::agent::runtime::SessionContinuity::Invalidated,
             true,
         )
         .await
@@ -707,9 +709,9 @@ impl TestHarness {
                         .agent_runtime
                         .lock()
                         .map(|state| state.status)
-                        .unwrap_or(crate::agent_runtime::AgentLifecycleStatus::Disconnected)
+                        .unwrap_or(crate::agent::runtime::AgentLifecycleStatus::Disconnected)
                 })
-                .unwrap_or(crate::agent_runtime::AgentLifecycleStatus::Disconnected);
+                .unwrap_or(crate::agent::runtime::AgentLifecycleStatus::Disconnected);
             if current == target {
                 return;
             }

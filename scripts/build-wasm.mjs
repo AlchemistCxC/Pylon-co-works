@@ -7,13 +7,13 @@
 //
 // 当前两个目标：
 //   pylon-compute  → src/wasm/pylon-compute   投影/流式计算核（WP2/WP3）
-//   pylon-markdown → src/wasm/pylon-markdown  markdown 引擎与高亮（WP4）
+//   pylon-markdown → src/wasm/pylon-markdown  markdown 解析引擎（WP4；#241 起高亮在前端 Lezer）
 //
 // 为什么是脚本而不是 package.json 里一行 wasm-pack：
 //   1. **工具链前置要报成人话**。缺 wasm32 target 或 wasm-pack 时给补齐命令，
 //      而不是一句 `command not found`。
-//   2. **未变则跳过**。wasm-pack 每次都要跑 wasm-bindgen + wasm-opt（实测 10-35s，
-//      pylon-markdown 因为有 vendored 语法更大），挂在 vitest globalSetup 上会让
+//   2. **未变则跳过**。wasm-pack 每次都要跑 wasm-bindgen + wasm-opt（实测 10-35s；
+//      pylon-markdown 在 #241 前带 14 份 vendored 语法时更久），挂在 vitest globalSetup 上会让
 //      每条测试命令都付这个成本。以「crate 源码 + 资产 + Cargo.toml + 工具链声明」
 //      的内容哈希做戳，未变直接返回（<100ms）。
 //

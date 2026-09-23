@@ -118,7 +118,20 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
   const editingWorkspace = props.workspaces.find(workspace => workspace.id === editingCwdId)
   // 会话列表**不再被搜索过滤**：搜索已是独立模块、自己呈现结果（一个查询驱动两处呈现
   // 会让人分不清哪边是「结果」）。这里只负责分组与选择。
-  const looseSessions = props.sessions.filter(session => !session.workspaceId)
+  // (#260-C10) 一次遍历完成「按工作区分组 + 无工作区组」，组内保持 props.sessions
+  // 原序——与旧的 loose filter + 每工作区一次全量 filter 逐条等价，O(会话+工作区)。
+  const sessionsByWorkspace = new Map<string, (typeof props.sessions)[number][]>()
+  const looseSessions: (typeof props.sessions)[number][] = []
+  for (const session of props.sessions) {
+    if (session.workspaceId) {
+      const group = sessionsByWorkspace.get(session.workspaceId)
+      if (group) group.push(session)
+      else sessionsByWorkspace.set(session.workspaceId, [session])
+    } else {
+      looseSessions.push(session)
+    }
+  }
+  const liveGenerating = new Set(props.liveGeneratingSources)
 
   /**
    * 会话行：`[置顶] 名称 … ● 时间 / 设置`。
@@ -162,7 +175,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
         ) : <span className="session-name">{session.name}</span>}
         {/* 运行指示点跟着时间走（不再占名字左边的列）：那一列让位给置顶图标，
             名字才能与工作区名对齐。 */}
-        <span className="session-dot" data-running={props.liveGeneratingSources.includes(session.source) ? 'true' : undefined} />
+        <span className="session-dot" data-running={liveGenerating.has(session.source) ? 'true' : undefined} />
         {/* 时间与设置钮共用一个流内格子：默认只显示时间，悬停/聚焦时按钮淡入顶替。 */}
         <span className="session-tail">
           <span className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</span>
@@ -240,7 +253,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
 
         {props.workspaces.map(workspace => renderGroup(
           workspace.id,
-          props.sessions.filter(session => session.workspaceId === workspace.id),
+          sessionsByWorkspace.get(workspace.id) ?? [],
           renderGroupHead(
             workspace.id, workspace.name, workspace.rootPath, 'folder',
             () => props.onCreateWorkspaceSession(workspace.id),

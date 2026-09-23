@@ -309,8 +309,15 @@ pub(crate) async fn plugin_package_install(
     }
     let _guard = write_lock().await;
     let root = root(&app)?;
-    ensure_layout_at(&root)?;
-    Ok(install_at(&root, &source, &expected_id)?)
+    // #261：二进制复制/批量 rename 等文件 IO 移出 reactor 线程（对齐存储核
+    // 「所有盘 IO 经 spawn_blocking」标准）；写锁仍在 async 侧串行化，操作与错误逐字不变。
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ensure_layout_at(&root)?;
+        install_at(&root, &source, &expected_id)
+    })
+    .await
+    .expect("plugin package install task panicked");
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -338,8 +345,14 @@ pub(crate) async fn plugin_package_stage(
     }
     let _guard = write_lock().await;
     let root = root(&app)?;
-    ensure_layout_at(&root)?;
-    Ok(stage_at(&root, &source, &expected_id)?)
+    // #261：同 install——staging 目录复制/校验/rename 移出 reactor 线程。
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ensure_layout_at(&root)?;
+        stage_at(&root, &source, &expected_id)
+    })
+    .await
+    .expect("plugin package stage task panicked");
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -348,7 +361,13 @@ pub(crate) async fn plugin_package_stage_commit(
     operation_id: String,
 ) -> Result<PluginPackageOperationResult, PylonError> {
     let _guard = write_lock().await;
-    Ok(commit_stage_at(&root(&app)?, &operation_id)?)
+    let root = root(&app)?;
+    // #261：journal 提交含目录 rename，移出 reactor 线程。
+    let result =
+        tauri::async_runtime::spawn_blocking(move || commit_stage_at(&root, &operation_id))
+            .await
+            .expect("plugin package stage commit task panicked");
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -357,7 +376,12 @@ pub(crate) async fn plugin_package_stage_abort(
     operation_id: String,
 ) -> Result<(), PylonError> {
     let _guard = write_lock().await;
-    Ok(abort_stage_at(&root(&app)?, &operation_id)?)
+    let root = root(&app)?;
+    // #261：abort 含 staging 残留清理（remove_dir_all），移出 reactor 线程。
+    let result = tauri::async_runtime::spawn_blocking(move || abort_stage_at(&root, &operation_id))
+        .await
+        .expect("plugin package stage abort task panicked");
+    Ok(result?)
 }
 
 #[tauri::command]
@@ -422,9 +446,14 @@ pub(crate) async fn plugin_package_set_enabled(
     validate_plugin_id(&plugin_id)?;
     let _guard = write_lock().await;
     let root = root(&app)?;
-    ensure_layout_at(&root)?;
-    set_enabled_at(&root, &plugin_id, enabled)?;
-    Ok(())
+    // #261：状态文件 read/rewrite 移出 reactor 线程。
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ensure_layout_at(&root)?;
+        set_enabled_at(&root, &plugin_id, enabled)
+    })
+    .await
+    .expect("plugin package set enabled task panicked");
+    Ok(result?)
 }
 
 pub(crate) fn set_enabled_at(
@@ -496,8 +525,14 @@ pub(crate) async fn plugin_package_rollback(
 ) -> Result<PluginPackageOperationResult, PylonError> {
     let _guard = write_lock().await;
     let root = root(&app)?;
-    ensure_layout_at(&root)?;
-    Ok(rollback_at(&root, plugin_id, package_instance_id)?)
+    // #261：回滚 rename + 状态回写移出 reactor 线程。
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ensure_layout_at(&root)?;
+        rollback_at(&root, plugin_id, package_instance_id)
+    })
+    .await
+    .expect("plugin package rollback task panicked");
+    Ok(result?)
 }
 
 pub(crate) fn uninstall_at(
@@ -531,6 +566,11 @@ pub(crate) async fn plugin_package_uninstall(
 ) -> Result<(), PylonError> {
     validate_plugin_id(&plugin_id)?;
     let _guard = write_lock().await;
-    uninstall_at(&root(&app)?, &plugin_id, purge_data)?;
-    Ok(())
+    let root = root(&app)?;
+    // #261：目录树删除（remove_dir_all）移出 reactor 线程——Windows 上可能秒级阻塞。
+    let result =
+        tauri::async_runtime::spawn_blocking(move || uninstall_at(&root, &plugin_id, purge_data))
+            .await
+            .expect("plugin package uninstall task panicked");
+    Ok(result?)
 }

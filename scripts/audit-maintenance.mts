@@ -25,8 +25,11 @@ export const moduleDefinitions = [
   { id: 'test-support', roots: ['src/test-utils/'], responsibility: '测试共享支撑（mock 形状、fixture 工厂）；仅被测试代码 import，不进生产构建' },
   { id: 'demo', roots: ['src/demo/'], responsibility: '浏览器演示数据；不得把演示验证当作原生链路证据' },
   { id: 'frontend-root', roots: ['src/*', 'src/presets/', 'src/zones/'], responsibility: '旧根级 store、schema、入口和公共策略；按真实调用者逐步下沉' },
-  { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 协商、传输、实例生命周期和通知分发' },
-  { id: 'rust-session', roots: ['src-tauri/src/session/'], responsibility: '会话事务、replay 与持久化；保持 owner/generation 和提交顺序' },
+  { id: 'rust-acp', roots: ['src-tauri/src/acp/', 'src-tauri/src/dispatcher/', 'src-tauri/src/lifecycle/'], responsibility: 'ACP 宿主适配：实例注册与 harness 依赖型表征测试' },
+  // #247：协议引擎核/存储核独立 crate；依赖方向 acp→core→foundations、session→core。
+  { id: 'rust-session', roots: ['src-tauri/src/session/'], responsibility: '会话命令编排：create/prompt/persist/inspector/expiry 与 owner 解析' },
+  { id: 'rust-acp-engine', roots: ['src-tauri/pylon-acp/src/'], responsibility: 'ACP 协议引擎核：engine/client/negotiated/replay/wire_trace/policies' },
+  { id: 'rust-session-storage', roots: ['src-tauri/pylon-session/src/'], responsibility: '会话存储核：event_repo/msg_repo/retention/turn_rollup，禁止触达 tauri' },
   { id: 'rust-host', roots: ['src-tauri/src/'], responsibility: 'Tauri 注册、native adapters、文件/终端/Gateway/插件服务' },
   { id: 'rust-core', roots: ['src-tauri/pylon-core/src/'], responsibility: '可复用 Agent catalog、检测与 preflight 能力' },
   { id: 'rust-foundations', roots: ['src-tauri/pylon-foundations/src/'], responsibility: '跨宿主基础类型与策略' },
@@ -37,11 +40,12 @@ export const moduleDefinitions = [
   // #220：前端计算核（Rust/WASM）。纯函数——不读时钟/store/registry、不做 IO、
   // 不发明活性判定；编排与 DOM 留在 JS 侧。
   { id: 'rust-compute', roots: ['src-tauri/pylon-compute/src/'], responsibility: '前端计算核：投影折叠与流式文本管线的计算层（wasm-bindgen 出口）' },
-  // #220 WP4：markdown 引擎（comrak）与代码高亮（syntect + vendored tmLanguage）。
-  // `gen/` 是从 starry-night 机械化导出语法与主题资产的生成器；`parity/` 是与
-  // TS 基线做差分对照的工具（快照 + 差异报告），都不是产品运行时依赖。
-  { id: 'rust-markdown', roots: ['src-tauri/pylon-markdown/src/'], responsibility: 'markdown 解析与代码高亮的计算层；整块进/整块（行数组）出' },
-  { id: 'markdown-parity-tooling', roots: ['src-tauri/pylon-markdown/gen/', 'src-tauri/pylon-markdown/parity/'], responsibility: 'WP4 的资产生成与 TS↔Rust 差分工具；不作为产品运行时 import 来源' },
+  // #220 WP4：markdown 引擎（comrak）。#241 起代码高亮已不在本 crate——syntect 语法
+  // 机器连同 `gen/` 资产生成器、vendored tmLanguage 与 TS↔Rust 差分工具一并退役，
+  // 高亮改由前端 Lezer 承担。`parity/` 只剩语料与 Rust 快照（JSON，不计行），
+  // 供 vitest 侧 markdown parity 门禁消费。
+  { id: 'rust-markdown', roots: ['src-tauri/pylon-markdown/src/'], responsibility: 'markdown 解析的计算层；整块进/整块（行数组）出' },
+  { id: 'markdown-parity-tooling', roots: ['src-tauri/pylon-markdown/parity/'], responsibility: 'markdown 语料与 Rust 快照，供 parity 门禁消费；无 JS 源，故计 0 行' },
   { id: 'rust-build', roots: ['src-tauri/*'], responsibility: '原生构建入口脚本；不属于运行时模块' },
   { id: 'tooling', roots: ['scripts/'], responsibility: '开发、校验与发布脚本；不作为产品运行时 import 来源' },
 ] as const

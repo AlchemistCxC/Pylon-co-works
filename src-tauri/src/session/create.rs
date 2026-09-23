@@ -18,7 +18,7 @@ pub(crate) fn replace_session_slot(
     max_sessions: usize,
 ) -> Result<Option<SessionInfo>, PylonError> {
     // 方案 8：委托 SessionStore（满额策略 + mapping_ready 通知 + 锁序纪律）。
-    crate::session_store::insert(
+    crate::session::store::insert(
         runtime,
         source,
         session,
@@ -57,17 +57,7 @@ fn option_identity(option: &serde_json::Value) -> Option<String> {
     keys.into_iter().find_map(|wanted| {
         object
             .iter()
-            .find(|(key, _)| {
-                key.replace(['-', ' '], "_")
-                    .chars()
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>()
-                    == wanted
-                        .replace(['-', ' '], "_")
-                        .chars()
-                        .flat_map(char::to_lowercase)
-                        .collect::<String>()
-            })
+            .find(|(key, _)| loose_normalized_key(key) == loose_normalized_key(wanted))
             .and_then(|(_, value)| response_string(value))
     })
 }
@@ -99,40 +89,10 @@ fn option_text(option: &serde_json::Value) -> String {
 fn option_choices(option: &serde_json::Value) -> Vec<String> {
     // ACP implementations have used each of these names in the wild.  The
     // recursive walk also handles a JSON-schema `{schema: {enum: [...]}}`.
-    fn collect(value: &serde_json::Value, depth: usize, out: &mut Vec<String>) {
-        if depth > 4 {
-            return;
-        }
-        if let Some(values) = value.as_array() {
-            for item in values {
-                if let Some(choice) = response_string(item) {
-                    out.push(choice);
-                }
-            }
-            return;
-        }
-        let Some(object) = value.as_object() else {
-            return;
-        };
-        for key in [
-            "options",
-            "choices",
-            "values",
-            "available",
-            "enum",
-            "items",
-            "schema",
-            "optionValues",
-            "option_values",
-        ] {
-            if let Some(nested) = object.get(key) {
-                collect(nested, depth + 1, out);
-            }
-        }
-    }
-
+    // 递归骨架与 model.rs 的 P56/D1 machine-id 轨共享（collect_config_choice_values）；
+    // 本轨宽容提取后排序去重，键序对输出无影响——共享骨架输出逐字节等价（#261）。
     let mut values = Vec::new();
-    collect(option, 0, &mut values);
+    collect_config_choice_values(option, response_string, &mut values);
     values.sort();
     values.dedup();
     values
@@ -884,7 +844,7 @@ async fn create_session_slot(
 ) -> Result<SessionMapping, PylonError> {
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if sessions.len() >= crate::agent_runtime::SessionSlotPolicy::default().max_sessions {
+        if sessions.len() >= crate::agent::runtime::SessionSlotPolicy::default().max_sessions {
             return Err(PylonError::Protocol("max sessions reached".to_string()));
         }
     }
@@ -899,7 +859,8 @@ async fn create_session_slot(
             ));
         }
     }
-    // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 acp.rs 构造器 doc）——
+    // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 pylon-core
+    // agent_config/types.rs 的 McpServersMode doc）——
     // per-agent 协议配置解析，缺省 Always = 现状 wire；OmitIfEmpty 显式删键（v2 语义）。
     // B2：参数经 SessionNewPlan 纯函数成形（MCP 模式语义保持在 session_new_params）。
     let params = crate::acp::initialize_plan::build_session_new_plan(
@@ -974,9 +935,9 @@ async fn create_session_slot(
         source,
         session,
         false,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
-    let attached = crate::session_store::mark_attached_if_current(
+    let attached = crate::session::store::mark_attached_if_current(
         runtime, source, &peri_id, generation, generation,
     )
     .map_err(|error| PylonError::Protocol(error.to_string()))?;
@@ -1041,9 +1002,9 @@ pub(crate) async fn ensure_session_mapping(
         .cloned()
     {
         let unavailable = match health {
-            crate::agent_runtime::SessionBindingHealth::Attached { .. } => None,
-            crate::agent_runtime::SessionBindingHealth::Probing { .. } => Some("probing"),
-            crate::agent_runtime::SessionBindingHealth::Detached { .. } => Some("detached"),
+            crate::agent::runtime::SessionBindingHealth::Attached { .. } => None,
+            crate::agent::runtime::SessionBindingHealth::Probing { .. } => Some("probing"),
+            crate::agent::runtime::SessionBindingHealth::Detached { .. } => Some("detached"),
         };
         if let Some(health) = unavailable {
             return Err(PylonError::SessionBindingUnavailable {
@@ -1163,7 +1124,7 @@ async fn revive_session_slot(
     // provider 解析的 establishment_order（无 profile = 默认 resume→load→new，
     // 与旧行为一致）；广告侧 canonical 嵌套 object 优先、根级 alias 仅兼容表
     // 登记（load）生效。resume/load 任一不满足即跳过该通道，new 恒备。
-    let capability_snapshot = crate::acp::NegotiatedCapabilitySnapshot::capture(runtime)
+    let capability_snapshot = crate::acp::capture_negotiated_snapshot(runtime)
         .await
         .map_err(PylonError::Protocol)?;
     let establishment_channels = capability_snapshot
@@ -1328,9 +1289,9 @@ async fn revive_session_slot(
         source,
         session,
         true,
-        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
     )?;
-    let attached = crate::session_store::mark_attached_if_current(
+    let attached = crate::session::store::mark_attached_if_current(
         runtime,
         source,
         &revived_peri_id,

@@ -1,7 +1,7 @@
 //! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；C1：值内容脱敏 + markdown 注入转义；
 //! R21：脱敏实现统一到 crate::sanitize，此处 re-export 保持调用面）。
 
-use crate::agent_runtime::session_mapping_matches;
+use crate::agent::runtime::session_mapping_matches;
 use crate::error::PylonError;
 use crate::AppState;
 
@@ -191,9 +191,11 @@ pub(crate) async fn export_session(
     }
     drop(sessions);
     if replay.metadata.truncated {
-        return Err(PylonError::ReplayTruncated {
-            dropped_count: replay.metadata.dropped_count,
-        });
+        return Err(PylonError::Storage(
+            pylon_session::SessionError::ReplayTruncated {
+                dropped_count: replay.metadata.dropped_count,
+            },
+        ));
     }
     let messages = replay.events;
     let safe_messages = sanitize_export_messages(&messages);

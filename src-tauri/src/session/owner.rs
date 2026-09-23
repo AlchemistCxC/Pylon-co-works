@@ -37,52 +37,9 @@ use crate::runtime::{AgentRuntime, AgentRuntimeManager};
 /// SQLite durable identity. Unlike [`SessionOwner`], all three dimensions are
 /// required because persisted state must never be recovered by remote ACP id or
 /// by a source that is only unique inside one runtime.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DurableSessionOwner {
-    pub(crate) profile_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) local_session_id: String,
-}
-
-impl DurableSessionOwner {
-    pub(crate) fn new(
-        profile_id: impl Into<String>,
-        agent_id: impl Into<String>,
-        local_session_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            profile_id: profile_id.into(),
-            agent_id: agent_id.into(),
-            local_session_id: local_session_id.into(),
-        }
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), PylonError> {
-        for (field, value) in [
-            ("profileId", self.profile_id.as_str()),
-            ("agentId", self.agent_id.as_str()),
-            ("localSessionId", self.local_session_id.as_str()),
-        ] {
-            if value.trim().is_empty() {
-                return Err(PylonError::from(format!(
-                    "durable session owner {field} must be non-empty"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn key(&self) -> Result<String, PylonError> {
-        self.validate()?;
-        serde_json::to_string(&[
-            self.profile_id.as_str(),
-            self.agent_id.as_str(),
-            self.local_session_id.as_str(),
-        ])
-        .map_err(PylonError::from)
-    }
-}
+// #247：DurableSessionOwner（纯 serde 值类型）下沉 pylon-session，重导出保活本模块内
+// 与 crate::session:: 调用点的既有路径；owner 解析（AppState/锁面）仍在本文件。
+pub use pylon_session::DurableSessionOwner;
 
 /// A 版 OwnerKey：agentId + source（localSessionId）必填；profileId 可选声明维
 /// （语义见模块 doc）。`as_context_key()` 与既有 `AgentContextKey`（runtime.rs）互转。

@@ -103,7 +103,9 @@ export function reduceCanonicalMessageEvent(
       return appendMessage({ messages, sequence: state.sequence }, {
         id: `user-${sequence}`,
         role: 'user',
-        sender: event.owner.localSessionId,
+        // #253②：sender 用角色标签而非 owner 键——localSessionId（local:{id}）是内部
+        // 路由标识，不应出现在消息元数据里；归属已由 agentId/owner 承载。
+        sender: 'user',
         content: text,
         time: formatTime(event),
         agentId: event.owner.agentId,
@@ -143,7 +145,9 @@ export function reduceCanonicalMessageEvent(
       return appendMessage({ messages: state.messages, sequence: state.sequence }, {
         id: `${role === 'assistant' ? 'msg' : 'thought'}-${sequence}`,
         role,
-        sender: 'peri',
+        // #253②：'peri' 是 Peri 单 Agent 时代的硬编码遗物，任何 provider 的
+        // assistant/reasoning 行都标 peri；归位为角色标签，Agent 归属看 agentId。
+        sender: 'assistant',
         content: text,
         time: formatTime(event),
         running: false,

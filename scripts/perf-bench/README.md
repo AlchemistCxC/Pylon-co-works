@@ -24,8 +24,8 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `ms中位` | 每 case 预热 1 轮（JIT / wasm 装载 / 引擎首载不进样本）后，`PERF_ROUNDS` 轮取中位 |
 | `ms最小` | 无干扰地板。与中位拉得开说明本轮采样被外部负载污染，这一行不可信 |
 | `工作量` | 这次 run 处理的量纲总量（字符 / 拍 / 事件 / 块） |
-| `单位成本` | `中位耗时 / 工作量`。**跨机器、跨输入规模只有这一列可比**。工作量 < 32 时报 `—`：低于这个量级时「一次调用的固定开销」（过界 + 编组，实测 5–30µs）会主导读数，算出来的是噪声 |
-| `核线性Δ` | 本次 run 的**单次**调用把计算核 `WebAssembly.Memory` 高水位抬高多少字节。确定性、与 GC 无关。**只涨不跌** ⇒ 为 0 表示该 case 没有抬到新高水位，不是「不占内存」；某些行会因为**一次性资产注册**而偏大（见下） |
+| `单位成本` | `中位耗时 / 工作量`。**跨机器、跨输入规模只有这一列可比**。工作量低于门槛时报 `—`：低于门槛时「一次调用的固定开销」会主导读数，算出来的是噪声。门槛**按 pair 声明**（缺省 32）——wasm 出口的固定开销是「过界 + 一次编组」（5–30µs），而前端 Lezer 高亮实测 ~1.6ms/次（量级差 50 倍），故后者在 `markdownHighlightSuite.ts` 里自报 16000 字符 |
+| `核线性Δ` | 本次 run 的**单次**调用把计算核 `WebAssembly.Memory` 高水位抬高多少字节。确定性、与 GC 无关。**只涨不跌** ⇒ 为 0 表示该 case 没有抬到新高水位，不是「不占内存」 |
 
 两点**别读错**：
 
@@ -33,9 +33,11 @@ PERF_SCALE=s bun scripts/perf-bench.mts
    pair/case 的 `note`（表下方「脚注」）说明哪一截不在读数里——例如高亮不含
    `codeHighlight.ts` 的结果缓存与 #221 的视口降级/帧预算调度，markdown 解析不含
    `markdownRenderModel` 的 LRU 与 graft。
-2. **一次性资产注册会落在「第一个用到它的 case」头上。** `pylon-markdown` 的 tmLanguage
-   语法是**按语言懒注册**的（实测数 MB–数十 MB/语言），所以每种语言的**首行**会显示一次大 Δ——
-   那是资产注册，不是该 case 的每调用占用。`engine-warmup` 那一行是把 ts 的那笔单独隔离出来。
+2. **#241 起高亮已不在 wasm**（迁到前端 Lezer），因此 `markdown-highlight` 全列的 `核线性Δ`
+   **恒为 0**——这是设计结果，不是漏测。同理它也不再有「语法资产按语言懒注册」那种一次性大 Δ：
+   那条曾把 `pylon-markdown` 的 tmLanguage（每语言数 MB–数十 MB）记在每种语言的首行上，
+   随语法机器一并退役。现在 `engine-warmup` 那一行量的是 Lezer 引擎的**懒装载**（JS 侧堆内存，
+   计算核看不见，所以 Δ 同样是 0）。
 
 ## 域与接线点
 
@@ -44,13 +46,13 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `streaming-split` | `splitStreamingMarkdownBlockEnds` / `splitOpenCodeFenceTail` | `src/renderers/solid-workbench/chat/MarkdownContent.solid.tsx:85` / `:193` |
 | `streaming-reveal` | `StreamingRevealEngine` | `src/renderers/solid-workbench/streamingDisplayScheduler.ts:4` |
 | `markdown-parse` | `parseMarkdown` | `src/renderers/solid-workbench/chat/markdownRenderModel.ts:7,494` |
-| `markdown-highlight` | `highlightBlock` | `src/components/chat/codeHighlight.ts:91` |
+| `markdown-highlight` | `highlightBlockWithLezer`（Lezer，纯 JS；**不经 wasm**） | `src/components/chat/codeHighlight.ts:76` |
 | `projector` | `projectWorkbench` | `src/domains/workbench/workbenchProjector.ts:444` |
 | `events` | `normalizeRawEvent` | `src/domains/events/canonicalNormalizer.ts:196` |
 
-**没接线的 not in the table.** 两个计算核的**当前**真实导出共 **11 个**（`pylon-compute` 6 + `pylon-markdown` 5，`initSync` 除外）：**接线 5 个**（正是上表里 5 个 wasm 路径），**未接线 6 个** —— 三个被 #220 ends 出口取代的旧切分出口、两个 `*Json` 编组变体、`markdownEngineVersion` 诊断出口。
+**没接线的 not in the table.** 两个计算核的**当前**真实导出共 **9 个**（`pylon-compute` 6 + `pylon-markdown` 3，`initSync` 除外）：**接线 4 个**（正是上表里 4 个 wasm 路径），**未接线 5 个** —— 三个被 #220 ends 出口取代的旧切分出口、`parseMarkdownJson` 编组变体、`markdownEngineVersion` 诊断出口。
 
-（原第 12 个是 wasm 的 `scopeForLanguage`：生产走 `codeHighlight.ts:46` 的同名 TS 同步语言门，且实测逐次调用比 TS 表慢约 **18×** ⇒ 已按 #236 删除，不在此列。）
+（另有两个出口已**离开导出面**，故不在此列：`scopeForLanguage` 按 #236 删除——生产走 `codeHighlight.ts` 的同名 TS 同步语言门，且实测逐次调用比 TS 表慢约 **18×**；`highlightBlock` / `highlightBlockJson` 按 #241 删除——高亮整体迁出 wasm 到前端 Lezer。**「不在导出面上」与「在但没接线」是两件事。**）
 
 它们不进基准，但**连理由一起打印在表尾**（`index.ts` 的 `EXCLUDED_WASM_EXITS`）：**排除本身是结论，得能被人核。**
 别只按 parity 脚手架的 `REQUIRED_EXPORTS` 数——那只是 `pylon-compute` 的一半，且不含 `pylon-markdown`。
@@ -64,7 +66,7 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `index.ts` | 域注册表 + **排除清单**（每个被排除的出口与理由） |
 | `suites/streamingSuite.ts` | 切分/揭示：**直接复用 parity 套件的 case 定义**（`pair.wasm` 就是生产出口），按白名单挑已接线的 pair |
 | `suites/markdownParseSuite.ts` | markdown 解析：形状语料放大到 ~4k 字符 + 规模档 + 生产流式短尾 + 逐帧增长 |
-| `suites/markdownHighlightSuite.ts` | 高亮：语言语料 + 巨块档 + 语言资产注册隔离行 |
+| `suites/markdownHighlightSuite.ts` | 高亮：语言语料 + 巨块档。**#241 起量的是 Lezer（`highlightBlockWithLezer`），不走计算核** |
 | `suites/projectorSuite.ts` | 投影折叠：delta 流 / 混合流 / 乱序覆盖 |
 | `suites/eventsSuite.ts` | 单帧归一：delta 流 / 完整回合 / 真机捕获载荷 / 畸形 |
 | `fixtures/envelopes.ts` | projector 的 envelope 生成器（出处 `fa4aab5d^:scripts/compute-parity/fixtures/envelopes.ts`） |
@@ -75,7 +77,7 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | 借用物 | 出处 |
 |---|---|
 | 切分/揭示的 case 定义与语料 | `scripts/compute-parity/{suites,fixtures}/`（仍在树上，parity 门禁也用） |
-| markdown / highlight 语料 | `scripts/compute-parity/fixtures/corpora.ts` |
+| markdown / highlight 语料 | `scripts/compute-parity/fixtures/corpora.ts`（highlight 语料现喂给 Lezer） |
 | markdown 的「生产流式形状」case 构造（`tailOf` / `growingFrames`） | `66671b92^:scripts/compute-parity/suites/markdownParseSuite.ts` |
 | projector 的 envelope 生成器 | `fa4aab5d^:scripts/compute-parity/fixtures/envelopes.ts` |
 | events 的 wire 形状 | `src/__tests__/replay/harness.ts` 的 `raw*()` + 真机捕获 JSON |

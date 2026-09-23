@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::acp::{self, PromptWaitOutcome};
+use crate::agent::runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::agent_config::AgentDef;
-use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
@@ -50,49 +50,49 @@ pub(crate) use persist::*;
 // retention_policy/canonical_events；v9 已删除 messages/send_attempts/message_migrations）。
 // I14-W1：service 化——MessageService/DTO/MessageError 经本层 re-export 供 AppState
 // 注入与命令层使用；MsgRepo 的 Connection 保持私有（只暴露 service 与 DTO）。
-mod msg_repo;
+// #247：msg_repo/event_repo/turn_rollup/retention/user_data/persistence_bootstrap
+// 存储核下沉 pylon-session crate；模块重导出保活 crate::session:: 既有路径。
 pub(crate) use msg_repo::*;
+pub use pylon_session::msg_repo;
 // I13-A-FE-02：消息历史保留策略契约（模式/档位/默认值/回退语义；不含删除逻辑）。
-mod retention;
+pub use pylon_session::retention;
 // I14-W5：用户数据仓库（versioned Profile/Session/activeProfileId，与消息同库 user_data 表；
 // 独立连接 + busy_timeout，service/DTO/错误经本层 re-export 供 AppState 与命令层使用）。
-mod user_data;
+pub use pylon_session::user_data;
 pub(crate) use user_data::*;
 // M3 EVT-02：canonical 事件仓库（方案书 §5.10——append-only 事件流；与消息同库
 // canonical_events 表 v6；独立连接 + busy_timeout；service/DTO/错误经本层 re-export）。
-mod event_repo;
 pub(crate) use event_repo::*;
+pub use pylon_session::event_repo;
 // #81 L2/L3：turn 单元行构建（kernel 终结时追加）与 L3 裁剪校验。
-mod turn_rollup;
 // Kernel persistence readiness barrier：三个同库 service 作为一个启动单元安装，
 // setup 返回前全部 ready；禁止半初始化与备用历史权威。
-mod persistence_bootstrap;
 pub(crate) use persistence_bootstrap::*;
+pub use pylon_session::persistence_bootstrap;
 // M4 DEL-01：现有 schema/tombstone owner 化审计（方案书 §5.12——表/索引/FK/owner 缺口
 // 基线固化；只审计不迁移，DEL-02 升版时本基线断言必须同步演进）。
-#[cfg(test)]
-mod del01_schema_audit;
 // M4 DEL-02：tombstone 升级 owner/deletion state 迁移与写路径测试（方案书 §5.12——
 // v6→v7 兼容迁移 + delete_session 写 owner_key/state/deletion_revision 完整 tombstone）。
-#[cfg(test)]
-mod del02_tombstone_migration;
 // M4 DEL-03：本地优先删除事务测试（方案书 §5.13——OwnerKey 校验、deleting→deleted
 // 两阶段状态机、deleting tombstone 同样 gate 迟到写、finalize/重复 begin 幂等）。
 #[cfg(test)]
 mod del03_local_first_delete;
 // M4 DEL-05：wire 错误码矩阵测试（方案书 §5.13/B1.2——MessageError/UserDataError/EventError
 // 的 {code,message} 稳定序列化 + 删除后迟到 evt_append wire code=event_session_deleted）。
-#[cfg(test)]
-mod del05_error_code_matrix;
 // #155 T2：存储写入基准（v15 vs v14 形态的 WAL/占用/空闲页数值证据）。
 #[cfg(test)]
 mod revive_tests;
-#[cfg(test)]
-mod storage_write_bench;
 // #97：模型选择器切换闭环 wire 级集成测试（真实广告 config id、发送前拒绝、
 // 钳制收敛、session/load 复活零 selector RPC）。
 #[cfg(test)]
 mod model_switch_wire_tests;
+
+// #245：原 crate 根的 session_store.rs 与两个兄弟测试模块就近归入。
+#[cfg(test)]
+mod session_expiry_platform_tests;
+#[cfg(test)]
+mod session_info_tests;
+pub(crate) mod store;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
@@ -205,7 +205,7 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
     ) -> crate::agent_config::AcpProtocolConfig {
         self.agent_for_runtime(runtime)
-            .map(|agent| crate::hermes_runtime::effective_protocol(&agent))
+            .map(|agent| crate::hermes::runtime::effective_protocol(&agent))
             .unwrap_or_default()
     }
 
@@ -339,7 +339,7 @@ impl AppState {
         let generation = self.current_generation(runtime);
         // 方案 8 步骤 5：snapshot 锁内 clone、锁外组装（SessionStore 纪律）。
         let sessions =
-            crate::session_store::snapshot(runtime).map_err(|error| error.to_string())?;
+            crate::session::store::snapshot(runtime).map_err(|error| error.to_string())?;
         let matches: Vec<(String, String)> = sessions
             .iter()
             .filter(|(_, session)| session.peri_id == peri_id && session.generation == generation)
@@ -375,7 +375,7 @@ impl AppState {
     ) -> Result<T, String> {
         self.ensure_generation(runtime, generation)?;
         // 方案 8：委托 SessionStore（(peri_id, generation) 匹配 + 锁序纪律）。
-        crate::session_store::update_if_current(runtime, source, peri_id, generation, update)
+        crate::session::store::update_if_current(runtime, source, peri_id, generation, update)
             .map_err(|e| e.to_string())
     }
 
@@ -399,7 +399,7 @@ impl AppState {
         generation: u64,
     ) -> Result<bool, String> {
         // 方案 8：委托 SessionStore（匹配删除 + 锁外 prompt 锁收敛）。
-        crate::session_store::remove_if_current(runtime, source, peri_id, generation)
+        crate::session::store::remove_if_current(runtime, source, peri_id, generation)
             .map_err(|e| e.to_string())
     }
 
@@ -452,7 +452,7 @@ impl AppState {
             agent_id,
             start_status,
             log_action,
-            crate::agent_runtime::SessionContinuity::Invalidated,
+            crate::agent::runtime::SessionContinuity::Invalidated,
             true,
         )
         .await
@@ -487,9 +487,9 @@ impl AppState {
             .cloned()
             .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let continuity = if matches!(status, AgentLifecycleStatus::Crashed) {
-            crate::agent_runtime::SessionContinuity::Unknown
+            crate::agent::runtime::SessionContinuity::Unknown
         } else {
-            crate::agent_runtime::SessionContinuity::Invalidated
+            crate::agent::runtime::SessionContinuity::Invalidated
         };
         let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
         // 双检查：拿到生命周期锁后重查（防并发连接）
@@ -642,18 +642,8 @@ pub(crate) async fn delete_session_core(
     Ok(())
 }
 
-/// DEL-03（§5.13 步骤 1）：命令层 owner_key 校验——Some 时校验格式（3 元素 JSON 数组），
-/// 非法 → `UserDataError::InvalidOwnerKey`（B1.2 code=invalid_owner_key，前端可分支）；
-/// None（legacy 调用）直接放行，走会话作用域 legacy owner。
-pub(crate) fn validate_delete_owner(
-    owner_key: Option<String>,
-) -> Result<Option<String>, UserDataError> {
-    if let Some(ref key) = owner_key {
-        crate::session::msg_repo::validate_owner_key(key)
-            .map_err(|error| UserDataError::InvalidOwnerKey(error.to_string()))?;
-    }
-    Ok(owner_key)
-}
+// #247：validate_delete_owner 随存储核下沉 pylon-session::msg_repo，经上方
+// `pub(crate) use msg_repo::*` 重导出，宿主调用点零改动。
 
 #[tauri::command]
 pub(crate) async fn user_session_delete(
@@ -1688,7 +1678,7 @@ gateway:
         );
         assert!(matches!(
             runtime.binding_health.lock().unwrap().get("source-a"),
-            Some(crate::agent_runtime::SessionBindingHealth::Detached {
+            Some(crate::agent::runtime::SessionBindingHealth::Detached {
                 retryable: false,
                 ..
             })
@@ -1721,7 +1711,7 @@ gateway:
     #[tokio::test]
     async fn probing_binding_is_rejected_by_the_backend_send_gate() {
         let runtime = AgentRuntime::new_disconnected();
-        crate::session_store::insert(
+        crate::session::store::insert(
             &runtime,
             "source-a",
             SessionInfo::new("peri-1".into(), String::new(), ".".into(), true, 4),
@@ -1731,7 +1721,7 @@ gateway:
         .unwrap();
         runtime.binding_health.lock().unwrap().insert(
             "source-a".into(),
-            crate::agent_runtime::SessionBindingHealth::Probing {
+            crate::agent::runtime::SessionBindingHealth::Probing {
                 from_generation: 4,
                 target_generation: 5,
             },

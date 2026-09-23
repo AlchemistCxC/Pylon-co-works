@@ -3,7 +3,7 @@ import type { ContentBlock } from '../../infrastructure/acp/chatContracts.ts'
 import { normalizeToolStatus, toolStatePresentation, type ToolVisualState } from '../../domains/tool/status.ts'
 import { toolIdFromMessage } from '../../domains/tool/id.ts'
 import { truncateToWidth } from '../../utils/textWidth.ts'
-import { buildToolRenderModel, type ToolAction, type ToolKind, type ToolResolution } from '../../domains/tool/toolPresentation.ts'
+import { buildToolRenderModel, countNonEmptyLines, type ToolAction, type ToolKind, type ToolResolution } from '../../domains/tool/toolPresentation.ts'
 import type { DiffPayload } from '../../domains/tool/diffPresentation.ts'
 import { getAgentInstance } from '../../domains/agent/agentRegistry.ts'
 
@@ -66,8 +66,7 @@ function collectToolOutput(output: string | undefined, blocks: readonly ContentB
 }
 
 function outputLineCount(output: string): number {
-  if (!output) return 0
-  return output.split('\n').filter(line => line.trim().length > 0).length
+  return countNonEmptyLines(output)
 }
 
 /**

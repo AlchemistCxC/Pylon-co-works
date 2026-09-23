@@ -242,7 +242,7 @@ function snapshot(name, records) {
       // overloaded 终态关闭连接并记录 gap 计数。静默 drop-on-full 已废除。
       backpressure: "bounded-spill-then-overload-terminal",
       evidence:
-        "acp::engine::tests::inbox_full_spills_then_delivers_every_frame_in_order + spill_overflow_terminates_connection_with_explicit_overload",
+        "engine::tests::inbox_full_spills_then_delivers_every_frame_in_order + spill_overflow_terminates_connection_with_explicit_overload",
     },
     traceBytes,
     memoryBound: traceBytes <= 4 * 1024 * 1024,
@@ -255,24 +255,26 @@ function runBackpressureCheck() {
   // 匹配 0 个测试的情况也退出 0，因此这里的测试名必须与源码同步维护
   // （名字失效 = 探针假绿），两个测试分别锁定「spill 续投不丢帧」与
   // 「溢出显式过载终态」两半契约。
+  // #247 起协议引擎核抽至 `pylon-acp` crate——`acp::engine::tests::*` 只在
+  // pylon-acp 自己的 lib 测试里存在（glob 重导出带不出依赖 crate 的
+  // cfg(test) 模块），探针随之改指 `-p pylon-acp`；`--features test-agent`
+  // 是主 crate 的 P5 门面 feature，与此二测试无关，不再传递。
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
   const tests = [
-    "acp::engine::tests::inbox_full_spills_then_delivers_every_frame_in_order",
-    "acp::engine::tests::spill_overflow_terminates_connection_with_explicit_overload",
+    "engine::tests::inbox_full_spills_then_delivers_every_frame_in_order",
+    "engine::tests::spill_overflow_terminates_connection_with_explicit_overload",
   ];
   let elapsedMs = 0;
   let stdout = "";
   let stderr = "";
-  // #184：--features test-agent 与 fixture/rust-test job 对齐指纹（同 run 内
-  // 不再因 feature 翻转触发重编）。
   for (const name of tests) {
     const result = run(cargo, [
       "test",
       "--manifest-path",
       "src-tauri/Cargo.toml",
+      "-p",
+      "pylon-acp",
       "--lib",
-      "--features",
-      "test-agent",
       name,
       "--",
       "--exact",
@@ -353,9 +355,12 @@ const backpressure = runBackpressureCheck();
 if (backpressure.status !== 0)
   fail("backpressure behavior check failed", backpressure.stdout + backpressure.stderr);
 
-const clientSource = readFileSync(resolve(root, "src-tauri/src/acp/client.rs"), "utf8");
+// #247 抽取后 ACP 核驻 `pylon-acp` crate：A1c legacy 守卫对准现址读 client.rs，
+// legacy 三文件在新旧两处均不得存在（防旧栈借抽取复活）。
+const clientSource = readFileSync(resolve(root, "src-tauri/pylon-acp/src/client.rs"), "utf8");
 const legacyFiles = ["transport.rs", "jsonrpc.rs", "request_id.rs"].filter((name) =>
-  existsSync(resolve(root, "src-tauri/src/acp", name)),
+  existsSync(resolve(root, "src-tauri/pylon-acp/src", name))
+    || existsSync(resolve(root, "src-tauri/src/acp", name)),
 );
 if (legacyFiles.length > 0) fail("A1c legacy ACP files still exist", legacyFiles.join(", "));
 if (clientSource
