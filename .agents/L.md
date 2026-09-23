@@ -700,6 +700,24 @@
 ---
 
 
+[2026-09-23 22:30] [Riemann] [#266 · 遗留② 发送按钮边框/图标色改自由选色]
+
+**开工：#266 同类补充（① 的续做，同分支 `feat/cc-widget-free-colors`）** —— 把 `sendButtonBorderColor`（边框）与 `sendButtonIconColor`（图标）从白/黑/灰枚举改成自由选色。施工单 `E:\Acode\FILES\任务\工作台优化\元件定义表\16-施工单-发送按钮颜色改自由选色.md`。★ 命门 = 等价色**不是**纯白纯黑（边框 white→`rgba(255,255,255,.5)` 半透明、black→`rgba(0,0,0,.5)`；图标 white→`#ffffff`、gray→`rgba(0,0,0,.5)`、black→`#000000`）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（`sendButtonBorderColor` / `sendButtonIconColor` 两行 `S(...)` → `C(...)` + 默认取等价色）
+- `src/domains/theme/migration.ts`（① 建的枚举映射表改成**按字段**查表（同名 `white` 在不同字段等价色不同）+ 映射这两键 + 改掉 :88 那句"仍是枚举"的注释）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（**仅** 630-631 两行：去掉枚举→颜色的转换，直接传字段值）
+- `src/zones/factory/{gui-cc,terminal-cc}.ts`（出厂数据 12 处 `"white"` 按字段换等价色）
+- 测试：`src/domains/theme/__tests__/ccControlColorFreePick.test.ts`（"不越界"改"也自由色" + 头部第 3 条说明）、`src/renderers/solid-workbench/__tests__/mountSolidControlCenterPreview.solid.test.tsx`（默认值/改值改等价色字面量）
+- 契约快照 `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（脚本重拍，不手改）
+- 文档：`.agents/records/266-cc-widget-free-colors.md`（追加）、本文件
+
+**我不碰**：`sendButtonColor`（已是自由色）、`sendButtonRadius` / 图标形状圆角那几项（非颜色，保持枚举）、① 已改的 6 个字段、`src/domains/cc/widgetDefinitions.ts`（发送按钮无属性面板表单）、中控结构/布局、`ControlCenter.css`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
+
+---
+
 [2026-09-23 22] [Riemann] [#266 · 遗留① 控件底色/文字色改自由选色]
 
 **开工：#266 第①项（控件底色/文字色从「白/黑枚举」改成自由选色）。** 施工单 `E:\Acode\FILES\任务\工作台优化\元件定义表\13-施工单-控件改自由选色.md`；分支 `feat/cc-widget-free-colors`（从 `main@d360f9b0` 开）。口径：属性声明一律走值（颜色即字段值）；不做「深色」那一层（不给出厂深色预设填值、不动呈现方案、不动 `uiScheme`）。
