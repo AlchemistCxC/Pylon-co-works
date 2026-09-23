@@ -233,12 +233,83 @@
 2. **`statusBg` 时代留下的同类问题**：刀5A 删的三个 cc 字段也没有走 `REMOVED_CC_THEME_KEYS`，
    老数据里同样靠 `partialize` 白名单修剪。本刀沿用同一处置。若将来要把"已删字段"统一进迁移清键，
    是本刀与刀5A 共同的欠账（不影响行为，只影响老 localStorage 的残留键）。
-3. **编辑态面板的现场实机未做**（本会话在应用内找不到「进入布局编辑器」的入口：标题栏「界面与设置」
-   → 「外观」进的是模板库，工作区 sheet 里也未出现该按钮；`ccEditMode` 是 meta 字段，
-   手写 localStorage 会被忽略）⇒ 以**组件级 DOM 断言 + 产物核对**替代，并在此如实标注为**未现场目视**。
-   若需现场确认，可按下条路径：应用内打开「设置」sheet → 外观分区 → 「进入布局编辑器」。
+3. ~~**编辑态面板的现场实机未做**~~ → ✅ **2026-09-23 补验已完成，见文末「补验」一节**。
+   原路径判断有误：入口不在「外观/模板库」那侧，而在 **设置 sheet → 左侧分区导航「中控台」→ 分组「布局编辑」**
+   里的按钮「进入布局编辑器」（源码 `src/components/Settings.tsx` 的 `case 'cc'` 分支，走 `store.setCcEditMode`）。
 4. **`ccScale` 的 legacy 值不再被改名**：老数据里若存在 `ccScale.send`，它不会被改成 `cc-send-button`
    —— 但该字段已被整体忽略，**无行为后果**（下次写盘随键一起被修剪）。记此以免后来者误判为回归。
+
+---
+
+## 补验（2026-09-23 追加；只做现场确认 + 一条文档，**未动代码、未新增断言**）
+
+> 触发：刀7 收口时唯一没目视的用户可见改动 = **编辑态属性面板里不再有「缩放」**。
+> 提交：L.md 声明 `c4690401`；本轮文档提交见 `git log`（`SKILL.md` + 本节）。
+
+## 1. 现场实机（编辑态面板）
+
+**入口**（上一轮找不到的原因）：**设置 sheet → 左侧分区导航「中控台」→ 最下方分组「布局编辑」→ 按钮「进入布局编辑器」**。
+不是标题栏「界面与设置 → 外观」那一侧（那条进的是**模板库**，`SETTINGS_SECTION_LABELS.templates`）。
+点该按钮即 `useStore.setCcEditMode(true)` 并关闭设置 sheet。
+
+**取证**（普通 `cargo build` 二进制 + WebView2 调试端点；本次为确认唯一性，先重新跑过
+`bun run build` + `cargo build`，二进制时间戳 13:03，dist 里 `控件缩放` / `set-cc-scale` 命中数 **0**）：
+
+```
+进入编辑器后：
+  .control-center 类名 = "solid-workbench-control-center-slot control-center cc-editing cc-variant-glass"
+  工具栏 chips = 7：● 输入栏 / ● 模型 / ● 思考强度 / ● 权限模式 / ● 用量 / ● 命令行提示 / ＋ 发送按钮
+
+选中「模型」（点工具栏 chip「模型」）⇒ 属性面板（标题「模型」）：
+  面板字段共 10 项，**前三项正是布局三项**：
+    顺序（aria=控件顺序，值 5）/ 水平微调（值 0 px）/ 垂直微调（值 0 px）
+    + 模型那 7 项 schema 字段（模型切换方式 / 模型背景色 / 模型宽度 / 模型高度 / 模型圆角 / 模型字号 / 模型文字颜色）
+  ★ `document.querySelectorAll('[aria-label="控件缩放"]').length` = **0**
+  ★ 面板子树里**没有任何**文本为「缩放」的叶子节点（`panelHasScaleWord = false`）
+
+选中「用量」（= 缩放原先唯一真正作用的那个元件）⇒ 属性面板（标题「用量」）：
+  面板字段恰好 **3 项**：顺序 / 水平微调 / 垂直微调      ★ 同样 `控件缩放` = 0
+  （用量自己没有外观字段，所以面板就只有这三项 —— 与刀7 前的形状相比只少了「缩放」一行）
+
+退出编辑器（工具栏「退出编辑」）后：
+  工具栏消失、属性面板消失、中控回到常态：
+  元件 = input / model / reasoning / mode / tokens / cc-command-hint（6 件）
+  `.cc-widget-separator` = 0、面板/工具栏均不在 DOM
+```
+
+**截图证据**：`C:\Users\Elysita\.zcode\cli\artifacts\sess_eeecd554-9323-4a31-971b-5013fc84743a\call_00_ZG8WgP0p9r6SBeihxXt94281-tool-result-3cb9eab5-0715-4da8-9224-ba5a4cc2f3ab.png`
+（左侧属性面板「用量」= 布局 顺序/水平微调/垂直微调 三行、**无「缩放」行**、底部「退出自定义」；
+中部编辑工具栏 7 个 chip + 重置位置/退出编辑；底部中控本体与用量胶囊）
+
+**本轮控制台**：只有那条与本刀无关的 `切换 Agent失败`（`openOwnedSessionTransaction`，本环境无 Agent runtime），
+无 CSS / 渲染类报错。
+
+## 2. 收尾与状态复原
+
+- 关掉 Pylon、释放调试端口（`tasklist` 无 `pylon.exe`）。
+- ★ **发现并复原一处遗留**：本轮启动时界面模式是 **`modern-gui`**（`pylon-interface-mode` 持久值同），
+  主题值也已被换成 GUI 那套（`inputMode=default` / `inputVariant=composer` / `footerLayout=peri` / `cliHintMode=hidden`）
+  —— 这不是刀7 的产品行为，而是**上一轮实机验收切换界面模式时留下的**（上一轮结束时我核对的是主题值、没核对
+  `pylon-interface-mode` 这个键，两者当时不一致）。
+  ⇒ 本轮已切回 **「经典终端」** 并逐项核对，现为用户原本的那套：
+  ```
+  persistedInterfaceMode = terminal-like ；app data-interface-mode = terminal-like
+  inputMode=cli / inputVariant=cli / footerLayout=free / cliHintMode=compact /
+  ccHintFontSize=16 / ccHeight=109 / ccHidden=['cc-send-button','attach'] / modelFontSize=12 /
+  appliedPreset 全 'claude' / ccScale 键 = KEY_ABSENT（刀7 后不再落盘）
+  中控 6 件（含命令行提示）；用量胶囊内联字号 12px
+  ```
+  （与刀5B 记录的用户基准逐项一致。）★ 教训记在这里：**验收改过界面模式之后，要同时核 `pylon-theme` 与
+  `pylon-interface-mode` 两个键**，只核主题值会漏。
+
+## 3. 同轮补的文档
+
+- `.agents/skills/webview2-acceptance/SKILL.md` 坑清单新增一条：
+  **渲染器层（`src/renderers/**`）的类型检查只在 `check:solid`（`tsc -p tsconfig.solid.json`），
+  `bun run build` 的 `tsc -b` 不覆盖它** —— 刀7 实测那处 `ccScale` 类型错误 `tsc -b` EXIT=0、`check:solid` 红。
+  ⇒ 动过 `src/renderers/**` 必须跑 `check:solid`。
+- 本节（追加进刀7 记录，未新开文件）。
+
 
 ## 并行交集
 
