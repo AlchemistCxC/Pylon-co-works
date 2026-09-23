@@ -3296,19 +3296,115 @@
               {
                 "children": [
                   {
-                    "type": "text",
-                    "value": "^1"
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "1"
+                      }
+                    ],
+                    "properties": {
+                      "dataFootnoteRef": true,
+                      "href": "#user-content-fn-1",
+                      "id": "user-content-fnref-1"
+                    },
+                    "tagName": "a",
+                    "type": "element"
                   }
                 ],
                 "properties": {
-                  "href": "note"
+                  "ariaLabel": "Reference 1"
                 },
-                "tagName": "a",
+                "tagName": "sup",
                 "type": "element"
               }
             ],
             "properties": {},
             "tagName": "p",
+            "type": "element"
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "note"
+                          },
+                          {
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "↩"
+                              }
+                            ],
+                            "properties": {
+                              "ariaLabel": "Back to reference 1",
+                              "className": [
+                                "footnote-backref"
+                              ],
+                              "dataFootnoteBackref": true,
+                              "href": "#user-content-fnref-1"
+                            },
+                            "tagName": "a",
+                            "type": "element"
+                          }
+                        ],
+                        "properties": {},
+                        "tagName": "p",
+                        "type": "element"
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ],
+                    "properties": {
+                      "id": "user-content-fn-1"
+                    },
+                    "tagName": "li",
+                    "type": "element"
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ],
+                "properties": {},
+                "tagName": "ol",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ],
+            "properties": {
+              "className": [
+                "footnotes"
+              ],
+              "dataFootnotes": true
+            },
+            "tagName": "section",
             "type": "element"
           }
         ],
@@ -4830,6 +4926,547 @@
             ],
             "properties": {},
             "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-inline",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "动能 "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "E=mc^{2}"
+                  }
+                ],
+                "properties": {
+                  "className": [
+                    "math",
+                    "math-inline"
+                  ]
+                },
+                "tagName": "span",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": " 守恒"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-display-solo",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\nS=\\sum_{n=1}^{\\infty}\\frac{1}{n^{2}}=\\zeta(2)\n"
+              }
+            ],
+            "properties": {
+              "className": [
+                "math",
+                "math-display"
+              ]
+            },
+            "tagName": "div",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-display-single-line",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "a+b"
+              }
+            ],
+            "properties": {
+              "className": [
+                "math",
+                "math-display"
+              ]
+            },
+            "tagName": "div",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-display-mid-text",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "text "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "a+b"
+                  }
+                ],
+                "properties": {
+                  "className": [
+                    "math",
+                    "math-inline"
+                  ]
+                },
+                "tagName": "span",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": " more"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-adjacent-emphasis",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "x"
+                  }
+                ],
+                "properties": {
+                  "className": [
+                    "math",
+                    "math-inline"
+                  ]
+                },
+                "tagName": "span",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": " and "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "bold"
+                  }
+                ],
+                "properties": {},
+                "tagName": "strong",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": " "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "y^{2}"
+                  }
+                ],
+                "properties": {
+                  "className": [
+                    "math",
+                    "math-inline"
+                  ]
+                },
+                "tagName": "span",
+                "type": "element"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-with-escapes",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "50% and \\frac{a}{b}"
+                  }
+                ],
+                "properties": {
+                  "className": [
+                    "math",
+                    "math-inline"
+                  ]
+                },
+                "tagName": "span",
+                "type": "element"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "footnote-multi-ref",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "b"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "1"
+                      }
+                    ],
+                    "properties": {
+                      "dataFootnoteRef": true,
+                      "href": "#user-content-fn-1",
+                      "id": "user-content-fnref-1"
+                    },
+                    "tagName": "a",
+                    "type": "element"
+                  }
+                ],
+                "properties": {
+                  "ariaLabel": "Reference 1"
+                },
+                "tagName": "sup",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": " then a"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "2"
+                      }
+                    ],
+                    "properties": {
+                      "dataFootnoteRef": true,
+                      "href": "#user-content-fn-2",
+                      "id": "user-content-fnref-2"
+                    },
+                    "tagName": "a",
+                    "type": "element"
+                  }
+                ],
+                "properties": {
+                  "ariaLabel": "Reference 2"
+                },
+                "tagName": "sup",
+                "type": "element"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "more"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "1"
+                      }
+                    ],
+                    "properties": {
+                      "dataFootnoteRef": true,
+                      "href": "#user-content-fn-1",
+                      "id": "user-content-fnref-1-2"
+                    },
+                    "tagName": "a",
+                    "type": "element"
+                  }
+                ],
+                "properties": {
+                  "ariaLabel": "Reference 1"
+                },
+                "tagName": "sup",
+                "type": "element"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          },
+          {
+            "type": "text",
+            "value": "\n"
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "N"
+                          },
+                          {
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "↩"
+                              }
+                            ],
+                            "properties": {
+                              "ariaLabel": "Back to reference 1",
+                              "className": [
+                                "footnote-backref"
+                              ],
+                              "dataFootnoteBackref": true,
+                              "href": "#user-content-fnref-1"
+                            },
+                            "tagName": "a",
+                            "type": "element"
+                          }
+                        ],
+                        "properties": {},
+                        "tagName": "p",
+                        "type": "element"
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ],
+                    "properties": {
+                      "id": "user-content-fn-1"
+                    },
+                    "tagName": "li",
+                    "type": "element"
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  },
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      },
+                      {
+                        "children": [
+                          {
+                            "type": "text",
+                            "value": "O"
+                          },
+                          {
+                            "children": [
+                              {
+                                "type": "text",
+                                "value": "↩"
+                              }
+                            ],
+                            "properties": {
+                              "ariaLabel": "Back to reference 2",
+                              "className": [
+                                "footnote-backref"
+                              ],
+                              "dataFootnoteBackref": true,
+                              "href": "#user-content-fnref-2"
+                            },
+                            "tagName": "a",
+                            "type": "element"
+                          }
+                        ],
+                        "properties": {},
+                        "tagName": "p",
+                        "type": "element"
+                      },
+                      {
+                        "type": "text",
+                        "value": "\n"
+                      }
+                    ],
+                    "properties": {
+                      "id": "user-content-fn-2"
+                    },
+                    "tagName": "li",
+                    "type": "element"
+                  },
+                  {
+                    "type": "text",
+                    "value": "\n"
+                  }
+                ],
+                "properties": {},
+                "tagName": "ol",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ],
+            "properties": {
+              "className": [
+                "footnotes"
+              ],
+              "dataFootnotes": true
+            },
+            "tagName": "section",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "footnote-undefined-ref",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Hi[^ghost]"
+              }
+            ],
+            "properties": {},
+            "tagName": "p",
+            "type": "element"
+          }
+        ],
+        "type": "root"
+      }
+    },
+    {
+      "id": "math-in-blockquote",
+      "model": {
+        "children": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\n"
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "段内 "
+                  },
+                  {
+                    "children": [
+                      {
+                        "type": "text",
+                        "value": "E=mc^{2}"
+                      }
+                    ],
+                    "properties": {
+                      "className": [
+                        "math",
+                        "math-inline"
+                      ]
+                    },
+                    "tagName": "span",
+                    "type": "element"
+                  },
+                  {
+                    "type": "text",
+                    "value": " 引用"
+                  }
+                ],
+                "properties": {},
+                "tagName": "p",
+                "type": "element"
+              },
+              {
+                "type": "text",
+                "value": "\n"
+              }
+            ],
+            "properties": {},
+            "tagName": "blockquote",
             "type": "element"
           }
         ],

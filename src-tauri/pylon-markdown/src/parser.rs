@@ -26,47 +26,181 @@
 //! 刻意不做的映射（逐条在 parity 差异清单里过审）：
 //! - **HTML 节点直接丢弃**——remark-rehype 未开 `allowDangerousHtml` 时 html 节点
 //!   本来就不产出 hast 节点，两侧一致，不是差异。
-//! - **footnotes 不启用**——remark-gfm 的脚注 hast 形状（`#user-content-fn-*` 锚点、
-//!   文末 section 重排）与 comrak 的 AST 形状差异是结构性的，无法机械映射；
-//!   输入带脚注时两侧必然分叉，列入差异清单待裁决。
+//! - **footnotes 已启用**（#267 裁决，ADR-0021）——历史「刻意关闭」在此关闭：形状对齐
+//!   remark-gfm/rehype（`user-content-*` 锚点 + 文末 `section[data-footnotes]`），
+//!   旧差异清单的 footnote 分叉项随之收敛；corpus `footnote-probe` 转为锁定渲染形状。
+//! - **math 已启用**（#267，`math_dollars`）——remark-math 的 hast 形状：
+//!   行内 `span.math.math-inline`、显示 `div.math.math-display`，latex 作为唯一
+//!   文本子节点（comrak 不展开 latex 内容，语义一致）。`math_code` 不开（remark-math 无此物）。
 
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 use comrak::{parse_document, Arena, Options};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::model::{PropValue, RenderNode};
 
 /// GFM 扩展开关——与 remark-gfm 的默认特性集对齐：
-/// table / strikethrough / autolink / tasklist。
-/// footnotes 刻意关闭（见模块注释），superscript 等非 GFM 扩展不开。
+/// table / strikethrough / autolink / tasklist，另加 #267 的 math_dollars 与
+/// footnotes（二者均为 remark-gfm 面内的特性；superscript 等非 GFM 扩展不开）。
 fn gfm_options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
     options.extension.autolink = true;
     options.extension.tasklist = true;
+    options.extension.math_dollars = true;
+    options.extension.footnotes = true;
     options
 }
 
 /// markdown 文本 → 渲染模型。入口恒返回 `root` 节点（解析本身不失败，
 /// CommonMark 对任意输入都有定义；无 Result）。
+///
+/// 脚注两遍走树（#267）：第一遍按**文档序首引用**给名字编号（定义体位于
+/// root 子级尾部，其内部引用天然排在正文引用之后）；第二遍转换正文并按编号
+/// 在 root 末尾追加文末脚注节（有定义且被引用者才收）。
 pub fn parse_markdown(markdown: &str) -> RenderNode {
     let options = gfm_options();
     let arena = Arena::new();
     let root = parse_document(&arena, markdown, &options);
+    let mut footnotes = FootnoteNumbers::default();
+    let mut next = 0u32;
+    collect_footnote_numbers(root, &mut footnotes, &mut next);
+    let ctx = Context {
+        aligns: None,
+        tight_list: false,
+        footnotes: Some(Rc::new(footnotes)),
+    };
+    let mut children = convert_block_children(root, &ctx);
+    if let Some(section) = build_footnote_section(root, &ctx) {
+        children.push(section);
+    }
     // root 容器排版：只有子节点之间的 `"\n"` 分隔（无首尾——parity 实证）。
-    RenderNode::root(container_flow(
-        &convert_block_children(root, &Context::default()),
-        Wrap::Between,
+    RenderNode::root(container_flow(&children, Wrap::Between))
+}
+
+/// 脚注编号状态：name → 展示编号（首引用序，1 起）。`ref_counts` 供第二遍为
+/// 同名多次引用生成唯一锚 id（首次 `user-content-fnref-N`，后续 `-k` 后缀）。
+#[derive(Default)]
+struct FootnoteNumbers {
+    numbers: HashMap<String, u32>,
+    ref_counts: RefCell<HashMap<String, u32>>,
+}
+
+/// 第一遍：文档序（先序）收集「名字 → 展示编号」。
+fn collect_footnote_numbers<'a>(
+    node: &'a AstNode<'a>,
+    state: &mut FootnoteNumbers,
+    next: &mut u32,
+) {
+    if let NodeValue::FootnoteReference(reference) = &node.data().value {
+        state
+            .numbers
+            .entry(reference.name.clone())
+            .or_insert_with(|| {
+                *next += 1;
+                *next
+            });
+    }
+    for child in node.children() {
+        collect_footnote_numbers(child, state, next);
+    }
+}
+
+/// 找同名脚注定义（comrak 把定义作为 root 子级，名字唯一时恰一个）。
+fn find_footnote_definition<'a>(root: &'a AstNode<'a>, name: &str) -> Option<&'a AstNode<'a>> {
+    root.children().find(|child| {
+        matches!(
+            &child.data().value,
+            NodeValue::FootnoteDefinition(definition) if definition.name == name
+        )
+    })
+}
+
+/// 文末脚注节：`section[data-footnotes].footnotes > ol > li#user-content-fn-N`。
+/// 只收「有定义且被引用」的名字，按展示编号排序；未被引用的定义不收（与
+/// remark-rehype 一致——引用了未定义名字时引用仍渲染、节内无条目）。
+fn build_footnote_section<'a>(root: &'a AstNode<'a>, ctx: &Context) -> Option<RenderNode> {
+    let numbers = ctx.footnotes.as_ref()?;
+    let mut ordered: Vec<(u32, &String)> = numbers
+        .numbers
+        .iter()
+        .map(|(name, &number)| (number, name))
+        .collect();
+    ordered.sort();
+    let mut items = Vec::new();
+    for (number, name) in ordered {
+        let Some(definition) = find_footnote_definition(root, name) else {
+            continue;
+        };
+        let mut blocks = Vec::new();
+        for block in definition.children() {
+            blocks.extend(convert_block(block, ctx));
+        }
+        // 回链塞进最后一个块元素（通常是 p）的内容末尾——cmark-gfm/remark 同位。
+        let mut back_properties = std::collections::BTreeMap::new();
+        back_properties.insert(
+            "href".to_string(),
+            PropValue::str(format!("#user-content-fnref-{number}")),
+        );
+        back_properties.insert("dataFootnoteBackref".to_string(), PropValue::Bool(true));
+        back_properties.insert(
+            "className".to_string(),
+            PropValue::List(vec![PropValue::str("footnote-backref")]),
+        );
+        back_properties.insert(
+            "ariaLabel".to_string(),
+            PropValue::str(format!("Back to reference {number}")),
+        );
+        let backref = RenderNode::element_with("a", back_properties, vec![RenderNode::text("↩")]);
+        match blocks.last_mut() {
+            Some(RenderNode::Element { children, .. }) => children.push(backref),
+            _ => blocks.push(backref),
+        }
+        let mut li_properties = std::collections::BTreeMap::new();
+        li_properties.insert(
+            "id".to_string(),
+            PropValue::str(format!("user-content-fn-{number}")),
+        );
+        items.push(RenderNode::element_with(
+            "li",
+            li_properties,
+            container_flow(&blocks, Wrap::Around),
+        ));
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let mut section_properties = std::collections::BTreeMap::new();
+    section_properties.insert("dataFootnotes".to_string(), PropValue::Bool(true));
+    section_properties.insert(
+        "className".to_string(),
+        PropValue::List(vec![PropValue::str("footnotes")]),
+    );
+    Some(RenderNode::element_with(
+        "section",
+        section_properties,
+        container_flow(
+            &[RenderNode::element(
+                "ol",
+                container_flow(&items, Wrap::Around),
+            )],
+            Wrap::Around,
+        ),
     ))
 }
 
-/// 走树时需要下传的上下文：表格列对齐（TableCell 按列号取对齐）与
-/// 紧凑列表（Item 展平 Paragraph 用）。对齐列用 `Rc` 持有：走树深度不限，
-/// 与 comrak 节点借用完全解耦（children() 要求与 arena 同生命周期的借用）。
-#[derive(Clone, Default)]
+/// 走树时需要下传的上下文：表格列对齐（TableCell 按列号取对齐）、
+/// 紧凑列表（Item 展平 Paragraph 用）与脚注编号（#267，第一遍产物只读共享）。
+/// 对齐列用 `Rc` 持有：走树深度不限，与 comrak 节点借用完全解耦
+/// （children() 要求与 arena 同生命周期的借用）。
+#[derive(Clone)]
 struct Context {
     aligns: Option<std::rc::Rc<[TableAlignment]>>,
     tight_list: bool,
+    footnotes: Option<Rc<FootnoteNumbers>>,
 }
 
 /// 块级节点的**已拷贝**载荷判别——存在意义见模块注释「借用结构说明」。
@@ -130,7 +264,13 @@ fn convert_block<'a>(node: &'a AstNode<'a>, ctx: &Context) -> Vec<RenderNode> {
 
     // 第二步：data() 借用已释放，可自由遍历子树。
     match kind {
-        BlockKind::Paragraph => vec![RenderNode::element("p", convert_inline_children(node, ctx))],
+        BlockKind::Paragraph => match solo_display_math(node) {
+            // #267：整段只有一个显示公式（允许纯空白文本/软换行夹杂）时提升为
+            // 块级 `div.math-display`——对应 remark-math 的 flow math；其余一律
+            // 走行内路径（span）。
+            Some(latex) => vec![math_display_element(latex)],
+            None => vec![RenderNode::element("p", convert_inline_children(node, ctx))],
+        },
         BlockKind::Heading(level) => {
             let tag = format!("h{}", level.min(6));
             vec![RenderNode::element(tag, convert_inline_children(node, ctx))]
@@ -163,6 +303,7 @@ fn convert_block<'a>(node: &'a AstNode<'a>, ctx: &Context) -> Vec<RenderNode> {
             let item_ctx = Context {
                 aligns: ctx.aligns.clone(),
                 tight_list: tight,
+                footnotes: ctx.footnotes.clone(),
             };
             let mut items = Vec::new();
             for item in node.children() {
@@ -175,7 +316,7 @@ fn convert_block<'a>(node: &'a AstNode<'a>, ctx: &Context) -> Vec<RenderNode> {
             )]
         }
         BlockKind::Item { task } => render_list_item(node, ctx, task),
-        BlockKind::Table(aligns) => render_table(node, aligns),
+        BlockKind::Table(aligns) => render_table(node, aligns, ctx),
     }
 }
 
@@ -261,10 +402,12 @@ fn render_list_item<'a>(
 fn render_table<'a>(
     node: &'a AstNode<'a>,
     aligns: std::rc::Rc<[TableAlignment]>,
+    ctx: &Context,
 ) -> Vec<RenderNode> {
     let table_ctx = Context {
         aligns: Some(aligns.clone()),
         tight_list: false,
+        footnotes: ctx.footnotes.clone(),
     };
     let mut thead = Vec::new();
     let mut tbody = Vec::new();
@@ -319,6 +462,36 @@ fn render_table<'a>(
         "table",
         container_flow(&children, Wrap::Around),
     )]
+}
+
+/// #267：段落级显示公式提升判据——全部子节点中恰有一个 `display_math` 的
+/// Math 节点，其余只允许空白文本/软换行。返回该节点的 latex。
+fn solo_display_math<'a>(node: &'a AstNode<'a>) -> Option<String> {
+    let mut math: Option<String> = None;
+    for child in node.children() {
+        match &child.data().value {
+            NodeValue::Math(m) if m.display_math => {
+                if math.is_some() {
+                    return None;
+                }
+                math = Some(m.literal.clone());
+            }
+            NodeValue::Text(text) if text.trim().is_empty() => {}
+            NodeValue::SoftBreak => {}
+            _ => return None,
+        }
+    }
+    math
+}
+
+/// `div.math.math-display`，latex 为唯一文本子节点。
+fn math_display_element(latex: String) -> RenderNode {
+    let mut properties = std::collections::BTreeMap::new();
+    properties.insert(
+        "className".to_string(),
+        PropValue::List(vec![PropValue::str("math"), PropValue::str("math-display")]),
+    );
+    RenderNode::element_with("div", properties, vec![RenderNode::text(latex)])
 }
 
 /// 行内子树转换：核心是**文本合并缓冲**——mdast 的 text 节点横跨软换行
@@ -414,6 +587,65 @@ fn convert_inline_structured<'a>(node: &'a AstNode<'a>, ctx: &Context) -> Vec<Re
                     properties.insert("title".to_string(), PropValue::str(link.title.clone()));
                 }
                 return vec![RenderNode::element_with("img", properties, vec![])];
+            }
+            NodeValue::Math(math) => {
+                // #267：remark-math 的 hast 形状。comrak 的 Math 恒为行内节点
+                // （`$$` 也一样，见 comrak tests/math.rs），「整段纯显示公式」在
+                // 块级提升为 `div.math-display`（见 convert_block 的 Paragraph 臂）；
+                // 行内位置一律 `span.math-inline`（避免 div 落进 p 的非法嵌套）。
+                let mut properties = std::collections::BTreeMap::new();
+                properties.insert(
+                    "className".to_string(),
+                    PropValue::List(vec![PropValue::str("math"), PropValue::str("math-inline")]),
+                );
+                return vec![RenderNode::element_with(
+                    "span",
+                    properties,
+                    vec![RenderNode::text(math.literal.clone())],
+                )];
+            }
+            NodeValue::FootnoteReference(reference) => {
+                // #267：remark-gfm/rehype 形状——sup > a[href=#user-content-fn-N]。
+                // 编号来自第一遍首引用序；同名多次引用的锚 id 加 -k 后缀保唯一。
+                let Some(numbers) = &ctx.footnotes else {
+                    return Vec::new();
+                };
+                let Some(&number) = numbers.numbers.get(&reference.name) else {
+                    return Vec::new();
+                };
+                let occurrence = {
+                    let mut counts = numbers.ref_counts.borrow_mut();
+                    let count = counts.entry(reference.name.clone()).or_insert(0);
+                    *count += 1;
+                    *count
+                };
+                let reference_id = if occurrence == 1 {
+                    format!("user-content-fnref-{number}")
+                } else {
+                    format!("user-content-fnref-{number}-{occurrence}")
+                };
+                let mut anchor_properties = std::collections::BTreeMap::new();
+                anchor_properties.insert(
+                    "href".to_string(),
+                    PropValue::str(format!("#user-content-fn-{number}")),
+                );
+                anchor_properties.insert("id".to_string(), PropValue::str(reference_id));
+                anchor_properties.insert("dataFootnoteRef".to_string(), PropValue::Bool(true));
+                let anchor = RenderNode::element_with(
+                    "a",
+                    anchor_properties,
+                    vec![RenderNode::text(number.to_string())],
+                );
+                let mut sup_properties = std::collections::BTreeMap::new();
+                sup_properties.insert(
+                    "ariaLabel".to_string(),
+                    PropValue::str(format!("Reference {number}")),
+                );
+                return vec![RenderNode::element_with(
+                    "sup",
+                    sup_properties,
+                    vec![anchor],
+                )];
             }
             _ => None,
         }
@@ -694,5 +926,126 @@ mod tests {
         assert_eq!(children[0]["tagName"], "p");
         let model = parse("~~gone~~");
         assert_eq!(model["children"][0]["children"][0]["tagName"], "del");
+    }
+
+    /// #267 行内数学：`span.math.math-inline`，latex 为唯一文本子节点。
+    #[test]
+    fn inline_math_is_span_with_latex_text() {
+        let model = parse("动力 $f(x)=x^{2}$ 的导数");
+        let children = model["children"][0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0]["value"], "动力 ");
+        assert_eq!(children[1]["tagName"], "span");
+        assert_eq!(children[1]["properties"]["className"][0], "math");
+        assert_eq!(children[1]["properties"]["className"][1], "math-inline");
+        assert_eq!(children[1]["children"][0]["value"], "f(x)=x^{2}");
+        assert_eq!(children[2]["value"], " 的导数");
+    }
+
+    /// #267 显示数学：`div.math.math-display`（顶层块）。literal 具体是否含
+    /// 界内换行随 comrak，断言只锁 tagName/class 与 latex 内容存在。
+    #[test]
+    fn display_math_is_div_with_latex_text() {
+        let model = parse("$$\nS=\\sum_{n=1}^{\\infty}\\frac{1}{n^{2}}\n$$");
+        let block = &model["children"][0];
+        assert_eq!(block["tagName"], "div");
+        assert_eq!(block["properties"]["className"][0], "math");
+        assert_eq!(block["properties"]["className"][1], "math-display");
+        let latex = block["children"][0]["value"].as_str().unwrap();
+        assert!(latex.contains("S=\\sum"), "latex 原文保留: {latex:?}");
+    }
+
+    /// #267 脚注：引用 → `sup > a[data-footnote-ref]`（首引用锚无后缀），
+    /// 文末 `section[data-footnotes].footnotes > ol > li#user-content-fn-1`，
+    /// 回链塞进定义末块（p）内容尾。
+    #[test]
+    fn footnote_reference_definition_and_section() {
+        let model = parse("Hi[^1]\n\n[^1]: A greeting.");
+        let children = model["children"].as_array().unwrap();
+        // 正文段落 + "\n" + section
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0]["tagName"], "p");
+        let sup = &children[0]["children"][1];
+        assert_eq!(sup["tagName"], "sup");
+        assert_eq!(sup["children"][0]["tagName"], "a");
+        assert_eq!(
+            sup["children"][0]["properties"]["href"],
+            "#user-content-fn-1"
+        );
+        assert_eq!(
+            sup["children"][0]["properties"]["id"],
+            "user-content-fnref-1"
+        );
+        assert_eq!(sup["children"][0]["properties"]["dataFootnoteRef"], true);
+        assert_eq!(sup["children"][0]["children"][0]["value"], "1");
+
+        let section = &children[2];
+        assert_eq!(section["tagName"], "section");
+        assert_eq!(section["properties"]["dataFootnotes"], true);
+        assert_eq!(section["properties"]["className"][0], "footnotes");
+        let ol = &section["children"][1];
+        assert_eq!(ol["tagName"], "ol");
+        let li = &ol["children"][1];
+        assert_eq!(li["properties"]["id"], "user-content-fn-1");
+        let p = &li["children"][1];
+        assert_eq!(p["tagName"], "p");
+        let backref = &p["children"][1];
+        assert_eq!(backref["tagName"], "a");
+        assert_eq!(backref["properties"]["href"], "#user-content-fnref-1");
+        assert_eq!(backref["properties"]["dataFootnoteBackref"], true);
+        assert_eq!(backref["properties"]["className"][0], "footnote-backref");
+        assert_eq!(backref["children"][0]["value"], "↩");
+    }
+
+    /// #267 编号与多引：编号按**首引用序**；同名二次引用锚加 `-2` 后缀；
+    /// 回链恒指首引用锚。
+    #[test]
+    fn footnote_numbering_follows_first_reference_order() {
+        let model = parse("b[^note] then a[^other]\n\nmore[^note]\n\n[^note]: N\n[^other]: O");
+        let children = model["children"].as_array().unwrap();
+        let first = &children[0]["children"][1];
+        assert_eq!(
+            first["children"][0]["properties"]["href"],
+            "#user-content-fn-1"
+        );
+        assert_eq!(first["children"][0]["children"][0]["value"], "1");
+        let second = &children[0]["children"][3];
+        assert_eq!(
+            second["children"][0]["properties"]["href"],
+            "#user-content-fn-2"
+        );
+        assert_eq!(second["children"][0]["children"][0]["value"], "2");
+        // 第二段的重复引用：编号仍 1，锚 id 带 -2 后缀
+        let repeat = &children[2]["children"][1];
+        assert_eq!(
+            repeat["children"][0]["properties"]["id"],
+            "user-content-fnref-1-2"
+        );
+        // section 内两个 li 的 id 顺序 = 编号序
+        let ol = &children[4]["children"][1];
+        assert_eq!(ol["children"][1]["properties"]["id"], "user-content-fn-1");
+        assert_eq!(ol["children"][3]["properties"]["id"], "user-content-fn-2");
+    }
+
+    /// #267 引用了未定义的名字：comrak/remark-gfm 同语义——不产引用节点，
+    /// 保持字面文本 `[^ghost]`（内容不丢）。
+    #[test]
+    fn footnote_without_definition_stays_literal() {
+        let model = parse("Hi[^ghost]");
+        let children = model["children"][0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0]["value"], "Hi[^ghost]");
+    }
+
+    /// #267 行中 `$$…$$`：不提升（div 落进 p 是非法嵌套），保持行内 span。
+    #[test]
+    fn display_math_mid_text_stays_inline_span() {
+        let model = parse("text $$a+b$$ more");
+        let children = model["children"][0]["children"].as_array().unwrap();
+        assert_eq!(children[0]["value"], "text ");
+        assert_eq!(children[1]["tagName"], "span");
+        assert_eq!(children[1]["properties"]["className"][1], "math-inline");
+        assert_eq!(children[1]["children"][0]["value"], "a+b");
+        assert_eq!(children[2]["value"], " more");
     }
 }

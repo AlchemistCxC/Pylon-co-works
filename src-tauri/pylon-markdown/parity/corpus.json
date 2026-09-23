@@ -468,6 +468,42 @@
     {
       "id": "emoji-zwj",
       "input": "👨‍👩‍👧‍👦 家族"
+    },
+    {
+      "id": "math-inline",
+      "input": "动能 $E=mc^{2}$ 守恒"
+    },
+    {
+      "id": "math-display-solo",
+      "input": "$$\nS=\\sum_{n=1}^{\\infty}\\frac{1}{n^{2}}=\\zeta(2)\n$$"
+    },
+    {
+      "id": "math-display-single-line",
+      "input": "$$a+b$$"
+    },
+    {
+      "id": "math-display-mid-text",
+      "input": "text $$a+b$$ more"
+    },
+    {
+      "id": "math-adjacent-emphasis",
+      "input": "$x$ and **bold** $y^{2}$"
+    },
+    {
+      "id": "math-with-escapes",
+      "input": "$50% and \\frac{a}{b}$"
+    },
+    {
+      "id": "footnote-multi-ref",
+      "input": "b[^note] then a[^other]\n\nmore[^note]\n\n[^note]: N\n[^other]: O"
+    },
+    {
+      "id": "footnote-undefined-ref",
+      "input": "Hi[^ghost]"
+    },
+    {
+      "id": "math-in-blockquote",
+      "input": "> 段内 $E=mc^{2}$ 引用"
     }
   ]
 }
