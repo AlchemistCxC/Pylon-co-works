@@ -778,3 +778,15 @@
 [2026-09-24 05] [Miyaki Kumo] [CI 转绿修复]
 
 **CI run 35894284095 四 job 红的修复（根因 + 接管声明）**：全部红收敛于 `mathRender.solid.tsx`——① `issue267.mathCache.test.ts`（主 tsconfig React 检查）import 该组件文件拖进 React JSX 语义 → TS2322 ×3（Rust 三 job 的前端构建前置连带全灭）；② 该文件 24 行死赋值 eslint 红。**修复**：纯函数 `renderMathMarkup` 拆入**新增** `mathMarkup.ts`；组件文件只留 MathRender；**恢复 #272 会话工作树内未提交的 mathCache 测试删除**并改导入指向纯模块（测试保住，缓存语义零变化）；顺带登记 #269 `startupTiming.ts` 直发 allowlist（CI 前序红修复后会暴露的下一处红）。详见 `.agents/records/2026-09-24-ci-green-math-render-split.md`。**文件域**：`src/renderers/solid-workbench/chat/{mathMarkup.ts(新),mathRender.solid.tsx,issue267.mathCache.test.ts}`、`scripts/check-runtime-boundaries.mts`、`.agents/records/2026-09-24-ci-green-*.md`、本文件。#267/#272 会话若对 mathCache 测试删除另有意图请对表。
+
+---
+
+[2026-09-24 06] [Miyaki Kumo] [#252]
+
+**开工：issue252（File 工作台默认只读预览——显式「编辑」才进编辑态；编辑态脏时退出加确认丢弃）。** spec 见 `.agents/spec/252-file-workbench-default-readonly.md`。分支沿用 `kumo/prometheus`。文件域（请勿改写、勿连带提交）：
+
+- `src/sheets/file/FileViewHost.tsx`（默认态 + 退出编辑确认/丢弃）
+- `src/sheets/file/__tests__/FileViewHost.test.tsx`、`FileViewHost.save.test.tsx`、`FileSheetView.integration.test.tsx`（契约跟随，逐条登记）
+- 文档：`.agents/records/252-*.md`（完工时新增）、本文件
+
+**我不碰**：`src/sheets/file/FileTabView.tsx`（只读/编辑双模式语义已参数化，零改动）、`FileCodeEditor.tsx`、`DispatchBar.tsx`（发令栏本就与编辑态解耦，读路径特性保留）、`FileSheetView.tsx`（导航层脏守卫已完备）、中控区、预设系统、他人在途域。全程 pathspec 提交。
