@@ -715,5 +715,7 @@
 
 **我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（属性面板读取点 528 行不动）、`ControlCenter.css`、`src/themeFieldDefs.ts`、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
 
+**✅ 进展（本地完工，未 push 未开 PR）**：主任务（删三条 `showIf` + 删成员层 4 条判明声明 + 从类型删 `field` 变体）与顺手补丁（权限语义色四条补槽位前缀）均已落地，四笔提交（`82035c1c` / `575edb7b` / `7ab66605` / `9a6f784f`）。门禁五步全绿、全量 **632 文件 / 4796 用例连跑 2 次**；实机四档数值 + 属性面板两模式 + 设置页 77/77 均已取证（记录 `.agents/records/266-cc-drop-conditional-hiding.md`）；#266 已回写。★ **本条目保留至合入**。
+
 ---
 
