@@ -699,3 +699,23 @@
 
 ---
 
+
+[2026-09-23 22] [Riemann] [#266 · 遗留① 控件底色/文字色改自由选色]
+
+**开工：#266 第①项（控件底色/文字色从「白/黑枚举」改成自由选色）。** 施工单 `E:\Acode\FILES\任务\工作台优化\元件定义表\13-施工单-控件改自由选色.md`；分支 `feat/cc-widget-free-colors`（从 `main@d360f9b0` 开）。口径：属性声明一律走值（颜色即字段值）；不做「深色」那一层（不给出厂深色预设填值、不动呈现方案、不动 `uiScheme`）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（6 个字段 `S(枚举)` → `C(自由色)` + 默认值）
+- `src/domains/theme/migration.ts`（老枚举值 → 等价颜色的归一化，挂在每次读盘路径 `normalizeThemeValues` 上，幂等、仅这 6 个字段）
+- `src/domains/cc/widgetDefinitions.ts`（**仅** 三个 `propertyFields` 里那 6 项 `kind:'chips'` → `'color'`，及 `CcColorPropertyKey`/`CcStringPropertyKey` 两个类型别名）
+- `src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（三组控件的 `bg()`/`fg()` 改直读颜色）
+- ★ **`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 仅 `renderBody` 的 `tokens`（用量胶囊）样式两行** —— 单子 §1 点名「用量胶囊借用模型字段（会跟着一起变）」，而那两行仍是「枚举→颜色」映射，不改则胶囊不跟模型（属单子 #3「消费端改直读颜色」的同一类改动；**除此之外本文件一字不动**）
+- `src/zones/factory/{gui-cc,terminal-cc}.ts`（出厂数据等价颜色替换，仅这 6 个字段共 36 行）
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`、`src/domains/theme/__tests__/{themeFieldCopy,themeSchemaV8Backfill}.test.ts`、`src/renderers/solid-workbench/input/__tests__/WorkbenchWidgets.solid.test.tsx`（单子逐条点名）、**新增** `src/domains/theme/__tests__/ccControlColorFreePick.test.ts`（「老数据等价 + 幂等」断言，单子 §3-2/§3-5 要求的反向验证靶子）
+- 契约快照 `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（脚本重拍，不手改）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：中控结构/布局/定义表行、`ccVariant`/`ccScale`（已删）、呈现方案结构、`uiScheme`、`sendButtonBorderColor`/`sendButtonIconColor`（仍是枚举，不属这 6 个字段）、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域（#241 Lezer 线、README/BOARD 无关项）。全程 pathspec 提交。
+
+---
