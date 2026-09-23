@@ -699,20 +699,21 @@
 
 ---
 
-[2026-09-23 18] [Nashorn] [#266 · 成员级显隐收编]
+[2026-09-23 23] [Riemann] [#266 · 撤掉「按条件隐藏」（口径已改，取代原「成员级显隐收编」条目）]
 
-**开工：#266（成员 `visibility` 声明写了没人读 ⇒ 让它生效，并把重复的显隐条件收到子部件上）。** 施工单 `任务/工作台优化/元件定义表/14-施工单-成员级显隐收编.md`；分支 `refactor/cc-member-visibility`（从 `main@d360f9b0` 开，旧同名空分支直接沿用）。开工前核对阶段先起一条临时探针跑读数，核对结论可能触发单子 §4 停手条件。
+**开工：#266 主体（⑷）——撤掉「按条件判明该不该显示」这一类做法，相关项一律常态显示。** 施工单已按用户 2026-09-23 口径改写：`任务/工作台优化/元件定义表/14-施工单-撤掉按条件隐藏.md`（**原「成员级显隐收编」方向作废**，含上一条 21:20 的停手结论）。分支 `refactor/cc-member-visibility`（从 `main@d360f9b0` 开）。**同一会话并入用户指定的顺手补丁**：修「权限语义色被通用规则覆写」的存量 CSS 缺陷。
 
 **我方本轮文件域（请勿改写、勿连带提交）**：
 
-- `src/themeFieldDefs.ts`（成员可见性派生，与 `CC_MEMBER_FIELDS` 同处）
-- `src/domains/cc/widgetDefinitions.ts`（**仅** `input` 行 `propertyFields` 里那三条 `cliLine*` 的 `showIf`）
-- `src/domains/cc/__tests__/`（新增断言文件；既有测试不改）
+- `src/domains/cc/widgetDefinitions.ts`（删 `input.propertyFields` 三条 `cliLine*` 的 `showIf`；删成员层 4 条 `{kind:'field'}` 显隐声明；`CcMemberVisibility` 删 `field` 变体 + 类型注释按「不构成显隐门」改写）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（两条断言按新口径改写）
+- `src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`（新增「属性面板两模式均渲染命令行边框三项」断言）
+- `src/domains/cc/__tests__/ccSettingsGrouping.test.ts`（新增「设置页 cc 区两模式同为 77 项」断言）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css`（四条语义色规则补槽位作用域前缀）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css`（**仅**槽位段那条解释「谁更specific」的注释同步，零规则改动）
 - 文档：`.agents/records/`、本文件
 
-**我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 与 `ControlCenter.css`（中控本体渲染/样式）、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
-
-**⏸ 停手待分流（2026-09-23 21:20）**：开工前核对触发施工单 §4-1 —— 那三条 `cliLine*` 的 `showIf` **不在** `themeFieldDefs.ts`，真身在 `widgetDefinitions.ts:261-263` 的 `input.propertyFields`（属性面板）；设置页侧这三个字段**本来没有条件**。实测：设置页 cc 区在 cli / 标准两模式下均渲染 **77 项、差集为空** ⇒ 若让成员门在设置页生效，标准模式下会新藏 **6 项**（`cliPromptColor`、`cliLineWidth/Color/Padding`、`cliHintMode`、`ccHintFontSize`），与单子「可见行为零变化 / 逐项一致 / 差集必须为空」互斥。已停手，未改任何源码，等口径。探针（一次性）已删，工作树干净。
+**我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（属性面板读取点 528 行不动）、`ControlCenter.css`、`src/themeFieldDefs.ts`、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
 
 ---
 
