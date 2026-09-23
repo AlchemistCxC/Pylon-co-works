@@ -267,11 +267,14 @@ export const THEME_FIELD_DEFS = {
   inputPlaceholder: { ...C('cc', '占位提示颜色'), default: 'rgba(0,0,0,0.28)', group: '输入框本体', cssVar: '--cc-input-placeholder' },
   sendButtonColor: { ...C('cc', '发送按钮颜色'), default: '#000000', group: '按钮本体', noCssVar: true },
   sendButtonRadius: { ...S('cc', '发送按钮圆角', ['0', '0.25', '0.33', '0.5']), optionLabels: { '0': '直角', '0.25': '四分之一', '0.33': '三分之一', '0.5': '圆形' }, default: '0.5', group: '按钮本体', noCssVar: true },
-  sendButtonBorderColor: { ...S('cc', '发送按钮边框', ['white', 'black']), optionLabels: { white: '纯白', black: '纯黑' }, default: 'white', group: '按钮本体', noCssVar: true },
+  // ★ #266 遗留②：发送按钮的边框色 / 图标色（下方隔两行）也改自由选色 ⇒ 默认值取**等价色**，
+  //   不是"纯白/纯黑"：边框原来白档就是**半透明** `rgba(255,255,255,.5)`（旧渲染侧翻出来的），
+  //   顺手写成 `#fff` 会让边框静默变实心。老枚举字面量由读盘归一化搬（`domains/theme/migration.ts`）。
+  sendButtonBorderColor: { ...C('cc', '发送按钮边框'), default: 'rgba(255,255,255,.5)', group: '按钮本体', noCssVar: true },
   sendButtonIcon: { ...S('cc', '图标形状', ['arrow', 'triangle', 'double-arrow']), optionLabels: { arrow: '箭头', triangle: '三角', 'double-arrow': '双箭头' }, default: 'arrow', group: '图标层', noCssVar: true },
   sendButtonIconGenerating: { ...S('cc', '生成中图标', ['square', 'cross']), optionLabels: { square: '方块', cross: '叉' }, default: 'square', group: '图标层', noCssVar: true },
   sendButtonIconRound: { ...S('cc', '图标圆角', ['on', 'off']), optionLabels: { on: '圆角', off: '直角' }, default: 'on', group: '图标层', noCssVar: true },
-  sendButtonIconColor: { ...S('cc', '图标颜色', ['white', 'gray', 'black']), optionLabels: { white: '纯白', gray: '50 灰', black: '纯黑' }, default: 'white', group: '图标层', noCssVar: true },
+  sendButtonIconColor: { ...C('cc', '图标颜色'), default: '#ffffff', group: '图标层', noCssVar: true },
   inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入框本体", semanticRole: 'stroke.default', semanticSource: true },
   inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入框本体", semanticRole: 'state.focusRing', semanticSource: true },
   inputBorder: { ...C('cc', '输入栏边框色'), default: 'transparent', group: '输入框本体', cssVar: '--cc-input-border' },

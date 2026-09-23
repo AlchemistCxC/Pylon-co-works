@@ -13,8 +13,9 @@ import { PRESET_ZONES } from '../presetReducer.ts'
  * 1. **等价**：老数据经读盘归一化后，**画出来的颜色**与改造前逐项相同（不是字面量相同 ——
  *    `#fff` 与 `#ffffff` 是同一个色）；
  * 2. **幂等**：归一化再跑一遍不变（颜色值不是枚举字面量，第二次不会被再翻译一次）；
- * 3. **不越界**：`sendButtonBorderColor` / `sendButtonIconColor` 是**同名枚举但仍是枚举**，
- *    不许被这条映射顺手改掉；用户已经设过的任意颜色与空串原样穿过。
+ * 3. **遗留② 同口径**：`sendButtonBorderColor` / `sendButtonIconColor`（发送按钮的边框色 / 图标色）
+ *    也走**同一条**映射 ⇒ 等价色**按字段取**（边框白档是**半透明** `rgba(255,255,255,.5)`，
+ *    图标白档是纯白 `#ffffff`）；用户已经设过的任意颜色与空串原样穿过。
  */
 
 const defaults = {
@@ -55,8 +56,10 @@ const newShownPermissionText = (value: string): string | undefined => value || u
 /**
  * 让**浏览器自己**把颜色规范化后再比 —— 比的是「画出来的色」，不是「字符串写得一样」。
  * 非法值会被 CSS 丢掉（返回空串），与真实渲染行为一致（权限文字色留空走的就是这条路）。
+ *
+ * ★ `borderColor` / `stroke` 供遗留②的发送按钮字段用（边框走 `border-color`、图标走 `stroke`）。
  */
-function asCssColor(property: 'background' | 'color', value: string | undefined): string {
+function asCssColor(property: 'background' | 'color' | 'borderColor' | 'stroke', value: string | undefined): string {
   const probe = document.createElement('div')
   if (value !== undefined) probe.style[property] = value
   return probe.style[property]
@@ -130,19 +133,109 @@ describe('#266 遗留① · 老枚举 ⇒ 等价颜色（读盘归一化）', ()
     }
   })
 
-  it('不越界：仍是枚举的字段不被顺手改掉，用户已设的任意颜色原样穿过', () => {
+  it('不越界：用户已设的任意颜色与空串原样穿过', () => {
     const aligned = align({
       ...LEGACY_ENUM_VALUES,
-      sendButtonBorderColor: 'black',
-      sendButtonIconColor: 'white',
       modelBgColor: '#ff0000',
       modelTextColor: 'rgba(1,2,3,.4)',
       permissionTextColor: '#00ff00',
+      sendButtonBorderColor: 'rgba(10,20,30,.25)',
+      sendButtonIconColor: '',
     })
-    expect(aligned.sendButtonBorderColor).toBe('black')
-    expect(aligned.sendButtonIconColor).toBe('white')
     expect(aligned.modelBgColor).toBe('#ff0000')
     expect(aligned.modelTextColor).toBe('rgba(1,2,3,.4)')
     expect(aligned.permissionTextColor).toBe('#00ff00')
+    expect(aligned.sendButtonBorderColor).toBe('rgba(10,20,30,.25)')
+    expect(aligned.sendButtonIconColor).toBe('')
+  })
+})
+
+/**
+ * ★ #266 遗留②：发送按钮的边框色 / 图标色同样由枚举改自由选色。
+ *
+ * 等价色**按字段取**，与遗留①的"白 → 纯白"不同：边框的白档在旧渲染里是**半透明**
+ * `rgba(255,255,255,.5)`（`ControlCenter.solid.tsx` 的枚举→CSS 变量那一步），黑档同样半透明；
+ * 图标则白 `#ffffff`、灰 `rgba(0,0,0,.5)`、黑 `#000000`。写成 `#fff`/`#000` 会让边框**静默变实心**。
+ */
+const LEGACY_SEND_ENUM_VALUES = {
+  sendButtonBorderColor: 'white',
+  sendButtonIconColor: 'white',
+} as const
+
+type SendColorKey = keyof typeof LEGACY_SEND_ENUM_VALUES
+
+/** 改造前这两个字段的全部枚举档（用来覆盖"半透明"与"三档图标色"）。 */
+const LEGACY_SEND_ALL_ENUMS: Readonly<Record<SendColorKey, readonly string[]>> = {
+  sendButtonBorderColor: ['white', 'black'],
+  sendButtonIconColor: ['white', 'gray', 'black'],
+}
+
+/**
+ * 改造前消费端的取值 —— ★ 原样照抄旧实现（`ControlCenter.solid.tsx` 去枚举那两行）。
+ * 旧实现已在本刀删除，这份副本是"老数据画出来什么颜色"的对照臂。
+ */
+const legacySendRaw = (key: SendColorKey, enumValue: string): string => key === 'sendButtonBorderColor'
+  ? (enumValue === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)')
+  : (enumValue === 'black' ? '#000' : enumValue === 'gray' ? 'rgba(0,0,0,.5)' : '#fff')
+
+/** 这两个字段的渲染色落到哪个属性：边框走 `border-color`，图标走 `stroke`（`fill` 同一个变量）。 */
+const sendCssPropertyOf = (key: SendColorKey): 'borderColor' | 'stroke' =>
+  key === 'sendButtonBorderColor' ? 'borderColor' : 'stroke'
+
+/** 改造前的渲染色 / 改造后的渲染色（改造后 = 直读字段值）。 */
+const oldSendRendered = (key: SendColorKey, enumValue: string): string =>
+  asCssColor(sendCssPropertyOf(key), legacySendRaw(key, enumValue))
+const newSendRendered = (key: SendColorKey, value: string): string =>
+  asCssColor(sendCssPropertyOf(key), value)
+
+describe('#266 遗留② · 发送按钮边框/图标色 ⇒ 等价颜色（读盘归一化）', () => {
+  it('两个字段的枚举字面量被搬成等价颜色（默认档）', () => {
+    const aligned = align({ ...LEGACY_SEND_ENUM_VALUES })
+    expect({
+      sendButtonBorderColor: aligned.sendButtonBorderColor,
+      sendButtonIconColor: aligned.sendButtonIconColor,
+    }).toEqual({
+      sendButtonBorderColor: 'rgba(255,255,255,.5)',
+      sendButtonIconColor: '#ffffff',
+    })
+  })
+
+  it('★ 等价性：归一化后画出来的颜色与改造前逐档相同', () => {
+    for (const key of Object.keys(LEGACY_SEND_ALL_ENUMS) as SendColorKey[]) {
+      for (const enumValue of LEGACY_SEND_ALL_ENUMS[key]) {
+        const aligned = align({ [key]: enumValue })
+        // 对照臂本身必须是**有效色**（非空）——否则下面的相等断言会退化成 `'' === ''` 的空断言
+        expect(oldSendRendered(key, enumValue), `${key} 老枚举 ${enumValue} 的对照臂应能解析成色`).not.toBe('')
+        expect(
+          { [key]: newSendRendered(key, aligned[key]) },
+          `${key}：老枚举 ${enumValue} 画出来应是同一个色`,
+        ).toEqual({ [key]: oldSendRendered(key, enumValue) })
+      }
+    }
+  })
+
+  it('★ 半透明那一档没丢：边框白档仍是 rgba(255,255,255,.5)，不是纯白', () => {
+    const aligned = align({ sendButtonBorderColor: 'white' })
+    expect(asCssColor('borderColor', aligned.sendButtonBorderColor)).toBe('rgba(255, 255, 255, 0.5)')
+    expect(asCssColor('borderColor', aligned.sendButtonBorderColor))
+      .not.toBe(asCssColor('borderColor', '#fff'))
+    const black = align({ sendButtonBorderColor: 'black' })
+    expect(asCssColor('borderColor', black.sendButtonBorderColor)).toBe('rgba(0, 0, 0, 0.5)')
+  })
+
+  it('老数据缺这两个键 ⇒ 补新默认值，画出来的颜色仍与改造前相同', () => {
+    const aligned = align({})
+    for (const key of Object.keys(LEGACY_SEND_ENUM_VALUES) as SendColorKey[]) {
+      expect({ [key]: newSendRendered(key, aligned[key]) }, `${key} 的默认值应等价`)
+        .toEqual({ [key]: oldSendRendered(key, LEGACY_SEND_ENUM_VALUES[key]) })
+    }
+  })
+
+  it('幂等：归一化连跑两次结果相同', () => {
+    const once = align({ ...LEGACY_SEND_ENUM_VALUES })
+    const twice = align({ ...once })
+    for (const key of Object.keys(LEGACY_SEND_ENUM_VALUES) as SendColorKey[]) {
+      expect(twice[key], `${key} 第二次应原样`).toBe(once[key])
+    }
   })
 })
