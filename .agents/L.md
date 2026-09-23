@@ -836,3 +836,15 @@
 ---
 [2026-09-24] [Codex-Aster] [AgentSheet terminal-like 视觉重构]
 范围：AgentSheet 左右栏展示组件、对应 workspace/shell CSS、工作区/Profile/宠物/会话设置视觉、验收与记录。保持所有业务及插件契约、预设数据、布局宽度与折叠语义。避开 #276 Markdown 文件域。共享树当前有他人在途改动，依 §2.1 暂不 merge/stage/commit；本声明暂未提交。
+
+---
+
+[2026-09-24 11] [Miyaki Kumo] [#279]
+
+**开工:issue279(前端 shell 逐梯队 Solid 化第 0~3 梯队,ADR-0023)。隔离工作树 `D:/pylon-solidify-wt`,分支 `kumo/solidify`(基于 78a75a36)——共享树不受影响,本条目随分支提交。** 文件域(请勿在共享树改写以下路径):
+
+- 删除:`src/components/chat/` 孤儿(MessageRenderBoundary/CollapsibleRegion/MessageSearchBar/SpinnerGlimpse/useToolConnectors 等,逐个核实零消费者)
+- 新增/改写:`src/sheets/**`(.solid.tsx 实体 + 薄桥)、`src/sheets/SolidMount.tsx`、`src/workspace-sheets/**`(第 3 梯队 chrome)、`vite.config.ts`/`vitest.config.ts`(solid 编译模式扩展)、`.agents/{decisions,records,spec}/279*`
+- 文档:`docs/说明书/` 如涉模块表述同步
+
+**我不碰**:`src/renderers/solid-workbench/**`、`src-tauri/**`、插件契约、sheet 注册表契约、中控区、预设系统、他人在途域。全程 pathspec 提交。
