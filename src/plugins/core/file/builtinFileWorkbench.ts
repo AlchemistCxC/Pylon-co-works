@@ -17,12 +17,18 @@ const ViewsActivity = lazy(() => views().then(module => ({ default: module.Views
 const FileViewHost = lazy(() => import('../../../sheets/file/FileViewHost.tsx'))
 const client = createWorkspaceClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
 
+/** 0-A4：FileSheet 可读/可编辑上限——与后端 MAX_PREVIEW_BYTES（1MB）对齐。 */
+export const FILE_SHEET_MAX_READ_BYTES = 1024 * 1024
+
 export const builtinFileProvider = {
   id: 'builtin.file.workspace-provider', canHandle: () => true,
   // createWorkspaceClient 已完成 wire → WorkspaceEntry 归一化；这里不能再次按 wire
   // 形状归一化，否则 name/relativePath 已变成 label/path 后会被全部过滤为空。
   listEntries: async (target: Parameters<typeof client.listEntries>[0], path: string, _signal?: AbortSignal) => await client.listEntries(target, path) as WorkspaceEntry[],
-  readText: async (target: Parameters<typeof client.readText>[0], path: string, _signal?: AbortSignal) => normalizeWorkspaceText(await client.readText(target, path)),
+  // 0-A4（#286）：FileSheet 读取显式抬到 1MB（后端 MAX_PREVIEW_BYTES）；>1MB 走
+  // truncated 截断预览保持只读。DEFAULT_PREVIEW_BYTES（256KB）留给未指定的保守消费方。
+  readText: async (target: Parameters<typeof client.readText>[0], path: string, _signal?: AbortSignal) =>
+    normalizeWorkspaceText(await client.readText(target, path, FILE_SHEET_MAX_READ_BYTES)),
   writeText: async (target: Parameters<typeof client.writeText>[0], input: Parameters<typeof client.writeText>[1], _signal?: AbortSignal) => normalizeWorkspaceText(await client.writeText(target, input)),
   search: async (target: Parameters<typeof client.search>[0], query: string, _signal?: AbortSignal) => normalizeWorkspaceSearchResults(await client.search(target, query)),
 }
@@ -38,6 +44,8 @@ export const builtinGitProvider = {
   switchBranch: async (target: Parameters<typeof client.gitSwitchBranch>[0], name: string, _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitSwitchBranch(target, name)),
   pull: async (target: Parameters<typeof client.gitPull>[0], _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitPull(target)),
   push: async (target: Parameters<typeof client.gitPush>[0], _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitPush(target)),
+  showFile: async (target: Parameters<typeof client.gitShowFile>[0], input: { rev: string; path: string }) => String(await client.gitShowFile(target, input.rev, input.path)),
+  sequenceState: async (target: Parameters<typeof client.gitSequenceState>[0]) => await client.gitSequenceState(target),
 }
 
 export const BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS: readonly FileWorkbenchContribution[] = [

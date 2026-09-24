@@ -241,6 +241,20 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
     reportRuntimeError('注册 canonical feed user 兜底监听', error)
   })
 
+  // #310：`pylon:update` 同样需要广播兜底。后端对**未注册 per-source Channel** 的来源
+  // 整回合改走 `emit_event_all` 广播（与 Channel 互斥，见 dispatcher 的
+  // `send_update_frame`/`emit_event_all` 分叉）——FileSheet 发令（`send_message`）、
+  // 平台 ingest、`pylon_cli session send` 都属这一类，且它们从不注册 Channel。
+  // 缺这条兜底时，整回合的助手正文/思考帧进不了 feed（不 publish、不投影），只有
+  // `pylon:done` 的兜底轨到得了 → 界面只剩「处理耗时」页脚，正文要等重启冷装载
+  // 读 journal 才出现（issue #310 实机复现：回合内 DOM 4 行／重载后 6 行）。
+  // 与 `pylon:user` 兜底同形：重复投递由 cursor 的 sequence 去重与投影器幂等吸收。
+  void listen('pylon:update', event => {
+    void feed.acceptFrame({ event: 'pylon:update', payload: event.payload })
+  }).catch(error => {
+    reportRuntimeError('注册 canonical feed update 兜底监听', error)
+  })
+
   return feed
 }
 

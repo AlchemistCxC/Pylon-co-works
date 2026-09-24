@@ -100,6 +100,18 @@ describe('extractTouchedPaths 三级优先', () => {
     expect(extractTouchedPaths(event, 'C:\\ws')).toEqual(['a.ts'])
   })
 
+  it('旧工具名回退覆盖 Write/patch 变体', () => {
+    for (const title of ['Write', 'patch']) {
+      const event = toolEvent({ title, rawInput: { path: 'C:\\ws\\a.ts' } })
+      expect(extractTouchedPaths(event, 'C:\\ws')).toEqual(['a.ts'])
+    }
+  })
+
+  it('completed 终态同样触发（写盘发生在 started 与 completed 之间）', () => {
+    const event = toolEvent({ eventType: 'tool.call.completed', kind: 'edit', rawInput: { path: 'src/a.ts' } })
+    expect(extractTouchedPaths(event, 'C:\\ws')).toEqual(['src/a.ts'])
+  })
+
   it('cwd 外绝对路径 → 丢弃不记录', () => {
     const event = toolEvent({ kind: 'edit', rawInput: { path: 'D:\\elsewhere\\a.ts' } })
     expect(extractTouchedPaths(event, 'C:\\ws')).toEqual([])

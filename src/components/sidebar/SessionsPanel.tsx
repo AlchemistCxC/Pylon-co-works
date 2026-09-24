@@ -5,6 +5,7 @@ import { Folder, FolderOpen, Inbox, Pin, PinOff, Plus, Settings, X } from 'lucid
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
+import { useModalOverlayVeil } from '../../app/modalOverlayStore'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import { useBlockActionHandler } from './useBlockActionHandler.ts'
 
@@ -116,6 +117,8 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
   })
 
   const editingWorkspace = props.workspaces.find(workspace => workspace.id === editingCwdId)
+  // #309：工作区设置弹窗是覆盖主区的模态层——打开期间让原生子视图暂时隐藏。
+  useModalOverlayVeil('workspace-settings', Boolean(editingWorkspace))
   // 会话列表**不再被搜索过滤**：搜索已是独立模块、自己呈现结果（一个查询驱动两处呈现
   // 会让人分不清哪边是「结果」）。这里只负责分组与选择。
   // (#260-C10) 一次遍历完成「按工作区分组 + 无工作区组」，组内保持 props.sessions

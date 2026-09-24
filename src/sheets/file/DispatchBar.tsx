@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useRuntimeStore } from '../../runtimeStore'
 import { useIdentityStore } from '../../identityStore'
 import { reportRuntimeError } from '../../runtimeError'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
-import { lineFromDataNode, normalizeSelectionRange } from './selectionCapture.ts'
 import type { Session } from '../../identityStore'
 
 export function resolveDispatchOwnerSession(
@@ -24,8 +23,8 @@ export function resolveDispatchOwnerSession(
 /**
  * DispatchBar — 发令指令栏（W2-08，§4.1）。
  *
- * 折叠态（无选中）/展开态（chip + 输入 + 发送）：DOM selectionchange 捕获选区
- * （data-line → 1-based 行号）；发送调 send_message 显式 source + persona:''；
+ * 选区事实来自 CM 内核 KernelSummary（0-A1 起旧 DOM data-line 捕获随投影退役）；
+ * 发送调 send_message 显式 source + persona:''；
  * 调用发出后（invoke 同步创建成功）清 instruction 保留选区；错误内联。目标会话
  * 生成中仅提示不禁用（send_message 阻塞语义由后端串行化）。
  *
@@ -40,9 +39,9 @@ export default function DispatchBar({
   filePath,
   selection,
   content,
+  getContent,
   instruction,
   onInstructionChange,
-  onSelectionChange,
   onClearSelection,
 }: {
   targetSource: string | null
@@ -50,29 +49,16 @@ export default function DispatchBar({
   context?: { agentId: string; source: string } | null
   filePath: string | null
   selection: DispatchSelection | null
-  content: string
+  /** 0-A1：编辑事实在 CM 内核——宿主经取景器给发送时刻的全文，不再传内容 state。 */
+  content?: string
+  getContent?: () => string
   instruction: string
   onInstructionChange: (value: string) => void
-  onSelectionChange: (selection: DispatchSelection | null) => void
   onClearSelection: () => void
 }) {
   const [error, setError] = useState('')
   // selector 内完成 includes → 返回 boolean（稳定）；`|| []` 放 hook 外会返回新引用触发 #185
   const generating = useRuntimeStore(s => (s.liveGeneratingSources ?? []).includes(targetSource || ''))
-
-  // 选区捕获：selectionchange 时若 anchor/focus 落在代码视图 data-line 上 → 更新 selection
-  useEffect(() => {
-    const capture = () => {
-      const domSelection = window.getSelection()
-      if (!domSelection || domSelection.rangeCount === 0) return
-      const anchorLine = lineFromDataNode(domSelection.anchorNode)
-      const focusLine = lineFromDataNode(domSelection.focusNode)
-      const range = normalizeSelectionRange(anchorLine, focusLine)
-      if (range && filePath) onSelectionChange(range)
-    }
-    window.addEventListener('selectionchange', capture)
-    return () => window.removeEventListener('selectionchange', capture)
-  }, [filePath, onSelectionChange])
 
   const send = async () => {
     setError('')
@@ -92,7 +78,7 @@ export default function DispatchBar({
       filePath,
       selection,
       instruction,
-      content,
+      content: getContent ? getContent() : (content ?? ''),
       truncated: false,
     })
     try {

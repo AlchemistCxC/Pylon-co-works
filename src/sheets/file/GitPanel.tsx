@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Download, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Upload } from 'lucide-react'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import { classifyGitError, normalizeGitHistory, normalizeGitOperationResult, normalizeGitStatus, normalizeGitStatusWithBranch, type GitCommit, type GitErrorDetail, type GitOperationResult, type GitStatusEntry, type GitStatusWithBranch } from '../../infrastructure/tauri/gitContracts.ts'
+import { useGitStatus } from './useGitStatus'
+import { advanceSourceContext, type SourceRequestContext } from './sourceRequestGuard'
+import { classifyGitError, normalizeGitHistory, normalizeGitOperationResult, type GitCommit, type GitErrorDetail, type GitOperationResult, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
-import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 
@@ -73,12 +74,17 @@ function GitStatusTree({ entries, onOpenDiff, onMutate, mutationLabel, disabled 
 
 /** GitPanel — 完整 Git 树、状态和提交历史。 */
 export default function GitPanel({ target, provider, onOpenDiff }: { target: WorkspaceTarget | null; provider: GitProvider | null; onOpenDiff: (path: string, staged: boolean) => void }) {
-  const [staged, setStaged] = useState<GitStatusEntry[]>([])
-  const [unstaged, setUnstaged] = useState<GitStatusEntry[]>([])
+  // 0-C3：status 数据源收敛到 useGitStatus（行为不变重构）
+  const gitStatus = useGitStatus(target, provider)
+  const { error: statusError, applyStatus } = gitStatus
+  const entries = gitStatus.entries
+  const branchName = gitStatus.branchName
+  const staged = useMemo(() => entries.filter(entry => entry.staged), [entries])
+  const unstaged = useMemo(() => entries.filter(entry => !entry.staged), [entries])
   const [history, setHistory] = useState<GitCommit[]>([])
-  const [error, setError] = useState<GitErrorDetail | null>(null)
+  const [historyError, setHistoryError] = useState<GitErrorDetail | null>(null)
+  const error = statusError ?? historyError
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
-  const [branchName, setBranchName] = useState<string | null>(null)
   const [commitMessage, setCommitMessage] = useState('')
   const [branchDraft, setBranchDraft] = useState('')
   const [branchEditorOpen, setBranchEditorOpen] = useState(false)
@@ -93,51 +99,34 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
   useEffect(() => {
     const targetChanged = previousTargetKey.current !== targetKey
     previousTargetKey.current = targetKey
+    // runMutation 的迟到守卫依赖本 context 的推进（status 拉取已归 useGitStatus）
     requestContext.current = advanceSourceContext(requestContext.current, targetKey)
-    const token = targetKey ? beginSourceRequest(requestContext.current, targetKey) : null
-    let disposed = false
     if (targetChanged) {
       // Status rows and write drafts are workspace-bound. Leaving them visible while
       // the next target loads can execute an A path/message against workspace B.
-      setStaged([])
-      setUnstaged([])
       setHistory([])
       setExpandedCommit(null)
-      setBranchName(null)
       setCommitMessage('')
       setBranchDraft('')
       setBranchEditorOpen(false)
     }
     if (!target || !provider) {
-      setStaged([])
-      setUnstaged([])
       setHistory([])
       setExpandedCommit(null)
-      setBranchName(null)
       setCommitMessage('')
       setBranchDraft('')
       setBranchEditorOpen(false)
-      setError(null)
-      return () => { disposed = true }
+      setHistoryError(null)
+      return
     }
-    setError(null)
+    setHistoryError(null)
     setFeedback(null)
     setBusyAction(null)
-    // ISSUE-15 W4：经 typed client 单次获取 branch + entries（WI01 后端已就绪）
-    Promise.all([provider.status(target), provider.history(target)]).then(([statusRaw, historyRaw]) => {
-      if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
-      const result = normalizeGitStatusWithBranch(statusRaw) as GitStatusWithBranch
-      const entries = normalizeGitStatus(result.entries)
-      setStaged(entries.filter(entry => entry.staged))
-      setUnstaged(entries.filter(entry => !entry.staged))
+    // 0-C3：status 已由 useGitStatus 拉取，本 effect 只负责 history
+    provider.history(target).then(historyRaw => {
       setHistory(normalizeGitHistory(historyRaw))
-      const info = result.branch
-      setBranchName(info.branch ? info.branch : info.detached ? '(detached)' : null)
-      setError(null)
-      resolveRuntimeErrors({ key: errorKey('读取 Git 信息') })
     }).catch(err => {
-      if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
-      setError(classifyGitError(err))
+      setHistoryError(classifyGitError(err))
       reportRuntimeError('读取 Git 信息', err, undefined, {
         key: errorKey('读取 Git 信息'),
         scope: { kind: 'sheet', id: `git:${targetKey ?? 'none'}` },
@@ -145,16 +134,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         recovery: { kind: 'open-runtime-log', sheetId: `git:${targetKey ?? 'none'}` },
       })
     })
-    return () => { disposed = true }
   }, [target, targetKey, provider, refreshRevision, errorKey])
-
-  const applyStatus = (statusRaw: GitStatusWithBranch) => {
-    const result = normalizeGitStatusWithBranch(statusRaw)
-    const entries = normalizeGitStatus(result.entries)
-    setStaged(entries.filter(entry => entry.staged))
-    setUnstaged(entries.filter(entry => !entry.staged))
-    setBranchName(result.branch.branch ? result.branch.branch : result.branch.detached ? '(detached)' : null)
-  }
 
   const runMutation = async (action: string, request: () => Promise<GitOperationResult>, refreshHistory = false) => {
     if (!target || !provider || busyAction) return
@@ -205,7 +185,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         <span className="file-panel-count">{staged.length + unstaged.length}</span>
       </div>
       <div className="git-command-bar" aria-label="Git 操作">
-        <button type="button" disabled={Boolean(busyAction)} onClick={() => setRefreshRevision(value => value + 1)} title="刷新"><RefreshCw size={14} /></button>
+        <button type="button" disabled={Boolean(busyAction)} onClick={() => { gitStatus.refresh(); setRefreshRevision(value => value + 1) }} title="刷新"><RefreshCw size={14} /></button>
         {provider.pull && <button type="button" disabled={Boolean(busyAction)} onClick={() => void runMutation('拉取', () => provider.pull!(target), true)}><Download size={14} />拉取</button>}
         {provider.push && <button type="button" disabled={Boolean(busyAction)} onClick={() => void runMutation('推送', () => provider.push!(target))}><Upload size={14} />推送</button>}
         {(provider.createBranch || provider.switchBranch) && <button type="button" className={branchEditorOpen ? 'active' : ''} disabled={Boolean(busyAction)} aria-expanded={branchEditorOpen} onClick={() => setBranchEditorOpen(value => !value)}><GitBranch size={14} />分支</button>}

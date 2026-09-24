@@ -749,6 +749,9 @@
   text-overflow: ellipsis;
 }
 
+.file-status-write-lock { color: var(--warning); font-weight: 700; }
+.file-lock-override { padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border)); border-radius: 0; color: var(--text); background: transparent; font-size: 11px; line-height: 1; cursor: pointer; }
+.file-lock-override:hover { background: var(--bg-hover); }
 .file-status-selection.active {
   color: var(--accent);
   font-weight: 700;
@@ -941,9 +944,6 @@
   line-height: 1;
   cursor: pointer;
 }
-.file-edit-toggle { padding: 5px 10px; }
-.file-edit-toggle:hover:not(:disabled) { background: var(--bg-hover); }
-.file-edit-toggle:disabled { color: var(--text-placeholder); cursor: default; }
 .file-save-btn { padding: 5px 14px; color: var(--text-on-accent); border-color: var(--accent); background: var(--accent); }
 .file-save-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .file-save-btn:disabled { opacity: .42; cursor: default; }
@@ -983,6 +983,8 @@
 .file-code-editor .cm-cursor { border-left-color: var(--editor-cursor, var(--text)); }
 .file-code-editor .cm-panels,
 .file-code-editor .cm-tooltip { color: var(--text); background: var(--bg-panel); }
+/* 0-A1：外部刷新（agent/磁盘改动）的变更行 decoration（原只读投影 data-changed 的内核承接） */
+.file-code-editor .file-line-changed { background: var(--editor-active-line, rgba(0,0,0,0.04)); }
 .file-code-editor .cm-tooltip { border-color: var(--border); }
 .file-code-editor .cm-searchMatch { background: color-mix(in srgb, var(--warning) 28%, transparent); }
 .file-code-editor .cm-searchMatch.cm-searchMatch-selected { background: color-mix(in srgb, var(--accent) 34%, transparent); }

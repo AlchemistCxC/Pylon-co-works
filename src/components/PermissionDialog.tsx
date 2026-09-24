@@ -1,5 +1,6 @@
 import { useRuntimeStore } from '../runtimeStore'
 import { useIdentityStore } from '../identityStore'
+import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { getPermissionController } from '../infrastructure/acp/permissionController'
 import { activeForAgent } from '../domains/permission/permissionState.ts'
 import { resolvePermissionButtons } from '../domains/permission/permissionButtons.ts'
@@ -36,6 +37,9 @@ export default function PermissionDialog() {
   // P1-1：permission 状态按 agent 切片隔离——只展示当前 agent 的 active（后台 agent 停放）
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const active = useRuntimeStore(s => activeForAgent(s.permission, activeAgent))
+  // #309：权限弹窗是覆盖主区的模态层——打开期间让原生子视图（浏览器 WebView2）暂时
+  // 隐藏，否则审批按钮被原生页面吃掉点击。hook 必须在 early return 之前调用。
+  useModalOverlayVeil('permission', !!active)
   if (!active) return null
 
   const { request, status } = active

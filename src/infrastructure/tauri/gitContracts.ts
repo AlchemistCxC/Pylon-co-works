@@ -110,3 +110,86 @@ export function classifyGitError(error: unknown): GitErrorDetail {
   if (/unavailable|不可用/i.test(normalized)) return { kind: 'unavailable', message }
   return { kind: 'failed', message: message && message !== '[object Object]' ? message : 'Git 操作失败' }
 }
+
+/** 0-C2：merge/rebase/cherry-pick 进行态 + 冲突文件清单（git_sequence_state 响应）。 */
+export interface GitSequenceState {
+  kind: 'none' | 'rebase' | 'merge' | 'cherry-pick'
+  conflicts: string[]
+}
+
+const SEQUENCE_KINDS: readonly GitSequenceState['kind'][] = ['none', 'rebase', 'merge', 'cherry-pick']
+
+export function normalizeGitSequenceState(raw: unknown): GitSequenceState {
+  if (!raw || typeof raw !== 'object') return { kind: 'none', conflicts: [] }
+  const item = raw as Partial<GitSequenceState>
+  const known = SEQUENCE_KINDS.includes(item.kind as GitSequenceState['kind'])
+  // kind 损坏回退 'none' 时一并清空 conflicts（防「无进行态却有孤儿冲突清单」混合态）
+  const kind = known ? item.kind as GitSequenceState['kind'] : 'none'
+  const conflicts = known && Array.isArray(item.conflicts)
+    ? item.conflicts.filter((path): path is string => typeof path === 'string' && path.length > 0)
+    : []
+  return { kind, conflicts }
+}
+
+/** 0-C4：git 图单页（logGraph 响应；宽容解析——损坏条目跳过不崩）。 */
+export interface GitCommitGraph {
+  hash: string
+  parents: string[]
+  author: string
+  date: number
+  subject: string
+  refs: string
+}
+
+export interface GitLogPage {
+  commits: GitCommitGraph[]
+  hasMore: boolean
+}
+
+export function normalizeGitLogPage(raw: unknown): GitLogPage {
+  if (!raw || typeof raw !== 'object') return { commits: [], hasMore: false }
+  const item = raw as Partial<GitLogPage>
+  const commits = Array.isArray(item.commits)
+    ? item.commits.flatMap((entry): GitCommitGraph[] => {
+        if (!entry || typeof entry !== 'object') return []
+        const value = entry as Partial<GitCommitGraph>
+        if (typeof value.hash !== 'string' || value.hash.length === 0) return []
+        const date = value.date
+        return [{
+          hash: value.hash,
+          parents: Array.isArray(value.parents) ? value.parents.filter((p): p is string => typeof p === 'string') : [],
+          author: typeof value.author === 'string' ? value.author : '',
+          date: typeof date === 'number' && Number.isFinite(date) ? date : 0,
+          subject: typeof value.subject === 'string' ? value.subject : '',
+          refs: typeof value.refs === 'string' ? value.refs : '',
+        }]
+      })
+    : []
+  return { commits, hasMore: item.hasMore === true }
+}
+
+/** 0-C4：blame 行（宽容解析：缺字段的行跳过）。 */
+export interface GitBlameLine {
+  hash: string
+  author: string
+  date: number
+  lineNo: number
+  content: string
+}
+
+export function normalizeGitBlame(raw: unknown): GitBlameLine[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry): GitBlameLine[] => {
+    if (!entry || typeof entry !== 'object') return []
+    const value = entry as Partial<GitBlameLine>
+    const { hash, content, lineNo, date } = value
+    if (typeof hash !== 'string' || typeof content !== 'string' || typeof lineNo !== 'number' || !Number.isFinite(lineNo)) return []
+    return [{
+      hash,
+      author: typeof value.author === 'string' ? value.author : '',
+      date: typeof date === 'number' && Number.isFinite(date) ? date : 0,
+      lineNo,
+      content,
+    }]
+  })
+}

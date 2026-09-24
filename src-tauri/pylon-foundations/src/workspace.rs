@@ -9,9 +9,11 @@ use std::time::UNIX_EPOCH;
 pub const DEFAULT_PREVIEW_BYTES: usize = 256 * 1024;
 pub const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 1000;
-/// I08-A-FE-02：可编辑保存的文件大小上限——与 DEFAULT_PREVIEW_BYTES 一致：
-/// 能完整预览（未 truncated）的文本文件才可编辑保存；更大的文件保持只读。
-pub const MAX_SAVE_BYTES: usize = DEFAULT_PREVIEW_BYTES;
+/// 0-A4（issue #286 / ADR 无关的量级抬升）：可编辑保存的文件大小上限——与
+/// MAX_PREVIEW_BYTES 对齐：CM6 单内核视口渲染兜住 1MB，「<=1MB 即可写」；>1MB
+/// 仍走截断预览保持只读。前端 FileSheet 读取显式传 maxBytes=MAX_PREVIEW_BYTES，
+/// DEFAULT_PREVIEW_BYTES（256KB）继续作为未指定时的保守默认（右栏预览等）。
+pub const MAX_SAVE_BYTES: usize = MAX_PREVIEW_BYTES;
 
 /// R5b：Display/Error 改 thiserror derive（与手写 impl 文案逐字一致——
 /// 每个变体输出 `code: message`，`Io` 变体**保留原行为**：内部 String 不参与

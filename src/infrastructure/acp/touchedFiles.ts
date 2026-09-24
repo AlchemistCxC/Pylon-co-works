@@ -17,7 +17,8 @@ export interface TouchedFile {
 
 export const TOUCHED_FILE_LIMIT = 50
 
-const EDIT_TOOL_NAMES = ['Edit', 'Write', 'edit', 'write_file', 'patch']
+/** edit 类工具名回退集合（kind 缺失时的旧消息兼容判定；canonicalTouchedFileProjection 共用）。 */
+export const EDIT_TOOL_NAMES = ['Edit', 'Write', 'edit', 'write_file', 'patch']
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

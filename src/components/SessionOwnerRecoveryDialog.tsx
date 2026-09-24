@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useIdentityStore } from '../identityStore'
+import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { resolveUnresolvedSessionTransaction } from '../app/bootstrap/resolveUnresolvedSessionTransaction'
 import type { LegacySession } from '../sessionPersistence'
 import Select from './ui/Select.tsx'
@@ -53,6 +54,10 @@ export default function SessionOwnerRecoveryDialog() {
       return next
     })
   }, [agents, unresolved])
+
+  // #309：本弹窗是覆盖主区的模态层——打开期间让原生子视图暂时隐藏（hook 须在
+  // early return 之前调用）。
+  useModalOverlayVeil('session-owner-recovery', unresolved.length > 0 && !dismissed)
 
   if (unresolved.length === 0 || dismissed) return null
 

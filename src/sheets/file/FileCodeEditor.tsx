@@ -1,180 +1,73 @@
 import { useEffect, useRef } from 'react'
-import { basicSetup, EditorView } from 'codemirror'
-import { Compartment, EditorState } from '@codemirror/state'
-import { keymap } from '@codemirror/view'
-import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
-import { tags } from '@lezer/highlight'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
-import { resolveFileLanguageProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
+import { createFileCodeMirrorKernel, FILE_CODE_TAB_SIZE_FALLBACK, resolveTabSize, type FileCodeEditorApi, type FileCodeMirrorKernel, type KernelSummary } from './fileCodeMirrorKernel.ts'
 
 /**
- * 两态几何契约（FileSheet.css 的 `--file-code-tab-size`）在编辑侧的镜像值。
+ * FileCodeEditor — React 适配器（薄壳）。
  *
- * 只读投影用 CSS 消费该 token；CodeMirror 则必须把同一个值写进 `EditorState.tabSize`：
- * CM 用 tabSize 同时计算「tab 字符的渲染宽度」与「坐标 ↔ 偏移」换算，只靠 CSS 覆盖
- * （`.cm-line { tab-size }`）会让含 tab 的行上点击/选区落点偏移。构造时从宿主元素的
- * 计算样式读 token（jsdom 里读不到时回退此常量，其值由契约测试锁定与 CSS 一致）。
+ * 内核实体在 fileCodeMirrorKernel.ts（框架无关工厂，与 Solid 适配器
+ * FileCodeEditor.solid.tsx 共享同一行为事实——#279 双渲染器同构纪律 + 0-A1 单内核）。
+ * 本壳只做 React 生命周期桥接：mount 创建内核，baseline/editable/revealLine 的
+ * 后续变化经内核可变方法下传。FileTabView 以 path 作为 key；单个实例只对应一个
+ * 文档与语言生命周期。
  */
-export const FILE_CODE_TAB_SIZE_FALLBACK = 2
-
-/** 读契约 token（导出供契约测试覆盖“读到值 / 读到空 / 读到脏值”三条路径）。 */
-export function resolveTabSize(host: HTMLElement | null): number {
-  if (!host || typeof getComputedStyle !== 'function') return FILE_CODE_TAB_SIZE_FALLBACK
-  const raw = getComputedStyle(host).getPropertyValue('--file-code-tab-size').trim()
-  const parsed = Number.parseFloat(raw)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : FILE_CODE_TAB_SIZE_FALLBACK
-}
-
-// Language metadata is sizeable (it enumerates every CodeMirror language) and
-// is only needed once an editor is opened.  Keep it out of the initial shell
-// chunk while preserving the existing filename-based language selection.
-let languageDataPromise: Promise<readonly LanguageDescription[]> | null = null
-function loadLanguageData(): Promise<readonly LanguageDescription[]> {
-  if (!languageDataPromise) {
-    languageDataPromise = import('@codemirror/language-data').then(({ languages }) => languages)
-  }
-  return languageDataPromise
-}
-
-const fileEditorHighlightStyle = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier], color: 'var(--syn-kw, #b48ead)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--syn-str, #96b5b4)' },
-  { tag: tags.regexp, color: 'var(--syn-re, #d08770)' },
-  { tag: tags.comment, color: 'var(--syn-cmt, #65737e)', fontStyle: 'italic' },
-  { tag: [tags.number, tags.bool, tags.null, tags.atom], color: 'var(--syn-lit, #d08770)' },
-  { tag: [tags.typeName, tags.className, tags.tagName], color: 'var(--syn-ent, #ebcb8b)' },
-  { tag: [tags.variableName, tags.labelName], color: 'var(--syn-var, #c0c5ce)' },
-  { tag: tags.propertyName, color: 'var(--syn-prop, #c0c5ce)' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--syn-fn, #8fa1b3)' },
-  { tag: tags.heading, color: 'var(--syn-mh, #65737e)', fontWeight: '600' },
-  { tag: [tags.link, tags.url], color: 'var(--accent)' },
-  { tag: tags.invalid, color: 'var(--danger)' },
-])
-
-/**
- * File 模块私有的 CodeMirror 6 适配器。
- *
- * Workspace 宿主只接触 value/change/selection，不持有 EditorView；语言包按路径异步
- * 装入，未知扩展名保持纯文本。这样编辑器实现可以替换而不改插件或 Sheet 契约。
- */
-export default function FileCodeEditor({ path, value, revealLine, onChange, onSelectionChange, onSave }: {
+export default function FileCodeEditor({ path, initialContent, baseline, editable = true, revealLine, onSummaryChange, onSave, apiRef }: {
   path: string
-  value: string
+  /** 首次构造的文档内容；此后宿主经 api.replaceDoc 做外部替换，不再有 value prop。 */
+  initialContent: string
+  /** 磁盘锚点（保存成功/重载后由宿主推进）；内核据此计算 dirty。 */
+  baseline: string
+  editable?: boolean
   revealLine?: number
-  onChange?: (value: string) => void
-  onSelectionChange?: (selection: DispatchSelection | null) => void
+  onSummaryChange?: (summary: KernelSummary) => void
   onSave?: () => void
+  apiRef?: { current: FileCodeEditorApi | null }
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef<EditorView | null>(null)
-  const applyingExternalValue = useRef(false)
-  const callbacksRef = useRef({ onChange, onSelectionChange, onSave })
-  callbacksRef.current = { onChange, onSelectionChange, onSave }
+  const kernelRef = useRef<FileCodeMirrorKernel | null>(null)
+  const callbacksRef = useRef({ onSummaryChange, onSave })
+  callbacksRef.current = { onSummaryChange, onSave }
 
   useEffect(() => {
     const parent = hostRef.current
     if (!parent) return
-    const language = new Compartment()
-    const languageAbort = new AbortController()
-    let disposed = false
-    // issue #69：编辑态 tab 列宽与只读投影同源（读契约 token，见 resolveTabSize）。
-    const tabSize = resolveTabSize(parent)
-
-    const view = new EditorView({
-      doc: value,
-      parent,
-      extensions: [
-        basicSetup,
-        EditorState.tabSize.of(tabSize),
-        keymap.of([{
-          key: 'Mod-s',
-          preventDefault: true,
-          run: () => {
-            callbacksRef.current.onSave?.()
-            return true
-          },
-        }]),
-        syntaxHighlighting(fileEditorHighlightStyle),
-        language.of([]),
-        EditorView.contentAttributes.of({ 'aria-label': `编辑 ${path}`, spellcheck: 'false' }),
-        EditorView.updateListener.of(update => {
-          if (update.docChanged && !applyingExternalValue.current) {
-            callbacksRef.current.onChange?.(update.state.doc.toString())
-          }
-          if (update.docChanged || update.selectionSet) {
-            if (update.state.doc.length === 0) {
-              callbacksRef.current.onSelectionChange?.(null)
-              return
-            }
-            const selection = update.state.selection.main
-            callbacksRef.current.onSelectionChange?.({
-              startLine: update.state.doc.lineAt(selection.from).number,
-              endLine: update.state.doc.lineAt(selection.to).number,
-            })
-          }
-        }),
-      ],
+    const kernel = createFileCodeMirrorKernel(parent, {
+      path,
+      initialContent,
+      baseline,
+      editable,
+      callbacks: {
+        onSummaryChange: summary => callbacksRef.current.onSummaryChange?.(summary),
+        onSave: () => callbacksRef.current.onSave?.(),
+      },
     })
-    viewRef.current = view
-
-    const loadLanguage = async () => {
-      const provider = resolveFileLanguageProvider(path)
-      if (provider) {
-        try {
-          const support = await provider.load(path, languageAbort.signal)
-          if (support && !disposed && viewRef.current === view) {
-            view.dispatch({ effects: language.reconfigure(support) })
-            return
-          }
-        } catch {
-          // Provider failure/abort falls through to the built-in language data.
-        }
-      }
-      const languages = await loadLanguageData()
-      if (disposed || viewRef.current !== view || languageAbort.signal.aborted) return
-      const description = LanguageDescription.matchFilename(languages, path)
-      if (!description) return
-      const support = await description.load()
-      if (!disposed && viewRef.current === view && !languageAbort.signal.aborted) {
-        view.dispatch({ effects: language.reconfigure(support) })
-      }
-    }
-    void loadLanguage().catch(() => {
-      // 未安装/加载失败的语言按 CodeMirror 纯文本模式继续编辑。
-    })
+    kernelRef.current = kernel
+    if (apiRef) apiRef.current = kernel.api
 
     return () => {
-      disposed = true
-      languageAbort.abort()
-      viewRef.current = null
-      view.destroy()
+      kernelRef.current = null
+      if (apiRef) apiRef.current = null
+      kernel.destroy()
     }
-    // FileTabView 以 path 作为 key；单个实例只对应一个文档与语言生命周期。
+    // 单实例只对应一个文档与语言生命周期（key 由宿主承载）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 磁盘锚点推进（保存回执）：内核内 O(结构) 重算 dirty 并发摘要。
   useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    const current = view.state.doc.toString()
-    if (current === value) return
-    applyingExternalValue.current = true
-    try {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
-    } finally {
-      applyingExternalValue.current = false
-    }
-  }, [value])
+    kernelRef.current?.setBaseline(baseline)
+  }, [baseline])
+
+  // editable 翻转：readonly compartment reconfigure（创建时已按初值装配）。
+  useEffect(() => {
+    kernelRef.current?.setEditable(editable)
+  }, [editable])
 
   useEffect(() => {
-    const view = viewRef.current
-    if (!view || !revealLine || revealLine > view.state.doc.lines) return
-    const line = view.state.doc.line(revealLine)
-    view.dispatch({
-      selection: { anchor: line.from },
-      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
-    })
+    kernelRef.current?.reveal(revealLine)
   }, [revealLine])
 
   return <div ref={hostRef} className="file-code-editor" data-file-code-layout="shared" data-path={path} />
 }
+
+export { FILE_CODE_TAB_SIZE_FALLBACK, resolveTabSize }
+export type { FileCodeEditorApi, KernelSummary }
