@@ -20,5 +20,5 @@ const solidModule = modules['./HistorySheetView.solid.tsx']
 if (!solidModule) throw new Error('History Solid 实体未进入 Vite module graph')
 
 export default function HistorySheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  return <SolidMount mount={container => solidModule.renderHistorySheetView(container, { sheet, ctx })} />
+  return <SolidMount initial={{ sheet, ctx }} mount={(container, getProps) => solidModule.renderHistorySheetView(container, getProps())} />
 }

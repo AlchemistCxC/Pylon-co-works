@@ -20,5 +20,5 @@ const solidModule = modules['./SearchSheetView.solid.tsx']
 if (!solidModule) throw new Error('Search Solid 实体未进入 Vite module graph')
 
 export default function SearchSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  return <SolidMount mount={container => solidModule.renderSearchSheetView(container, { sheet, ctx })} />
+  return <SolidMount initial={{ sheet, ctx }} mount={(container, getProps) => solidModule.renderSearchSheetView(container, getProps())} />
 }

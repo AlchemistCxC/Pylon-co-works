@@ -3,21 +3,23 @@ import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import SolidMount from '../SolidMount'
 
-// #279：React→Solid 通用薄桥的机制契约——挂载工厂拿到真实容器、dispose 对称回收
-// （StrictMode 双执行下无残留）、容器 display:contents 不参与布局。
+// #279：React→Solid 通用薄桥的机制契约——挂载工厂拿到真实容器与响应式 props 访问器、
+// dispose 对称回收（StrictMode 双执行下无残留）、React 重渲染推送最新 props（响应式
+// 通道，saveReceipt/editing 类可变字段赖此跨桥）、容器 display:contents 不参与布局。
 
 describe('SolidMount', () => {
-  it('挂载工厂拿到容器并执行，卸载时 dispose 对称回收', () => {
+  it('挂载工厂拿到容器与 initial，卸载时 dispose 对称回收', () => {
     const disposals: string[] = []
     function Host({ text }: { text: string }) {
       return (
         <SolidMount
-          mount={container => {
+          initial={{ text }}
+          mount={(container, latest) => {
             const mark = document.createElement('p')
-            mark.dataset.solid = text
+            mark.dataset.solid = latest().text
             container.appendChild(mark)
             return () => {
-              disposals.push(text)
+              disposals.push(latest().text)
               mark.remove()
             }
           }}
@@ -34,13 +36,27 @@ describe('SolidMount', () => {
     expect(document.querySelector('[data-solid="alpha"]')).toBeNull()
   })
 
-  it('props 按挂载捕获：后续 React 重渲染不重挂 Solid 子树', () => {
-    let mounts = 0
-    function Host(_: { label: string }) {
-      return <SolidMount mount={() => { mounts += 1; return () => {} }} />
+  it('React 重渲染把最新 props 推给 latest()（响应式通道）', () => {
+    const seen: string[] = []
+    let captureLatest: (() => { label: string }) | undefined
+    function Host({ label }: { label: string }) {
+      return (
+        <SolidMount
+          initial={{ label }}
+          mount={(_container, latest) => {
+            captureLatest = latest
+            return () => {}
+          }}
+        />
+      )
     }
     const view = render(<Host label="a" />)
     view.rerender(<Host label="b" />)
-    expect(mounts).toBe(1)
+    // layout effect 推送是异步于 rerender 断言的——直接读 latest 与经推送各验证一次
+    seen.push(captureLatest!().label)
+    return Promise.resolve().then(() => {
+      expect(seen).toEqual(['b'])
+      view.unmount()
+    })
   })
 })
