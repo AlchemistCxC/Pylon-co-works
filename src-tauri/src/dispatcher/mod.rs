@@ -399,6 +399,23 @@ async fn reject_interaction_request<R: tauri::Runtime>(
     );
 }
 
+/// #316：strict fs 沙箱根解析——按 periId+generation 查会话工作区
+/// （`SessionInfo.cwd`），不信任 agent 自报参数。查无映射/代际不符/cwd 为空
+/// → None（调用方以 -32602 拒绝）。
+fn session_workspace_root(
+    sessions: &SessionsLock,
+    peri_session: &str,
+    generation: u64,
+) -> Option<std::path::PathBuf> {
+    sessions.lock().ok().and_then(|items| {
+        items
+            .values()
+            .find(|session| session.peri_id == peri_session && session.generation == generation)
+            .map(|session| std::path::PathBuf::from(&session.cwd))
+            .filter(|cwd| !cwd.as_os_str().is_empty())
+    })
+}
+
 /// #316：在私有交互快照中按 elicitationId 匹配挂起的 URL elicitation
 /// （method 必须是 elicitation/create 且 params.elicitationId 相等）。纯函数
 /// 便于测试（官方契约：未知/已完成 id 忽略）。
@@ -2372,16 +2389,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 .and_then(|v| v.get("sessionId").or_else(|| v.get("session_id")))
                                 .and_then(serde_json::Value::as_str)
                                 .unwrap_or("");
-                            let workspace = sessions.lock().ok().and_then(|items| {
-                                items
-                                    .values()
-                                    .find(|session| {
-                                        session.peri_id == peri_session
-                                            && session.generation == generation
-                                    })
-                                    .map(|session| std::path::PathBuf::from(&session.cwd))
-                                    .filter(|cwd| !cwd.as_os_str().is_empty())
-                            });
+                            let workspace =
+                                session_workspace_root(&sessions, peri_session, generation);
                             match workspace {
                                 Some(workspace) => {
                                     match crate::acp::file_system_runtime::FileSystemRuntime::new_strict(&workspace) {
@@ -2752,6 +2761,41 @@ mod tests {
             match_pending_elicitation(&snapshot, "el-1").is_none(),
             "方法不符或缺 elicitationId 的条目不得命中"
         );
+    }
+
+    #[test]
+    fn session_workspace_root_resolves_by_peri_id_and_generation() {
+        let sessions: SessionsLock = std::sync::Mutex::new(std::collections::HashMap::new());
+        let mut s1 = SessionInfo::new("peri-1".into(), String::new(), "G:/ws/one".into(), true, 1);
+        s1.generation = 1;
+        let mut s2 = SessionInfo::new("peri-1".into(), String::new(), "G:/ws/two".into(), true, 2);
+        s2.generation = 2;
+        sessions.lock().unwrap().insert("local:1".into(), s1);
+        sessions.lock().unwrap().insert("local:2".into(), s2);
+
+        // 命中：periId + generation 双键，各代各归其工作区
+        assert_eq!(
+            session_workspace_root(&sessions, "peri-1", 1),
+            Some(std::path::PathBuf::from("G:/ws/one"))
+        );
+        assert_eq!(
+            session_workspace_root(&sessions, "peri-1", 2),
+            Some(std::path::PathBuf::from("G:/ws/two"))
+        );
+        // 代际不符 → None（旧代际请求不进新代际沙箱）
+        assert_eq!(session_workspace_root(&sessions, "peri-1", 3), None);
+        // 未知 periId → None
+        assert_eq!(session_workspace_root(&sessions, "peri-404", 1), None);
+    }
+
+    #[test]
+    fn session_workspace_root_rejects_empty_cwd() {
+        let sessions: SessionsLock = std::sync::Mutex::new(std::collections::HashMap::new());
+        sessions.lock().unwrap().insert(
+            "local:1".into(),
+            SessionInfo::new("peri-empty".into(), String::new(), String::new(), true, 1),
+        );
+        assert_eq!(session_workspace_root(&sessions, "peri-empty", 1), None);
     }
 
     #[test]
