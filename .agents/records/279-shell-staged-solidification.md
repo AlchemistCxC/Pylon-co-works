@@ -64,6 +64,16 @@
 
 > **复盘（第 4/5 梯队的坑）**：main 修 React 原件、本分支已迁出 Solid 孪生件的场景，**文本合并永不报冲突而行为静默回退**，且「只读 React 原件」的护栏会一起给假绿。后续梯队每合一次 main，都要对「已迁走的原件」复检一遍 main 侧修正，并把护栏指向真正被渲染的那份。
 
+## CI 门禁补修（PR #312 首跑）
+
+CI 的「前端静态门禁」job 跑的是 `check:frontend:static` **加** `check:solid`；本分支的本地验收只跑了 `check:frontend`（**不含 `check:solid`**），故 `check:solid` 首跑即红：
+
+- **现象**：`check-runtime-boundaries` 报 `src/sheets/history/HistorySheetView.solid.tsx: direct invoke 未登记 allowlist`。同 job 的另一半 `check:frontend:static`（lint / csp / canonical-types / ipc / 首方样式与 tailwind token 守卫 / `tsc -b` + build / check:bundle / solid-smoke / check:docs / check:deps / 生产产物隔离）全绿，`vitest` 两分片亦全绿。
+- **根因**：第 1 梯队把 `HistorySheetView` 的 Tauri `invoke` 迁进 `.solid.tsx` 实体，但 `DIRECT_INVOKE_ALLOWLIST` 仍登记 React 薄桥 `HistorySheetView.tsx`——该文件迁移后已无 invoke，成了全仓唯一的白名单死条目（44 条中 43 条 live，另一处死条目即此）。
+- **修法**：把白名单条目由 `HistorySheetView.tsx` **移**到 `HistorySheetView.solid.tsx`（随实现迁移，而非新增一条），使 legacy inventory 与实现一致。
+- **复核**：`bun run check:solid` 全链绿（运行时边界门禁通过：55 条遗留白名单仅报告，无新增 invoke/store/CustomEvent 越界）；`GLOBAL_STORE_ALLOWLIST` / `RENDERER_CUSTOM_EVENT_ALLOWLIST` 按同一判据复核无死条目。
+- **教训**：本地验收的脚本组合要对齐 CI job（`check:frontend` ≠ `check:frontend:static` + `check:solid`），否则「本地全绿、CI 首跑红」。
+
 ## 遗留与未解
 
 - **第 4 梯队**（设置页 radix/cmdk 区，25 文件）与**第 5 梯队**（宿主根 IsolatedPluginSurface、App/main、删 react 依赖、撤 R1/双测试环境门禁）待后续 issue。

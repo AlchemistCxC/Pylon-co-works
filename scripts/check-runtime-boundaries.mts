@@ -79,7 +79,7 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/sheets/file/DispatchBar.tsx',
   'src/sheets/file/legacyFileProvider.ts',
   'src/sheets/gateway/GatewaySheetView.tsx',
-  'src/sheets/history/HistorySheetView.tsx',
+  'src/sheets/history/HistorySheetView.solid.tsx',
   'src/sheets/OverviewSheetView.tsx',
   'src/sheets/RuntimeSheetView.tsx',
   'src/userDataRepository.ts',
