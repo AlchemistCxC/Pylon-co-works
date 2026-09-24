@@ -589,6 +589,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
             ref={node => { chatViewport = node }}
             class="chat-view solid-workbench-chat"
             data-chat-viewport="scroll"
+            data-reduced-motion={props.context.input().reducedMotion ? 'true' : 'false'}
             onScroll={event => updateBottomFollow(event.currentTarget)}
             onWheel={scrollIntent.onWheel}
             onTouchStart={scrollIntent.onTouchStart}
@@ -630,6 +631,9 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
                   queueBottomFollow()
                 }}
                 rowLive={item => isAuthoritativelyLive(props.context, item.descriptor.renderMessage.message)}
+                animateEntry={() => snapshot().generating
+                  && !props.context.input().replayReadonly
+                  && !props.context.input().reducedMotion}
                 scrollViewport={() => chatViewport}
                 scrollPosture={() => followBottom() ? 'follow' : 'pin'}
               />

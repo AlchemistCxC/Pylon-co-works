@@ -2037,9 +2037,8 @@
 }
 
 /* ── Conversation motion ──
-   Message facts remain owned by Workbench Runtime; this is a display-only
-   treatment on the list wrapper. Initial replay rows stay quiet, while rows
-   appended after a send receive one short, accent-tinted arrival pass. */
+   Entry flags expire after one pass. Animate inside the measured message
+   wrapper so scroll anchors and virtual row geometry stay fixed. */
 .plain-message-list__row {
   position:relative;
   min-width:0;
@@ -2047,45 +2046,128 @@
 }
 .plain-message-list__row[data-message-role="assistant"] { --message-entry-accent:var(--state-success,var(--accent)); }
 .plain-message-list__row[data-message-role="reasoning"] { --message-entry-accent:var(--accent); }
-.plain-message-list__row[data-entry="new"] {
-  animation:pylon-message-enter var(--motion-slow,260ms) var(--ease-emphasized) both;
+.plain-message-list__row[data-entry="new"] > .term-row {
+  transform-origin:left top;
+  animation:pylon-message-enter 380ms cubic-bezier(.2,.75,.2,1) both;
 }
-.plain-message-list__row[data-entry="new"]::after {
+.plain-message-list__row[data-entry="new"]::before {
   content:'';
   position:absolute;
-  inset:-3px -8px;
+  inset:0 auto 0 0;
   z-index:2;
+  width:2px;
   pointer-events:none;
-  border-inline-start:var(--line-width-2) solid color-mix(in srgb,var(--message-entry-accent) 68%,transparent);
-  background:linear-gradient(108deg,transparent 15%,color-mix(in srgb,var(--message-entry-accent) 15%,transparent) 48%,transparent 78%);
-  background-size:220% 100%;
-  opacity:0;
-  animation:pylon-message-sheen 560ms var(--ease-emphasized) both;
+  background:var(--message-entry-accent);
+  box-shadow:0 0 12px var(--accent-soft-strong);
+  transform-origin:top;
+  animation:pylon-entry-trace 640ms ease-out both;
 }
 @keyframes pylon-message-enter {
-  0% { opacity:0; transform:translateY(8px); filter:blur(2px); }
-  62% { opacity:1; transform:translateY(-1px); filter:blur(0); }
-  100% { opacity:1; transform:translateY(0); filter:none; }
+  0% { opacity:0; transform:translate3d(0,8px,0) scale(.992); }
+  65% { opacity:1; transform:translate3d(0,-1px,0) scale(1.002); }
+  100% { opacity:1; transform:translate3d(0,0,0) scale(1); }
 }
-@keyframes pylon-message-sheen {
-  0% { opacity:0; transform:translateX(-20%); background-position:140% 0; }
-  22% { opacity:.72; }
-  100% { opacity:0; transform:translateX(20%); background-position:-40% 0; }
+@keyframes pylon-entry-trace {
+  0% { opacity:0; transform:scaleY(.12); }
+  32% { opacity:.85; transform:scaleY(1); }
+  65% { opacity:.42; transform:scaleY(1); }
+  100% { opacity:0; transform:scaleY(1); }
 }
 
-/* A stream is a stable row whose payload changes in place. A restrained
-   gradient sweep communicates liveness without reflowing or revealing tokens
-   one character at a time. */
+/* Tool cards appear once when their canonical id first arrives during a live
+   turn. Status changes reuse that id and never replay the animation. */
+.solid-workbench-activity-slot[data-entry="new"] {
+  position:relative;
+  transform-origin:left top;
+  animation:pylon-tool-appear 500ms cubic-bezier(.2,.75,.2,1) both;
+}
+.solid-workbench-activity-slot[data-entry="new"]::before {
+  content:'';
+  position:absolute;
+  inset:-2px;
+  z-index:2;
+  pointer-events:none;
+  border:1px solid var(--accent-edge);
+  border-radius:var(--message-radius,8px);
+  box-shadow:0 0 18px var(--accent-soft), inset 0 0 12px var(--accent-soft);
+  animation:pylon-tool-halo 700ms ease-out both;
+}
+@keyframes pylon-tool-appear {
+  0% { opacity:0; transform:translate3d(0,10px,0) scale(.975); }
+  58% { opacity:1; transform:translate3d(0,-2px,0) scale(1.006); }
+  100% { opacity:1; transform:translate3d(0,0,0) scale(1); }
+}
+@keyframes pylon-tool-halo {
+  0%,15% { opacity:0; transform:scale(.985); }
+  40% { opacity:.8; transform:scale(1); }
+  100% { opacity:0; transform:scale(1.015); }
+}
+.solid-workbench-activity-slot[data-entry="new"]:has(.term-tool[data-reduced-motion="true"]) {
+  animation:none;
+}
+.solid-workbench-activity-slot[data-entry="new"]:has(.term-tool[data-reduced-motion="true"])::before {
+  display:none;
+}
+
+/* Sweep only the last part of a live assistant body. The overlay follows the
+   growing tail without restarting Markdown or animating a long text surface. */
+.term-assistant-body { position:relative; }
+.term-stream-sheen {
+  position:absolute;
+  inset:auto 0 0;
+  height:min(10rem,100%);
+  overflow:hidden;
+  pointer-events:none;
+}
+.term-stream-sheen::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  background:linear-gradient(100deg,transparent 17%,var(--accent-soft) 38%,var(--accent-soft-strong) 49%,var(--accent-soft) 60%,transparent 82%);
+  opacity:.7;
+  animation:pylon-stream-sheen 3.4s ease-in-out infinite;
+}
+@keyframes pylon-stream-sheen {
+  0%,8% { transform:translate3d(-100%,0,0); }
+  72%,100% { transform:translate3d(100%,0,0); }
+}
+
+/* The cursor follows the last revealed text leaf, including parsed Markdown
+   and open code fences. Its zero-sized anchor does not change line wrapping. */
+.term-typewriter-cursor {
+  display:inline-block;
+  position:relative;
+  width:0;
+  height:0;
+  vertical-align:baseline;
+  pointer-events:none;
+  user-select:none;
+}
+.term-typewriter-cursor::after {
+  content:'';
+  position:absolute;
+  left:.08em;
+  bottom:-.12em;
+  width:2px;
+  height:.94em;
+  border-radius:2px;
+  background:var(--accent);
+  box-shadow:0 0 10px var(--accent-soft-strong);
+  transform-origin:bottom;
+  animation:pylon-typewriter-cursor 900ms ease-in-out infinite;
+}
+@keyframes pylon-typewriter-cursor {
+  0%,100% { opacity:.35; transform:scaleY(.78); }
+  35% { opacity:1; transform:scaleY(1); }
+  70% { opacity:.75; transform:scaleY(1); }
+}
+
+/* The rail retains a quieter continuous signal while the sweep crosses the
+   tail. Both stop when the authoritative live flag clears. */
 .term-row-assistant[data-streaming="true"],
 .term-row-reasoning[data-streaming="true"],
 .plain-message-list__row[data-streaming="true"] .term-row-assistant {
   position:relative;
-}
-.term-row-assistant[data-streaming="true"] .term-assistant-body,
-.plain-message-list__row[data-streaming="true"] .term-row-assistant .term-assistant-body {
-  background:linear-gradient(108deg,transparent 12%,color-mix(in srgb,var(--accent) 7%,transparent) 48%,transparent 84%);
-  background-size:220% 100%;
-  animation:pylon-streaming-sweep 2.4s linear infinite;
 }
 .term-row-assistant[data-streaming="true"]::after,
 .term-row-reasoning[data-streaming="true"]::after,
@@ -2098,22 +2180,40 @@
   pointer-events:none;
   background:var(--accent);
   opacity:.28;
-  animation:pylon-streaming-pulse 1.35s ease-in-out infinite;
+  box-shadow:0 0 8px var(--accent-soft-strong);
+  animation:pylon-streaming-pulse 1.8s ease-in-out infinite;
 }
-@keyframes pylon-streaming-sweep { from { background-position:140% 0; } to { background-position:-40% 0; } }
 @keyframes pylon-streaming-pulse { 0%,100% { opacity:.18; } 50% { opacity:.6; } }
 
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"] > .term-row,
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"]::before,
+.chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"],
+.chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"]::before,
+.chat-view[data-reduced-motion="true"] .term-stream-sheen,
+.chat-view[data-reduced-motion="true"] .term-row-assistant[data-streaming="true"]::after,
+.chat-view[data-reduced-motion="true"] .term-row-reasoning[data-streaming="true"]::after,
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
+  animation:none;
+}
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"]::before,
+.chat-view[data-reduced-motion="true"] .term-stream-sheen,
+.chat-view[data-reduced-motion="true"] .term-typewriter-cursor,
+.chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
 @media (prefers-reduced-motion:reduce) {
-  .plain-message-list__row[data-entry="new"],
-  .plain-message-list__row[data-entry="new"]::after,
-  .term-row-assistant[data-streaming="true"] .term-assistant-body,
-  .plain-message-list__row[data-streaming="true"] .term-row-assistant .term-assistant-body,
+  .plain-message-list__row[data-entry="new"] > .term-row,
+  .plain-message-list__row[data-entry="new"]::before,
+  .solid-workbench-activity-slot[data-entry="new"],
+  .solid-workbench-activity-slot[data-entry="new"]::before,
+  .term-stream-sheen,
   .term-row-assistant[data-streaming="true"]::after,
   .term-row-reasoning[data-streaming="true"]::after,
   .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
-    animation:none !important;
-    background:none;
+    animation:none;
   }
+  .plain-message-list__row[data-entry="new"]::before,
+  .term-stream-sheen,
+  .term-typewriter-cursor,
+  .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
 }
 
 /* B1 authoritative tail: profile-specific rules above may set compact tool
@@ -2179,12 +2279,6 @@
 .term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child,
 .term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child > :first-child {
   margin-block-start:0;
-}
-.plain-message-list__row[data-entry="new"][data-streaming="true"],
-.plain-message-list__row[data-entry="new"][data-streaming="true"]::after {
-  /* A streaming row is updated in place; an entry transform on every
-     transient segment would look like the whole chat is jumping vertically. */
-  animation:none;
 }
 .term-assistant.has-dot > .term-assistant-dot,
 .term-assistant.has-dot > .term-assistant-dot-img,
