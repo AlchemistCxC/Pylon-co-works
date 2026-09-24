@@ -293,9 +293,13 @@ export function resolveModeOptionEntries(snapshot: WorkbenchRuntimeSnapshot, dra
 
 export function resolveReasoningOptionEntries(snapshot: WorkbenchRuntimeSnapshot, current?: string): readonly WorkbenchOptionEntry[] {
   const advertised = documentOptions(snapshot, 'reasoning')
+  // ★ 与权限 / 模型两条**保持对称**：清单里除当前值外什么都没有 ⇒ 视作"没上报"⇒ 用兜底表。
+  //   当前值的比对基准必须**取文档值**（调用方通常已传，缺省时自读）：拿不到基准时
+  //   `advertisedChoices` 会原样放行，守卫静默失效，且单测若喂了非空的 current 仍会绿。
+  const currentValue = current ?? resolveDocumentOptionValue(snapshot.document?.session.options, 'reasoning')
   return mergeEntries([
-    preferAdvertised(advertised, DEFAULT_REASONING_OPTIONS),
-  ], current)
+    preferAdvertised(advertisedChoices(advertised, currentValue), DEFAULT_REASONING_OPTIONS),
+  ], currentValue)
 }
 
 export function optionLabel(kind: WorkbenchOptionKind, id: string, fallback?: string): string {
