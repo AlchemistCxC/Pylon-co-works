@@ -15,6 +15,7 @@ import {
   type CcOverflowMode,
 } from '../../ccHeightState.ts'
 import { normalizeThemeState } from '../../themeFieldDefs.ts'
+import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
 
 /**
@@ -80,6 +81,43 @@ const REMOVED_CC_THEME_KEYS = [
 
 /** v11（刀4）：legacy `send` → 注册轨 id（槽位事实的继任者）。 */
 const LEGACY_CC_KEY_RENAMES: Readonly<Record<string, string>> = Object.freeze({ send: 'cc-send-button' })
+
+/**
+ * ★ #266 遗留①②：控件的颜色字段由「枚举档位」改成**自由选色** ⇒ 老数据里存的枚举字面量要搬成
+ * **等价颜色**，否则老用户看到的是无效色值。
+ *
+ * ★ 按「字段名 → 枚举字面量」两层查表，**不是按值全局替换**：同一个 `'white'` 在不同字段上的
+ *   等价色**不同** —— 发送按钮边框的白档是**半透明** `rgba(255,255,255,.5)`（旧渲染侧
+ *   `ControlCenter.solid.tsx` 就是这么翻的），图标的白档才是纯白 `#ffffff`。写成 `#fff` 会让
+ *   边框从半透明静默变实心。★ 幂等：颜色值在表里查不到 ⇒ 原样穿过。
+ */
+const LEGACY_CC_COLOR_ENUM_VALUES: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  // 遗留①：模型 / 思考强度 / 权限（底色 + 文字色）
+  modelBgColor: { white: '#ffffff', black: '#000000' },
+  modelTextColor: { white: '#ffffff', black: '#000000' },
+  reasoningBgColor: { white: '#ffffff', black: '#000000' },
+  reasoningTextColor: { white: '#ffffff', black: '#000000' },
+  permissionBgColor: { white: '#ffffff', black: '#000000' },
+  permissionTextColor: { white: '#ffffff', black: '#000000' },
+  // 遗留②：发送按钮边框色 / 图标色（边框两档都半透明；图标多一档 `'gray'`）
+  sendButtonBorderColor: { white: 'rgba(255,255,255,.5)', black: 'rgba(0,0,0,.5)' },
+  sendButtonIconColor: { white: '#ffffff', gray: 'rgba(0,0,0,.5)', black: '#000000' },
+})
+
+function normalizeLegacyCcColorEnums(state: Record<string, unknown>): void {
+  for (const [key, equivalents] of Object.entries(LEGACY_CC_COLOR_ENUM_VALUES)) {
+    const value = state[key]
+    if (typeof value !== 'string') continue
+    // `permissionTextColor` 多一档 `'mode'`（跟模式）⇒ 自由选色下的等价表达是**留空**
+    // （不写 inline color，交 CSS `[data-mode]` 语义色）。★ 有意的语义变化，见开发记录。
+    if (key === 'permissionTextColor' && value === 'mode') {
+      state[key] = ''
+      continue
+    }
+    const equivalent = equivalents[value]
+    if (equivalent !== undefined) state[key] = equivalent
+  }
+}
 
 function renameLegacyCcHiddenKeys(value: unknown): unknown {
   return Array.isArray(value)
@@ -186,6 +224,8 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
   Object.assign(state, normalizeThemeState(state))
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
+  // ★ #266 遗留①②：先搬老枚举（`white`/`black`/`gray`/`mode`）→ 等价颜色，再让下面的规则按颜色值走
+  normalizeLegacyCcColorEnums(state)
   state.inputShowPlaceholder = state.inputShowPlaceholder !== false
   state.inputShowHistoryHint = state.inputShowHistoryHint !== false
   // These select fields historically accepted booleans. Persist the enum
@@ -205,9 +245,10 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
     footerLayout: migratedFooterLayout as CcFooterLayout,
     hintMode: migratedHintMode as CcHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-      inputMode: migratedInputMode as CcInputMode,
-      submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
+      hiddenIds: resolveCcHiddenWidgetIds({
+        ccHidden: Array.isArray(state.ccHidden) ? state.ccHidden : [],
+        cliHintMode: migratedHintMode,
+      }),
     }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })

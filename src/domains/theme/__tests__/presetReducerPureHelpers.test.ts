@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
+import { resolveCcHiddenWidgetIds } from '../../cc/widgetDefinitions.ts'
 import { THEME_DEFAULTS, THEME_PRESET_KEYS, THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
 import { clampPresetCcHeight, filterPresetTheme, syncPresetCcHeight, toThemeDelta } from '../presetReducer.ts'
 
@@ -59,9 +60,8 @@ describe('clampPresetCcHeight / syncPresetCcHeight', () => {
 
   const visibleCount = (hidden: string[]) =>
     resolveVisibleStatusWidgetCount({
-      hiddenIds: hidden,
-      inputMode: 'cli',
-      submitButtonMode: 'inline',
+      // ★ #266 ⑰：隐藏名单的组装只有一处（预设的值 + 详细档折叠）—— 调用点照渲染侧那样组装。
+      hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: hidden, cliHintMode: cliPeri.cliHintMode }),
     })
   const minHeight = (visible: number) =>
     resolveCcMinHeight({
@@ -72,14 +72,18 @@ describe('clampPresetCcHeight / syncPresetCcHeight', () => {
       cliOverflowMode: 'fixed-scroll',
     })
 
-  it('下界跟着「可见状态控件数」联动（刀4 后名单上限 4，状态行不再换行）', () => {
-    expect(visibleCount(manyVisible.ccHidden)).toBe(4)
-    expect(visibleCount(fewVisible.ccHidden)).toBe(2)
+  it('下界跟着「可见状态控件数」联动（⑰ 后名单上限 5，满员会触发状态行换行）', () => {
+    // ★ #266 ⑰：可见数由 4 变 5（命令行提示不再被"有没有会话 / 是不是命令行模式"挡掉）
+    //   ⇒ `wrappedStatusRows`（>4 才多让一行）**从此会生效**，这正是空态数值不受影响的另一面：
+    //   空态那一侧由语境侧名单挡住提示，计数仍是 0。
+    expect(visibleCount(manyVisible.ccHidden)).toBe(5)
+    expect(visibleCount(fewVisible.ccHidden)).toBe(3)
 
     expect(clampPresetCcHeight({ ...manyVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(manyVisible.ccHidden)))
     expect(clampPresetCcHeight({ ...fewVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(fewVisible.ccHidden)))
-    // 名单换代后可见状态控件 ≤ 4，永不触发 wrappedStatusRows（>4 才多让一行）
-    expect(minHeight(visibleCount(manyVisible.ccHidden))).toBe(minHeight(visibleCount(fewVisible.ccHidden)))
+    // 现在两者的最小高**不同**（满员 5 ⇒ 换行 + 提示行）
+    expect(minHeight(visibleCount(manyVisible.ccHidden))).toBe(109)
+    expect(minHeight(visibleCount(fewVisible.ccHidden))).toBe(84)
   })
 
   it('上界固定 400，区间内原样返回', () => {

@@ -52,8 +52,8 @@ describe('主题设置展示文案契约', () => {
       cliOverflowMode: ['fixed-scroll', 'grow', 'overlay'],
       modelSwitchMode: ['menu', 'cycle'],
       permissionSwitchMode: ['menu', 'cycle'],
-      permissionBgColor: ['white', 'black'],
-      permissionTextColor: ['mode', 'black', 'white'],
+      // ★ #266 遗留①：`permissionBgColor` / `permissionTextColor` 已由「白/黑(+跟模式) 枚举」改成
+      //   **自由选色**（`type: 'color'`，无 options）⇒ 不再属于「关键枚举」这一组。
       sendVariant: ['icon', 'square', 'minimal'],
     } as const
 

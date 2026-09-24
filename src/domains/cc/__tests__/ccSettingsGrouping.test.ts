@@ -114,4 +114,24 @@ describe('#238 刀6 · 设置页中控区分组：字段集合不变量', () => 
       expect(groupTitles, `${label} 没有可调项，不该出现在设置页分组里`).not.toContain(label)
     }
   })
+
+  it('★ 两模式可渲染集合相同（77 / 77）—— 中控区没有"按输入模式判明"的项', () => {
+    // #266（2026-09-23 用户口径「不要这个判明条件，常态显示」）：设置页侧的 cc 字段本来就没有
+    // showIf，这条把"没有"钉住 —— 有人给中控字段挂条件即红（上一条冻结清单也会同步红）。
+    const groupTitles = new Set((GROUP_ORDER.cc ?? []).flatMap(section => section.groups.map(group => group.title)))
+    const renderableIn = (inputMode: string) => THEME_FIELD_KEYS
+      .filter(key => {
+        const def = defs[key]
+        if (def.zone !== 'cc' || def.hidden || def.group === undefined || !groupTitles.has(def.group)) return false
+        return !def.showIf || def.showIf({ inputMode } as Parameters<NonNullable<ThemeFieldDef['showIf']>>[0])
+      })
+      .sort()
+    const standard = renderableIn('default')
+    const cli = renderableIn('cli')
+    expect(standard, '标准输入模式下的可渲染项数').toHaveLength(77)
+    expect(cli, '命令行模式下的可渲染项数').toHaveLength(77)
+    expect(standard, '两模式差集必须为空').toEqual(cli)
+    // 反向确认判据真的读了 inputMode：cc 区任何字段都不该有 showIf
+    expect(THEME_FIELD_KEYS.filter(key => defs[key].zone === 'cc' && defs[key].showIf)).toEqual([])
+  })
 })

@@ -48,7 +48,7 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
   // 说明原因，而不是让用户反复点出一串长报错。草稿态（空态选型）不受限。
   const unsurfaced=()=>!props.onDraftChange&&entries().length===0
   const width=()=>appearance().modelWidth??120, height=()=>appearance().modelHeight??28, radius=()=>appearance().modelRadius??0, fontSize=()=>appearance().modelFontSize??12
-  const bg=()=>appearance().modelBgColor==='black'?'#000':'#fff', fg=()=>appearance().modelTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const bg=()=>appearance().modelBgColor, fg=()=>appearance().modelTextColor; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
   const choose=async(target:string)=>{ if(pending()) return; if(props.onDraftChange){props.onDraftChange(target);close(true);return}; const sid=workbench.input().sessionId;if(!sid||target===model()){close(true);return}; setPending(true);setError(''); try {const r=await workbench.commands.setModel(sid,target);if(!r.ok)setError(r.error||MODEL_SWITCH_FAIL)} finally {setPending(false);close(true)} }
   createEffect(()=>{const currentSessionId=workbench.input().sessionId;if(currentSessionId!==previousSessionId)close();previousSessionId=currentSessionId})
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
@@ -57,7 +57,7 @@ export function SolidModelWidget(props: { draftValue?: () => string; onDraftChan
 }
 
 /** 权限模式控件：本体只显示后端机器值（不翻译），外观与交互跟模型／思考强度控件同一套语言。
- *  颜色：permissionTextColor='mode' 时不写 inline color，交给 CSS 的 [data-mode] 语义色
+ *  颜色：字段留空（`permissionTextColor === ''`）时不写 inline color，交给 CSS 的 [data-mode] 语义色
  *  （auto 黄 / bypass 红 / edit 紫 / default 灰）—— 危险模式一眼可见。 */
 export function SolidModeWidget(props: {
   draftValue?: () => string
@@ -77,8 +77,9 @@ export function SolidModeWidget(props: {
   onMount(()=>{const pd=(e:PointerEvent)=>{if(open()&&!root?.contains(e.target as Node))close()};document.addEventListener('pointerdown',pd);onCleanup(()=>document.removeEventListener('pointerdown',pd))})
   const cycle=()=>{void choose(nextValue(entries().map(e=>e.id), mode()))}
   const width=()=>appearance().permissionWidth??120, height=()=>appearance().permissionHeight??28, radius=()=>appearance().permissionRadius??0, fontSize=()=>appearance().permissionFontSize??12
-  const bg=()=>appearance().permissionBgColor==='black'?'#000':'#fff'
-  const color=()=>{const c=appearance().permissionTextColor??'mode';return c==='mode'?undefined:c==='white'?'#fff':'#000'}
+  const bg=()=>appearance().permissionBgColor
+  // 留空 = 跟模式：不写 inline color（`undefined` 会被 style 对象丢掉），语义色由 CSS [data-mode] 给。
+  const color=()=>appearance().permissionTextColor||undefined
   const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),...(color()?{color:color()}:{})})
   return <div ref={el=>root=el} class="solid-permission-widget" style={{'margin-left':`${previousWidgetGapPx('mode')}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),MODE_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-permission-trigger" data-mode={mode()} style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={switchMode()==='menu'?'listbox':undefined} aria-expanded={switchMode()==='menu'?open():undefined} aria-controls={switchMode()==='menu'?menuId:undefined} onClick={()=>switchMode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':mode()}</button><Show when={switchMode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="权限模式选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==mode())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }
@@ -98,7 +99,7 @@ export function SolidReasoningWidget(props: { draftValue?: () => string; onDraft
   const mode=()=>appearance().reasoningSwitchMode??'menu'
   const cycle=()=>{const ids=entries().map(e=>e.id);const i=ids.indexOf(current());void choose(ids[(i+1+ids.length)%ids.length]||current())}
   const width=()=>appearance().reasoningWidth??120, height=()=>appearance().reasoningHeight??28, radius=()=>appearance().reasoningRadius??0, fontSize=()=>appearance().reasoningFontSize??12
-  const bg=()=>appearance().reasoningBgColor==='black'?'#000':'#fff', fg=()=>appearance().reasoningTextColor==='white'?'#fff':'#000'; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
+  const bg=()=>appearance().reasoningBgColor, fg=()=>appearance().reasoningTextColor; const close=(focus=false)=>{setOpen(false);if(focus)queueMicrotask(()=>trigger?.focus())}
   const triggerStyle=()=>({width:`${width()}px`,height:`${height()}px`,'border-radius':`${radius()}px`,'font-size':`${fontSize()}px`,background:bg(),color:fg()})
   return <div ref={el=>root=el} class="solid-reasoning-widget" style={{'margin-left':`${previousWidgetGapPx('reasoning')}px`}}><Show when={error()}>{m=><span class="cc-widget-error" role="alert" aria-live="assertive" title={m()}>{shortControlCenterError(m(),REASONING_SWITCH_FAIL)}</span>}</Show><button ref={el=>trigger=el} type="button" class="cc-reasoning-trigger" style={{...triggerStyle(),display:'flex','align-items':'center','justify-content':'center'}} aria-haspopup={mode()==='menu'?'listbox':undefined} aria-expanded={mode()==='menu'?open():undefined} aria-controls={mode()==='menu'?menuId:undefined} onClick={()=>mode()==='cycle'?cycle():setOpen(v=>!v)}>{pending()?'......':current()}</button><Show when={mode()==='menu'&&open()}><div id={menuId} class="cc-model-menu" role="listbox" aria-label="思考强度选项" data-popover="control-center" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();close(true)}}} style={{width:`${width()}px`}}><For each={entries().filter(x=>x.id!==current())}>{item=><button type="button" role="option" class="cc-model-item" onClick={()=>void choose(item.id)}>{item.id}</button>}</For></div></Show></div>
 }

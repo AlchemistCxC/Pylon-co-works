@@ -4,11 +4,11 @@ import { clampCcHeight, resolveCcMinHeight, resolveVisibleStatusWidgetCount } fr
 
 describe('ccHeightState 状态栏可见计数', () => {
   it('resolveVisibleStatusWidgetCount 走通用 isWidgetVisible 计数', () => {
-    // 刀4 名单换代后 STATUS_WIDGET_IDS = [model, reasoning, mode, tokens]（4 个），
-    // 可见性只由 hidden 决定（numeric 去重 / 外部按钮 / terminal-classic 三条规则随被删元件退场）。
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', submitButtonMode: 'inline' })).toBe(4)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', submitButtonMode: 'inline' })).toBe(2)
-    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tokens'], inputMode: 'cli', submitButtonMode: 'inline' })).toBe(3)
+    // ★ #266 ⑰ 后：STATUS_WIDGET_IDS = [model, reasoning, mode, tokens, cc-command-hint]（5 个），
+    // 可见性**只由隐藏名单决定**（会话 / 输入模式 / 条件都不再过问）⇒ 空名单即 5。
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: [] })).toBe(5)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'] })).toBe(3)
+    expect(resolveVisibleStatusWidgetCount({ hiddenIds: ['tokens'] })).toBe(4)
   })
 })
 

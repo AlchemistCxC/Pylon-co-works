@@ -69,25 +69,15 @@ export interface CcMinHeightOptions {
 
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
-  inputMode,
-  submitButtonMode,
-  hintMode,
-  hasSession,
 }: {
+  /** 隐藏名单（**组装好的**：预设的值 + 详细档折叠 + 语境侧名单，见 `resolveCcHiddenWidgetIds`） */
   hiddenIds: readonly string[]
-  inputMode: CcInputMode
-  submitButtonMode: string
-  /** #238 刀5B：命令行提示的详细档（`'hint-visible'` 条件用）；缺省 = 未知 */
-  hintMode?: CcHintMode
-  /** #238 刀5B：是否活跃会话（`'has-session'` 条件用）；缺省 = 未知（无会话信息的调用方） */
-  hasSession?: boolean
 }): number {
-  // C2：与渲染共用一个可见性谓词。名单换代（刀4）后，可见性只由 hidden 决定；
-  // ★ 刀5B 起还由 `inActiveSession` 与 `conditions` 决定 ⇒ 这三个 ctx 字段**必须与渲染侧同源**，
+  // C2：与渲染共用一个可见性谓词。★ #266 ⑰ 后可见性**只由隐藏名单决定** ——
+  //   元件的行上不再有任何显隐申明，也不再有运行期条件 ⇒ 谓词的上下文只剩 `hidden`。
+  //   名单的组装**只有一处**（`resolveCcHiddenWidgetIds`），渲染侧与这里同源，
   //   否则会出现"计数多算一个不渲染的元件"（正是 C2 要防的）。
-  //   ★ 拿不到会话信息的调用方（如 `themeFieldDefs` 的 ccHeight minFn）不传 `hasSession`
-  //   ⇒ 含 `'has-session'` 条件的行在那里算作不可见（保守：不改写用户已落盘的高度）。
-  return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds, inputMode, submitButtonMode, hintMode, hasSession })).length
+  return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds })).length
 }
 
 const BASE_MIN_HEIGHT = 64

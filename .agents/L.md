@@ -836,3 +836,96 @@
 ---
 [2026-09-24] [Codex-Aster] [AgentSheet terminal-like 视觉重构]
 范围：AgentSheet 左右栏展示组件、对应 workspace/shell CSS、工作区/Profile/宠物/会话设置视觉、验收与记录。保持所有业务及插件契约、预设数据、布局宽度与折叠语义。避开 #276 Markdown 文件域。共享树当前有他人在途改动，依 §2.1 暂不 merge/stage/commit；本声明暂未提交。
+
+[2026-09-23 23] [Riemann] [#266 · 撤掉「按条件隐藏」（口径已改，取代原「成员级显隐收编」条目）]
+
+**开工：#266 主体（⑷）——撤掉「按条件判明该不该显示」这一类做法，相关项一律常态显示。** 施工单已按用户 2026-09-23 口径改写：`任务/工作台优化/元件定义表/14-施工单-撤掉按条件隐藏.md`（**原「成员级显隐收编」方向作废**，含上一条 21:20 的停手结论）。分支 `refactor/cc-member-visibility`（从 `main@d360f9b0` 开）。**同一会话并入用户指定的顺手补丁**：修「权限语义色被通用规则覆写」的存量 CSS 缺陷。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（删 `input.propertyFields` 三条 `cliLine*` 的 `showIf`；删成员层 4 条 `{kind:'field'}` 显隐声明；`CcMemberVisibility` 删 `field` 变体 + 类型注释按「不构成显隐门」改写）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（两条断言按新口径改写）
+- `src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`（新增「属性面板两模式均渲染命令行边框三项」断言）
+- `src/domains/cc/__tests__/ccSettingsGrouping.test.ts`（新增「设置页 cc 区两模式同为 77 项」断言）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css`（四条语义色规则补槽位作用域前缀）
+- `src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css`（**仅**槽位段那条解释「谁更specific」的注释同步，零规则改动）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（属性面板读取点 528 行不动）、`ControlCenter.css`、`src/themeFieldDefs.ts`、`src/components/Settings.tsx`、`src/sheets/**`、预设系统（`src/presets/**`、`src/zones/**`、`src/customPresets*`）、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
+
+**✅ 进展（本地完工，未 push 未开 PR）**：主任务（删三条 `showIf` + 删成员层 4 条判明声明 + 从类型删 `field` 变体）与顺手补丁（权限语义色四条补槽位前缀）均已落地，四笔提交（`82035c1c` / `575edb7b` / `7ab66605` / `9a6f784f`）。门禁五步全绿、全量 **632 文件 / 4796 用例连跑 2 次**；实机四档数值 + 属性面板两模式 + 设置页 77/77 均已取证（记录 `.agents/records/266-cc-drop-conditional-hiding.md`）；#266 已回写。★ **本条目保留至合入**。
+
+---
+
+[2026-09-24 12] [Riemann] [#266 · 显隐只剩「值」（⑰，叠在 ④ 之上）]
+
+**开工：#266 遗留（⑰）——撤掉元件侧三样显隐申明（行上 `inActiveSession` / `conditions` / `hiddenInEmptyState`），显隐收敛成「预设里的值 + 语境侧名单」。** 施工单 `任务/工作台优化/元件定义表/17-施工单-显隐只剩值.md`；分支 `refactor/cc-visibility-as-value`（从 ④ 的 tip `988cfbb9` 开出；本件与 ④ 同期进批量 PR）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（删行上三样 + `CcVisibilityCondition` / `CC_VISIBILITY_CONDITIONS` / `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`；空态名单改字面量；新增纯函数 `resolveCcHiddenWidgetIds`；可见性谓词收口）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（删 `passesStatusGate` / `hasAlwaysVisibleStatusWidget`；`statusRowContent` 改判可见件；隐藏名单走组装函数）
+- `src/ccHeightState.ts` + **计数调用点（实测 8 处，单子写「6 处」但其枚举与实测逐条一致）**：`src/store.ts`×2、`src/themeFieldDefs.ts`、`src/domains/theme/migration.ts`、`src/domains/theme/presetReducer.ts`×2、`src/domains/workbench/workbenchAppearanceStore.ts`×2
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`、`src/__tests__/ccHeightState.test.ts`、`src/domains/theme/__tests__/presetReducerPureHelpers.test.ts`；**新增** `src/domains/cc/__tests__/ccVisibilityDeclarationGuard.test.ts`（守卫「行上再无显隐申明」）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/zones/**`（⑦ 域）、`src/presets/**`、`ControlCenter.css`、`src/components/Settings.tsx`、`src/sheets/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
+
+**✅ 进展（本地完工，未 push 未开 PR）**：三样行级显隐申明 + 类型/条件表/常态放行名单已删净，空态名单改字面量，新增 `resolveCcHiddenWidgetIds` 一处组装（渲染侧与 8 处计数调用点共用），删恒真废过滤器 `passesStatusGate`，谓词收口。门禁五步全绿、全量 **632 文件 / 4799 用例连跑 3 次**；等价表逐行 diff（唯一变化 = 命令行提示在标准输入模式下默认显示）；新增守卫 `ccVisibilityDeclarationGuard.test.ts` 反向验证两次均红；实机五档数值 + 空容器/空态 84px 不变 + 控制台零报错，App 已关。记录 `.agents/records/266-cc-visibility-as-value.md`；#266 已回写。★ **本条目保留至合入**。
+
+---
+
+[2026-09-23 22:30] [Riemann] [#266 · 遗留② 发送按钮边框/图标色改自由选色]
+
+**开工：#266 同类补充（① 的续做，同分支 `feat/cc-widget-free-colors`）** —— 把 `sendButtonBorderColor`（边框）与 `sendButtonIconColor`（图标）从白/黑/灰枚举改成自由选色。施工单 `E:\Acode\FILES\任务\工作台优化\元件定义表\16-施工单-发送按钮颜色改自由选色.md`。★ 命门 = 等价色**不是**纯白纯黑（边框 white→`rgba(255,255,255,.5)` 半透明、black→`rgba(0,0,0,.5)`；图标 white→`#ffffff`、gray→`rgba(0,0,0,.5)`、black→`#000000`）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（`sendButtonBorderColor` / `sendButtonIconColor` 两行 `S(...)` → `C(...)` + 默认取等价色）
+- `src/domains/theme/migration.ts`（① 建的枚举映射表改成**按字段**查表（同名 `white` 在不同字段等价色不同）+ 映射这两键 + 改掉 :88 那句"仍是枚举"的注释）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（**仅** 630-631 两行：去掉枚举→颜色的转换，直接传字段值）
+- `src/zones/factory/{gui-cc,terminal-cc}.ts`（出厂数据 12 处 `"white"` 按字段换等价色）
+- 测试：`src/domains/theme/__tests__/ccControlColorFreePick.test.ts`（"不越界"改"也自由色" + 头部第 3 条说明）、`src/renderers/solid-workbench/__tests__/mountSolidControlCenterPreview.solid.test.tsx`（默认值/改值改等价色字面量）
+- 契约快照 `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（脚本重拍，不手改）
+- 文档：`.agents/records/266-cc-widget-free-colors.md`（追加）、本文件
+
+**我不碰**：`sendButtonColor`（已是自由色）、`sendButtonRadius` / 图标形状圆角那几项（非颜色，保持枚举）、① 已改的 6 个字段、`src/domains/cc/widgetDefinitions.ts`（发送按钮无属性面板表单）、中控结构/布局、`ControlCenter.css`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-23 22] [Riemann] [#266 · 遗留① 控件底色/文字色改自由选色]
+
+**开工：#266 第①项（控件底色/文字色从「白/黑枚举」改成自由选色）。** 施工单 `E:\Acode\FILES\任务\工作台优化\元件定义表\13-施工单-控件改自由选色.md`；分支 `feat/cc-widget-free-colors`（从 `main@d360f9b0` 开）。口径：属性声明一律走值（颜色即字段值）；不做「深色」那一层（不给出厂深色预设填值、不动呈现方案、不动 `uiScheme`）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/themeFieldDefs.ts`（6 个字段 `S(枚举)` → `C(自由色)` + 默认值）
+- `src/domains/theme/migration.ts`（老枚举值 → 等价颜色的归一化，挂在每次读盘路径 `normalizeThemeValues` 上，幂等、仅这 6 个字段）
+- `src/domains/cc/widgetDefinitions.ts`（**仅** 三个 `propertyFields` 里那 6 项 `kind:'chips'` → `'color'`，及 `CcColorPropertyKey`/`CcStringPropertyKey` 两个类型别名）
+- `src/renderers/solid-workbench/input/WorkbenchWidgets.solid.tsx`（三组控件的 `bg()`/`fg()` 改直读颜色）
+- ★ **`src/renderers/solid-workbench/input/ControlCenter.solid.tsx` 仅 `renderBody` 的 `tokens`（用量胶囊）样式两行** —— 单子 §1 点名「用量胶囊借用模型字段（会跟着一起变）」，而那两行仍是「枚举→颜色」映射，不改则胶囊不跟模型（属单子 #3「消费端改直读颜色」的同一类改动；**除此之外本文件一字不动**）
+- `src/zones/factory/{gui-cc,terminal-cc}.ts`（出厂数据等价颜色替换，仅这 6 个字段共 36 行）
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`、`src/domains/theme/__tests__/{themeFieldCopy,themeSchemaV8Backfill}.test.ts`、`src/renderers/solid-workbench/input/__tests__/WorkbenchWidgets.solid.test.tsx`（单子逐条点名）、**新增** `src/domains/theme/__tests__/ccControlColorFreePick.test.ts`（「老数据等价 + 幂等」断言，单子 §3-2/§3-5 要求的反向验证靶子）
+- 契约快照 `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（脚本重拍，不手改）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：中控结构/布局/定义表行、`ccVariant`/`ccScale`（已删）、呈现方案结构、`uiScheme`、`sendButtonBorderColor`/`sendButtonIconColor`（仍是枚举，不属这 6 个字段）、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域（#241 Lezer 线、README/BOARD 无关项）。全程 pathspec 提交。
+
+---
+
+[2026-09-23 23] [Vernier] [#266 遗留⑦]
+
+**开工：issue266 遗留⑦（出厂区域数据立一条机器校验 + `order` 序号值整理；序号只改写法、不改相对次序 ⇒ 渲染零变化）。** 施工单 `元件定义表/15-施工单-出厂数据校验与序号整理.md`。分支 `test/cc-factory-zone-data-guard`（基于 main `d360f9b0`，工作树干净）。文件域（请勿改写、勿连带提交）：
+
+- `src/zones/factory/terminal-cc.ts`、`src/zones/factory/gui-cc.ts`（**仅** ccLayout 里 `input` / `cc-command-hint` 两处 `order` 数值）
+- `src/domains/cc/widgetDefinitions.ts`（**仅** `input` 与 `cc-command-hint` 两行的 `layout.order`）
+- **新增** `src/zones/__tests__/factoryZonePresetLayoutGuard.test.ts`（出厂数据 ↔ 定义表位置一致性守卫）
+- `src/domains/cc/__tests__/widgetDefinitionTable.test.ts`（**仅** `DEFAULT_CC_LAYOUT` 字面量两条序号 + 随之失效的注释）
+- `src/renderers/solid-workbench/__fixtures__/workbench-skin-baseline.json`（`--write` 重拍：序号随真值变）
+- 文档：`.agents/records/266-*.md`（完工时新增）、本文件、issue #266 回写
+
+★ **与另两条 #266 支线的重叠提醒**（施工单 §3 写「文件面不重叠」，实测不成立）：`refactor/cc-member-visibility` 与 `feat/cc-widget-free-colors` 都改了 `src/domains/cc/widgetDefinitions.ts`、`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`，后者还改了同一份契约快照与 `src/zones/factory/{terminal-cc,gui-cc}.ts`。三条各自基于 main ⇒ 后合入者会在这几个文件上冲突（本件只动 2 个数值，冲突面极小）。两条支线本地已完工、当前不在改，故不阻塞。
+
+**我不碰**：预设系统其余部分、中控渲染（`ControlCenter.solid.tsx` / `WorkbenchWidgets.solid.tsx` 等）、上面两条在途分支各自的域、他人在途域。全程 pathspec 提交。
+
+---
