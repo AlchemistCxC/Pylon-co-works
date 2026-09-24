@@ -25,8 +25,10 @@ const IDLE_SUMMARY: KernelSummary = { dirty: false, selection: null, lineCount: 
  * 取全文（键击路径零全文串）。基线 = 最近一次成功保存（或加载）的磁盘文本；编辑中
  * dirty → 保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
  * conflict → 覆盖保存（force）或重新加载。
- * #252（阶段〇保留）：打开默认只读——「编辑」显式进可写态；working-diff 面板仅在
- * 编辑态且有未保存改动时出现，diff 文本 300ms 防抖按需取（键击路径零全文串）。
+ * 0-A2（ADR-0023，重审 #252）：**默认可写**——「编辑/退出编辑」按钮退役，打开即可
+ * 输入；强制只读仅物理例外（truncated/binary/超限 → 内核只读档）。防误改由三层承接：
+ * expectedBaseline 冲突检测（不变）/ 关闭与导航守卫（FileSheetView，不变）/ 写冲突锁
+ * （0-A3）。working-diff 面板在有未保存改动时出现，diff 文本 300ms 防抖按需取。
  */
 export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab, onDirtyChange, onSavingChange }: {
   target?: WorkspaceTarget | null
@@ -49,9 +51,6 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [instruction, setInstruction] = useState('')
   const [summary, setSummary] = useState<KernelSummary>(IDLE_SUMMARY)
   const [workingText, setWorkingText] = useState<string | null>(null)
-  // #252：打开文件默认只读预览——阅读是 File 工作台的高频路径，显式点「编辑」才
-  // 进入编辑态（高危的「可写入真实仓库文件」状态不设为默认态）。
-  const [editing, setEditing] = useState(false)
   const [baseline, setBaseline] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle')
   const [saveError, setSaveError] = useState('')
@@ -69,16 +68,16 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
       : `L${selection.startLine}–L${selection.endLine}`
     : null
 
-  // working-diff 按需计算：仅在编辑态且 dirty 时，键击静默 300ms 后取一次全文串。
+  // working-diff 按需计算：仅在 dirty 时，键击静默 300ms 后取一次全文串。
   // 依赖 summary（内核仅在 dirty/选区/行列真变化时发新摘要）→ 防抖天然生效。
   useEffect(() => {
-    if (!editing || !summary.dirty || baseline === null) {
+    if (!summary.dirty || baseline === null) {
       setWorkingText(null)
       return
     }
     const timer = window.setTimeout(() => setWorkingText(apiRef.current?.getDoc() ?? ''), 300)
     return () => window.clearTimeout(timer)
-  }, [summary, editing, baseline])
+  }, [summary, baseline])
 
   const workingPayload = useMemo(() => {
     if (baseline === null || workingText === null || !dirty) return null
@@ -104,7 +103,6 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setInstruction(cleared.instruction)
     setSummary(IDLE_SUMMARY)
     setWorkingText(null)
-    setEditing(false)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
@@ -154,7 +152,6 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   }
 
   const discardAndReload = () => {
-    setEditing(false)
     setSaveState('idle')
     setSaveError('')
     setSelection(null)
@@ -163,25 +160,6 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
 
   const setSelection = (value: KernelSummary['selection']) => {
     setSummary(previous => (previous.selection === value ? previous : { ...previous, selection: value }))
-  }
-
-  // #252：退出编辑即离开「可写面」。有未保存改动时先确认——确认则丢弃并重拉磁盘
-  // （与 conflict 的「重新加载」同一条 discard 路径），取消则留在编辑态。
-  const handleExitEdit = () => {
-    if (dirty && !window.confirm('放弃未保存的修改并退出编辑吗？')) return
-    if (dirty) discardAndReload()
-    else {
-      setEditing(false)
-      setSelection(null)
-    }
-  }
-
-  const handleToggleEdit = () => {
-    if (editing) handleExitEdit()
-    else {
-      setSelection(null)
-      setEditing(true)
-    }
   }
 
   if (!tab) {
@@ -225,27 +203,14 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
       <div className="file-edit-toolbar">
         <button
           type="button"
-          className="file-edit-toggle"
-          onClick={handleToggleEdit}
-          disabled={truncated || !target || saveState === 'saving'}
-          title={truncated ? '内容不完整（truncated）不可编辑' : saveState === 'saving' ? '保存进行中，请稍候' : undefined}
+          className="file-save-btn"
+          onClick={() => void handleSave(false)}
+          disabled={!dirty || saveState === 'saving'}
+          title={truncated ? '内容不完整（truncated）不可编辑' : '保存（Ctrl/⌘+S）'}
         >
-          {editing ? '退出编辑' : '编辑'}
+          {saveState === 'saving' ? '保存中…' : '保存'}
         </button>
-        {editing && (
-          <>
-            <button
-              type="button"
-              className="file-save-btn"
-              onClick={() => void handleSave(false)}
-              disabled={!dirty || saveState === 'saving'}
-              title="保存（Ctrl/⌘+S）"
-            >
-              {saveState === 'saving' ? '保存中…' : '保存'}
-            </button>
-            {saveState === 'saved' && <span className="file-save-ok" role="status">已保存</span>}
-          </>
-        )}
+        {saveState === 'saved' && <span className="file-save-ok" role="status">已保存</span>}
         {saveState === 'error' && <span className="file-save-error" role="alert">{saveError}</span>}
       </div>
       {saveState === 'conflict' && (
@@ -264,13 +229,12 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         context={context}
         path={tab.path}
         revealLine={tab.line}
-        editing={editing}
+        writable={!truncated}
         baseline={baseline ?? undefined}
         onTruncated={value => {
-          setTruncated(value)
           // A truncated response is intentionally read-only.  Never grant an
-          // incomplete buffer an editable surface, whatever mode was active.
-          if (value) setEditing(false)
+          // incomplete buffer an editable surface.
+          setTruncated(value)
         }}
         onContentReady={content => { setBaseline(content) }}
         onExternalChange={() => {
@@ -288,7 +252,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         saveReceipt={saveReceipt}
         apiRef={apiRef}
       />
-      {editing && workingPayload && (
+      {workingPayload && (
         <div className="file-working-diff">
           <DiffCard output="" payload={workingPayload} />
         </div>
@@ -297,8 +261,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         <span className="file-status-path" title={tab.path}>{tab.path}</span>
         <span>{lineCount} 行</span>
         {summary.cursor && <span>Ln {summary.cursor.line}, Col {summary.cursor.col}</span>}
-        {editing && <span>编辑中</span>}
-        {editing && dirty && <span className="file-status-dirty">+{workingStats.added} −{workingStats.removed} 未保存</span>}
+        {dirty && <span className="file-status-dirty">+{workingStats.added} −{workingStats.removed} 未保存</span>}
         <span className={selectionLabel ? 'file-status-selection active' : 'file-status-selection'}>
           {selectionLabel ? `已选择 ${selectionLabel}` : '拖选代码以回传会话'}
         </span>

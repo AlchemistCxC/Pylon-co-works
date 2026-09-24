@@ -15,9 +15,9 @@ function readTextResult(content: string) {
   return { relativePath: 'src/a.ts', content, bytesRead: content.length, totalBytes: content.length, truncated: false }
 }
 
-// 0-A1 内核合一后「只读」= 常驻 CodeMirror 内核的 editable=false 档：文档内容、
-// 行号 gutter（CM 自带）与程序化外部刷新仍可用，可编辑面关闭。
-describe('FileTabView 只读恒内核（0-A1）', () => {
+// 0-A2 默认可写：FileTabView 缺省即内核可编辑档；只读仅物理例外（writable=false）。
+// 文档内容、行号 gutter（CM 自带）与程序化外部刷新恒可用。
+describe('FileTabView 内核承载（0-A2）', () => {
   beforeEach(() => {
     resetStores()
     localStorage.clear()
@@ -25,11 +25,11 @@ describe('FileTabView 只读恒内核（0-A1）', () => {
     invoke.mockResolvedValue(readTextResult('const x = 1\nconsole.log(x)\n'))
   })
 
-  it('只读模式由 CodeMirror 内核承载内容（editable=false，gutter 在）', async () => {
+  it('默认可写：CodeMirror 内核承载内容（editable=true，gutter 在）', async () => {
     render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
 
-    await waitForFileEditor('const x = 1\nconsole.log(x)\n')
-    expect(fileEditorEditable()).toBe(false)
+    await waitForFileEditor('const x = 1' + String.fromCharCode(10) + 'console.log(x)' + String.fromCharCode(10))
+    expect(fileEditorEditable()).toBe(true)
     expect(document.querySelector('.cm-gutters')).not.toBeNull()
   })
 
@@ -41,11 +41,18 @@ describe('FileTabView 只读恒内核（0-A1）', () => {
     expect(document.querySelector('.file-code-editor')).toBeNull()
   })
 
+  it('writable=false（物理例外）→ 内核只读档', async () => {
+    render(<FileTabView source="ws-a" path="src/a.ts" writable={false} onTruncated={vi.fn()} />)
+
+    await waitForFileEditor('const x = 1' + String.fromCharCode(10) + 'console.log(x)' + String.fromCharCode(10))
+    expect(fileEditorEditable()).toBe(false)
+  })
+
   it('markdown 文件同样走源码内核（默认源码态；渲染态切换归阶段一）', async () => {
-    invoke.mockResolvedValue(readTextResult('# Title\n'))
+    invoke.mockResolvedValue(readTextResult('# Title' + String.fromCharCode(10)))
     render(<FileTabView source="ws-a" path="src/b.md" onTruncated={vi.fn()} />)
 
-    await waitForFileEditor('# Title\n')
-    expect(fileEditorEditable()).toBe(false)
+    await waitForFileEditor('# Title' + String.fromCharCode(10))
+    expect(fileEditorEditable()).toBe(true)
   })
 })

@@ -30,8 +30,7 @@ function deferred<T>() {
 }
 
 async function editAndType(value = 'const x = 2') {
-  // #252：默认只读预览——显式点「编辑」才进编辑态
-  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  // 0-A2（ADR-0023）：默认可写——打开即可输入，无「编辑」开关
   const editor = await waitForFileEditor('const x = 1')
   replaceFileEditorValue(editor, value)
   return editor
@@ -50,34 +49,27 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     })
   })
 
-  it('打开文件默认只读预览（内核只读档/无保存/无「编辑中」）；点「编辑」进编辑态，退出回只读（#252）', async () => {
+  it('打开文件默认可写（ADR-0023 重审 #252）：打开即可输入、保存未 dirty 时禁用、无「编辑」开关', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await screen.findByText('const x = 1')
-    // 0-A1：只读预览也是常驻 CodeMirror 内核，但可编辑面关闭、无保存、无「编辑中」
-    await waitForFileEditable(false)
-    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
-    expect(screen.queryByText('编辑中')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    await waitForFileEditor('const x = 1')
     await waitForFileEditable(true)
-    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
-    expect(screen.getByText('编辑中')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+    expect(screen.queryByText('编辑中')).toBeNull()
+    const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
 
-    fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
-    await waitForFileEditable(false)
-    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
-    expect(window.confirm).not.toHaveBeenCalled()
+    replaceFileEditorValue(fileEditorView(), 'const x = 2')
+    await waitFor(() => expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
-  it('truncated 文件：编辑按钮禁用（内容不完整不可编辑）', async () => {
+  it('truncated 文件：物理例外强制只读（内核可编辑面关闭）', async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1', true))
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     await screen.findByText('内容不完整（truncated）')
-    const toggle = screen.getByRole('button', { name: '编辑' }) as HTMLButtonElement
-    expect(toggle.disabled).toBe(true)
+    await waitForFileEditable(false)
   })
 
   it('保存成功：write 带 source/relativePath/content/expectedBaseline=基线/force=false，状态栏已保存、dirty 清除', async () => {
@@ -156,7 +148,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await waitFor(() => expect(screen.queryByText(/磁盘文件已被外部修改/)).toBeNull())
   })
 
-  it('重新加载：丢弃本地编辑，重拉磁盘内容并退出编辑', async () => {
+  it('重新加载：丢弃本地编辑并重拉磁盘内容', async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1'))
       if (cmd === 'write_workspace_text') return Promise.reject(new Error('conflict: 磁盘文件已被外部修改，保存已拒绝'))
@@ -169,9 +161,9 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     const readsBefore = invoke.mock.calls.filter(([cmd]) => cmd === 'read_workspace_text').length
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }))
     await waitFor(() => expect(invoke.mock.calls.filter(([cmd]) => cmd === 'read_workspace_text').length).toBeGreaterThan(readsBefore))
-    await waitForFileEditable(false)
-    // 0-A1：重拉的磁盘真值以内核 doc 为准（RTL 文本匹配在 CM 虚拟化 DOM 上口径不稳）
+    // 0-A2：无编辑态可「退出」——重载 = 丢弃编辑回到磁盘真值，且保持可写
     await waitFor(() => expect(fileEditorView().state.doc.toString()).toBe('const x = 1'))
+    expect(fileEditorEditable()).toBe(true)
     expect(screen.queryByText(/磁盘文件已被外部修改/)).toBeNull()
   })
 
@@ -207,7 +199,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await screen.findByText(/未保存/)
     rerender(<FileViewHost source="ws-a" tab={otherTab} onCloseTab={vi.fn()} />)
     await waitForFileEditor('const x = 1')
-    await waitForFileEditable(false)
+    await waitForFileEditable(true)
     expect(screen.queryByText(/未保存/)).toBeNull()
     expect(screen.queryByText('已保存')).toBeNull()
   })
@@ -227,25 +219,7 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     // 新工作区读取 pending 期间内核不挂载（loadedText 未就绪），编辑器退场立即生效
     await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
     expect(screen.queryByText(/未保存/)).toBeNull()
-    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
-  })
-
-  it('脏态退出编辑先确认：取消留在编辑态；确认丢弃并重拉磁盘（#252）', async () => {
-    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await editAndType()
-    await screen.findByText(/未保存/)
-
-    vi.mocked(window.confirm).mockReturnValueOnce(false)
-    fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
-    expect(window.confirm).toHaveBeenCalledWith('放弃未保存的修改并退出编辑吗？')
-    expect(fileEditorView()).not.toBeNull()
-    expect(screen.getByText(/未保存/)).toBeInTheDocument()
-
-    vi.mocked(window.confirm).mockReturnValueOnce(true)
-    fireEvent.click(screen.getByRole('button', { name: '退出编辑' }))
-    await waitForFileEditable(false)
-    await waitFor(() => expect(screen.queryByText(/未保存/)).toBeNull())
-    await waitFor(() => expect(fileEditorView().state.doc.toString()).toBe('const x = 1'))
+    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
   })
 
   it('旧 workspace 的迟到保存结果不能污染新 workspace 的保存状态', async () => {
@@ -263,7 +237,6 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await screen.findByText('保存中…')
 
     rerender(<FileViewHost source="ws-b" tab={fileTab} onCloseTab={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     await waitForFileEditor('workspace b')
     await act(async () => { write.resolve(readTextResult('workspace a saved')); await write.promise })
 

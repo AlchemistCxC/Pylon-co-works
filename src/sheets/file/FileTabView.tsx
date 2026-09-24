@@ -20,21 +20,23 @@ export type { KernelSummary, FileCodeEditorApi }
 /**
  * FileTabView — 文件视图数据编排（0-A1 / issue #283 内核合一后）。
  *
- * 渲染恒为 CodeMirror 常驻单内核（FileCodeEditor）：只读/编辑只是 editable 两档，
- * 旧「手工 DOM 投影 + highlightCode/sanitizeHtml + MarkdownPreview 只读分支」退役
- * （markdown 渲染态切换归阶段一 1-A1，裁决：md 默认源码态）。本组件只负责：
+ * 渲染恒为 CodeMirror 常驻单内核（FileCodeEditor）：0-A2 起默认可写，只读仅物理
+ * 例外（writable=false）。旧「手工 DOM 投影 + highlightCode/sanitizeHtml +
+ * MarkdownPreview 只读分支」退役（markdown 渲染态切换归阶段一 1-A1，裁决：md 默认
+ * 源码态）。本组件只负责：
  * read_workspace_text 装载（source guard 防串）、touchVersion 感知（编辑中走
  * probeDisk 不静默覆盖，无编辑安全刷新并落变更行 decoration）、saveReceipt 锚点
  * 推进、truncated 上报。内容全文不过 React state——宿主经 apiRef 句柄取全文。
  */
-export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, editing, baseline, onTruncated, onContentReady, onExternalChange, onSelectionInvalidated, onSummaryChange, onSave, saveAnchorToken, saveReceipt, apiRef }: {
+export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, writable = true, baseline, onTruncated, onContentReady, onExternalChange, onSelectionInvalidated, onSummaryChange, onSave, saveAnchorToken, saveReceipt, apiRef }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   provider?: FileProvider | null
   path: string
   revealLine?: number
   context?: AgentContext | null
-  editing?: boolean
+  /** 0-A2 默认可写：仅物理例外（truncated）传 false → 内核只读档。 */
+  writable?: boolean
   /** 磁盘锚点（宿主持有；保存回执/重载后推进），透传内核计算 dirty。 */
   baseline?: string
   onTruncated: (truncated: boolean) => void
@@ -59,10 +61,9 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   const diskRef = useRef<string | null>(null)
   const saveAnchorRef = useRef<number>(0)
   const saveReceiptRef = useRef<number>(0)
-  // 编辑模式 ref：touchVersion 重载 effect 不依赖 editing（否则切编辑模式重跑 effect，
-  // 退出编辑会 300ms 后 loadContent 静默覆盖未保存修改、重进编辑会误报冲突）
-  const editingRef = useRef(false)
-  useEffect(() => { editingRef.current = editing === true }, [editing])
+  // 可写 ref：touchVersion 重载 effect 不依赖 writable（否则翻转重跑 effect 误报冲突）
+  const writableRef = useRef(true)
+  useEffect(() => { writableRef.current = writable !== false }, [writable])
   // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
   const targetKey = workspaceTargetKey(target)
   const errorKey = `file-tab:${targetKey ?? 'none'}:${path}`
@@ -98,11 +99,14 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
         return
       }
       setLoading(false)
-      if (isFirstLoad) {
+      if (isFirstLoad || !apiRef?.current) {
+        // 首载，或内核不在挂载位（上次 error 卸载后恢复）：回退首载路径让内核以
+        // 新磁盘快照重挂——否则 stale initialContent + 新 baseline 会产生伪 dirty，
+        // Ctrl+S 会以匹配的 expectedBaseline 把旧内容静默写回（AC-1 旁路）。
         loadedRef.current = loaded.text
         setLoadedText(loaded.text)
       } else {
-        apiRef?.current?.replaceDoc(loaded.text, { baseline: loaded.text, markChanged: showChanged })
+        apiRef.current.replaceDoc(loaded.text, { baseline: loaded.text, markChanged: showChanged })
         if (showChanged) onSelectionInvalidated?.()
       }
       diskRef.current = loaded.text
@@ -129,6 +133,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     requestContext.current = { source: targetKey, generation: requestContext.current.generation + 1 }
     const token = beginSourceRequest(requestContext.current, targetKey)
     const requestPath = path
+    if (!apiRef?.current) return
     const editorNow = editorContent()
     fetchText(target, path).then(loaded => {
       if (!loaded || !isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
@@ -169,7 +174,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   useEffect(() => {
     if (touchVersion === undefined || !target || !path) return
     const timer = window.setTimeout(() => {
-      if (editingRef.current || editorContent() !== diskRef.current) probeDisk()
+      if (writableRef.current || editorContent() !== diskRef.current) probeDisk()
       else loadContent(true)
     }, 300)
     return () => window.clearTimeout(timer)
@@ -214,7 +219,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
         path={path}
         initialContent={loadedText}
         baseline={baseline ?? loadedText}
-        editable={editing === true}
+        editable={writable !== false}
         revealLine={revealLine}
         onSummaryChange={onSummaryChange}
         onSave={onSave}

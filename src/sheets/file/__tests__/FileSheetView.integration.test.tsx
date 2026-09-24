@@ -277,8 +277,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     ]
     seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
     renderHarness()
-    // #252：默认只读——先显式进编辑态再制造未保存修改
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    // 0-A2：默认可写——直接制造未保存修改
     const editor = await waitForFileEditor('const x = 1')
     replaceFileEditorValue(editor, 'unsaved edit')
     await screen.findByText(/未保存/)
@@ -301,7 +300,6 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
       openTabs: serializeFileTabs({ version: 3, tabs: [tab], activeKey: fileTabKey(tab) }),
     })
     renderHarness()
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'unsaved edit')
     await screen.findByText(/未保存/)
 
@@ -335,7 +333,6 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     ]
     seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
     renderHarness()
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'const x = 2')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByText('保存中…')
