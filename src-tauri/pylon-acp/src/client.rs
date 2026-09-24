@@ -133,6 +133,9 @@ pub enum AcpKind {
     PermissionRequest,
     /// pylon:agent-crashed 崩溃广播。
     Crashed,
+    /// #315 provider 私有扩展通知（peri/agent_event 等；dispatcher 包络为
+    /// session/update 形状后走标准通路，见 [`wrap_provider_extension_notification`]）。
+    ProviderExtension,
     /// 其他通知（透传忽略，dispatcher 不处理）。
     OtherNotification,
 }
@@ -144,9 +147,58 @@ impl AcpKind {
             Some(NOTIF_AGENT_CRASHED) => Self::Crashed,
             Some(METHOD_SESSION_REQUEST_PERMISSION) => Self::PermissionRequest,
             Some(NOTIF_SESSION_UPDATE) => Self::SessionUpdate,
+            Some(
+                NOTIF_PERI_AGENT_EVENT
+                | NOTIF_PERI_AGENT_EVENT_DONE
+                | NOTIF_PERI_UNSTABLE_EVENT
+                | NOTIF_PERI_PREDICTION_READY,
+            ) => Self::ProviderExtension,
             Some(_) => Self::OtherNotification,
         }
     }
+}
+
+/// #315：provider 私有扩展通知就地包络为 session/update 形状——provider 载荷
+/// 字段**原样保留**，只补 `sessionUpdate` 判别符（取 wire method 原名，如
+/// `peri/agent_event`）。下游 durable canonical + publish 与标准 update 共用
+/// 同一通路；`peri/agent_event` 的 `event_json` 保持字符串形态，由前端
+/// normalizer 单点解析（live/replay/restart 同一解析路径）。
+///
+/// 已知形状（peri-acp event_sink.rs / host/mod.rs）：
+/// - `peri/agent_event`       `{sessionId, event_json}` → update 携带 `eventJson`
+/// - `peri/agent_event_done`  `{sessionId, stopReason, requestId?}`
+/// - `peri/unstable-event`    `{sessionId, event, data}`
+/// - `peri/prediction_ready`  `{sessionId, text, actions}`
+///
+/// params 非 object 或缺 `sessionId` 字符串时返回 None（调用方丢弃并告警）；
+/// host 级 OAuth 通知的 `sessionId` 为空串，照原样包络（无绑定会话，由
+/// dispatcher 既有 stale-session 路径拒绝）。
+pub fn wrap_provider_extension_notification(
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let serde_json::Value::Object(mut map) = params? else {
+        return None;
+    };
+    let session_id = map
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)?;
+    map.remove("sessionId");
+    let mut update = serde_json::Map::new();
+    update.insert("sessionUpdate".into(), serde_json::json!(method));
+    for (key, value) in map {
+        // `event_json` → `eventJson`（camelCase 投影，避免前端再适配蛇形）。
+        update.insert(
+            if key == "event_json" {
+                "eventJson".into()
+            } else {
+                key
+            },
+            value,
+        );
+    }
+    Some(serde_json::json!({ "sessionId": session_id, "update": update }))
 }
 
 #[derive(Debug, Clone)]
@@ -546,5 +598,82 @@ impl AcpClient {
     /// Obtain the one Kernel notification inbox for this connection generation.
     pub fn notification_inbox(&self) -> NotificationInbox {
         self.backend.inbound.clone()
+    }
+}
+
+#[cfg(test)]
+mod extension_wrap_tests {
+    use super::*;
+
+    #[test]
+    fn peri_extension_methods_classify_as_provider_extension() {
+        for method in [
+            NOTIF_PERI_AGENT_EVENT,
+            NOTIF_PERI_AGENT_EVENT_DONE,
+            NOTIF_PERI_UNSTABLE_EVENT,
+            NOTIF_PERI_PREDICTION_READY,
+        ] {
+            assert_eq!(
+                AcpKind::from_method(Some(method)),
+                AcpKind::ProviderExtension
+            );
+        }
+        assert_eq!(
+            AcpKind::from_method(Some(NOTIF_SESSION_UPDATE)),
+            AcpKind::SessionUpdate
+        );
+        assert_eq!(
+            AcpKind::from_method(Some("peri/other")),
+            AcpKind::OtherNotification
+        );
+    }
+
+    #[test]
+    fn agent_event_wraps_with_verbatim_discriminator_and_camel_event_json() {
+        let params = serde_json::json!({
+            "sessionId": "s-1",
+            "event_json": "{\"type\":\"subagent_started\",\"value\":{}}"
+        });
+        let wrapped = wrap_provider_extension_notification(NOTIF_PERI_AGENT_EVENT, Some(params))
+            .expect("wrap succeeds");
+        assert_eq!(wrapped["sessionId"], "s-1");
+        assert_eq!(wrapped["update"]["sessionUpdate"], "peri/agent_event");
+        assert!(wrapped["update"]["eventJson"].is_string());
+        assert!(wrapped["update"].get("event_json").is_none());
+    }
+
+    #[test]
+    fn done_and_unstable_payload_fields_are_preserved_verbatim() {
+        let done = wrap_provider_extension_notification(
+            NOTIF_PERI_AGENT_EVENT_DONE,
+            Some(serde_json::json!({ "sessionId": "s-1", "stopReason": "end_turn", "requestId": "42" })),
+        )
+        .expect("wrap succeeds");
+        assert_eq!(done["update"]["sessionUpdate"], "peri/agent_event_done");
+        assert_eq!(done["update"]["stopReason"], "end_turn");
+        assert_eq!(done["update"]["requestId"], "42");
+
+        let unstable = wrap_provider_extension_notification(
+            NOTIF_PERI_UNSTABLE_EVENT,
+            Some(serde_json::json!({ "sessionId": "s-1", "event": "trace", "data": { "n": 1 } })),
+        )
+        .expect("wrap succeeds");
+        assert_eq!(unstable["update"]["sessionUpdate"], "peri/unstable-event");
+        assert_eq!(unstable["update"]["data"]["n"], 1);
+    }
+
+    #[test]
+    fn missing_session_id_or_object_params_is_rejected() {
+        assert!(wrap_provider_extension_notification(NOTIF_PERI_AGENT_EVENT, None).is_none());
+        assert!(wrap_provider_extension_notification(
+            NOTIF_PERI_AGENT_EVENT,
+            Some(serde_json::json!({ "event_json": "{}" })),
+        )
+        .is_none());
+        assert!(wrap_provider_extension_notification(
+            NOTIF_PERI_AGENT_EVENT,
+            Some(serde_json::json!([1, 2])),
+        )
+        .is_none());
     }
 }
