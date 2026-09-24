@@ -836,21 +836,3 @@
 ---
 [2026-09-24] [Codex-Aster] [AgentSheet terminal-like 视觉重构]
 范围：AgentSheet 左右栏展示组件、对应 workspace/shell CSS、工作区/Profile/宠物/会话设置视觉、验收与记录。保持所有业务及插件契约、预设数据、布局宽度与折叠语义。避开 #276 Markdown 文件域。共享树当前有他人在途改动，依 §2.1 暂不 merge/stage/commit；本声明暂未提交。
-
----
-
-[2026-09-24 15] [Riemann] [#266 · 思考强度对称守卫（总表 CC-12）]
-
-**开工：#266 遗留 CC-12 —— 给「思考强度」的候选解析补上与权限/模型同形的 `advertisedChoices` 守卫。** 分支 `fix/cc-266-remaining`（从 main 开）。
-
-**我方本轮文件域（请勿改写、勿连带提交）**：
-
-- `src/renderers/solid-workbench/input/workbenchOptionCatalog.ts`（`resolveReasoningOptionEntries` 补守卫；**当前值比对基准定死为文档值**，调用方缺省时自读）
-
-- `src/renderers/solid-workbench/input/__tests__/workbenchOptionCatalog.test.ts`（新增四档用例：只有当前值 ⇒ 兜底表 / 真候选面 ⇒ 用它 / 都没有 ⇒ 兜底表 / 参数不传但文档有值 ⇒ 守卫仍生效）
-
-- 文档：`.agents/records/266-cc-reasoning-symmetric-guard.md`（完工时新增）、本文件
-
-**✅ 进展（本地完工，未 push 未开 PR）**：守卫已补（`advertisedChoices` 守卫 + 比对基准取文档值）、新增 5 条用例、**反向验证撤掉守卫 ⇒ 3 条变红**；门禁四步绿；全量 **641 文件 / 4854 用例** 跑两次（首次命中已登记的 `PlainMessageList` #243 flake，隔离 3 次全绿）。记录 `.agents/records/266-cc-reasoning-symmetric-guard.md`。★ 本条目保留至合入。
-
-**我不碰**：权限 / 模型两条解析（已完工，只做参照）、`WorkbenchWidgets.solid.tsx`、中控元件定义表、预设系统、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
