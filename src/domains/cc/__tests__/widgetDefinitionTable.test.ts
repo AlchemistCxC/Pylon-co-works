@@ -269,20 +269,21 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-command-hint', 'cc-send-button',
     ])
     // ★ #238 刀3：`slot` 退场；序号语义由「槽内序号」变为「同落脚处组内序号」。
-    // ★ 序号**沿用历史值**（2/3/4/5 的空档也照抄）：出厂区域预设的落盘数据（`zones/factory/**`，
-    //   生成脚本已删、不许手改）里就是这些值，改出厂默认会让 `presetAssembly.test.ts` 的
-    //   「归一 = 规范排布」不变量失去意义。
+    // ★ #266 遗留⑦：序号改为**连续值 1..6**（按当前实际显示顺序）。原先是 0/2/3/4/5，
+    //   且「命令行提示」与「用量」撞在同一个 5 上 ⇒ 同落脚处内的先后只能靠表序兜着。
+    //   ★ 定义表与出厂区域预设的落盘数据（`zones/factory/**`）两处必须一致，
+    //   一致性由 `src/zones/__tests__/factoryZonePresetLayoutGuard.test.ts` 机检（数据 ↔ 定义表）。
     expect(DEFAULT_CC_LAYOUT).toEqual({
       version: 9,
       placements: {
-        input: { order: 0, offsetX: 0, offsetY: 0 },
+        input: { order: 1, offsetX: 0, offsetY: 0 },
         model: { order: 2, offsetX: 0, offsetY: 0 },
         reasoning: { order: 3, offsetX: 0, offsetY: 0 },
         mode: { order: 4, offsetX: 0, offsetY: 0 },
         tokens: { order: 5, offsetX: 0, offsetY: 0 },
-        // ★ 刀5B：提示的序号沿用表里结构步时写的 5（与 tokens 同序）。两者同序不冲突：
-        //   `idsForLanding` 的排序是稳定排序，表序（tokens 在前）决定并列时的先后。
-        'cc-command-hint': { order: 5, offsetX: 0, offsetY: 0 },
+        // ★ #266 遗留⑦：提示的序号 = 6（原先沿用结构步时的 5，与 tokens 撞号）
+        'cc-command-hint': { order: 6, offsetX: 0, offsetY: 0 },
+        // 悬浮件（发送按钮）自己一个落脚处，序号仍是 0
         'cc-send-button': { order: 0, offsetX: 0, offsetY: 0 },
       },
     })
@@ -350,12 +351,12 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       offsetX: 0,
       offsetY: 0,
     }))).toEqual([
-      { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'stretch', order: 1, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 4, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
-      { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 6, offsetX: 0, offsetY: 0 },
     ])
     // 用量控件不新增属性字段（S11 拍板）⇒ 表里它的属性表单为空
     expect(WIDGET_PROPERTY_FIELDS.tokens).toEqual([])

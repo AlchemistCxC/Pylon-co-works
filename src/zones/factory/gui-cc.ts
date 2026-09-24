@@ -61,7 +61,7 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
         "placements": {
           "input": {
             "slot": "input",
-            "order": 0,
+            "order": 1,
             "offsetX": 0,
             "offsetY": 0
           },
@@ -90,7 +90,7 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
             "offsetY": 0
           },
           "cc-command-hint": {
-            "order": 5,
+            "order": 6,
             "offsetX": 0,
             "offsetY": 0
           },

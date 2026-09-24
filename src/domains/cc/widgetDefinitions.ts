@@ -255,7 +255,7 @@ export const CC_WIDGET_GROUPS = [
     label: '输入栏',
     category: 'input',
     rail: 'builtin',
-    layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 0 },
+    layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 1 },
     draggable: true,
     propertyFields: [
       { kind: 'section', title: '输入栏设置' },
@@ -430,7 +430,7 @@ export const CC_WIDGET_GROUPS = [
     label: '命令行提示',
     category: 'input',
     rail: 'builtin',
-    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 5 },
+    layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 6 },
     gap: 0,
     draggable: true,
     // ★ #266 ⑰：这里原先挂着三条 `conditions`（有会话 + 命令行模式 + 详细档不为 hidden）——
