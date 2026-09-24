@@ -312,7 +312,8 @@ describe('FileSheet token hygiene (issue #281)', () => {
     for (const selector of ['.file-save-btn', '.file-conflict-force']) {
       const rule = rulesOf(css).find(item => item.selector === selector)
       expect(rule, `${selector} 规则缺失`).toBeTruthy()
-      expect(rule!.body).not.toMatch(/#fff\b/i)
+      // \b 在 "#ffffff" 的 f→f 之间无词边界，必须显式吃掉后续 hex 位。
+      expect(rule!.body).not.toMatch(/#fff[0-9a-fA-F]{0,5}\b/i)
       expect(rule!.body).toContain('var(--text-on-accent)')
     }
   })
