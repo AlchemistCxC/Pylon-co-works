@@ -45,6 +45,7 @@ export interface FileReferenceAppearance {
 
 export function SolidFileReferenceCard(props: { part: ContentPart; actions?: FileReferenceActions; appearance?: FileReferenceAppearance }) {
   const part = createMemo(() => props.part)
+  const filePath = () => asFileish(part()).path
 
   return (
     <Show
@@ -64,11 +65,11 @@ export function SolidFileReferenceCard(props: { part: ContentPart; actions?: Fil
         <span class="term-file-icon" aria-hidden="true" style={iconStyle(props.appearance)}>📄</span>
         <div class="term-file-meta">
           <span class="term-file-name">{displayTitle(part())}</span>
-          <Show when={visiblePath((part() as unknown as { path: string }).path, props.appearance)}>
-            {path => <span class="term-file-path" style={mutedStyle(props.appearance)} title={(part() as unknown as { path: string }).path}>{path()}</span>}
+          <Show when={visiblePath(filePath(), props.appearance)}>
+            {path => <span class="term-file-path" style={mutedStyle(props.appearance)} title={filePath()}>{path()}</span>}
           </Show>
           <Show when={part().kind === 'file-selection'}>
-            <span class="term-file-range" style={mutedStyle(props.appearance)}>{rangeText(part() as unknown as { selection?: { start?: { line?: number; column?: number }; end?: { line?: number; column?: number } } })}</span>
+            <span class="term-file-range" style={mutedStyle(props.appearance)}>{rangeText(asFileish(part()))}</span>
           </Show>
           <Show when={showMetadata(props.appearance) ? metaLine(part()) : undefined}>
             {meta => <span class="term-file-meta-line" style={mutedStyle(props.appearance)}>{meta()}</span>}
@@ -147,9 +148,7 @@ function SolidResourceCard(props: { part: ContentPart; actions?: FileReferenceAc
 }
 
 function SolidDocumentCard(props: { part: ContentPart; actions?: FileReferenceActions; appearance?: FileReferenceAppearance }) {
-  const document = () => props.part as unknown as {
-    title?: string; path?: string; uri?: string; mimeType?: string; text?: string; hasBlob?: boolean
-  }
+  const document = () => asDocument(props.part)
   const source = () => document().path ?? document().uri
   const preview = () => {
     if (typeof document().text !== 'string') return undefined
@@ -222,6 +221,12 @@ function asFileish(part: ContentPart): FileishPart {
   return part as unknown as FileishPart
 }
 
+type DocumentPart = { title?: string; path?: string; uri?: string; mimeType?: string; text?: string; hasBlob?: boolean }
+
+function asDocument(part: ContentPart): DocumentPart {
+  return part as unknown as DocumentPart
+}
+
 function displayTitle(part: ContentPart): string {
   const p = asFileish(part)
   if (!p.path) return ''
@@ -265,7 +270,8 @@ function groupLayout(appearance: FileReferenceAppearance | undefined): 'stack' |
   return appearance?.groupLayout === 'grid' ? 'grid' : 'stack'
 }
 
-function visiblePath(path: string, appearance: FileReferenceAppearance | undefined): string | undefined {
+function visiblePath(path: string | undefined, appearance: FileReferenceAppearance | undefined): string | undefined {
+  if (path === undefined) return undefined
   return presentFileContentPath(path, appearance)
 }
 
