@@ -3,8 +3,6 @@ import type { GitProvider } from '../fileWorkbenchTypes.ts'
 import { resolveGitCapabilities } from '../gitCapabilities.ts'
 import { builtinGitProvider } from '../../../plugins/core/file/builtinFileWorkbench'
 
-const target = { sessionId: 's', agentId: 'a', source: 'src' } as GitProvider extends never ? never : Parameters<GitProvider['status']>[0]
-
 function provider(overrides: Partial<GitProvider> = {}): GitProvider {
   return {
     id: 'test.git',
