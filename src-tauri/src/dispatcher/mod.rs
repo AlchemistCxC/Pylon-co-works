@@ -399,6 +399,29 @@ async fn reject_interaction_request<R: tauri::Runtime>(
     );
 }
 
+/// #316：在私有交互快照中按 elicitationId 匹配挂起的 URL elicitation
+/// （method 必须是 elicitation/create 且 params.elicitationId 相等）。纯函数
+/// 便于测试（官方契约：未知/已完成 id 忽略）。
+fn match_pending_elicitation(
+    snapshot: &[(
+        crate::acp::RequestId,
+        crate::private_interaction::PendingPrivateInteraction,
+    )],
+    elicitation_id: &str,
+) -> Option<(
+    crate::acp::RequestId,
+    crate::private_interaction::PendingPrivateInteraction,
+)> {
+    snapshot
+        .iter()
+        .find(|(_, pending)| {
+            pending.method == "elicitation/create"
+                && pending.params.get("elicitationId").and_then(|v| v.as_str())
+                    == Some(elicitation_id)
+        })
+        .map(|(id, pending)| (id.clone(), pending.clone()))
+}
+
 async fn handle_terminal_request(
     acp: &AcpLock,
     registry: &crate::acp::terminal_runtime::TerminalRegistry,
@@ -2190,16 +2213,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     continue;
                 };
                 {
-                    let matched =
-                        runtime
-                            .private_interactions
-                            .snapshot()
-                            .into_iter()
-                            .find(|(_, pending)| {
-                                pending.method == "elicitation/create"
-                                    && pending.params.get("elicitationId").and_then(|v| v.as_str())
-                                        == Some(elicitation_id)
-                            });
+                    let matched = match_pending_elicitation(
+                        &runtime.private_interactions.snapshot(),
+                        elicitation_id,
+                    );
                     if let Some((request_id, pending)) = matched {
                         // P2-2（#316 审查）：take 成功（Some）才 settle+emit——
                         // 并发 respond_interaction 抢先收口时不再发 spurious 事件。
@@ -2683,6 +2700,84 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::private_interaction::PendingPrivateInteraction;
+
+    fn pending_elicitation(elicitation_id: &str) -> PendingPrivateInteraction {
+        PendingPrivateInteraction {
+            provider: "peri".into(),
+            agent_id: "a1".into(),
+            session_id: "peri-s1".into(),
+            method: "elicitation/create".into(),
+            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
+            params: serde_json::json!({
+                "sessionId": "peri-s1",
+                "elicitationId": elicitation_id,
+                "url": "https://example.com/auth",
+                "message": "完成登录",
+            }),
+            question_specs: None,
+            client_generation: 1,
+            enqueued_at: crate::time::Timestamp::now(),
+        }
+    }
+
+    /// #316：elicitation/complete 按 elicitationId 匹配 pending 私有交互。
+    #[test]
+    fn match_pending_elicitation_finds_only_exact_id_and_method() {
+        let a = crate::acp::RequestId::Number(11);
+        let b = crate::acp::RequestId::Number(12);
+        let snapshot = vec![
+            (a.clone(), pending_elicitation("el-1")),
+            (b.clone(), pending_elicitation("el-2")),
+        ];
+        let (hit, pending) = match_pending_elicitation(&snapshot, "el-2").expect("el-2 必须命中");
+        assert_eq!(hit, b);
+        assert_eq!(pending.session_id, "peri-s1");
+        // 未知 id → None（官方契约：忽略）
+        assert!(match_pending_elicitation(&snapshot, "el-404").is_none());
+    }
+
+    #[test]
+    fn match_pending_elicitation_ignores_other_methods_and_malformed_params() {
+        let mut other_method = pending_elicitation("el-1");
+        other_method.method = "session/request_permission".into();
+        let mut malformed = pending_elicitation("el-1");
+        malformed.params = serde_json::json!({"message": "form 模式无 elicitationId"});
+        let snapshot = vec![
+            (crate::acp::RequestId::Number(21), other_method),
+            (crate::acp::RequestId::Number(22), malformed),
+        ];
+        assert!(
+            match_pending_elicitation(&snapshot, "el-1").is_none(),
+            "方法不符或缺 elicitationId 的条目不得命中"
+        );
+    }
+
+    #[test]
+    fn runtime_store_roundtrip_supports_complete_matching() {
+        let runtime = crate::test_utils::connected_runtime();
+        let request_id = crate::acp::RequestId::Number(31);
+        runtime
+            .private_interactions
+            .insert(request_id.clone(), pending_elicitation("el-9"))
+            .expect("insert 必须成功");
+        let matched = match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9")
+            .expect("inserted pending must match");
+        assert_eq!(matched.0, request_id);
+        assert!(
+            runtime
+                .private_interactions
+                .take(&request_id)
+                .map(|taken| taken.is_some())
+                .unwrap_or(false),
+            "take 成功才 settle+emit（P2-2 守卫的数据前提）"
+        );
+        assert!(
+            match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9").is_none()
+        );
+    }
+
     use super::*;
     use tracing_subscriber::layer::Layer as _;
 

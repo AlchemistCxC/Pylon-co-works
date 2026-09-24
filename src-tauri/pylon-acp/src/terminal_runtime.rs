@@ -381,6 +381,52 @@ mod tests {
     use super::*;
     use crate::terminal_policy::TerminalExitStatus;
 
+    async fn insert_exited(registry: &TerminalRegistry, session_id: &str) -> String {
+        let id = registry
+            .insert(session_id.into(), 1024, ManagedChild::empty())
+            .await;
+        // 空 child 永远不会退出——预置已退出状态，让 release/clear 的 kill 走
+        // 早退路径（测试只关心注册表清点与归属，不关心真实进程）。
+        let terminal = registry.find(&id, session_id).await.unwrap();
+        terminal.completion.send_replace(TerminalCompletion::Exited(
+            TerminalExitStatus::new().exit_code(0),
+        ));
+        id
+    }
+
+    /// #316：release_session 只清指定会话名下的终端，其余会话不受累。
+    #[tokio::test]
+    async fn release_session_removes_only_matching_session() {
+        let registry = TerminalRegistry::default();
+        let a = insert_exited(&registry, "session-a").await;
+        let b = insert_exited(&registry, "session-b").await;
+
+        let removed = registry.release_session("session-a").await;
+        assert_eq!(removed, 1);
+        assert!(registry.snapshot(&a, "session-a").await.is_err());
+        assert!(
+            registry.snapshot(&b, "session-b").await.is_ok(),
+            "其他会话的终端不得被误清"
+        );
+
+        let removed_again = registry.release_session("session-a").await;
+        assert_eq!(removed_again, 0, "重复释放计数为 0（幂等）");
+    }
+
+    /// #316：clear 清空全部会话的终端（runtime 停止时调用）。
+    #[tokio::test]
+    async fn clear_removes_all_terminals_and_reports_count() {
+        let registry = TerminalRegistry::default();
+        insert_exited(&registry, "session-a").await;
+        insert_exited(&registry, "session-b").await;
+        insert_exited(&registry, "session-c").await;
+
+        let removed = registry.clear().await;
+        assert_eq!(removed, 3);
+        let removed_again = registry.clear().await;
+        assert_eq!(removed_again, 0, "重复 clear 计数为 0（幂等）");
+    }
+
     #[tokio::test]
     async fn healthy_long_running_terminal_has_no_error_deadline() {
         let instance = TerminalInstance::new("session-a".into(), 1024, ManagedChild::empty());
