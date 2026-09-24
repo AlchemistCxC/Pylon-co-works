@@ -306,8 +306,9 @@ export default function SheetTabStrip(p: { latest: () => SheetTabStripProps }) {
 }
 
 function SheetKindMark(props: { kind: string; modern: boolean }) {
-  if (!props.modern) return <span class="sheet-tab-kind-mark" aria-hidden="true" />
-  const iconName = props.kind === 'agent' ? 'Bot'
+  // 审查 P2-2 修正：组件体早返回会在 untrack 语境单次读 props.modern（编译为 getter，
+  // 读一次即冻结）——模式切换时 kind-mark 不随更新。改 Show 让分支随信号重算。
+  const iconName = () => props.kind === 'agent' ? 'Bot'
     : props.kind === 'overview' ? 'LayoutDashboard'
       : props.kind === 'file' ? 'FileCode2'
         : props.kind === 'search' ? 'Search'
@@ -316,7 +317,11 @@ function SheetKindMark(props: { kind: string; modern: boolean }) {
               : props.kind === 'runtime' ? 'Activity'
                 : props.kind === 'gateway' ? 'Network'
                   : 'Puzzle'
-  return <span class="sheet-tab-kind-mark sheet-tab-kind-icon" aria-hidden="true"><LucideIcon name={iconName} size={14} strokeWidth={1.8} /></span>
+  return (
+    <Show when={props.modern} fallback={<span class="sheet-tab-kind-mark" aria-hidden="true" />}>
+      <span class="sheet-tab-kind-mark sheet-tab-kind-icon" aria-hidden="true"><LucideIcon name={iconName()} size={14} strokeWidth={1.8} /></span>
+    </Show>
+  )
 }
 
 

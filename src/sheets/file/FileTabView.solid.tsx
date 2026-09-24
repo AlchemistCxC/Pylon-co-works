@@ -233,7 +233,9 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     const currentPath = path()
     requestContext = advanceSourceContext(requestContext, currentTargetKey)
     setContent('')
-    setHighlighted(null)
+    // 审查 P3-5 修正：与 React 版 invalidateHighlight() 同构（bump 守卫 + 清空）——
+    // 裸 setHighlighted 不 bump，重置后走早返回时在途高亮仅靠 requestPath 兜底
+    invalidateHighlight()
     setError('')
     setLoading(false)
     setChangedLines([])

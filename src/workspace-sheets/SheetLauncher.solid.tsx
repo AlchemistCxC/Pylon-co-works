@@ -64,9 +64,11 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
   const activeAgent = createZustandSignal(useIdentityStore, state => state.activeAgent)
   let inputElement: HTMLInputElement | undefined
 
-  // Registry 快照 → 工具项（与 React 版 useSyncExternalStore 同语义）
-  const workspaceSnapshot = createMemo(() => getWorkspaceRegistrySnapshot())
-  onCleanup(subscribeWorkspaceRegistry(() => { workspaceSnapshot(); }))
+  // Registry 快照 → 工具项（与 React 版 useSyncExternalStore 同语义：订阅写信号，
+  // 快照引用等值去重。审查 P2-1 修正：memo 无响应式依赖只会求值一次，订阅回调读
+  // memo 是 no-op——launcher 打开期间的插件注册/重载不会反映）
+  const [workspaceSnapshot, setWorkspaceSnapshot] = createSignal(getWorkspaceRegistrySnapshot())
+  onCleanup(subscribeWorkspaceRegistry(() => setWorkspaceSnapshot(getWorkspaceRegistrySnapshot())))
 
   const matches = (itemValue: string) => {
     const needle = query().trim().toLowerCase()
