@@ -403,7 +403,7 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::WebviewWindow) {
+    pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::Window) {
         let mut events = self.runtime_logs.subscribe();
         let hub = Arc::clone(&self.runtime_logs);
         tokio::spawn(async move {
@@ -436,7 +436,7 @@ impl AppState {
     pub(crate) async fn connect_and_replace(
         &self,
         runtime: &Arc<AgentRuntime>,
-        window: &tauri::WebviewWindow,
+        window: &tauri::Window,
         agent: &AgentDef,
         agent_id: Option<String>,
         start_status: AgentLifecycleStatus,
@@ -464,7 +464,7 @@ impl AppState {
         &self,
         runtime: &Arc<AgentRuntime>,
         agent_id: &str,
-        window: &tauri::WebviewWindow,
+        window: &tauri::Window,
     ) -> Result<(), String> {
         let status = runtime
             .agent_runtime

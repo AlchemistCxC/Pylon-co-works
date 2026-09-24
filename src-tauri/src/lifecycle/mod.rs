@@ -87,7 +87,7 @@ fn config_activation_state(
 pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
     handles: &AppStateHandles,
     runtime: &Arc<AgentRuntime>,
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     agent: &AgentDef,
     agent_id: Option<String>,
     start_status: AgentLifecycleStatus,
@@ -625,7 +625,7 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
 #[tauri::command]
 pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow<R>,
+    window: tauri::Window<R>,
     name: String,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
@@ -701,7 +701,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 #[tauri::command]
 pub(crate) async fn reconnect_agent(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
+    window: tauri::Window,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
     // C7：switch/reconnect 串行锁（与 switch_agent 共用，防交叉杀进程）。
@@ -731,7 +731,7 @@ pub(crate) async fn reconnect_agent(
 #[tauri::command]
 pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow<R>,
+    window: tauri::Window<R>,
     agent_id: String,
 ) -> Result<serde_json::Value, PylonError> {
     let inner = state.inner();
@@ -1087,7 +1087,7 @@ mod tests {
         }
     }
 
-    async fn mock_window() -> tauri::WebviewWindow<tauri::test::MockRuntime> {
+    async fn mock_window() -> tauri::Window<tauri::test::MockRuntime> {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -1098,6 +1098,8 @@ mod tests {
         )
         .build()
         .expect("mock window must build")
+        .as_ref()
+        .window()
     }
 
     #[tokio::test]

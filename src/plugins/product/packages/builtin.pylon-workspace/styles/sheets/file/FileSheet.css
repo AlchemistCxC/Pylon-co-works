@@ -845,12 +845,22 @@
 .file-tree-kind { border: 0; background: transparent; }
 .file-tree-folder .file-tree-kind { border: 0; }
 .file-type-icon { flex: 0 0 auto; color: var(--text-dim); }
-.file-type-icon.type-ts { color: #3178c6; }
-.file-type-icon.type-js { color: #c5a900; }
-.file-type-icon.type-rust { color: #ce6b36; }
-.file-type-icon.type-c { color: #659ad2; }
-.file-type-icon.type-json { color: #d4a72c; }
-.file-type-icon.type-style { color: #a855f7; }
+/* 文件类型图标品牌色：第三方语言标识色，非主题语义字段（issue #281——禁裸字面量，
+ * 色值白名单锁定在本块，由 FileSheet.css.test 契约钉住）。 */
+.file-sheet {
+  --file-type-ts: #3178c6;
+  --file-type-js: #c5a900;
+  --file-type-rust: #ce6b36;
+  --file-type-c: #659ad2;
+  --file-type-json: #d4a72c;
+  --file-type-style: #a855f7;
+}
+.file-type-icon.type-ts { color: var(--file-type-ts); }
+.file-type-icon.type-js { color: var(--file-type-js); }
+.file-type-icon.type-rust { color: var(--file-type-rust); }
+.file-type-icon.type-c { color: var(--file-type-c); }
+.file-type-icon.type-json { color: var(--file-type-json); }
+.file-type-icon.type-style { color: var(--file-type-style); }
 .file-type-icon.type-text { color: var(--text-dim); }
 
 .file-search-panel { padding: 8px; }
@@ -934,7 +944,7 @@
 .file-edit-toggle { padding: 5px 10px; }
 .file-edit-toggle:hover:not(:disabled) { background: var(--bg-hover); }
 .file-edit-toggle:disabled { color: var(--text-placeholder); cursor: default; }
-.file-save-btn { padding: 5px 14px; color: #fff; border-color: var(--accent); background: var(--accent); }
+.file-save-btn { padding: 5px 14px; color: var(--text-on-accent); border-color: var(--accent); background: var(--accent); }
 .file-save-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .file-save-btn:disabled { opacity: .42; cursor: default; }
 .file-save-ok { color: var(--accent); font: 11px var(--mono); }
@@ -951,7 +961,7 @@
   font-size: 11px;
 }
 .file-conflict-text { flex: 1; }
-.file-conflict-force { padding: 4px 10px; color: #fff; border-color: var(--danger); background: var(--danger); }
+.file-conflict-force { padding: 4px 10px; color: var(--text-on-accent); border-color: var(--danger); background: var(--danger); }
 .file-conflict-force:hover { filter: brightness(1.08); }
 .file-conflict-reload { padding: 4px 10px; }
 .file-conflict-reload:hover { background: var(--bg-hover); }
