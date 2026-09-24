@@ -1424,4 +1424,40 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
         assert!(state.conflicts.is_empty(), "无 unmerged 条目时 conflicts 为空");
     }
 
+
+    // ── 0-C2：真实冲突仓库的 stage 读取（:1/:2/:3）与 conflicts 派生 ──────────
+
+    #[tokio::test]
+    async fn show_file_reads_stage_entries_during_conflict() {
+        let repo = temp_repo("conflict_stage");
+        std::fs::write(repo.0.join("a.txt"), "base
+").unwrap();
+        run_sync(&repo.0, &["add", "a.txt"]);
+        run_sync(&repo.0, &["commit", "-q", "-m", "base"]);
+        // 默认分支名随 git init 配置（main/master），不可硬编码——须在切 feature 前取
+        let default_branch = run_sync(&repo.0, &["rev-parse", "--abbrev-ref", "HEAD"]);
+        run_sync(&repo.0, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.0.join("a.txt"), "feature
+").unwrap();
+        run_sync(&repo.0, &["commit", "-q", "-am", "feature"]);
+        run_sync(&repo.0, &["checkout", "-q", default_branch.trim()]);
+        std::fs::write(repo.0.join("a.txt"), "main
+").unwrap();
+        run_sync(&repo.0, &["commit", "-q", "-am", "main"]);
+        // 制造真实冲突（merge feature → 默认分支冲突，exit code 非零属预期）
+        let _ = std::process::Command::new("git")
+            .args(["merge", "feature"])
+            .current_dir(&repo.0)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        let state = git_sequence_state(&repo.0).await.unwrap();
+        assert_eq!(state.kind, "merge");
+        assert!(state.conflicts.iter().any(|p| p == "a.txt"), "conflicts 应含 a.txt");
+        assert_eq!(git_show_file(&repo.0, ":2", "a.txt").await.unwrap(), "main
+", ":2 = ours");
+        assert_eq!(git_show_file(&repo.0, ":3", "a.txt").await.unwrap(), "feature
+", ":3 = theirs");
+    }
 }

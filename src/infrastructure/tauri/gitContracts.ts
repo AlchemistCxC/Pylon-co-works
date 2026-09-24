@@ -122,8 +122,10 @@ const SEQUENCE_KINDS: readonly GitSequenceState['kind'][] = ['none', 'rebase', '
 export function normalizeGitSequenceState(raw: unknown): GitSequenceState {
   if (!raw || typeof raw !== 'object') return { kind: 'none', conflicts: [] }
   const item = raw as Partial<GitSequenceState>
-  const kind = SEQUENCE_KINDS.includes(item.kind as GitSequenceState['kind']) ? item.kind as GitSequenceState['kind'] : 'none'
-  const conflicts = Array.isArray(item.conflicts)
+  const known = SEQUENCE_KINDS.includes(item.kind as GitSequenceState['kind'])
+  // kind 损坏回退 'none' 时一并清空 conflicts（防「无进行态却有孤儿冲突清单」混合态）
+  const kind = known ? item.kind as GitSequenceState['kind'] : 'none'
+  const conflicts = known && Array.isArray(item.conflicts)
     ? item.conflicts.filter((path): path is string => typeof path === 'string' && path.length > 0)
     : []
   return { kind, conflicts }
