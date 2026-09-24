@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
-import { Database, Search, X } from 'lucide-solid'
+import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
 import { createZustandSignal } from '../solidStoreBridge.ts'
 import { useIdentityStore } from '../../identityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
@@ -128,9 +128,9 @@ export default function SearchSheetView(props: SearchSheetViewProps) {
     <div class={SHEET}>
       <aside class={SIDEBAR} aria-label="搜索工具">
           <div class={SIDEBAR_HEAD}><span class={HEAD_SPAN}>SEARCH</span><strong class={HEAD_STRONG}>搜索范围</strong></div>
-          <div class={SCOPE}><Database size={15} aria-hidden="true" class={SCOPE_SVG} /><span>本地会话快照</span><small class={SCOPE_SMALL}>{sessions().length}</small></div>
-          <button type="button" class={SIDEBAR_ACTION} onClick={() => inputElement?.focus()}><Search size={15} aria-hidden="true" /><span>输入关键词</span></button>
-          <button type="button" class={SIDEBAR_ACTION} disabled={!query()} onClick={() => { setQuery(''); inputElement?.focus() }}><X size={15} aria-hidden="true" /><span>清除查询</span></button>
+          <div class={SCOPE}><LucideIcon name="Database" size={15} class={SCOPE_SVG} /><span>本地会话快照</span><small class={SCOPE_SMALL}>{sessions().length}</small></div>
+          <button type="button" class={SIDEBAR_ACTION} onClick={() => inputElement?.focus()}><LucideIcon name="Search" size={15} /><span>输入关键词</span></button>
+          <button type="button" class={SIDEBAR_ACTION} disabled={!query()} onClick={() => { setQuery(''); inputElement?.focus() }}><LucideIcon name="X" size={15} /><span>清除查询</span></button>
           <div class={SIDEBAR_SUMMARY}><strong class={SUMMARY_STRONG}>{loading() ? '…' : results().length}</strong><span class={SUMMARY_SPAN}>当前结果</span><Show when={truncated()}><small class={SUMMARY_SPAN}>已达显示上限</small></Show></div>
         </aside>
       <main class={MAIN}>

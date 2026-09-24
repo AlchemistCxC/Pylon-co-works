@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, onCleanup, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
-import { Archive, ChevronFirst, ChevronLast } from 'lucide-solid'
+import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
@@ -166,12 +166,12 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
     <div class={SHEET}>
       <aside class={SIDEBAR} aria-label="存档导航">
           <div class={SIDEBAR_HEAD}><span class={SIDEBAR_HEAD_SPAN}>HISTORY</span><strong class={SIDEBAR_HEAD_STRONG}>存档导航</strong></div>
-          <div class={SIDEBAR_TOTAL}><Archive size={16} aria-hidden="true" class={SIDEBAR_TOTAL_SVG} /><span><strong class={SIDEBAR_TOTAL_STRONG}>{paged().total}</strong> 个存档</span></div>
+          <div class={SIDEBAR_TOTAL}><LucideIcon name="Archive" size={16} class={SIDEBAR_TOTAL_SVG} /><span><strong class={SIDEBAR_TOTAL_STRONG}>{paged().total}</strong> 个存档</span></div>
           <Show when={paged().pages > 1}>
             <nav class={NAV} aria-label="存档分页">
-              <button type="button" class={`${NAV_BTN} ${NAV_BTN_DISABLED_EXTRA}`} disabled={paged().page === 1} onClick={() => setPage(1)} aria-label="第一页"><ChevronFirst size={15} aria-hidden="true" /><span>第一页</span></button>
+              <button type="button" class={`${NAV_BTN} ${NAV_BTN_DISABLED_EXTRA}`} disabled={paged().page === 1} onClick={() => setPage(1)} aria-label="第一页"><LucideIcon name="ChevronFirst" size={15} /><span>第一页</span></button>
               <For each={sidebarPages()}>{pageNumber => <button type="button" class={pageNumber === paged().page ? NAV_BTN_ACTIVE : NAV_BTN} aria-current={pageNumber === paged().page ? 'page' : undefined} onClick={() => setPage(pageNumber)}><span>第 {pageNumber} 页</span></button>}</For>
-              <button type="button" class={`${NAV_BTN} ${NAV_BTN_DISABLED_EXTRA}`} disabled={paged().page === paged().pages} onClick={() => setPage(paged().pages)} aria-label="最后一页"><ChevronLast size={15} aria-hidden="true" /><span>最后一页</span></button>
+              <button type="button" class={`${NAV_BTN} ${NAV_BTN_DISABLED_EXTRA}`} disabled={paged().page === paged().pages} onClick={() => setPage(paged().pages)} aria-label="最后一页"><LucideIcon name="ChevronLast" size={15} /><span>最后一页</span></button>
             </nav>
           </Show>
           <div class={SIDEBAR_FOOT}>第 {paged().page} / {paged().pages} 页</div>

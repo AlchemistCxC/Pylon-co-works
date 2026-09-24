@@ -315,66 +315,15 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
   const changedLineSet = createMemo(() => new Set(changedLines()))
   const editorKey = createMemo(() => `${targetKey() ?? 'unknown'}:${path()}`)
 
-  // 编辑器按「每文档一实例」重建（React 版以 key 承载的契约），keyed Show 在
-  // targetKey:path 变化时重建 CodeMirror 生命周期。
-  const editor = (
-    <Show when={editorKey()} keyed>
-      {_editorKey => (
-        <div class="file-tab-view file-tab-edit" data-path={path()}>
-          <FileCodeEditor
-            path={path()}
-            value={content()}
-            revealLine={revealLine()}
-            onChange={nextValue => {
-              // Keep the dirty/snapshot ref in lockstep with CodeMirror's input;
-              // a save receipt may arrive before the state effect flushes.
-              setContent(nextValue)
-              invalidateHighlight()
-              latest().onContentChange?.(nextValue)
-            }}
-            onSelectionChange={selection => latest().onSelectionChange?.(selection)}
-            onSave={() => latest().onSave?.()}
-          />
-        </div>
-      )}
-    </Show>
-  )
-
-  const readView = (
-    <div ref={element => { readViewElement = element }} class="file-tab-view" data-path={path()}>
-      <Show
-        when={isMarkdown()}
-        fallback={
-          <div class="file-tab-code" data-file-code-layout="shared" data-lang={highlighted()?.lang ?? languageFromPath(path())} data-highlighted={highlighted() ? 'true' : 'false'}>
-            <div class="file-tab-gutter">
-              <For each={codeLines()}>{(_, index) => <div class="file-tab-gutter-line">{index() + 1}</div>}</For>
-            </div>
-            <pre class="file-tab-pre">
-              <Show
-                when={highlightedLines()}
-                keyed
-                fallback={
-                  <For each={codeLines()}>{(line, index) => (
-                    <code class="file-tab-line" data-line={index() + 1} data-revealed={revealLine() === index() + 1 ? 'true' : undefined} data-changed={changedLineSet().has(index() + 1) ? 'true' : undefined}>{line}</code>
-                  )}</For>
-                }
-              >
-                {lines => (
-                  <For each={lines}>{(line, index) => (
-                    <code class="file-tab-line" data-line={index() + 1} data-revealed={revealLine() === index() + 1 ? 'true' : undefined} data-changed={changedLineSet().has(index() + 1) ? 'true' : undefined} innerHTML={sanitizeHtml(line || '&nbsp;')} />
-                  )}</For>
-                )}
-              </Show>
-            </pre>
-          </div>
-        }
-      >
-        <div class="file-tab-md">
-          <MarkdownPreview latest={() => ({ text: content() })} />
-        </div>
-      </Show>
-    </div>
-  )
+  // 渲染模式：单一 keyed Show 分派。Solid 的 JSX 赋值会**急切实例化**子树——编辑器
+  // 若在只读模式下被预创建，其 CodeMirror 会以游离 DOM 存在并永久 measure（jsdom 下
+  // 每帧抛错）。keyed 分支保证子树只在模式命中时创建、离开即销毁。
+  const viewMode = createMemo(() => {
+    if (!target() || !provider()) return 'no-provider'
+    if (error()) return 'error'
+    if (loading()) return 'loading'
+    return editing() ? 'edit' : 'read'
+  })
 
   // revealLine 定位：read 投影落地后按行滚动（React 版 [content, revealLine, path] effect）
   createEffect(() => {
@@ -389,14 +338,75 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
   })
 
   return (
-    <Show when={target() && provider()} fallback={<div class="file-tab-view file-tab-empty">未安装可用的文件 provider</div>}>
-      <Show when={!error()} fallback={<div class="file-tab-view file-tab-error" role="status">文件读取失败，详情见右下角错误中心</div>}>
-        <Show when={!loading()} fallback={<div class="file-tab-view file-tab-loading" role="status">正在读取文件…</div>}>
-          <Show when={!editing()} fallback={editor}>
-            {readView}
-          </Show>
-        </Show>
-      </Show>
+    <Show when={viewMode()} keyed>
+      {mode => {
+        if (mode === 'no-provider') return <div class="file-tab-view file-tab-empty">未安装可用的文件 provider</div>
+        if (mode === 'error') return <div class="file-tab-view file-tab-error" role="status">文件读取失败，详情见右下角错误中心</div>
+        if (mode === 'loading') return <div class="file-tab-view file-tab-loading" role="status">正在读取文件…</div>
+
+        if (mode === 'edit') {
+          // 编辑器按「每文档一实例」重建（React 版以 key 承载的契约），keyed Show 在
+          // targetKey:path 变化时重建 CodeMirror 生命周期。
+          return (
+            <Show when={editorKey()} keyed>
+              {_editorKey => (
+                <div class="file-tab-view file-tab-edit" data-path={path()}>
+                  <FileCodeEditor
+                    path={path()}
+                    value={content()}
+                    revealLine={revealLine()}
+                    onChange={nextValue => {
+                      // Keep the dirty/snapshot ref in lockstep with CodeMirror's input;
+                      // a save receipt may arrive before the state effect flushes.
+                      setContent(nextValue)
+                      invalidateHighlight()
+                      latest().onContentChange?.(nextValue)
+                    }}
+                    onSelectionChange={selection => latest().onSelectionChange?.(selection)}
+                    onSave={() => latest().onSave?.()}
+                  />
+                </div>
+              )}
+            </Show>
+          )
+        }
+
+        return (
+          <div ref={element => { readViewElement = element }} class="file-tab-view" data-path={path()}>
+            <Show
+              when={isMarkdown()}
+              fallback={
+                <div class="file-tab-code" data-file-code-layout="shared" data-lang={highlighted()?.lang ?? languageFromPath(path())} data-highlighted={highlighted() ? 'true' : 'false'}>
+                  <div class="file-tab-gutter">
+                    <For each={codeLines()}>{(_, index) => <div class="file-tab-gutter-line">{index() + 1}</div>}</For>
+                  </div>
+                  <pre class="file-tab-pre">
+                    <Show
+                      when={highlightedLines()}
+                      keyed
+                      fallback={
+                        <For each={codeLines()}>{(line, index) => (
+                          <code class="file-tab-line" data-line={index() + 1} data-revealed={revealLine() === index() + 1 ? 'true' : undefined} data-changed={changedLineSet().has(index() + 1) ? 'true' : undefined}>{line}</code>
+                        )}</For>
+                      }
+                    >
+                      {lines => (
+                        <For each={lines}>{(line, index) => (
+                          <code class="file-tab-line" data-line={index() + 1} data-revealed={revealLine() === index() + 1 ? 'true' : undefined} data-changed={changedLineSet().has(index() + 1) ? 'true' : undefined} innerHTML={sanitizeHtml(line || '&nbsp;')} />
+                        )}</For>
+                      )}
+                    </Show>
+                  </pre>
+                </div>
+              }
+            >
+              <div class="file-tab-md">
+                <MarkdownPreview latest={() => ({ text: content() })} />
+              </div>
+            </Show>
+          </div>
+        )
+      }}
     </Show>
   )
 }

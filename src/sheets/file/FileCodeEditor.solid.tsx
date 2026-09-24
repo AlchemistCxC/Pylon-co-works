@@ -156,7 +156,19 @@ export default function FileCodeEditor(props: {
       disposed = true
       languageAbort.abort()
       view = null
-      editor.destroy()
+      // Solid 的 Show 分支卸载顺序是「先摘 DOM 后跑清理」——destroy 时宿主已脱离
+      // 文档，CM 内部的样式读取在 jsdom 下会抛错（真实浏览器无此行为）导致半途而废，
+      // 挂起的 measure RAF 随后在分离树上再抛（uncaught，vitest 判运行失败）。
+      // 同步尝试 + 微任务补刀：微任务先于渲染帧，补刀会取消挂起的 RAF。
+      const destroyOnce = () => {
+        try {
+          editor.destroy()
+        } catch {
+          /* 分离态 jsdom 样式读取异常 */
+        }
+      }
+      destroyOnce()
+      queueMicrotask(destroyOnce)
     })
   })
 
