@@ -1,6 +1,6 @@
 [package]
 name = "pylon"
-version = "0.2.7-MAT"
+version = "0.2.9-PAC"
 edition = "2021"
 description = "Prism Desktop - AI Agent GUI"
 default-run = "pylon"
