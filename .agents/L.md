@@ -864,3 +864,17 @@
 全程 pathspec 提交；每卡完工派独立子 agent review（后台），反馈并入后续提交。
 
 **范围修订（0-E1 实际触达）**：追加 `src/index.css`（--bg-elevated/--text-on-accent 全局 token 落点，亮暗两 scheme）。
+
+---
+
+[2026-09-24 23] [Kumo] [#308]
+
+**开工：实机验收暴露的两条缺陷**——①浏览器 Sheet 子 WebView 创建失败留下原生空壳窗口（整块主区失去鼠标/滚轮，切 Sheet 后仍在）；②FileSheet 发令回传文件内容后 AgentSheet 只显示处理耗时、无正文（重启后正常）。**本轮文件域（请勿改写、勿连带提交）**：
+
+- 后端：`src-tauri/src/browser/mod.rs`（子 WebView 复用宿主 WebView2 环境参数）、`src-tauri/src/lib.rs`、`src-tauri/src/lifecycle/mod.rs`、`src-tauri/src/session/{mod.rs,fork.rs}`、`src-tauri/src/dispatcher/mod.rs`（命令窗口参数 `WebviewWindow` → `Window`，见下）
+- 前端：`src/domains/workbench/**`、`src/renderers/solid-workbench/**`、`src/sheets/**`（issue② 待定位，命中后收窄）
+- 文档：`.agents/L.md`、`.agents/records/**`、`docs/说明书/**`
+
+**必读前提（同一根因的两面）**：`tauri::Window::is_webview_window()`（`webviews().all(label == window.label())`）会被主窗口上任何子 WebView 污染。子 WebView 一旦真正创建成功，所有以 `tauri::WebviewWindow` 为参数的 `#[tauri::command]` 都会返回 `current webview is not a WebviewWindow`（实机复现：切 Agent 时控制台报 `切换 Agent失败 current webview is not a WebviewWindow`）。故本轮把 `switch_agent` / `reconnect_agent` / `restart_agent_runtime` / `session_fork` 等命令及经手的内部函数参数由 `WebviewWindow` 收敛为 `Window`（`Emitter::emit` 两者同走 `manager().emit`，行为等价；已 `cargo check` 通过）。不修这条，修好子 WebView 反而会让会话/Agent 切换失败。
+
+**外部现象根因**：修好子 WebView 后，之前那条「浏览器 Sheet 可用但主区被吃掉」的假象会消失，取而代之的是命令面报错——两者必须成对修，勿只取其一。
