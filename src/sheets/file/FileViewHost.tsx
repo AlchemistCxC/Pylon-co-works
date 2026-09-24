@@ -50,6 +50,10 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [truncated, setTruncated] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [summary, setSummary] = useState<KernelSummary>(IDLE_SUMMARY)
+  // 0-A3 写冲突锁：locked = agent 写盘冷却期（内核只读）；override = 逃生口
+  //（恢复编辑但锁内保存仍禁用，防半成品文件写回）。
+  const [writeLocked, setWriteLocked] = useState(false)
+  const [lockOverride, setLockOverride] = useState(false)
   const [workingText, setWorkingText] = useState<string | null>(null)
   const [baseline, setBaseline] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle')
@@ -59,6 +63,8 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const saveReceiptVersion = useRef(0)
   const apiRef = useRef<FileCodeEditorApi | null>(null)
   const dirty = summary.dirty
+  const editable = !truncated && (!writeLocked || lockOverride)
+  const saveBlockedByLock = writeLocked
   const tabKey = tab ? fileTabKey(tab) : null
   const lineCount = summary.lineCount
   const selection = summary.selection
@@ -103,6 +109,8 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setInstruction(cleared.instruction)
     setSummary(IDLE_SUMMARY)
     setWorkingText(null)
+    setWriteLocked(false)
+    setLockOverride(false)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
@@ -115,8 +123,10 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
 
   const handleSave = async (force: boolean) => {
     if (!target || !fileProvider?.writeText || !tab || fileTabViewType(tab) !== 'file.text' || baseline === null) return
+    if (saveBlockedByLock) return
+    if (!apiRef.current) return
     const operationIdentity = viewIdentity
-    const content = apiRef.current?.getDoc() ?? ''
+    const content = apiRef.current.getDoc()
     const contentAtStart = content
     setSaveState('saving')
     setSaveError('')
@@ -201,12 +211,22 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         onClearSelection={() => setSelection(null)}
       />
       <div className="file-edit-toolbar">
+        {writeLocked && !lockOverride && (
+          <button
+            type="button"
+            className="file-lock-override"
+            onClick={() => setLockOverride(true)}
+            title="锁定期间保存仍被禁用（防半成品文件写回）"
+          >
+            仍要编辑
+          </button>
+        )}
         <button
           type="button"
           className="file-save-btn"
           onClick={() => void handleSave(false)}
-          disabled={!dirty || saveState === 'saving'}
-          title={truncated ? '内容不完整（truncated）不可编辑' : '保存（Ctrl/⌘+S）'}
+          disabled={!dirty || saveState === 'saving' || saveBlockedByLock}
+          title={truncated ? '内容不完整（truncated）不可编辑' : saveBlockedByLock ? 'Agent 正在修改此文件，保存暂停' : '保存（Ctrl/⌘+S）'}
         >
           {saveState === 'saving' ? '保存中…' : '保存'}
         </button>
@@ -229,7 +249,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         context={context}
         path={tab.path}
         revealLine={tab.line}
-        writable={!truncated}
+        writable={editable}
         baseline={baseline ?? undefined}
         onTruncated={value => {
           // A truncated response is intentionally read-only.  Never grant an
@@ -245,6 +265,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         }}
         onSelectionInvalidated={() => setSelection(null)}
         onSummaryChange={handleSummaryChange}
+        onWriteLockChange={setWriteLocked}
         onSave={() => {
           if (dirty && saveState !== 'saving') void handleSave(false)
         }}
@@ -265,6 +286,11 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         <span className={selectionLabel ? 'file-status-selection active' : 'file-status-selection'}>
           {selectionLabel ? `已选择 ${selectionLabel}` : '拖选代码以回传会话'}
         </span>
+        {writeLocked && (
+          <span className="file-status-write-lock" role="status">
+            {lockOverride ? 'Agent 正在修改此文件（保存将等待写入结束）' : 'Agent 正在修改此文件，编辑已暂停'}
+          </span>
+        )}
         <span>{target?.source || '未指向会话'}</span>
       </div>
     </>

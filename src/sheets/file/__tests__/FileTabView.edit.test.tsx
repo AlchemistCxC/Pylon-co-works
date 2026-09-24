@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import FileTabView, { type FileCodeEditorApi, type KernelSummary } from '../FileTabView'
 import { useWorkspaceStore, touchedFileVersionKey } from '../../../workspaceStore'
 import { resetStores } from '../../../test/resetStores'

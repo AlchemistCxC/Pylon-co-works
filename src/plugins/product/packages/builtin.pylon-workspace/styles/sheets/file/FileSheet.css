@@ -749,6 +749,9 @@
   text-overflow: ellipsis;
 }
 
+.file-status-write-lock { color: var(--warning); font-weight: 700; }
+.file-lock-override { padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border)); border-radius: 0; color: var(--text); background: transparent; font-size: 11px; line-height: 1; cursor: pointer; }
+.file-lock-override:hover { background: var(--bg-hover); }
 .file-status-selection.active {
   color: var(--accent);
   font-weight: 700;
@@ -941,9 +944,6 @@
   line-height: 1;
   cursor: pointer;
 }
-.file-edit-toggle { padding: 5px 10px; }
-.file-edit-toggle:hover:not(:disabled) { background: var(--bg-hover); }
-.file-edit-toggle:disabled { color: var(--text-placeholder); cursor: default; }
 .file-save-btn { padding: 5px 14px; color: var(--text-on-accent); border-color: var(--accent); background: var(--accent); }
 .file-save-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .file-save-btn:disabled { opacity: .42; cursor: default; }

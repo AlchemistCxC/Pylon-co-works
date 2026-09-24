@@ -17,6 +17,9 @@ export interface FileSaveReceipt {
 
 export type { KernelSummary, FileCodeEditorApi }
 
+/** 0-A3 写冲突锁：冷却窗口（ms）内 touchVersion >=2 次递增 = agent 正在写盘。 */
+export const WRITE_LOCK_COOLDOWN_MS = 3000
+
 /**
  * FileTabView — 文件视图数据编排（0-A1 / issue #283 内核合一后）。
  *
@@ -28,7 +31,7 @@ export type { KernelSummary, FileCodeEditorApi }
  * probeDisk 不静默覆盖，无编辑安全刷新并落变更行 decoration）、saveReceipt 锚点
  * 推进、truncated 上报。内容全文不过 React state——宿主经 apiRef 句柄取全文。
  */
-export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, writable = true, baseline, onTruncated, onContentReady, onExternalChange, onSelectionInvalidated, onSummaryChange, onSave, saveAnchorToken, saveReceipt, apiRef }: {
+export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, writable = true, baseline, onTruncated, onContentReady, onExternalChange, onSelectionInvalidated, onSummaryChange, onWriteLockChange, onSave, saveAnchorToken, saveReceipt, apiRef }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   provider?: FileProvider | null
@@ -44,6 +47,8 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   onExternalChange?: () => void
   onSelectionInvalidated?: () => void
   onSummaryChange?: (summary: KernelSummary) => void
+  /** 0-A3 写冲突锁：agent 写盘冷却期置 true，静默后置 false。 */
+  onWriteLockChange?: (locked: boolean) => void
   onSave?: () => void
   saveAnchorToken?: number
   saveReceipt?: FileSaveReceipt | null
@@ -61,6 +66,9 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   const diskRef = useRef<string | null>(null)
   const saveAnchorRef = useRef<number>(0)
   const saveReceiptRef = useRef<number>(0)
+  // 0-A3 写冲突锁簿记：冷却窗口内的 touchVersion 时间戳 + 解锁定时器
+  const touchTimesRef = useRef<number[]>([])
+  const unlockTimerRef = useRef<number | null>(null)
   // 可写 ref：touchVersion 重载 effect 不依赖 writable（否则翻转重跑 effect 误报冲突）
   const writableRef = useRef(true)
   useEffect(() => { writableRef.current = writable !== false }, [writable])
@@ -105,9 +113,14 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
         // Ctrl+S 会以匹配的 expectedBaseline 把旧内容静默写回（AC-1 旁路）。
         loadedRef.current = loaded.text
         setLoadedText(loaded.text)
-      } else {
+      } else if (apiRef.current) {
         apiRef.current.replaceDoc(loaded.text, { baseline: loaded.text, markChanged: showChanged })
         if (showChanged) onSelectionInvalidated?.()
+      } else {
+        // 窄竞态：内核已按 stale initialContent 重挂但 apiRef 尚未就位——bump nonce 强制重挂
+        loadedRef.current = loaded.text
+        setLoadedText(loaded.text)
+        setRemountNonce(n => n + 1)
       }
       diskRef.current = loaded.text
       onTruncated(loaded.truncated)
@@ -133,7 +146,6 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     requestContext.current = { source: targetKey, generation: requestContext.current.generation + 1 }
     const token = beginSourceRequest(requestContext.current, targetKey)
     const requestPath = path
-    if (!apiRef?.current) return
     const editorNow = editorContent()
     fetchText(target, path).then(loaded => {
       if (!loaded || !isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
@@ -160,6 +172,11 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     setError('')
     setLoading(false)
     diskRef.current = null
+    touchTimesRef.current = []
+    if (unlockTimerRef.current !== null) {
+      window.clearTimeout(unlockTimerRef.current)
+      unlockTimerRef.current = null
+    }
     if (!target || !path) return
     loadContent(false)
     return () => {
@@ -168,12 +185,46 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKey, path, provider])
 
+  // 0-A3 写冲突锁：冷却窗口内 >=2 次 touchVersion 递增 → 置锁；静默满冷却 → 解锁并
+  // probeDisk 确认磁盘稳定（顺带同步内容/冲突上报）。每次新 touch 顺延解锁定时器。
+  const lockCallbacksRef = useRef({ onWriteLockChange, probeDisk: () => {} })
+  // 0-A2 review：错误态卸载期间的 touchVersion 自愈——内核不在挂载位时改走完整重载
+  const [remountNonce, setRemountNonce] = useState(0)
+  useEffect(() => {
+    if (touchVersion === undefined || !target || !path) return
+    const now = Date.now()
+    touchTimesRef.current = touchTimesRef.current.filter(t => now - t < WRITE_LOCK_COOLDOWN_MS)
+    touchTimesRef.current.push(now)
+    const locked = touchTimesRef.current.length >= 2
+    lockCallbacksRef.current.onWriteLockChange?.(locked)
+    if (locked) {
+      if (unlockTimerRef.current !== null) window.clearTimeout(unlockTimerRef.current)
+      unlockTimerRef.current = window.setTimeout(() => {
+        unlockTimerRef.current = null
+        touchTimesRef.current = []
+        lockCallbacksRef.current.onWriteLockChange?.(false)
+        lockCallbacksRef.current.probeDisk()
+      }, WRITE_LOCK_COOLDOWN_MS)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [touchVersion, targetKey, path])
+
+  lockCallbacksRef.current.onWriteLockChange = onWriteLockChange
+  lockCallbacksRef.current.probeDisk = probeDisk
+
   // W2-09：版本戳变化 → 300ms debounce；编辑中改走探测（不静默覆盖），只读保持重拉。
   // 依赖不含 editing（否则切编辑模式重跑 effect → 退出编辑静默覆盖未保存修改、重进编辑误报冲突）；
   // 定时器回调内读 editingRef 取最新编辑态，且编辑器内容 !== diskRef（存在未保存编辑）时也走探测路径。
   useEffect(() => {
     if (touchVersion === undefined || !target || !path) return
     const timer = window.setTimeout(() => {
+      if (!apiRef?.current) {
+        // 错误态卸载期间的磁盘变化无法感知，自愈 = 完整重载
+        loadedRef.current = null
+        setLoadedText(null)
+        loadContent(false)
+        return
+      }
       if (writableRef.current || editorContent() !== diskRef.current) probeDisk()
       else loadContent(true)
     }, 300)
@@ -215,7 +266,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   return (
     <div className="file-tab-view file-tab-edit" data-path={path}>
       <FileCodeEditor
-        key={`${targetKey ?? 'unknown'}:${path}`}
+        key={`${targetKey ?? 'unknown'}:${path}:${remountNonce}`}
         path={path}
         initialContent={loadedText}
         baseline={baseline ?? loadedText}
