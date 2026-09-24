@@ -106,3 +106,33 @@ describe('#238 刀5B · 分隔点整族已删 + 命令行提示不再是整行�
     expect(block).toContain('white-space:nowrap')
   })
 })
+
+const statusBarCss = css('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css')
+
+/**
+ * 2026-09-23 · 权限 `[data-mode]` 语义色的**特异度守卫**。
+ *
+ * 为什么要有它：这四条颜色规则曾经**从未生效**（权限文字一直是灰的），而
+ * lint / build / check:solid / 测试**全绿** —— 原因是特异度同分（都是 (0,2,0)），
+ * 而 WorkbenchChrome.css 里那条通用 `color: var(--text-dim)` 更靠后加载。修法是给四条
+ * 补上槽位作用域前缀（升到 (0,3,0)）。这类"算式型"失效没有任何一层能抓到，故在此钉住。
+ * ★ 与 `ccDeadDataGuard` 同款意义：将来若真要改回去，**改这条就是一次显式动作**。
+ */
+describe('2026-09-23 · 权限语义色四条必须带槽位作用域前缀（否则被通用规则压掉）', () => {
+  const MODES = ['bypass', 'auto', 'edit', 'default'] as const
+
+  it('四条规则的选择器都带槽位前缀，语义色变量仍在，且没用 !important 抢', () => {
+    // 出现次数恰好 4：多一条（例如无前缀的旧形态被加回来）或少了都会红
+    expect((statusBarCss.match(/\.cc-permission-trigger\[data-mode=/g) ?? []).length).toBe(4)
+    for (const mode of MODES) {
+      const selector = `.solid-workbench-control-center-slot .cc-permission-trigger[data-mode="${mode}"]`
+      expect(statusBarCss, `${mode} 档缺少带槽位前缀的语义色规则`).toContain(selector)
+      const block = extractBlock(statusBarCss, selector)
+      expect(block, `${mode} 档不再是语义色变量`).toMatch(/color:var\(--/)
+      expect(block, `${mode} 档用了 !important（本仓禁区）`).not.toContain('!important')
+    }
+    // 压住过它的那条通用规则仍在（前提可见：它若被删，本守卫的算式前提就变了）
+    const generic = extractBlock(chromeCss, '.solid-workbench-control-center-slot :is(.cc-model-trigger, .cc-permission-trigger, .cc-reasoning-trigger, .cc-usage-pill)')
+    expect(generic).toContain('color:var(--text-dim)')
+  })
+})
