@@ -20,8 +20,8 @@
 | --- | --- | --- |
 | `chat/PlainMessageList.solid.tsx`、`entryMotion.solid.tsx` | 新消息短时入场标记 | 修改 / 新增 |
 | `CanonicalActivityList.solid.tsx`、`WorkbenchContent.solid.tsx` | 实时工具 id 入场、减动效与生成态门控 | 修改 |
-| `chat/MessageRow.solid.tsx`、`ChatView.css` | 流式正文尾部扫光、消息与工具入场及左轨提示 | 修改 |
-| `PlainMessageList.solid.test.tsx`、`MessageRow.solid.test.tsx`、`mountSolidWorkbench.solid.test.tsx` | 实时、历史、状态更新、扫光生命周期与减动效边界 | 修改 |
+| `chat/MessageRow.solid.tsx`、`chat/MarkdownContent.solid.tsx`、`ChatView.css` | 流式正文尾部扫光、打字光标、消息与工具入场及左轨提示 | 修改 |
+| `PlainMessageList.solid.test.tsx`、`MessageRow.solid.test.tsx`、`StreamingIdentity.solid.test.tsx`、`mountSolidWorkbench.solid.test.tsx` | 实时、历史、状态更新、扫光与打字光标生命周期、减动效边界 | 修改 |
 | `docs/说明书/Pylon-项目架构参考.md` | 显示层动效事实 | 修改 |
 
 ## 方案要点
@@ -65,6 +65,16 @@
 - 定向组件测试：`MessageRow.solid.test.tsx`、`PlainMessageList.solid.test.tsx`、`mountSolidWorkbench.solid.test.tsx`，3 个文件 133 项通过；`ChatView.css.test.ts` 30 项通过。
 - `bun run check:solid`：退出码 0；Solid 边界扫描 165 个源码文件，CSS 消费审计悬空引用 0。
 - `bun run check:frontend`：退出码 0；Vitest 643 个文件通过、1 跳过，4880 项通过、1 跳过、1 todo；生产 Vite 构建 2762 模块，后续 bundle、docs、deps 与产物隔离检查均通过。
+
+### 打字机视觉增强（同 issue 后续反馈）
+
+- 调查确认：`streamingDisplayScheduler` 与 wasm 揭示引擎只按预算发布文字，本身没有字符位置的视觉动效；既有扫光属于正文生成态。
+- `MarkdownContent` 只在初始流式行发生前缀增长时显示一个装饰性光标，420ms 无新增文字即清除；终态若仍按预算补齐文字，光标继续跟随。历史整发、回退或替换不触发。
+- 光标位于助手正文最后一个可见普通文本或 Markdown 文本叶节点，跳过列表/引用结尾的结构空白；未闭合代码围栏落在最后一行。思考区不显示光标。零盒宽高、`aria-hidden`，不进入复制文本和行宽计算。系统与聊天减动效下隐藏。揭示预算与 Markdown 解析模型未改。
+- `StreamingIdentity.solid.test.tsx` 新增普通文字、解析 Markdown 稳定块身份、列表/引用容器、未闭合代码围栏末行与终态清理用例；定向 9/9 通过。第一次全量测试发现思考区结构 HTML 与终态不一致；收窄到助手正文并跳过容器结构空白后，`issue55.streamingContainers.solid.test.tsx` 与新增用例定向通过。
+- 最终 `bun run check:solid`：退出码 0，扫描 165 个源码文件，CSS 消费审计悬空引用 0。
+- 最终 `bun run check:frontend`：退出码 0；Vitest 643 个文件通过、1 跳过，4885 项通过、1 跳过、1 todo；Vite 构建 2762 模块，后续 bundle、docs、deps 和产物隔离检查通过。一次中途的 `build:example-plugin` esbuild 失败单独重跑后通过，完整门禁复跑亦通过。
+- `git diff --check`：退出码 0。实机视觉继续按用户要求跳过。
 
 ## 与 spec 的偏差
 

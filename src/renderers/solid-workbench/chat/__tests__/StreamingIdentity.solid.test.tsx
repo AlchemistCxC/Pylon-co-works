@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createSignal } from 'solid-js'
 import { render, waitFor } from '@solidjs/testing-library'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
 
 /**
@@ -18,6 +18,68 @@ import { MarkdownContent } from '../MarkdownContent.solid.tsx'
  */
 const FLUSH_BUDGET = { timeout: 2_000 }
 describe('C00 streaming root identity (1000 chunks)', () => {
+  it('places one zero-text cursor at the live plain-text tip and clears it after the last reveal', () => {
+    vi.useFakeTimers()
+    try {
+      const [state, setState] = createSignal({ text: '首段', streaming: true })
+      const result = render(() => <MarkdownContent text={state().text} streaming={state().streaming} />)
+      const paragraph = result.container.querySelector('.term-plain-text')
+      expect(paragraph?.querySelector('.term-typewriter-cursor')).toHaveAttribute('aria-hidden', 'true')
+      expect(paragraph).toHaveTextContent('首段')
+      vi.advanceTimersByTime(420)
+      expect(paragraph?.querySelector('.term-typewriter-cursor')).toBeNull()
+
+      setState({ text: '首段继续', streaming: false })
+      expect(result.container.querySelector('.term-plain-text')).toBe(paragraph)
+      expect(paragraph?.querySelector('.term-typewriter-cursor')).not.toBeNull()
+      vi.advanceTimersByTime(420)
+      expect(paragraph?.querySelector('.term-typewriter-cursor')).toBeNull()
+      expect(result.container.textContent).toBe('首段继续')
+      setState({ text: '历史替换', streaming: false })
+      expect(result.container.querySelector('.term-typewriter-cursor')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the cursor on the last parsed text leaf without touching stable blocks', async () => {
+    const [text, setText] = createSignal('# 稳定标题\n\n**粗体**')
+    const result = render(() => <MarkdownContent text={text()} streaming />)
+    const heading = await waitFor(() => {
+      const node = result.container.querySelector('h1')
+      if (!node) throw new Error('heading not ready')
+      return node
+    }, FLUSH_BUDGET)
+    await waitFor(() => expect(result.container.querySelector('strong')).not.toBeNull(), FLUSH_BUDGET)
+    setText('# 稳定标题\n\n**粗体** 追加')
+    await waitFor(() => expect(result.container.querySelector('p .term-typewriter-cursor')).not.toBeNull(), FLUSH_BUDGET)
+    expect(result.container.querySelectorAll('.term-typewriter-cursor')).toHaveLength(1)
+    expect(heading.querySelector('.term-typewriter-cursor')).toBeNull()
+    expect(result.container.querySelector('h1')).toBe(heading)
+  })
+
+  it('anchors the cursor to only the final line of an open code fence', () => {
+    const result = render(() => <MarkdownContent text={'```ts\nsame\nsame'} streaming />)
+    const lines = result.container.querySelectorAll('.term-code-line')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]?.querySelector('.term-typewriter-cursor')).toBeNull()
+    expect(lines[1]?.querySelector('.term-typewriter-cursor')).not.toBeNull()
+  })
+
+  it.each([
+    '- **父项**\n\n  - **子项**\n\n    子项续写。',
+    '> **引用**\n\n> 续写引用。',
+  ])('places a parsed container cursor inside its last visible paragraph', async text => {
+    const result = render(() => <MarkdownContent text={text} streaming />)
+    const cursor = await waitFor(() => {
+      const node = result.container.querySelector('.term-typewriter-cursor')
+      if (!node) throw new Error('typing cursor not ready')
+      return node
+    }, FLUSH_BUDGET)
+    expect(cursor.closest('p')).not.toBeNull()
+    expect(result.container.querySelectorAll('.term-typewriter-cursor')).toHaveLength(1)
+  })
+
   it('keeps stable heading identity across 1000 tail appends', async () => {
     // 初始即含一个已完成块边界；此后 1000 chunk 全部落在 unstable 尾块内
     const [text, setText] = createSignal('# 稳定标题\n\n尾块起点。')

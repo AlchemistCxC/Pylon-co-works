@@ -18,6 +18,8 @@ export interface MarkdownContentProps {
   text: string
   streaming?: boolean
   inline?: boolean
+  /** Reasoning uses its own activity treatment; the typing tip belongs to assistant prose. */
+  typewriter?: boolean
 }
 
 export function MarkdownContent(props: MarkdownContentProps) {
@@ -36,7 +38,8 @@ export function MarkdownContent(props: MarkdownContentProps) {
 
   return (
     <Show when={incremental} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
-      <StreamingMarkdownBlocks text={() => props.text} streaming={() => props.streaming === true} inline={props.inline} />
+      <StreamingMarkdownBlocks text={() => props.text} streaming={() => props.streaming === true}
+        typewriter={props.typewriter !== false} inline={props.inline} />
     </Show>
   )
 }
@@ -109,7 +112,7 @@ function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
   return { specs, stableSpecs, paragraphs: ends.length + (unstable.length > 0 ? 1 : 0) }
 }
 
-function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; inline?: boolean }) {
+function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; typewriter: boolean; inline?: boolean }) {
   let nextId = 1
   // 行集合 = 当前文本的函数。这里刻意不保留任何独立于文本的累积状态：旧实现里的
   // committedText / hiddenLeading / stableRows 累积 + reset() 正是漂移的来源。
@@ -119,10 +122,25 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   // 后继发布省掉对全部已完成块的 slice+trim 重复分配；尾行永远重算，回退/换挡清空。
   let cachedStableTexts: readonly string[] = []
   const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
+  const lastRowId = createMemo(() => rows().at(-1)?.id)
+  const [typing, setTyping] = createSignal(false)
+  let clearTyping: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => { if (clearTyping !== undefined) clearTimeout(clearTyping) })
 
   const reconcile = (text: string, final: boolean) => {
     // 非后继输入（回退/换挡/重放）只作为只读计数，不再需要特殊分支：推导只看当前文本。
-    const reset = !text.startsWith(lastText)
+    const extendsPrevious = text.startsWith(lastText)
+    const reset = !extendsPrevious
+    // Reuse the prefix comparison already needed for row reconciliation.
+    // A replacement is not a character reveal; a terminal catch-up still is.
+    const grew = props.typewriter && extendsPrevious && text.length > lastText.length
+    if (clearTyping !== undefined) clearTimeout(clearTyping)
+    clearTyping = undefined
+    setTyping(grew)
+    if (grew) clearTyping = setTimeout(() => {
+      clearTyping = undefined
+      setTyping(false)
+    }, 420)
     lastText = text
     if (reset) cachedStableTexts = []
     // Providers may open an assistant stream with blank lines (for example right after a
@@ -161,6 +179,7 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   return <For each={rows()}>{row => <StreamingMarkdownBlock
     row={row}
     streaming={props.streaming}
+    typing={props.typewriter ? () => typing() && lastRowId() === row.id : undefined}
     inline={props.inline}
   />}</For>
 }
@@ -189,7 +208,7 @@ function createStreamingBlockRow(id: number, initialText: string, tail: boolean)
   return { id, tail: isTail, setTail: setIsTail, get text() { return text() }, update: setText }
 }
 
-function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; inline?: boolean }) {
+function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; typing?: () => boolean; inline?: boolean }) {
   const text = () => props.row.text
   const openCodeTail = createMemo(() => props.streaming() ? splitOpenCodeFenceTail(text()) : null)
   // P57 S3-A11：增长尾块的中间态解析绕 LRU 缓存（同前缀同长度的文本永不再命中，
@@ -197,7 +216,7 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
   const cacheModel = () => !props.row.tail()
   return <Show
     when={openCodeTail() !== null}
-    fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} />}
+    fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} typing={props.typing} />}
   >
     <Show when={openCodeTail()?.prefix}>
       {prefix => <MarkdownSegment text={prefix()} inline={props.inline} cache={cacheModel} />}
@@ -205,6 +224,7 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
     <StreamingCodeBlock
       code={() => openCodeTail()?.code ?? ''}
       language={() => openCodeTail()?.language}
+      typing={props.typing}
     />
   </Show>
 }
@@ -217,7 +237,7 @@ function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () =
  * 生成期。真机实测 372 行 / 1.18 万字符的块在流式期 0 条 long task，常见规模下代价可忽略；
  * 若将来出现极端长块导致 DOM 膨胀，再引入高上限兜底（而不是直接改为折叠）。
  */
-function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string }) {
+function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string; typing?: () => boolean }) {
   const lines = () => props.code().split(String.fromCharCode(10))
   return (
     <div
@@ -225,10 +245,12 @@ function StreamingCodeBlock(props: { language: () => string | undefined; code: (
       data-streaming-code="true"
       data-language={props.language()}
     >
-      <Index each={lines()}>{line => (
+      <Index each={lines()}>{(line, index) => (
         <div class="term-code-line">
           <span class="term-code-gutter">│ </span>
-          <span class="term-code-text">{line() || String.fromCharCode(160)}</span>
+          <span class="term-code-text">{line() || String.fromCharCode(160)}
+            {props.typing && <Show when={props.typing() && index === lines().length - 1}><TypingCursor /></Show>}
+          </span>
         </div>
       )}</Index>
     </div>
@@ -242,8 +264,10 @@ function StreamingCodeBlock(props: { language: () => string | undefined; code: (
  * 不再回落到原始文本——流式尾块旧模型是同文本前缀，短暂滞后无感，而原始
  * `**`/`` ` `` 标记不再泄漏到 DOM。仅首次解析（从未 resolve）渲染骨架。
  */
-function MarkdownSegment(props: { text: string | (() => string); inline?: boolean; cache?: () => boolean }) {
+function MarkdownSegment(props: { text: string | (() => string); inline?: boolean; cache?: () => boolean; typing?: () => boolean }) {
   const text = () => typeof props.text === 'function' ? props.text() : props.text
+  const typing = () => props.typing?.() === true
+  const canType = props.typing !== undefined
   const shouldParse = () => !isPlainTextContent(text())
   const useCache = () => props.cache?.() ?? true
   // #212：命中**已结算**的缓存模型时同步渲染，完全不经骨架——历史行不再有一次
@@ -268,19 +292,33 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
 
   return (
     <Show when={shouldParse()} fallback={props.inline
-      ? <span class="term-p term-plain-text">{text()}</span>
-      : <p class="term-p term-plain-text">{text()}</p>}>
+      ? <span class="term-p term-plain-text">{text()}{canType && <Show when={typing()}><TypingCursor /></Show>}</span>
+      : <p class="term-p term-plain-text">{text()}{canType && <Show when={typing()}><TypingCursor /></Show>}</p>}>
       <Show when={root()} fallback={<div class="term-md-skeleton" aria-busy="true" />}>
-        {resolved => <For each={resolved().children}>{node => <MarkdownNode node={node} />}</For>}
+        {resolved => {
+          const lastIndex = canType ? createMemo(() => lastContentIndex(resolved().children)) : () => -1
+          return <For each={resolved().children}>{(node, index) => {
+            const lastAtMount = canType && index() === lastIndex()
+            return <MarkdownNode node={node} typingTail={lastAtMount
+              ? () => typing() && index() === lastIndex()
+              : undefined} />
+          }}</For>
+        }}
       </Show>
     </Show>
   )
 }
 
-function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
-  if (props.node.type === 'text') return props.node.value
+function TypingCursor() {
+  return <span class="term-typewriter-cursor" aria-hidden="true" />
+}
+
+function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => boolean }): JSX.Element {
+  if (props.node.type === 'text') return props.typingTail
+    ? <>{props.node.value}<Show when={props.typingTail()}><TypingCursor /></Show></>
+    : props.node.value
   if (props.node.type === 'root') {
-    return <For each={props.node.children}>{node => <MarkdownNode node={node} />}</For>
+    return <MarkdownChildren children={props.node.children} typingTail={props.typingTail} />
   }
 
   const node = props.node
@@ -289,7 +327,7 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
     if (code) return <CodeBlock language={code.language} code={code.code} />
   }
   if (node.tagName === 'code') {
-    return <code class="term-inline-code"><MarkdownChildren children={node.children} /></code>
+    return <code class="term-inline-code"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></code>
   }
   if (node.tagName === 'a') {
     const href = safeHref(node.properties.href)
@@ -304,8 +342,8 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
           target={isHashOnly ? undefined : '_blank'}
           rel={isHashOnly ? undefined : 'noopener noreferrer'}
           class="term-link"
-        ><MarkdownChildren children={node.children} /></a>
-      : <span><MarkdownChildren children={node.children} /></span>
+        ><MarkdownChildren children={node.children} typingTail={props.typingTail} /></a>
+      : <span><MarkdownChildren children={node.children} typingTail={props.typingTail} /></span>
   }
   if (node.tagName === 'img') {
     const src = safeImageSource(node.properties.src)
@@ -315,10 +353,10 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
       : <span class="term-markdown-image-alt">{alt}</span>
   }
   if (node.tagName === 'blockquote') {
-    return <blockquote class="term-blockquote"><MarkdownChildren children={node.children} /></blockquote>
+    return <blockquote class="term-blockquote"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></blockquote>
   }
   if (node.tagName === 'table') {
-    return <div class="term-table-wrap"><table class="term-table"><MarkdownChildren children={node.children} /></table></div>
+    return <div class="term-table-wrap"><table class="term-table"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></table></div>
   }
   // #267：数学公式（span.math-inline / div.math-display，解析侧 remark-math 形状）
   // → Temml 渲染 MathML；失败回落 latex 原文（见 mathRender.tsx）。
@@ -326,18 +364,19 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
     const classNames = normalizeClassNames(node.properties.className)
     if (classNames.includes('math')) {
       const latex = collectText(node)
-      return <MathRender latex={latex} display={classNames.includes('math-display')} />
+      return <><MathRender latex={latex} display={classNames.includes('math-display')} />
+        <Show when={props.typingTail?.()}><TypingCursor /></Show></>
     }
   }
   // #267：GFM 脚注——引用上标与文末脚注节（解析侧 remark-gfm/rehype 形状）。
   if (node.tagName === 'sup') {
     const label = typeof node.properties.ariaLabel === 'string' ? node.properties.ariaLabel : undefined
-    return <sup class="term-footnote-ref" aria-label={label}><MarkdownChildren children={node.children} /></sup>
+    return <sup class="term-footnote-ref" aria-label={label}><MarkdownChildren children={node.children} typingTail={props.typingTail} /></sup>
   }
   if (node.tagName === 'section') {
     const classNames = normalizeClassNames(node.properties.className)
     if (classNames.includes('footnotes')) {
-      return <section class="term-footnotes footnotes"><MarkdownChildren children={node.children} /></section>
+      return <section class="term-footnotes footnotes"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></section>
     }
   }
 
@@ -361,11 +400,28 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
   const cellAlign = (tagName === 'th' || tagName === 'td') && typeof node.properties.align === 'string'
     ? node.properties.align
     : undefined
-  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}><MarkdownChildren children={node.children} /></Dynamic>
+  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}>
+    <MarkdownChildren children={node.children} typingTail={props.typingTail} />
+  </Dynamic>
 }
 
-function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {
-  return <For each={props.children}>{node => <MarkdownNode node={node} />}</For>
+function MarkdownChildren(props: { children: readonly MarkdownRenderNode[]; typingTail?: () => boolean }) {
+  const lastIndex = props.typingTail ? createMemo(() => lastContentIndex(props.children)) : () => -1
+  return <For each={props.children}>{(node, index) => {
+    const lastAtMount = props.typingTail !== undefined && index() === lastIndex()
+    return <MarkdownNode node={node} typingTail={lastAtMount
+      ? () => props.typingTail?.() === true && index() === lastIndex()
+      : undefined} />
+  }}</For>
+}
+
+/** Parsed containers often end with a formatting newline after their last visible child. */
+function lastContentIndex(children: readonly MarkdownRenderNode[]): number {
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    const node = children[index]!
+    if (node.type !== 'text' || node.value.trim().length > 0) return index
+  }
+  return -1
 }
 
 function CodeBlock(props: { language?: string; code: string }) {

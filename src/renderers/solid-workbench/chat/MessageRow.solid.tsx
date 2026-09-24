@@ -267,7 +267,7 @@ export function ReasoningBlock(props: {
                 只对**超阈值**正文惰性化：短正文保持既有的「折叠也在 DOM 里」契约（页面查找、
                 既有断言、诊断几何都依赖它），长正文改为展开才解析/渲染。复制不受影响（走 props.text）。 */}
             <Show when={collapse.open() || props.text.length <= LAZY_REASONING_BODY_CHARS}>
-              <MarkdownContent text={props.text} streaming={props.running} />
+              <MarkdownContent text={props.text} streaming={props.running} typewriter={false} />
             </Show>
           </div>
         </SolidCollapsibleRegion>

@@ -2132,6 +2132,36 @@
   72%,100% { transform:translate3d(100%,0,0); }
 }
 
+/* The cursor follows the last revealed text leaf, including parsed Markdown
+   and open code fences. Its zero-sized anchor does not change line wrapping. */
+.term-typewriter-cursor {
+  display:inline-block;
+  position:relative;
+  width:0;
+  height:0;
+  vertical-align:baseline;
+  pointer-events:none;
+  user-select:none;
+}
+.term-typewriter-cursor::after {
+  content:'';
+  position:absolute;
+  left:.08em;
+  bottom:-.12em;
+  width:2px;
+  height:.94em;
+  border-radius:2px;
+  background:var(--accent);
+  box-shadow:0 0 10px var(--accent-soft-strong);
+  transform-origin:bottom;
+  animation:pylon-typewriter-cursor 900ms ease-in-out infinite;
+}
+@keyframes pylon-typewriter-cursor {
+  0%,100% { opacity:.35; transform:scaleY(.78); }
+  35% { opacity:1; transform:scaleY(1); }
+  70% { opacity:.75; transform:scaleY(1); }
+}
+
 /* The rail retains a quieter continuous signal while the sweep crosses the
    tail. Both stop when the authoritative live flag clears. */
 .term-row-assistant[data-streaming="true"],
@@ -2167,6 +2197,7 @@
 }
 .chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"]::before,
 .chat-view[data-reduced-motion="true"] .term-stream-sheen,
+.chat-view[data-reduced-motion="true"] .term-typewriter-cursor,
 .chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
 @media (prefers-reduced-motion:reduce) {
   .plain-message-list__row[data-entry="new"] > .term-row,
@@ -2181,6 +2212,7 @@
   }
   .plain-message-list__row[data-entry="new"]::before,
   .term-stream-sheen,
+  .term-typewriter-cursor,
   .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
 }
 
