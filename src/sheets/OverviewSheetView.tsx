@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles } from 'lucide-react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../identityStore'
@@ -99,7 +100,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const client = createSessionClient({ invoke: tauriInvokeTransport })
     client.listPersistedSessions().then(all => {
       if (!disposed) {
         setRecent(recentPersistedSessions(all))
@@ -119,7 +120,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     setSwitchingId(agent.id)
     setError('')
     setErrorIsValidation(false)
-    const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),

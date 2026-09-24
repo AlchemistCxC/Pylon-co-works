@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import {
   createAgentClient,
@@ -203,7 +203,7 @@ function pathHintForProvider(provider: string | null | undefined): string {
  */
 export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?: string }) {
   const [agentClient] = useState(() => createAgentClient({
-    invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
+    invoke: tauriInvokeTransport,
   }))
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)

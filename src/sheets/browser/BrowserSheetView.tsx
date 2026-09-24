@@ -14,6 +14,7 @@ import {
   type ConsoleEntry,
 } from '../../domains/browser/browserLibrary.ts'
 import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { listen } from '@tauri-apps/api/event'
 import { classifyBrowserStartError } from '../../infrastructure/tauri/browserContracts.ts'
 import { createBrowserClient } from '../../infrastructure/tauri/browserClient'
@@ -240,7 +241,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     if (!element || !browserRuntimeAvailable || snapshot.phase !== 'ready' || !isSheetActive) return
     const rect = element.getBoundingClientRect()
     if (rect.width < 1 || rect.height < 1) return
-    void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setBounds({
+    void createBrowserClient({ invoke: tauriInvokeTransport }).setBounds({
       x: Math.round(rect.left),
       y: Math.round(rect.top),
       width: Math.round(rect.width),
@@ -255,7 +256,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     // 未 mock 命令，SheetLayout（生产路径）会始终提供显式布尔值。
     if (!browserRuntimeAvailable || browserPreview || typeof ctx.isActive !== 'boolean' || snapshot.phase !== 'ready') return
     const nativeVisible = isSheetActive && !modalOverlayOpen
-    void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    void createBrowserClient({ invoke: tauriInvokeTransport })
       .setVisible(nativeVisible)
       .catch(error => reportRuntimeError('切换浏览器可见性', error))
   }, [browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive, snapshot.phase, modalOverlayOpen])
@@ -263,7 +264,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   useEffect(() => {
     if (!browserRuntimeAvailable) return
     let disposed = false
-    const client = createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const client = createBrowserClient({ invoke: tauriInvokeTransport })
     const commit = (next: BrowserSnapshot) => {
       if (!disposed) applySnapshot(next)
     }
@@ -331,7 +332,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     try {
       const element = viewportRef.current
       const rect = element?.getBoundingClientRect()
-      const next = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).start({
+      const next = await createBrowserClient({ invoke: tauriInvokeTransport }).start({
         x: Math.round(rect?.left ?? 0),
         y: Math.round(rect?.top ?? 0),
         width: Math.max(1, Math.round(rect?.width ?? 1)),
@@ -353,7 +354,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     const url = /^https?:\/\//i.test(value) ? value : `https://${value}`
     notifyUserActivity()
     try {
-      const next = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).navigate(url) as BrowserSnapshot
+      const next = await createBrowserClient({ invoke: tauriInvokeTransport }).navigate(url) as BrowserSnapshot
       if (browserPreview) setPreviewRevision(revision => revision + 1)
       applySnapshot(next)
     } catch (error) {
@@ -366,7 +367,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   const browserCommand = async (command: 'browser_back' | 'browser_forward' | 'browser_reload') => {
     notifyUserActivity()
     try {
-      const bc = createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      const bc = createBrowserClient({ invoke: tauriInvokeTransport })
       const next = await (command === 'browser_back' ? bc.back() : command === 'browser_forward' ? bc.forward() : bc.reload()) as BrowserSnapshot
       if (browserPreview) setPreviewRevision(revision => revision + 1)
       applySnapshot(next)
@@ -378,7 +379,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   const tabCommand = useCallback(async (command: 'new' | 'select' | 'close' | 'open', tabId?: number, url?: string) => {
     notifyUserActivity()
     try {
-      const client = createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      const client = createBrowserClient({ invoke: tauriInvokeTransport })
       const next = await (command === 'new'
         ? client.newTab()
         : command === 'open'
@@ -435,7 +436,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     const nextZoom = Math.min(MAX_ZOOM_PERCENT, Math.max(MIN_ZOOM_PERCENT, zoomPercent))
     notifyUserActivity()
     try {
-      const next = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setZoom(nextZoom) as BrowserSnapshot
+      const next = await createBrowserClient({ invoke: tauriInvokeTransport }).setZoom(nextZoom) as BrowserSnapshot
       applySnapshot({ ...next, zoomPercent: next.zoomPercent ?? nextZoom })
     } catch (error) {
       reportRuntimeError('调整浏览器缩放', error)
@@ -451,7 +452,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     const request = (async () => {
       logConsole(command, 'info')
       try {
-        const result = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).snapshot() as BrowserPageSnapshot
+        const result = await createBrowserClient({ invoke: tauriInvokeTransport }).snapshot() as BrowserPageSnapshot
         setPageSnapshot(result)
         const detail = typeof result.text === 'string' ? `${result.url ?? ''} · ${result.text.length} chars · ${result.links?.length ?? 0} links` : String(result.url ?? '')
         logConsole(command, 'success', detail)
@@ -484,7 +485,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     }
     logConsole('browser_download', 'info', url)
     try {
-      const result = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).download(url, filename) as Record<string, unknown>
+      const result = await createBrowserClient({ invoke: tauriInvokeTransport }).download(url, filename) as Record<string, unknown>
       const status = result?.status === 'failed' ? 'failed' : 'started'
       const error = typeof result?.error === 'string' ? result.error : undefined
       updateLibrary(current => recordDownload(current, { url, filename: typeof result?.filename === 'string' ? result.filename : filename, status, error }))
@@ -514,7 +515,7 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     // 只在 ready 清理会留下后台 WebView。browser_close 对 idle 也是幂等的，
     // 因而这里覆盖所有非 idle 状态。
     if (browserRuntimeAvailable && snapshotRef.current.phase !== 'idle') {
-      void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).close().catch(() => {})
+      void createBrowserClient({ invoke: tauriInvokeTransport }).close().catch(() => {})
     }
   }, [browserRuntimeAvailable])
 

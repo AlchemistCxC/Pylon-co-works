@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { createGatewayClient, type AdapterCatalogItem, type AdapterInstance, type GatewayInstanceInput } from '../../infrastructure/tauri/gatewayClient'
 import { migrateLegacyRouteBindings, saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
@@ -35,7 +35,7 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
   const sheetScope = useMemo(() => ({ kind: 'sheet' as const, id: sheet.id }), [sheet.id])
   const operationKey = useCallback((action: string, suffix = '') => `gateway:${sheet.id}:${action}${suffix ? `:${suffix}` : ''}`, [sheet.id])
   const [gatewayClient] = useState(() => createGatewayClient({
-    invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
+    invoke: tauriInvokeTransport,
   }))
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [sessions, setSessions] = useState<PlatformSession[]>([])

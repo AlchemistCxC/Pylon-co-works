@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../identityStore.ts'
@@ -146,7 +146,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!sheetAgentId) return
     if (agentProbeFresh(sheetAgentId) || agentProbeInFlight(sheetAgentId)) return
     markProbeInFlight(sheetAgentId, true)
-    createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    createSessionClient({ invoke: tauriInvokeTransport })
       .probeAgentSelectors({ agentId: sheetAgentId })
       .then(snapshot => {
         noteAgentSelectorsSnapshot(sheetAgentId, snapshot)

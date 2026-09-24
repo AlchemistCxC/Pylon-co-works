@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { useIdentityStore } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
@@ -60,7 +60,7 @@ export async function createAgentWorkbenchSession(
   try {
     const profile = useIdentityStore.getState().profiles.find(item => item.id === session.profileId)
     const response = await requestNewSession(session, createSessionClient({
-      invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+      invoke: tauriInvokeTransport,
     }), () => ({
       persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
       model: request?.model || profile?.model,
@@ -90,7 +90,7 @@ export async function discardAgentWorkbenchSession(sessionId: string): Promise<v
   if (!session) return
   try {
     await createSessionClient({
-      invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+      invoke: tauriInvokeTransport,
     }).closeSession({ agentId: session.agentId, source: session.source })
   } catch (error) {
     reportRuntimeError('回滚空态新会话', error)
