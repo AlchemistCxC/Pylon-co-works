@@ -799,9 +799,9 @@
 
 ---
 
-[2026-09-24 08] [Miyaki Kumo] [release 0.2.7-MAT]
+[2026-09-24 11] [Miyaki Kumo] [release 0.2.9-PAC]
 
-**开工：0.2.7-MAT 版本号升级 + release 便携包构建上传**。文件域：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/{pylon-acp,pylon-canonical-types,pylon-compute,pylon-markdown,pylon-session}/Cargo.toml`、`src-tauri/Cargo.lock`、本文件。构建按 #228 纪律 `CARGO_TARGET_DIR=D:\pylon-acceptance-target`（G 盘 97% 满），不写 G 盘 target。全程 pathspec 提交；完成后打 tag `v0.2.7-MAT`（指向本分支）并上传 GitHub Release。
+**开工：0.2.9-PAC 版本号升级 + release 便携包构建上传**（0.2.7-MAT 条目已完成，随本次移除）。先把 `github/main` merge 进 `kumo/prometheus`（已在途，20+ 提交，无冲突）。文件域：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/{pylon-acp,pylon-canonical-types,pylon-compute,pylon-markdown,pylon-session}/Cargo.toml`、`src-tauri/Cargo.lock`、本文件。构建按 #228 纪律 `CARGO_TARGET_DIR=D:\pylon-acceptance-target`（G 盘 91% 满），不写 G 盘 target。全程 pathspec 提交；完成后打 tag `v0.2.9-PAC`（指向本分支）并上传 GitHub Release。
 
 ---
 
