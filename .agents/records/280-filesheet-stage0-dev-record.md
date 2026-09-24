@@ -70,3 +70,34 @@ Zed 极简 chrome 主干（阶段一）· minimap 阶段二自建 · markdown �
 - 共享工作树全程 pathspec 提交；0-C1 曾连带他人在途 lib.rs 改动（WebviewWindow→Window 重构），以 soft reset 拆分剔除并还原他人 WIP，未改写任何已推送历史。
 - 开工前与完工后按 §2.3 维护 `.agents/L.md` 在途条目。
 - 磁盘事件：G 盘两度写满（0 字节），清理可再生构建缓存 `target/debug/incremental`（16GB）后恢复；C 盘 1.1~1.4GB 为子 agent 首次探索失败根因。
+
+## 合并 main（#279 Solid 化）的冲突解决与语义重移植（2026-09-25 补记）
+
+阶段〇分支与 main 上的 #279「前端逐梯队 Solid 化」相撞：main 把**旧语义**的 FileTabView
+整体搬运为 Solid 实体（`FileTabView.solid.tsx` 419 行 + `FileCodeEditor.solid.tsx` +
+SolidMount 薄桥），本分支则在 React 侧原地演化出新语义（单内核/默认可写/写冲突锁）。
+用户裁断：**取 main 架构，把我方语义重移植到 Solid 侧**。
+
+落地方案（冲突仅 FileTabView.tsx 与 readonly 测试两处；其余自动合并）：
+
+1. **内核工厂抽取**：新建 `fileCodeMirrorKernel.ts`（框架无关）——EditorView 装配、
+   editable compartment、changedLines StateField、KernelSummary 摘要、api 句柄、
+   语言懒加载、resolveTabSize（采用 Solid 侧的 isConnected+try/catch 加固版）。
+2. **双适配器薄壳化**：`FileCodeEditor.tsx`（React）与 `FileCodeEditor.solid.tsx`
+   （Solid）都改为消费内核工厂（约 -120 行重复逻辑）；Solid 侧保留其 jsdom destroy
+   补刀模式与 isConnected 时序加固。
+3. **Solid 实体重写**：`FileTabView.solid.tsx` 从「旧语义移植版」重写为「0-A1/A2/A3
+   语义版」——默认可写（writable）、KernelSummary/apiRef、probeDisk 三分支、
+   saveReceipt 锚点推进、AC-1 旁路防护（回退首载 + remountNonce）、写冲突锁簿记、
+   markdown 默认源码态；删除投影/highlight/markdown 只读分支。
+4. **薄桥 props 契约更新**：`FileTabView.tsx` 保持 SolidMount 结构，props 面换为
+   writable/baseline/onSummaryChange/onWriteLockChange/apiRef（对齐 FileViewHost）。
+5. **ADR 撞号**：main 的 0023 被 #279 solidification 占用——本侧默认可写 ADR 顺延
+   改号 **0024-filesheet-default-writable.md**（FileViewHost 引用同步）。
+6. `languageFromPath` 维持删除（重移植后无消费方）；readonly 测试采纳 main 的
+   「Solid 桥 loading 态抢先 role=status」waitFor 修复。
+
+门禁（合并后）：`tsc -b` 双类型图绿 · `check:solid` 全门禁绿（Solid 边界扫描 164 文件）
+· file+plugin-runtime 523 绿 · 全量 646 文件 / **4,883 测试绿**。
+移植使 Solid 实体获得 0-A1/A2/A3 全部行为；React 适配器测试（FileCodeEditor.test 7 条）
+与桥端到端测试（FileTabView.readonly/edit 等）双层锁定。

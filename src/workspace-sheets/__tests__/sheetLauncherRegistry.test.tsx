@@ -54,7 +54,7 @@ describe('SheetLauncher Registry 卡片', () => {
       onOpenSettings={vi.fn()}
       onOpenProfiles={vi.fn()}
     />)
-    fireEvent.change(screen.getByPlaceholderText('搜索 Sheet、Agent 或管理入口...'), { target: { value: 'diagnostic' } })
+    fireEvent.input(screen.getByPlaceholderText('搜索 Sheet、Agent 或管理入口...'), { target: { value: 'diagnostic' } })
     expect(screen.getByRole('option', { name: /Runtime/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /Browser/ })).toBeNull()
   })

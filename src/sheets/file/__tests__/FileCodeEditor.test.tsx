@@ -137,7 +137,9 @@ describe('FileCodeEditor 常驻单内核（0-A1 / issue #283）', () => {
     expect(Number.parseFloat(tokenValue!)).toBe(FILE_CODE_TAB_SIZE_FALLBACK)
 
     // token 读取的三条路径：读到值 / 读到空 / 读到脏值
+    // resolver 带 isConnected 守卫（Solid 时序加固），合成元素须先接入文档
     const stubHost = document.createElement('div')
+    document.body.appendChild(stubHost)
     const stubbed = vi.spyOn(globalThis, 'getComputedStyle').mockReturnValue({
       getPropertyValue: () => ' 4 ',
     } as unknown as CSSStyleDeclaration)
@@ -147,6 +149,7 @@ describe('FileCodeEditor 常驻单内核（0-A1 / issue #283）', () => {
     stubbed.mockReturnValue({ getPropertyValue: () => 'auto' } as unknown as CSSStyleDeclaration)
     expect(resolveTabSize(stubHost)).toBe(FILE_CODE_TAB_SIZE_FALLBACK)
     stubbed.mockRestore()
+    stubHost.remove()
 
     render(<FileCodeEditor path="src/a.ts" initialContent={'a\tb'} baseline={'a\tb'} />)
     const view = await waitFor(viewOf)

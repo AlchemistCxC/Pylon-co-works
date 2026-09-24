@@ -4,7 +4,9 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import solid from 'vite-plugin-solid'
 
-const SOLID_WORKBENCH_FILES = /src\/renderers\/solid-workbench\/.*\.solid(?:\.test)?\.tsx$/
+// #279 逐梯队 Solid 化：与 vite.config.ts 同步扩展 solid 编译面（sheets /
+// workspace-sheets / components）——`.solid.tsx` 后缀即 solid 编译与 solid-dom 分组。
+const SOLID_WORKBENCH_FILES = /src\/(?:renderers\/solid-workbench|sheets|workspace-sheets|components)\/.*\.solid(?:\.test)?\.tsx$/
 
 // #175：非 watch 模式 vitest 默认吃满 availableParallelism（20 核开发机 = 19 worker）。
 // 实测满载下全量必红：worker 内存峰值把 16GB 级开发机推进分页，事件循环整段冻结，

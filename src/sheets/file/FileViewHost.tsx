@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fileTabKey, fileTabViewType, resetFileSheetTransientState, type FileTabRecord } from './fileSheetState.ts'
-import FileTabView, { type FileSaveReceipt, type FileCodeEditorApi, type KernelSummary } from './FileTabView'
+import FileTabView, { type FileSaveReceipt } from './FileTabView'
+import { type FileCodeEditorApi, type KernelSummary } from './FileCodeEditor.tsx'
 import DiffView from './DiffView'
 import DispatchBar from './DispatchBar'
 import DiffCard from '../../components/chat/DiffCard'
@@ -26,7 +27,7 @@ const IDLE_SUMMARY: KernelSummary = { dirty: false, selection: null, lineCount: 
  * 取全文（键击路径零全文串）。基线 = 最近一次成功保存（或加载）的磁盘文本；编辑中
  * dirty → 保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
  * conflict → 覆盖保存（force）或重新加载。
- * 0-A2（ADR-0023，重审 #252）：**默认可写**——「编辑/退出编辑」按钮退役，打开即可
+ * 0-A2（ADR-0024，重审 #252）：**默认可写**——「编辑/退出编辑」按钮退役，打开即可
  * 输入；强制只读仅物理例外（truncated/binary/超限 → 内核只读档）。防误改由三层承接：
  * expectedBaseline 冲突检测（不变）/ 关闭与导航守卫（FileSheetView，不变）/ 写冲突锁
  * （0-A3）。working-diff 面板在有未保存改动时出现，diff 文本 300ms 防抖按需取。
