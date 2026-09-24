@@ -25,6 +25,7 @@ import {
 } from '../../infrastructure/tauri/browserAgentClient.ts'
 import { getPylonCliService } from '../../cli/pylonCliRuntime.ts'
 import { hasTauriRuntime, isBrowserMockRuntime, IS_TAURI, type TauriWindow } from '../../infrastructure/tauri/env.ts'
+import { useModalOverlayOpen } from '../../app/modalOverlayStore'
 import { reportRuntimeError } from '../../runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import { BROWSER_PHASE_LABELS, type BrowserPageSnapshot, type BrowserSnapshot, type BrowserToolId } from './browserSheetTypes.ts'
@@ -65,6 +66,9 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
   // 原生子 WebView 是独立于 React DOM 的窗口，父节点 display:none 不会将其隐藏。
   // SheetLayout 对 keep-alive Browser 显式传 isActive=false；旧上下文省略时按 active 处理。
   const isSheetActive = ctx.isActive !== false
+  // #309：模态覆盖层（启动器/权限请求等）打开期间原生子视图必须让位——原生层盖不住
+  // DOM 覆盖层，否则覆盖层上的按钮被原生页面吃掉点击。页面在隐藏期间继续运行。
+  const modalOverlayOpen = useModalOverlayOpen()
   const [activeTool, setActiveTool] = useState<BrowserToolId | null>(null)
   const [address, setAddress] = useState('')
   const [library, setLibrary] = useState<BrowserLibrary>(() => loadBrowserLibrary())
@@ -250,10 +254,11 @@ export default function BrowserSheetView({ ctx }: { sheet: SheetRecord; ctx: She
     // 旧的独立组件调用方没有 isActive 字段；不向它们引入一个额外的
     // 未 mock 命令，SheetLayout（生产路径）会始终提供显式布尔值。
     if (!browserRuntimeAvailable || browserPreview || typeof ctx.isActive !== 'boolean' || snapshot.phase !== 'ready') return
+    const nativeVisible = isSheetActive && !modalOverlayOpen
     void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-      .setVisible(isSheetActive)
+      .setVisible(nativeVisible)
       .catch(error => reportRuntimeError('切换浏览器可见性', error))
-  }, [browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive, snapshot.phase])
+  }, [browserPreview, browserRuntimeAvailable, ctx.isActive, isSheetActive, snapshot.phase, modalOverlayOpen])
 
   useEffect(() => {
     if (!browserRuntimeAvailable) return
