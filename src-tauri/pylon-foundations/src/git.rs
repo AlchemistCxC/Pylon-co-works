@@ -440,7 +440,9 @@ pub fn is_safe_rev(rev: &str) -> bool {
     }
     let hex_only = !rev.is_empty()
         && rev.len() <= 40
-        && rev.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'));
+        && rev
+            .bytes()
+            .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'));
     hex_only && rev.len() >= 7
 }
 
@@ -1353,14 +1355,14 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
     fn safe_rev_rejects_options_and_malformed() {
         for bad in [
             "",
-            "123456",              // 太短
-            "abcdefgh",            // 非 hex（g-z）
-            "--output=/tmp/x",     // 选项注入
+            "123456",          // 太短
+            "abcdefgh",        // 非 hex（g-z）
+            "--output=/tmp/x", // 选项注入
             "HEAD~",
             "HEAD~x",
             ":4",
             ":",
-            "main",                // 分支名不进白名单（reset/checkout 另行裁决）
+            "main", // 分支名不进白名单（reset/checkout 另行裁决）
             "HEAD~2 --signoff",
             "abc123 --output=/tmp/x",
         ] {
@@ -1388,8 +1390,12 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
     #[tokio::test]
     async fn show_file_rejects_unsafe_rev_and_path() {
         let repo = temp_repo("show_file_guard");
-        assert!(git_show_file(&repo.0, "--output=/tmp/x", "a.txt").await.is_err());
-        assert!(git_show_file(&repo.0, "HEAD", "../outside.txt").await.is_err());
+        assert!(git_show_file(&repo.0, "--output=/tmp/x", "a.txt")
+            .await
+            .is_err());
+        assert!(git_show_file(&repo.0, "HEAD", "../outside.txt")
+            .await
+            .is_err());
         assert!(git_show_file(&repo.0, "main", "a.txt").await.is_err());
     }
 
@@ -1416,33 +1422,51 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
         // 模拟 merge 进行态：MERGE_HEAD 元数据文件（git merge 冲突时留下的就是它）
         let git_dir = run_sync(&repo.0, &["rev-parse", "--git-dir"]);
         let git_dir = repo.0.join(git_dir.trim());
-        std::fs::write(git_dir.join("MERGE_HEAD"), "1234567890abcdef1234567890abcdef12345678
-").unwrap();
+        std::fs::write(
+            git_dir.join("MERGE_HEAD"),
+            "1234567890abcdef1234567890abcdef12345678
+",
+        )
+        .unwrap();
 
         let state = git_sequence_state(&repo.0).await.unwrap();
         assert_eq!(state.kind, "merge");
-        assert!(state.conflicts.is_empty(), "无 unmerged 条目时 conflicts 为空");
+        assert!(
+            state.conflicts.is_empty(),
+            "无 unmerged 条目时 conflicts 为空"
+        );
     }
-
 
     // ── 0-C2：真实冲突仓库的 stage 读取（:1/:2/:3）与 conflicts 派生 ──────────
 
     #[tokio::test]
     async fn show_file_reads_stage_entries_during_conflict() {
         let repo = temp_repo("conflict_stage");
-        std::fs::write(repo.0.join("a.txt"), "base
-").unwrap();
+        std::fs::write(
+            repo.0.join("a.txt"),
+            "base
+",
+        )
+        .unwrap();
         run_sync(&repo.0, &["add", "a.txt"]);
         run_sync(&repo.0, &["commit", "-q", "-m", "base"]);
         // 默认分支名随 git init 配置（main/master），不可硬编码——须在切 feature 前取
         let default_branch = run_sync(&repo.0, &["rev-parse", "--abbrev-ref", "HEAD"]);
         run_sync(&repo.0, &["checkout", "-q", "-b", "feature"]);
-        std::fs::write(repo.0.join("a.txt"), "feature
-").unwrap();
+        std::fs::write(
+            repo.0.join("a.txt"),
+            "feature
+",
+        )
+        .unwrap();
         run_sync(&repo.0, &["commit", "-q", "-am", "feature"]);
         run_sync(&repo.0, &["checkout", "-q", default_branch.trim()]);
-        std::fs::write(repo.0.join("a.txt"), "main
-").unwrap();
+        std::fs::write(
+            repo.0.join("a.txt"),
+            "main
+",
+        )
+        .unwrap();
         run_sync(&repo.0, &["commit", "-q", "-am", "main"]);
         // 制造真实冲突（merge feature → 默认分支冲突，exit code 非零属预期）
         let _ = std::process::Command::new("git")
@@ -1454,10 +1478,21 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
 
         let state = git_sequence_state(&repo.0).await.unwrap();
         assert_eq!(state.kind, "merge");
-        assert!(state.conflicts.iter().any(|p| p == "a.txt"), "conflicts 应含 a.txt");
-        assert_eq!(git_show_file(&repo.0, ":2", "a.txt").await.unwrap(), "main
-", ":2 = ours");
-        assert_eq!(git_show_file(&repo.0, ":3", "a.txt").await.unwrap(), "feature
-", ":3 = theirs");
+        assert!(
+            state.conflicts.iter().any(|p| p == "a.txt"),
+            "conflicts 应含 a.txt"
+        );
+        assert_eq!(
+            git_show_file(&repo.0, ":2", "a.txt").await.unwrap(),
+            "main
+",
+            ":2 = ours"
+        );
+        assert_eq!(
+            git_show_file(&repo.0, ":3", "a.txt").await.unwrap(),
+            "feature
+",
+            ":3 = theirs"
+        );
     }
 }
