@@ -13,11 +13,17 @@ import { resolvePermissionButtons } from '../domains/permission/permissionButton
  * （D15——不硬编码 Peri/Hermes 按钮集）；answering 禁用全部按钮防双击。
  * P1 结构化 diff 未落地前仅展示 prompt，不阻塞审批（后续增强）。
  *
- * 样式绞杀（P93）：原 PermissionDialog.css 的 utility 化；--settings-* 为
- * Settings 域供给的 token，color-mix 遮罩为存量值原样平移。
+ * 样式绞杀（P93）：原 PermissionDialog.css 的 utility 化。
+ * #306：原面板消费 --settings-surface/--settings-shadow，但这两个 token 只在
+ * `.settings-surface` 作用域内定义，本弹窗挂 App 顶层（App.tsx）取不到——悬空引用在
+ * computed-value time 无效，background/box-shadow 落到 initial，面板全透明、聊天正文
+ * 穿透。改消费全局声明的 --surface-overlay（与 `.dialog-content` 以 --dialog-bg 兜底到
+ * --surface-overlay 是同一先例）与 --shadow-float。
+ * 遮罩同理：原「--bg-panel 取 60%」的写法里 --bg-panel 是面板内层叠的 3~4% 着色 token，
+ * 在基础方案只剩约 1.9% 黑，故改用与 `.dialog-overlay` 基线一致的固定 30% 黑（不加模糊）。
  */
-const OVERLAY = 'fixed inset-0 z-[200] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]'
-const DIALOG = 'min-w-[320px] max-w-[480px] p-4 border border-border rounded-none bg-[var(--settings-surface)] shadow-[var(--settings-shadow)] text-text font-[family-name:var(--font)]'
+const OVERLAY = 'fixed inset-0 z-[200] flex items-center justify-center bg-[rgba(0,0,0,0.3)]'
+const DIALOG = 'min-w-[320px] max-w-[480px] p-4 border border-border rounded-none bg-[var(--surface-overlay)] shadow-[var(--shadow-float)] text-text font-[family-name:var(--font)]'
 const TITLE = 'font-semibold text-md mb-2'
 const META = 'font-mono text-[11px] text-text-dim mb-2 break-all'
 const PROMPT = 'text-[13px] text-text bg-bg-input border border-border rounded-none px-2.5 py-2 mb-3 max-h-[200px] overflow-y-auto whitespace-pre-wrap break-words'
