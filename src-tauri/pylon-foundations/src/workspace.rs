@@ -77,15 +77,21 @@ pub fn is_safe_relative_path(path: &str) -> bool {
 /// 新建的 segment。读取既有路径仍走 resolve_workspace_path 的 canonical 校验，
 /// 本谓词只把守「新建名字」入口，因此比读取侧更严（冒号无条件拒绝）。
 pub fn is_safe_segment(name: &str) -> bool {
-    if name.is_empty() || name.chars().count() > 255 {
+    // 长度按 UTF-16 单位计（NTFS 上限口径），不按 chars()——星面字符 1 char =
+    // 2 units，chars() 口径会放进超出 FS 上限的名字。
+    if name.is_empty() || name.encode_utf16().count() > 255 {
         return false;
     }
     // Windows 会吞掉尾随空白与尾点；首尾空白在 UI 层也几乎必然是误输入。
     if name != name.trim() || name.ends_with('.') {
         return false;
     }
-    // 控制字符（含 NUL）一律拒绝。
-    if name.chars().any(|c| (c as u32) < 0x20) {
+    // 控制字符（含 NUL）与 bidi 方向控制符（U+202A–202E、U+2066–2069、LRM/RLM）
+    // 一律拒绝——后者在文件列表 UI 上有伪装欺骗面。
+    if name.chars().any(|c| {
+        (c as u32) < 0x20
+            || matches!(c as u32, 0x202A..=0x202E | 0x2066..=0x2069 | 0x200E | 0x200F)
+    }) {
         return false;
     }
     // 路径分隔符与 Windows 保留符号。
@@ -98,8 +104,14 @@ pub fn is_safe_segment(name: &str) -> bool {
     if name == "." || name == ".." {
         return false;
     }
-    // Windows 保留设备名（含带扩展名形态：CON.txt 同样保留）。
-    let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    // Windows 保留设备名（含带扩展名形态：CON.txt、CON .txt 同样保留——stem
+    // 先去尾空白再比对，防 "CON " 借扩展名形态绕过）。
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
     !matches!(
         stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL"
@@ -340,6 +352,12 @@ pub fn list_workspace_files(
             // 不可读目录跳过，不整体失败。
             Err(_) => continue,
         };
+        // 前缀每目录算一次（队列不变式：dir 恒为 canonical_root 后代）。
+        let prefix = match dir.strip_prefix(&canonical_root) {
+            Ok(prefix) => prefix.to_path_buf(),
+            Err(e) => return Err(WorkspaceError::Io(e.to_string())),
+        };
+        let prefix_text = prefix.to_string_lossy().replace('\\', "/");
         for item in read.flatten() {
             let name = item.file_name().to_string_lossy().into_owned();
             if is_ignored(&name) || name.starts_with('.') {
@@ -355,13 +373,10 @@ pub fn list_workspace_files(
                 truncated = true;
                 break 'walk;
             }
-            let prefix = dir
-                .strip_prefix(&canonical_root)
-                .map_err(|e| WorkspaceError::Io(e.to_string()))?;
-            let relative = if prefix.as_os_str().is_empty() {
+            let relative = if prefix_text.is_empty() {
                 name
             } else {
-                format!("{}/{}", prefix.to_string_lossy().replace('\\', "/"), name)
+                format!("{prefix_text}/{name}")
             };
             entries.push(relative);
         }
@@ -1474,6 +1489,22 @@ mod tests {
     fn safe_segment_rejects_overlong_names() {
         assert!(is_safe_segment(&"a".repeat(255)));
         assert!(!is_safe_segment(&"a".repeat(256)));
+        // UTF-16 口径：127 个星面字符 = 254 units 放行，128 个 = 256 units 拒绝。
+        assert!(is_safe_segment(&"\u{1F600}".repeat(127)));
+        assert!(!is_safe_segment(&"\u{1F600}".repeat(128)));
+    }
+
+    #[test]
+    fn safe_segment_rejects_bidi_direction_controls() {
+        assert!(!is_safe_segment("a\u{202E}b")); // RLO
+        assert!(!is_safe_segment("\u{200F}a")); // RLM
+        assert!(!is_safe_segment("a\u{2066}b")); // LRI
+    }
+
+    #[test]
+    fn safe_segment_rejects_reserved_stem_with_trailing_space_before_extension() {
+        assert!(!is_safe_segment("CON .txt"));
+        assert!(!is_safe_segment("nul  .md"));
     }
 
     // ── 0-C1：list_workspace_files（quick open 索引）────────────────────────
@@ -1540,6 +1571,34 @@ mod tests {
         let clamped = list_workspace_files(&root, Some(MAX_FILE_INDEX_ENTRIES + 500)).unwrap();
         assert!(!clamped.truncated);
         assert_eq!(clamped.entries.len(), 3);
+    }
+
+    #[test]
+    fn list_files_exact_limit_is_not_truncated() {
+        let (_dir, root) = index_fixture();
+        // 恰好等于 limit（fixture 恒 3 个文件）：truncated 必须为 false。
+        let page = list_workspace_files(&root, Some(3)).unwrap();
+        assert_eq!(page.entries.len(), 3);
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn list_files_zero_limit_yields_empty_truncated_page() {
+        let (_dir, root) = index_fixture();
+        let page = list_workspace_files(&root, Some(0)).unwrap();
+        assert!(page.entries.is_empty());
+        assert!(page.truncated);
+    }
+
+    #[test]
+    fn list_files_filters_hidden_files_in_root() {
+        let (_dir, root) = index_fixture();
+        fs::write(root.join(".env"), "x").unwrap();
+        let page = list_workspace_files(&root, None).unwrap();
+        assert_eq!(
+            page.entries,
+            vec!["README.md", "src/deep/util.ts", "src/main.ts"]
+        );
     }
 
     #[test]
