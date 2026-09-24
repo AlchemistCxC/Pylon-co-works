@@ -846,3 +846,19 @@
 **我不碰**：`src/renderers/solid-workbench/**`（尤其 #301 在途的两个虚拟化测试文件与 `PlainMessageList.solid.tsx`）、`src/plugins/**` 首方 CSS 与插件运行时、`src-tauri/**`、插件外观接口（本轮只出比较建议，未裁断前不动代码）、他人在途域（#301、AgentSheet 视觉域）。全程 pathspec 提交。
 
 **共享树状况（§2.1 报备）**：工作树存在 **#301 的未提交在途改动**（两个虚拟化测试文件，本分支自己已声明的 WIP）。我未 abort、未 stage、未触碰该文件域；本条目与后续改动一律以 pathspec 提交，不会连带其内容。
+
+---
+
+[2026-09-24 24] [Miyaki Kumo] [FileSheet 阶段〇（Epic #280：#281-#291）]
+
+**开工：FileSheet 补强阶段〇全部 12 卡**（内核合一/默认可写/写冲突锁/1MB/样式 bug/后端与契约地基），分支 `kumo/filesheet-stage0`（自 kumo/prometheus @19e2b21f 切出）。逐卡施工、逐卡 pathspec 提交，Epic 级 PR。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 前端：`src/sheets/file/**`（含 `__tests__`）、`src/workspaceStore.ts`、`src/infrastructure/acp/touchedFiles.ts`、`src/infrastructure/tauri/{workspaceContracts,gitContracts,workspaceClient}.ts`、`src/plugin-runtime/file-workbench/**`、`src/plugins/core/file/**`、`src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/**`、`src/components/FileTypeIcon`相关（若涉 0-E1）
+- 后端：`src-tauri/pylon-foundations/src/{workspace,git}.rs` 及同 crate 测试、`src-tauri/src/workspaces/cmds.rs`、`src-tauri/src/lib.rs`（仅 invoke_handler 追加）
+- 文档：`.agents/records/28x-*.md`（逐卡完工新增）、本文件、issue 回写
+
+**我不碰**：`src-tauri/src/browser/**`（他人在途未提交改动）、`src/plugins/core/sheet/**`、中控/预设/权限域、#301/#306/#110 各自声明的域。
+
+全程 pathspec 提交；每卡完工派独立子 agent review（后台），反馈并入后续提交。
