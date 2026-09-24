@@ -1971,13 +1971,34 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 None => break,
             };
             let crate::acp::ClassifiedMessage {
-                raw,
+                mut raw,
                 classification,
                 wire_ordinal,
                 ingress_seq,
             } = classified;
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
+            }
+            // #315：provider 私有扩展通知（peri/agent_event 等）就地包络为
+            // session/update 形状——载荷字段原样保留，只补通道判别符；此后与本
+            // 批窗口内的标准 update 完全同质（durable canonical + publish 共用
+            // 通路，routing 对未知 sessionUpdate 变体照常 publish/persist）。
+            if raw.kind == crate::acp::AcpKind::ProviderExtension {
+                let method = raw.method.clone().unwrap_or_default();
+                match crate::acp::wrap_provider_extension_notification(&method, raw.params.take()) {
+                    Some(wrapped) => {
+                        tracing::debug!("provider 扩展通知 {} 已包络为 session/update", method);
+                        raw.kind = crate::acp::AcpKind::SessionUpdate;
+                        raw.params = Some(wrapped);
+                    }
+                    None => {
+                        tracing::warn!(
+                            "provider 扩展通知 {} 缺 object params/sessionId，丢弃",
+                            method
+                        );
+                        continue;
+                    }
+                }
             }
             // Keep a window owner-homogeneous. Control/request frames, replay
             // frames, terminal boundaries, and owner/session switches flush

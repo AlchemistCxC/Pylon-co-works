@@ -23,6 +23,14 @@ pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 /// session/update 通知名官方为 pub，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
+/// #315 Peri 私有扩展通知（Category ③/⑤，peri 侧 `PeriCaps` 经
+/// `clientCapabilities._meta` 协商开启；wire method 名即包络后的 sessionUpdate
+/// 判别符，见 `client::wrap_provider_extension_notification`）。命名对照 peri-acp
+/// 源 event_sink.rs / host/mod.rs：agent_event 系列为下划线，其余为连字符。
+pub const NOTIF_PERI_AGENT_EVENT: &str = "peri/agent_event";
+pub const NOTIF_PERI_AGENT_EVENT_DONE: &str = "peri/agent_event_done";
+pub const NOTIF_PERI_UNSTABLE_EVENT: &str = "peri/unstable-event";
+pub const NOTIF_PERI_PREDICTION_READY: &str = "peri/prediction_ready";
 /// G3 Step 8a（4.2）：进程内崩溃伪通知常量迁移——事件名唯一来源收口到
 /// event_names 常量表，本名保持既有引用（dispatcher/reader/测试）零改动。
 pub use pylon_foundations::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
