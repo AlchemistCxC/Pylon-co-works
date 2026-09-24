@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileViewHost from '../FileViewHost'
 import { fileTabKey, type FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
-import { waitForFileEditor } from './codeMirrorTestUtils.ts'
+import { fileEditorEditable, waitForFileEditor } from './codeMirrorTestUtils.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -45,9 +45,9 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
       expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
       expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
     })
-    // 只读预览：无 CodeMirror、无「保存」、无「编辑中」徽标
+    // 只读预览：CodeMirror 常驻但可编辑面关闭、无「保存」、无「编辑中」徽标
     await waitFor(() => expect(screen.getByText('const x = 1')).toBeTruthy())
-    expect(document.querySelector('.file-code-editor')).toBeNull()
+    expect(fileEditorEditable()).toBe(false)
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
     expect(screen.queryByText('编辑中')).toBeNull()
     expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy()

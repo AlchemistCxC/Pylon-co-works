@@ -983,6 +983,8 @@
 .file-code-editor .cm-cursor { border-left-color: var(--editor-cursor, var(--text)); }
 .file-code-editor .cm-panels,
 .file-code-editor .cm-tooltip { color: var(--text); background: var(--bg-panel); }
+/* 0-A1：外部刷新（agent/磁盘改动）的变更行 decoration（原只读投影 data-changed 的内核承接） */
+.file-code-editor .file-line-changed { background: var(--editor-active-line, rgba(0,0,0,0.04)); }
 .file-code-editor .cm-tooltip { border-color: var(--border); }
 .file-code-editor .cm-searchMatch { background: color-mix(in srgb, var(--warning) 28%, transparent); }
 .file-code-editor .cm-searchMatch.cm-searchMatch-selected { background: color-mix(in srgb, var(--accent) 34%, transparent); }

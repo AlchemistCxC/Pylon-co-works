@@ -3,54 +3,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import FileTabView from '../FileTabView'
 import { resetStores } from '../../../test/resetStores'
+import { fileEditorEditable, waitForFileEditor } from './codeMirrorTestUtils.ts'
 
-const { invoke, highlightCode } = vi.hoisted(() => ({ invoke: vi.fn(), highlightCode: vi.fn() }))
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode }))
 
 function readTextResult(content: string) {
   return { relativePath: 'src/a.ts', content, bytesRead: content.length, totalBytes: content.length, truncated: false }
 }
 
-describe('FileTabView 只读代码反馈缝', () => {
+// 0-A1 内核合一后「只读」= 常驻 CodeMirror 内核的 editable=false 档：文档内容、
+// 行号 gutter（CM 自带）与程序化外部刷新仍可用，可编辑面关闭。
+describe('FileTabView 只读恒内核（0-A1）', () => {
   beforeEach(() => {
     resetStores()
     localStorage.clear()
     invoke.mockReset()
-    highlightCode.mockReset()
     invoke.mockResolvedValue(readTextResult('const x = 1\nconsole.log(x)\n'))
   })
 
-  it('高亮器返回 null 时仍保留逐行代码与完整行号 gutter', async () => {
-    highlightCode.mockResolvedValue(null)
+  it('只读模式由 CodeMirror 内核承载内容（editable=false，gutter 在）', async () => {
     render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
 
-    await screen.findByText('console.log(x)')
-    const code = document.querySelector('.file-tab-code')
-    expect(code?.getAttribute('data-highlighted')).toBe('false')
-    expect(document.querySelectorAll('.file-tab-gutter-line')).toHaveLength(3)
-    expect([...document.querySelectorAll('.file-tab-line')].map(line => line.textContent)).toEqual([
-      'const x = 1',
-      'console.log(x)',
-      '',
-    ])
-  })
-
-  it('高亮器抛错时安全降级且不丢行号；成功时继续消费安全 HTML', async () => {
-    highlightCode.mockRejectedValueOnce(new Error('worker unavailable'))
-    const { unmount } = render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
-    await screen.findByText('console.log(x)')
-    expect(document.querySelectorAll('.file-tab-gutter-line')).toHaveLength(3)
-    unmount()
-
-    highlightCode.mockResolvedValueOnce('<span class="pl-k">const</span> x = 1\nconsole.log(x)\n')
-    render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
-    await waitFor(() => expect(document.querySelector('.file-tab-code')?.getAttribute('data-highlighted')).toBe('true'))
-    expect(document.querySelector('.pl-k')?.textContent).toBe('const')
-    expect(document.querySelectorAll('.file-tab-gutter-line')).toHaveLength(3)
+    await waitForFileEditor('const x = 1\nconsole.log(x)\n')
+    expect(fileEditorEditable()).toBe(false)
+    expect(document.querySelector('.cm-gutters')).not.toBeNull()
   })
 
   it('文件 provider 返回损坏响应时转入中央错误中心，不永久停在空白视图', async () => {
@@ -58,6 +38,14 @@ describe('FileTabView 只读代码反馈缝', () => {
     render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
 
     expect(await screen.findByRole('status')).toHaveTextContent('文件读取失败')
-    expect(document.querySelector('.file-tab-code')).toBeNull()
+    expect(document.querySelector('.file-code-editor')).toBeNull()
+  })
+
+  it('markdown 文件同样走源码内核（默认源码态；渲染态切换归阶段一）', async () => {
+    invoke.mockResolvedValue(readTextResult('# Title\n'))
+    render(<FileTabView source="ws-a" path="src/b.md" onTruncated={vi.fn()} />)
+
+    await waitForFileEditor('# Title\n')
+    expect(fileEditorEditable()).toBe(false)
   })
 })

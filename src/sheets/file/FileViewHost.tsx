@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { fileTabKey, fileTabViewType, resetFileSheetTransientState, type FileTabRecord } from './fileSheetState.ts'
-import FileTabView, { type FileSaveReceipt } from './FileTabView'
+import FileTabView, { type FileSaveReceipt, type FileCodeEditorApi, type KernelSummary } from './FileTabView'
 import DiffView from './DiffView'
 import DispatchBar from './DispatchBar'
 import DiffCard from '../../components/chat/DiffCard'
@@ -13,15 +12,21 @@ import type { FileProvider, GitProvider } from '../../plugin-runtime/file-workbe
 import { legacyFileProvider, legacyGitProvider, legacyTarget } from './legacyFileProvider.ts'
 import { workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
 
+const IDLE_SUMMARY: KernelSummary = { dirty: false, selection: null, lineCount: 0, cursor: null }
+
 /**
  * FileViewHost — 主区统一 file/diff 宿主（ISSUE-08 D-03/D-04 + I08-A-FE-02 保存）。
  *
- * 由 FileSheetView 传入活动 tab（版本化 tab 记录），按 mode 渲染：
+ * 由 FileSheetView 传入活动 tab（版本化 tab 记录），按 viewType 渲染：
  * file → 发令栏 + 编辑工具栏 + 文件视图 + working-diff 面板 + 状态栏；
  * diff → DiffView（复用 DiffCard）；无 tab → 空态。
- * 真实编辑/save：基线 = 最近一次成功保存（或加载）的磁盘文本；编辑中 dirty =
- * 内容 ≠ 基线；保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
- * conflict → 覆盖保存（force）或重新加载；working-diff = 基线 vs 未保存编辑。
+ * 0-A1 内核合一后本宿主**不再持有内容全文 state**：编辑事实来自内核 KernelSummary
+ * （dirty = doc.eq(baselineDoc) 结构共享比较），保存/working-diff 经 apiRef 句柄按需
+ * 取全文（键击路径零全文串）。基线 = 最近一次成功保存（或加载）的磁盘文本；编辑中
+ * dirty → 保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
+ * conflict → 覆盖保存（force）或重新加载。
+ * #252（阶段〇保留）：打开默认只读——「编辑」显式进可写态；working-diff 面板仅在
+ * 编辑态且有未保存改动时出现，diff 文本 300ms 防抖按需取（键击路径零全文串）。
  */
 export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab, onDirtyChange, onSavingChange }: {
   target?: WorkspaceTarget | null
@@ -42,8 +47,8 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   currentViewIdentity.current = viewIdentity
   const [truncated, setTruncated] = useState(false)
   const [instruction, setInstruction] = useState('')
-  const [selection, setSelection] = useState<DispatchSelection | null>(null)
-  const [fileContent, setFileContent] = useState('')
+  const [summary, setSummary] = useState<KernelSummary>(IDLE_SUMMARY)
+  const [workingText, setWorkingText] = useState<string | null>(null)
   // #252：打开文件默认只读预览——阅读是 File 工作台的高频路径，显式点「编辑」才
   // 进入编辑态（高危的「可写入真实仓库文件」状态不设为默认态）。
   const [editing, setEditing] = useState(false)
@@ -53,20 +58,32 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [reloadToken, setReloadToken] = useState(0)
   const [saveReceipt, setSaveReceipt] = useState<FileSaveReceipt | null>(null)
   const saveReceiptVersion = useRef(0)
-  const fileContentRef = useRef(fileContent)
-  fileContentRef.current = fileContent
-  const lineCount = fileContent ? fileContent.split('\n').length : 0
+  const apiRef = useRef<FileCodeEditorApi | null>(null)
+  const dirty = summary.dirty
+  const tabKey = tab ? fileTabKey(tab) : null
+  const lineCount = summary.lineCount
+  const selection = summary.selection
   const selectionLabel = selection
     ? selection.startLine === selection.endLine
       ? `L${selection.startLine}`
       : `L${selection.startLine}–L${selection.endLine}`
     : null
-  const dirty = baseline !== null && fileContent !== baseline
-  const tabKey = tab ? fileTabKey(tab) : null
+
+  // working-diff 按需计算：仅在编辑态且 dirty 时，键击静默 300ms 后取一次全文串。
+  // 依赖 summary（内核仅在 dirty/选区/行列真变化时发新摘要）→ 防抖天然生效。
+  useEffect(() => {
+    if (!editing || !summary.dirty || baseline === null) {
+      setWorkingText(null)
+      return
+    }
+    const timer = window.setTimeout(() => setWorkingText(apiRef.current?.getDoc() ?? ''), 300)
+    return () => window.clearTimeout(timer)
+  }, [summary, editing, baseline])
+
   const workingPayload = useMemo(() => {
-    if (baseline === null || !dirty) return null
-    return { oldText: baseline, newText: fileContent, lines: workingDiffLines(baseline, fileContent) }
-  }, [baseline, fileContent, dirty])
+    if (baseline === null || workingText === null || !dirty) return null
+    return { oldText: baseline, newText: workingText, lines: workingDiffLines(baseline, workingText) }
+  }, [baseline, workingText, dirty])
   const workingStats = useMemo(() => workingDiffStats(workingPayload?.lines ?? []), [workingPayload])
 
   useEffect(() => {
@@ -85,32 +102,36 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     const cleared = resetFileSheetTransientState()
     setTruncated(cleared.truncated)
     setInstruction(cleared.instruction)
-    setFileContent(cleared.fileContent)
+    setSummary(IDLE_SUMMARY)
+    setWorkingText(null)
     setEditing(false)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
     setSaveReceipt(null)
-    setSelection(null)
   }, [viewIdentity])
+
+  const handleSummaryChange = (next: KernelSummary) => {
+    setSummary(next)
+  }
 
   const handleSave = async (force: boolean) => {
     if (!target || !fileProvider?.writeText || !tab || fileTabViewType(tab) !== 'file.text' || baseline === null) return
     const operationIdentity = viewIdentity
-    const contentAtStart = fileContent
+    const content = apiRef.current?.getDoc() ?? ''
+    const contentAtStart = content
     setSaveState('saving')
     setSaveError('')
     try {
       const result = await fileProvider.writeText(target, {
         relativePath: tab.path,
-        content: fileContent,
+        content,
         expectedBaseline: force ? null : baseline,
         force,
       })
       if (currentViewIdentity.current !== operationIdentity) return
       if (result) {
-        const hasNewerEdits = fileContentRef.current !== contentAtStart
-        if (!hasNewerEdits) setFileContent(result.content)
+        const hasNewerEdits = (apiRef.current?.getDoc() ?? '') !== contentAtStart
         setBaseline(result.content)
         setSaveState(hasNewerEdits ? 'idle' : 'saved')
         setSaveReceipt({
@@ -118,7 +139,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
           expectedContent: contentAtStart,
           persistedContent: result.content,
         })
-        if (!hasNewerEdits) setSelection(null)
+        if (!hasNewerEdits) setSummary(previous => ({ ...previous, selection: null }))
       } else {
         // 响应损坏（normalize 为 null）：不卡 saving，置 error 态并可重试
         setSaveError('保存响应异常，请重试')
@@ -140,9 +161,12 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setReloadToken(token => token + 1)
   }
 
+  const setSelection = (value: KernelSummary['selection']) => {
+    setSummary(previous => (previous.selection === value ? previous : { ...previous, selection: value }))
+  }
+
   // #252：退出编辑即离开「可写面」。有未保存改动时先确认——确认则丢弃并重拉磁盘
-  // （与 conflict 的「重新加载」同一条 discard 路径），取消则留在编辑态；只读视图
-  // 因此恒等于磁盘真值，不会出现「保存按钮已消失但内容仍非磁盘」的陷阱中间态。
+  // （与 conflict 的「重新加载」同一条 discard 路径），取消则留在编辑态。
   const handleExitEdit = () => {
     if (dirty && !window.confirm('放弃未保存的修改并退出编辑吗？')) return
     if (dirty) discardAndReload()
@@ -193,10 +217,9 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         context={context}
         filePath={tab.path}
         selection={selection}
-        content={fileContent}
+        getContent={() => apiRef.current?.getDoc() ?? ''}
         instruction={instruction}
         onInstructionChange={setInstruction}
-        onSelectionChange={setSelection}
         onClearSelection={() => setSelection(null)}
       />
       <div className="file-edit-toolbar">
@@ -242,27 +265,28 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         path={tab.path}
         revealLine={tab.line}
         editing={editing}
+        baseline={baseline ?? undefined}
         onTruncated={value => {
           setTruncated(value)
           // A truncated response is intentionally read-only.  Never grant an
           // incomplete buffer an editable surface, whatever mode was active.
           if (value) setEditing(false)
         }}
-        onContentReady={content => { setFileContent(content); setBaseline(content) }}
-        onContentChange={setFileContent}
+        onContentReady={content => { setBaseline(content) }}
         onExternalChange={() => {
-          if (fileContent !== baseline) {
+          if (dirty) {
             setSaveState('conflict')
             setSaveError('文件已被外部修改（保存前请选择覆盖或重新加载）')
           }
         }}
-        onSelectionChange={setSelection}
         onSelectionInvalidated={() => setSelection(null)}
+        onSummaryChange={handleSummaryChange}
         onSave={() => {
           if (dirty && saveState !== 'saving') void handleSave(false)
         }}
         saveAnchorToken={reloadToken}
         saveReceipt={saveReceipt}
+        apiRef={apiRef}
       />
       {editing && workingPayload && (
         <div className="file-working-diff">
@@ -272,6 +296,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
       <div className="file-status-bar" role="status" aria-live="polite">
         <span className="file-status-path" title={tab.path}>{tab.path}</span>
         <span>{lineCount} 行</span>
+        {summary.cursor && <span>Ln {summary.cursor.line}, Col {summary.cursor.col}</span>}
         {editing && <span>编辑中</span>}
         {editing && dirty && <span className="file-status-dirty">+{workingStats.added} −{workingStats.removed} 未保存</span>}
         <span className={selectionLabel ? 'file-status-selection active' : 'file-status-selection'}>

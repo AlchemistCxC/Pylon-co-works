@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { EditorView } from '@codemirror/view'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
@@ -426,10 +427,13 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     fireEvent.click(screen.getByLabelText('搜索'))
     fireEvent.click(await screen.findByTitle('src/result.ts:42'))
 
-    // #252：默认只读预览——定位契约落在只读视图的行级 reveal（不再假设编辑器选区）
+    // 0-A1 内核合一：行级 reveal 收编为内核 scrollIntoView + 选区锚（锚定目标行行首）
     await waitFor(() => {
       expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/result.ts')
-      expect(document.querySelector('[data-line="42"]')?.getAttribute('data-revealed')).toBe('true')
+      const editor = document.querySelector('.file-code-editor .cm-editor')
+      const view = editor ? EditorView.findFromDOM(editor) : null
+      if (!view) throw new Error('editor not mounted')
+      expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(42)
     })
     const persisted = parseFileTabs(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.openTabs)
     expect(persisted.tabs[0]).toEqual(expect.objectContaining({ path: 'src/result.ts', line: 42 }))

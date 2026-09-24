@@ -40,6 +40,7 @@ export default function DispatchBar({
   filePath,
   selection,
   content,
+  getContent,
   instruction,
   onInstructionChange,
   onSelectionChange,
@@ -50,10 +51,12 @@ export default function DispatchBar({
   context?: { agentId: string; source: string } | null
   filePath: string | null
   selection: DispatchSelection | null
-  content: string
+  /** 0-A1：编辑事实在 CM 内核——宿主经取景器给发送时刻的全文，不再传内容 state。 */
+  content?: string
+  getContent?: () => string
   instruction: string
   onInstructionChange: (value: string) => void
-  onSelectionChange: (selection: DispatchSelection | null) => void
+  onSelectionChange?: (selection: DispatchSelection | null) => void
   onClearSelection: () => void
 }) {
   const [error, setError] = useState('')
@@ -68,7 +71,7 @@ export default function DispatchBar({
       const anchorLine = lineFromDataNode(domSelection.anchorNode)
       const focusLine = lineFromDataNode(domSelection.focusNode)
       const range = normalizeSelectionRange(anchorLine, focusLine)
-      if (range && filePath) onSelectionChange(range)
+      if (range && filePath) onSelectionChange?.(range)
     }
     window.addEventListener('selectionchange', capture)
     return () => window.removeEventListener('selectionchange', capture)
@@ -92,7 +95,7 @@ export default function DispatchBar({
       filePath,
       selection,
       instruction,
-      content,
+      content: getContent ? getContent() : (content ?? ''),
       truncated: false,
     })
     try {
