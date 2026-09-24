@@ -64,6 +64,7 @@
     "cmdk": "^1.1.1",
     "codemirror": "^6.0.2",
     "lucide-react": "^1.26.0",
+    "lucide-solid": "^1.47.0",
     "motion": "^12.42.2",
     "react": "^19",
     "react-dom": "^19",
