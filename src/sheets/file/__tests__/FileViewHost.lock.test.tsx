@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import FileViewHost from '../FileViewHost'
 import type { FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'

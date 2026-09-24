@@ -427,7 +427,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     // 0-A1 内核合一：行级 reveal 收编为内核 scrollIntoView + 选区锚（锚定目标行行首）
     await waitFor(() => {
       expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/result.ts')
-      const editor = document.querySelector('.file-code-editor .cm-editor')
+      const editor = document.querySelector<HTMLElement>('.file-code-editor .cm-editor')
       const view = editor ? EditorView.findFromDOM(editor) : null
       if (!view) throw new Error('editor not mounted')
       expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(42)

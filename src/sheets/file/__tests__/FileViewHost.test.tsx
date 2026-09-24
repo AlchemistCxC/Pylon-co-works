@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileViewHost from '../FileViewHost'
 import { fileTabKey, type FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
-import { fileEditorEditable, waitForFileEditor } from './codeMirrorTestUtils.ts'
+import { fileEditorEditable } from './codeMirrorTestUtils.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {

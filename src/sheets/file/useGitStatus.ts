@@ -38,15 +38,21 @@ export function useGitStatus(target: WorkspaceTarget | null, provider: GitProvid
   const [error, setError] = useState<GitErrorDetail | null>(null)
   const [refreshRevision, setRefreshRevision] = useState(0)
   const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
+  const previousTargetKey = useRef<string | null | undefined>(undefined)
   const targetKey = workspaceTargetKey(target)
 
   useEffect(() => {
+    const targetChanged = previousTargetKey.current !== targetKey
+    previousTargetKey.current = targetKey
     requestContext.current = advanceSourceContext(requestContext.current, targetKey)
     const token = targetKey ? beginSourceRequest(requestContext.current, targetKey) : null
     let disposed = false
-    // entries/branch 是 workspace 绑定事实：目标切换时立即清空（旧工作区行不得残留）
-    setEntries([])
-    setBranchName(null)
+    // entries/branch 是 workspace 绑定事实：仅目标切换时立即清空（旧工作区行不得
+    // 残留）；手动刷新保留旧数据直至新数据落地（重构前 GitPanel 同语义）。
+    if (targetChanged) {
+      setEntries([])
+      setBranchName(null)
+    }
     if (!target || !provider) {
       setError(null)
       return () => { disposed = true }
