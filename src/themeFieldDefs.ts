@@ -1,6 +1,6 @@
 import type { ThemeSettings } from './store'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
-import { CC_WIDGET_GROUPS } from './domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_GROUPS, resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
 import type { FontRole } from './plugin-runtime/fonts/fontContributionTypes.ts'
 import type { VisualSemanticRole } from './domains/theme/visualSemantics.ts'
 
@@ -231,13 +231,8 @@ export const THEME_FIELD_DEFS = {
       footerLayout: t.footerLayout || 'free',
       hintMode: t.cliHintMode || 'full',
       visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: t.ccHidden || [],
-        inputMode: t.inputMode,
-        submitButtonMode: t.inputSubmitButtonMode || 'inline',
-        // ★ #238 刀5B：命令行提示的可见性含 `'hint-visible'` 条件 ⇒ 把档位传进去；
-        //   `hasSession` 在这里**拿不到**（this 是主题对象，没有会话信息），故不传
-        //   ⇒ 含 `'has-session'` 的行在此按"不可见"计（保守：不改写用户已落盘的高度）。
-        hintMode: t.cliHintMode || 'full',
+        // ★ #266 ⑰：隐藏名单**只在这里组装一处**（预设的值 + 详细档折叠），与渲染侧同源。
+        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: t.ccHidden || [], cliHintMode: t.cliHintMode }),
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
     }),

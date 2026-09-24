@@ -15,6 +15,7 @@ import {
   type ZonePresetEntry,
 } from './zones/index.ts'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
@@ -222,9 +223,7 @@ export const useStore = create<ThemeState>()(persist(
       footerLayout: state.footerLayout,
       hintMode: state.cliHintMode,
       visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: state.ccHidden,
-        inputMode: state.inputMode,
-        submitButtonMode: state.inputSubmitButtonMode,
+        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: state.ccHidden, cliHintMode: state.cliHintMode }),
       }),
       cliOverflowMode: state.cliOverflowMode,
     })
@@ -245,9 +244,7 @@ export const useStore = create<ThemeState>()(persist(
       footerLayout: state.footerLayout,
       hintMode: state.cliHintMode,
       visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: ccHidden,
-        inputMode: state.inputMode,
-        submitButtonMode: state.inputSubmitButtonMode,
+        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden, cliHintMode: state.cliHintMode }),
       }),
       cliOverflowMode: state.cliOverflowMode,
     })

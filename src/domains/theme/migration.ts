@@ -15,6 +15,7 @@ import {
   type CcOverflowMode,
 } from '../../ccHeightState.ts'
 import { normalizeThemeState } from '../../themeFieldDefs.ts'
+import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
 
 /**
@@ -205,9 +206,10 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
     footerLayout: migratedFooterLayout as CcFooterLayout,
     hintMode: migratedHintMode as CcHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-      inputMode: migratedInputMode as CcInputMode,
-      submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
+      hiddenIds: resolveCcHiddenWidgetIds({
+        ccHidden: Array.isArray(state.ccHidden) ? state.ccHidden : [],
+        cliHintMode: migratedHintMode,
+      }),
     }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })

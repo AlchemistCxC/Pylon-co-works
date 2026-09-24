@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
@@ -266,17 +266,19 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  const hiddenWidgetIds = () => !emptyVisual()
-    ? appearance().ccHidden
-    : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])]
+  // ★ #266 ⑰：隐藏名单 = **语境侧名单**（空态那一侧）∪ 预设的**值**，再经 `resolveCcHiddenWidgetIds`
+  //   把「提示详细档 = 隐藏」这个值折进来 —— 组装只有这一处，计数侧调同一个函数（渲染与计数同源）。
+  const hiddenWidgetIds = () => resolveCcHiddenWidgetIds({
+    ccHidden: !emptyVisual()
+      ? appearance().ccHidden
+      : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])],
+    cliHintMode: appearance().cliHintMode,
+  })
+  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）+ 编辑态豁免」——元件的行上不再有显隐申明，
+  //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
   const visibilityContext = () => ({
     hidden: hiddenWidgetIds(),
-    inputMode: appearance().inputMode,
-    submitButtonMode: appearance().inputSubmitButtonMode,
     editMode: appearance().ccEditMode,
-    // ★ #238 刀5B：`conditions`（运行期状态检测）要读的两个事实 —— 必须与高度计数同源。
-    hasSession: Boolean(input().sessionId),
-    hintMode: appearance().cliHintMode,
   })
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
@@ -287,24 +289,15 @@ export function SolidControlCenter() {
     hintMode: appearance().cliHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
       hiddenIds: hiddenWidgetIds(),
-      inputMode: appearance().inputMode,
-      submitButtonMode: appearance().inputSubmitButtonMode,
-      hintMode: appearance().cliHintMode,
-      hasSession: Boolean(input().sessionId),
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
-  // 状态行门户：常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS = `inActiveSession: 'show'` 的状态控件）
-  // 在活跃会话里也放行；其它信息控件仍受"活跃会话收起"约束。输入栏从不经过这个门户。
-  const passesStatusGate = (id: CcWidgetId) =>
-    id === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
   // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
   //   进组前过一遍**输入栏落脚处独占守卫**（原「input 槽只准放输入栏」的替代）：
   //   非输入栏若被错标到输入栏容器，退回信息落脚处 —— 宁可换位置，不凭空消失。
   const landingOf = (id: CcWidgetId) => coerceInputLanding(id, ccWidgetLanding(id))
   const idsForLanding = (landing: string | undefined) => visibleIds()
     .filter(id => landingOf(id) === landing)
-    .filter(id => passesStatusGate(id))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
   /**
@@ -387,8 +380,8 @@ export function SolidControlCenter() {
         />
       case 'cc-command-hint':
         // ★ #238 刀5B：命令行提示从「裸渲染」升格为表里的普通行内元件（本分支就是它的渲染实现）。
-        //   运行期条件（有会话 / 命令行模式 / 详细档不为 hidden）**不在这里判** ——
-        //   它们写在定义表的 `conditions` 里，由 `isWidgetVisible` 统一裁决
+        //   ★ #266 ⑰：运行期条件（有会话 / 命令行模式 / 详细档不为 hidden）**已全部撤销** ——
+        //   判据只剩「隐藏名单」（预设的值 + 详细档折叠 + 空态名单），由 `isWidgetVisible` 统一裁决
         //   ⇒ 渲染与高度计数共用一个谓词，不可见时自然不计数。
         return <div class="cc-command-hint" aria-label="输入快捷键提示">
           <span class="cc-command-hint-key">/: 命令</span>
@@ -558,10 +551,12 @@ export function SolidControlCenter() {
   // Keep empty-state/edit-mode controls available for session setup and layout
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
-  // 例外（2026-09-14）：常态放行的状态控件，见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS。
-  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGET_IDS
-    .some(id => isWidgetVisible(id, visibilityContext()))
-  const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
+  // ★ #266 ⑰：状态行门户（`passesStatusGate`）已删 —— 它对 `visibleIds()` 里的每个 id **恒真**
+  //   （输入栏走 `id === 'input'` 那一支，状态控件走常态放行名单那一支，而那份名单本来就等于全体
+  //   状态控件）⇒ 作为过滤器从来不起作用。状态行内容改判"**该落脚处有没有可见件**"。
+  //   ★ `showStatusSlots()` 保留：它是**语境侧**门户（口径合法），留住它才能让空态那个空容器的
+  //   行为完全不变（空态无可见件也照旧渲染容器）。
+  const statusRowContent = () => showStatusSlots() || idsForLanding(INFO_LANDING).length > 0
 
   onMount(() => {
     const slot = controlCenterElement?.querySelector<HTMLElement>('.cc-input-slot')
