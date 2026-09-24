@@ -2037,9 +2037,8 @@
 }
 
 /* ── Conversation motion ──
-   Message facts remain owned by Workbench Runtime; this is a display-only
-   treatment on the list wrapper. Initial replay rows stay quiet, while rows
-   appended after a send receive one short, accent-tinted arrival pass. */
+   Entry flags expire after one pass. Animate inside the measured message
+   wrapper so scroll anchors and virtual row geometry stay fixed. */
 .plain-message-list__row {
   position:relative;
   min-width:0;
@@ -2047,45 +2046,50 @@
 }
 .plain-message-list__row[data-message-role="assistant"] { --message-entry-accent:var(--state-success,var(--accent)); }
 .plain-message-list__row[data-message-role="reasoning"] { --message-entry-accent:var(--accent); }
-.plain-message-list__row[data-entry="new"] {
-  animation:pylon-message-enter var(--motion-slow,260ms) var(--ease-emphasized) both;
+.plain-message-list__row[data-entry="new"] > .term-row {
+  animation:pylon-message-enter 180ms ease-out both;
 }
-.plain-message-list__row[data-entry="new"]::after {
+.plain-message-list__row[data-entry="new"]::before {
   content:'';
   position:absolute;
-  inset:-3px -8px;
+  inset:0 auto 0 0;
   z-index:2;
+  width:2px;
   pointer-events:none;
-  border-inline-start:var(--line-width-2) solid color-mix(in srgb,var(--message-entry-accent) 68%,transparent);
-  background:linear-gradient(108deg,transparent 15%,color-mix(in srgb,var(--message-entry-accent) 15%,transparent) 48%,transparent 78%);
-  background-size:220% 100%;
-  opacity:0;
-  animation:pylon-message-sheen 560ms var(--ease-emphasized) both;
+  background:var(--message-entry-accent);
+  transform-origin:top;
+  animation:pylon-entry-trace 360ms ease-out both;
 }
 @keyframes pylon-message-enter {
-  0% { opacity:0; transform:translateY(8px); filter:blur(2px); }
-  62% { opacity:1; transform:translateY(-1px); filter:blur(0); }
-  100% { opacity:1; transform:translateY(0); filter:none; }
+  from { opacity:0; transform:translateY(4px); }
+  to { opacity:1; transform:translateY(0); }
 }
-@keyframes pylon-message-sheen {
-  0% { opacity:0; transform:translateX(-20%); background-position:140% 0; }
-  22% { opacity:.72; }
-  100% { opacity:0; transform:translateX(20%); background-position:-40% 0; }
+@keyframes pylon-entry-trace {
+  0% { opacity:0; transform:scaleY(.2); }
+  35% { opacity:.72; transform:scaleY(1); }
+  100% { opacity:0; transform:scaleY(1); }
 }
 
-/* A stream is a stable row whose payload changes in place. A restrained
-   gradient sweep communicates liveness without reflowing or revealing tokens
-   one character at a time. */
+/* Tool cards appear once when their canonical id first arrives during a live
+   turn. Status changes reuse that id and never replay the animation. */
+.solid-workbench-activity-slot[data-entry="new"] {
+  transform-origin:left center;
+  animation:pylon-tool-appear 220ms cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes pylon-tool-appear {
+  from { opacity:0; transform:translateY(5px) scale(.985); }
+  to { opacity:1; transform:translateY(0) scale(1); }
+}
+.solid-workbench-activity-slot[data-entry="new"]:has(.term-tool[data-reduced-motion="true"]) {
+  animation:none;
+}
+
+/* Keep the growing markdown surface still. Only the thin marker pulses while
+   the authoritative live flag is set; text and syntax never flash per chunk. */
 .term-row-assistant[data-streaming="true"],
 .term-row-reasoning[data-streaming="true"],
 .plain-message-list__row[data-streaming="true"] .term-row-assistant {
   position:relative;
-}
-.term-row-assistant[data-streaming="true"] .term-assistant-body,
-.plain-message-list__row[data-streaming="true"] .term-row-assistant .term-assistant-body {
-  background:linear-gradient(108deg,transparent 12%,color-mix(in srgb,var(--accent) 7%,transparent) 48%,transparent 84%);
-  background-size:220% 100%;
-  animation:pylon-streaming-sweep 2.4s linear infinite;
 }
 .term-row-assistant[data-streaming="true"]::after,
 .term-row-reasoning[data-streaming="true"]::after,
@@ -2098,21 +2102,26 @@
   pointer-events:none;
   background:var(--accent);
   opacity:.28;
-  animation:pylon-streaming-pulse 1.35s ease-in-out infinite;
+  animation:pylon-streaming-pulse 1.8s ease-in-out infinite;
 }
-@keyframes pylon-streaming-sweep { from { background-position:140% 0; } to { background-position:-40% 0; } }
 @keyframes pylon-streaming-pulse { 0%,100% { opacity:.18; } 50% { opacity:.6; } }
 
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"] > .term-row,
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"]::before,
+.chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"],
+.chat-view[data-reduced-motion="true"] .term-row-assistant[data-streaming="true"]::after,
+.chat-view[data-reduced-motion="true"] .term-row-reasoning[data-streaming="true"]::after,
+.chat-view[data-reduced-motion="true"] .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
+  animation:none;
+}
 @media (prefers-reduced-motion:reduce) {
-  .plain-message-list__row[data-entry="new"],
-  .plain-message-list__row[data-entry="new"]::after,
-  .term-row-assistant[data-streaming="true"] .term-assistant-body,
-  .plain-message-list__row[data-streaming="true"] .term-row-assistant .term-assistant-body,
+  .plain-message-list__row[data-entry="new"] > .term-row,
+  .plain-message-list__row[data-entry="new"]::before,
+  .solid-workbench-activity-slot[data-entry="new"],
   .term-row-assistant[data-streaming="true"]::after,
   .term-row-reasoning[data-streaming="true"]::after,
   .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
-    animation:none !important;
-    background:none;
+    animation:none;
   }
 }
 
@@ -2179,12 +2188,6 @@
 .term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child,
 .term-assistant.has-dot > .term-assistant-body .solid-content-kind > :first-child > :first-child {
   margin-block-start:0;
-}
-.plain-message-list__row[data-entry="new"][data-streaming="true"],
-.plain-message-list__row[data-entry="new"][data-streaming="true"]::after {
-  /* A streaming row is updated in place; an entry transform on every
-     transient segment would look like the whole chat is jumping vertically. */
-  animation:none;
 }
 .term-assistant.has-dot > .term-assistant-dot,
 .term-assistant.has-dot > .term-assistant-dot-img,

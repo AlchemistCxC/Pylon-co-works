@@ -10,9 +10,12 @@ import { selectMessageViewportState } from '../../../domains/workbench/messageVi
 import { createFrameTask } from '../frameTask.ts'
 import { createRowHeightTable } from './rowHeightTable.ts'
 import { estimateRowHeight } from './rowHeightEstimate.ts'
+import { createEntryMotion } from '../entryMotion.solid.tsx'
 
 /** #212 S4：小于该像素的差量视为无变化（避免亚像素抖动的写入循环）。 */
 const ANCHOR_EPSILON_PX = 1
+/** Bulk history hydration and session replacement must never animate as live arrivals. */
+const MAX_ANIMATED_APPEND_ROWS = 4
 
 export interface PlainMessageListProps {
   initialItems?: readonly MessageListItem[]
@@ -38,6 +41,8 @@ export interface PlainMessageListProps {
    * 正是 #213 要消灭的症状。
    */
   rowLive?: (item: MessageListItem) => boolean
+  /** Production gates arrival motion to an active turn; fixtures may omit it. */
+  animateEntry?: () => boolean
   /**
    * #243：行虚拟化的启用口径。缺省 `'auto'` = 超过双阈值（行数 + 字符，D3）才启用；
    * `'on'`/`'off'` 供测试与运维强制。祖先带 `data-row-virtualization="off"` 时一律停用
@@ -283,6 +288,10 @@ export function PlainMessageList(props: PlainMessageListProps) {
     setItems(nextItems) {
       if (destroyed || nextItems === untrack(items)) return
       const previousRows = untrack(rows)
+      const appendCount = nextItems.length - previousRows.length
+      const isSmallAppend = appendCount > 0 && appendCount <= MAX_ANIMATED_APPEND_ROWS
+        && previousRows.every((row, index) => nextItems[index]?.key === row.key)
+      const animateAppend = isSmallAppend && (props.animateEntry?.() ?? true)
       // Streaming updates usually keep every key in place. Build a lookup only
       // when reconciliation encounters an insertion, removal or reorder.
       let previousRowsByKey: Map<string, StableMessageListRow> | undefined
@@ -293,7 +302,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
           : (previousRowsByKey ??= new Map(previousRows.map(row => [row.key, row]))).get(item.key)
         if (!existing) {
           changed = true
-          const entering = !seenKeys.has(item.key)
+          const entering = animateAppend && !seenKeys.has(item.key)
           seenKeys.add(item.key)
           return createStableMessageListRow(item, entering)
         }
@@ -549,7 +558,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
               class="plain-message-list__row"
               data-message-id={item.descriptor.renderMessage.message.id}
               data-message-key={row.key}
-              data-entry={row.entering ? 'new' : undefined}
+              data-entry={row.entering() ? 'new' : undefined}
               data-message-role={item.descriptor.renderMessage.message.role}
               data-streaming={(props.rowLive?.(item) ?? item.descriptor.renderMessage.message.running === true) ? 'true' : undefined}
             >
@@ -568,7 +577,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
               data-message-id={item.descriptor.renderMessage.message.id}
               data-message-key={cell.row.key}
               data-index={cell.index}
-              data-entry={cell.row.entering ? 'new' : undefined}
+              data-entry={cell.row.entering() ? 'new' : undefined}
               data-message-role={item.descriptor.renderMessage.message.role}
               data-streaming={(props.rowLive?.(item) ?? item.descriptor.renderMessage.message.running === true) ? 'true' : undefined}
             >
@@ -585,7 +594,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
 interface StableMessageListRow {
   readonly key: string
   readonly item: MessageListItem
-  readonly entering: boolean
+  entering(): boolean
   update(item: MessageListItem): void
   /** P57 S2-R3：当前已应用的 item 引用，供引用相等门跳过冗余 update。 */
   isCurrent(item: MessageListItem): boolean
@@ -593,6 +602,7 @@ interface StableMessageListRow {
 
 function createStableMessageListRow(initialItem: MessageListItem, entering = false): StableMessageListRow {
   const [current, setCurrent] = createSignal(initialItem)
+  const entry = createEntryMotion(entering)
   let appliedItem = initialItem
   const item: MessageListItem = {
     get key() { return current().key },
@@ -602,7 +612,7 @@ function createStableMessageListRow(initialItem: MessageListItem, entering = fal
   return {
     key: initialItem.key,
     item,
-    entering,
+    entering: entry,
     update(next) {
       appliedItem = next
       setCurrent(next)
