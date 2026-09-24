@@ -41,6 +41,21 @@ export function normalizeWorkspaceEntries(entries: unknown): WorkspaceEntry[] {
   })
 }
 
+/** 0-C1：quick open 文件名索引页（list_workspace_files 响应）。 */
+export interface WorkspaceFileIndexPage {
+  entries: string[]
+  truncated: boolean
+}
+
+export function normalizeWorkspaceFileIndexPage(value: unknown): WorkspaceFileIndexPage {
+  if (!value || typeof value !== 'object') return { entries: [], truncated: false }
+  const item = value as Partial<WorkspaceFileIndexPage>
+  const entries = Array.isArray(item.entries)
+    ? item.entries.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+    : []
+  return { entries, truncated: item.truncated === true }
+}
+
 export function mergeWorkspaceEntries(
   entries: readonly WorkspaceEntry[],
   path: string,

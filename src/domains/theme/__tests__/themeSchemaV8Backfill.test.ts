@@ -61,7 +61,10 @@ describe('theme schema v9：老安装补入权限控件字段组（S10）', () =
     const migrated = themeDomainMigrate(legacy, defaults, 8)
 
     expect(migrated.permissionSwitchMode).toBe('menu')
-    expect(migrated.permissionTextColor).toBe('mode')
+    // ★ #266 遗留①：`permissionTextColor` 默认由 `'mode'`（跟模式枚举档）改成 **`''`** —— 自由选色下
+    //   「留空」就是原来那一档的等价表达（不写 inline color，交 CSS `[data-mode]` 语义色）。
+    //   这是**有意的语义变化**：老数据里的 `'mode'` 同样被归一化成 `''`（见开发记录）。
+    expect(migrated.permissionTextColor).toBe('')
     expect(migrated.permissionWidth).toBe(120)
   })
 

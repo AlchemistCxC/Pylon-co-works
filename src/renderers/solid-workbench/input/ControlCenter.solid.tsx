@@ -1,10 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, ALWAYS_VISIBLE_STATUS_WIDGET_IDS, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
-import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
+import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
@@ -62,6 +63,7 @@ export function SolidControlCenter() {
   }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
+  const [selectorPending] = createSessionUiSignal(workbench.sessionUi, () => input().sessionId, 'selector-pending', '')
   const [selected, setSelected] = createSignal<CcLayoutWidgetId>()
   const [workspaceId, setWorkspaceId] = createSignal('')
   /** Workspace carried by Sidebar's create-session intent. The event is
@@ -266,17 +268,19 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  const hiddenWidgetIds = () => !emptyVisual()
-    ? appearance().ccHidden
-    : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])]
+  // ★ #266 ⑰：隐藏名单 = **语境侧名单**（空态那一侧）∪ 预设的**值**，再经 `resolveCcHiddenWidgetIds`
+  //   把「提示详细档 = 隐藏」这个值折进来 —— 组装只有这一处，计数侧调同一个函数（渲染与计数同源）。
+  const hiddenWidgetIds = () => resolveCcHiddenWidgetIds({
+    ccHidden: !emptyVisual()
+      ? appearance().ccHidden
+      : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])],
+    cliHintMode: appearance().cliHintMode,
+  })
+  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）+ 编辑态豁免」——元件的行上不再有显隐申明，
+  //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
   const visibilityContext = () => ({
     hidden: hiddenWidgetIds(),
-    inputMode: appearance().inputMode,
-    submitButtonMode: appearance().inputSubmitButtonMode,
     editMode: appearance().ccEditMode,
-    // ★ #238 刀5B：`conditions`（运行期状态检测）要读的两个事实 —— 必须与高度计数同源。
-    hasSession: Boolean(input().sessionId),
-    hintMode: appearance().cliHintMode,
   })
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
@@ -287,24 +291,15 @@ export function SolidControlCenter() {
     hintMode: appearance().cliHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
       hiddenIds: hiddenWidgetIds(),
-      inputMode: appearance().inputMode,
-      submitButtonMode: appearance().inputSubmitButtonMode,
-      hintMode: appearance().cliHintMode,
-      hasSession: Boolean(input().sessionId),
     }),
     cliOverflowMode: appearance().cliOverflowMode,
   })
-  // 状态行门户：常态显示控件（见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS = `inActiveSession: 'show'` 的状态控件）
-  // 在活跃会话里也放行；其它信息控件仍受"活跃会话收起"约束。输入栏从不经过这个门户。
-  const passesStatusGate = (id: CcWidgetId) =>
-    id === 'input' || showStatusSlots() || ALWAYS_VISIBLE_STATUS_WIDGET_IDS.includes(id)
   // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
   //   进组前过一遍**输入栏落脚处独占守卫**（原「input 槽只准放输入栏」的替代）：
   //   非输入栏若被错标到输入栏容器，退回信息落脚处 —— 宁可换位置，不凭空消失。
   const landingOf = (id: CcWidgetId) => coerceInputLanding(id, ccWidgetLanding(id))
   const idsForLanding = (landing: string | undefined) => visibleIds()
     .filter(id => landingOf(id) === landing)
-    .filter(id => passesStatusGate(id))
     .sort((left, right) => appearance().ccLayout.placements[left].order - appearance().ccLayout.placements[right].order)
 
   /**
@@ -355,20 +350,22 @@ export function SolidControlCenter() {
         // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
         // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
         // 但必须与 model/reasoning/mode 是同一族按钮，否则会退化成裸文字。
-        const usage = () => runtime().document?.session.usage
-        const limit = () => usage()?.contextLimit
+        const usage = () => resolveContextUsage(runtime().document?.session.usage)
+        const limit = () => usage().limit
         const pillStyle = () => ({
           height: `${appearance().modelHeight ?? 28}px`,
           'border-radius': `${appearance().modelRadius ?? 0}px`,
           // ★ #238 刀7：原先这里还乘一个「缩放」(`ccScale.tokens`)。缩放已整体删除
           //   ⇒ 用量字号直接取基准字号（`modelFontSize`）。对没调过缩放的人（= 100）逐位相同。
           'font-size': `${appearance().modelFontSize ?? 12}px`,
-          background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
-          color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
+          // ★ #266 遗留①：直读模型控件的颜色字段（借用关系见定义表 `borrowsFrom: 'model'`）——
+          //   模型底色/文字色改成自由选色后，胶囊跟着模型走。
+          background: appearance().modelBgColor,
+          color: appearance().modelTextColor,
         })
         return <span class="cc-usage-pill" style={pillStyle()}>
-          <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
-          <span class="cc-usage-percent">{formatUsagePercent(contextRatio(usage(), runtime().tokenCount))}</span>
+          <span class="cc-usage-count">{usage().used !== undefined ? formatUsageTokens(usage().used!) : '—'}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
+          <span class="cc-usage-percent">{usage().percent !== undefined ? formatUsagePercent(usage().percent! / 100) : '—'}</span>
         </span>
       }
       case 'model':
@@ -387,8 +384,8 @@ export function SolidControlCenter() {
         />
       case 'cc-command-hint':
         // ★ #238 刀5B：命令行提示从「裸渲染」升格为表里的普通行内元件（本分支就是它的渲染实现）。
-        //   运行期条件（有会话 / 命令行模式 / 详细档不为 hidden）**不在这里判** ——
-        //   它们写在定义表的 `conditions` 里，由 `isWidgetVisible` 统一裁决
+        //   ★ #266 ⑰：运行期条件（有会话 / 命令行模式 / 详细档不为 hidden）**已全部撤销** ——
+        //   判据只剩「隐藏名单」（预设的值 + 详细档折叠 + 空态名单），由 `isWidgetVisible` 统一裁决
         //   ⇒ 渲染与高度计数共用一个谓词，不可见时自然不计数。
         return <div class="cc-command-hint" aria-label="输入快捷键提示">
           <span class="cc-command-hint-key">/: 命令</span>
@@ -558,10 +555,12 @@ export function SolidControlCenter() {
   // Keep empty-state/edit-mode controls available for session setup and layout
   // editing; hide the legacy status widgets from the active conversation view.
   const showStatusSlots = () => emptyVisual() || appearance().ccEditMode
-  // 例外（2026-09-14）：常态放行的状态控件，见 ALWAYS_VISIBLE_STATUS_WIDGET_IDS。
-  const hasAlwaysVisibleStatusWidget = () => ALWAYS_VISIBLE_STATUS_WIDGET_IDS
-    .some(id => isWidgetVisible(id, visibilityContext()))
-  const statusRowContent = () => showStatusSlots() || hasAlwaysVisibleStatusWidget()
+  // ★ #266 ⑰：状态行门户（`passesStatusGate`）已删 —— 它对 `visibleIds()` 里的每个 id **恒真**
+  //   （输入栏走 `id === 'input'` 那一支，状态控件走常态放行名单那一支，而那份名单本来就等于全体
+  //   状态控件）⇒ 作为过滤器从来不起作用。状态行内容改判"**该落脚处有没有可见件**"。
+  //   ★ `showStatusSlots()` 保留：它是**语境侧**门户（口径合法），留住它才能让空态那个空容器的
+  //   行为完全不变（空态无可见件也照旧渲染容器）。
+  const statusRowContent = () => showStatusSlots() || idsForLanding(INFO_LANDING).length > 0
 
   onMount(() => {
     const slot = controlCenterElement?.querySelector<HTMLElement>('.cc-input-slot')
@@ -625,8 +624,9 @@ export function SolidControlCenter() {
       '--cc-send-anchor-gap': `${resolveCcWidgetGroup('cc-send-button')?.layout?.x.gap ?? 0}px`,
       '--cc-send-color': appearance().sendButtonColor,
       '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
-      '--cc-send-border-color': appearance().sendButtonBorderColor === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)',
-      '--cc-send-icon-color': appearance().sendButtonIconColor === 'black' ? '#000' : appearance().sendButtonIconColor === 'gray' ? 'rgba(0,0,0,.5)' : '#fff',
+      // ★ #266 遗留②：边框色 / 图标色改自由选色 ⇒ 直读字段值，不再把枚举翻成颜色。
+      '--cc-send-border-color': appearance().sendButtonBorderColor,
+      '--cc-send-icon-color': appearance().sendButtonIconColor,
       '--cc-input-text-right-inset': sendButtonMode() === 'inline'
         ? 'calc(var(--cc-input-height) * 0.9 + var(--cc-input-text-inset-x, 5%))'
         : 'var(--cc-input-text-inset-x, 5%)',
@@ -652,6 +652,7 @@ export function SolidControlCenter() {
     <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('cc-send-button')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
+      <Show when={selectorPending()}><span role="status" aria-live="polite">{selectorPending()}</span></Show>
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
         <div class="cc-footer-status">
@@ -714,22 +715,4 @@ function placementStyle(placement: CcWidgetPlacement): JSX.CSSProperties {
   return placement.offsetX === 0 && placement.offsetY === 0
     ? {}
     : { transform: `translate(${placement.offsetX}px, ${placement.offsetY}px)` }
-}
-
-function usageTokenCount(usage: UsageSnapshot | undefined, fallback: number): number {
-  if (usage?.totalTokens !== undefined) return usage.totalTokens
-  const parts = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
-  return parts > 0 ? parts : Math.max(0, fallback)
-}
-
-function contextRatio(usage: UsageSnapshot | undefined, fallback: number): number {
-  const explicit = usage?.contextPercent
-  if (explicit !== undefined) return clamp01(explicit / 100)
-  const limit = usage?.contextLimit ?? 0
-  const used = usage?.contextUsed ?? usageTokenCount(usage, fallback)
-  return limit > 0 ? clamp01(used / limit) : 0
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }

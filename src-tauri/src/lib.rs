@@ -480,7 +480,7 @@ impl AppStateHandles {
         runtime: &Arc<AgentRuntime>,
         agent_id: Option<String>,
         new_acp: AcpClient,
-        window: tauri::WebviewWindow<R>,
+        window: tauri::Window<R>,
         activation: crate::agent::runtime::ClientActivation,
     ) -> Result<Vec<crate::session::store::SessionProbeCandidate>, String> {
         if new_acp.is_crashed() {
@@ -1057,12 +1057,12 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
         .unwrap_or(false);
     if let Some(runtime) = handles.active_runtime() {
         if !default_runtime_connecting {
-            start_notification_dispatcher(&handles, &runtime, window.clone());
+            start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
         }
     }
     app.state::<AppState>()
         .inner()
-        .start_runtime_log_dispatcher(window);
+        .start_runtime_log_dispatcher(window.as_ref().window());
     // #270（ADR-0022）：默认 agent 初始连接后台化——窗口先见。持 switch_lock →
     // agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
     // 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
@@ -1103,7 +1103,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
                     .inner()
                     .connect_and_replace(
                         &runtime,
-                        &connect_window,
+                        &connect_window.as_ref().window(),
                         &agent,
                         None,
                         AgentLifecycleStatus::Connecting,
@@ -1181,7 +1181,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
             }
             let runtime = state.inner().runtimes.get_or_create(&agent_id);
             if let Some(webview) = webview.as_ref() {
-                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
+                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, &webview.as_ref().window()).await {
                     tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
                     return;
                 }
@@ -1543,6 +1543,7 @@ pub fn run() {
                 crate::runtime_log::cmds::set_runtime_log_live,
                 crate::workspaces::cmds::get_workspace_root,
                 crate::workspaces::cmds::list_workspace_entries,
+                crate::workspaces::cmds::list_workspace_files,
                 crate::workspaces::cmds::read_workspace_text,
                 crate::workspaces::cmds::write_workspace_text,
                 crate::workspaces::cmds::git_status,

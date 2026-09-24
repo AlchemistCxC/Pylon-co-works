@@ -210,7 +210,7 @@ pub(crate) async fn fork_session_slot(
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn session_fork(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
+    window: tauri::Window,
     source: String,
     child_source: String,
 ) -> Result<serde_json::Value, PylonError> {

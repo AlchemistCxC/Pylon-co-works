@@ -1,6 +1,6 @@
 [package]
 name = "pylon-compute"
-version = "0.2.7-MAT"
+version = "0.2.9-PAC"
 edition = "2021"
 description = "Pylon 前端计算核（Rust/WASM）——issue #220"
 publish = false

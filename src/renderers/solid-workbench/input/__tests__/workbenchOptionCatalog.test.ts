@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_MODE_OPTIONS,
+  DEFAULT_REASONING_OPTIONS,
   resolveDocumentOptionValue,
   resolveModeOptionEntries,
   resolveModelOptionEntries,
+  resolveReasoningOptionEntries,
   shortControlCenterError,
   type WorkbenchOptionEntry,
 } from '../workbenchOptionCatalog.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../../domains/workbench/workbenchRuntime.ts'
+import type { SessionConfigOption } from '../../../../domains/workbench/session/sessionSurface.ts'
+import { createWorkbenchDocument } from '../../../../domains/workbench/workbenchProjector.ts'
 import { normalizeSessionMode } from '../../../../components/chat/sessionModeState.ts'
 
 function emptySnapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
@@ -18,6 +22,17 @@ function emptySnapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): Workb
     canAttach: false, promptImage: false, error: null, ...overrides,
   }
 }
+
+/** 会话态快照：把 provider 上报的选项装进规范化文档（思考强度的候选只从这里来）。 */
+function snapshotWithOptions(options: readonly SessionConfigOption[]): WorkbenchRuntimeSnapshot {
+  const document = createWorkbenchDocument('s-reasoning')
+  return emptySnapshot({ document: { ...document, session: { ...document.session, options } } })
+}
+
+/** provider 只报了当前值、**没有给候选清单** —— `resolveDocumentOptionEntries` 会回落成单元素列表。 */
+const ONLY_CURRENT_VALUE: SessionConfigOption[] = [
+  { id: 'thought_level', label: '思考强度', value: 'high' },
+]
 
 describe('Workbench option catalog', () => {
   it('reads the provider-selected reasoning value from normalized options', () => {
@@ -83,9 +98,9 @@ describe('Workbench option catalog', () => {
   // optionIds 会把当前值插进快照列表（好让 UI 总能显示它），于是"只有当前值"会被误读成
   // "provider 上报过候选"。此时必须回落兜底表：菜单按设计排除当前值，若把单元素集合当权威，
   // 菜单就一项不剩 —— 用户切换档位后再点开就是空盒，且换不回其它档位。
-  it('treats a candidate surface holding only the current mode as not advertised', () => {
+  it('preserves a singleton mode advertisement without inventing candidates', () => {
     const entries = resolveModeOptionEntries(emptySnapshot({ availableModes: ['auto'], activeMode: 'auto' }))
-    expect(entries.map(entry => entry.id)).toEqual(DEFAULT_MODE_OPTIONS.map(entry => entry.id))
+    expect(entries.map(entry => entry.id)).toEqual(['auto'])
   })
 
   it('still prefers a real advertised mode surface over the fallback catalogue', () => {
@@ -117,5 +132,42 @@ describe('shortControlCenterError (#51)', () => {
     const long = 'x'.repeat(200)
     expect(shortControlCenterError(long, '失败').length).toBe(80)
     expect(shortControlCenterError(undefined, '模型切换失败')).toBe('模型切换失败')
+  })
+})
+
+describe('思考强度的候选面 —— 与权限 / 模型对称的守卫（#266 CC-12）', () => {
+  it('provider 只报了当前值、没给候选清单 ⇒ 用兜底表（否则菜单是空盒）', () => {
+    const ids = resolveReasoningOptionEntries(snapshotWithOptions(ONLY_CURRENT_VALUE), 'high').map(entry => entry.id)
+    expect(ids).toEqual(DEFAULT_REASONING_OPTIONS.map(entry => entry.id))
+    expect(ids).toContain('high')
+  })
+
+  it('★ 当前值不在兜底表里时，仍换得回去（这条挡的是"只剩当前值"的老病灶）', () => {
+    const unknown: SessionConfigOption[] = [{ id: 'thought_level', label: '思考强度', value: 'ultra-custom' }]
+    const ids = resolveReasoningOptionEntries(snapshotWithOptions(unknown), 'ultra-custom').map(entry => entry.id)
+    // 未加守卫时这里只会有一项（['ultra-custom']）⇒ 菜单空盒、换不回去；加了守卫 ⇒ 兜底档全体回来。
+    expect(ids).toContain('ultra-custom')
+    expect(ids).toContain('low')
+    expect(ids).toHaveLength(DEFAULT_REASONING_OPTIONS.length + 1)
+  })
+
+  it('真候选面（带 choices）⇒ 用它，不回落兜底表', () => {
+    const advertised: SessionConfigOption[] = [{
+      id: 'thought_level', label: '思考强度', value: 'high',
+      schema: { options: [{ id: 'low', label: 'low' }, { id: 'high', label: 'high' }] },
+    }]
+    expect(resolveReasoningOptionEntries(snapshotWithOptions(advertised), 'high').map(entry => entry.id))
+      .toEqual(['low', 'high'])
+  })
+
+  it('既没有候选面也没有当前值 ⇒ 兜底表', () => {
+    expect(resolveReasoningOptionEntries(emptySnapshot()).map(entry => entry.id))
+      .toEqual(DEFAULT_REASONING_OPTIONS.map(entry => entry.id))
+  })
+
+  it('★ 形参不传、文档里有值 ⇒ 守卫仍生效（比对基准取文档值，不依赖调用方）', () => {
+    // 把基准系在形参上的写法在这一档会静默放行（current 为空 ⇒ advertisedChoices 原样返回）。
+    const ids = resolveReasoningOptionEntries(snapshotWithOptions(ONLY_CURRENT_VALUE)).map(entry => entry.id)
+    expect(ids).toEqual(DEFAULT_REASONING_OPTIONS.map(entry => entry.id))
   })
 })

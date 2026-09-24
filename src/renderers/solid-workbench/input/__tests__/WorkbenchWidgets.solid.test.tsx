@@ -73,7 +73,7 @@ describe('Solid Workbench widgets', () => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
         options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
-          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+          currentValue: value, category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
       } })
     }
     publish('low')
@@ -256,7 +256,7 @@ describe('Solid Workbench widgets', () => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
         options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
-          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+          currentValue: value, category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
       } })
     }
     publish('low')
@@ -316,11 +316,11 @@ describe('Solid Workbench widgets', () => {
     expect(screen.queryByRole('option', { name: '绕过确认' })).toBeNull()
   })
 
-  it('权限控件：permissionTextColor=mode 不写 inline color（交语义色），white 时覆盖', () => {
-    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'mode' })
+  it('权限控件：permissionTextColor 留空不写 inline color（交语义色），给了颜色则覆盖', () => {
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: '' })
     expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('')
     cleanup()
-    renderWidget(() => <SolidModeWidget />, { permissionTextColor: 'white' })
+    renderWidget(() => <SolidModeWidget />, { permissionTextColor: '#ffffff' })
     expect(screen.getByRole('button', { name: 'auto' }).style.color).toBe('rgb(255, 255, 255)')
   })
 

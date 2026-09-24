@@ -6,7 +6,7 @@
 
 - issue：https://github.com/AlchemistCxC/Pylon-co-works/issues/279
 - 决策：ADR-0023（前端 shell 逐梯队 Solid 化）
-- 分支：`kumo/solidify`（隔离工作树 `D:/pylon-solidify-wt`，基于 `78a75a36`）
+- 分支：`kumo/solidify`（隔离工作树 `D:/pylon-solidify-wt`，基于 `78a75a36`；PR #312 期已合入 `github/main` @`30d8fe3a`）
 - 日期：2026-09-24
 
 ## 目标与范围
@@ -53,6 +53,16 @@
 - [x] 几何契约护栏全绿：sidebarUnifiedModel.css.test / workspaceTitlebar.css.test / sheetLayoutSidebarCollapsedReactive 等穿桥通过
 - [x] `docs/说明书/` 维护地图/架构参考无逐文件表述需同步（check:docs 绿）；ADR-0023 承载方向性表述
 - [x] 隔离工作树施工，共享树零干扰；全程 pathspec 提交
+
+## 合入 main 的冲突解决（PR #312）
+
+- 合入 `github/main` @`30d8fe3a`（分支基点 `78a75a36`）。**文本冲突只有 `.agents/L.md` 一处**，按 AGENTS §2.1「保留双方条目」解：保留本分支 #279 条目 + main 侧 #304/#301/#306/FileSheet 阶段〇/#308 五条；main 已按「只留在途」摘除的 #212+#213、#243、release 0.2.7-MAT 四条不复活。`package.json` 自动合并为正确并集（main 的 `0.2.9-PAC` 版本号 + 分支的 `lucide` 依赖），`bun.lock` 已含该依赖（main 未动 lock）。
+- **语义冲突（文本无冲突、行为会静默回退）**：main 的 #281 兜底修正（`--syn-cmt`/`--syn-mh` → `#65737e`）落在 React 版 `FileCodeEditor.tsx`，而第 2 梯队已把产物切到 `FileCodeEditor.solid.tsx`（React 版现仅余自身测试消费）——**直接合并会让 #281 在生产上失效，且门禁全绿**。已把两处字面量同步进 Solid 版；该文件自述「与 React 版逐行同构」，此同步即维持该不变式。
+- **护栏补盲**：main 新增的 `FileSheet.css.test.ts` token 用例只读 React 版，对生产路径是假绿。已把 `EDITOR_TS_PATH` 扩为 `EDITOR_TS_PATHS`（两版并集）。变异核验：仅回退 Solid 版 `--syn-mh` 一处 → 用例必红（`syn-mh 兜底色漂移：#8fa1b3`），恢复即绿。
+- 合入后复核：main 新增代码（`canonicalTouchedFileProjection`、`main.tsx` 安装点等）对第 0 梯队删除的 9 个孤儿**零引用**；分支自留域 `src/workspace-sheets/**`、`src-tauri/**` 与 main 无重叠；#281 的 CSS 落地（`.file-type-icon` 品牌色 token 化、`--text-on-accent`）落在分支未替换的 `FileViewHost.tsx`/`FileTypeIcon.tsx` 上，**正常生效**；main 的 `docs/说明书/` 改动（#304 表述）与本分支无冲突。
+- 合入后门禁：`vitest run` **642 文件 / 4869 用例通过**（1 skipped / 1 todo，零失败）；`tsc -b` + `tsc -p tsconfig.solid.json` 双绿；改动文件 eslint 0 error。
+
+> **复盘（第 4/5 梯队的坑）**：main 修 React 原件、本分支已迁出 Solid 孪生件的场景，**文本合并永不报冲突而行为静默回退**，且「只读 React 原件」的护栏会一起给假绿。后续梯队每合一次 main，都要对「已迁走的原件」复检一遍 main 侧修正，并把护栏指向真正被渲染的那份。
 
 ## 遗留与未解
 

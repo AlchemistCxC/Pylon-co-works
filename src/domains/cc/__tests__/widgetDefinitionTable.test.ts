@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ALWAYS_VISIBLE_STATUS_WIDGET_IDS,
   CC_FLOATING_WIDGET_IDS,
   CC_REGISTERED_SLOT_IDS,
   CC_SYSTEM_FIELDS,
@@ -14,8 +13,8 @@ import {
   ccWidgetLanding,
   coerceInputLanding,
   isWidgetVisible,
+  resolveCcHiddenWidgetIds,
   resolveCcWidgetGroup,
-  type CcMemberVisibility,
   type CcWidgetMember,
 } from '../widgetDefinitions.ts'
 import {
@@ -149,13 +148,17 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     }))
   })
 
-  it('成员的默认显隐只引用已有字段', () => {
-    type FieldRef = Extract<CcMemberVisibility, { kind: 'field' }>
-    const refs = memberRows
-      .map(({ member }) => member.visibility)
-      .filter((visibility): visibility is FieldRef => visibility.kind === 'field')
-    expect(refs.length).toBeGreaterThan(0)
-    expect(refs.filter(ref => !ccFields.includes(ref.field))).toEqual([])
+  it('成员显隐只是说明列：不承载"按字段判明"（四类子部件归入 always）', () => {
+    // ★ 2026-09-23 口径：成员 `visibility` 是**说明**，不是门；类型上的 `field` 变体已删。
+    //   这四类原先靠 `{kind:'field'}` 声明判明的子部件，现在一律声明常态可见 ——
+    //   它们真正出不出现的判据在各渲染分支（inputVariant / inputShowHistoryHint）。
+    const kindByLabel = new Map(memberRows.map(({ member }) => [member.label, member.visibility.kind]))
+    for (const label of ['提示符 ❯', '上下两条线', '历史快捷提示', '提示行']) {
+      expect(kindByLabel.get(label), `${label} 应声明为常态可见（判明门已撤）`).toBe('always')
+    }
+    // 反向确认没被"空手放过"：三类说明值都真实存在，且没有第四类冒出来
+    expect([...new Set(memberRows.map(({ member }) => member.visibility.kind))].sort())
+      .toEqual(['always', 'content', 'host'])
   })
 })
 
@@ -189,10 +192,11 @@ describe('#238 · 定义表不变量 4：成员与容器不进名单', () => {
     expect([...layoutNames].sort()).toEqual(Object.keys(DEFAULT_CC_LAYOUT.placements).sort())
   })
 
-  it('成员 id 不得落进常态放行 / 空态隐藏这两份名单', () => {
+  it('成员 id 不得落进空态隐藏名单', () => {
+    // ★ #266 ⑰：原来还有一份「常态放行名单」（`ALWAYS_VISIBLE_STATUS_WIDGET_IDS`）要求同一件事，
+    //   该名单已随 ⑰ 删除 ⇒ 这条保护由**语境侧的空态名单**继续承担。
     const memberIds = memberRows.map(({ member }) => member.id)
     expect(memberIds.filter(id => (EMPTY_STATE_HIDDEN_WIDGET_IDS as readonly string[]).includes(id))).toEqual([])
-    expect(memberIds.filter(id => (ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).includes(id))).toEqual([])
   })
 })
 
@@ -265,20 +269,21 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       'input', 'model', 'reasoning', 'mode', 'tokens', 'cc-command-hint', 'cc-send-button',
     ])
     // ★ #238 刀3：`slot` 退场；序号语义由「槽内序号」变为「同落脚处组内序号」。
-    // ★ 序号**沿用历史值**（2/3/4/5 的空档也照抄）：出厂区域预设的落盘数据（`zones/factory/**`，
-    //   生成脚本已删、不许手改）里就是这些值，改出厂默认会让 `presetAssembly.test.ts` 的
-    //   「归一 = 规范排布」不变量失去意义。
+    // ★ #266 遗留⑦：序号改为**连续值 1..6**（按当前实际显示顺序）。原先是 0/2/3/4/5，
+    //   且「命令行提示」与「用量」撞在同一个 5 上 ⇒ 同落脚处内的先后只能靠表序兜着。
+    //   ★ 定义表与出厂区域预设的落盘数据（`zones/factory/**`）两处必须一致，
+    //   一致性由 `src/zones/__tests__/factoryZonePresetLayoutGuard.test.ts` 机检（数据 ↔ 定义表）。
     expect(DEFAULT_CC_LAYOUT).toEqual({
       version: 9,
       placements: {
-        input: { order: 0, offsetX: 0, offsetY: 0 },
+        input: { order: 1, offsetX: 0, offsetY: 0 },
         model: { order: 2, offsetX: 0, offsetY: 0 },
         reasoning: { order: 3, offsetX: 0, offsetY: 0 },
         mode: { order: 4, offsetX: 0, offsetY: 0 },
         tokens: { order: 5, offsetX: 0, offsetY: 0 },
-        // ★ 刀5B：提示的序号沿用表里结构步时写的 5（与 tokens 同序）。两者同序不冲突：
-        //   `idsForLanding` 的排序是稳定排序，表序（tokens 在前）决定并列时的先后。
-        'cc-command-hint': { order: 5, offsetX: 0, offsetY: 0 },
+        // ★ #266 遗留⑦：提示的序号 = 6（原先沿用结构步时的 5，与 tokens 撞号）
+        'cc-command-hint': { order: 6, offsetX: 0, offsetY: 0 },
+        // 悬浮件（发送按钮）自己一个落脚处，序号仍是 0
         'cc-send-button': { order: 0, offsetX: 0, offsetY: 0 },
       },
     })
@@ -303,14 +308,12 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     expect(slotIds).toHaveLength(7)
   })
 
-  it('常态放行 5 条（原 4 + 命令行提示）/ 空态隐藏 5 条，两集合语义仍不同', () => {
-    // ★ 刀5B：提示标 `inActiveSession: 'show'` ⇒ 常态放行由 4 变 5（不写它，提示会在活跃会话里被门户滤掉）。
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
+  it('空态隐藏 6 条（⑰ 起含命令行提示）——它是**语境侧名单**，与预设的值无关', () => {
+    // ★ #266 ⑰：名单由行上派生改为**字面量**；`cc-command-hint` 是 ⑰ 新加入的一条 ——
+    //   空态没有会话，命令行提示没有意义（原由行上 `conditions` 的 `'has-session'` 承担）。
     expect([...EMPTY_STATE_HIDDEN_WIDGET_IDS].sort())
-      .toEqual(['cc-send-button', 'model', 'reasoning', 'mode', 'tokens'].sort())
-    // 两个集合语义不同，不许并成一个：空态隐藏比常态放行多出注册轨的发送按钮
+      .toEqual(['cc-send-button', 'cc-command-hint', 'model', 'reasoning', 'mode', 'tokens'].sort())
     expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-send-button')
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).not.toContain('cc-send-button')
   })
 
   it('标签表逐字不变（含容器与不可拖行）', () => {
@@ -348,12 +351,12 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
       offsetX: 0,
       offsetY: 0,
     }))).toEqual([
-      { anchor: 'cc-surface', side: 'stretch', order: 0, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'stretch', order: 1, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 2, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 3, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 4, offsetX: 0, offsetY: 0 },
       { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
-      { anchor: 'cc-surface', side: 'left', order: 5, offsetX: 0, offsetY: 0 },
+      { anchor: 'cc-surface', side: 'left', order: 6, offsetX: 0, offsetY: 0 },
     ])
     // 用量控件不新增属性字段（S11 拍板）⇒ 表里它的属性表单为空
     expect(WIDGET_PROPERTY_FIELDS.tokens).toEqual([])
@@ -375,30 +378,38 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
       'number:cliLineWidth', 'color:cliLineColor', 'number:cliLinePadding',
     ])
     expect(strip('model')).toEqual([
-      'section:模型控件', 'chips:modelSwitchMode', 'chips:modelBgColor',
+      'section:模型控件', 'chips:modelSwitchMode', 'color:modelBgColor',
       'number:modelWidth', 'number:modelHeight', 'number:modelRadius',
-      'number:modelFontSize', 'chips:modelTextColor',
+      'number:modelFontSize', 'color:modelTextColor',
     ])
     expect(strip('reasoning')).toEqual([
-      'section:思考强度控件', 'chips:reasoningSwitchMode', 'chips:reasoningBgColor',
+      'section:思考强度控件', 'chips:reasoningSwitchMode', 'color:reasoningBgColor',
       'number:reasoningWidth', 'number:reasoningHeight', 'number:reasoningRadius',
-      'number:reasoningFontSize', 'chips:reasoningTextColor',
+      'number:reasoningFontSize', 'color:reasoningTextColor',
     ])
     expect(strip('mode')).toEqual([
-      'section:权限控件', 'chips:permissionSwitchMode', 'chips:permissionBgColor',
+      'section:权限控件', 'chips:permissionSwitchMode', 'color:permissionBgColor',
       'number:permissionWidth', 'number:permissionHeight', 'number:permissionRadius',
-      'number:permissionFontSize', 'chips:permissionTextColor',
+      'number:permissionFontSize', 'color:permissionTextColor',
     ])
     expect(strip('tokens')).toEqual([])
   })
 
-  it('cli 三个字段仍带 showIf（面板在非命令行模式仍按旧规则隐藏）', () => {
-    const fields = WIDGET_PROPERTY_FIELDS.input.filter(field => field.kind !== 'section' && 'showIf' in field && field.showIf)
-    expect(fields.map(field => field.kind === 'section' ? '' : field.key)).toEqual(['cliLineWidth', 'cliLineColor', 'cliLinePadding'])
-    for (const field of fields) {
-      expect(field.kind !== 'section' && field.showIf!({ inputMode: 'cli' })).toBe(true)
-      expect(field.kind !== 'section' && field.showIf!({ inputMode: 'default' })).toBe(false)
+  it('命令行边框三项不再带 showIf（两模式常态显示）', () => {
+    // ★ 2026-09-23 用户口径：「不要这个判明条件，常态显示，预设里我手动改」
+    //   ⇒ 原三条 `showIf: t => t.inputMode === 'cli'` 删除。这条断言的**靶子反了过来**：
+    //   原先锁"仍带 showIf"，现在锁"还在表里、且一个条件都没有"。
+    const fields = WIDGET_PROPERTY_FIELDS.input.filter(field => field.kind !== 'section')
+    for (const key of ['cliLineWidth', 'cliLineColor', 'cliLinePadding'] as const) {
+      const field = fields.find(candidate => candidate.key === key)
+      expect(field, `${key} 不该从属性表单里消失（撤条件 ≠ 删项）`).toBeDefined()
+      expect(field && 'showIf' in field ? field.showIf : undefined, `${key} 不该再带条件显示`).toBeUndefined()
     }
+    // 全表零 showIf：这条路已撤，防回摆（有人再挂一条即红）
+    const withShowIf = Object.values(WIDGET_PROPERTY_FIELDS)
+      .flat()
+      .filter(field => field.kind !== 'section' && field.showIf)
+    expect(withShowIf).toEqual([])
   })
 
   it('属性表单指向的字段必须由本组的某个成员拥有（挂错成员即红）', () => {
@@ -434,61 +445,73 @@ describe('#238 刀3 · 输入栏落脚处独占守卫（原「input 槽只准放
   })
 })
 
-describe('#238 刀5B · 可见性：显/隐（`inActiveSession`）+ 状态检测条件（`conditions`）', () => {
-  it('命令行提示：`inActiveSession: show` + 三条条件（少了它，活跃会话里会被门户滤掉）', () => {
-    const hint = resolveCcWidgetGroup('cc-command-hint')
-    expect(hint?.draggable).toBe(true)
-    expect(hint?.inActiveSession).toBe('show')
-    expect(hint?.conditions).toEqual(['has-session', 'cli-mode', 'hint-visible'])
-    // ★ 这两条是「活跃会话里能显示」的必要条件：门户只放行 `inActiveSession: 'show'` 的状态控件
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).toContain('cc-command-hint')
-  })
-
-  it('常态放行的四个状态控件不带条件（`show` 且无 conditions）', () => {
-    for (const id of ['model', 'reasoning', 'mode', 'tokens']) {
-      const row = resolveCcWidgetGroup(id)
-      expect(row?.inActiveSession, id).toBe('show')
-      expect(row?.conditions ?? [], id).toEqual([])
+describe('#266 ⑰ · 可见性只剩「值 + 语境名单」（元件不自己申明）', () => {
+  it('行上不再有任何显隐申明（对象层：三个键都不存在）', () => {
+    // ★ 用户口径：「如果要记『这里不显示』，应该是在这里注明 a 不显示，而不是 a 申明在这里不显示」
+    //   ⇒ 原先的三样（`inActiveSession` / `conditions` / `hiddenInEmptyState`）从行上撤掉。
+    for (const row of CC_WIDGET_GROUPS) {
+      for (const key of ['inActiveSession', 'conditions', 'hiddenInEmptyState']) {
+        expect(Object.hasOwn(row, key), `${row.id} 不该再有 ${key}`).toBe(false)
+      }
     }
+    // 正控：表本体仍在（否则上面的断言会因为"表整个没了"而假绿）
+    expect(CC_WIDGET_GROUPS).toHaveLength(8)
   })
 
-  it('三条条件逐个可判：全部满足才可见（缺任一条即不可见）', () => {
-    const base = { hidden: [] as readonly string[], inputMode: 'cli', submitButtonMode: 'inline', hasSession: true, hintMode: 'full' }
-    expect(isWidgetVisible('cc-command-hint', base)).toBe(true)
-    expect(isWidgetVisible('cc-command-hint', { ...base, hintMode: 'compact' })).toBe(true)
-    expect(isWidgetVisible('cc-command-hint', { ...base, hintMode: 'hidden' })).toBe(false)   // hint-visible
-    expect(isWidgetVisible('cc-command-hint', { ...base, inputMode: 'default' })).toBe(false) // cli-mode
-    expect(isWidgetVisible('cc-command-hint', { ...base, hasSession: false })).toBe(false)    // has-session
-    // 缺省 ctx（拿不到会话信息的调用方）⇒ `has-session` 判否（保守：不改写用户已落盘的高度）
-    expect(isWidgetVisible('cc-command-hint', { hidden: [], inputMode: 'cli', submitButtonMode: 'inline' })).toBe(false)
+  it('命令行提示：没有会话 / 标准输入模式下**照样可见**（本件的目的）', () => {
+    // ★ 反转自旧断言 `inputMode: 'default' ⇒ false`：用户口径「命令行提示按模式驱动可见我后悔了」。
+    expect(isWidgetVisible('cc-command-hint', { hidden: [] })).toBe(true)
+    expect(isWidgetVisible('cc-command-hint', { hidden: [], editMode: true })).toBe(true)
   })
 
-  it('`ccHidden` 仍能藏它；编辑态豁免显隐、但仍受条件约束（与升格前的裸渲染条件一致）', () => {
-    const ctx = { inputMode: 'cli', submitButtonMode: 'inline', hasSession: true, hintMode: 'full' }
-    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: ['cc-command-hint'] })).toBe(false)
-    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: ['cc-command-hint'], editMode: true })).toBe(true)
-    expect(isWidgetVisible('cc-command-hint', { ...ctx, hidden: [], editMode: true, inputMode: 'default' })).toBe(false)
+  it('`ccHidden` 仍能藏它；编辑态豁免（把藏起来的元件露出来）', () => {
+    expect(isWidgetVisible('cc-command-hint', { hidden: ['cc-command-hint'] })).toBe(false)
+    expect(isWidgetVisible('cc-command-hint', { hidden: ['cc-command-hint'], editMode: true })).toBe(true)
   })
 
-  it('非 cli 模式下提示不参与高度计数（条件在同一谓词里 ⇒ 自然不计数）', () => {
-    const counts = (inputMode: string) => resolveVisibleStatusWidgetCount({
-      hiddenIds: [], inputMode, submitButtonMode: 'inline', hintMode: 'full', hasSession: true,
+  it('详细档「隐藏」按**值**折进名单（组装只有一处，渲染与计数同源）', () => {
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'compact' })).toEqual([])
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'full' })).toEqual([])
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
+    // 已在名单里不重复追加（集合语义）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['cc-command-hint'], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
+    // 折进名单后由同一个谓词判隐 —— 谓词里不再需要"详细档"这件事
+    expect(isWidgetVisible('cc-command-hint', {
+      hidden: resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' }),
+    })).toBe(false)
+    // 预设里用户自己藏的那些原样带出（不吞不改）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], cliHintMode: 'compact' })).toEqual(['model'])
+  })
+
+  it('空态由**语境侧名单**承担：提示在内 ⇒ 空态不显示（原由 `has-session` 条件承担）', () => {
+    const emptyHidden = resolveCcHiddenWidgetIds({
+      ccHidden: [...EMPTY_STATE_HIDDEN_WIDGET_IDS],
+      cliHintMode: 'full',
     })
-    expect(counts('cli')).toBe(5)      // 4 常态 + 提示
-    expect(counts('default')).toBe(4)  // 提示被 `cli-mode` 条件挡掉
+    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-command-hint')   // 反转自旧断言"不在内"
+    expect(emptyHidden).toContain('cc-command-hint')
+    expect(isWidgetVisible('cc-command-hint', { hidden: emptyHidden })).toBe(false)
+  })
+
+  it('计数与谓词同源：可见数 = 状态控件里不在名单上的个数', () => {
+    const counts = (hiddenIds: readonly string[]) => resolveVisibleStatusWidgetCount({ hiddenIds })
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'full' }))).toBe(5)     // 四常态 + 提示
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' }))).toBe(4)   // 详细档隐藏 ⇒ 少提示
+    // 空态：语境侧名单把 5 条状态控件全挡掉 ⇒ 计数 0（空态数值不变的成因）
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [...EMPTY_STATE_HIDDEN_WIDGET_IDS], cliHintMode: 'full' }))).toBe(0)
   })
 })
 
 describe('#238 刀5B · 命令行提示已升格为可拖元件', () => {
-  it('它在名单、默认布局、常态放行里；仍不在空态隐藏名单', () => {
+  it('它在名单、默认布局里；空态名单里也有它（⑰ 起由语境侧名单接住）', () => {
     const hint = resolveCcWidgetGroup('cc-command-hint')
     expect(hint).toBeDefined()
+    expect(hint?.draggable).toBe(true)
     expect(hint?.layout).toBeDefined()
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toContain('cc-command-hint')
     expect(slotIds).toContain('cc-command-hint')
-    expect(ALWAYS_VISIBLE_STATUS_WIDGET_IDS as readonly string[]).toContain('cc-command-hint')
-    // 空态：条件 `has-session` 自然把它挡掉，不需要额外声明"空态隐藏"
-    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).not.toContain('cc-command-hint')
+    // ★ #266 ⑰：原先靠行上 `conditions` 的 `'has-session'` 把空态挡掉；撤条件后改由**空态名单**接住
+    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-command-hint')
   })
 
   it('它既受占区约束、也当障碍（不是悬浮件）', () => {

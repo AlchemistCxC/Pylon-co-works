@@ -155,6 +155,10 @@ function optionIdentity(option: SessionConfigOption): string {
 function optionKind(option: SessionConfigOption): WorkbenchOptionKind | undefined {
   const id = optionIdentity(option)
   const raw = option.raw ?? {}
+  // Categories are semantic; model_config must not be mistaken for model.
+  if (raw.category === 'model' || raw.category === 'mode') return raw.category
+  if (raw.category === 'thought_level') return 'reasoning'
+  if (raw.category === 'model_config') return undefined
   const label = normalizedKey(option.label)
   const rawText = Object.entries(raw)
     .filter(([key]) => ['id', 'key', 'name', 'label', 'category', 'title', 'description'].includes(key.toLowerCase()))
@@ -287,15 +291,19 @@ export function resolveModeOptionEntries(snapshot: WorkbenchRuntimeSnapshot, dra
     documentOptions(snapshot, 'mode'),
   ])
   return mergeEntries([
-    preferAdvertised(advertisedChoices(advertised, snapshot.activeMode), DEFAULT_MODE_OPTIONS),
+    snapshot.sessionId ? advertised : preferAdvertised(advertised, DEFAULT_MODE_OPTIONS),
   ], draft || snapshot.activeMode)
 }
 
 export function resolveReasoningOptionEntries(snapshot: WorkbenchRuntimeSnapshot, current?: string): readonly WorkbenchOptionEntry[] {
   const advertised = documentOptions(snapshot, 'reasoning')
+  // ★ 与权限 / 模型两条**保持对称**：清单里除当前值外什么都没有 ⇒ 视作"没上报"⇒ 用兜底表。
+  //   当前值的比对基准必须**取文档值**（调用方通常已传，缺省时自读）：拿不到基准时
+  //   `advertisedChoices` 会原样放行，守卫静默失效，且单测若喂了非空的 current 仍会绿。
+  const currentValue = current ?? resolveDocumentOptionValue(snapshot.document?.session.options, 'reasoning')
   return mergeEntries([
-    preferAdvertised(advertised, DEFAULT_REASONING_OPTIONS),
-  ], current)
+    preferAdvertised(advertisedChoices(advertised, currentValue), DEFAULT_REASONING_OPTIONS),
+  ], currentValue)
 }
 
 export function optionLabel(kind: WorkbenchOptionKind, id: string, fallback?: string): string {

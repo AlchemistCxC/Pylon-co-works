@@ -342,7 +342,7 @@ type PermissionLock =
 // request_id/params/reason_code/rpc_code/message），语义互不分组，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn reject_interaction_request<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     acp: &AcpLock,
     provider: &str,
     agent_id: &str,
@@ -553,7 +553,7 @@ pub(crate) fn resolve_agent_provider(
 /// 参数多为各锁/上下文的按引用透传（与同文件 L316/L751 同类），故保留显式形参。
 #[allow(clippy::too_many_arguments)]
 async fn handle_permission_request<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     acp: &AcpLock,
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
@@ -955,7 +955,7 @@ pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
 // client_generation/generation/mapping_ready/payload），与调用点逐参对应，
 // 结构体重构收益低。
 fn publish_committed_update<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
     update_channels: &crate::runtime::UpdateChannelMap,
     source: &str,
@@ -1004,7 +1004,7 @@ fn publish_committed_update<R: tauri::Runtime>(
 // 同一调用点形态，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn flush_pending_canonical<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
     update_channels: &crate::runtime::UpdateChannelMap,
     pet: &std::sync::Mutex<PetState>,
@@ -1140,7 +1140,7 @@ async fn flush_pending_canonical<R: tauri::Runtime>(
 // 调用点形态，结构体重构收益低。
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
     sessions: &SessionsLock,
     binding_health: &std::sync::Mutex<
@@ -1581,7 +1581,7 @@ async fn handle_session_update<R: tauri::Runtime>(
 pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     handles: &AppStateHandles,
     runtime: &Arc<AgentRuntime>,
-    window: tauri::WebviewWindow<R>,
+    window: tauri::Window<R>,
 ) {
     // O8：锁中毒（panic 时持有者遗弃）也恢复重启——into_inner 取出 guard，
     // 否则 dispatcher 永久静默下线，自动重连/崩溃通知全部失效。
@@ -2694,7 +2694,7 @@ mod tests {
             .collect();
         assert!(
             flush_pending_canonical(
-                &window,
+                &window.as_ref().window(),
                 &gateway,
                 &update_channels,
                 &std::sync::Mutex::new(crate::pet::PetState::default()),

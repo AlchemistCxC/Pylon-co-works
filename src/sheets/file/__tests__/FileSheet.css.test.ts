@@ -261,3 +261,65 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(leaked, `注释残渣漏进了选择器：\n${leaked.join('\n')}`).toEqual([])
   })
 })
+
+// ── token 卫生（issue #281）──────────────────────────────────────────────────
+describe('FileSheet token hygiene (issue #281)', () => {
+  const INDEX_CSS_PATH = 'src/index.css'
+  // 编辑态有两个同构实现（React 版与 #279 第 2 梯队的 Solid 版），产物渲染的是 Solid 版；
+  // 只查 React 版会给出假绿（PR #312 合入 main 时实测：main 的 #281 兜底修正曾只落在 React 版）。
+  const EDITOR_TS_PATHS = [
+    'src/sheets/file/FileCodeEditor.tsx',
+    'src/sheets/file/FileCodeEditor.solid.tsx',
+  ]
+  const indexCss = readFileSync(INDEX_CSS_PATH, 'utf8')
+  const editorTrees = EDITOR_TS_PATHS.map(path => readFileSync(path, 'utf8'))
+
+  const schemeBlocksOf = (source: string): readonly string[] => {
+    const blocks: string[] = []
+    const pattern = /\{([^{}]*)\}/g
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(source))) blocks.push(match[1])
+    return blocks.filter(block => block.includes('--bg-panel:'))
+  }
+
+  it('defines --bg-elevated in every scheme block that defines the bg family (search panel was transparent)', () => {
+    const blocks = schemeBlocksOf(indexCss)
+    expect(blocks.length, 'index.css 应存在亮/暗两个 bg 族定义块').toBeGreaterThanOrEqual(2)
+    for (const block of blocks) {
+      expect(block, 'bg 族定义块缺少 --bg-elevated 定义').toMatch(/--bg-elevated:/)
+    }
+  })
+
+  it('keeps --syn-cmt/--syn-mh fallbacks identical across CSS and HighlightStyle', () => {
+    // themeFieldDefs 的 default 是唯一真源（--syn-cmt/--syn-mh 均为 #65737e）。
+    // 只读投影（FileSheet.css 的 pl-* 类）与编辑态 HighlightStyle（两个编辑器实现）
+    // 的 fallback 字面量必须逐个一致，否则主题未发射该 var 时两态颜色漂移。
+    const collect = (source: string, name: string): string[] =>
+      [...source.matchAll(new RegExp(`var\\(--${name},\\s*([^)]+)\\)`, 'g'))].map(m => m[1]!.trim())
+    for (const name of ['syn-cmt', 'syn-mh']) {
+      const fallbacks = [...collect(css, name), ...editorTrees.flatMap(tree => collect(tree, name))]
+      expect(fallbacks.length, `${name} 应存在带兜底的消费点`).toBeGreaterThan(0)
+      const drifted = fallbacks.filter(value => value !== '#65737e')
+      expect(drifted, `${name} 兜底色漂移：${drifted.join(', ')}`).toEqual([])
+    }
+  })
+
+  it('colors file-type icons via scoped tokens, not bare literals', () => {
+    const iconRules = rulesOf(css).filter(rule => /\.file-type-icon\.type-/.test(rule.selector))
+    expect(iconRules.length).toBeGreaterThanOrEqual(6)
+    const literals = iconRules
+      .filter(rule => /#[0-9a-fA-F]{3,8}\b/.test(rule.body))
+      .map(rule => `${rule.selector} { ${rule.body.trim()} }`)
+    expect(literals, `图标色存在裸字面量：\n${literals.join('\n')}`).toEqual([])
+  })
+
+  it('uses --text-on-accent (not #fff) on accent/danger button text', () => {
+    for (const selector of ['.file-save-btn', '.file-conflict-force']) {
+      const rule = rulesOf(css).find(item => item.selector === selector)
+      expect(rule, `${selector} 规则缺失`).toBeTruthy()
+      // \b 在 "#ffffff" 的 f→f 之间无词边界，必须显式吃掉后续 hex 位。
+      expect(rule!.body).not.toMatch(/#fff[0-9a-fA-F]{0,5}\b/i)
+      expect(rule!.body).toContain('var(--text-on-accent)')
+    }
+  })
+})

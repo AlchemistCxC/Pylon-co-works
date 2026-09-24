@@ -1,6 +1,7 @@
 import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../../ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
 import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
+import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
@@ -110,9 +111,7 @@ export function reduceAppearanceCommand(
         footerLayout: theme.footerLayout,
         hintMode: theme.cliHintMode,
         visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-          hiddenIds: theme.ccHidden,
-          inputMode: theme.inputMode,
-          submitButtonMode: theme.inputSubmitButtonMode,
+          hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: theme.ccHidden, cliHintMode: theme.cliHintMode }),
         }),
         cliOverflowMode: theme.cliOverflowMode,
       })
@@ -135,9 +134,7 @@ function settleCcHeight(theme: ThemeSettings): ThemeSettings {
     footerLayout: theme.footerLayout,
     hintMode: theme.cliHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: theme.ccHidden,
-      inputMode: theme.inputMode,
-      submitButtonMode: theme.inputSubmitButtonMode,
+      hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: theme.ccHidden, cliHintMode: theme.cliHintMode }),
     }),
     cliOverflowMode: theme.cliOverflowMode,
   })

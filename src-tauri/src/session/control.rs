@@ -8,25 +8,58 @@ pub(crate) async fn set_mode(
     agent_id: String,
     source: String,
     mode: String,
-) -> Result<(), PylonError> {
+) -> Result<serde_json::Value, PylonError> {
     // OWNER-02（§5.8）：显式 agentId 正向 owner 路由（会话存在才可 set_mode）。
     let owner = SessionOwner::new(&agent_id, &source);
     let runtime = state.inner().resolve_owner_runtime(&owner)?;
     let generation = state.current_generation(&runtime);
+    let (config_target, legacy_choices) = {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| PylonError::Protocol(e.to_string()))?;
+        let session = sessions
+            .get(&source)
+            .ok_or_else(|| PylonError::SessionNotFound(source.clone()))?;
+        (
+            super::find_config_option(&session.config_options, "mode").cloned(),
+            session.mode_choices.clone(),
+        )
+    };
+    if let Some(option) = config_target {
+        super::validate_advertised_choice(
+            &mode,
+            &super::config_option_choice_ids(&option),
+            "mode_not_advertised",
+        )?;
+        let config_id = super::config_option_identity(&option)
+            .ok_or_else(|| PylonError::Protocol("mode_config_id_missing".into()))?;
+        return set_config_option(state, agent_id, source, config_id, serde_json::json!(mode))
+            .await;
+    }
+    if legacy_choices.is_empty() {
+        return Err(PylonError::Protocol(
+            "mode_switching_unavailable: agent advertises no mode surface".into(),
+        ));
+    }
+    super::validate_advertised_choice(&mode, &legacy_choices, "mode_not_advertised")?;
     let peri_id = state.get_peri_id(&runtime, &source)?;
     state
         .inner()
-        .acp_rpc(
+        .acp_rpc_generation_checked(
             &runtime,
             acp::METHOD_SESSION_SET_MODE,
             acp::session_set_mode_params(&peri_id, &mode)?,
+            generation,
         )
         .await?;
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
-        session.mode = Some(mode);
+        session.mode = Some(mode.clone());
     })?;
-    Ok(())
+    // The legacy method acknowledges the requested mode with an empty response.
+    // Return only that dimension; never fabricate an availableModes catalogue.
+    Ok(serde_json::json!({"modes": {"currentModeId": mode}}))
 }
 
 #[tauri::command]
@@ -120,10 +153,11 @@ pub(crate) async fn set_config_option(
             })?;
             state
                 .inner()
-                .acp_rpc(
+                .acp_rpc_generation_checked(
                     &runtime,
                     acp::METHOD_SESSION_SET_MODEL,
                     acp::session_set_model_params(&peri_id, model_id)?,
+                    generation,
                 )
                 .await?
         }
@@ -133,10 +167,11 @@ pub(crate) async fn set_config_option(
             let config_id = advertised_config_id.unwrap_or_else(|| key.clone());
             state
                 .inner()
-                .acp_rpc(
+                .acp_rpc_generation_checked(
                     &runtime,
                     acp::METHOD_SESSION_SET_CONFIG_OPTION,
                     acp::session_set_config_option_params(&peri_id, &config_id, &value)?,
+                    generation,
                 )
                 .await?
         }
@@ -169,6 +204,21 @@ pub(crate) async fn set_config_option(
             );
         }
         _ => {}
+    }
+    if let Some(options) = response
+        .get("configOptions")
+        .or_else(|| response.get("config_options"))
+        .and_then(serde_json::Value::as_array)
+    {
+        let _ = super::ingest_established_config_options_event(
+            state.inner(),
+            &runtime,
+            &source,
+            &peri_id,
+            generation,
+            options,
+        )
+        .await;
     }
     Ok(response)
 }

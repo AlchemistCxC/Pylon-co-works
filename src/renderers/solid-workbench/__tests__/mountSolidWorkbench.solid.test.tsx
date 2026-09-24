@@ -1866,13 +1866,36 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
   })
 
-  it('属性 schema 的联动字段和条件字段在 Solid 面板中保持响应式', async () => {
+  it('#266 · 属性面板不按输入模式判明：命令行边框三项在两种模式下都渲染（条件字段已撤）', async () => {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '输入栏 属性' }))
-    fireEvent.click(screen.getByRole('button', { name: '命令行' }))
+    const panel = () => document.querySelector<HTMLElement>('.cc-prop-panel')!
+    // 输入栏自己的可编辑项（面板顶部那三个「布局」项不算在内）
+    const editableLabels = () => [...panel().querySelectorAll('.cc-prop-field')]
+      .map(el => el.querySelector('label')?.textContent ?? '')
+      .filter(label => !['顺序', '水平微调', '垂直微调'].includes(label))
+    const panelChip = (label: string) => [...panel().querySelectorAll('button')].find(button => button.textContent === label)!
+    const EIGHT = ['背景色', '文字色', '字号', '最小高度', '模式', '边框宽度', '边框颜色', '内边距']
 
+    // 命令行模式（预览档默认）：8 项，与改造前一致
+    expect(services.appearance.getSnapshot().inputMode).toBe('cli')
+    expect(editableLabels()).toEqual(EIGHT)
+
+    // ★ 标准输入模式：**此前只有 5 项**（命令行边框三项被 showIf 藏掉）⇒ 现在 8 项
+    fireEvent.click(panelChip('标准输入'))
+    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'default', inputVariant: 'composer' }))
+    expect(editableLabels()).toEqual(EIGHT)
+    for (const label of ['边框宽度', '边框颜色', '内边距']) {
+      expect(screen.getByLabelText(label), `${label} 在标准输入模式下也必须显示`).toBeInTheDocument()
+    }
+
+    // 切回命令行：仍是同样 8 项（两模式差集为空）
+    fireEvent.click(panelChip('命令行'))
     await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli' }))
+    expect(editableLabels()).toEqual(EIGHT)
+
+    // 面板字段本身照旧响应式（原用例的靶子保留）
     const lineColor = screen.getByLabelText('边框颜色')
     fireEvent.change(lineColor, { target: { value: '#123456' } })
     await waitFor(() => expect(services.appearance.getSnapshot().ccProperties.cliLineColor).toBe('#123456'))

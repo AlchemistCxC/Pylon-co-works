@@ -2,23 +2,15 @@
 // 施工书处置：两脚本同被测 sessionModeState.ts，合入本文件分别 describe）。
 import { describe, expect, it } from 'vitest'
 import { extractMode, extractUsage, sessionResponseObject } from '../acpTypes.ts'
-import { applySessionModeChange, nextSessionMode, normalizeSessionMode, resolvePreviousSessionMode } from '../sessionModeState.ts'
+import { applySessionModeChange, normalizeSessionMode, resolvePreviousSessionMode } from '../sessionModeState.ts'
 
-describe('session mode 轮换与 ACP usage 提取（原 test-session-context-mode.mts）', () => {
+describe('会话 mode 状态与 ACP usage 提取（原 test-session-context-mode.mts）', () => {
   it('sessionResponseObject + extractMode 应保留 Peri 的 accept_edit mode ID', () => {
     const response = sessionResponseObject({
       sessionId: 'peri-a',
       modes: { currentModeId: 'accept_edit' },
     })
     expect(extractMode(response)).toBe('accept_edit')
-  })
-
-  it('nextSessionMode 轮换：default→accept_edit→auto→bypass→default；兼容旧 edit 但不得再发出 edit', () => {
-    expect(nextSessionMode('default')).toBe('accept_edit')
-    expect(nextSessionMode('accept_edit')).toBe('auto')
-    expect(nextSessionMode('auto')).toBe('bypass')
-    expect(nextSessionMode('bypass')).toBe('default')
-    expect(nextSessionMode('edit')).toBe('auto')
   })
 
   it('extractUsage 应读取 ACP UsageUpdate 的标准 used/size 字段', () => {
@@ -85,11 +77,11 @@ describe('applySessionModeChange 变更与回滚（原 test-session-mode.mts）'
     expect(writes).toEqual(['auto', 'default'])
   })
 
-  it('resolvePreviousSessionMode / nextSessionMode / normalizeSessionMode 边界', () => {
+  it('resolvePreviousSessionMode / normalizeSessionMode 边界', () => {
     expect(resolvePreviousSessionMode(undefined)).toBe('default')
-    expect(resolvePreviousSessionMode('edit')).toBe('accept_edit')
-    expect(nextSessionMode('unknown')).toBe('accept_edit')
-    expect(normalizeSessionMode('edit')).toBe('accept_edit')
-    expect(normalizeSessionMode('invalid')).toBe(null)
+    expect(resolvePreviousSessionMode('edit')).toBe('edit')
+    expect(normalizeSessionMode('edit')).toBe('edit')
+    expect(normalizeSessionMode('custom')).toBe('custom')
+    expect(normalizeSessionMode('')).toBe(null)
   })
 })

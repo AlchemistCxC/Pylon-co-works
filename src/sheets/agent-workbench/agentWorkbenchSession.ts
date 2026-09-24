@@ -37,6 +37,9 @@ import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
   findConfigOption,
+  extractModelConfig,
+  extractModeConfig,
+  extractConfigOptionValue,
   sessionResponseObject,
   type PromptFailureMetadata,
   type SessionResponseObject,
@@ -432,7 +435,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * before React has rebound the Workbench to the newly-added local Session.
    * Keep them keyed by local Session.id until that bind completes. */
   const pendingSessionResponses = new Map<string, SessionResponseObject[]>()
-  const appliedSessionResponseKeys = new Map<string, Set<string>>()
+  const appliedSessionResponseKeys = new Map<string, { key: string; session: WorkbenchDocument['session'] | undefined }>()
+  let selectorRequestInFlight = false
   const transientSequenceBySource = new Map<string, number>()
   const pendingOptimisticBySource = new Map<string, Array<{
     clientMessageId: string
@@ -487,7 +491,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     base?: WorkbenchDocument,
   ): WorkbenchDocument => {
     const current = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(source ?? '')
-    return reduceWorkbenchEvent(current, envelope)
+    const next = reduceWorkbenchEvent(current, envelope)
+    if (boundSessionId && (next.session.model !== current.session.model || next.session.mode !== current.session.mode || next.session.options !== current.session.options)) {
+      sessionUi.set(boundSessionId, 'selector-pending', '')
+    }
+    return next
   }
 
   /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
@@ -825,10 +833,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string): void => {
     if (destroyed || !boundSessionId || !source || targetSessionId !== boundSessionId) return
     const key = sessionResponseProjectionKey(response)
-    const applied = appliedSessionResponseKeys.get(targetSessionId) ?? new Set<string>()
-    if (applied.has(key)) return
-    applied.add(key)
-    appliedSessionResponseKeys.set(targetSessionId, applied)
+    const last = appliedSessionResponseKeys.get(targetSessionId)
+    if (last?.key === key && last.session === runtime.getSnapshot().document?.session) return
 
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(source)
     const bufferedMax = buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
@@ -838,9 +844,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const envelope = createSessionResponseEnvelope(source, boundProvider, response, sequence)
     if (loading) {
       buffered.push(envelope)
+      appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
       return
     }
     runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, preserveGeneration: true })
+    appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
   }
 
   const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
@@ -855,6 +863,49 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const pending = pendingSessionResponses.get(target) ?? []
     pending.push(normalized)
     pendingSessionResponses.set(target, pending)
+  }
+
+  /** Execute one selector write against this binding. Replies update the same
+   * document as notifications, never a second optimistic selector store. */
+  const runSessionControl = async (
+    context: { agentId: string; source: string },
+    fact: LocalSessionFact,
+    request: () => Promise<unknown>,
+  ): Promise<void> => {
+    if (destroyed || !boundSessionId || source !== context.source || boundProvider !== context.agentId) throw new Error('selector_owner_stale')
+    if (selectorRequestInFlight) throw new Error('selector_request_in_flight')
+    const requestGeneration = generation
+    const sessionId = boundSessionId
+    const before = runtime.getSnapshot().document?.session
+    selectorRequestInFlight = true
+    sessionUi.set(sessionId, 'selector-pending', '')
+    try {
+      const response = sessionResponseObject(await request())
+      if (destroyed || generation !== requestGeneration || boundSessionId !== sessionId) return
+      const current = runtime.getSnapshot().document ?? createWorkbenchDocument(context.source)
+      const receivedSelectorUpdate = before && (before.model !== current.session.model || before.mode !== current.session.mode || before.options !== current.session.options)
+      const model = extractModelConfig(response.configOptions, response).model
+      const mode = extractModeConfig(response).mode
+      const options = response.configOptions ?? response.config_options
+      if (options?.length) {
+        const sequence = Math.max(current.revision, transientSequenceBySource.get(context.source) ?? 0, ...buffered.map(item => item.sequence)) + 1
+        transientSequenceBySource.set(context.source, sequence)
+        const envelope = createSessionResponseEnvelope(context.source, boundProvider, response, sequence, 'session.config-updated')
+        if (loading) buffered.push(envelope)
+        else runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, preserveGeneration: true })
+      } else {
+        if (model) applyLocalSessionFact({ kind: 'model', model }, context.source)
+        if (mode) applyLocalSessionFact({ kind: 'mode', mode }, context.source)
+      }
+      const confirmed = fact.kind === 'model' ? model : fact.kind === 'mode' ? mode
+        : options?.find(option => option.id === fact.id) && extractConfigOptionValue(options.find(option => option.id === fact.id))
+      if (confirmed === undefined && !receivedSelectorUpdate) {
+        const requested = fact.kind === 'model' ? fact.model : fact.kind === 'mode' ? fact.mode : String(fact.value)
+        sessionUi.set(sessionId, 'selector-pending', `${requested}（等待 Agent 确认）`)
+      }
+    } finally {
+      selectorRequestInFlight = false
+    }
   }
 
   /**
@@ -1235,6 +1286,7 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
      * effect runs; the response is buffered and consumed by bind().
      */
     applySessionResponse,
+    runSessionControl,
     applyLocalSessionFact,
     refresh,
     async bind(session: Session | undefined): Promise<void> {

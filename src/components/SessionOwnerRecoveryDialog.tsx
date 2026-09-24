@@ -12,9 +12,14 @@ import Select from './ui/Select.tsx'
  * 样式绞杀（P93）：原 SessionOwnerRecoveryDialog.css 的 utility 化；
  * `.session-owner-select .pylon-select` 的宽度规则以子级 arbitrary variant
  * 保留（不改动共享 Select 组件）。
+ * #306：面板原消费 --settings-surface/--settings-shadow——这两个 token 只在
+ * `.settings-surface` 作用域内定义，本弹窗挂 App 顶层（App.tsx）取不到，悬空引用使
+ * 面板全透明、聊天正文穿透。改消费全局声明的 --surface-overlay 与 --shadow-float；
+ * 遮罩同 PermissionDialog：固定 30% 黑（原「--bg-panel 取 60%」在基础方案只有
+ * 约 1.9% 黑），不加模糊。
  */
-const OVERLAY = 'fixed inset-0 z-[210] flex items-center justify-center bg-[color-mix(in_srgb,var(--bg-panel)_60%,transparent)]'
-const DIALOG = 'w-[min(560px,calc(100vw-32px))] max-h-[calc(100vh-32px)] overflow-auto p-4 border border-border bg-[var(--settings-surface)] shadow-[var(--settings-shadow)] text-text font-[family-name:var(--font)]'
+const OVERLAY = 'fixed inset-0 z-[210] flex items-center justify-center bg-[rgba(0,0,0,0.3)]'
+const DIALOG = 'w-[min(560px,calc(100vw-32px))] max-h-[calc(100vh-32px)] overflow-auto p-4 border border-border bg-[var(--surface-overlay)] shadow-[var(--shadow-float)] text-text font-[family-name:var(--font)]'
 const H2 = 'm-0 mb-2 text-[16px]'
 const P = 'm-0 mb-3 text-text-dim text-[13px] leading-[1.5]'
 const UL = 'grid gap-2 m-0 mb-3 p-0 list-none'
