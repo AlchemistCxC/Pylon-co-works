@@ -151,6 +151,8 @@ const IPC_EXEMPT: ReadonlySet<string> = new Set([
   "cancel_detection_refresh",
   "push_frontend_log",
   "load_sessions", // 旧枚举面：前端消费 list_persisted_sessions，此命令保留兼容
+  // ── 零消费保留面 ──
+  "get_workspace_root", // #317：前端死包装 getWorkspaceRoot 删除后显形——前端本就零调用；后端命令与 WorkspaceRoot wire 保留待用
 ]);
 
 // ── 比对核心 ─────────────────────────────────────────────────────────────────
