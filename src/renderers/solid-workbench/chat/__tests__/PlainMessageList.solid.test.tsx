@@ -262,15 +262,24 @@ describe('PlainMessageList', () => {
     })
   })
 
+  const rectOf = (top: number, bottom: number) => ({
+    top, bottom, left: 0, right: 100, width: 100, height: bottom - top, x: 0, y: top, toJSON() {},
+  })
+
   /**
-   * #243 改写（原 #212 S3b「冷开时按窗口渐进挂载（尾部优先），逐帧扩满」）：
-   * 长会话的窗口语义从「尾部只增」改为「视口窗口」——冷开只物化尾部一个有界窗
-   * （视口 + overscan，「尾部优先」由上层贴底姿态把 scrollTop 钉到底部实现），
-   * 其余行是等高占位盒；不再有「逐帧扩满」——DOM 规模从此不随历史行数增长。
-   * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
+   * #243 长会话视口夹具（两条窗口用例同一挂载形态）：视口高 300px、scrollTop 可写。
+   *
+   * **几何必须忠实（#301）**：视口盒的矩形不随滚动移动（真实浏览器行为），列表容器的矩形
+   * 随滚动上移 `scrollTop`——组件的 scrollMargin 实测式
+   * `container.top − viewport.top + scrollTop` 因此恒等于「列表在滚动内容流里的偏移」
+   * （本夹具无 leading 内容 ⇒ 0），与何时重测无关。
+   *
+   * 若容器退回 jsdom 的零矩形（常量、不含 scrollTop），该式就退化成 `scrollTop`：上层钉底时
+   * 它恰好等于"视口在列表开头"，于是**按帧批处理**的几何重测只要跑在断言之前，引擎就把
+   * 窗口算到新会话开头（`b0…b11`、`padding-top: 0`），尾行永不物化。那是夹具造的假状态，
+   * 与并行度无关、只随帧调度时红时绿——#301 的成因，不是产品缺陷。
    */
-  it('#243：冷开长会话只物化尾部有界窗，其余为占位盒；窗口随滚动步进（D2）', async () => {
-    let port!: MessageListPort
+  function mountVirtualizedList() {
     const scroller = document.createElement('div')
     document.body.append(scroller)
     let scrollTop = 0
@@ -279,14 +288,34 @@ describe('PlainMessageList', () => {
       get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
     })
     // 视口高 300px；「row N」行估算高 76px ⇒ 视口内 ~4 行 + 上下 overscan 各 8
-    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 300, left: 0, right: 100, width: 100, height: 300, x: 0, y: 0, toJSON() {} })
-    const result = render(() => (
+    scroller.getBoundingClientRect = () => rectOf(0, 300)
+    let port!: MessageListPort
+    render(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }} renderItem={item => item.key}
       />
     ), { container: scroller })
-    const ids = () => [...result.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))
+    // 列表容器**随滚动内容上移**（生产真实几何：它自己不滚动）。矩形在读取时取当前
+    // scrollTop，故几何在整条用例期间始终成立，而不是只在桩建立的那一刻。
+    const listRoot = scroller.querySelector<HTMLElement>('[data-message-list="plain"]')!
+    listRoot.getBoundingClientRect = () => rectOf(-scrollTop, 300 - scrollTop)
+    return {
+      port,
+      ids: () => [...scroller.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id')),
+      jumpTo: (value: number) => { scrollTop = value; scroller.dispatchEvent(new Event('scroll')) },
+    }
+  }
+
+  /**
+   * #243 改写（原 #212 S3b「冷开时按窗口渐进挂载（尾部优先），逐帧扩满」）：
+   * 长会话的窗口语义从「尾部只增」改为「视口窗口」——冷开只物化尾部一个有界窗
+   * （视口 + overscan，「尾部优先」由上层贴底姿态把 scrollTop 钉到底部实现），
+   * 其余行是等高占位盒；不再有「逐帧扩满」——DOM 规模从此不随历史行数增长。
+   * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
+   */
+  it('#243：冷开长会话只物化尾部有界窗，其余为占位盒；窗口随滚动步进（D2）', async () => {
+    const { port, ids, jumpTo } = mountVirtualizedList()
     const hundred = createMessageListItems(Array.from({ length: 100 }, (_, index) => descriptor({
       id: `m${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
     })))
@@ -296,14 +325,12 @@ describe('PlainMessageList', () => {
     // 物化行有界（≤ 视口 + 2×overscan），窗外行不驻留 DOM
     expect(ids().length).toBeLessThanOrEqual(24)
     // 上层贴底姿态钉住 scrollTop ⇒ 尾部行在窗内
-    scrollTop = 99999
-    scroller.dispatchEvent(new Event('scroll'))
+    jumpTo(99999)
     await waitFor(() => expect(ids()).toContain('m99'))
     expect(ids().length).toBeLessThanOrEqual(24)
 
     // 滚到中部：窗口随视口步进（增量回卷 = 窗随滚动逐行扩出历史），物化行仍有界
-    scrollTop = 3000
-    scroller.dispatchEvent(new Event('scroll'))
+    jumpTo(3000)
     await waitFor(() => expect(ids()).toContain('m40'))
     expect(ids().length).toBeLessThanOrEqual(24)
   })
@@ -326,10 +353,6 @@ describe('PlainMessageList', () => {
     ])
     port.setItems([...ITEMS, three[0]!])
     expect(ids()).toEqual(['m1', 'm2', 'm3'])
-  })
-
-  const rectOf = (top: number, bottom: number) => ({
-    top, bottom, left: 0, right: 100, width: 100, height: bottom - top, x: 0, y: top, toJSON() {},
   })
 
   /** 真实滚动容器：坐标基准必须是 scroller，不是列表容器（审核 M2）。 */
@@ -418,29 +441,14 @@ describe('PlainMessageList', () => {
    * 改写理由逐条登记于 .agents/records/243-long-session-row-virtualization.md。
    */
   it('#243：换代把窗口收敛到新会话尾部，不按旧会话规模扩满', async () => {
-    let port!: MessageListPort
-    const scroller = document.createElement('div')
-    document.body.append(scroller)
-    let scrollTop = 0
-    Object.defineProperty(scroller, 'offsetHeight', { value: 300, configurable: true })
-    Object.defineProperty(scroller, 'scrollTop', {
-      get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
-    })
-    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 300, left: 0, right: 100, width: 100, height: 300, x: 0, y: 0, toJSON() {} })
-    const result = render(() => (
-      <PlainMessageList
-        initialItems={[]} virtualization="on" scrollViewport={() => scroller}
-        onPortReady={value => { port = value }} renderItem={item => item.key}
-      />
-    ), { container: scroller })
-    const ids = () => [...result.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))
+    const { port, ids, jumpTo } = mountVirtualizedList()
     const mk = (count: number, prefix: string) => createMessageListItems(Array.from({ length: count }, (_, index) => descriptor({
       id: `${prefix}${index}`, role: 'assistant', sender: 'agent', content: `row ${index}`, time: '10:00',
     })))
     port.setItems(mk(100, 'a'))
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
-    scrollTop = 99999
-    scroller.dispatchEvent(new Event('scroll'))
+    // 上层贴底姿态钉住 scrollTop ⇒ 尾部行在窗内
+    jumpTo(99999)
     await waitFor(() => expect(ids()).toContain('a99'))
 
     // 同一 流 内换到更长的会话：窗口必须收敛到新会话尾部附近的有界窗

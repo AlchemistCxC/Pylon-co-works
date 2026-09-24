@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, waitFor } from '@solidjs/testing-library'
+import type { JSX } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
@@ -41,7 +42,21 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** 视口 300px、scrollTop 可写的真实滚动容器（引擎的坐标基准）。 */
+const rectOf = (top: number, bottom: number) => ({
+  top, bottom, left: 0, right: 100, width: 100, height: bottom - top, x: 0, y: top, toJSON() {},
+})
+
+/**
+ * 视口 300px、scrollTop 可写的真实滚动容器（引擎的坐标基准）。
+ *
+ * `mountList` 是**唯一入口**：它渲染进视口后立刻给列表容器接上**忠实的滚动矩形**
+ * （视口盒不动、容器随滚动上移 `scrollTop`），使组件的 scrollMargin 实测式
+ * `container.top − viewport.top + scrollTop` 恒等于「列表在滚动内容流里的偏移」（此处 0）。
+ * 若容器退回 jsdom 的零矩形（常量、不含 scrollTop），该式退化成 `scrollTop`——上层钉底时
+ * 恰好等于"视口在列表开头"，按帧批处理的几何重测一旦跑在断言之前就会把窗口算到列表开头
+ * （#301：窗外尾行永不物化、用例时红时绿）。接在挂载里而不是逐个用例手动调用，是为了让
+ * "忘记接几何"不可能发生。
+ */
 function mountScroller() {
   const scroller = document.createElement('div')
   document.body.append(scroller)
@@ -50,7 +65,7 @@ function mountScroller() {
     Object.defineProperty(scroller, 'scrollTop', {
     get: () => scrollTop, set: (value: number) => { scrollTop = value }, configurable: true,
   })
-  scroller.getBoundingClientRect = () => ({ top: 0, bottom: 300, left: 0, right: 100, width: 100, height: 300, x: 0, y: 0, toJSON() {} })
+  scroller.getBoundingClientRect = () => rectOf(0, 300)
   // jsdom 无布局：引擎的 getMaxScrollOffset = scrollHeight - clientHeight，缺桩会把
   // scrollToIndex 的目标偏移钳制到 0
   Object.defineProperty(scroller, 'scrollHeight', { value: 100_000, configurable: true })
@@ -66,6 +81,14 @@ function mountScroller() {
       scrollTop = value
       scroller.dispatchEvent(new Event('scroll'))
     },
+    mountList: (view: () => JSX.Element) => {
+      const result = render(view, { container: scroller })
+      const listRoot = scroller.querySelector<HTMLElement>('[data-message-list="plain"]')
+      // 缺了列表容器就接不上几何、夹具会退回"撒谎"状态 —— 直接响，不静默跳过
+      if (!listRoot) throw new Error('mountList 只用于挂载 PlainMessageList：未找到 [data-message-list="plain"]')
+      listRoot.getBoundingClientRect = () => rectOf(-scroller.scrollTop, 300 - scroller.scrollTop)
+      return result
+    },
   }
 }
 
@@ -80,14 +103,14 @@ const MATERIALIZED_BOUND = 24
 
 describe('PlainMessageList #243 行虚拟化', () => {
   it('验收：1000 行会话下物化行 ≤ 视口 + overscan，其余行为占位盒', async () => {
-    const { scroller, jumpTo } = mountScroller()
+    const { scroller, jumpTo, mountList } = mountScroller()
     let port!: MessageListPort
-    const result = render(() => (
+    const result = mountList(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }} renderItem={item => item.key}
       />
-    ), { container: scroller })
+    ))
     const ids = () => result.container.querySelectorAll('[data-message-id]')
     port.setItems(makeItems('m', 1000, 'row'))
     await waitFor(() => expect(ids().length).toBeGreaterThan(0))
@@ -101,14 +124,14 @@ describe('PlainMessageList #243 行虚拟化', () => {
   })
 
   it('窗外行不驻留 DOM，几何由容器 spacer 承载；滚回即重物化', async () => {
-    const { scroller, jumpTo } = mountScroller()
+    const { scroller, jumpTo, mountList } = mountScroller()
     let port!: MessageListPort
-    const result = render(() => (
+    const result = mountList(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }} renderItem={item => item.key}
       />
-    ), { container: scroller })
+    ))
     port.setItems(makeItems('m', 500, 'row'))
     await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
 
@@ -128,19 +151,19 @@ describe('PlainMessageList #243 行虚拟化', () => {
   it('D3 双阈值（取「与」）：行多字少不启用；行多字多自动启用', async () => {
     const lightScroller = mountScroller()
     // 300 行 × ~7 字符 = 远低于 100k 字符门槛 ⇒ 不启用（legacy 整挂路径）
-    const light = render(() => (
+    const light = lightScroller.mountList(() => (
       <PlainMessageList initialItems={makeItems('a', 300, 'row')} virtualization="auto"
         scrollViewport={() => lightScroller.scroller} renderItem={item => item.key} />
-    ), { container: lightScroller.scroller })
+    ))
     expect(light.container.querySelectorAll('[data-row-placeholder]')).toHaveLength(0)
     expect(light.container.querySelectorAll('[data-message-id]')).toHaveLength(300)
 
     // 300 行 × 420 字符 ≈ 126k 字符 ≥ 门槛 ⇒ 自动启用
     const heavyScroller = mountScroller()
-    const heavy = render(() => (
+    const heavy = heavyScroller.mountList(() => (
       <PlainMessageList initialItems={makeItems('b', 300, 'x'.repeat(420))} virtualization="auto"
         scrollViewport={() => heavyScroller.scroller} renderItem={item => item.key} />
-    ), { container: heavyScroller.scroller })
+    ))
     await waitFor(() => expect(heavy.container.querySelectorAll('[data-message-id]').length).toBeLessThanOrEqual(MATERIALIZED_BOUND))
     expect(Number(heavy.container.querySelectorAll('[data-message-id]').length)).toBeGreaterThan(0)
   })
@@ -160,14 +183,14 @@ describe('PlainMessageList #243 行虚拟化', () => {
   })
 
   it('scrollTo 命中占位区：只物化目标附近（不再全开），返回 true', async () => {
-    const { scroller } = mountScroller()
+    const { scroller, mountList } = mountScroller()
     let port!: MessageListPort
-    const result = render(() => (
+    const result = mountList(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }} renderItem={item => item.key}
       />
-    ), { container: scroller })
+    ))
     port.setItems(makeItems('m', 1000, 'row'))
     await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
 
@@ -179,15 +202,15 @@ describe('PlainMessageList #243 行虚拟化', () => {
   })
 
   it('虚拟化下持续物化的行跨 setItems 保持 DOM 身份（P57 S2-R3 不因虚拟化松动）', async () => {
-    const { scroller } = mountScroller()
+    const { scroller, mountList } = mountScroller()
     let port!: MessageListPort
-    const result = render(() => (
+    const result = mountList(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }}
         renderItem={item => <span>{item.descriptor.renderMessage.message.content}</span>}
       />
-    ), { container: scroller })
+    ))
     port.setItems(makeItems('m', 500, 'row'))
     await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
 
@@ -215,15 +238,15 @@ describe('PlainMessageList #243 行虚拟化', () => {
     const proto = HTMLElement.prototype
     Object.defineProperty(proto, 'offsetHeight', { get: () => 76, configurable: true })
     try {
-      const { scroller, readScrollTop, jumpTo } = mountScroller()
+      const { scroller, readScrollTop, jumpTo, mountList } = mountScroller()
       let port!: MessageListPort
-      const result = render(() => (
+      const result = mountList(() => (
         <PlainMessageList
           initialItems={[]} virtualization="on" scrollViewport={() => scroller}
           scrollPosture={() => 'pin'}
           onPortReady={value => { port = value }} renderItem={item => item.key}
         />
-      ), { container: scroller })
+      ))
       port.setItems(makeItems('m', 200, 'row'))
       await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
 
@@ -244,12 +267,12 @@ describe('PlainMessageList #243 行虚拟化', () => {
 
   it('#243 切片4：行卸载后再挂载不重解析（markdown LRU 计数证明，D7 改口径②）', async () => {
     clearMarkdownRenderModelCache()
-    const { scroller, jumpTo } = mountScroller()
+    const { scroller, jumpTo, mountList } = mountScroller()
     let port!: MessageListPort
     // 全部行共享同一 markdown 串 ⇒ LRU 里只有一条目：任何重挂载若走解析即计 parsed+1，
     // 走缓存即计 cacheHits+1——往返一趟后 parsed 零增长就是「不重解析」的计数证明。
     const mdContent = '# 共享标题\n\n共享正文段落'
-    const result = render(() => (
+    const result = mountList(() => (
       <PlainMessageList
         initialItems={[]} virtualization="on" scrollViewport={() => scroller}
         onPortReady={value => { port = value }}
@@ -258,7 +281,7 @@ describe('PlainMessageList #243 行虚拟化', () => {
           return <span>{item.descriptor.renderMessage.message.id}</span>
         }}
       />
-    ), { container: scroller })
+    ))
     port.setItems(makeItems('m', 500, 'row'))
     await waitFor(() => expect(result.container.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0))
     // 等首解析落地
