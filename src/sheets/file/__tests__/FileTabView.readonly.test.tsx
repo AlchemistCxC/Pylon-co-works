@@ -57,7 +57,9 @@ describe('FileTabView 只读代码反馈缝', () => {
     invoke.mockResolvedValue({ invalid: true })
     render(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} />)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('文件读取失败')
+    // #279 登记改写：Solid 桥下 loading 态（同为 role=status）先于错误微任务落 DOM，
+    // findByRole 首轮轮询会捕获瞬态 loading——改 waitFor 轮询至错误态呈现，断言语义不变。
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('文件读取失败'))
     expect(document.querySelector('.file-tab-code')).toBeNull()
   })
 })

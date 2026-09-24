@@ -265,9 +265,14 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
 // ── token 卫生（issue #281）──────────────────────────────────────────────────
 describe('FileSheet token hygiene (issue #281)', () => {
   const INDEX_CSS_PATH = 'src/index.css'
-  const EDITOR_TS_PATH = 'src/sheets/file/FileCodeEditor.tsx'
+  // 编辑态有两个同构实现（React 版与 #279 第 2 梯队的 Solid 版），产物渲染的是 Solid 版；
+  // 只查 React 版会给出假绿（PR #312 合入 main 时实测：main 的 #281 兜底修正曾只落在 React 版）。
+  const EDITOR_TS_PATHS = [
+    'src/sheets/file/FileCodeEditor.tsx',
+    'src/sheets/file/FileCodeEditor.solid.tsx',
+  ]
   const indexCss = readFileSync(INDEX_CSS_PATH, 'utf8')
-  const editorTs = readFileSync(EDITOR_TS_PATH, 'utf8')
+  const editorTrees = EDITOR_TS_PATHS.map(path => readFileSync(path, 'utf8'))
 
   const schemeBlocksOf = (source: string): readonly string[] => {
     const blocks: string[] = []
@@ -287,12 +292,12 @@ describe('FileSheet token hygiene (issue #281)', () => {
 
   it('keeps --syn-cmt/--syn-mh fallbacks identical across CSS and HighlightStyle', () => {
     // themeFieldDefs 的 default 是唯一真源（--syn-cmt/--syn-mh 均为 #65737e）。
-    // 只读投影（FileSheet.css 的 pl-* 类）与编辑态 HighlightStyle（FileCodeEditor.tsx）
+    // 只读投影（FileSheet.css 的 pl-* 类）与编辑态 HighlightStyle（两个编辑器实现）
     // 的 fallback 字面量必须逐个一致，否则主题未发射该 var 时两态颜色漂移。
     const collect = (source: string, name: string): string[] =>
       [...source.matchAll(new RegExp(`var\\(--${name},\\s*([^)]+)\\)`, 'g'))].map(m => m[1]!.trim())
     for (const name of ['syn-cmt', 'syn-mh']) {
-      const fallbacks = [...collect(css, name), ...collect(editorTs, name)]
+      const fallbacks = [...collect(css, name), ...editorTrees.flatMap(tree => collect(tree, name))]
       expect(fallbacks.length, `${name} 应存在带兜底的消费点`).toBeGreaterThan(0)
       const drifted = fallbacks.filter(value => value !== '#65737e')
       expect(drifted, `${name} 兜底色漂移：${drifted.join(', ')}`).toEqual([])

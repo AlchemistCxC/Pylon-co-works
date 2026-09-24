@@ -41,7 +41,7 @@ function renderSearch(ctx: SheetContext): void {
 
 async function searchAndClick(query: string, ctx: SheetContext): Promise<void> {
   renderSearch(ctx)
-  fireEvent.change(screen.getByLabelText('跨会话搜索'), { target: { value: query } })
+  fireEvent.input(screen.getByLabelText('跨会话搜索'), { target: { value: query } })
   await screen.findByText(/需要定位的消息 hello world/)
   fireEvent.click(screen.getByRole('button', { name: /需要定位的消息 hello world/ }))
 }

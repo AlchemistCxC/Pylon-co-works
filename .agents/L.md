@@ -808,6 +808,18 @@
 
 ---
 
+[2026-09-24 11] [Miyaki Kumo] [#279]
+
+**开工:issue279(前端 shell 逐梯队 Solid 化第 0~3 梯队,ADR-0023)。隔离工作树 `D:/pylon-solidify-wt`,分支 `kumo/solidify`(基于 78a75a36，施工期已合入 `github/main` @30d8fe3a 解 PR #312 冲突，文件域不变)——共享树不受影响,本条目随分支提交。** 文件域(请勿在共享树改写以下路径):
+
+- 删除:`src/components/chat/` 孤儿(MessageRenderBoundary/CollapsibleRegion/MessageSearchBar/SpinnerGlimpse/useToolConnectors 等,逐个核实零消费者)
+- 新增/改写:`src/sheets/**`(.solid.tsx 实体 + 薄桥)、`src/sheets/SolidMount.tsx`、`src/workspace-sheets/**`(第 3 梯队 chrome)、`vite.config.ts`/`vitest.config.ts`(solid 编译模式扩展)、`.agents/{decisions,records,spec}/279*`
+- 文档:`docs/说明书/` 如涉模块表述同步
+
+**我不碰**:`src/renderers/solid-workbench/**`、`src-tauri/**`、插件契约、sheet 注册表契约、中控区、预设系统、他人在途域。全程 pathspec 提交。
+
+---
+
 [2026-09-24 20] [Miyaki Kumo] [#304 · ACP 中控状态收敛·收尾]
 
 **收尾：接管 #304（承接 #266 CC-26）已在工作树中的未提交改动**——实现与测试已成体（当时门禁全绿），缺程序性收尾与残留收敛。spec 见 `.agents/spec/304-acp-session-controls.md`。分支沿用 `kumo/prometheus`。用户明确本次**不做实机验收**。
