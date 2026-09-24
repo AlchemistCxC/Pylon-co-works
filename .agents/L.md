@@ -830,3 +830,19 @@
 **我不碰**：`PlainMessageList.solid.tsx` 与 `rowHeightTable.ts`/`rowHeightEstimate.ts`（产品逻辑零改动）、`@tanstack/*` 依赖、`messageListPort.ts` 契约、中控区、预设系统、`src-tauri/**`、他人在途域（#304 收尾域、AgentSheet 视觉域）。
 
 **顺带清理（issue #301 点名）**：本文件里 #212+#213、#243 两条**已合入**的旧条目按「只留在途」摘除（对应 issue 均已 CLOSED）。全程 pathspec 提交。
+
+---
+
+[2026-09-24 23] [Miyaki Kumo] [#306]
+
+**开工：修 issue306（权限弹窗面板背景越界引用 `--settings-surface` 致面板全透明、聊天正文穿透；连带给发相同缺陷的会话接管恢复弹窗）。** 分支沿用 `kumo/prometheus`。用户已定：遮罩**不加全屏模糊**。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- `src/components/PermissionDialog.tsx`、`src/components/SessionOwnerRecoveryDialog.tsx`（各仅动样式常量）
+- `src/components/__tests__/PermissionDialog.test.tsx`（仅在需要钉住新契约时）
+- 文档：`.agents/records/306-*.md`（完工时新增）、本文件、issue #306 回写
+
+**我不碰**：`src/renderers/solid-workbench/**`（尤其 #301 在途的两个虚拟化测试文件与 `PlainMessageList.solid.tsx`）、`src/plugins/**` 首方 CSS 与插件运行时、`src-tauri/**`、插件外观接口（本轮只出比较建议，未裁断前不动代码）、他人在途域（#301、AgentSheet 视觉域）。全程 pathspec 提交。
+
+**共享树状况（§2.1 报备）**：工作树存在 **#301 的未提交在途改动**（两个虚拟化测试文件，本分支自己已声明的 WIP）。我未 abort、未 stage、未触碰该文件域；本条目与后续改动一律以 pathspec 提交，不会连带其内容。
