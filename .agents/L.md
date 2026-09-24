@@ -733,5 +733,7 @@
 
 **我不碰**：`src/zones/**`（⑦ 域）、`src/presets/**`、`ControlCenter.css`、`src/components/Settings.tsx`、`src/sheets/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
 
+**✅ 进展（本地完工，未 push 未开 PR）**：三样行级显隐申明 + 类型/条件表/常态放行名单已删净，空态名单改字面量，新增 `resolveCcHiddenWidgetIds` 一处组装（渲染侧与 8 处计数调用点共用），删恒真废过滤器 `passesStatusGate`，谓词收口。门禁五步全绿、全量 **632 文件 / 4799 用例连跑 3 次**；等价表逐行 diff（唯一变化 = 命令行提示在标准输入模式下默认显示）；新增守卫 `ccVisibilityDeclarationGuard.test.ts` 反向验证两次均红；实机五档数值 + 空容器/空态 84px 不变 + 控制台零报错，App 已关。记录 `.agents/records/266-cc-visibility-as-value.md`；#266 已回写。★ **本条目保留至合入**。
+
 ---
 
