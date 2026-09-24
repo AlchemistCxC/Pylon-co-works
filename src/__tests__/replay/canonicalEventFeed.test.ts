@@ -155,6 +155,24 @@ describe('canonicalEventFeed（P52 D2）', () => {
     expect(handler).toBeDefined()
   })
 
+  it('#310：pylon:update 广播兜底把助手正文帧送进 plugin bus（未注册 Channel 的发送路径）', async () => {
+    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const handler = listeners.get('pylon:update')
+    expect(handler).toBeDefined()
+    // 已 seed 到 2：sequence 3 不是 gap，走正常 publish 路径
+    feed.seed(`["p1","peri","${SOURCE}"]`, 2)
+    const published: CanonicalEventRow[] = []
+    subscribePluginEvents(event => { published.push(event as CanonicalEventRow) })
+
+    // 后端对未注册 per-source Channel 的来源改走窗口广播（与 Channel 互斥）：
+    // 这一帧此前没有任何订阅者，实时投影整段收不到助手正文。
+    handler!({ source: SOURCE, canonicalEvent: canonicalEvent(3, 'assistant.text.delta', 'a') })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(published.map(event => event.sequence)).toEqual([3])
+  })
+
   it('discard 与 seed 委托 cursor（seed 只增）', async () => {
     const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
     feed.seed(`["p1","peri","${SOURCE}"]`, 5)
