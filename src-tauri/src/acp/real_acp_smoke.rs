@@ -135,11 +135,11 @@ async fn real_agent_prompt_round_trip() {
     .await;
     match outcome {
         crate::acp::PromptWaitOutcome::Response(raw) => {
-            let stop = crate::acp::prompt_stop_reason(
+            let stop = crate::acp::prompt_stop_outcome(
                 raw.result.as_ref().expect("prompt 响应必须有 result"),
             )
             .expect("stopReason 必须合法");
-            tracing::info!("真实 agent prompt -> stopReason={stop}");
+            tracing::info!("真实 agent prompt -> stopOutcome={stop:?}");
         }
         other => panic!("真实 agent prompt 未正常结算: {other:?}"),
     }
@@ -227,11 +227,11 @@ async fn hermes_configured_profile_real_prompt_round_trip() {
     .await;
     match outcome {
         crate::acp::PromptWaitOutcome::Response(raw) => {
-            let stop = crate::acp::prompt_stop_reason(
+            let stop = crate::acp::prompt_stop_outcome(
                 raw.result.as_ref().expect("prompt 响应必须有 result"),
             )
             .expect("stopReason 必须合法");
-            tracing::info!("Hermes prompt -> stopReason={stop}");
+            tracing::info!("Hermes prompt -> stopOutcome={stop:?}");
         }
         other => panic!("Hermes prompt 未正常结算: {other:?}"),
     }

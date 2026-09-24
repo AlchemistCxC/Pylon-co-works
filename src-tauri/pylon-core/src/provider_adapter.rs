@@ -171,12 +171,18 @@ mod tests {
         );
 
         // 无 provider：只有 Pylon 默认 caps，不含任何 provider 声明。
+        // （peri.agentEvent/agentEventDone/unstableEvent/prediction 为 Peri
+        // 扩展通知通道声明，2026-09 加入默认 caps。）
         let default_caps = serde_json::json!({
             "tokenStats": true,
             "_meta": {
                 "peri.tokenStats": true,
                 "peri.skillNames": true,
-                "peri.replay": true
+                "peri.replay": true,
+                "peri.agentEvent": true,
+                "peri.agentEventDone": true,
+                "peri.unstableEvent": true,
+                "peri.prediction": true
             }
         });
         assert_eq!(
@@ -202,6 +208,10 @@ mod tests {
                     "peri.tokenStats": true,
                     "peri.skillNames": true,
                     "peri.replay": true,
+                    "peri.agentEvent": true,
+                    "peri.agentEventDone": true,
+                    "peri.unstableEvent": true,
+                    "peri.prediction": true,
                     "subagent-transcript": true,
                     "jetbrains.air": {
                         "version": 1,

@@ -570,10 +570,14 @@ fn protocol_defaults_match_current_behavior() {
             "_meta": {
                 "peri.tokenStats": true,
                 "peri.skillNames": true,
-                "peri.replay": true
+                "peri.replay": true,
+                "peri.agentEvent": true,
+                "peri.agentEventDone": true,
+                "peri.unstableEvent": true,
+                "peri.prediction": true
             }
         }),
-        "默认 caps = 现值（tokenStats + _meta.peri.*）"
+        "默认 caps = 现值（tokenStats + _meta.peri.*，含 Peri 扩展通知通道）"
     );
     assert_eq!(
         protocol.client_info(),

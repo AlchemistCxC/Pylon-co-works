@@ -34,11 +34,8 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
         let Some(update) = message.get("update") else {
             continue;
         };
-        // R4：sessionUpdate 变体经枚举解析（wire 字符串契约不变）。
-        let variant = update
-            .get("sessionUpdate")
-            .and_then(|value| value.as_str())
-            .and_then(crate::acp::SessionUpdateVariant::from_str);
+        // R4→#316：变体经官方 schema typed-first 分类（fallback 宽容别名不变）。
+        let variant = crate::acp::classify_session_update(update);
         match variant {
             Some(crate::acp::SessionUpdateVariant::UserMessageChunk) => {
                 if let Some(text) = update

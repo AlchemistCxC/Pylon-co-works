@@ -887,6 +887,13 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
             let _ = runtime
                 .interactions
                 .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
+            // #316：私有交互（elicitation/ask-user）同批收敛——崩溃后 store 残留
+            // 条目会在 interaction_list 里悬挂到下次 generation 替换。
+            let stale_private = runtime.private_interactions.snapshot().len();
+            if stale_private > 0 {
+                tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
+            }
+            runtime.private_interactions.cancel_all();
             continue;
         }
         let expired: Vec<(RequestId, String, String, u64, Vec<PermissionOption>)> = runtime

@@ -20,6 +20,7 @@ use crate::session::{
 };
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
+use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
 
 mod routing;
 
@@ -350,7 +351,7 @@ async fn reject_interaction_request<R: tauri::Runtime>(
     request_id: Option<crate::acp::RequestId>,
     params: Option<&serde_json::Value>,
     reason_code: &str,
-    rpc_code: i64,
+    rpc_code: WireErrorCode,
     message: &str,
 ) {
     let request_id_text = request_id.as_ref().map(ToString::to_string);
@@ -417,15 +418,28 @@ async fn handle_terminal_request(
                 .and_then(serde_json::Value::as_str)
             {
                 Some(command) => command,
-                None => return {
-                    let responder = { acp.lock().await.responder() };
-                    let _ = responder.respond_error(request_id, -32602, "terminal/create requires command").await;
-                },
+                None => {
+                    return {
+                        let responder = { acp.lock().await.responder() };
+                        let _ = responder
+                            .respond_error(
+                                request_id,
+                                WireErrorCode::InvalidParams,
+                                "terminal/create requires command",
+                            )
+                            .await;
+                    }
+                }
             };
             let args = object
                 .and_then(|p| p.get("args"))
                 .and_then(serde_json::Value::as_array)
-                .map(|args| args.iter().filter_map(serde_json::Value::as_str).map(str::to_owned).collect::<Vec<_>>())
+                .map(|args| {
+                    args.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default();
             let line = shell_words::join(std::iter::once(command.to_owned()).chain(args));
             let cwd = object
@@ -439,36 +453,72 @@ async fn handle_terminal_request(
             registry
                 .create_shell(session_id.to_owned(), None, &line, cwd, limit)
                 .await
-                .map(|terminal_id| serde_json::json!({"terminalId": terminal_id}))
+                .and_then(|terminal_id| {
+                    // #316：响应由官方 Response 类型构造（wire 与手写 json!
+                    // 逐字节一致）。序列化失败显式入 Err 走 -32602 应答路径，
+                    // 不静默回 null（#316 审查 P2-1）。
+                    serde_json::to_value(
+                        agent_client_protocol_schema::v1::CreateTerminalResponse::new(terminal_id),
+                    )
+                    .map_err(|error| format!("serialize terminal/create response: {error}"))
+                })
         }
         "terminal/output" => registry
             .snapshot(
-                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                object
+                    .and_then(|p| p.get("terminalId"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
                 session_id,
             )
             .await
-            .map(|snapshot| serde_json::json!({"output": snapshot.output, "truncated": snapshot.truncated})),
+            .and_then(|snapshot| {
+                serde_json::to_value(
+                    agent_client_protocol_schema::v1::TerminalOutputResponse::new(
+                        snapshot.output,
+                        snapshot.truncated,
+                    ),
+                )
+                .map_err(|error| format!("serialize terminal/output response: {error}"))
+            }),
         "terminal/wait_for_exit" | "terminal/waitForExit" => registry
             .wait_for_exit(
-                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                object
+                    .and_then(|p| p.get("terminalId"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
                 session_id,
             )
             .await
             .map(|status| serde_json::json!({"exitStatus": status})),
         "terminal/kill" => registry
             .kill(
-                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                object
+                    .and_then(|p| p.get("terminalId"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
                 session_id,
             )
             .await
-            .map(|_| serde_json::json!({})),
+            .and_then(|_| {
+                serde_json::to_value(agent_client_protocol_schema::v1::KillTerminalResponse::new())
+                    .map_err(|error| format!("serialize terminal/kill response: {error}"))
+            }),
         "terminal/release" => registry
             .release(
-                object.and_then(|p| p.get("terminalId")).and_then(serde_json::Value::as_str).unwrap_or(""),
+                object
+                    .and_then(|p| p.get("terminalId"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
                 session_id,
             )
             .await
-            .map(|_| serde_json::json!({})),
+            .and_then(|_| {
+                serde_json::to_value(
+                    agent_client_protocol_schema::v1::ReleaseTerminalResponse::new(),
+                )
+                .map_err(|error| format!("serialize terminal/release response: {error}"))
+            }),
         _ => Err("unsupported terminal method".to_string()),
     };
     match result {
@@ -478,7 +528,9 @@ async fn handle_terminal_request(
         }
         Err(error) => {
             let responder = { acp.lock().await.responder() };
-            let _ = responder.respond_error(request_id, -32602, &error).await;
+            let _ = responder
+                .respond_error(request_id, WireErrorCode::InvalidParams, &error)
+                .await;
         }
     }
 }
@@ -500,7 +552,12 @@ async fn handle_filesystem_request(
                 Some(path) => runtime
                     .read_text_file(std::path::Path::new(path))
                     .await
-                    .map(|content| serde_json::json!({"content": content})),
+                    .and_then(|content| {
+                        serde_json::to_value(
+                            agent_client_protocol_schema::v1::ReadTextFileResponse::new(content),
+                        )
+                        .map_err(|error| format!("serialize fs/read_text_file response: {error}"))
+                    }),
                 None => Err("fs/read_text_file requires path".to_string()),
             }
         }
@@ -516,7 +573,12 @@ async fn handle_filesystem_request(
                 (Some(path), Some(content)) => runtime
                     .write_text_file(std::path::Path::new(path), content)
                     .await
-                    .map(|_| serde_json::json!({})),
+                    .and_then(|_| {
+                        serde_json::to_value(
+                            agent_client_protocol_schema::v1::WriteTextFileResponse::new(),
+                        )
+                        .map_err(|error| format!("serialize fs/write_text_file response: {error}"))
+                    }),
                 (None, _) => Err("fs/write_text_file requires path".to_string()),
                 (_, None) => Err("fs/write_text_file requires content".to_string()),
             }
@@ -529,7 +591,9 @@ async fn handle_filesystem_request(
             let _ = responder.respond(request_id, value).await;
         }
         Err(error) => {
-            let _ = responder.respond_error(request_id, -32602, &error).await;
+            let _ = responder
+                .respond_error(request_id, WireErrorCode::InvalidParams, &error)
+                .await;
         }
     }
 }
@@ -582,7 +646,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
             Some(request_id),
             params,
             "method_unsupported",
-            -32601,
+            WireErrorCode::MethodNotFound,
             &format!(
                 "interaction method unsupported: {}",
                 method.unwrap_or("<missing>")
@@ -601,7 +665,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
             Some(request_id),
             params,
             "method_unsupported",
-            -32601,
+            WireErrorCode::MethodNotFound,
             &format!(
                 "interaction method unsupported: {}",
                 method.unwrap_or("<missing>")
@@ -630,7 +694,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
             Some(request_id),
             params,
             "invalid_params",
-            -32602,
+            WireErrorCode::InvalidParams,
             // Keep the stable diagnostic phrase used by the OBS-03 evidence
             // surface while retaining the machine-readable invalid_params
             // reason code and JSON-RPC -32602 response above.
@@ -847,7 +911,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
                 Some(request_id),
                 params,
                 "invalid_options",
-                -32602,
+                WireErrorCode::InvalidParams,
                 "invalid params: permission request options 为空",
             )
             .await;
@@ -1252,11 +1316,10 @@ async fn handle_session_update<R: tauri::Runtime>(
         tracing::warn!("ACP session/update missing update payload");
         return true;
     };
-    // R4：sessionUpdate 变体经枚举解析（未知变体 → None，与旧 _ => {} 忽略一致）。
-    let variant = update
-        .get("sessionUpdate")
-        .and_then(|v| v.as_str())
-        .and_then(crate::acp::SessionUpdateVariant::from_str);
+    // R4→#316：sessionUpdate 变体经官方 schema typed-first 分类
+    // （classify_session_update；解析失败落 from_str 宽容别名，未知 → None，
+    // 与旧 `_ => {}` 忽略一致）。
+    let variant = crate::acp::classify_session_update(update);
     // Replay/live is decided once at the transport boundary and passed through
     // the Kernel seam. Provider `_meta.periReplay` is compatibility metadata,
     // never an authority for side-effect policy.
@@ -1344,8 +1407,11 @@ async fn handle_session_update<R: tauri::Runtime>(
                 &peri_id,
                 generation,
                 ingress_seq,
-                effects.text.is_some(),
-                false,
+                crate::acp::ActivityFlags {
+                    saw_text: effects.text.is_some(),
+                    saw_tool: false,
+                    saw_thinking: false,
+                },
             );
             if effects.first_chunk {
                 pet_events.push(PetEvent::FirstChunk);
@@ -1410,8 +1476,27 @@ async fn handle_session_update<R: tauri::Runtime>(
                     &peri_id,
                     generation,
                     ingress_seq,
-                    false,
-                    true,
+                    crate::acp::ActivityFlags {
+                        saw_text: false,
+                        saw_tool: true,
+                        saw_thinking: false,
+                    },
+                );
+            }
+            // #316：live 思考流喂账本 saw_thinking——thinking-only 回合
+            // （长推理无正文无工具）empty-turn 判定算有产出，不再误报
+            // agent-empty。思考文本本身不进 collect（与旧行为一致）。
+            if !is_replay && variant == Some(crate::acp::SessionUpdateVariant::AgentThoughtChunk) {
+                let _ = turn_ledger.note_session_activity(
+                    &source,
+                    &peri_id,
+                    generation,
+                    ingress_seq,
+                    crate::acp::ActivityFlags {
+                        saw_text: false,
+                        saw_tool: false,
+                        saw_thinking: true,
+                    },
                 );
             }
             pet_events.extend(apply_update_event_routed(
@@ -2084,6 +2169,74 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 handle_crash(reason).await;
                 continue;
             }
+            // #316：elicitation/complete —— URL 模式外带交互完成通知（form 模式
+            // 同步应答不产生本通知）。官方契约：客户端忽略未知/已完成 id。当前
+            // 只做两件事：可观测日志 + 收敛匹配中的 pending elicitation 卡
+            // （URL 模式 UI 本期不做，但队列里的挂起条目必须能被终态）。
+            if raw.kind == crate::acp::AcpKind::ElicitationComplete {
+                let note = raw.params.as_ref().and_then(|params| {
+                    serde_json::from_value::<
+                        agent_client_protocol_schema::v1::CompleteElicitationNotification,
+                    >(params.clone())
+                    .ok()
+                });
+                let Some(note) = note else {
+                    tracing::debug!("elicitation/complete unparseable; ignoring per spec");
+                    continue;
+                };
+                let elicitation_id: &str = note.elicitation_id.0.as_ref();
+                let Some(runtime) = runtimes.get(&agent_id) else {
+                    tracing::debug!(elicitation_id, "elicitation/complete: no runtime; ignored");
+                    continue;
+                };
+                {
+                    let matched =
+                        runtime
+                            .private_interactions
+                            .snapshot()
+                            .into_iter()
+                            .find(|(_, pending)| {
+                                pending.method == "elicitation/create"
+                                    && pending.params.get("elicitationId").and_then(|v| v.as_str())
+                                        == Some(elicitation_id)
+                            });
+                    if let Some((request_id, pending)) = matched {
+                        // P2-2（#316 审查）：take 成功（Some）才 settle+emit——
+                        // 并发 respond_interaction 抢先收口时不再发 spurious 事件。
+                        if runtime
+                            .private_interactions
+                            .take(&request_id)
+                            .map(|taken| taken.is_some())
+                            .unwrap_or(false)
+                        {
+                            let request_id_text = request_id.to_string();
+                            let _ = runtime.interactions.settle(
+                                &request_id_text,
+                                crate::acp::interaction_queue::InteractionTerminalReason::Answered,
+                            );
+                            emit_event(
+                                &window,
+                                crate::event_names::INTERACTION,
+                                serde_json::json!({
+                                    "eventType": "interaction.resolved",
+                                    "agentId": agent_id,
+                                    "sessionId": pending.session_id,
+                                    "requestId": request_id_text,
+                                    "clientGeneration": pending.client_generation,
+                                    "kind": "elicitation",
+                                    "reason": "completed",
+                                }),
+                            );
+                        }
+                    } else {
+                        tracing::debug!(
+                            elicitation_id,
+                            "elicitation/complete for unknown id; ignored per spec"
+                        );
+                    }
+                }
+                continue;
+            }
             // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
             // ACP-01：id 为原始 variant（number/string）——string-id agent 请求不再丢弃。
             if raw.kind == crate::acp::AcpKind::PermissionRequest {
@@ -2127,7 +2280,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         None,
                         raw.params.as_ref(),
                         "missing_request_id",
-                        -32600,
+                        WireErrorCode::InvalidRequest,
                         "invalid request: interaction request requires a JSON-RPC id",
                     )
                     .await;
@@ -2147,7 +2300,8 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     if host_tools_policy
                         .lock()
                         .map(|policy| {
-                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                            policy
+                                .allows_terminal_request(raw.method.as_deref().unwrap_or_default())
                         })
                         .unwrap_or(false)
                     {
@@ -2164,7 +2318,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         let _ = responder
                             .respond_error(
                                 request_id,
-                                -32601,
+                                WireErrorCode::MethodNotFound,
                                 "host terminal tools are disabled for this agent",
                             )
                             .await;
@@ -2180,68 +2334,83 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     let allowed = host_tools_policy
                         .lock()
                         .map(|policy| {
-                            policy.allows_request(raw.method.as_deref().unwrap_or_default())
+                            policy.allows_fs_request(raw.method.as_deref().unwrap_or_default())
                         })
                         .unwrap_or(false);
                     if allowed {
+                        // #316（P0 修复）：strict = fs 门为 host 档。沙箱根取自
+                        // **Pylon 会话工作区**（按 params.sessionId 查 peri_id 映射
+                        // 的 SessionInfo.cwd）——不取 agent 自报 cwd：官方 fs 请求
+                        // 形状本无 cwd 字段，且沙箱根若由 agent 声明即可被
+                        // prompt 注入逃逸（声明 `cwd: "C:\\"` 放大沙箱到全盘）。
+                        // unrestricted = 不设根限制（语义与门名对齐）。
                         let strict = host_tools_policy
                             .lock()
-                            .map(|p| {
-                                matches!(*p, crate::acp::host_tools::HostToolsPolicy::HostStrict)
-                            })
+                            .map(|p| p.fs == crate::agent_config::HostToolsMode::Host)
                             .unwrap_or(false);
-                        let roots = raw
-                            .params
-                            .as_ref()
-                            .and_then(|v| v.get("cwd"))
-                            .and_then(serde_json::Value::as_str)
-                            .map(|p| vec![std::path::PathBuf::from(p)])
-                            .unwrap_or_default();
-                        if strict && roots.is_empty() {
-                            let responder = { acp.lock().await.responder() };
-                            let _ = responder
-                                .respond_error(
-                                    request_id,
-                                    -32602,
-                                    "HostStrict filesystem requests require cwd",
-                                )
-                                .await;
-                        } else {
-                            let filesystem = if strict {
-                                match crate::acp::file_system_runtime::FileSystemRuntime::new_strict(
-                                    &roots[0],
-                                ) {
-                                    Ok(filesystem) => filesystem,
-                                    Err(_) => {
-                                        let responder = { acp.lock().await.responder() };
-                                        let _ = responder
-                                            .respond_error(
-                                                request_id,
-                                                -32602,
-                                                "HostStrict filesystem workspace is inaccessible",
-                                            )
-                                            .await;
-                                        continue;
+                        let filesystem = if strict {
+                            let peri_session = raw
+                                .params
+                                .as_ref()
+                                .and_then(|v| v.get("sessionId").or_else(|| v.get("session_id")))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("");
+                            let workspace = sessions.lock().ok().and_then(|items| {
+                                items
+                                    .values()
+                                    .find(|session| {
+                                        session.peri_id == peri_session
+                                            && session.generation == generation
+                                    })
+                                    .map(|session| std::path::PathBuf::from(&session.cwd))
+                                    .filter(|cwd| !cwd.as_os_str().is_empty())
+                            });
+                            match workspace {
+                                Some(workspace) => {
+                                    match crate::acp::file_system_runtime::FileSystemRuntime::new_strict(&workspace) {
+                                        Ok(filesystem) => filesystem,
+                                        Err(_) => {
+                                            let responder = { acp.lock().await.responder() };
+                                            let _ = responder
+                                                .respond_error(
+                                                    request_id,
+                                                    WireErrorCode::InvalidParams,
+                                                    "host filesystem workspace is inaccessible",
+                                                )
+                                                .await;
+                                            continue;
+                                        }
                                     }
                                 }
-                            } else {
-                                crate::acp::file_system_runtime::FileSystemRuntime::new(roots)
-                            };
-                            handle_filesystem_request(
-                                &acp,
-                                raw.method.as_deref().unwrap_or_default(),
-                                request_id,
-                                raw.params.as_ref(),
-                                filesystem,
-                            )
-                            .await;
-                        }
+                                None => {
+                                    let responder = { acp.lock().await.responder() };
+                                    let _ = responder
+                                        .respond_error(
+                                            request_id,
+                                            WireErrorCode::InvalidParams,
+                                            "host filesystem sandbox unavailable: session workspace unknown",
+                                        )
+                                        .await;
+                                    continue;
+                                }
+                            }
+                        } else {
+                            crate::acp::file_system_runtime::FileSystemRuntime::new(Vec::new())
+                        };
+                        handle_filesystem_request(
+                            &acp,
+                            raw.method.as_deref().unwrap_or_default(),
+                            request_id,
+                            raw.params.as_ref(),
+                            filesystem,
+                        )
+                        .await;
                     } else {
                         let responder = { acp.lock().await.responder() };
                         let _ = responder
                             .respond_error(
                                 request_id,
-                                -32601,
+                                WireErrorCode::MethodNotFound,
                                 "host filesystem tools are disabled for this agent",
                             )
                             .await;
@@ -2359,13 +2528,13 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 {
                     (
                         "invalid_private_payload",
-                        -32602,
+                        WireErrorCode::InvalidParams,
                         format!("invalid private interaction payload: {error}"),
                     )
                 } else if raw.id.is_none() {
                     (
                         "missing_request_id",
-                        -32600,
+                        WireErrorCode::InvalidRequest,
                         "invalid request: interaction request requires a JSON-RPC id".to_string(),
                     )
                 } else {
@@ -2375,7 +2544,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     let reason = "method_unsupported";
                     (
                         reason,
-                        -32601,
+                        WireErrorCode::MethodNotFound,
                         format!(
                             "interaction {} unsupported",
                             raw.method.as_deref().unwrap_or("method")
@@ -2416,7 +2585,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     let _ = responder
                         .respond_error(
                             request_id,
-                            -32601,
+                            WireErrorCode::MethodNotFound,
                             &format!("method not supported by client: {method}"),
                         )
                         .await;

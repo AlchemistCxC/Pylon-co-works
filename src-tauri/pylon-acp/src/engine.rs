@@ -145,6 +145,8 @@ impl InboundRelay {
         match classified.raw.kind {
             // 崩溃广播是控制帧（洪泛时不得被 session/update 饿死）。
             super::AcpKind::Crashed => InboundLane::Control,
+            // #316：elicitation/complete 同为控制帧（轻量、低频、语义关键）。
+            super::AcpKind::ElicitationComplete => InboundLane::Control,
             // 带 id 且带 method = agent 发来的 JSON-RPC 请求（permission/terminal/
             // fs/私有交互）——也是控制帧。Response 不经 inbox（SDK SentRequest 直达）。
             _ if classified.raw.id.is_some() && classified.raw.method.is_some() => {
@@ -453,10 +455,11 @@ impl ResponderHandle {
     }
 
     /// 以 JSON-RPC error 应答 agent 发来的请求。
+    /// #316：错误码由官方 `ErrorCode` 枚举收口（魔数词表消除；wire 数值不变）。
     pub async fn respond_error(
         self,
         request_id: super::RequestId,
-        rpc_code: i64,
+        code: agent_client_protocol_schema::v1::ErrorCode,
         message: &str,
     ) -> bool {
         let responder = self
@@ -466,7 +469,7 @@ impl ResponderHandle {
             .and_then(|mut pending| pending.remove(&request_id));
         match responder {
             Some(responder) => responder
-                .respond_with_error(agent_client_protocol::Error::new(rpc_code as i32, message))
+                .respond_with_error(agent_client_protocol::Error::new(i32::from(code), message))
                 .is_ok(),
             None => false,
         }

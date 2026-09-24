@@ -36,18 +36,21 @@ pub(crate) enum InteractionClassification {
 /// both forms are observed.  Keeping the list in one place also means the
 /// diagnostics command and the dispatcher cannot silently drift apart.
 pub(crate) const SUPPORTED_ACP_CLIENT_REQUEST_METHODS: &[&str] = &[
-    "fs/write_text_file",
-    "fs/read_text_file",
-    "terminal/create",
-    "terminal/output",
-    "terminal/release",
-    "terminal/wait_for_exit",
-    "terminal/kill",
-    "elicitation/create",
+    // #316：官方方法名统一取 CLIENT_METHOD_NAMES 常量（消除手写漂移）。
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.fs_write_text_file,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.fs_read_text_file,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.terminal_create,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.terminal_output,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.terminal_release,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.terminal_wait_for_exit,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.terminal_kill,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.elicitation_create,
+    agent_client_protocol_schema::v1::CLIENT_METHOD_NAMES.session_request_permission,
+    // mcp/* 常量被 unstable_mcp_over_acp feature 门控（未开启）——保留字符串。
     "mcp/connect",
     "mcp/message",
     "mcp/disconnect",
-    "session/request_permission",
+    // provider 私有扩展（官方 schema 无对应常量，永不收编）。
     "session/request_question",
     "session/request_input",
     "session/request_user_input",

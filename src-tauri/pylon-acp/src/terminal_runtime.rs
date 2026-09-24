@@ -318,6 +318,40 @@ impl TerminalRegistry {
         self.terminals.lock().await.remove(id);
         terminal.kill().await
     }
+
+    /// #316：终止并清出某会话名下的全部终端（session 关闭/映射移除时调用），
+    /// 返回清理数。终端进程是 Pylon 子进程——不清理会在 agent 重启后跨代泄漏。
+    pub async fn release_session(&self, session_id: &str) -> usize {
+        let owned: Vec<String> = {
+            let terminals = self.terminals.lock().await;
+            terminals
+                .iter()
+                .filter(|(_, terminal)| terminal.session_id == session_id)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for id in &owned {
+            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+                let _ = terminal.kill().await;
+            }
+        }
+        owned.len()
+    }
+
+    /// #316：清空注册表全部终端（`stop_agent_runtime` 停旧 runtime 时调用），
+    /// 返回清理数。
+    pub async fn clear(&self) -> usize {
+        let ids: Vec<String> = {
+            let terminals = self.terminals.lock().await;
+            terminals.keys().cloned().collect()
+        };
+        for id in &ids {
+            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+                let _ = terminal.kill().await;
+            }
+        }
+        ids.len()
+    }
 }
 
 fn spawn_reader<R: Read + Send + 'static>(

@@ -172,7 +172,7 @@ impl AgentRuntime {
             instance_guard: Arc::new(Mutex::new(None)),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
             host_tools_policy: Arc::new(Mutex::new(
-                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
+                crate::acp::host_tools::HostToolsPolicy::closed(),
             )),
             turn_ledger: crate::acp::TurnLedger::new(),
             probe_sessions: Arc::new(crate::runtime::ProbeSessionRegistry::new()),
@@ -180,12 +180,23 @@ impl AgentRuntime {
         })
     }
 
-    pub fn set_host_tools_policy(&self, runtime_env: &std::collections::BTreeMap<String, String>) {
-        let policy = crate::acp::host_tools::HostToolsPolicy::parse_env(runtime_env)
-            .unwrap_or_else(|error| {
-                tracing::warn!("invalid host tools policy; using agent self-hosted: {error}");
-                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
-            });
+    /// #316：fs/terminal 分门控策略解析——YAML（`acp.host_tools` /
+    /// `acp.host_terminal`）声明优先，未声明门回退旧环境变量（两门共用）；
+    /// 环境变量非法值 fail-closed（双门全关 + warn）。
+    pub fn set_host_tools_policy(
+        &self,
+        protocol: &pylon_core::agent_config::AcpProtocolConfig,
+        runtime_env: &std::collections::BTreeMap<String, String>,
+    ) {
+        let policy = crate::acp::host_tools::HostToolsPolicy::resolve(
+            protocol.host_tools,
+            protocol.host_terminal,
+            runtime_env,
+        )
+        .unwrap_or_else(|error| {
+            tracing::warn!("invalid host tools policy; using fail-closed gates: {error}");
+            crate::acp::host_tools::HostToolsPolicy::closed()
+        });
         if let Ok(mut current) = self.host_tools_policy.lock() {
             *current = policy;
         }
@@ -590,20 +601,48 @@ mod tests {
     }
 
     #[test]
-    fn host_tools_policy_defaults_closed_and_accepts_explicit_host_mode() {
+    fn host_tools_policy_dual_gates_follow_yaml_and_env_fallback() {
         let runtime = AgentRuntime::new_disconnected();
+        // 未连接初值 = 双门全关（连接时由 YAML/env 解析覆盖）。
         assert_eq!(
             *runtime.host_tools_policy.lock().unwrap(),
-            crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+            crate::acp::host_tools::HostToolsPolicy::closed()
         );
+        // #316：缺省（YAML 未声明 + env 未设）= fs Host / terminal Agent。
+        let empty = std::collections::BTreeMap::new();
+        runtime.set_host_tools_policy(&Default::default(), &empty);
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts());
+        assert!(!policy.terminal_hosts());
+        // env 回退：未声明门随 env 开（host 档双开），非法值 fail-closed。
         let env = std::collections::BTreeMap::from([(
             crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
             "host".to_string(),
         )]);
-        runtime.set_host_tools_policy(&env);
+        runtime.set_host_tools_policy(&Default::default(), &env);
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts() && policy.terminal_hosts());
+        runtime.set_host_tools_policy(
+            &pylon_core::agent_config::AcpProtocolConfig {
+                host_terminal: Some(pylon_core::agent_config::HostToolsMode::Agent),
+                ..Default::default()
+            },
+            &env,
+        );
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts());
+        assert!(
+            !policy.terminal_hosts(),
+            "YAML terminal 门声明压过 env host"
+        );
+        let invalid = std::collections::BTreeMap::from([(
+            crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
+            "typo".to_string(),
+        )]);
+        runtime.set_host_tools_policy(&Default::default(), &invalid);
         assert_eq!(
             *runtime.host_tools_policy.lock().unwrap(),
-            crate::acp::host_tools::HostToolsPolicy::HostStrict
+            crate::acp::host_tools::HostToolsPolicy::closed()
         );
     }
 
