@@ -42,7 +42,6 @@ export default function DispatchBar({
   getContent,
   instruction,
   onInstructionChange,
-  onSelectionChange,
   onClearSelection,
 }: {
   targetSource: string | null

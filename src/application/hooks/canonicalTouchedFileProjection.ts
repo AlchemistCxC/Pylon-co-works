@@ -22,8 +22,6 @@ import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { EDIT_TOOL_NAMES, extractTouchedPath, relativizePath } from '../../infrastructure/acp/touchedFiles.ts'
 import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
 
-const EDIT_TOOL_NAMES = ['Edit', 'Write', 'edit', 'write_file', 'patch']
-
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
