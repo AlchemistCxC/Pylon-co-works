@@ -10,6 +10,7 @@ import type { AgentContext } from '../../agentContext'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider, GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyGitProvider, legacyTarget } from './legacyFileProvider.ts'
+import { FILE_SHEET_MAX_READ_BYTES } from '../../plugins/core/file/builtinFileWorkbench.ts'
 import { workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
 
 const IDLE_SUMMARY: KernelSummary = { dirty: false, selection: null, lineCount: 0, cursor: null }
@@ -247,7 +248,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
       {truncated && (
         <div className="file-truncated-hint" role="status">
           {truncTotalBytes
-            ? `文件约 ${(truncTotalBytes / 1048576).toFixed(1)} MB，仅预览前 1 MB（内容不完整，不可编辑）`
+            ? `文件约 ${(truncTotalBytes / 1048576).toFixed(1)} MB，仅预览前 ${FILE_SHEET_MAX_READ_BYTES / 1048576} MB（内容不完整，不可编辑）`
             : '内容不完整（truncated）'}
         </div>
       )}

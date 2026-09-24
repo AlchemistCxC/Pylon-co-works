@@ -6,7 +6,7 @@
  */
 import type { ClientTransport } from '../acp/agentClient.ts'
 import { normalizeWorkspaceEntries, normalizeWorkspaceFileIndexPage, normalizeWorkspaceText } from './workspaceContracts.ts'
-import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitStatusWithBranch } from './gitContracts.ts'
+import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitSequenceState, normalizeGitStatusWithBranch } from './gitContracts.ts'
 import { normalizeWorkspaceSearchResults } from './workspaceSearchContracts.ts'
 import { normalizeWorkspaceShape, type Workspace } from '../../workspaceEntities.ts'
 import type { WorkspaceTargetWire } from '../../domains/workspace/workspaceTarget.ts'
@@ -35,6 +35,12 @@ export function createWorkspaceClient(transport: ClientTransport) {
       transport.invoke('write_workspace_text', { target, ...input }).then(normalizeWorkspaceText),
     search: (target: WorkspaceTargetWire, query: string): Promise<unknown> =>
       transport.invoke('workspace_search', { target, query }).then(normalizeWorkspaceSearchResults),
+    /** 0-C2：单文件两版本全文（rev 白名单：hash/HEAD(~N)/:0-:3）。 */
+    gitShowFile: (target: WorkspaceTargetWire, rev: string, path: string): Promise<unknown> =>
+      transport.invoke('git_show_file', { target, rev, path }),
+    /** 0-C2：merge/rebase/cherry-pick 进行态 + 冲突清单。 */
+    gitSequenceState: (target: WorkspaceTargetWire): Promise<unknown> =>
+      transport.invoke('git_sequence_state', { target }).then(normalizeGitSequenceState),
     gitStatus: (target: WorkspaceTargetWire | string): Promise<unknown> => transport.invoke('git_status', targetArgs(target)).then(normalizeGitStatus),
     gitStatusWithBranch: (target: WorkspaceTargetWire | string): Promise<unknown> =>
       transport.invoke('git_status_with_branch', targetArgs(target)).then(normalizeGitStatusWithBranch),

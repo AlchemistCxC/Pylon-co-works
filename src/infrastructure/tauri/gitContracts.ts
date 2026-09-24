@@ -110,3 +110,21 @@ export function classifyGitError(error: unknown): GitErrorDetail {
   if (/unavailable|不可用/i.test(normalized)) return { kind: 'unavailable', message }
   return { kind: 'failed', message: message && message !== '[object Object]' ? message : 'Git 操作失败' }
 }
+
+/** 0-C2：merge/rebase/cherry-pick 进行态 + 冲突文件清单（git_sequence_state 响应）。 */
+export interface GitSequenceState {
+  kind: 'none' | 'rebase' | 'merge' | 'cherry-pick'
+  conflicts: string[]
+}
+
+const SEQUENCE_KINDS: readonly GitSequenceState['kind'][] = ['none', 'rebase', 'merge', 'cherry-pick']
+
+export function normalizeGitSequenceState(raw: unknown): GitSequenceState {
+  if (!raw || typeof raw !== 'object') return { kind: 'none', conflicts: [] }
+  const item = raw as Partial<GitSequenceState>
+  const kind = SEQUENCE_KINDS.includes(item.kind as GitSequenceState['kind']) ? item.kind as GitSequenceState['kind'] : 'none'
+  const conflicts = Array.isArray(item.conflicts)
+    ? item.conflicts.filter((path): path is string => typeof path === 'string' && path.length > 0)
+    : []
+  return { kind, conflicts }
+}

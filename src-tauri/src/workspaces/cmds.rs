@@ -186,6 +186,32 @@ pub(crate) async fn list_workspace_files(
         .map_err(|error| PylonError::Workspace(error.to_string()))
 }
 
+/// 0-C2：单文件两版本全文（diff 前端化/冲突流数据面）。rev 白名单：hash/HEAD(~N)/:0-:3。
+#[tauri::command]
+pub(crate) async fn git_show_file(
+    state: tauri::State<'_, AppState>,
+    target: WorkspaceTargetWire,
+    rev: String,
+    path: String,
+) -> Result<String, PylonError> {
+    let root = git_workspace_root(state.inner(), &target).await?;
+    git::git_show_file(&root, &rev, &path)
+        .await
+        .map_err(PylonError::Git)
+}
+
+/// 0-C2：merge/rebase/cherry-pick 进行态 + 冲突文件清单。
+#[tauri::command]
+pub(crate) async fn git_sequence_state(
+    state: tauri::State<'_, AppState>,
+    target: WorkspaceTargetWire,
+) -> Result<git::GitSequenceState, PylonError> {
+    let root = git_workspace_root(state.inner(), &target).await?;
+    git::git_sequence_state(&root)
+        .await
+        .map_err(PylonError::Git)
+}
+
 async fn git_workspace_root(
     state: &AppState,
     target: &WorkspaceTargetWire,

@@ -1546,6 +1546,8 @@ pub fn run() {
                 crate::workspaces::cmds::list_workspace_files,
                 crate::workspaces::cmds::read_workspace_text,
                 crate::workspaces::cmds::write_workspace_text,
+                crate::workspaces::cmds::git_show_file,
+                crate::workspaces::cmds::git_sequence_state,
                 crate::workspaces::cmds::git_status,
                 crate::workspaces::cmds::git_status_with_branch,
                 crate::workspaces::cmds::git_diff,

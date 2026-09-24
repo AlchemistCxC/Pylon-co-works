@@ -13,7 +13,7 @@
 //! - 写操作只开放 stage/unstage/commit/branch/pull/push；不提供 reset、force push、
 //!   forced checkout，且禁止交互式凭据提示
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -22,6 +22,8 @@ use tokio::process::Command;
 
 /// diff 输出上限（字节）。
 pub const MAX_DIFF_BYTES: usize = 256 * 1024;
+/// 0-C2：git_show_file 输出上限（两版本文本数据面）。// 1MB
+pub const MAX_SHOW_FILE_BYTES: usize = 1024 * 1024;
 /// status 条目上限。
 pub const MAX_STATUS_ENTRIES: usize = 2000;
 /// history 条数上限。
@@ -421,6 +423,100 @@ pub async fn git_diff(cwd: &Path, path: Option<&str>, staged: bool) -> Result<St
         "{}...（diff 超过 {MAX_DIFF_BYTES} 字节已截断）",
         &stdout[..end]
     ))
+}
+
+/// 0-C2（issue #288）：rev 白名单——commit hash（7-40 位 hex）/ HEAD（含 ~N 后缀）/
+/// index stage（:0-:3，冲突流 ours/theirs/base 读取）。rev 恒作为单参数传给 git
+/// （防选项注入），本谓词在调用侧先行拒绝非法形态，不依赖 git 自身拒绝。
+pub fn is_safe_rev(rev: &str) -> bool {
+    if let Some(stripped) = rev.strip_prefix(':') {
+        return matches!(stripped, "0" | "1" | "2" | "3");
+    }
+    if rev == "HEAD" {
+        return true;
+    }
+    if let Some(depth) = rev.strip_prefix("HEAD~") {
+        return !depth.is_empty() && depth.bytes().all(|b| b.is_ascii_digit());
+    }
+    let hex_only = !rev.is_empty()
+        && rev.len() <= 40
+        && rev.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'));
+    hex_only && rev.len() >= 7
+}
+
+/// 0-C2：单文件两版本全文（diff 前端化与冲突流的数据面）。输出有界
+/// MAX_SHOW_FILE_BYTES（超限截断，口径同 git_diff）。
+pub async fn git_show_file(cwd: &Path, rev: &str, path: &str) -> Result<String, String> {
+    if !is_safe_rev(rev) {
+        return Err("rev 必须是 7-40 位 hash、HEAD(~N) 或 :0-:3 stage".to_string());
+    }
+    if !crate::workspace::is_safe_relative_path(path) {
+        return Err("show path 必须是相对路径且不能穿越".to_string());
+    }
+    let (stdout, _) = run_git(cwd, &["show", &format!("{rev}:{path}")]).await?;
+    if stdout.len() <= MAX_SHOW_FILE_BYTES {
+        return Ok(stdout);
+    }
+    let mut end = MAX_SHOW_FILE_BYTES.saturating_sub(3);
+    while end > 0 && !stdout.is_char_boundary(end) {
+        end -= 1;
+    }
+    Ok(format!(
+        "{}...（文件超过 {MAX_SHOW_FILE_BYTES} 字节已截断）",
+        &stdout[..end]
+    ))
+}
+
+/// 0-C2：merge/rebase/cherry-pick 进行态 + 冲突文件清单（GitPanel 横幅与冲突流入口）。
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSequenceState {
+    /// "none" | "rebase" | "merge" | "cherry-pick"
+    pub kind: String,
+    /// status unmerged 条目派生（UU/AA/DD 及含 U 的双字码）。
+    pub conflicts: Vec<String>,
+}
+
+/// 0-C2：rebase/merge/cherry-pick 进行态探测——`.git` 元数据文件存在性
+/// （rebase-merge/rebase-apply/MERGE_HEAD/CHERRY_PICK_HEAD）。
+pub async fn git_sequence_state(cwd: &Path) -> Result<GitSequenceState, String> {
+    let (stdout, _) = run_git(cwd, &["rev-parse", "--git-dir"]).await?;
+    let git_dir = PathBuf::from(stdout.trim());
+    let git_dir = if git_dir.is_absolute() {
+        git_dir
+    } else {
+        cwd.join(git_dir)
+    };
+    let exists = |rel: &str| git_dir.join(rel).exists();
+    let kind = if exists("rebase-merge") || exists("rebase-apply") {
+        "rebase"
+    } else if exists("MERGE_HEAD") {
+        "merge"
+    } else if exists("CHERRY_PICK_HEAD") {
+        "cherry-pick"
+    } else {
+        "none"
+    };
+    let conflicts = if kind == "none" {
+        Vec::new()
+    } else {
+        let status = git_status(cwd).await?;
+        status
+            .entries
+            .iter()
+            .filter(|entry| {
+                let code = entry.status.as_bytes();
+                matches!(entry.status.as_str(), "AA" | "DD")
+                    || code.first().is_some_and(|b| *b == b'U')
+                    || code.get(1).is_some_and(|b| *b == b'U')
+            })
+            .map(|entry| entry.path.clone())
+            .collect()
+    };
+    Ok(GitSequenceState {
+        kind: kind.to_string(),
+        conflicts,
+    })
 }
 
 /// 提交历史：`git log --format=%H%x00%an%x00%at%x00%s`（NUL 分隔字段，行分隔 commit）。
@@ -1240,4 +1336,92 @@ u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.tx
             .expect("git_diff 超限场景必须成功");
         assert!(diff.contains("已截断"), "截断标记文案必须仍在（E17）");
     }
+
+    // ── 0-C2：is_safe_rev 白名单 ─────────────────────────────────────────────
+
+    #[test]
+    fn safe_rev_accepts_hash_head_and_stage() {
+        assert!(is_safe_rev("1234567"));
+        assert!(is_safe_rev(&"a".repeat(40)));
+        assert!(is_safe_rev("HEAD"));
+        assert!(is_safe_rev("HEAD~3"));
+        assert!(is_safe_rev(":0"));
+        assert!(is_safe_rev(":2"));
+    }
+
+    #[test]
+    fn safe_rev_rejects_options_and_malformed() {
+        for bad in [
+            "",
+            "123456",              // 太短
+            "abcdefgh",            // 非 hex（g-z）
+            "--output=/tmp/x",     // 选项注入
+            "HEAD~",
+            "HEAD~x",
+            ":4",
+            ":",
+            "main",                // 分支名不进白名单（reset/checkout 另行裁决）
+            "HEAD~2 --signoff",
+            "abc123 --output=/tmp/x",
+        ] {
+            assert!(!is_safe_rev(bad), "{bad:?} 应被拒绝");
+        }
+    }
+
+    // ── 0-C2：git_show_file ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn show_file_reads_head_and_hash_content() {
+        let repo = temp_repo("show_file");
+        std::fs::write(repo.0.join("a.txt"), "v1").unwrap();
+        run_sync(&repo.0, &["add", "a.txt"]);
+        run_sync(&repo.0, &["commit", "-q", "-m", "init"]);
+        std::fs::write(repo.0.join("a.txt"), "v2").unwrap();
+
+        assert_eq!(git_show_file(&repo.0, "HEAD", "a.txt").await.unwrap(), "v1");
+        let hash = run_sync(&repo.0, &["rev-parse", "HEAD"]);
+        let hash = hash.trim().to_string();
+        assert_eq!(git_show_file(&repo.0, &hash, "a.txt").await.unwrap(), "v1");
+        assert!(git_show_file(&repo.0, "HEAD", "missing.txt").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn show_file_rejects_unsafe_rev_and_path() {
+        let repo = temp_repo("show_file_guard");
+        assert!(git_show_file(&repo.0, "--output=/tmp/x", "a.txt").await.is_err());
+        assert!(git_show_file(&repo.0, "HEAD", "../outside.txt").await.is_err());
+        assert!(git_show_file(&repo.0, "main", "a.txt").await.is_err());
+    }
+
+    // ── 0-C2：git_sequence_state ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sequence_state_none_on_clean_repo() {
+        let repo = temp_repo("sequence_none");
+        std::fs::write(repo.0.join("a.txt"), "v").unwrap();
+        run_sync(&repo.0, &["add", "a.txt"]);
+        run_sync(&repo.0, &["commit", "-q", "-m", "init"]);
+
+        let state = git_sequence_state(&repo.0).await.unwrap();
+        assert_eq!(state.kind, "none");
+        assert!(state.conflicts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sequence_state_reports_merge_in_progress() {
+        let repo = temp_repo("sequence_merge");
+        std::fs::write(repo.0.join("a.txt"), "v").unwrap();
+        run_sync(&repo.0, &["add", "a.txt"]);
+        run_sync(&repo.0, &["commit", "-q", "-m", "init"]);
+        // 模拟 merge 进行态：MERGE_HEAD 元数据文件（git merge 冲突时留下的就是它）
+        let git_dir = run_sync(&repo.0, &["rev-parse", "--git-dir"]);
+        let git_dir = repo.0.join(git_dir.trim());
+        std::fs::write(git_dir.join("MERGE_HEAD"), "1234567890abcdef1234567890abcdef12345678
+").unwrap();
+
+        let state = git_sequence_state(&repo.0).await.unwrap();
+        assert_eq!(state.kind, "merge");
+        assert!(state.conflicts.is_empty(), "无 unmerged 条目时 conflicts 为空");
+    }
+
 }
