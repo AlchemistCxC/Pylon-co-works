@@ -54,7 +54,7 @@
 | 前端 vitest（permissionController+卡片） | ✅ 28 passed |
 | golden trace | ✅ 十份重生成，`--check` deterministic:true |
 | fmt / 类型检查 | ✅ cargo fmt --check 0 diff；tsc --noEmit 本域无错误 |
-| webview2 实机 | ⏸ 未执行（见"与 spec 的偏差"） |
+| webview2 实机 | ✅ 2026-09-25 已执行（见"实机验收记录"节） |
 | 文档同步 | ✅ agents.example.yaml/架构参考/ORIGIN.md；⚠️ 维护地图因 #317 会话在途未提交改动延后 |
 | 行为断言（代码级） | max_tokens 不再 pylon_error（有测试）；未知 stopReason 降级（有测试）；thinking-only→completed（有测试）；版本不一致→protocol_version_mismatch（有测试） |
 
@@ -71,10 +71,25 @@
 
 ## 与 spec 的偏差
 
-1. **webview2 实机验收未执行**：共享工作树存在 #315/#317 并行未提交改动，装包验证会把他人半成品行为算到本 issue 头上；实机清单（elicitation 卡渲染、fs 广告后真实 agent 请求、peri/hermes 对新广告反应）已写入 issue 遗留，待分支收敛后单独跑。
+1. ~~webview2 实机验收未执行~~ → **已补跑（2026-09-25，webview2-mcp 驱动真实实例 + fake ACP agent）**，证据见下方"实机验收记录"。
 2. 维护地图同步延后（同上并行原因）。
 3. build_initialize_plan 增加 policy 参数（spec 未预见的 P1 修复产物）。
 4. dispatcher elicitation/complete 分支的行为测试以纯逻辑审读代替（提取纯函数+connected_runtime 测试为审查建议，未落入本期）。
+
+## 实机验收记录（webview2-mcp，2026-09-25）
+
+方法：`PYLON_AGENTS_CONFIG` 指向临时验收配置（不入库），注册一个 node 实现的标准 ACP fake agent（initialize/session/new/set_mode/close/prompt 全覆盖，出入站帧全量落 jsonl 取证）；`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 开 CDP，经 webview2-mcp 驱动真实 GUI：建会话（workspace=prism-desktop）→ 发 prompt → CDP 填写 elicitation 表单卡并提交。
+
+| 验收项 | 结果 |
+| --- | --- |
+| 默认 host 档 initialize 广告 | ✅ fake agent 收到含 `fs:{readTextFile,writeTextFile}` 的握手（其敢于发起 fs 请求本身即广告生效的证明） |
+| fs/read_text_file 沙箱内 | ✅ Pylon 返回 `{"content":"inside-sandbox-content"}`（agent log 21:10:50） |
+| fs/read_text_file 越界 | ✅ `-32602 "path is outside allowed read roots"`（三段 `..` 逃逸被拒，agent log 同刻） |
+| elicitation 表单卡渲染 | ✅ 截图：标题「Agent 信息请求」、message、name* 文本框、agree 复选框、提交/拒绝/取消 |
+| 三值应答 accept+content | ✅ GUI 提交后 wire 应答 `{"action":"accept","content":{"name":"acc-name","agree":true}}`（agent log 21:12:04） |
+| turn 正常收尾 | ✅ `stopReason:end_turn`；stub 的 chunk 落在 terminal fence 后被 ADR-0017 晚到事件纪律正确忽略（预期保护行为，非缺陷） |
+
+备注：peri/hermes 真实 exe 不在本机，fake agent 即「任意标准 ACP agent」的最小替身（比 peri/hermes 更具生态代表性）；acceptance 临时文件已清理（artifacts/ 不入库）。
 
 ## 未解问题（后续 issue 候选）
 
