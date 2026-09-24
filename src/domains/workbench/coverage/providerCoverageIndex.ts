@@ -27,7 +27,7 @@ const SOURCE_ONLY_IDS = new Set([
 /** #315：经 provider 私有扩展通知通道到线的映射单元（peri/agent_event 系，
  * PeriCaps 经 clientCapabilities._meta 协商开启）。 */
 const EXTENSION_CHANNEL_IDS = new Set([
-  'peri-05', 'peri-08', 'peri-10', 'peri-12', 'peri-13', 'peri-14', 'peri-15',
+  'peri-05', 'peri-08', 'peri-10', 'peri-13', 'peri-14', 'peri-15',
   'peri-16', 'peri-17', 'peri-21', 'peri-22', 'peri-23', 'peri-24', 'peri-25',
   'peri-26', 'peri-34',
 ])

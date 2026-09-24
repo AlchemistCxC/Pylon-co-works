@@ -96,7 +96,7 @@ export const PERI_COVERAGE: readonly CoverageItemDraft[] = [
     status: 'flattened-with-reason',
     firstClassFields: ['_meta.inputTokens/outputTokens/cacheReadTokens/cacheCreationTokens→usage'],
     retainedOnlyFields: ['_meta.model/requestId/stopReason 落 usage.raw（身份证据，非数值键）', 'output 文本不经此通道'],
-    pylonAnchors: ['usage_update._meta（peri tokenStats cap）→acpNormalizer.normalizeUsageUpdate 深消费（#315 P0-4）'],
+    pylonAnchors: ['carrier=标准 usage_update._meta（provider 中立层，字典 §零 overlay；非 peri/agent_event 扩展通道）', 'acpNormalizer.normalizeUsageUpdate 深消费（#315 P0-4，键名单源 periWireContract.ts）'],
     fixtures: ['acpNormalizer.test.ts'], followUp: 'ACP-UP-04(LlmCallEnd output 文本 carrier)' },
   { id: 'peri-13', provider: 'peri', dictionarySection: '§四 L178', wireSymbol: 'ObserveEvent::CompactStarted strategy',
     semanticEvent: 'lifecycle.compact-started', renderKind: '',

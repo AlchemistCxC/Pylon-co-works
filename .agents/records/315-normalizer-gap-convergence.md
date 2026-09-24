@@ -75,3 +75,18 @@
 
 - `types.rs`/`client.rs`/`dispatcher/mod.rs` 与 #316 同文件不同区段（host_tools/terminal 门与 protocolVersion 校验）——本施工以 `git apply --cached` 只提交己方 hunk，不连带；#316 收工后其 hunks 以正常 diff 呈现。
 - `workbenchProjector.ts`/`chatClient.ts`/`tauriTransport.ts`/`docs 模块维护地图` 有 #317/#316 在途改动，本施工**未触碰**。
+
+## 审查轮（子 agent review 后修复，2026-09-25）
+
+子 agent 双轴审查 overall=fail → 修复后转绿。逐项处置：
+
+| 发现 | 级别 | 处置 |
+| --- | --- | --- |
+| PR 树 Rust caps 基线门禁红（provider_adapter 两处 pin / agent_config tests.rs pin / 9 个 golden jsonl 仍记 3 键） | fail | PR 分支补齐：两处 provider_adapter pin、tests.rs pin、10 个 jsonl 片段更新为 7 键；worktree 实跑 `cargo test -p pylon-core --lib` 118 passed + `cargo test --lib -- golden` 8 passed |
+| P2-8（peri _meta 契约单源）未实施且未声明偏差 | fail | 已实施：`src/domains/events/periWireContract.ts`（caps 键 + usage `_meta` 载荷键 + skillNames 键单源）+ `periWireContract.test.ts` 逐字对照钉子；acpNormalizer 消费端全部改引常量 |
+| _meta 深消费 / skillNames 零 fixture | warn | acpNormalizer.test.ts 补 2 例（正例 7 键 + 反例非数值/空集不伪造） |
+| peri-12 误标 WIRE-EXTENSION（carrier 是标准 usage_update._meta，provider 中立层） | warn | 改归 WIRE-STANDARD；EXTENSION_CHANNEL_IDS/door test pin 同步 16→15 |
+| acpNormalizer 注释「落 usage.raw」误导 | warn | 注释改为「投影为 usage 顶层具名字段，projector 侧不参与终态判定」 |
+| caps 4/7 与转出 16/20 低于目标 | warn | 维持诚实披露（hitl 通道休眠经 peri-acp 全源核实；sourceAgentId 无条件注入不依赖声明） |
+
+修正后计数：WIRE-EXTENSION 15 项（peri-12 归 WIRE-STANDARD）；其余计数不变。

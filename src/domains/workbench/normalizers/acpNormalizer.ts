@@ -25,6 +25,7 @@ import {
   type SessionResponseObject,
 } from '../../../infrastructure/acp/chatContracts.ts'
 import { presentPromptFailure, type PromptFailurePresentationMetadata } from '../promptFailurePresentation.ts'
+import { PERI_SKILL_NAMES_META_KEY, PERI_USAGE_META_KEYS } from '../../events/periWireContract.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
   id: 'acp',
@@ -322,13 +323,14 @@ function normalizeUsageUpdate(update: Record<string, unknown>): Record<string, u
     ...(finiteNonNegative(meta.inputTokens) !== undefined ? { inputTokens: meta.inputTokens } : {}),
     ...(finiteNonNegative(meta.outputTokens) !== undefined ? { outputTokens: meta.outputTokens } : {}),
     ...(finiteNonNegative(meta.cacheReadTokens) !== undefined ? { cacheReadTokens: meta.cacheReadTokens } : {}),
-    // #315：peri tokenStats `_meta` 深消费（peri-acp mapper.rs LlmCallEnd 臂）——
-    // cacheCreationTokens 进 token 口径；model/requestId/stopReason 是调用/轮次
-    // 身份证据，随 usage 快照保留（非数值键落 usage.raw，不参与终态判定）。
-    ...(finiteNonNegative(meta.cacheCreationTokens) !== undefined ? { cacheCreationTokens: meta.cacheCreationTokens } : {}),
-    ...(stringField(meta.model) ? { model: meta.model } : {}),
-    ...(stringField(meta.requestId) ? { requestId: meta.requestId } : {}),
-    ...(stringField(meta.stopReason) ? { providerStopReason: meta.stopReason } : {}),
+    // #315：peri tokenStats `_meta` 深消费（peri-acp mapper.rs LlmCallEnd 臂，
+    // 键名单源见 periWireContract.ts）——cacheCreationTokens 进 token 口径；
+    // model/requestId/stopReason 投影为 usage 顶层具名字段（身份证据，
+    // projector 侧不参与终态判定，语义键名 providerStopReason 避免歧义）。
+    ...(finiteNonNegative(meta[PERI_USAGE_META_KEYS.cacheCreationTokens]) !== undefined ? { cacheCreationTokens: meta[PERI_USAGE_META_KEYS.cacheCreationTokens] } : {}),
+    ...(stringField(meta[PERI_USAGE_META_KEYS.model]) ? { model: meta[PERI_USAGE_META_KEYS.model] } : {}),
+    ...(stringField(meta[PERI_USAGE_META_KEYS.requestId]) ? { requestId: meta[PERI_USAGE_META_KEYS.requestId] } : {}),
+    ...(stringField(meta[PERI_USAGE_META_KEYS.stopReason]) ? { providerStopReason: meta[PERI_USAGE_META_KEYS.stopReason] } : {}),
     ...(finiteNonNegative(update.used ?? update.value) !== undefined ? { contextUsed: update.used ?? update.value } : {}),
     ...(finiteNonNegative(update.size) !== undefined ? { contextLimit: update.size } : {}),
     ...(finiteNonNegative(cost.amount) !== undefined ? { costUsd: cost.amount } : {}),
@@ -355,11 +357,11 @@ function normalizeAvailableCommands(update: Record<string, unknown>): readonly J
   })
 }
 
-/** #315：`_meta.skillNames` 读取（peri skillNames cap 载荷，PeriCaps 契约：
- * AvailableCommandsUpdate._meta.skillNames；字符串数组收窄，空集不伪造）。 */
+/** #315：`_meta.skillNames` 读取（peri skillNames cap 载荷，契约键单源
+ * periWireContract.ts；字符串数组收窄，空集不伪造）。 */
 function skillNamesOf(update: Record<string, unknown>): readonly JsonValue[] | undefined {
   const meta = isRecord(update._meta) ? update._meta : undefined
-  const names = meta?.skillNames
+  const names = meta?.[PERI_SKILL_NAMES_META_KEY]
   if (!Array.isArray(names)) return undefined
   const narrowed = names.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
   return narrowed.length > 0 ? narrowed : undefined
