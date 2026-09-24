@@ -30,32 +30,12 @@ export interface FileLanguageProvider {
   load(path: string, signal?: AbortSignal): Promise<LanguageSupport | null>
 }
 
-/** 0-C4：结构化 log 单页（git_log_graph 数据面，0-C2 的 git_show_file 已就绪）。 */
-export interface GitCommitGraph {
-  hash: string
-  parents: string[]
-  author: string
-  /** Unix 秒（与现契约 date 语义一致）。 */
-  date: number
-  subject: string
-  /** %D 原文（如 "origin/main, HEAD -> main"），前端解析徽章。 */
-  refs: string
-}
+// 0-C4：结构化 log/blame 数据类型单源于 gitContracts（防双份声明漂移）。
+import type { GitBlameLine, GitCommitGraph, GitLogPage, GitSequenceState } from '../../infrastructure/tauri/gitContracts.ts'
 
-export interface GitLogPage {
-  commits: GitCommitGraph[]
-  hasMore: boolean
-}
+export type { GitBlameLine, GitCommitGraph, GitLogPage }
 
-/** 0-C4：blame 行（只读 gutter 悬浮）。 */
-export interface GitBlameLine {
-  hash: string
-  author: string
-  date: number
-  lineNo: number
-  content: string
-}
-
+/** 0-C4：stash 条目（stashList 响应）。 */
 export interface GitStash {
   id: string
   subject: string
@@ -74,7 +54,7 @@ export interface GitProvider {
   showFile?(target: WorkspaceTarget, input: { rev: string; path: string }, signal?: AbortSignal): Promise<string>
   blame?(target: WorkspaceTarget, path: string, signal?: AbortSignal): Promise<GitBlameLine[]>
   /** merge/rebase/cherry-pick 进行态 + 冲突清单。 */
-  sequenceState?(target: WorkspaceTarget, signal?: AbortSignal): Promise<{ kind: 'none' | 'rebase' | 'merge' | 'cherry-pick'; conflicts: string[] }>
+  sequenceState?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitSequenceState>
   stashList?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitStash[]>
   stashPush?(target: WorkspaceTarget, input?: { message?: string; includeUntracked?: boolean }, signal?: AbortSignal): Promise<GitOperationResult>
   stashPop?(target: WorkspaceTarget, index?: number, signal?: AbortSignal): Promise<GitOperationResult>

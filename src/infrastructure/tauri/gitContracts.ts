@@ -153,12 +153,13 @@ export function normalizeGitLogPage(raw: unknown): GitLogPage {
     ? item.commits.flatMap((entry): GitCommitGraph[] => {
         if (!entry || typeof entry !== 'object') return []
         const value = entry as Partial<GitCommitGraph>
-        if (typeof value.hash !== 'string' || value.hash.length < 7) return []
+        if (typeof value.hash !== 'string' || value.hash.length === 0) return []
+        const date = value.date
         return [{
           hash: value.hash,
           parents: Array.isArray(value.parents) ? value.parents.filter((p): p is string => typeof p === 'string') : [],
           author: typeof value.author === 'string' ? value.author : '',
-          date: typeof value.date === 'number' ? value.date : 0,
+          date: typeof date === 'number' && Number.isFinite(date) ? date : 0,
           subject: typeof value.subject === 'string' ? value.subject : '',
           refs: typeof value.refs === 'string' ? value.refs : '',
         }]
@@ -181,13 +182,14 @@ export function normalizeGitBlame(raw: unknown): GitBlameLine[] {
   return raw.flatMap((entry): GitBlameLine[] => {
     if (!entry || typeof entry !== 'object') return []
     const value = entry as Partial<GitBlameLine>
-    if (typeof value.hash !== 'string' || typeof value.content !== 'string' || typeof value.lineNo !== 'number') return []
+    const { hash, content, lineNo, date } = value
+    if (typeof hash !== 'string' || typeof content !== 'string' || typeof lineNo !== 'number' || !Number.isFinite(lineNo)) return []
     return [{
-      hash: value.hash,
+      hash,
       author: typeof value.author === 'string' ? value.author : '',
-      date: typeof value.date === 'number' ? value.date : 0,
-      lineNo: value.lineNo,
-      content: value.content,
+      date: typeof date === 'number' && Number.isFinite(date) ? date : 0,
+      lineNo,
+      content,
     }]
   })
 }
