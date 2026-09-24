@@ -851,4 +851,6 @@
 
 - 文档：`.agents/records/266-cc-reasoning-symmetric-guard.md`（完工时新增）、本文件
 
+**✅ 进展（本地完工，未 push 未开 PR）**：守卫已补（ + 比对基准取文档值）、新增 5 条用例、**反向验证撤掉守卫 ⇒ 3 条变红**；门禁四步绿；全量 **641 文件 / 4854 用例** 跑两次（首次命中已登记的 `PlainMessageList` #243 flake，隔离 3 次全绿）。记录 。★ 本条目保留至合入。
+
 **我不碰**：权限 / 模型两条解析（已完工，只做参照）、`WorkbenchWidgets.solid.tsx`、中控元件定义表、预设系统、`src-tauri/**`、`tools/**`、他人在途域。全程 pathspec 提交。
