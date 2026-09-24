@@ -89,8 +89,7 @@ pub fn is_safe_segment(name: &str) -> bool {
     // 控制字符（含 NUL）与 bidi 方向控制符（U+202A–202E、U+2066–2069、LRM/RLM）
     // 一律拒绝——后者在文件列表 UI 上有伪装欺骗面。
     if name.chars().any(|c| {
-        (c as u32) < 0x20
-            || matches!(c as u32, 0x202A..=0x202E | 0x2066..=0x2069 | 0x200E | 0x200F)
+        (c as u32) < 0x20 || matches!(c as u32, 0x202A..=0x202E | 0x2066..=0x2069 | 0x200E | 0x200F)
     }) {
         return false;
     }
@@ -114,9 +113,28 @@ pub fn is_safe_segment(name: &str) -> bool {
         .to_ascii_uppercase();
     !matches!(
         stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL"
-            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
-            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     )
 }
 
@@ -341,7 +359,9 @@ pub fn list_workspace_files(
             WorkspaceError::Io(e.to_string())
         }
     })?;
-    let limit = max_entries.unwrap_or(MAX_FILE_INDEX_ENTRIES).min(MAX_FILE_INDEX_ENTRIES);
+    let limit = max_entries
+        .unwrap_or(MAX_FILE_INDEX_ENTRIES)
+        .min(MAX_FILE_INDEX_ENTRIES);
     let mut entries: Vec<String> = Vec::new();
     let mut truncated = false;
     let mut queue = std::collections::VecDeque::new();
@@ -364,7 +384,9 @@ pub fn list_workspace_files(
                 continue;
             }
             // file_type() 不跟随 symlink：symlink 目录不下钻（防环/防逃逸）。
-            let Ok(file_type) = item.file_type() else { continue };
+            let Ok(file_type) = item.file_type() else {
+                continue;
+            };
             if file_type.is_dir() {
                 queue.push_back(item.path());
                 continue;
@@ -1478,7 +1500,9 @@ mod tests {
 
     #[test]
     fn safe_segment_rejects_windows_reserved_device_names() {
-        for name in ["CON", "con", "Con.txt", "PRN", "AUX", "NUL", "com1", "LPT9", "lpt4.bak"] {
+        for name in [
+            "CON", "con", "Con.txt", "PRN", "AUX", "NUL", "com1", "LPT9", "lpt4.bak",
+        ] {
             assert!(!is_safe_segment(name), "{name} 应被拒绝");
         }
         // 保留名仅在 stem 命中时拒绝；".con" 的 stem 为空，是合法隐藏名。
