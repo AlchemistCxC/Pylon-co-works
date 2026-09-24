@@ -7,7 +7,8 @@
 
 - issue：#301（bug(test)，渲染器线；由 @AlchemistCxC 报告，本轮认领）
 - 分支：`kumo/prometheus`
-- 提交范围：`5c1d9caa`（L.md 声明）→ 本轮夹具提交
+- 提交范围：`5c1d9caa..36dac61b`（前者 = L.md 施工声明，后者 = 夹具修复 + 本记录）
+- PR：[#307](https://github.com/AlchemistCxC/Pylon-co-works/pull/307)
 - 日期：2026-09-24
 
 ## 目标与范围
@@ -113,7 +114,7 @@ margin 由此恒等于真值 0 ⇒ 任何帧序都取到同一窗口，不再存
 
 ## 证据
 
-- commit：`5c1d9caa`（L.md 声明，单文件）、本轮夹具提交（见 PR）
+- commit：`5c1d9caa`（L.md 施工声明，单文件）、`36dac61b`（夹具 + 本记录），PR #307
 - 测试（`bunx vitest run`）：
   - 两文件合跑：`Test Files 2 passed (2)` / `Tests 24 passed (24)`
   - 干净用例隔离跑 10 轮：0 红
