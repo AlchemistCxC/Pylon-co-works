@@ -356,8 +356,10 @@ export function SolidControlCenter() {
           // ★ #238 刀7：原先这里还乘一个「缩放」(`ccScale.tokens`)。缩放已整体删除
           //   ⇒ 用量字号直接取基准字号（`modelFontSize`）。对没调过缩放的人（= 100）逐位相同。
           'font-size': `${appearance().modelFontSize ?? 12}px`,
-          background: appearance().modelBgColor === 'black' ? '#000' : '#fff',
-          color: appearance().modelTextColor === 'white' ? '#fff' : '#000',
+          // ★ #266 遗留①：直读模型控件的颜色字段（借用关系见定义表 `borrowsFrom: 'model'`）——
+          //   模型底色/文字色改成自由选色后，胶囊跟着模型走。
+          background: appearance().modelBgColor,
+          color: appearance().modelTextColor,
         })
         return <span class="cc-usage-pill" style={pillStyle()}>
           <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
@@ -620,8 +622,9 @@ export function SolidControlCenter() {
       '--cc-send-anchor-gap': `${resolveCcWidgetGroup('cc-send-button')?.layout?.x.gap ?? 0}px`,
       '--cc-send-color': appearance().sendButtonColor,
       '--cc-send-radius': `${Number(appearance().sendButtonRadius || '0.5') * 100}%`,
-      '--cc-send-border-color': appearance().sendButtonBorderColor === 'black' ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.5)',
-      '--cc-send-icon-color': appearance().sendButtonIconColor === 'black' ? '#000' : appearance().sendButtonIconColor === 'gray' ? 'rgba(0,0,0,.5)' : '#fff',
+      // ★ #266 遗留②：边框色 / 图标色改自由选色 ⇒ 直读字段值，不再把枚举翻成颜色。
+      '--cc-send-border-color': appearance().sendButtonBorderColor,
+      '--cc-send-icon-color': appearance().sendButtonIconColor,
       '--cc-input-text-right-inset': sendButtonMode() === 'inline'
         ? 'calc(var(--cc-input-height) * 0.9 + var(--cc-input-text-inset-x, 5%))'
         : 'var(--cc-input-text-inset-x, 5%)',
