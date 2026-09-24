@@ -79,7 +79,7 @@
 
 | 文件 | 改了什么 | 为什么必须改 |
 | --- | --- | --- |
-| `widgetDefinitionTable.test.ts` | 删 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS` 相关 3 条断言（:198 常态放行 / :311 名单 5 条 / :455/:500 提示在常态放行里）；:197 那条改名为「成员 id 不得落进空态隐藏名单」（保护不丢）；:312 空态名单由 5 条改 **6 条**（含 `cc-command-hint`）；:502 由「提示**不在**空态名单」**反转**为「在内」；整个 `刀5B 可见性` describe 按 ⑧ 重写为「可见性只剩值 + 语境名单」（其中 :461 `inputMode:'default' ⇒ false` **反转为 true** —— 本件目的；:462 `hasSession:false ⇒ false` 改由**空态名单**承担，语境改为「空态名单里 ⇒ 不显示」）；:485-489 计数断言改为经组装函数、`default` 由 4 反转成 5 | 断言靶子被本件撤掉/反转 |
+| `widgetDefinitionTable.test.ts` | 删掉全部涉及 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS` 的断言（原「成员不进两份名单」那条的后半句、原「常态放行 5 条 / 空态隐藏 5 条」整条、以及两处「提示在常态放行名单里」），并把该测试里「成员不进名单」的保护落到**空态名单**上继续承担；原「空态隐藏 5 条」改 **6 条**（含 `cc-command-hint`）；原「提示**不在**空态名单」**反转**为「在内」；整个 `刀5B 可见性` describe 按 ⑧ 重写为「可见性只剩值 + 语境名单」（其中「`inputMode:'default' ⇒ false`」**反转为 true** —— 本件目的；「`hasSession:false ⇒ false`」改由**空态名单**承担，语境改为「在空态名单里 ⇒ 不显示」；计数断言改为经组装函数、`default` 档由 4 反转成 5） | 断言靶子被本件撤掉/反转 |
 | `src/__tests__/ccHeightState.test.ts` | 计数入参去掉 `inputMode`/`submitButtonMode`；期望值 `4→5`、`2→3`、`3→4`（空名单即全体状态控件） | 可见性不再依赖输入模式；提示计入 |
 | `presetReducerPureHelpers.test.ts` | 计数入参改经组装函数；期望 `4→5`、`2→3`；末条「名单上限 4 ⇒ 永不换行」的断言**不再成立**（上限变 5 ⇒ 满员触发状态行换行），改写为显式数值 `109 / 84` | 同上；原断言编码的「上限 4」是旧口径 |
 | `domains/workbench/__tests__/appearance.test.ts` | 两条 clamp 断言 `84 → 109`（含标题与注释里的旧口径更正） | 计数 4→5 后 cli+peri 最小高变 109（见「偏差」2） |
