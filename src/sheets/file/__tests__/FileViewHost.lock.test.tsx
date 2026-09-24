@@ -74,6 +74,19 @@ describe('FileViewHost 写冲突锁（0-A3 / issue #285）', () => {
     vi.useRealTimers()
   })
 
+  it('恰满冷却 3s 后的第二次 touch 不置锁（窗口为严格小于）', async () => {
+    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await waitForFileEditor('const x = 1')
+
+    vi.useFakeTimers()
+    act(() => bumpTouch(5))
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    act(() => bumpTouch(6))
+    expect(fileEditorEditable()).toBe(true)
+    expect(screen.queryByText('Agent 正在修改此文件，编辑已暂停')).toBeNull()
+    vi.useRealTimers()
+  })
+
   it('锁内用户已有编辑保留；逃生口恢复编辑但保存仍禁用，解锁后可保存', async () => {
     render(<FileViewHost source="ws-a" tab={fileTab} context={{ agentId: 'agent-test', source: 'ws-a' }} onCloseTab={vi.fn()} />)
     const editor = await waitForFileEditor('const x = 1')
@@ -95,9 +108,11 @@ describe('FileViewHost 写冲突锁（0-A3 / issue #285）', () => {
     fireEvent.keyDown(fileEditorView().contentDOM, { key: 's', ctrlKey: true })
     expect(invoke).not.toHaveBeenCalledWith('write_workspace_text', expect.anything())
 
-    // 解锁 → 保存恢复可用
+    // 解锁 → 保存恢复可用；编辑内容仍保留（dirty 语义不变）
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
     expect(save.disabled).toBe(false)
+    expect(fileEditorView().state.doc.toString()).toBe('const x = 999')
+    expect(screen.getByText(/未保存/)).toBeInTheDocument()
     vi.useRealTimers()
   })
 

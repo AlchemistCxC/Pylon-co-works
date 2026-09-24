@@ -218,7 +218,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
             type="button"
             className="file-lock-override"
             onClick={() => setLockOverride(true)}
-            title="锁定期间保存仍被禁用（防半成品文件写回）"
+            title="锁定期间保存仍被禁用（防半成品文件写回）；解锁后可保存"
           >
             仍要编辑
           </button>
@@ -297,7 +297,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         </span>
         {writeLocked && (
           <span className="file-status-write-lock" role="status">
-            {lockOverride ? 'Agent 正在修改此文件（保存将等待写入结束）' : 'Agent 正在修改此文件，编辑已暂停'}
+            {lockOverride ? 'Agent 正在修改此文件（解锁后可保存）' : 'Agent 正在修改此文件，编辑已暂停'}
           </span>
         )}
         <span>{target?.source || '未指向会话'}</span>
