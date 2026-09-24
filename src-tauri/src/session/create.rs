@@ -546,6 +546,48 @@ fn established_options_unchanged(
 }
 
 /// 从建立/恢复响应里提取权威 configOptions envelope（camel/snake 双形）。
+/// Journal projection only: retain legacy selector catalogues alongside standard
+/// options. Do not use this synthesized list to infer outbound ACP methods.
+pub(crate) fn response_projection_options(response: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut options = response_config_options(response);
+    for (kind, state_key, choices_key, current_key) in [
+        ("model", "models", "availableModels", "currentModelId"),
+        ("mode", "modes", "availableModes", "currentModeId"),
+    ] {
+        if super::find_config_option(&options, kind).is_some() {
+            continue;
+        }
+        let selection = response.get(state_key).unwrap_or(response);
+        let snake_choices = if kind == "model" {
+            "available_models"
+        } else {
+            "available_modes"
+        };
+        let snake_current = if kind == "model" {
+            "current_model_id"
+        } else {
+            "current_mode_id"
+        };
+        let choices = selection
+            .get(choices_key)
+            .or_else(|| selection.get(snake_choices))
+            .and_then(serde_json::Value::as_array);
+        let current = selection
+            .get(current_key)
+            .or_else(|| selection.get(snake_current));
+        if choices.is_none() && current.is_none() {
+            continue;
+        }
+        let mut option = serde_json::json!({"id":kind,"name":kind,"category":kind,"type":"select",
+            "options":choices.cloned().unwrap_or_default(),"_meta":{"pylonLegacySelector":true}});
+        if let Some(value) = current {
+            option["currentValue"] = value.clone();
+        }
+        options.push(option);
+    }
+    options
+}
+
 pub(crate) fn response_config_options(response: &serde_json::Value) -> Vec<serde_json::Value> {
     response
         .get("configOptions")
@@ -952,7 +994,7 @@ async fn create_session_slot(
     }
     // #51：建立期选择器面入 journal——重启后打开历史会话时中控区由此恢复
     // model choices / reasoning / mode 候选（空 envelope 不写，见 helper 文档）。
-    let established_options = response_config_options(&response);
+    let established_options = response_projection_options(&response);
     let _ = ingest_established_config_options_event(
         state,
         runtime,
@@ -1317,7 +1359,7 @@ async fn revive_session_slot(
     // #51：revive 槽位的 new_response 为 None（不向调用方回传响应），前端 document
     // 因此拿不到选择器面——把 load/resume 响应里的 configOptions 写进 journal，
     // 经 live/replay 同通道收敛到 document.session.options。
-    let revived_options = response_config_options(&response);
+    let revived_options = response_projection_options(&response);
     let _ = ingest_established_config_options_event(
         state,
         runtime,

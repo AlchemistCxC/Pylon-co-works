@@ -3,8 +3,9 @@ import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
-import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
+import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
@@ -62,6 +63,7 @@ export function SolidControlCenter() {
   }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
+  const [selectorPending] = createSessionUiSignal(workbench.sessionUi, () => input().sessionId, 'selector-pending', '')
   const [selected, setSelected] = createSignal<CcLayoutWidgetId>()
   const [workspaceId, setWorkspaceId] = createSignal('')
   /** Workspace carried by Sidebar's create-session intent. The event is
@@ -348,8 +350,8 @@ export function SolidControlCenter() {
         // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
         // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
         // 但必须与 model/reasoning/mode 是同一族按钮，否则会退化成裸文字。
-        const usage = () => runtime().document?.session.usage
-        const limit = () => usage()?.contextLimit
+        const usage = () => resolveContextUsage(runtime().document?.session.usage)
+        const limit = () => usage().limit
         const pillStyle = () => ({
           height: `${appearance().modelHeight ?? 28}px`,
           'border-radius': `${appearance().modelRadius ?? 0}px`,
@@ -362,8 +364,8 @@ export function SolidControlCenter() {
           color: appearance().modelTextColor,
         })
         return <span class="cc-usage-pill" style={pillStyle()}>
-          <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
-          <span class="cc-usage-percent">{formatUsagePercent(contextRatio(usage(), runtime().tokenCount))}</span>
+          <span class="cc-usage-count">{usage().used !== undefined ? formatUsageTokens(usage().used!) : '—'}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
+          <span class="cc-usage-percent">{usage().percent !== undefined ? formatUsagePercent(usage().percent! / 100) : '—'}</span>
         </span>
       }
       case 'model':
@@ -650,6 +652,7 @@ export function SolidControlCenter() {
     <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('cc-send-button')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
+      <Show when={selectorPending()}><span role="status" aria-live="polite">{selectorPending()}</span></Show>
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
         <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
         <div class="cc-footer-status">
@@ -712,22 +715,4 @@ function placementStyle(placement: CcWidgetPlacement): JSX.CSSProperties {
   return placement.offsetX === 0 && placement.offsetY === 0
     ? {}
     : { transform: `translate(${placement.offsetX}px, ${placement.offsetY}px)` }
-}
-
-function usageTokenCount(usage: UsageSnapshot | undefined, fallback: number): number {
-  if (usage?.totalTokens !== undefined) return usage.totalTokens
-  const parts = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
-  return parts > 0 ? parts : Math.max(0, fallback)
-}
-
-function contextRatio(usage: UsageSnapshot | undefined, fallback: number): number {
-  const explicit = usage?.contextPercent
-  if (explicit !== undefined) return clamp01(explicit / 100)
-  const limit = usage?.contextLimit ?? 0
-  const used = usage?.contextUsed ?? usageTokenCount(usage, fallback)
-  return limit > 0 ? clamp01(used / limit) : 0
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }

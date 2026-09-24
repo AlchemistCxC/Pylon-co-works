@@ -98,9 +98,9 @@ describe('Workbench option catalog', () => {
   // optionIds 会把当前值插进快照列表（好让 UI 总能显示它），于是"只有当前值"会被误读成
   // "provider 上报过候选"。此时必须回落兜底表：菜单按设计排除当前值，若把单元素集合当权威，
   // 菜单就一项不剩 —— 用户切换档位后再点开就是空盒，且换不回其它档位。
-  it('treats a candidate surface holding only the current mode as not advertised', () => {
+  it('preserves a singleton mode advertisement without inventing candidates', () => {
     const entries = resolveModeOptionEntries(emptySnapshot({ availableModes: ['auto'], activeMode: 'auto' }))
-    expect(entries.map(entry => entry.id)).toEqual(DEFAULT_MODE_OPTIONS.map(entry => entry.id))
+    expect(entries.map(entry => entry.id)).toEqual(['auto'])
   })
 
   it('still prefers a real advertised mode surface over the fallback catalogue', () => {

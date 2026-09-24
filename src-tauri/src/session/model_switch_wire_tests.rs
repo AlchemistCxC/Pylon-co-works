@@ -13,6 +13,101 @@ use crate::agent_config::{AcpProtocolConfig, SetModelApi};
 use crate::test_utils::TestStateBuilder;
 use tauri::Manager;
 
+#[tokio::test]
+async fn mode_uses_advertised_config_id_and_validates_before_wire() {
+    let trace = std::env::temp_dir().join(format!(
+        "pylon-mode-{}.jsonl",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let trace_arg = trace.to_string_lossy().to_string();
+    let agent = crate::test_utils::fake_acp_agent(
+        "mode-agent",
+        &[
+            "--scenario",
+            "initial-options-echo",
+            "--trace-file",
+            &trace_arg,
+            "--trace-mode",
+            "all",
+        ],
+    );
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None).await.unwrap();
+    let state = TestStateBuilder::bare()
+        .with_active_agent("mode-agent")
+        .with_agent(agent)
+        .with_runtime("mode-agent", runtime.clone())
+        .build();
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    app.manage(state);
+    new_session(
+        app.state::<AppState>(),
+        "mode-agent".into(),
+        "local:mode".into(),
+        "profile".into(),
+        "".into(),
+        Some(".".into()),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    runtime.sessions.lock().unwrap().get_mut("local:mode").unwrap().config_options.push(
+        serde_json::json!({"id":"permissions-choice","category":"mode","type":"select","currentValue":"default",
+            "options":[{"value":"default"},{"value":"acceptEdits"},{"value":"plan"}]}));
+    set_mode(
+        app.state::<AppState>(),
+        "mode-agent".into(),
+        "local:mode".into(),
+        "acceptEdits".into(),
+    )
+    .await
+    .unwrap();
+    // The echo scenario replaces configOptions; restore the fixture declaration for rejection.
+    runtime
+        .sessions
+        .lock()
+        .unwrap()
+        .get_mut("local:mode")
+        .unwrap()
+        .config_options = vec![
+        serde_json::json!({"id":"permissions-choice","category":"mode","options":[{"value":"plan"}]}),
+    ];
+    let error = set_mode(
+        app.state::<AppState>(),
+        "mode-agent".into(),
+        "local:mode".into(),
+        "invented".into(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("mode_not_advertised"));
+    let frames: Vec<serde_json::Value> = std::fs::read_to_string(trace)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(frames
+        .iter()
+        .any(|frame| frame["method"] == "session/set_config_option"
+            && frame["params"]["configId"] == "permissions-choice"
+            && frame["params"]["value"] == "acceptEdits"));
+    assert!(!frames
+        .iter()
+        .any(|frame| frame["method"] == "session/set_mode"));
+    assert!(!frames
+        .iter()
+        .any(|frame| frame["params"]["value"] == "invented"));
+}
+
 /// 验收（跨 runtime/Agent 重绑不泄漏）：同一 source 在不同 Agent runtime 上重建
 /// 会话时，新 selector snapshot 不得沿用旧 Agent 的 config id/model id/choices。
 #[tokio::test]

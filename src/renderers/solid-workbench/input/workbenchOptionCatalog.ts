@@ -155,6 +155,10 @@ function optionIdentity(option: SessionConfigOption): string {
 function optionKind(option: SessionConfigOption): WorkbenchOptionKind | undefined {
   const id = optionIdentity(option)
   const raw = option.raw ?? {}
+  // Categories are semantic; model_config must not be mistaken for model.
+  if (raw.category === 'model' || raw.category === 'mode') return raw.category
+  if (raw.category === 'thought_level') return 'reasoning'
+  if (raw.category === 'model_config') return undefined
   const label = normalizedKey(option.label)
   const rawText = Object.entries(raw)
     .filter(([key]) => ['id', 'key', 'name', 'label', 'category', 'title', 'description'].includes(key.toLowerCase()))
@@ -287,7 +291,7 @@ export function resolveModeOptionEntries(snapshot: WorkbenchRuntimeSnapshot, dra
     documentOptions(snapshot, 'mode'),
   ])
   return mergeEntries([
-    preferAdvertised(advertisedChoices(advertised, snapshot.activeMode), DEFAULT_MODE_OPTIONS),
+    snapshot.sessionId ? advertised : preferAdvertised(advertised, DEFAULT_MODE_OPTIONS),
   ], draft || snapshot.activeMode)
 }
 
