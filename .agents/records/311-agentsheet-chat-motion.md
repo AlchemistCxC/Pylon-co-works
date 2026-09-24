@@ -5,6 +5,7 @@
 ## 元信息
 
 - issue：#311
+- 署名：Codex
 - 分支：`codex/chat-motion`
 - 提交范围：代码提交 `7d038ddd`；随后合并 `github/main@30d8fe3a`，本记录单独提交
 - 日期：2026-09-25
