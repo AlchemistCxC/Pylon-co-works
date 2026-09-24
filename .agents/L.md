@@ -719,3 +719,19 @@
 
 ---
 
+[2026-09-24 12] [Riemann] [#266 · 显隐只剩「值」（⑰，叠在 ④ 之上）]
+
+**开工：#266 遗留（⑰）——撤掉元件侧三样显隐申明（行上 `inActiveSession` / `conditions` / `hiddenInEmptyState`），显隐收敛成「预设里的值 + 语境侧名单」。** 施工单 `任务/工作台优化/元件定义表/17-施工单-显隐只剩值.md`；分支 `refactor/cc-visibility-as-value`（从 ④ 的 tip `988cfbb9` 开出；本件与 ④ 同期进批量 PR）。
+
+**我方本轮文件域（请勿改写、勿连带提交）**：
+
+- `src/domains/cc/widgetDefinitions.ts`（删行上三样 + `CcVisibilityCondition` / `CC_VISIBILITY_CONDITIONS` / `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`；空态名单改字面量；新增纯函数 `resolveCcHiddenWidgetIds`；可见性谓词收口）
+- `src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（删 `passesStatusGate` / `hasAlwaysVisibleStatusWidget`；`statusRowContent` 改判可见件；隐藏名单走组装函数）
+- `src/ccHeightState.ts` + **计数调用点（实测 8 处，单子写「6 处」但其枚举与实测逐条一致）**：`src/store.ts`×2、`src/themeFieldDefs.ts`、`src/domains/theme/migration.ts`、`src/domains/theme/presetReducer.ts`×2、`src/domains/workbench/workbenchAppearanceStore.ts`×2
+- 测试：`src/domains/cc/__tests__/widgetDefinitionTable.test.ts`、`src/__tests__/ccHeightState.test.ts`、`src/domains/theme/__tests__/presetReducerPureHelpers.test.ts`；**新增** `src/domains/cc/__tests__/ccVisibilityDeclarationGuard.test.ts`（守卫「行上再无显隐申明」）
+- 文档：`.agents/records/`、本文件
+
+**我不碰**：`src/zones/**`（⑦ 域）、`src/presets/**`、`ControlCenter.css`、`src/components/Settings.tsx`、`src/sheets/**`、`src-tauri/**`、`tools/**`、`src/ui-demo/**`、`src/layout-sketch/**`、`docs/前端接口地图.md`、他人在途域。全程 pathspec 提交。
+
+---
+
