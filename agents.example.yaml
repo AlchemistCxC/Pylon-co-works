@@ -35,6 +35,15 @@
 #   max_attachments: 8         # H10 附件数上限（默认 8）
 #   max_attachment_bytes: 10485760  # H11 单附件上限（默认 10MB）
 #   replay_max_events: 10000   # H12 session/load 回放收集上限（默认 10000）
+#   host_tools: agent | host | unrestricted    # #316 fs 宿主门（默认 host）：
+#       # host=Pylon 向 agent 广告 fs:{readTextFile,writeTextFile} 并代为执行
+#       # 读写（严格限制在该会话 workspace root 内）；agent=不广告不执行
+#       # （agent 自持文件访问）；unrestricted=执行但不设根限制（慎用）。
+#   host_terminal: agent | host | unrestricted # #316 terminal 宿主门（默认 agent）：
+#       # 开启后广告 terminal:true 并执行 terminal/* 方法（如 kimi-cli 的
+#       # Shell 工具会路由到宿主终端）。与 host_tools 分门控。
+#       # 环境变量 PYLON_ACP_HOST_TOOLS（agent 的 env: 段）仍被识别——仅当对应
+#       # YAML 字段未声明时对该门生效（legacy 兼容）；YAML 声明优先。
 
 agents:
   # provider: 协议/实现类别（如 peri/hermes）。旧配置缺省时后端按协议依据推断：
