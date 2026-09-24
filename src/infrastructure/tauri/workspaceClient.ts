@@ -25,8 +25,12 @@ export function createWorkspaceClient(transport: ClientTransport) {
         ...targetArgs(target),
         ...(maxEntries === undefined ? {} : { maxEntries }),
       }).then(normalizeWorkspaceFileIndexPage),
-    readText: (target: WorkspaceTargetWire | string, relativePath: string): Promise<unknown> =>
-      transport.invoke('read_workspace_text', { ...targetArgs(target), relativePath }).then(normalizeWorkspaceText),
+    readText: (target: WorkspaceTargetWire | string, relativePath: string, maxBytes?: number): Promise<unknown> =>
+      transport.invoke('read_workspace_text', {
+        ...targetArgs(target),
+        relativePath,
+        ...(maxBytes === undefined ? {} : { maxBytes }),
+      }).then(normalizeWorkspaceText),
     writeText: (target: WorkspaceTargetWire, input: { relativePath: string; content: string; expectedBaseline?: string | null; force?: boolean }): Promise<unknown> =>
       transport.invoke('write_workspace_text', { target, ...input }).then(normalizeWorkspaceText),
     search: (target: WorkspaceTargetWire, query: string): Promise<unknown> =>

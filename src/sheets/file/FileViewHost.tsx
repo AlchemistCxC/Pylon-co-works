@@ -48,6 +48,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const currentViewIdentity = useRef(viewIdentity)
   currentViewIdentity.current = viewIdentity
   const [truncated, setTruncated] = useState(false)
+  const [truncTotalBytes, setTruncTotalBytes] = useState<number | null>(null)
   const [instruction, setInstruction] = useState('')
   const [summary, setSummary] = useState<KernelSummary>(IDLE_SUMMARY)
   // 0-A3 写冲突锁：locked = agent 写盘冷却期（内核只读）；override = 逃生口
@@ -106,6 +107,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   useEffect(() => {
     const cleared = resetFileSheetTransientState()
     setTruncated(cleared.truncated)
+    setTruncTotalBytes(null)
     setInstruction(cleared.instruction)
     setSummary(IDLE_SUMMARY)
     setWorkingText(null)
@@ -242,7 +244,13 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
           <button type="button" className="file-conflict-reload" onClick={discardAndReload}>重新加载</button>
         </div>
       )}
-      {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
+      {truncated && (
+        <div className="file-truncated-hint" role="status">
+          {truncTotalBytes
+            ? `文件约 ${(truncTotalBytes / 1048576).toFixed(1)} MB，仅预览前 1 MB（内容不完整，不可编辑）`
+            : '内容不完整（truncated）'}
+        </div>
+      )}
       <FileTabView
         target={target}
         provider={fileProvider}
@@ -251,10 +259,11 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         revealLine={tab.line}
         writable={editable}
         baseline={baseline ?? undefined}
-        onTruncated={value => {
+        onTruncated={(value, info) => {
           // A truncated response is intentionally read-only.  Never grant an
           // incomplete buffer an editable surface.
           setTruncated(value)
+          setTruncTotalBytes(value && info ? info.totalBytes : null)
         }}
         onContentReady={content => { setBaseline(content) }}
         onExternalChange={() => {

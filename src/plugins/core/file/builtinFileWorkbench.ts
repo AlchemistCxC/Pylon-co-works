@@ -17,12 +17,18 @@ const ViewsActivity = lazy(() => views().then(module => ({ default: module.Views
 const FileViewHost = lazy(() => import('../../../sheets/file/FileViewHost.tsx'))
 const client = createWorkspaceClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
 
+/** 0-A4：FileSheet 可读/可编辑上限——与后端 MAX_PREVIEW_BYTES（1MB）对齐。 */
+export const FILE_SHEET_MAX_READ_BYTES = 1024 * 1024
+
 export const builtinFileProvider = {
   id: 'builtin.file.workspace-provider', canHandle: () => true,
   // createWorkspaceClient 已完成 wire → WorkspaceEntry 归一化；这里不能再次按 wire
   // 形状归一化，否则 name/relativePath 已变成 label/path 后会被全部过滤为空。
   listEntries: async (target: Parameters<typeof client.listEntries>[0], path: string, _signal?: AbortSignal) => await client.listEntries(target, path) as WorkspaceEntry[],
-  readText: async (target: Parameters<typeof client.readText>[0], path: string, _signal?: AbortSignal) => normalizeWorkspaceText(await client.readText(target, path)),
+  // 0-A4（#286）：FileSheet 读取显式抬到 1MB（后端 MAX_PREVIEW_BYTES）；>1MB 走
+  // truncated 截断预览保持只读。DEFAULT_PREVIEW_BYTES（256KB）留给未指定的保守消费方。
+  readText: async (target: Parameters<typeof client.readText>[0], path: string, _signal?: AbortSignal) =>
+    normalizeWorkspaceText(await client.readText(target, path, FILE_SHEET_MAX_READ_BYTES)),
   writeText: async (target: Parameters<typeof client.writeText>[0], input: Parameters<typeof client.writeText>[1], _signal?: AbortSignal) => normalizeWorkspaceText(await client.writeText(target, input)),
   search: async (target: Parameters<typeof client.search>[0], query: string, _signal?: AbortSignal) => normalizeWorkspaceSearchResults(await client.search(target, query)),
 }

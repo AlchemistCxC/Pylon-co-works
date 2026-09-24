@@ -42,7 +42,8 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   writable?: boolean
   /** 磁盘锚点（宿主持有；保存回执/重载后推进），透传内核计算 dirty。 */
   baseline?: string
-  onTruncated: (truncated: boolean) => void
+  /** 0-A4：truncated 时携带体积信息（>1MB 降级提示条）。 */
+  onTruncated: (truncated: boolean, info?: { totalBytes: number }) => void
   onContentReady?: (content: string) => void
   onExternalChange?: () => void
   onSelectionInvalidated?: () => void
@@ -79,10 +80,10 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
 
   const editorContent = (): string => apiRef?.current?.getDoc() ?? ''
 
-  const fetchText = (requestTarget: WorkspaceTarget, requestPath: string): Promise<{ text: string; truncated: boolean } | null> =>
+  const fetchText = (requestTarget: WorkspaceTarget, requestPath: string): Promise<{ text: string; truncated: boolean; totalBytes: number } | null> =>
     (provider ? provider.readText(requestTarget, requestPath) : Promise.resolve(null)).then(raw => {
       const text = normalizeWorkspaceText(raw)
-      return text ? { text: text.content, truncated: text.truncated } : null
+      return text ? { text: text.content, truncated: text.truncated, totalBytes: text.totalBytes } : null
     })
 
   const loadContent = (showChanged: boolean) => {
@@ -123,7 +124,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
         setRemountNonce(n => n + 1)
       }
       diskRef.current = loaded.text
-      onTruncated(loaded.truncated)
+      onTruncated(loaded.truncated, { totalBytes: loaded.totalBytes })
       onContentReady?.(loaded.text)
       resolveRuntimeErrors({ key: errorKey })
     }).catch(err => {

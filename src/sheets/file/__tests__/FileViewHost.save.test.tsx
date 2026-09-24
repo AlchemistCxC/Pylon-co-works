@@ -68,7 +68,8 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
-    await screen.findByText('内容不完整（truncated）')
+    // 0-A4：truncated 提示带体积（totalBytes 已知时）
+    await screen.findByText(/仅预览前 1 MB（内容不完整，不可编辑）/)
     await waitForFileEditable(false)
   })
 
