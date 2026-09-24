@@ -326,7 +326,7 @@ impl TestHarness {
                 crate::dispatcher::start_notification_dispatcher(
                     &handles,
                     &runtime,
-                    webview.clone(),
+                    webview.as_ref().window(),
                 );
             }
         }
@@ -598,7 +598,7 @@ impl TestHarness {
         crate::lifecycle::do_connect_and_replace(
             &handles,
             &runtime,
-            &self.window,
+            &self.window.as_ref().window(),
             &agent,
             None,
             crate::agent::runtime::AgentLifecycleStatus::Reconnecting,
