@@ -1543,6 +1543,7 @@ pub fn run() {
                 crate::runtime_log::cmds::set_runtime_log_live,
                 crate::workspaces::cmds::get_workspace_root,
                 crate::workspaces::cmds::list_workspace_entries,
+                crate::workspaces::cmds::list_workspace_files,
                 crate::workspaces::cmds::read_workspace_text,
                 crate::workspaces::cmds::write_workspace_text,
                 crate::workspaces::cmds::git_status,

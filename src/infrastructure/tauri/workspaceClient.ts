@@ -5,7 +5,7 @@
  * git_status / git_history / git_diff 的 command/payload 收口 + normalize。
  */
 import type { ClientTransport } from '../acp/agentClient.ts'
-import { normalizeWorkspaceEntries, normalizeWorkspaceText } from './workspaceContracts.ts'
+import { normalizeWorkspaceEntries, normalizeWorkspaceFileIndexPage, normalizeWorkspaceText } from './workspaceContracts.ts'
 import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitStatusWithBranch } from './gitContracts.ts'
 import { normalizeWorkspaceSearchResults } from './workspaceSearchContracts.ts'
 import { normalizeWorkspaceShape, type Workspace } from '../../workspaceEntities.ts'
@@ -19,6 +19,12 @@ export function createWorkspaceClient(transport: ClientTransport) {
   return {
     listEntries: (target: WorkspaceTargetWire | string, relativePath: string): Promise<unknown> =>
       transport.invoke('list_workspace_entries', { ...targetArgs(target), relativePath }).then(normalizeWorkspaceEntries),
+    /** 0-C1：quick open 文件名索引（有界枚举，本地匹配）。 */
+    listFiles: (target: WorkspaceTargetWire | string, maxEntries?: number): Promise<unknown> =>
+      transport.invoke('list_workspace_files', {
+        ...targetArgs(target),
+        ...(maxEntries === undefined ? {} : { maxEntries }),
+      }).then(normalizeWorkspaceFileIndexPage),
     readText: (target: WorkspaceTargetWire | string, relativePath: string): Promise<unknown> =>
       transport.invoke('read_workspace_text', { ...targetArgs(target), relativePath }).then(normalizeWorkspaceText),
     writeText: (target: WorkspaceTargetWire, input: { relativePath: string; content: string; expectedBaseline?: string | null; force?: boolean }): Promise<unknown> =>

@@ -172,6 +172,20 @@ pub(crate) async fn workspace_search(
         .map_err(|error| PylonError::Workspace(error.to_string()))
 }
 
+/// 0-C1：quick open 文件名索引——全仓文件枚举（有界），spawn_blocking 走盘。
+#[tauri::command]
+pub(crate) async fn list_workspace_files(
+    state: tauri::State<'_, AppState>,
+    target: WorkspaceTargetWire,
+    max_entries: Option<usize>,
+) -> Result<workspace::WorkspaceFileIndexPage, PylonError> {
+    let root = workspace_root_for_target(state.inner(), &target).await?;
+    tokio::task::spawn_blocking(move || workspace::list_workspace_files(&root, max_entries))
+        .await
+        .map_err(|error| PylonError::Workspace(error.to_string()))?
+        .map_err(|error| PylonError::Workspace(error.to_string()))
+}
+
 async fn git_workspace_root(
     state: &AppState,
     target: &WorkspaceTargetWire,
