@@ -15,14 +15,21 @@ const TRANSPORT_OVERRIDES: Readonly<Partial<Record<string, TransportStatus>>> = 
 }
 
 /** Explicit transport audit. Deliberately independent from CoverageStatus so a
- * status edit cannot silently promote provider-source-only rows onto the wire. */
+ * status edit cannot silently promote provider-source-only rows onto the wire.
+ * #315：peri Category ③ 变体经 peri/agent_event 扩展通道到线（见 EXTENSION_CHANNEL_IDS），
+ * 不再属于 SOURCE-ONLY；hitlPending 通道上游休眠（peri-06/37/38）维持 SOURCE-ONLY。 */
 const SOURCE_ONLY_IDS = new Set([
   'cc-05', 'cc-10', 'cc-11', 'cc-13', 'cc-15', 'cc-16', 'cc-18', 'cc-19', 'cc-20', 'cc-21', 'cc-22', 'cc-23',
-  'peri-05', 'peri-06', 'peri-07', 'peri-08', 'peri-10', 'peri-11', 'peri-12', 'peri-13', 'peri-14',
-  'peri-15', 'peri-16', 'peri-17', 'peri-18', 'peri-19', 'peri-20', 'peri-21', 'peri-22', 'peri-23',
-  'peri-24', 'peri-25', 'peri-26', 'peri-27', 'peri-34', 'peri-36', 'peri-37', 'peri-38', 'peri-44',
-  'peri-28',
+  'peri-06', 'peri-07', 'peri-11', 'peri-18', 'peri-19', 'peri-20', 'peri-27', 'peri-28', 'peri-36', 'peri-37', 'peri-38', 'peri-44',
   'hm-05', 'hm-07', 'hm-08', 'hm-09', 'hm-10', 'hm-11', 'hm-12',
+])
+
+/** #315：经 provider 私有扩展通知通道到线的映射单元（peri/agent_event 系，
+ * PeriCaps 经 clientCapabilities._meta 协商开启）。 */
+const EXTENSION_CHANNEL_IDS = new Set([
+  'peri-05', 'peri-08', 'peri-10', 'peri-12', 'peri-13', 'peri-14', 'peri-15',
+  'peri-16', 'peri-17', 'peri-21', 'peri-22', 'peri-23', 'peri-24', 'peri-25',
+  'peri-26', 'peri-34',
 ])
 
 const SOURCE_REVISIONS: Readonly<Record<ProviderName, string>> = {
@@ -238,7 +245,9 @@ function closeEvidence(item: CoverageItemDraft, transportStatus: TransportStatus
 function closeTransportGate(items: readonly CoverageItemDraft[]): readonly CoverageItem[] {
   return items.map((item) => {
     const transportStatus = TRANSPORT_OVERRIDES[item.id]
-      ?? (SOURCE_ONLY_IDS.has(item.id) ? 'SOURCE-ONLY/BACKLOG' : 'WIRE-STANDARD')
+      ?? (SOURCE_ONLY_IDS.has(item.id)
+        ? 'SOURCE-ONLY/BACKLOG'
+        : EXTENSION_CHANNEL_IDS.has(item.id) ? 'WIRE-EXTENSION' : 'WIRE-STANDARD')
     const sourceOnly = transportStatus === 'SOURCE-ONLY/BACKLOG'
     return {
       ...item,

@@ -232,14 +232,14 @@ tool_dictionary:
   hermes:
     - name: read_file
       display_name: Read File
-      aliases: []
+      aliases: ["read"]
       kind: read
       action: read
       summary_fields: [path]
       output_label: lines
     - name: write_file
       display_name: Write File
-      aliases: []
+      aliases: ["write"]
       kind: edit
       action: write
       summary_fields: [path]
@@ -253,7 +253,7 @@ tool_dictionary:
       output_label: changed-lines
     - name: search_files
       display_name: Search Files
-      aliases: []
+      aliases: ["search"]
       kind: search
       action: search
       summary_fields: [pattern]
@@ -274,42 +274,42 @@ tool_dictionary:
       output_label: lines
     - name: execute_code
       display_name: Execute Code
-      aliases: []
+      aliases: ["python"]
       kind: execute
       action: execute
       summary_fields: [code]
       output_label: lines
     - name: web_search
       display_name: Web Search
-      aliases: []
+      aliases: ["web search"]
       kind: fetch
       action: fetch
       summary_fields: [query]
       output_label: matches
     - name: web_extract
       display_name: Web Extract
-      aliases: []
+      aliases: ["extract"]
       kind: fetch
       action: fetch
       summary_fields: [urls]
       output_label: lines
     - name: skill_view
       display_name: Skill View
-      aliases: []
+      aliases: ["skill view"]
       kind: read
       action: skill
       summary_fields: [name]
       output_label: lines
     - name: skills_list
       display_name: Skills List
-      aliases: []
+      aliases: ["skills list"]
       kind: read
       action: skill
       summary_fields: [category]
       output_label: lines
     - name: skill_manage
       display_name: Skill Manage
-      aliases: []
+      aliases: ["skill"]
       kind: edit
       action: edit
       summary_fields: [name]
@@ -323,7 +323,7 @@ tool_dictionary:
       output_label: lines
     - name: delegate_task
       display_name: Delegate Task
-      aliases: []
+      aliases: ["delegate"]
       kind: execute
       action: delegate
       summary_fields: [goal]
@@ -337,7 +337,7 @@ tool_dictionary:
       output_label: lines
     - name: session_search
       display_name: Session Search
-      aliases: []
+      aliases: ["session search"]
       kind: search
       action: search
       summary_fields: [query]
@@ -351,14 +351,14 @@ tool_dictionary:
       output_label: lines
     - name: browser_navigate
       display_name: Browser Navigate
-      aliases: []
+      aliases: ["navigate"]
       kind: fetch
       action: navigate
       summary_fields: [url]
       output_label: lines
     - name: browser_snapshot
       display_name: Browser Snapshot
-      aliases: []
+      aliases: ["browser snapshot"]
       kind: read
       action: unknown
       summary_fields: []
@@ -400,14 +400,14 @@ tool_dictionary:
       output_label: lines
     - name: browser_get_images
       display_name: Browser Get Images
-      aliases: []
+      aliases: ["browser images"]
       kind: read
       action: unknown
       summary_fields: []
       output_label: lines
     - name: browser_vision
       display_name: Browser Vision
-      aliases: []
+      aliases: ["browser vision"]
       kind: read
       action: unknown
       summary_fields: [question]
@@ -421,14 +421,14 @@ tool_dictionary:
       output_label: lines
     - name: vision_analyze
       display_name: Vision Analyze
-      aliases: []
+      aliases: ["analyze image"]
       kind: read
       action: unknown
       summary_fields: []
       output_label: lines
     - name: image_generate
       display_name: Image Generate
-      aliases: []
+      aliases: ["generate image"]
       kind: execute
       action: unknown
       summary_fields: []
@@ -449,7 +449,7 @@ tool_dictionary:
       output_label: lines
     - name: cronjob
       display_name: Cronjob
-      aliases: []
+      aliases: ["cron"]
       kind: other
       action: unknown
       summary_fields: []
