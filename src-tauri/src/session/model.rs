@@ -112,6 +112,8 @@ pub(crate) struct SessionInfo {
     /// 后端会话状态，不向前端广播 replay 增量，避免全局事件流与 command response 双写。
     pub(crate) replay_loading: bool,
     pub(crate) mode: Option<String>,
+    /// Legacy modes advertisement, kept separate from standard configOptions.
+    pub(crate) mode_choices: Vec<String>,
     pub(crate) config_options: Vec<serde_json::Value>,
     pub(crate) model: String,
     /// P56/D1：模型切换通道宣告面（apply_session_response / apply_config_options
@@ -224,6 +226,7 @@ impl SessionInfo {
             generation,
             replay_loading: false,
             mode: None,
+            mode_choices: Vec::new(),
             config_options: Vec::new(),
             model: String::new(),
             model_surface: ModelSurface::None,
@@ -306,56 +309,60 @@ impl SessionInfo {
                     .is_some();
             }
         }
-        // ACP 1.4 and Hermes expose the selected model in different places.
-        // Prefer the standard `models.currentModelId` state when present, then
-        // retain the config-option fallback handled above.  P56/D2：model 的
-        // current 提取用 machine-id-only 变体（name/label 显示名不得当 id）。
-        // #97/D97-1：根级 currentModelId/current_model_id 变体与嵌套 models 状态
-        // 等价消费（同一解析规则覆盖 current 维度）。
-        if let Some(model) = response
-            .get("models")
-            .and_then(|models| {
-                models
-                    .get("currentModelId")
-                    .or_else(|| models.get("current_model_id"))
-                    .or_else(|| models.get("currentModel"))
-                    .or_else(|| models.get("current_model"))
-                    .or_else(|| models.get("current"))
-            })
-            .or_else(|| {
-                response
-                    .get("currentModelId")
-                    .or_else(|| response.get("current_model_id"))
-            })
-            .and_then(value_as_machine_id)
-        {
-            self.model = model;
-            authoritative_current = true;
-        } else if let Some(model) = response
-            .get("modelId")
-            .or_else(|| response.get("model_id"))
-            .or_else(|| response.get("model"))
-            .and_then(value_as_machine_id)
-        {
-            self.model = model;
-            authoritative_current = true;
+        // Prefer standard configOptions over legacy models state.
+        if !authoritative_current {
+            // ACP 1.4 and Hermes expose the selected model in different places.
+            // Prefer the standard `models.currentModelId` state when present, then
+            // retain the config-option fallback handled above.  P56/D2：model 的
+            // current 提取用 machine-id-only 变体（name/label 显示名不得当 id）。
+            // #97/D97-1：根级 currentModelId/current_model_id 变体与嵌套 models 状态
+            // 等价消费（同一解析规则覆盖 current 维度）。
+            if let Some(model) = response
+                .get("models")
+                .and_then(|models| {
+                    models
+                        .get("currentModelId")
+                        .or_else(|| models.get("current_model_id"))
+                        .or_else(|| models.get("currentModel"))
+                        .or_else(|| models.get("current_model"))
+                        .or_else(|| models.get("current"))
+                })
+                .or_else(|| {
+                    response
+                        .get("currentModelId")
+                        .or_else(|| response.get("current_model_id"))
+                })
+                .and_then(value_as_machine_id)
+            {
+                self.model = model;
+                authoritative_current = true;
+            } else if let Some(model) = response
+                .get("modelId")
+                .or_else(|| response.get("model_id"))
+                .or_else(|| response.get("model"))
+                .and_then(value_as_machine_id)
+            {
+                self.model = model;
+                authoritative_current = true;
+            }
         }
         if authoritative_current {
             self.model_pending = None;
         }
-        self.mode = response
-            .get("modes")
-            .and_then(|modes| {
-                modes
-                    .get("currentModeId")
-                    .or_else(|| modes.get("current_mode_id"))
-                    .or_else(|| modes.get("currentMode"))
-                    .or_else(|| modes.get("current_mode"))
-                    .or_else(|| modes.get("current"))
-            })
-            .and_then(value_as_string)
+        self.mode = find_config_option(&effective_options, "mode")
+            .and_then(config_option_current_value)
             .or_else(|| {
-                find_config_option(&effective_options, "mode").and_then(config_option_current_value)
+                response
+                    .get("modes")
+                    .and_then(|modes| {
+                        modes
+                            .get("currentModeId")
+                            .or_else(|| modes.get("current_mode_id"))
+                            .or_else(|| modes.get("currentMode"))
+                            .or_else(|| modes.get("current_mode"))
+                            .or_else(|| modes.get("current"))
+                    })
+                    .and_then(value_as_string)
             })
             .or_else(|| {
                 response
@@ -364,6 +371,15 @@ impl SessionInfo {
                     .or_else(|| response.get("mode"))
                     .and_then(value_as_string)
             });
+        if let Some(modes) = response.get("modes") {
+            if let Some(choices) = modes
+                .get("availableModes")
+                .or_else(|| modes.get("available_modes"))
+                .and_then(serde_json::Value::as_array)
+            {
+                self.mode_choices = choices.iter().filter_map(value_as_machine_id).collect();
+            }
+        }
         // usage 不在此内联提取——函数尾 capture_session_state 经注册表
         // capture_usage 单点写入 usage_snapshot（提取链与原内联块逐字相同，
         // #261 去重：消除同一次响应路径上的同逻辑双写）。
@@ -896,7 +912,7 @@ pub(crate) fn config_option_key_matches(option_key: &str, semantic: &str) -> boo
 
 /// P56/D1：选项身份（configId/config_id/optionId/option_id/id/key 的 machine-id-only
 /// 提取；不含 name——宣告 configId 不得降级为显示名）。
-fn config_option_identity(option: &serde_json::Value) -> Option<String> {
+pub(crate) fn config_option_identity(option: &serde_json::Value) -> Option<String> {
     let object = option.as_object()?;
     [
         "configId",
@@ -934,7 +950,15 @@ pub(crate) fn collect_config_choice_values(
         }
         if let Some(list) = value.as_array() {
             for item in list {
-                if let Some(choice) = extract(item) {
+                if item
+                    .get("group")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+                {
+                    if let Some(options) = item.get("options") {
+                        collect(options, depth + 1, extract, out);
+                    }
+                } else if let Some(choice) = extract(item) {
                     out.push(choice);
                 }
             }
@@ -1111,6 +1135,30 @@ pub(crate) fn validate_model_advertised(value: &str, choices: &[String]) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_acp_choices_are_values_not_group_labels() {
+        let option = serde_json::json!({"id":"model","options":[{"group":"recommended","name":"Recommended",
+            "options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]}]});
+        assert_eq!(config_option_choice_ids(&option), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn legacy_selector_projection_preserves_catalogue_without_changing_rpc_surface() {
+        let response = serde_json::json!({"models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"}]},
+            "modes":{"currentModeId":"default","availableModes":[{"id":"default"},{"id":"custom"}]}});
+        let options = super::super::response_projection_options(&response);
+        assert_eq!(options.len(), 2);
+        assert_eq!(config_option_choice_ids(&options[0]), vec!["a", "b"]);
+        assert_eq!(
+            config_option_choice_ids(&options[1]),
+            vec!["default", "custom"]
+        );
+        let mut live = session();
+        live.apply_session_response(&response);
+        assert_eq!(live.model_surface, ModelSurface::ModelsState);
+        assert!(live.config_options.is_empty());
+    }
 
     fn session() -> SessionInfo {
         SessionInfo::new(

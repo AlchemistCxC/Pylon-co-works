@@ -347,7 +347,11 @@ export function extractConfigOptionChoices(option: unknown): readonly unknown[] 
     if (depth > 5 || seen.has(value)) return
     seen.add(value)
     if (Array.isArray(value)) {
-      found.push(...value)
+      for (const item of value) {
+        const group = asWireRecord(item)
+        if (group && typeof group.group === 'string' && Array.isArray(group.options)) collect(group.options, depth + 1)
+        else found.push(item)
+      }
       return
     }
     const nested = asWireRecord(value)
@@ -560,7 +564,7 @@ export function extractModelConfig(
   // 方兼容）。
   const modelChoices = uniqueModelChoices([
     ...extractConfigOptionChoices(option).map(choice => toModelChoice(choice)),
-    ...responseChoices(response, 'model').map(choice => toModelChoice(choice)),
+    ...(option ? [] : responseChoices(response, 'model').map(choice => toModelChoice(choice))),
   ])
   const models = modelChoices.map(choice => choice.id)
   return {
@@ -573,10 +577,10 @@ export function extractModelConfig(
 export function extractModeConfig(response: SessionResponseObject): { mode?: string; modes?: string[] } {
   const options = responseConfigOptions(response)
   const option = findConfigOption(options, 'mode')
-  const current = responseCurrent(response, 'mode')
-    ?? extractWireString(extractConfigOptionValue(option), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
+  const current = extractWireString(extractConfigOptionValue(option), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
+    ?? responseCurrent(response, 'mode')
     ?? extractWireString(readWireField(asWireRecord(response), ['mode', 'mode_id', 'modeId']), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
-  const modes = uniqueStrings(responseChoices(response, 'mode').map(choice => extractChoiceId(choice, 'mode')))
+  const modes = uniqueStrings((option ? extractConfigOptionChoices(option) : responseChoices(response, 'mode')).map(choice => extractChoiceId(choice, 'mode')))
   return {
     ...(current ? { mode: current } : {}),
     ...(modes.length > 0 ? { modes } : {}),

@@ -73,7 +73,7 @@ describe('Solid Workbench widgets', () => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
         options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
-          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+          currentValue: value, category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
       } })
     }
     publish('low')
@@ -256,7 +256,7 @@ describe('Solid Workbench widgets', () => {
       const document = createWorkbenchDocument('preview-session')
       services.runtime.replaceDocument({ ...document, session: { ...document.session,
         options: normalizeSessionConfigOptions([{ id: 'reasoning_effort', type: 'select',
-          currentValue: value, category: 'mode', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
+          currentValue: value, category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }], version: 7 }]),
       } })
     }
     publish('low')

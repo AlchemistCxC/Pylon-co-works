@@ -51,7 +51,7 @@ flowchart LR
 
 当前已分开的责任：
 
-- [sessionResponseProjection](../../src/sheets/agent-workbench/sessionResponseProjection.ts)：响应选项、模型/模式与 envelope 值转换。去重集合、session owner、订阅与顺序留在 host。
+- [sessionResponseProjection](../../src/sheets/agent-workbench/sessionResponseProjection.ts)：响应选项、模型/模式与 envelope 值转换（#304：存在标准 configOptions 时不再合成 legacy model/mode 候选；事件 id 含 sequence，kind 区分会话建立与选择器更新）。去重（只与**最近一条**响应 + 当时 session 快照比对，故 A→B→A 不被永久吞掉）、session owner、订阅与顺序留在 host。
 - [messageSnapshotProjection](../../src/sheets/agent-workbench/messageSnapshotProjection.ts)：旧消息快照转换。调用者负责读取存储；转换不提升历史数据的权威性。
 - [toolConnectorProjection](../../src/renderers/solid-workbench/toolConnectorProjection.ts)：连线身份、legacy 优先去重与 appearance 解析。布局测量、DOM 注册和卸载留在挂载组件。
 - [interactionProjection](../../src/domains/workbench/interactionProjection.ts)：interaction 的脱敏与终态保留策略。类型引用不引入反向运行时依赖，事件次序/去重仍由父 projector 管理。

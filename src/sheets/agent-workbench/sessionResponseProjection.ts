@@ -4,7 +4,7 @@
  * ordering and deduplication; persisted field names and provenance stay intact.
  */
 import { createWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
-import { extractChoiceId, extractChoiceLabel, extractConfigOptionId, extractModeConfig, extractModelConfig, type SessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
+import { extractChoiceId, extractChoiceLabel, extractConfigOptionId, extractModeConfig, extractModelConfig, findConfigOption, type SessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -96,6 +96,7 @@ function mergeSessionResponseOptions(response: SessionResponseObject): readonly 
     .filter((item): item is JsonValue => item !== undefined)
   for (const synthetic of [syntheticSessionOption('model', response), syntheticSessionOption('mode', response)]) {
     if (!synthetic) continue
+    if (findConfigOption(options, synthetic.id === 'model' ? 'model' : 'mode')) continue
     const syntheticId = String(synthetic.id).toLowerCase()
     const index = options.findIndex(item => optionId(item)?.toLowerCase() === syntheticId)
     if (index < 0) {
@@ -144,13 +145,14 @@ export function createSessionResponseEnvelope(
   provider: string,
   response: SessionResponseObject,
   sequence: number,
+  kind: 'session.started' | 'session.config-updated' = 'session.started',
 ): WorkbenchEventEnvelope {
   const model = extractModelConfig(response.configOptions, response).model
   const mode = extractModeConfig(response).mode
   const options = mergeSessionResponseOptions(response)
   const fingerprint = shortHash(sessionResponseProjectionKey(response))
   return createWorkbenchEnvelope({
-    eventId: `session-response:${sessionId}:${fingerprint}`,
+    eventId: `session-response:${sessionId}:${sequence}:${fingerprint}`,
     sessionId,
     sequence: Math.max(1, sequence),
     recordedAt: new Date().toISOString(),
@@ -164,8 +166,8 @@ export function createSessionResponseEnvelope(
       synthetic: { reason: 'session-new-response' },
     },
     event: {
-      type: 'session.started',
-      status: 'ready',
+      type: kind,
+      ...(kind === 'session.started' ? { status: 'ready' } : {}),
       ...(model ? { model } : {}),
       ...(mode ? { mode } : {}),
       ...(options.length > 0 ? { options } : {}),

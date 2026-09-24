@@ -836,3 +836,13 @@
 ---
 [2026-09-24] [Codex-Aster] [AgentSheet terminal-like 视觉重构]
 范围：AgentSheet 左右栏展示组件、对应 workspace/shell CSS、工作区/Profile/宠物/会话设置视觉、验收与记录。保持所有业务及插件契约、预设数据、布局宽度与折叠语义。避开 #276 Markdown 文件域。共享树当前有他人在途改动，依 §2.1 暂不 merge/stage/commit；本声明暂未提交。
+
+---
+
+[2026-09-24 20] [Miyaki Kumo] [#304 · ACP 中控状态收敛·收尾]
+
+**收尾：接管 #304（承接 #266 CC-26）已在工作树中的未提交改动**——实现与测试已成体（当时门禁全绿），缺程序性收尾与残留收敛。spec 见 `.agents/spec/304-acp-session-controls.md`。分支沿用 `kumo/prometheus`。用户明确本次**不做实机验收**。
+
+**本轮文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/{control,create,model,persist,model_switch_wire_tests}.rs`、`src/components/chat/sessionModeState.ts` 及其测试、`src/infrastructure/acp/chatContracts.ts` 及其测试、`src/domains/workbench/sessionUiStore.ts`、`src/renderers/solid-workbench/input/{ControlCenter.solid,workbenchOptionCatalog}`（+测试）、`src/sheets/agent-workbench/{AgentRendererSuiteWorkbench.tsx,agentWorkbenchSession.ts,sessionResponseProjection.ts}`、新增 `src/sheets/agent-workbench/__tests__/sessionControl.test.ts`、`src/plugins/core/commandSet/builtinCommands.ts`（仅 `/mode` 提示与 prompt 文案）、`docs/说明书/`（如涉 mode/model 选择器表述）、`.agents/records/304-*.md`、本文件。
+
+**我不碰**：`src/plugins/core/commandSet/builtinCommandExecutors.ts`（`/mode`、`/model` 的插件执行器仍走重构前通道：写 `runtimeStore` + 裸 RPC，绕过 `runSessionControl`；**登记为遗留、不并入本次**，因为它需要把会话控制边界引入插件层，属新架构而非收尾）、实机验收（按用户指示不做）、他人在途域。全程 pathspec 提交。
