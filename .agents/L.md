@@ -364,21 +364,7 @@
 
 ---
 
-[2026-09-20 17] [Miyaki Kumo] [#212 + #213 · 重放/直播分流大重构]
-
-**开工：把「这一行现在是否在被揭示」从数据形状推断（`running` / 新行 / 有内容增长）改成运行时权威事实，并把渲染分成静态与流式两条路径。** 经用户拍板：判据**统一到运行时权威化**；历史**整发 + 渐进挂载**；滚动**自管锚点 + `overflow-anchor:none`**；引入 **HYDRATING 落位窗口**；**并入** #204/#208 遗留两条；自动跟随**一律 instant**。分支沿用 `Ru5t/Reflector`，经 **PR #207** 合入。spec 见 `.agents/spec/212-*.md`。
-
-**本轮文件域（请勿改写、勿连带提交）**：
-
-- 渲染层：`src/renderers/solid-workbench/streamingDisplayScheduler.ts`、`SolidWorkbenchApp.solid.tsx`、`chat/{MarkdownContent.solid.tsx,markdownRenderModel.ts,PlainMessageList.solid.tsx,MessageRow.solid.tsx,CodeBlock.solid.tsx}`
-- 领域/会话层：`src/domains/workbench/workbenchRuntime.ts`、`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`
-- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅 `.term-md-skeleton` 与消息行占位一节）
-- 测试：`src/renderers/solid-workbench/__tests__/**`、`src/domains/workbench/__tests__/**`、`src/__tests__/replay/**`
-- 文档：`.agents/records/`、`.agents/spec/`、本文件
-
-**我不碰**：`src-tauri/src/dispatcher/**`、`src-tauri/src/session/**`（#207 的 clippy 收口已单独提交，本轮不再动 Rust 侧）、`src/presets/**`、`src/zones/**`、`src/components/Settings.tsx`、`src/plugins/product/packages/builtin.pylon-workspace/**`（#206 域）。
-
-**共享工作树状态**：本轮开工时工作树对他人在途改动是干净的（此前 `dispatcher/mod.rs`、`persist.rs`、`Sidebar.css` 三处在途改动已由各自作者提交）；每次提交前重新核对 `git status`，全程 pathspec，不 `add .`、不 `commit -a`。
+（#212 + #213 重放/直播分流大重构已随 PR #207 合入 main，两条 issue 均 CLOSED，在途条目移除；内容见 git 历史与 `.agents/records/issue-212-static-vs-live-split.md`。）
 
 ---
 
@@ -660,24 +646,7 @@
 
 ---
 
-[2026-09-22 16] [Miyaki Kumo] [#243]
-
-**开工：issue243（长会话行虚拟化——视口窗口 + 行高表 + 占位符）。分支沿用 `Ru5t/renderer-memory-probe`（#240 附六/探针所在支，PR #242 在途；#243 实现为堆叠提交）。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
-
-[2026-09-22 16] [Miyaki Kumo] [#243]
-
-**进展：issue243 切片 1~5 全部落地（引擎 TanStack spacer 方案，对 issue 目标结构 4「逐行占位盒」有已论证偏离），门禁全绿，即将推送开 PR（堆叠于 #242）。在途条目保留至合入。** spec 见 `.agents/spec/240-long-session-row-virtualization.md`（D1~D10 已裁定）。
-
-本轮文件域（请勿改写、勿连带提交）：
-
-- 核心：`src/renderers/solid-workbench/chat/PlainMessageList.solid.tsx`、**新增** `src/renderers/solid-workbench/chat/rowHeightTable.ts`、`rowHeightEstimate.ts`
-- 样式：`src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css`（仅占位符行与杀停开关一节）
-- 依赖：`package.json`、`bun.lock`（**已** `bun add @tanstack/solid-virtual@3.13.40`，D9 裁定）
-- 测试：`chat/__tests__/PlainMessageList.solid.test.tsx`（**仅 issue 点名的 #212 三条窗口用例改写**，逐个登记；其余原样）、**新增** `chat/__tests__/issue243.*`、`__tests__/sessionScale.probe.solid.test.tsx`（切片 5 口径同步）
-- 文档：`.agents/spec/240-*.md`（一次性）、`.agents/records/`、`docs/说明书/` 聊天渲染节、本文件、issue #243 回写
-
-**我不碰**：`chatRowPipeline.ts` 与 `messageListPort.ts` 契约（estimatedHeight 缝只消费不改动）、`codeBlockDomLifecycle.ts` 本体（杀停开关只沿用先例形态）、`markdownRenderModel.ts`、`streamingDisplayScheduler.ts`、`WorkbenchContent.solid.tsx`（除非滚动模式标记对齐确需一行级接线，届时在此补声明）、中控区、预设系统、他人在途域（#245 的 src-tauri 域、#241 域的 codeHighlight 线均不碰）。
-
+（#243 长会话行虚拟化已随 PR #256 合入 main、issue CLOSED，在途条目移除；内容见 git 历史与 `.agents/records/243-long-session-row-virtualization.md`。）
 
 ---
 
@@ -846,3 +815,18 @@
 **本轮文件域（请勿改写、勿连带提交）**：`src-tauri/src/session/{control,create,model,persist,model_switch_wire_tests}.rs`、`src/components/chat/sessionModeState.ts` 及其测试、`src/infrastructure/acp/chatContracts.ts` 及其测试、`src/domains/workbench/sessionUiStore.ts`、`src/renderers/solid-workbench/input/{ControlCenter.solid,workbenchOptionCatalog}`（+测试）、`src/sheets/agent-workbench/{AgentRendererSuiteWorkbench.tsx,agentWorkbenchSession.ts,sessionResponseProjection.ts}`、新增 `src/sheets/agent-workbench/__tests__/sessionControl.test.ts`、`src/plugins/core/commandSet/builtinCommands.ts`（仅 `/mode` 提示与 prompt 文案）、`docs/说明书/`（如涉 mode/model 选择器表述）、`.agents/records/304-*.md`、本文件。
 
 **我不碰**：`src/plugins/core/commandSet/builtinCommandExecutors.ts`（`/mode`、`/model` 的插件执行器仍走重构前通道：写 `runtimeStore` + 裸 RPC，绕过 `runSessionControl`；**登记为遗留、不并入本次**，因为它需要把会话控制边界引入插件层，属新架构而非收尾）、实机验收（按用户指示不做）、他人在途域。全程 pathspec 提交。
+
+---
+
+[2026-09-24 22] [Miyaki Kumo] [#301]
+
+**开工：修 issue301（#243 窗口收敛用例偶发红——测试夹具的假滚动几何不忠实）。** 分支沿用 `kumo/prometheus`。**只改测试夹具的矩形桩，产品侧 `PlainMessageList.solid.tsx` 的 scrollMargin 实测式不动**（该式在真实几何下正确；本机已确定性复现出 fixture 造成的错误状态）。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 测试：`src/renderers/solid-workbench/chat/__tests__/PlainMessageList.solid.test.tsx`、`src/renderers/solid-workbench/chat/__tests__/issue243.virtualization.solid.test.tsx`（**仅视口/容器矩形桩与夹具提取**，断言与用例集不变）
+- 文档：`.agents/records/301-*.md`（完工时新增）、本文件、issue #301 回写
+
+**我不碰**：`PlainMessageList.solid.tsx` 与 `rowHeightTable.ts`/`rowHeightEstimate.ts`（产品逻辑零改动）、`@tanstack/*` 依赖、`messageListPort.ts` 契约、中控区、预设系统、`src-tauri/**`、他人在途域（#304 收尾域、AgentSheet 视觉域）。
+
+**顺带清理（issue #301 点名）**：本文件里 #212+#213、#243 两条**已合入**的旧条目按「只留在途」摘除（对应 issue 均已 CLOSED）。全程 pathspec 提交。
