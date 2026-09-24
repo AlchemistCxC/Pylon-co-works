@@ -565,7 +565,10 @@
 /* ── Solid control-center selectors ──
    Keep these menus in the same square, dense visual language as the terminal
    titlebar.  StatusBar.css still supplies the legacy fallback defaults; the
-   scoped rules below are deliberately later and more specific for Solid. */
+   scoped rules below are deliberately later and more specific for Solid.
+   ★ 例外（2026-09-23）：`.cc-permission-trigger` 的 [data-mode] 语义色四条在 StatusBar.css 侧
+   带了槽位作用域前缀 ⇒ 特异度反超下面的 `color: var(--text-dim)`。这是**有意**的：
+   权限文字要按模式变色，通用灰只是缺省。改下面这条时别把语义色再压回去。 */
 .solid-workbench-control-center-slot :is(.cc-model-root, .solid-permission-widget, .solid-reasoning-widget) {
   position: relative;
   display: inline-flex;
