@@ -105,6 +105,9 @@ export function AssistantContent(props: {
         <Show when={props.semanticContent !== undefined} fallback={<MarkdownContent text={props.text} streaming={props.streaming} />}>
           {props.semanticContent}
         </Show>
+        <Show when={props.streaming}>
+          <span class="term-stream-sheen" aria-hidden="true" />
+        </Show>
       </div>
     </div>
   )

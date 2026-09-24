@@ -76,7 +76,7 @@ describe('PlainMessageList', () => {
       expect(result.container.querySelector('[data-message-id="m4"]')).toBe(row)
       expect(row).toHaveAttribute('data-entry', 'new')
 
-      vi.advanceTimersByTime(420)
+      vi.advanceTimersByTime(760)
       expect(row).not.toHaveAttribute('data-entry')
       port.setItems([createMessageListItems([descriptor({
         id: 'history', role: 'assistant', sender: 'agent', content: 'old session', time: '09:00',
