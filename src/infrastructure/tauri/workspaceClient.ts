@@ -6,7 +6,7 @@
  */
 import type { ClientTransport } from '../acp/agentClient.ts'
 import { normalizeWorkspaceEntries, normalizeWorkspaceFileIndexPage, normalizeWorkspaceText } from './workspaceContracts.ts'
-import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitSequenceState, normalizeGitStatusWithBranch } from './gitContracts.ts'
+import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitSequenceState, normalizeGitStatusWithBranch, type GitSequenceState } from './gitContracts.ts'
 import { normalizeWorkspaceSearchResults } from './workspaceSearchContracts.ts'
 import { normalizeWorkspaceShape, type Workspace } from '../../workspaceEntities.ts'
 import type { WorkspaceTargetWire } from '../../domains/workspace/workspaceTarget.ts'
@@ -39,7 +39,7 @@ export function createWorkspaceClient(transport: ClientTransport) {
     gitShowFile: (target: WorkspaceTargetWire, rev: string, path: string): Promise<unknown> =>
       transport.invoke('git_show_file', { target, rev, path }),
     /** 0-C2：merge/rebase/cherry-pick 进行态 + 冲突清单。 */
-    gitSequenceState: (target: WorkspaceTargetWire): Promise<unknown> =>
+    gitSequenceState: (target: WorkspaceTargetWire): Promise<GitSequenceState> =>
       transport.invoke('git_sequence_state', { target }).then(normalizeGitSequenceState),
     gitStatus: (target: WorkspaceTargetWire | string): Promise<unknown> => transport.invoke('git_status', targetArgs(target)).then(normalizeGitStatus),
     gitStatusWithBranch: (target: WorkspaceTargetWire | string): Promise<unknown> =>

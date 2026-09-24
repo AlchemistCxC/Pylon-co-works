@@ -44,7 +44,7 @@ export const builtinGitProvider = {
   switchBranch: async (target: Parameters<typeof client.gitSwitchBranch>[0], name: string, _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitSwitchBranch(target, name)),
   pull: async (target: Parameters<typeof client.gitPull>[0], _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitPull(target)),
   push: async (target: Parameters<typeof client.gitPush>[0], _signal?: AbortSignal) => normalizeGitOperationResult(await client.gitPush(target)),
-  showFile: async (target: Parameters<typeof client.gitShowFile>[0], rev: string, path: string) => String(await client.gitShowFile(target, rev, path)),
+  showFile: async (target: Parameters<typeof client.gitShowFile>[0], input: { rev: string; path: string }) => String(await client.gitShowFile(target, input.rev, input.path)),
   sequenceState: async (target: Parameters<typeof client.gitSequenceState>[0]) => await client.gitSequenceState(target),
 }
 

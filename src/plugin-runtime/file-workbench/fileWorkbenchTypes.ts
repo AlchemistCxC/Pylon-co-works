@@ -14,6 +14,13 @@ export interface FileProvider {
   readText(target: WorkspaceTarget, relativePath: string, signal?: AbortSignal): Promise<WorkspaceTextPreview | null>
   writeText?(target: WorkspaceTarget, input: { relativePath: string; content: string; expectedBaseline?: string | null; force?: boolean }, signal?: AbortSignal): Promise<WorkspaceTextPreview | null>
   search?(target: WorkspaceTarget, query: string, signal?: AbortSignal): Promise<WorkspaceSearchResult[]>
+  // ── 0-C4 文件树写操作与 quick open 索引（全 optional；UI 能力探测）──
+  createFile?(target: WorkspaceTarget, input: { parentDir: string; name: string; content?: string }, signal?: AbortSignal): Promise<WorkspaceTextPreview | null>
+  createDir?(target: WorkspaceTarget, input: { parentDir: string; name: string }, signal?: AbortSignal): Promise<WorkspaceEntry | null>
+  rename?(target: WorkspaceTarget, input: { oldPath: string; newName: string }, signal?: AbortSignal): Promise<WorkspaceEntry | null>
+  delete?(target: WorkspaceTarget, input: { path: string; force?: boolean }, signal?: AbortSignal): Promise<boolean | null>
+  /** quick open 文件名索引（有界枚举）。 */
+  listFiles?(target: WorkspaceTarget, maxEntries?: number, signal?: AbortSignal): Promise<{ entries: string[]; truncated: boolean } | null>
 }
 
 export interface FileLanguageProvider {
@@ -23,12 +30,66 @@ export interface FileLanguageProvider {
   load(path: string, signal?: AbortSignal): Promise<LanguageSupport | null>
 }
 
+/** 0-C4：结构化 log 单页（git_log_graph 数据面，0-C2 的 git_show_file 已就绪）。 */
+export interface GitCommitGraph {
+  hash: string
+  parents: string[]
+  author: string
+  /** Unix 秒（与现契约 date 语义一致）。 */
+  date: number
+  subject: string
+  /** %D 原文（如 "origin/main, HEAD -> main"），前端解析徽章。 */
+  refs: string
+}
+
+export interface GitLogPage {
+  commits: GitCommitGraph[]
+  hasMore: boolean
+}
+
+/** 0-C4：blame 行（只读 gutter 悬浮）。 */
+export interface GitBlameLine {
+  hash: string
+  author: string
+  date: number
+  lineNo: number
+  content: string
+}
+
+export interface GitStash {
+  id: string
+  subject: string
+}
+
 export interface GitProvider {
   id: string
   canHandle(target: WorkspaceTarget): boolean | Promise<boolean>
   status(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitStatusWithBranch>
   history(target: WorkspaceTarget, options?: { limit?: number }, signal?: AbortSignal): Promise<GitCommit[]>
   diff(target: WorkspaceTarget, input: { path: string; staged: boolean }, signal?: AbortSignal): Promise<string>
+  // ── 0-C4 起的可选能力面（全部 optional = 能力探测；第三方不实现时 UI 隐藏入口）──
+  /** 结构化 log 分页（git 图）。 */
+  logGraph?(target: WorkspaceTarget, options?: { skip?: number; limit?: number; firstParent?: boolean; path?: string }, signal?: AbortSignal): Promise<GitLogPage>
+  /** 单文件两版本全文；rev 含 ":0:"~":3:" stage 语法（后端白名单内）。 */
+  showFile?(target: WorkspaceTarget, input: { rev: string; path: string }, signal?: AbortSignal): Promise<string>
+  blame?(target: WorkspaceTarget, path: string, signal?: AbortSignal): Promise<GitBlameLine[]>
+  /** merge/rebase/cherry-pick 进行态 + 冲突清单。 */
+  sequenceState?(target: WorkspaceTarget, signal?: AbortSignal): Promise<{ kind: 'none' | 'rebase' | 'merge' | 'cherry-pick'; conflicts: string[] }>
+  stashList?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitStash[]>
+  stashPush?(target: WorkspaceTarget, input?: { message?: string; includeUntracked?: boolean }, signal?: AbortSignal): Promise<GitOperationResult>
+  stashPop?(target: WorkspaceTarget, index?: number, signal?: AbortSignal): Promise<GitOperationResult>
+  stashDrop?(target: WorkspaceTarget, index?: number, signal?: AbortSignal): Promise<GitOperationResult>
+  /** L1-L3 危险分级确认由 UI 层负责；后端仍各自校验。 */
+  reset?(target: WorkspaceTarget, input: { mode: 'soft' | 'mixed' | 'hard'; toRev: string }, signal?: AbortSignal): Promise<GitOperationResult>
+  revert?(target: WorkspaceTarget, hashes: string[], signal?: AbortSignal): Promise<GitOperationResult>
+  /** 以独立可选方法并存一个版本期（不覆写 createBranch/switchBranch）。 */
+  checkout?(target: WorkspaceTarget, input: { name: string; create?: boolean }, signal?: AbortSignal): Promise<GitOperationResult>
+  cherryPick?(target: WorkspaceTarget, hash: string, signal?: AbortSignal): Promise<GitOperationResult>
+  abortCherryPick?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitOperationResult>
+  merge?(target: WorkspaceTarget, name: string, signal?: AbortSignal): Promise<GitOperationResult>
+  rebase?(target: WorkspaceTarget, onto: string, signal?: AbortSignal): Promise<GitOperationResult>
+  rebaseContinue?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitOperationResult>
+  rebaseAbort?(target: WorkspaceTarget, signal?: AbortSignal): Promise<GitOperationResult>
   stage?(target: WorkspaceTarget, paths: string[], signal?: AbortSignal): Promise<GitOperationResult>
   unstage?(target: WorkspaceTarget, paths: string[], signal?: AbortSignal): Promise<GitOperationResult>
   commit?(target: WorkspaceTarget, message: string, signal?: AbortSignal): Promise<GitOperationResult>

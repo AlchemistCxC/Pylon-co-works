@@ -130,3 +130,64 @@ export function normalizeGitSequenceState(raw: unknown): GitSequenceState {
     : []
   return { kind, conflicts }
 }
+
+/** 0-C4：git 图单页（logGraph 响应；宽容解析——损坏条目跳过不崩）。 */
+export interface GitCommitGraph {
+  hash: string
+  parents: string[]
+  author: string
+  date: number
+  subject: string
+  refs: string
+}
+
+export interface GitLogPage {
+  commits: GitCommitGraph[]
+  hasMore: boolean
+}
+
+export function normalizeGitLogPage(raw: unknown): GitLogPage {
+  if (!raw || typeof raw !== 'object') return { commits: [], hasMore: false }
+  const item = raw as Partial<GitLogPage>
+  const commits = Array.isArray(item.commits)
+    ? item.commits.flatMap((entry): GitCommitGraph[] => {
+        if (!entry || typeof entry !== 'object') return []
+        const value = entry as Partial<GitCommitGraph>
+        if (typeof value.hash !== 'string' || value.hash.length < 7) return []
+        return [{
+          hash: value.hash,
+          parents: Array.isArray(value.parents) ? value.parents.filter((p): p is string => typeof p === 'string') : [],
+          author: typeof value.author === 'string' ? value.author : '',
+          date: typeof value.date === 'number' ? value.date : 0,
+          subject: typeof value.subject === 'string' ? value.subject : '',
+          refs: typeof value.refs === 'string' ? value.refs : '',
+        }]
+      })
+    : []
+  return { commits, hasMore: item.hasMore === true }
+}
+
+/** 0-C4：blame 行（宽容解析：缺字段的行跳过）。 */
+export interface GitBlameLine {
+  hash: string
+  author: string
+  date: number
+  lineNo: number
+  content: string
+}
+
+export function normalizeGitBlame(raw: unknown): GitBlameLine[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry): GitBlameLine[] => {
+    if (!entry || typeof entry !== 'object') return []
+    const value = entry as Partial<GitBlameLine>
+    if (typeof value.hash !== 'string' || typeof value.content !== 'string' || typeof value.lineNo !== 'number') return []
+    return [{
+      hash: value.hash,
+      author: typeof value.author === 'string' ? value.author : '',
+      date: typeof value.date === 'number' ? value.date : 0,
+      lineNo: value.lineNo,
+      content: value.content,
+    }]
+  })
+}
