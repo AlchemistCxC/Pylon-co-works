@@ -261,3 +261,59 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
     expect(leaked, `注释残渣漏进了选择器：\n${leaked.join('\n')}`).toEqual([])
   })
 })
+
+// ── token 卫生（issue #281）──────────────────────────────────────────────────
+describe('FileSheet token hygiene (issue #281)', () => {
+  const INDEX_CSS_PATH = 'src/index.css'
+  const EDITOR_TS_PATH = 'src/sheets/file/FileCodeEditor.tsx'
+  const indexCss = readFileSync(INDEX_CSS_PATH, 'utf8')
+  const editorTs = readFileSync(EDITOR_TS_PATH, 'utf8')
+
+  const schemeBlocksOf = (source: string): readonly string[] => {
+    const blocks: string[] = []
+    const pattern = /\{([^{}]*)\}/g
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(source))) blocks.push(match[1])
+    return blocks.filter(block => block.includes('--bg-panel:'))
+  }
+
+  it('defines --bg-elevated in every scheme block that defines the bg family (search panel was transparent)', () => {
+    const blocks = schemeBlocksOf(indexCss)
+    expect(blocks.length, 'index.css 应存在亮/暗两个 bg 族定义块').toBeGreaterThanOrEqual(2)
+    for (const block of blocks) {
+      expect(block, 'bg 族定义块缺少 --bg-elevated 定义').toMatch(/--bg-elevated:/)
+    }
+  })
+
+  it('keeps --syn-cmt/--syn-mh fallbacks identical across CSS and HighlightStyle', () => {
+    // themeFieldDefs 的 default 是唯一真源（--syn-cmt/--syn-mh 均为 #65737e）。
+    // 只读投影（FileSheet.css 的 pl-* 类）与编辑态 HighlightStyle（FileCodeEditor.tsx）
+    // 的 fallback 字面量必须逐个一致，否则主题未发射该 var 时两态颜色漂移。
+    const collect = (source: string, name: string): string[] =>
+      [...source.matchAll(new RegExp(`var\\(--${name},\\s*([^)]+)\\)`, 'g'))].map(m => m[1]!.trim())
+    for (const name of ['syn-cmt', 'syn-mh']) {
+      const fallbacks = [...collect(css, name), ...collect(editorTs, name)]
+      expect(fallbacks.length, `${name} 应存在带兜底的消费点`).toBeGreaterThan(0)
+      const drifted = fallbacks.filter(value => value !== '#65737e')
+      expect(drifted, `${name} 兜底色漂移：${drifted.join(', ')}`).toEqual([])
+    }
+  })
+
+  it('colors file-type icons via scoped tokens, not bare literals', () => {
+    const iconRules = rulesOf(css).filter(rule => /\.file-type-icon\.type-/.test(rule.selector))
+    expect(iconRules.length).toBeGreaterThanOrEqual(6)
+    const literals = iconRules
+      .filter(rule => /#[0-9a-fA-F]{3,8}\b/.test(rule.body))
+      .map(rule => `${rule.selector} { ${rule.body.trim()} }`)
+    expect(literals, `图标色存在裸字面量：\n${literals.join('\n')}`).toEqual([])
+  })
+
+  it('uses --text-on-accent (not #fff) on accent/danger button text', () => {
+    for (const selector of ['.file-save-btn', '.file-conflict-force']) {
+      const rule = rulesOf(css).find(item => item.selector === selector)
+      expect(rule, `${selector} 规则缺失`).toBeTruthy()
+      expect(rule!.body).not.toMatch(/#fff\b/i)
+      expect(rule!.body).toContain('var(--text-on-accent)')
+    }
+  })
+})

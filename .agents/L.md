@@ -862,3 +862,5 @@
 **我不碰**：`src-tauri/src/browser/**`（他人在途未提交改动）、`src/plugins/core/sheet/**`、中控/预设/权限域、#301/#306/#110 各自声明的域。
 
 全程 pathspec 提交；每卡完工派独立子 agent review（后台），反馈并入后续提交。
+
+**范围修订（0-E1 实际触达）**：追加 `src/index.css`（--bg-elevated/--text-on-accent 全局 token 落点，亮暗两 scheme）。
