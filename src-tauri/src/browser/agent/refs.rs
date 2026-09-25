@@ -66,11 +66,6 @@ impl RefRegistry {
     pub(crate) fn len(&self, tab_id: u64) -> usize {
         self.by_tab.get(&tab_id).map_or(0, Vec::len)
     }
-
-    #[allow(dead_code)] // 测试用
-    pub(crate) fn is_empty(&self) -> bool {
-        self.by_tab.is_empty()
-    }
 }
 
 /// ref 名 ↔ 下标：`e1` 起步，纯下标编解码，无随机性（可测试、可回放）。
