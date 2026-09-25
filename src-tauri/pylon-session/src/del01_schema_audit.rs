@@ -103,7 +103,7 @@ fn user_index_names(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn schema_version_is_v15_rebuilt_canonical_storage_baseline() {
+fn schema_version_is_v16_draft_storage_baseline() {
     let conn = audit_db();
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -113,8 +113,8 @@ fn schema_version_is_v15_rebuilt_canonical_storage_baseline() {
         "user_version 必须等于 SCHEMA_VERSION"
     );
     assert_eq!(
-        version, 15,
-        "审计基线 = v15（#155 T2：canonical_events 15 列 + (owner_key,sequence) WITHOUT ROWID 主键 +         auto_vacuum=INCREMENTAL + application_id；旧库检测→重建，无升版搬迁）。后续迁移必须显式递增并更新本基线"
+        version, 16,
+        "审计基线 = v16（#155 T3：v15 canonical_events 不变，新增 canonical_draft_fragments；v15→v16 加表保留历史，旧于 v15 的库仍重建）。后续迁移必须显式递增并更新本基线"
     );
 }
 
@@ -124,6 +124,7 @@ fn table_inventory_baseline() {
     let mut tables = table_names(&conn);
     tables.sort();
     let expected = vec![
+        "canonical_draft_fragments",
         "canonical_events",
         "deleted_sessions",
         "retention_policy",
@@ -133,7 +134,7 @@ fn table_inventory_baseline() {
     ];
     assert_eq!(
         tables, expected,
-        "DEL-01 审计：v15 active 表清单必须与 SCHEMA_SQL 一致。#155 T2 死表清理：sessions 与         legacy_message_backfill_audit 已删除；旧 messages active names 不得存在"
+        "DEL-01 审计：v16 active 表清单必须与 SCHEMA_SQL 一致；旧 messages/sessions active names 不得存在"
     );
 }
 

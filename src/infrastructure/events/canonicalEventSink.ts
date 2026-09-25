@@ -100,6 +100,7 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
     if (!disposed && !deps.onError) resolveRuntimeErrors({ key: errorKey(ownerKey), source: 'canonical.sink' })
   }
   const safeReportError = (ownerKey: string, error: unknown): void => {
+    if (asCanonicalEventRepositoryError(error).code === 'draft_pending') return
     if (!disposed) reportError(ownerKey, error)
   }
 

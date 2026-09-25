@@ -25,6 +25,7 @@ mod routing;
 
 // #317 批次二 ④：主泵六缝提取——决策归子模块、副作用适配归调用点（同 routing 惯例）。
 mod canonical_flush;
+mod draft_flush;
 // #331/U4：逐帧热路径基准（cfg(test)，--nocapture 读数）。
 mod crash_reconnect;
 mod fallback_route;
@@ -34,11 +35,16 @@ mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
 
+#[cfg(test)]
+use canonical_flush::flush_pending_canonical;
 use canonical_flush::{
-    flush_pending_canonical, should_flush_batch, PendingCanonicalPublish,
-    PENDING_CANONICAL_FLUSH_INTERVAL,
+    should_flush_batch, PendingCanonicalPublish, PENDING_CANONICAL_FLUSH_INTERVAL,
 };
 use crash_reconnect::CrashReconnectHandler;
+use draft_flush::{
+    absorb_window, commit_open_draft, publish_due_draft, DraftFlushContext, DraftRun,
+    DRAFT_PERSIST_INTERVAL,
+};
 use fallback_route::route_unknown_notification;
 use host_tools_gate::{route_fs_request, route_terminal_request};
 use interaction_route::{route_elicitation_complete, route_private_interaction};
@@ -1545,6 +1551,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let generation = runtime
         .client_generation
         .load(std::sync::atomic::Ordering::Acquire);
+    let mut draft_flush_rx = runtime.install_draft_flush_channel(generation);
     let client_generation = runtime.client_generation.clone();
     let agents = handles.agents.clone();
     let active_agent = handles.active_agent.clone();
@@ -1629,6 +1636,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         }
         let wire_trace = acp.lock().await.wire_trace();
         let mut pending_batch: Vec<PendingCanonicalPublish> = Vec::new();
+        let mut draft_run: Option<DraftRun> = None;
+        let mut draft_interval = tokio::time::interval(DRAFT_PERSIST_INTERVAL);
+        draft_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        draft_interval.tick().await;
+        let draft_ctx = DraftFlushContext {
+            window: &window,
+            gateway: &gateway,
+            update_channels: &runtime_for_reconnect.update_channels,
+            pet: &pet,
+            client_generation: &client_generation,
+            agent_id: &agent_id,
+            event_service: event_service.as_ref(),
+            message_service: message_service.as_ref(),
+        };
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
                 // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
@@ -1641,6 +1662,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 // 每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
                 changed = crashed_rx.changed() => {
                     if changed.is_ok() && *crashed_rx.borrow_and_update() {
+                        if !pending_batch.is_empty() {
+                            let batch = std::mem::take(&mut pending_batch);
+                            if !absorb_window(&draft_ctx, &mut draft_run, batch).await { break; }
+                        }
+                        if !publish_due_draft(&draft_ctx, &mut draft_run).await { break; }
                         // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
                         handle_crash.handle(crate::acp::CrashReason::StdoutClosed.as_str().to_string()).await;
                     }
@@ -1648,23 +1674,37 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 }
                 raw = notification_inbox.recv_control() => raw,
                 raw = notification_inbox.recv() => raw,
+                // Lower priority than queued ACP updates: the response task
+                // must not overtake delta notifications preceding its response.
+                request = draft_flush_rx.recv() => {
+                    if let Some(request) = request {
+                        tracing::debug!(source = %request.source, "closing canonical draft before prompt terminal");
+                        if !pending_batch.is_empty() {
+                            let batch = std::mem::take(&mut pending_batch);
+                            if !absorb_window(&draft_ctx, &mut draft_run, batch).await {
+                                let _ = request.reply.send(Err("draft window flush failed".into()));
+                                break;
+                            }
+                        }
+                        if !commit_open_draft(&draft_ctx, &mut draft_run).await {
+                            let _ = request.reply.send(Err("draft commit failed".into()));
+                            break;
+                        }
+                        let _ = request.reply.send(Ok(()));
+                    }
+                    continue;
+                }
                 _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !pending_batch.is_empty() => {
                     let batch = std::mem::take(&mut pending_batch);
-                    if !flush_pending_canonical(
-                        &window,
-                        &gateway,
-                        &runtime_for_reconnect.update_channels,
-                        &pet,
-                        &client_generation,
-                        &agent_id,
-                        event_service.as_ref(),
-                        message_service.as_ref(),
-                        batch,
-                    )
-                    .await
-                    {
-                        break;
+                    if !absorb_window(&draft_ctx, &mut draft_run, batch).await { break; }
+                    continue;
+                }
+                _ = draft_interval.tick(), if draft_run.is_some() => {
+                    if !pending_batch.is_empty() {
+                        let batch = std::mem::take(&mut pending_batch);
+                        if !absorb_window(&draft_ctx, &mut draft_run, batch).await { break; }
                     }
+                    if !publish_due_draft(&draft_ctx, &mut draft_run).await { break; }
                     continue;
                 }
             };
@@ -1712,23 +1752,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             );
             if flush_batch && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
+                if !absorb_window(&draft_ctx, &mut draft_run, batch).await {
                     break;
                 }
             }
             if raw.kind == crate::acp::AcpKind::Crashed {
+                if !publish_due_draft(&draft_ctx, &mut draft_run).await {
+                    break;
+                }
                 // ISSUE-17 W1：broadcast 携带 reason（params.reason，稳定 code）——
                 // dispatcher 保留原始 code 生成用户可读文案；缺省 stdout_closed
                 let reason = raw
@@ -1848,38 +1879,42 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             }
             if terminal_boundary && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
+                if !absorb_window(&draft_ctx, &mut draft_run, batch).await {
                     break;
+                }
+            }
+            if draft_run.is_some() && !pending_batch.is_empty() {
+                // 在途 run 的下一帧立即判同质/预算；非 delta 与 owner 切换不可等 8 ms。
+                let batch = std::mem::take(&mut pending_batch);
+                if !absorb_window(&draft_ctx, &mut draft_run, batch).await {
+                    break;
+                }
+            }
+            if draft_run.is_none() && pending_batch.len() == 1 {
+                // 首个可折 delta 立即占位，关上外部 evt_append 的到达顺序竞态。
+                let first = &pending_batch[0];
+                if first
+                    .input
+                    .owner
+                    .as_ref()
+                    .and_then(|owner| {
+                        crate::session::draft_candidate(owner, first.input.payload.clone())
+                    })
+                    .is_some()
+                {
+                    let batch = std::mem::take(&mut pending_batch);
+                    if !absorb_window(&draft_ctx, &mut draft_run, batch).await {
+                        break;
+                    }
                 }
             }
         }
         if !pending_batch.is_empty() {
             let batch = std::mem::take(&mut pending_batch);
-            let _ = flush_pending_canonical(
-                &window,
-                &gateway,
-                &runtime_for_reconnect.update_channels,
-                &pet,
-                &client_generation,
-                &agent_id,
-                event_service.as_ref(),
-                message_service.as_ref(),
-                batch,
-            )
-            .await;
+            let _ = absorb_window(&draft_ctx, &mut draft_run, batch).await;
         }
+        // 无终态退出时保留可恢复的片段，不把残缺消息冒充正式历史。
+        let _ = publish_due_draft(&draft_ctx, &mut draft_run).await;
         // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
         // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
         // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn

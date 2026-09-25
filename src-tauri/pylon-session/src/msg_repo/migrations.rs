@@ -5,6 +5,7 @@ use super::*;
 /// 旧数据一律不搬迁（ADR-0008「老数据我一个都不要了」）。
 const LEGACY_DROP_TABLES: &[&str] = &[
     "canonical_events",
+    "canonical_draft_fragments",
     "rollup_migration_state",
     "legacy_message_backfill_audit",
     "deleted_sessions",
@@ -42,6 +43,21 @@ const SCHEMA_MANIFEST: &[(&str, &[&str])] = &[
             "provenance",
             "rollup_seq_start",
             "rollup_seq_end",
+        ],
+    ),
+    (
+        "canonical_draft_fragments",
+        &[
+            "owner_key",
+            "draft_id",
+            "fragment_index",
+            "client_generation",
+            "remote_session_id",
+            "event_type",
+            "identity",
+            "raw_payload",
+            "first_received_at",
+            "created_at",
         ],
     ),
     (
@@ -146,6 +162,14 @@ fn validate_schema_objects(conn: &Connection) -> Result<(), SessionError> {
     if primary_key_columns(conn, "canonical_events") != ["owner_key", "sequence"] {
         problems.push("canonical_events primary key must be (owner_key, sequence)".into());
     }
+    if primary_key_columns(conn, "canonical_draft_fragments")
+        != ["owner_key", "draft_id", "fragment_index"]
+    {
+        problems.push(
+            "canonical_draft_fragments primary key must be (owner_key, draft_id, fragment_index)"
+                .into(),
+        );
+    }
     if primary_key_columns(conn, "deleted_sessions") != ["owner_key"] {
         problems.push("deleted_sessions primary key must be owner_key".into());
     }
@@ -207,8 +231,8 @@ fn validate_quick_check(conn: &Connection) -> Result<(), SessionError> {
     }
 }
 
-/// v15 起只有两条路：**建库**（空文件）与**重建**（user_version < 15 的旧库，不搬迁
-/// 任何行）。补列/搬迁式升版代码已随「老数据全丢」决定删除（ADR-0008）。
+/// v16 有三条路：建库、v15 原位加 draft 表、user_version < 15 重建（不搬迁
+/// 旧历史）。v15→v16 不触碰已存在的 canonical 行（ADR-0026）。
 ///
 /// 重建保留面：`user_data` 的 `profiles` 行（配置）与 `retention_policy` 行（设置）；
 /// 其余历史（canonical_events、墓碑、状态快照、user_data.sessions 会话列表、
@@ -227,7 +251,7 @@ fn migrate(conn: &mut Connection) -> Result<(), SessionError> {
     if current == SCHEMA_VERSION {
         return validate_schema_objects(conn);
     }
-    let rebuilding = current > 0;
+    let rebuilding = current > 0 && current != 15;
     if rebuilding {
         tracing::warn!(
             found_version = current,

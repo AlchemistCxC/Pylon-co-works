@@ -287,6 +287,12 @@ pub(crate) async fn close_session(
     // 降级 + generation-bound 隔离）。close_session 为 RemoteFirst：普通 RPC 错误
     // 上抛（strict=true）；-32601 / stale generation 降级为本地清理。
     close_session_rpc(&state, &runtime, &peri_id, generation, true).await?;
+    // 显式关闭也是消息边界：先把同代际 dispatcher 中已排队的 delta 收口，
+    // 再移除 session 映射。无终态崩溃则仍保留临时片段供用户处理。
+    runtime
+        .flush_draft_before_terminal(&source, generation)
+        .await
+        .map_err(PylonError::Protocol)?;
     // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     // #316：回收该 session 名下的宿主终端（terminal registry 按 periId 归属），

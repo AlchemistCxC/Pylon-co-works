@@ -26,6 +26,7 @@ import {
 } from './canonicalEventSink.ts'
 import { tauriCanonicalEventRepository, type CanonicalEventRow } from './canonicalEventRepository.ts'
 import { publishPluginEvent } from './pluginEventBus.ts'
+import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 
 export type CanonicalTerminalKind = 'done' | 'error'
 
@@ -50,6 +51,16 @@ export interface CanonicalFeedForward {
 export type CanonicalFeedRowListener = (event: CanonicalEventRow) => void
 export type CanonicalFeedForwardListener = (forward: CanonicalFeedForward) => void | Promise<void>
 export type CanonicalFeedTerminalListener = (signal: CanonicalTerminalSignal) => void
+export interface CanonicalDraftChunkNotification {
+  ownerKey: string
+  draftId: string
+  chunkIndex: number
+  clientGeneration: number
+  source: string
+  raw: unknown
+}
+export type CanonicalFeedDraftListener = (chunk: CanonicalDraftChunkNotification) => void
+export type CanonicalFeedDraftCommitListener = (ownerKey: string, draftId: string) => void
 /** 帧归属源门（迁移前 controller 的 isActiveSource 前置过滤）：false = 整帧丢弃（含 cursor/publish）。 */
 export type CanonicalFeedSourceGate = (source: string | undefined) => boolean
 
@@ -69,6 +80,8 @@ export interface CanonicalEventFeed {
   onRecoveredRow(listener: CanonicalFeedRowListener): () => void
   onForward(listener: CanonicalFeedForwardListener): () => void
   onTerminal(listener: CanonicalFeedTerminalListener): () => void
+  onDraftChunk(listener: CanonicalFeedDraftListener): () => void
+  onDraftCommit(listener: CanonicalFeedDraftCommitListener): () => void
 }
 
 export interface CanonicalEventFeedDeps {
@@ -93,6 +106,24 @@ function extractSource(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
   const source = (payload as { source?: unknown }).source
   return typeof source === 'string' ? source : undefined
+}
+
+function extractDraftChunk(payload: unknown): CanonicalDraftChunkNotification | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
+  const record = payload as Record<string, unknown>
+  const draft = record.draftChunk
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return undefined
+  const value = draft as Record<string, unknown>
+  if (typeof value.ownerKey !== 'string' || typeof value.draftId !== 'string'
+    || !Number.isSafeInteger(value.chunkIndex) || !Number.isSafeInteger(value.clientGeneration)
+    || typeof record.source !== 'string') return undefined
+  const { draftChunk: _marker, ...raw } = record
+  return {
+    ownerKey: value.ownerKey, draftId: value.draftId,
+    chunkIndex: value.chunkIndex as number,
+    clientGeneration: value.clientGeneration as number,
+    source: record.source, raw,
+  }
 }
 
 /** 帧事件名 → 终帧类目（非终帧返回 undefined）。 */
@@ -156,6 +187,8 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
   const recoveredRowListeners = new Set<CanonicalFeedRowListener>()
   const forwardListeners = new Set<CanonicalFeedForwardListener>()
   const terminalListeners = new Set<CanonicalFeedTerminalListener>()
+  const draftListeners = new Set<CanonicalFeedDraftListener>()
+  const draftCommitListeners = new Set<CanonicalFeedDraftCommitListener>()
   let sourceGate: CanonicalFeedSourceGate | null = null
 
   const forward = async (frame: CanonicalFeedFrame, kernelCommitted: boolean): Promise<void> => {
@@ -177,6 +210,12 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
         // cursor/publish），与迁移前 handler 入口语义一致。
         const source = extractSource(frame.payload)
         if (sourceGate && !sourceGate(source)) return
+        const draftChunk = extractDraftChunk(frame.payload)
+        if (draftChunk) {
+          for (const listener of draftListeners) listener(draftChunk)
+          await forward(frame, true)
+          return
+        }
         const value = extractCanonicalNotification(frame.payload)
         if (value === undefined) {
           await forward(frame, false)
@@ -186,6 +225,13 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
         // 与迁移前 processCommittedOrLegacy 同构：投影在 cursor consume 回调内
         // await，保持 per-owner tail 串行（cursor → publish → 投影 → 推进）。
         await cursor.accept(value, async (event, isCurrentNotification) => {
+          const committedDraftId = frame.payload && typeof frame.payload === 'object'
+            ? (frame.payload as { committedDraftId?: unknown }).committedDraftId
+            : undefined
+          if (isCurrentNotification && typeof committedDraftId === 'string') {
+            for (const listener of draftCommitListeners) listener(toCanonicalOwnerKey(event.owner), committedDraftId)
+            sink.flushAll()
+          }
           publishPluginEvent(event)
           for (const listener of rowListeners) listener(event)
           if (isCurrentNotification) {
@@ -229,6 +275,14 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
     onTerminal(listener) {
       terminalListeners.add(listener)
       return () => terminalListeners.delete(listener)
+    },
+    onDraftChunk(listener) {
+      draftListeners.add(listener)
+      return () => draftListeners.delete(listener)
+    },
+    onDraftCommit(listener) {
+      draftCommitListeners.add(listener)
+      return () => draftCommitListeners.delete(listener)
     },
   }
 

@@ -169,6 +169,8 @@ export interface WorkbenchCommandFacade {
   copy(sessionId: string, text: string): Promise<CommandResult>
   retry(sessionId: string, messageId?: string): Promise<CommandResult>
   recover(sessionId: string, strategy?: string): Promise<CommandResult>
+  /** #155 T3：用户决定如何处理重启后残留的临时正文。 */
+  resolveDraft?(sessionId: string, draftId: string, action: 'keep' | 'discard'): Promise<CommandResult>
 }
 
 /** Keys whose values are callable command methods (excludes optional readers). */

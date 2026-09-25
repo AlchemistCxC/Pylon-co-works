@@ -26,7 +26,7 @@ import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
-import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
+import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
@@ -43,6 +43,7 @@ import {
 import {
   canonicalDurationFromRows,
   canonicalHasTerminalFromRows,
+  draftChunkToWorkbenchEnvelopes,
   isLiveTextDelta,
   localSessionFactEvent,
   runningTailStartTime,
@@ -52,13 +53,14 @@ import {
 } from './agentWorkbenchProjection.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
 import { createAgentWorkbenchOptimisticEcho } from './agentWorkbenchOptimisticEcho.ts'
-import type { CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
+import type { CanonicalDraftChunkNotification, CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { getCanonicalEventFeed, subscribeWindowTerminalFrames } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 export type { LocalSessionFact } from './agentWorkbenchProjection.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
+  loadDrafts?(ownerKey: string): Promise<readonly CanonicalDraftFragment[]>
   subscribe(listener: (event: unknown) => void): () => void
   /**
    * 终帧 window 广播兜底订阅。主轨是 per-source IPC Channel（`send_message_streaming`
@@ -108,6 +110,8 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
 export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
+  const loadDrafts = dependencies.loadDrafts ?? (ownerKey => IS_TAURI && !isBrowserMockRuntime()
+    ? loadCanonicalDraftFragments(ownerKey) : Promise.resolve([]))
   const subscribe = dependencies.subscribe ?? defaults.subscribe
   const listenTerminalFallback = dependencies.listenTerminalFallback ?? defaults.listenTerminalFallback
   const runtime = createWorkbenchRuntime({
@@ -123,6 +127,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   // 竞态控制面（generation/epoch/source/...）由此显式化。
   const binding = {
     boundSessionId: undefined as string | undefined,
+    boundSession: undefined as Session | undefined,
     boundProvider: 'acp',
     boundSessionBindingKey: undefined as string | undefined,
     ownerKey: undefined as string | undefined,
@@ -154,6 +159,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
     // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
     journalDiagnosticCount: 0,
+  }
+  const draft = {
+    seen: new Set<string>(),
+    activeIds: new Set<string>(),
+    interruptedIds: new Set<string>(),
+    reconcilePending: false,
+    liveDuringReconcile: [] as WorkbenchEventEnvelope[],
   }
   /** Responses from the atomic empty-state create transaction can arrive
    * before React has rebound the Workbench to the newly-added local Session.
@@ -451,6 +463,79 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
   }
 
+  const applyDraftChunk = (chunk: CanonicalDraftChunkNotification): void => {
+    if (binding.destroyed || binding.ownerKey !== chunk.ownerKey || binding.source !== chunk.source) return
+    const key = `${chunk.draftId}:${chunk.chunkIndex}`
+    if (draft.seen.has(key)) return
+    draft.seen.add(key)
+    draft.activeIds.add(chunk.draftId)
+    const current = runtime.getSnapshot().document
+    const sequence = Math.max(current?.revision ?? 0, transientSequenceBySource.get(chunk.source) ?? 0) + 1
+    transientSequenceBySource.set(chunk.source, sequence)
+    const envelopes = draftChunkToWorkbenchEnvelopes({
+      provider: binding.boundProvider, source: chunk.source,
+      draftId: chunk.draftId, chunkIndex: chunk.chunkIndex,
+      raw: chunk.raw, sequence, recordedAt: new Date().toISOString(),
+    })
+    envelopes.forEach(applyLive)
+  }
+
+  const projectRecoveredDrafts = (
+    fragments: readonly CanonicalDraftFragment[], startSequence: number,
+  ): WorkbenchEventEnvelope[] => {
+    const envelopes: WorkbenchEventEnvelope[] = []
+    let sequence = startSequence
+    const chunkIndexByDraft = new Map<string, number>()
+    for (const fragment of fragments) {
+      if (fragment.interrupted) draft.interruptedIds.add(fragment.draftId)
+      draft.activeIds.add(fragment.draftId)
+      for (const raw of fragment.rawPayload) {
+        const chunkIndex = chunkIndexByDraft.get(fragment.draftId) ?? 0
+        chunkIndexByDraft.set(fragment.draftId, chunkIndex + 1)
+        const key = `${fragment.draftId}:${chunkIndex}`
+        if (draft.seen.has(key)) continue
+        draft.seen.add(key)
+        sequence += 1
+        envelopes.push(...draftChunkToWorkbenchEnvelopes({
+          provider: binding.boundProvider, source: binding.source ?? '',
+          draftId: fragment.draftId, chunkIndex,
+          raw, sequence, recordedAt: fragment.firstReceivedAt,
+        }))
+      }
+    }
+    return envelopes
+  }
+
+  const withInterruptedDraftMarker = (
+    document: WorkbenchDocument,
+    envelopes: readonly WorkbenchEventEnvelope[],
+  ): WorkbenchDocument => {
+    if (draft.interruptedIds.size === 0) return document
+    // A draft can continue a message whose first chunks are already canonical
+    // (for example after the 48 KiB split). The projected message then keeps
+    // the first canonical source, so identify the provisional tail by its
+    // latest sequence as well.
+    const draftBySequence = new Map<number, string>()
+    for (const envelope of envelopes) {
+      const sourceId = envelope.source.sourceId
+      if (!sourceId.startsWith('draft:')) continue
+      const draftId = sourceId.slice('draft:'.length).split(':')[0]
+      if (draft.interruptedIds.has(draftId)) draftBySequence.set(envelope.sequence, draftId)
+    }
+    return {
+      ...document,
+      messages: document.messages.map(message => {
+        const sourceId = message.source.sourceId
+        const draftId = sourceId.startsWith('draft:')
+          ? sourceId.slice('draft:'.length).split(':')[0]
+          : draftBySequence.get(message.sequence)
+        return draftId && draft.interruptedIds.has(draftId)
+          ? { ...message, running: false, interruptedDraft: true, draftId }
+          : message
+      }),
+    }
+  }
+
   // P52 D3：feed 终帧信号 → TurnClock 终态（done/error；cancelled 映射 cancelled）。
   // 时钟幂等：首个终态 wins；不在当前 source 的终帧只封存该 source 的时钟。
   // 终态收敛的唯一入口：TurnClock 幂等（首个终态 wins），故 Channel 主轨与 window
@@ -479,7 +564,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const matchesOwner = candidate.owner ? toCanonicalOwnerKey(candidate.owner) === binding.ownerKey : candidate.sessionId === binding.source
     if (!matchesOwner) return
     const envelopes = toWorkbenchEnvelopes(event)
-    if (envelopes.length > 0) envelopes.forEach(applyLive)
+    if (envelopes.length > 0) {
+      if (draft.reconcilePending) draft.liveDuringReconcile.push(...envelopes)
+      envelopes.forEach(applyLive)
+    }
     else {
       binding.malformedCount += 1
       fold.journalDiagnosticCount = binding.malformedCount
@@ -513,12 +601,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     canonicalHasTerminal: boolean
     withLedgerEvidence: boolean
   }): void => {
-    const projected = foldPage(
-      input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead],
-      input.base,
-    )
+    const readEnvelopes = input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead]
+    const projected = foldPage(readEnvelopes, input.base)
     const reconciled = echo.withPending(input.readSource, projected)
-    const document = input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled
+    const document = withInterruptedDraftMarker(input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled, readEnvelopes)
     binding.buffered = []
     binding.loading = false
     const readLiveness = clock.effectiveLiveness(input.readSource)
@@ -602,6 +688,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const run = (async () => {
       try {
         const rows = await loadAll(refreshOwnerKey)
+        const fragments = await loadDrafts(refreshOwnerKey)
         const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
         const canonicalDuration = canonicalDurationFromRows(rows)
         const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
@@ -618,11 +705,20 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           refreshMalformedCount += 1
           return []
         })
+        if (draft.reconcilePending) {
+          draft.seen.clear(); draft.activeIds.clear(); draft.interruptedIds.clear()
+        }
+        envelopes.push(...projectRecoveredDrafts(fragments, rows.reduce<number>((max, row) => {
+          const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+          return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
+        }, 0)))
         // If refresh supersedes an initial bind read, fold events that arrived
         // while that read was in flight into the winning projection and release
         // the load buffer. Otherwise those events would remain stranded behind
         // the invalidated bind promise.
-        const bufferedAtRefresh = binding.buffered
+        const bufferedAtRefresh = draft.reconcilePending
+          ? [...binding.buffered, ...draft.liveDuringReconcile]
+          : binding.buffered
         // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
         // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
         // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
@@ -642,12 +738,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           readSessionId: refreshSessionId,
           envelopes,
           bufferedAtRead: bufferedAtRefresh,
-          base: current,
+          base: draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
           malformedCount: refreshMalformedCount,
           canonicalDuration,
           canonicalHasTerminal,
           withLedgerEvidence: true,
         })
+        draft.reconcilePending = false
+        draft.liveDuringReconcile = []
       } catch (error) {
         if (binding.destroyed || bindingKey !== binding.boundSessionBindingKey || binding.ownerKey !== refreshOwnerKey
           || binding.source !== refreshSource || binding.boundSessionId !== refreshSessionId || binding.generation !== refreshGeneration
@@ -675,8 +773,45 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     return pending
   }
 
+  const feed = getCanonicalEventFeed()
+  const unsubscribeDraftChunks = feed.onDraftChunk(applyDraftChunk)
+  const unsubscribeDraftCommits = feed.onDraftCommit((ownerKey, draftId) => {
+    if (binding.destroyed || binding.ownerKey !== ownerKey || !draft.activeIds.has(draftId)) return
+    const session = binding.boundSession
+    if (!session) return
+    draft.reconcilePending = true
+    void (async () => {
+      if (binding.refreshInFlight) await binding.refreshInFlight.catch(() => {})
+      if (binding.destroyed || binding.boundSession !== session) return
+      draft.reconcilePending = true
+      await refresh(session)
+    })()
+  })
+  const commandsWithDraft = {
+    ...commands,
+    async resolveDraft(sessionId: string, draftId: string, action: 'keep' | 'discard') {
+      if (binding.destroyed || binding.boundSessionId !== sessionId || !binding.ownerKey
+        || !binding.boundSession || !draft.interruptedIds.has(draftId)) {
+        return { ok: false, error: 'draft_not_bound' }
+      }
+      const ownerKey = binding.ownerKey
+      const session = binding.boundSession
+      try {
+        if (action === 'keep') await keepInterruptedDraft(ownerKey, draftId)
+        else if (!await discardInterruptedDraft(ownerKey, draftId)) return { ok: false, error: 'draft_not_found' }
+        getCanonicalEventFeed().flush()
+        if (binding.refreshInFlight) await binding.refreshInFlight
+        draft.reconcilePending = true
+        await refresh(session)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  }
+
   return {
-    runtime, appearance, sessionUi, commands,
+    runtime, appearance, sessionUi, commands: commandsWithDraft,
     /**
      * Project the response of the atomic `new_session` command into the same
      * disposable Workbench document used by canonical/live events.  This is a
@@ -715,10 +850,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       // 这里承接当前值，新回合仍由 applyLive 的 user 帧推进（`turnEpoch += 1`）。
       binding.turnEpoch = runtime.getSnapshot().turnEpoch ?? 0
       binding.boundSessionId = session?.id
+      binding.boundSession = session
       binding.boundProvider = session?.agentId || 'acp'
       binding.source = session?.source
       binding.ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
       binding.buffered = []
+      draft.seen.clear(); draft.activeIds.clear(); draft.interruptedIds.clear()
+      draft.reconcilePending = false; draft.liveDuringReconcile = []
       binding.malformedCount = 0
       fold.journalDiagnosticCount = 0
       // 绑定重建：折叠日志清空（journal 重放会重新入日志），文档由下面的整页折从空文档起。
@@ -760,6 +898,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       const bindReadEpoch = binding.canonicalReadEpoch
       // loadAll 必须**同步**调用：hanging-load 测试在 bind() 返回的同步窗口内拿 release 句柄。
       await loadAll(loadingOwnerKey).then(async rows => {
+        const fragments = await loadDrafts(loadingOwnerKey)
         if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
           || binding.canonicalReadEpoch !== bindReadEpoch) return
         const canonicalDuration = canonicalDurationFromRows(rows)
@@ -788,6 +927,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           }
         }
         collect(rows)
+        envelopes.push(...projectRecoveredDrafts(fragments, rows.reduce<number>((max, row) => {
+          const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+          return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
+        }, 0)))
         collect(browserSnapshot)
         // buffered 为空是冷切会话的常态：入参已是有序数组，整页一帧过界
         //（回放按页合批，边界穿越 2 次，与页内事件数无关）。
@@ -820,7 +963,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     destroy() {
       if (binding.destroyed) return
       binding.destroyed = true
-      unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents()
+      unsubscribeDraftChunks(); unsubscribeDraftCommits()
+      runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
       clock.clearAll(); echo.clear()
       fold.log = []; fold.ids.clear()

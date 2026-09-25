@@ -11,6 +11,8 @@ export function selectLegacyMessages(document: WorkbenchDocument): readonly Mess
     time: message.time,
     agentId: message.source.agentId,
     running: message.running,
+    interruptedDraft: message.interruptedDraft,
+    draftId: message.draftId,
     externalIdentity: Object.keys(message.identity).length === 0 ? undefined : {
       ...(message.identity.messageId ? { messageId: message.identity.messageId } : {}),
       ...(message.identity.turnId ? { turnId: message.identity.turnId } : {}),

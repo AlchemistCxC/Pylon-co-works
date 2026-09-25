@@ -15,6 +15,9 @@ pub enum EventError {
     /// SQLITE_BUSY / SQLITE_LOCKED：并发写锁冲突（可重试）。
     #[error("事件仓库并发锁冲突：{0}")]
     Conflict(String),
+    /// #155 T3：该 owner 有未收口的在途片段；外部 append 稍后重试。
+    #[error("在途消息尚未提交，稍后重试：{0}")]
+    DraftPending(String),
     /// DEL-04：owner 已 tombstone（deleting/deleted）——迟到 append 被拒绝，不复活已删会话。
     #[error("会话已删除（tombstone）：{0}")]
     SessionDeleted(String),
@@ -34,6 +37,7 @@ impl EventError {
             Self::Corrupt(_) => "event_repo_corrupt",
             Self::Constraint(_) => "event_repo_constraint",
             Self::Conflict(_) => "event_repo_conflict",
+            Self::DraftPending(_) => "draft_pending",
             Self::SessionDeleted(_) => "event_session_deleted",
             Self::Unavailable(_) => "event_db_unavailable",
             Self::Invalid(_) => "event_invalid",

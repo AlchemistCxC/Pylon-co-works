@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import type { Session } from '../../../identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
+import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
 import { useStore } from '../../../store.ts'
 
@@ -44,6 +45,73 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 }
 
 describe('Agent Workbench canonical session runtime', () => {
+  it('#155 T3：冷挂载恢复中断片段为有标记的临时内容', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      loadDrafts: async () => [{
+        ownerKey, draftId: 'crashed-run', fragmentIndex: 0, clientGeneration: 1,
+        remoteSessionId: 'remote-1', eventType: 'assistant.text.delta', identity: null,
+        rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '未完成的回复' } } }],
+        firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: true,
+      }],
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: '未完成的回复', interruptedDraft: true, draftId: 'crashed-run', running: false }),
+    ]))
+    service.destroy()
+  })
+  it('#155 T3：预算分行后中断的片段继续已有消息时仍可处理', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [canonicalRow(1, 'agent_message_chunk', { content: { text: '已提交前缀' } })],
+      loadDrafts: async () => [{
+        ownerKey, draftId: 'tail-run', fragmentIndex: 0, clientGeneration: 1,
+        remoteSessionId: 'remote-1', eventType: 'assistant.text.delta', identity: null,
+        rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '中断尾部' } } }],
+        firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: true,
+      }],
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: '已提交前缀中断尾部', interruptedDraft: true, draftId: 'tail-run', running: false,
+      }),
+    ]))
+    service.destroy()
+  })
+  it('#155 T3：正式提交替换临时投影，不重复正文', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    let rows: unknown[] = []
+    let fragments = [{
+      ownerKey, draftId: 'handoff-run', fragmentIndex: 0, clientGeneration: 1,
+      remoteSessionId: 'remote-1', eventType: 'assistant.text.delta' as const, identity: null,
+      rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '同一段正文' } } }],
+      firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: false,
+    }]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      loadDrafts: async () => fragments,
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages[0]?.content).toBe('同一段正文')
+    expect(service.runtime.getSnapshot().document?.messages[0]?.interruptedDraft).toBeUndefined()
+    rows = [canonicalRow(1, 'agent_message_chunk', { content: { text: '同一段正文' } })]
+    fragments = []
+    await getCanonicalEventFeed().acceptFrame({
+      event: 'pylon:update',
+      payload: { source: 'local:a', committedDraftId: 'handoff-run', canonicalEvent: rows[0] },
+    })
+    await vi.waitFor(() => {
+      expect(service.runtime.getSnapshot().document?.messages.map(message => message.content)).toEqual(['同一段正文'])
+      expect(service.runtime.getSnapshot().document?.messages[0]?.source.sourceId).toBe(ownerKey + '#1')
+    })
+    service.destroy()
+  })
   it('重启后 canonical 已完成消息仍显示完成态摘要', async () => {
     const active = session('session-restored', 'local:a')
     const service = createAgentWorkbenchSessionRuntime({

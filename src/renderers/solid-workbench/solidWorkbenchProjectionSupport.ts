@@ -97,6 +97,8 @@ export function toSolidMessage(message: WorkbenchDocument['messages'][number]): 
     content: message.content,
     time: message.time,
     running: message.running,
+    interruptedDraft: message.interruptedDraft,
+    draftId: message.draftId,
     thoughtStartedAt: message.thoughtStartedAtMs,
     thoughtDurationMs: message.thoughtDurationMs,
     redacted: message.redacted,

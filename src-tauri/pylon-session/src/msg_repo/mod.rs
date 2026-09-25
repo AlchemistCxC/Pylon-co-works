@@ -44,18 +44,20 @@ use crate::error::SessionError;
 ///      legacy_message_backfill_audit；auto_vacuum=INCREMENTAL + application_id。旧库
 ///      （user_version < 15）不搬迁任何行：保留 user_data.profiles 与 retention_policy，
 ///      其余历史（canonical_events/墓碑/快照/user_data.sessions）丢弃重建。
-pub const SCHEMA_VERSION: i64 = 15;
+/// v16：#155 T3 临时片段表；v15 升版只加表，既有 canonical 历史原样保留。
+pub const SCHEMA_VERSION: i64 = 16;
 
 /// Pylon 数据库头标识（PRAGMA application_id，'PYLN' 大端）。诊断用途：文件被误认成
 /// 其他应用数据时可据此识别。
 pub const PYLON_APPLICATION_ID: i64 = 0x5059_4C4E;
 
-/// 当前 schema DDL（CREATE IF NOT EXISTS；v15 起升版只有「重建」一条路，无补列迁移）。
+/// 当前 schema DDL（CREATE IF NOT EXISTS；v15→v16 仅加临时表，旧于 v15 仍重建）。
 /// - session_state_snapshots：usage/commands 等可恢复快照（不是历史存储）。
 /// - user_data：versioned Profile/Session/activeProfileId（与会话同库）。
 /// - deleted_sessions：DEL-02 owner/deletion state tombstone（deleting/deleted）。
 /// - retention_policy：保留策略后端权威存储（单行）。
 /// - canonical_events：canonical 事件流（append-only；唯一会话历史权威）。
+/// - canonical_draft_fragments：在途临时片段，不进入 evt_* 历史读。
 /// - rollup_migration_state：#81 L3 裁剪迁移进度。
 const SCHEMA_SQL: &str = r#"
 -- v10：usage/commands 等可恢复快照。它不是历史存储；canonical_events 仍是唯一 durable
@@ -144,6 +146,21 @@ CREATE TABLE IF NOT EXISTS canonical_events (
     rollup_seq_start INTEGER,
     rollup_seq_end INTEGER,
     PRIMARY KEY (owner_key, sequence)
+) WITHOUT ROWID;
+-- #155 T3（ADR-0026）：仅供在途显示/恢复的追加片段。它们不是 canonical 历史，
+-- 不推进 evt_revision，不参与 evt_list/evt_load_compact。正式行提交时同事务删除。
+CREATE TABLE IF NOT EXISTS canonical_draft_fragments (
+    owner_key TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    fragment_index INTEGER NOT NULL CHECK (fragment_index >= 0),
+    client_generation INTEGER NOT NULL,
+    remote_session_id TEXT,
+    event_type TEXT NOT NULL,
+    identity TEXT,
+    raw_payload TEXT NOT NULL,
+    first_received_at TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_key, draft_id, fragment_index)
 ) WITHOUT ROWID;
 -- #81 L3：裁剪迁移进度（逐 turn 单事务；trimmed/mismatch 永久跳过 => 可暂停/续跑）。
 CREATE TABLE IF NOT EXISTS rollup_migration_state (
@@ -609,6 +626,11 @@ impl MsgRepo {
                 params![tombstone_owner],
             )
             .map_err(repo_err)?;
+            tx.execute(
+                "DELETE FROM canonical_draft_fragments WHERE owner_key = ?1",
+                params![tombstone_owner],
+            )
+            .map_err(repo_err)?;
         }
         tx.commit().map_err(repo_err)?;
         Ok(())
@@ -645,6 +667,14 @@ impl MsgRepo {
                 params![cutoff],
             )
             .map_err(repo_err)? as i64;
+        tx.execute(
+            "DELETE FROM canonical_draft_fragments WHERE owner_key IN (
+                 SELECT owner_key FROM deleted_sessions
+                 WHERE state = 'deleted' AND owner_scope = 'exact' AND deleted_at < ?1
+             )",
+            params![cutoff],
+        )
+        .map_err(repo_err)?;
         tx.commit().map_err(repo_err)?;
         Ok(TombstonePurgeOutcome {
             tombstones,
@@ -847,6 +877,11 @@ impl MsgRepo {
                 let cutoff = now - policy.days.unwrap_or(0) as i64 * 86_400_000;
                 tx.execute(
                     "DELETE FROM canonical_events WHERE created_at < ?1",
+                    [cutoff],
+                )
+                .map_err(repo_err)?;
+                tx.execute(
+                    "DELETE FROM canonical_draft_fragments WHERE created_at < ?1",
                     [cutoff],
                 )
                 .map_err(repo_err)?;

@@ -62,6 +62,29 @@ afterEach(() => {
 })
 
 describe('canonicalEventFeed（P52 D2）', () => {
+  it('#155 T3：draft 只走临时 seam，正式提交再进入 canonical bus', async () => {
+    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const drafts: string[] = []
+    const commits: string[] = []
+    const canonical: number[] = []
+    const forwards: boolean[] = []
+    feed.onDraftChunk(chunk => { drafts.push(`${chunk.draftId}:${chunk.chunkIndex}`) })
+    feed.onDraftCommit((_owner, draftId) => { commits.push(draftId) })
+    feed.onForward(frame => { forwards.push(frame.kernelCommitted) })
+    subscribePluginEvents(event => { canonical.push((event as CanonicalEventRow).sequence) })
+    await feed.acceptFrame({ event: 'pylon:update', payload: {
+      source: SOURCE, update: { sessionUpdate: 'agent_message_chunk', content: { text: 'a' } },
+      draftChunk: { ownerKey: `["p1","peri","${SOURCE}"]`, draftId: 'd1', chunkIndex: 0, clientGeneration: 1 },
+    } })
+    expect(drafts).toEqual(['d1:0'])
+    expect(canonical).toEqual([])
+    expect(forwards).toEqual([true])
+    await feed.acceptFrame({ event: 'pylon:update', payload: {
+      source: SOURCE, committedDraftId: 'd1', canonicalEvent: canonicalEvent(1, 'assistant.text.delta', 'a'),
+    } })
+    expect(commits).toEqual(['d1'])
+    expect(canonical).toEqual([1])
+  })
   it('kernel-committed 行 publish 恰一次，且转发标记 kernelCommitted=true', async () => {
     const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
     const published: CanonicalEventRow[] = []
