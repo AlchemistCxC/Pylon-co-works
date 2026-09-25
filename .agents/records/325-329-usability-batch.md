@@ -186,7 +186,7 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
 1. **真机验收缺位**：本批涉及首屏（#326）与设置卡（#325）的可见变化，未跑 webview2 实机验收。
    建议合并前或合并后尽早补一次裸启动实机核对（重点：零 Agent 空态文案、Agent 卡失败原因行布局）。
 2. **#325 恢复动作错配**：`recoveryForCode` 只映 6 个码，且 72 处调用点的显式 `recovery` 覆盖它
-   （`runtimeError.ts:259`），导致恢复按钮与错误类型常不匹配。**另立 issue**。
+   （`runtimeError.ts:259`），导致恢复按钮与错误类型常不匹配。**已登记为 #338**（含复现与机理）。
 3. **#328 的裁决无仓内落点**：见#328 调查结论。
 4. **磁盘**：G: 在本次会话期间一度仅剩 796 MB（`src-tauri/target` 34 GB），`npx` 因 ENOSPC 失败过；
    已改用 `node node_modules/vitest/vitest.mjs` 规避。未清理任何构建产物（共享工作树）。
