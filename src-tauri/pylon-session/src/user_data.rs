@@ -20,7 +20,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::ser::SerializeMap;
 use serde::Serialize;
 
 /// 单条 user_data payload 序列化后的最大字节数（防超大 envelope 写入/DoS）。
@@ -115,16 +114,10 @@ impl UserDataError {
     }
 }
 
-/// B1.2：结构化错误 wire `{ code, message }`（typed IPC——Tauri command 直接返回
-/// `Result<T, UserDataError>`，前端按 code 分支，message 仅展示）。与 MessageError 同形。
-impl Serialize for UserDataError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化错误 wire `{ code, message }`（typed IPC——Tauri command 直接返回
+// `Result<T, UserDataError>`，前端按 code 分支，message 仅展示）。与 MessageError 同形；
+// #317 批次二：实现单源化到共享宏。
+crate::impl_wire_code_message_serialize!(UserDataError);
 
 impl From<rusqlite::Error> for UserDataError {
     fn from(error: rusqlite::Error) -> Self {

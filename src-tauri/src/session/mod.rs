@@ -574,14 +574,18 @@ fn require_user_data_service(
 }
 
 /// 读取指定 key 的 envelope（无数据返回 None）；payload 损坏 → `user_data_corrupt`。
+/// #317 批次二：错误经 PylonError::UserData 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn user_data_load(
     state: tauri::State<'_, AppState>,
     key: String,
-) -> Result<Option<UserDataEnvelope>, UserDataError> {
+) -> Result<Option<UserDataEnvelope>, PylonError> {
     let key = UserDataKey::parse(&key)
         .ok_or_else(|| UserDataError::Unavailable(format!("unknown user data key: {key}")))?;
-    require_user_data_service(&state)?.load(key).await
+    require_user_data_service(&state)?
+        .load(key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 原子保存（expected_revision 不匹配 → conflict；形状非法/超限 → corrupt）。
@@ -592,7 +596,7 @@ pub(crate) async fn user_data_save(
     key: String,
     payload: serde_json::Value,
     expected_revision: Option<i64>,
-) -> Result<UserDataSaveResult, UserDataError> {
+) -> Result<UserDataSaveResult, PylonError> {
     let key = UserDataKey::parse(&key)
         .ok_or_else(|| UserDataError::Unavailable(format!("unknown user data key: {key}")))?;
     let revision = require_user_data_service(&state)?
@@ -607,10 +611,11 @@ pub(crate) async fn user_data_save(
 pub(crate) async fn user_profile_delete(
     state: tauri::State<'_, AppState>,
     profile_id: String,
-) -> Result<ProfileDeleteResult, UserDataError> {
+) -> Result<ProfileDeleteResult, PylonError> {
     require_user_data_service(&state)?
         .delete_profile(profile_id)
         .await
+        .map_err(PylonError::from)
 }
 
 /// I14-W7 + DEL-02 + DEL-03（§5.13）：删除会话核心（命令与测试共用，CR-09：非 Tauri 命令，
@@ -650,20 +655,23 @@ pub(crate) async fn user_session_delete(
     state: tauri::State<'_, AppState>,
     session_id: String,
     owner_key: Option<String>,
-) -> Result<(), UserDataError> {
+) -> Result<(), PylonError> {
     let owner_key = validate_delete_owner(owner_key)?;
-    delete_session_core(state.inner(), session_id, owner_key).await
+    delete_session_core(state.inner(), session_id, owner_key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// DEL-03（§5.13）：删除终态化——deleting → deleted。本地删除成功且远端 close best effort
 /// 后由前端调用；幂等（不存在/已终态均为 no-op），失败不阻断（tombstone 保持 'deleting'
-/// 仍 gate 迟到写）。返回 MessageError（消息仓库层错误）。
+/// 仍 gate 迟到写）。#317 批次二：错误经 PylonError::MessagePersistence 委托，
+/// wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn user_session_delete_finalize(
     state: tauri::State<'_, AppState>,
     session_id: String,
     owner_key: Option<String>,
-) -> Result<(), MessageError> {
+) -> Result<(), PylonError> {
     if let Some(ref key) = owner_key {
         crate::session::msg_repo::validate_owner_key(key)
             .map_err(|error| MessageError::Unavailable(error.to_string()))?;
@@ -671,6 +679,7 @@ pub(crate) async fn user_session_delete_finalize(
     require_message_service(&state)?
         .finalize_session_delete(session_id, owner_key)
         .await
+        .map_err(PylonError::from)
 }
 
 // ============================================================================
@@ -700,15 +709,17 @@ fn require_event_service(
 }
 
 /// 校验 + 批量 append canonical 事件（单事务；event_id 去重；expected_revision 冲突检测）。
+/// #317 批次二：错误经 PylonError::CanonicalEvent 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn evt_append(
     state: tauri::State<'_, AppState>,
     events: Vec<serde_json::Value>,
     expected_revision: Option<i64>,
-) -> Result<EventAppendResult, EventError> {
+) -> Result<EventAppendResult, PylonError> {
     require_event_service(&state)?
         .append_events(events, expected_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 /// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基准）。
@@ -716,8 +727,11 @@ pub(crate) async fn evt_append(
 pub(crate) async fn evt_revision(
     state: tauri::State<'_, AppState>,
     owner_key: String,
-) -> Result<i64, EventError> {
-    require_event_service(&state)?.revision(owner_key).await
+) -> Result<i64, PylonError> {
+    require_event_service(&state)?
+        .revision(owner_key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 游标分页读取（最新页 before_seq=null；limit 缺省 100；升序返回）。
@@ -727,10 +741,11 @@ pub(crate) async fn evt_list(
     owner_key: String,
     before_sequence: Option<i64>,
     limit: Option<u32>,
-) -> Result<EventPage, EventError> {
+) -> Result<EventPage, PylonError> {
     require_event_service(&state)?
         .list_events(owner_key, before_sequence, limit.unwrap_or(100))
         .await
+        .map_err(PylonError::from)
 }
 
 /// Corrupt-row forensic export: returns the exact stored JSON text without decoding it.
@@ -738,10 +753,11 @@ pub(crate) async fn evt_list(
 pub(crate) async fn evt_export_raw(
     state: tauri::State<'_, AppState>,
     event_id: String,
-) -> Result<Option<CanonicalEventRawExport>, EventError> {
+) -> Result<Option<CanonicalEventRawExport>, PylonError> {
     require_event_service(&state)?
         .export_raw_event(event_id)
         .await
+        .map_err(PylonError::from)
 }
 
 /// B6：跨 owner 内容搜索候选（raw/typed payload + eventType LIKE，大小写不敏感）。
@@ -751,10 +767,11 @@ pub(crate) async fn evt_search(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: Option<u32>,
-) -> Result<Vec<EventSearchOwner>, EventError> {
+) -> Result<Vec<EventSearchOwner>, PylonError> {
     require_event_service(&state)?
         .search_owners(query, limit.unwrap_or(50))
         .await
+        .map_err(PylonError::from)
 }
 
 /// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
@@ -763,10 +780,11 @@ pub(crate) async fn evt_search(
 pub(crate) async fn evt_load_compact(
     state: tauri::State<'_, AppState>,
     owner_key: String,
-) -> Result<Vec<CanonicalEventRow>, EventError> {
+) -> Result<Vec<CanonicalEventRow>, PylonError> {
     require_event_service(&state)?
         .load_events_compact(owner_key)
         .await
+        .map_err(PylonError::from)
 }
 
 /// #81 L3：裁剪迁移（应用关闭时调用）。budget_ms 控制单次预算（逐 turn 单事务，
@@ -775,7 +793,7 @@ pub(crate) async fn evt_load_compact(
 pub(crate) async fn evt_rollup_trim(
     state: tauri::State<'_, AppState>,
     budget_ms: Option<u64>,
-) -> Result<RollupTrimReport, EventError> {
+) -> Result<RollupTrimReport, PylonError> {
     let service = require_event_service(&state)?;
     let policy = require_retention_service(&state)
         .map_err(|error| EventError::Unavailable(error.to_string()))?
@@ -791,7 +809,10 @@ pub(crate) async fn evt_rollup_trim(
         };
         return Ok(report);
     }
-    service.rollup_trim(budget_ms).await
+    service
+        .rollup_trim(budget_ms)
+        .await
+        .map_err(PylonError::from)
 }
 
 // ============================================================================
@@ -810,11 +831,15 @@ fn require_retention_service(
 }
 
 /// 读取保留策略行；无 → None（前端按默认永久保存处理，D-15）。
+/// #317 批次二：错误经 PylonError::Retention 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn retention_policy_get(
     state: tauri::State<'_, AppState>,
-) -> Result<Option<msg_repo::RetentionPolicyRow>, retention::RetentionError> {
-    require_retention_service(state.inner())?.get_policy().await
+) -> Result<Option<msg_repo::RetentionPolicyRow>, PylonError> {
+    require_retention_service(state.inner())?
+        .get_policy()
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 写入保留策略（先校验档位契约，非法拒绝；合法 → revision+1 原子落盘）。
@@ -825,10 +850,11 @@ pub(crate) async fn retention_policy_set(
     state: tauri::State<'_, AppState>,
     json: String,
     expected_revision: Option<i64>,
-) -> Result<i64, retention::RetentionError> {
+) -> Result<i64, PylonError> {
     require_retention_service(state.inner())?
         .set_policy(json, expected_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 /// preview：统计将删除的候选（不执行删除；与 prune 同一筛选）。
@@ -836,10 +862,11 @@ pub(crate) async fn retention_policy_set(
 pub(crate) async fn retention_preview(
     state: tauri::State<'_, AppState>,
     policy: retention::RetentionPolicy,
-) -> Result<msg_repo::RetentionPreview, retention::RetentionError> {
+) -> Result<msg_repo::RetentionPreview, PylonError> {
     require_retention_service(state.inner())?
         .preview(policy)
         .await
+        .map_err(PylonError::from)
 }
 
 /// prune：事务内统计候选 + 执行删除（与 preview 同一筛选）；返回实际删除计数。
@@ -850,10 +877,11 @@ pub(crate) async fn retention_prune(
     state: tauri::State<'_, AppState>,
     policy: retention::RetentionPolicy,
     expected_policy_revision: Option<i64>,
-) -> Result<msg_repo::RetentionPreview, retention::RetentionError> {
+) -> Result<msg_repo::RetentionPreview, PylonError> {
     require_retention_service(state.inner())?
         .prune(policy, expected_policy_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 #[cfg(test)]

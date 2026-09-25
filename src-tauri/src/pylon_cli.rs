@@ -9,6 +9,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::error::PylonError;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliFrontendRequest {
@@ -124,7 +126,7 @@ impl PylonCliBridge {
 }
 
 #[tauri::command]
-pub(crate) async fn pylon_cli_ready(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn pylon_cli_ready(app: AppHandle) -> Result<(), PylonError> {
     let bridge = app.state::<crate::AppState>().pylon_cli.clone();
     bridge.start(app);
     Ok(())
@@ -136,7 +138,7 @@ pub(crate) async fn pylon_cli_respond(
     request_id: String,
     result: Option<Value>,
     error: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     let response = match error {
         Some(error) => Err(error),
         None => Ok(result.unwrap_or(Value::Null)),
@@ -144,6 +146,7 @@ pub(crate) async fn pylon_cli_respond(
     app.state::<crate::AppState>()
         .pylon_cli
         .respond(&request_id, response)
+        .map_err(PylonError::Command)
 }
 
 #[derive(Debug, Serialize)]
@@ -160,19 +163,26 @@ pub(crate) async fn pylon_window_capture(
     app: AppHandle,
     artifact_path: String,
     format: Option<String>,
-) -> Result<NativeCaptureResult, String> {
+) -> Result<NativeCaptureResult, PylonError> {
     let format = format.unwrap_or_else(|| "png".into());
     if !matches!(format.as_str(), "png" | "webp") {
-        return Err(format!("unsupported capture format: {format}"));
+        return Err(PylonError::Command(format!(
+            "unsupported capture format: {format}"
+        )));
     }
     let window = app
         .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?;
-    let position = window.outer_position().map_err(|error| error.to_string())?;
-    let size = window.outer_size().map_err(|error| error.to_string())?;
+        .ok_or_else(|| PylonError::Command("main window not found".into()))?;
+    let position = window
+        .outer_position()
+        .map_err(|error| PylonError::Command(error.to_string()))?;
+    let size = window
+        .outer_size()
+        .map_err(|error| PylonError::Command(error.to_string()))?;
     let path = std::path::PathBuf::from(&artifact_path);
     let (pixels, width, height) =
-        capture_window_pixels(position.x, position.y, size.width, size.height)?;
+        capture_window_pixels(position.x, position.y, size.width, size.height)
+            .map_err(PylonError::Command)?;
     let image_format = if format == "webp" {
         image::ImageFormat::WebP
     } else {
@@ -186,7 +196,7 @@ pub(crate) async fn pylon_window_capture(
         image::ColorType::Rgba8,
         image_format,
     )
-    .map_err(|error| format!("write capture failed: {error}"))?;
+    .map_err(|error| PylonError::Command(format!("write capture failed: {error}")))?;
     Ok(NativeCaptureResult {
         artifact_ref: path.to_string_lossy().to_string(),
         mime: if format == "webp" {

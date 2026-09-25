@@ -77,10 +77,11 @@ pub(crate) async fn get_mcp_servers(
 pub(crate) async fn set_mcp_servers(
     state: tauri::State<'_, AppState>,
     servers: Option<Vec<crate::mcp::McpServerConfig>>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<serde_json::Value>, PylonError> {
     // O13：单次 clone（validate 消耗 clone，原值 move 进 runtime_mcp；
     // persist 在锁内借用 guard——原实现 serialized/persisted 两次 clone）。
-    let serialized = crate::mcp::validate_and_serialize(servers.clone())?;
+    let serialized =
+        crate::mcp::validate_and_serialize(servers.clone()).map_err(PylonError::Command)?;
     // C8：写 runtime_mcp + 落盘全程持写序锁——并发 set_mcp_servers 串行，
     // 磁盘必为最后一次设置（重启不回滚到旧配置）。
     let _mcp_write_guard = state.mcp_write_lock.lock().await;
@@ -88,7 +89,7 @@ pub(crate) async fn set_mcp_servers(
         let mut guard = state
             .runtime_mcp
             .lock()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| PylonError::Command(error.to_string()))?;
         *guard = servers;
         // P1（E10）：wire 缓存与 runtime_mcp 同锁写入（读路径 miss 时回退重算并回填）。
         if let Ok(mut cache) = state.mcp_wire.lock() {
