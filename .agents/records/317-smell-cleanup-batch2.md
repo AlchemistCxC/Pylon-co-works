@@ -64,6 +64,8 @@
 
 ## 与 spec/ADR 的偏差
 
+- ②String 收编**未**按 spec 字面「映射到 PylonError 既有变体（Io/Protocol/Plugin）」执行——新增 transparent `Command(String)` 变体（code=`command_error`）。理由：既有变体 Display 均带前缀（如「ACP protocol: 」「I/O error: 」），收编会污染前端展示文案；Command 变体保 message 逐字不变，符合 spec/ADR 更上位的「message 保留原文案」约束。
+- spec ②(c)「新增 code 需在 errorPayload 层登记」未做——errorPayload 保持宽容提取（wireErrorParts/errorCode 不设码表白名单）；兜底依据是「前端零处按 protocol_error 分支」的 grep 事实，且新码（command_error + ACP 10 码）不改变既有消费点行为。
 - ②收编对象精确数为 15 条四件套命令（spec 写 17：EventError 7 + MessageError 2 + UserDataError 4 + RetentionError 4 = 17，其中 2 条 MessageError 计入后为 15 条 UserData/Retention/Event + 2 MessageError——口径差异，总数一致 17）。
 - ④落地为 6 个子模块（与 ADR 目标形态一致）；权限分支独立成 permission_route.rs（spec 允许 5-6 模块，取 6）。
 - 其余与 spec 一致。
@@ -73,6 +75,12 @@
 - **localStorage/SQLite 双写**：按 D4 剥离另立 issue（identity 双写、保留策略按模式分叉、审批模式真源分裂在两层），需 ADR 级讨论。
 - pylon-foundations 若未来引入更多宿主下沉需求，建议评估 workspace 依赖 feature 收敛（windows-sys 特性当前仅 Win32_Storage_FileSystem）。
 - 共享树遗留：G 盘空间紧张（已清 incremental 缓存 11G；29G target 为可再生缓存，是否清理留仓主决策）。
+
+## 审查轮（双轴 sub-agent review，基准 196da8cf）
+
+- Standards 轴：零硬违规；判断题当场修正——删除 flush_canonical_window 纯透传包装（调用点直呼正身）、修正搬运遗留的 8 参失真注释与「闭包」措辞、fallback_route.rs use 置顶；runtimeError code 提取恢复 `.trim()` 语义。retentionPolicy 非 string code 收紧为 undefined 属 wireErrorParts 校验替代裸 cast，已在 wireErrorParts 文档注明。
+- Spec 轴：四项全落地、行为等价抽查全过（binding 守卫点/CrashReconnectHandler 克隆语义/主泵分支顺序逐一对上）；两处偏差声明缺口（Command 变体、errorPayload 登记未做）已补入本节。
+- 双写剥离复核：identityStore.ts 不在 diff，retentionPolicyRepository 仅改错误 helper，双写持久化逻辑未触。
 
 ## 并行交集
 

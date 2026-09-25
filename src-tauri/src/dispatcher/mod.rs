@@ -14,7 +14,7 @@ use crate::runtime::AgentRuntime;
 use crate::session::{
     config_option_key_matches, extract_tool_file_name, value_as_string, SessionInfo,
 };
-// #317 批次二 ④：flush 正身迁 canonical_flush.rs；仅测试直接调 pending 正身。
+// #317 批次二 ④：flush 正身迁 canonical_flush.rs。
 #[cfg(test)]
 use crate::session::DurableSessionOwner;
 use crate::AppStateHandles;
@@ -31,10 +31,8 @@ mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
 
-#[cfg(test)]
-use canonical_flush::flush_pending_canonical;
 use canonical_flush::{
-    flush_canonical_window, should_flush_batch, PendingCanonicalPublish,
+    flush_pending_canonical, should_flush_batch, PendingCanonicalPublish,
     PENDING_CANONICAL_FLUSH_INTERVAL,
 };
 use crash_reconnect::CrashReconnectHandler;
@@ -1590,9 +1588,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         //   epoch 重新武装（退避从 attempt 1 重新开始）。A5 的"成功分支复查"窄窗口
         //   由此结构性覆盖（不再依赖单一复查点）。
         let reconnect_epoch = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-        // A7：崩溃处理提取为闭包，broadcast 分支与 watch 分支共用。幂等设计：
-        // auto_reconnect_active 防重入，双通道都送达时最多多发一次同 payload 状态事件。
-        // ISSUE-17 W1（LR2-WI06）：闭包接收 crash reason（稳定 code，transport.rs
+        // A7：崩溃处理提取为 CrashReconnectHandler（#317 批次二 ④，原内联闭包），
+        // broadcast 分支与 watch 分支共用。幂等设计：auto_reconnect_active 防重入，
+        // 双通道都送达时最多多发一次同 payload 状态事件。
+        // ISSUE-17 W1（LR2-WI06）：handle 接收 crash reason（稳定 code，transport.rs
         // CrashReason::as_str）——不再硬编码 stdout closed；用户可读文案保留原始 code
         // （不覆盖诊断字段）。
         let handle_crash = {
@@ -1648,7 +1647,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 raw = notification_inbox.recv() => raw,
                 _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !pending_batch.is_empty() => {
                     let batch = std::mem::take(&mut pending_batch);
-                    if !flush_canonical_window(
+                    if !flush_pending_canonical(
                         &window,
                         &gateway,
                         &runtime_for_reconnect.update_channels,
@@ -1710,7 +1709,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             );
             if flush_batch && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_canonical_window(
+                if !flush_pending_canonical(
                     &window,
                     &gateway,
                     &runtime_for_reconnect.update_channels,
@@ -1846,7 +1845,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             }
             if terminal_boundary && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_canonical_window(
+                if !flush_pending_canonical(
                     &window,
                     &gateway,
                     &runtime_for_reconnect.update_channels,
@@ -1865,7 +1864,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         }
         if !pending_batch.is_empty() {
             let batch = std::mem::take(&mut pending_batch);
-            let _ = flush_canonical_window(
+            let _ = flush_pending_canonical(
                 &window,
                 &gateway,
                 &runtime_for_reconnect.update_channels,
