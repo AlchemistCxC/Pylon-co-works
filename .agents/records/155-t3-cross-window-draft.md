@@ -47,7 +47,8 @@
 
 ## 证据
 
-- commit：功能本体 `c8b4ccbe`，合入 github/main 的合并提交 `48170945`（冲突融合细节见「并行交集」）。
+- commit：功能本体 `c8b4ccbe`；合入主线两次——`48170945`（#331/#334–336/#325–329/#339）与 `a754e8f4`（#338/#345/#346，PR 冲突解除后 GitHub 才会重建 pull_request 工作流）。
+- CI（PR #347，head `a754e8f4`）：六项全绿——clippy 基线门禁、Rust fmt+测试+构建、ACP shadow parity、vitest 分片 ×2、前端静态门禁。仓库既有的 `docs.yml` 在 main 推送上同样 startup_failure（0 job），与本分支无关。
 - clippy 基线门禁（CI `rust-clippy` job 同款：`cargo clippy --workspace --all-targets` + `scripts/check-clippy-baseline.mjs` 逐 crate）：修复 `runtime.rs` 的 `draft_flush_tx` 嵌套泛型 `clippy::type_complexity` 新增（抽 `DraftFlushSender` 别名）后，六个 crate 全部零新增。
 - `bun run check:all`：退出码 0——前端 vitest 652 个测试文件通过（1 skipped），cargo test --workspace --lib 各 crate 全绿（pylon 841、pylon-session 等均 0 failed），shadow parity、cargo fmt --check 与全部 solid/边界守卫通过。
 - `cargo test --manifest-path src-tauri/Cargo.toml -p pylon-session --lib cross_window_draft_storage_bench -- --nocapture`：退出码 0，1 passed，600 chunk 生产形态基准见上。
@@ -63,6 +64,8 @@ main 在隔离期间合入 #331/#334–#336/#325–#329/#339，合并提交 `481
 - ADR 编号撞车（main 已用 0026 给文档站）：本 ADR 重编为 **ADR-0027**，说明书与开发记录引用同步。
 
 ## 与 spec 的偏差
+
+- 第二轮对齐（`a754e8f4`）：新 main 只动 TS/文档/脚本，重叠面仅 `canonicalEventSink.ts`（#338 删 recovery 硬编码行 × 分支加 `draft_pending` 守卫，自动合并互不干扰）、说明书（#346 刷新 + 本任务 schema 段与 `retention_policy` 措辞，均保留）与 L.md（冲突按「同一 #155 条目取分支新版」解决）。
 
 - 用户看过真实 EventRepo 基准后，把最初的 200 ms 策略调整为 16 chunk／约 800 ms；ADR、说明书与实现同步采用最终裁决。
 
