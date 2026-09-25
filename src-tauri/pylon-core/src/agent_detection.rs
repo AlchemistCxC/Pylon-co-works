@@ -1251,7 +1251,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
-                    Some(&executable),
+                    Some(executable),
                     "version_probe_spawn_failed",
                     format!(
                         "无法执行 {} 版本探针: {error}",
@@ -1280,7 +1280,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
-                    Some(&executable),
+                    Some(executable),
                     "version_probe_timeout",
                     format!("{} 版本探针超时", executable.to_string_lossy()),
                     true,
@@ -1296,7 +1296,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
-                    Some(&executable),
+                    Some(executable),
                     "version_probe_wait_failed",
                     format!(
                         "等待 {} 版本探针失败: {error}",
@@ -1313,7 +1313,7 @@ async fn probe_version_uncached(
             startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
-                Some(&executable),
+                Some(executable),
                 "version_probe_non_zero",
                 format!("{} 版本探针返回 {status}", executable.to_string_lossy()),
                 false,
@@ -1331,7 +1331,7 @@ async fn probe_version_uncached(
             startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
-                Some(&executable),
+                Some(executable),
                 "version_probe_empty",
                 format!("{} 版本探针未返回版本文本", executable.to_string_lossy()),
                 false,
