@@ -30,13 +30,19 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   agent_crashed: { summary: 'Agent 进程意外退出' },
   agent_runtime_unavailable: { summary: '当前没有可用的 Agent 运行时', hint: '先在 设置 → Agent 中完成连接' },
   no_active_agent: { summary: '还没有选择要使用的 Agent', hint: '在 设置 → Agent 中新建或切换一个 Agent' },
-  agent_detection_refresh_cancelled: { summary: '本机探测被取消（离开页面或重新发起）' },
+  agent_spawn_io_failed: { summary: '启动 Agent 进程时发生 IO 错误', hint: '确认该程序存在且当前用户有权执行' },
+  // Agent 崩溃的具体原因（pylon-acp cause 词表，会作为 cause.code 出现在错误卡里）
+  writer_failed: { summary: '向 Agent 进程写入失败，连接已按崩溃收敛', hint: '在运行日志里查看该进程的最后输出' },
+  writer_timeout: { summary: 'Agent 进程长时间不读取输入（写超时），连接已按崩溃收敛' },
+  stdout_closed: { summary: 'Agent 进程已退出（标准输出关闭）' },
+  pending_lock_poisoned: { summary: '内部状态锁中毒，连接已按崩溃收敛', hint: '重启 Pylon 后重试；持续出现请反馈' },
+  overloaded: { summary: 'Agent 入站事件速率超过背压上限，连接按过载收敛（事件有缺口）' },
 
   // ── Agent 探测（pylon-core 诊断码）──
-  version_probe_spawn_failed: { summary: '系统拒绝执行该程序（不是有效的可执行文件）' },
+  version_probe_spawn_failed: { summary: '无法执行该程序（不存在、无权限，或不是有效的可执行文件）', hint: '在 设置 → Agent 里重新选择 exe 路径' },
   version_probe_timeout: { summary: '探测超时，该程序未在预算内返回版本信息' },
   version_probe_wait_failed: { summary: '等待探测子进程结束时失败' },
-  version_probe_non_zero: { summary: '该程序返回了非零退出码，不像常规 Agent 可执行文件' },
+  version_probe_non_zero: { summary: '该程序返回了非零退出码（版本探测未成功）' },
   version_probe_empty: { summary: '程序能运行，但没输出版本信息' },
   detection_budget_exhausted: { summary: '本机探测的总时间预算用尽，部分候选未探测', hint: '点「重试探测」可重新发起一轮完整探测' },
   unknown_detector_id: { summary: '请求了未知的探测器标识' },
@@ -92,7 +98,7 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   config_backup_error: { summary: '写入前的备份步骤失败', hint: '确认配置目录可写' },
   config_lock_busy: { summary: '另一处正在写入配置，请稍后重试' },
   config_active_agent_protected: { summary: '不能删除当前正在使用的 Agent', hint: '先切换到别的 Agent 再删除它' },
-  config_not_applied: { summary: '改动已落盘但未生效（需要重连 Agent）' },
+  config_not_applied: { summary: '改动已写入磁盘，但当前运行中的配置还没切换过去', hint: '重载配置或重连 Agent 后生效' },
 
   // ── ACP 传输（pylon-acp 引擎）──
   acp_error: { summary: 'Agent 通信协议层报错' },
@@ -110,13 +116,45 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   workspace_error: { summary: '工作区操作失败' },
   prism_error: { summary: 'Prism 服务调用失败' },
   git_error: { summary: 'Git 操作失败' },
-  command_error: { summary: '命令执行失败' },
+  command_error: { summary: '命令执行失败（含 CLI/插件进程、窗口捕获等宿主命令）' },
 
   // ── 前端语义码（不在 Rust 词表内，但会出现在错误中心）──
   'provider.error': { summary: 'Agent 上报了一个错误' },
   'turn.failed': { summary: '本轮处理失败' },
   'wire.unknown': { summary: '收到了当前版本不认识的协议帧' },
-  'renderer.mount.failed': { summary: '渲染器挂载失败' },
+  'renderer.slot.mount.failed': { summary: '渲染器挂载失败' },
+  'renderer.slot.runtime.failed': { summary: '渲染器运行时失败' },
+  application_mount_failed: { summary: '应用界面初始化失败' },
+
+  // ── Gateway / 实例存储 ──
+  gateway_adapter_unavailable: { summary: '网关平台适配器不可用' },
+  gateway_config_lock_poisoned: { summary: '网关配置锁中毒（内部状态异常）', hint: '重启 Pylon 后重试' },
+  gateway_delivery_failed: { summary: '网关消息投递失败' },
+  gateway_instance_not_connected: { summary: '该网关实例尚未连接，无法执行此操作', hint: '先连接实例再重试' },
+  gateway_instance_not_found: { summary: '该网关实例不存在' },
+  gateway_invalid_config: { summary: '网关配置不合法' },
+  adapter_unavailable: { summary: '平台适配器不可用' },
+  route_in_use: { summary: '该路由正在被使用，不能删除', hint: '先解除引用或停用相关实例' },
+  invalid_transition: { summary: '当前状态下不允许这个操作', hint: '先完成或取消进行中的状态变更' },
+  instance_not_found: { summary: '该实例不存在' },
+  instance_store_corrupt: { summary: '实例存储内容损坏' },
+  instance_store_io: { summary: '实例存储读写失败' },
+  instance_store_write_failed: { summary: '写入实例存储失败' },
+  credential_missing: { summary: '缺少必要的凭据（如 token/密钥）', hint: '在对应设置里补全凭据' },
+  credential_corrupt: { summary: '凭据内容损坏，无法解析' },
+  credential_io: { summary: '凭据读写失败' },
+  credential_key_unavailable: { summary: '凭据加密密钥不可用', hint: '确认系统密钥服务可用后重试' },
+  credential_store_error: { summary: '凭据存储报错' },
+
+  // ── 插件运行时 ──
+  plugin_not_found: { summary: '插件不存在（可能已被移除）' },
+  plugin_invalid_id: { summary: '插件 id 不合法' },
+  plugin_manifest_invalid: { summary: '插件清单（pylon-plugin.json）不合法', hint: '对照随包的 manifest schema 修正' },
+  plugin_io: { summary: '插件文件读写失败' },
+  plugin_resource_invalid: { summary: '插件资源不合法' },
+  plugin_source_invalid: { summary: '插件来源不合法' },
+  plugin_state_conflict: { summary: '插件状态冲突' },
+  plugin_transaction_failed: { summary: '插件事务失败' },
 })
 
 /** 取某个码的人话解释；未知码返回 null（调用方保留原文展示）。 */

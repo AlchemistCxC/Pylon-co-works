@@ -30,13 +30,13 @@ pub struct AgentDetectionDiagnostic {
     pub detector_id: Option<String>,
     /// 结构化归因：诊断属于哪个候选（对齐 `AgentRuntimeCandidate.candidate_id`）。
     ///
-    /// 探测类诊断（`stage == "version_probe"`）必定有值——前端据此把失败原因挂到对应
-    /// Agent 卡，而不必再从 `message` 里正则抠路径。选择/预算类诊断无候选上下文，为 None。
+    /// **真正发起了探测**的诊断有值——前端据此把失败原因挂到对应 Agent 卡，而不必再从
+    /// `message` 里正则抠路径。选择类诊断（未知 detector、候选截断）没有候选上下文，为 None。
     pub candidate_id: Option<String>,
-    /// 结构化归因：被探测的可执行文件绝对路径（探测类诊断必定有值）。
+    /// 结构化归因：被探测的可执行文件绝对路径。
     ///
-    /// 预算耗尽这类「未真正探测」的诊断即便发生在某个候选的探测包装里，也不带路径：
-    /// 那是对全局预算的陈述，不是关于这个可执行文件的事实。
+    /// 同样以「真正发起了探测」为准：预算耗尽这类陈述即便发生在某个候选的探测包装里也不带
+    /// 路径——那是对全局预算的陈述，不是关于这个可执行文件的事实。
     pub executable: Option<String>,
     pub message: String,
     pub retryable: bool,

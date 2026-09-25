@@ -11,6 +11,9 @@ import { explainErrorCode } from '../../errorCodeExplanations.ts'
  * 本模块只做呈现映射，**不改探测算法**（那是 Rust 域，见 issue 边界）：
  * - 用户可见：`哪条探测 · 哪个候选 · 本地化原因`；
  * - 内部码与系统级原文经 `raw` 交给运行日志 / Runtime sheet，UI 不再出现。
+ *
+ * 候选与原因都走**结构化字段**（`executable` / 共享码表）：正则与本地码表副本分别带来
+ * 「后端改文案即静默失效」与「两处各自漂移」两个问题（#325）。
  */
 
 /** 探测阶段 → 可读名。未知阶段一律落到泛称，避免内部 stage id 泄漏。 */
@@ -28,7 +31,8 @@ const STAGE_FALLBACK = '运行时探测'
 const REASON_FALLBACK = '探测失败（完整原因见运行日志）'
 const reasonFor = (code: string) => explainErrorCode(code)?.summary ?? REASON_FALLBACK
 
-/** 后端 message 里的候选路径（`无法执行 <exe> 版本探针: …`）。 */
+/** 兜底：从后端 message 里抠候选路径（`无法执行 <exe> 版本探针: …`）。
+ *  首选 `diagnostic.executable`（#325 的结构化归因）——正则只在旧载荷缺该字段时兜底。 */
 const CANDIDATE_PATTERN = /(?:[A-Za-z]:[\\/]|\/)[^\s:：]+/
 
 /** 候选路径取不到时退回探测器的短名（`builtin.detector.hermes` → `hermes`）。 */
@@ -49,8 +53,9 @@ export function presentDetectionDiagnostic(
   diagnostic: AgentDetectionDiagnostic,
 ): DetectionDiagnosticPresentation {
   const stage = STAGE_LABELS[diagnostic.stage] ?? STAGE_FALLBACK
-  const candidate = CANDIDATE_PATTERN.exec(diagnostic.message)?.[0]
-    ?? detectorShortName(diagnostic.detectorId)
+  const candidate = diagnostic.executable
+    ?? CANDIDATE_PATTERN.exec(diagnostic.message)?.[0]
+    ?? detectorShortName(diagnostic.detectorId ?? undefined)
   const reason = reasonFor(diagnostic.code)
   const detail = diagnostic.retryable ? `${reason}（可重试）` : reason
   return {

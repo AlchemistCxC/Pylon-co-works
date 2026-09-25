@@ -67,10 +67,13 @@ describe('agent detector DTO', () => {
       diagnostics: [
         {
           code: 'version_probe_spawn_failed', stage: 'version_probe', detectorId: 'fixture',
-          candidateId: 'fixture:one', executable: 'C:\broken\peri.exe', message: 'os error 193', retryable: false,
+          candidateId: 'fixture:one', executable: 'C:\\broken\\peri.exe', message: 'os error 193', retryable: false,
         },
-        // 选择类诊断无候选上下文：两个字段缺省即合法
+        // 选择类诊断无候选上下文：字段缺省即合法
         { code: 'unknown_detector_id', stage: 'selection', message: 'unknown', retryable: false },
+        // **后端 Option 序列化成显式 null**（不是省略字段）：这一行必须照样保留，
+        // 否则「选择类诊断」会整条从 UI 消失（candidate_limit_reached 就是这么丢的）。
+        { code: 'candidate_limit_reached', stage: 'selection', candidateId: null, executable: null, message: 'truncated', retryable: false },
         // 类型非法 → 整条丢弃，不半信半疑地喂给 UI
         { code: 'version_probe_timeout', stage: 'version_probe', candidateId: 42, message: 'x', retryable: true },
       ],
@@ -78,10 +81,12 @@ describe('agent detector DTO', () => {
       truncated: false,
     })
 
-    expect(report.diagnostics).toHaveLength(2)
-    expect(report.diagnostics[0]).toMatchObject({ candidateId: 'fixture:one', executable: 'C:\broken\peri.exe' })
+    expect(report.diagnostics).toHaveLength(3)
+    expect(report.diagnostics[0]).toMatchObject({ candidateId: 'fixture:one', executable: 'C:\\broken\\peri.exe' })
     expect(report.diagnostics[1].candidateId).toBeUndefined()
-    expect(report.diagnostics[1].executable).toBeUndefined()
+    // 显式 null 的「选择类诊断」照常保留（只认 undefined 会把整条丢掉）
+    expect(report.diagnostics[2].candidateId).toBeNull()
+    expect(report.diagnostics[2].executable).toBeNull()
   })
 
   /** A4：双证据与安装状态必须严格归一化，不可解释的输入一律丢弃。 */

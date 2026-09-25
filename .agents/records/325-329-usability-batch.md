@@ -158,8 +158,9 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
   - `805a9fd7` #326 审查反馈修正（零 Agent 真正清空 activeAgent 等 8 项）
   - `ce9ff344` #329 主体
   - `da246750` #325 主体
+  - 各 issue 的审查反馈修正提交（见 PR 提交列表尾部）
 - 测试（退出码均为 0）：
-  - 前端全量：`vitest run` → **652 文件 / 4982 用例通过**（1 skipped, 1 todo）
+  - 前端全量：`vitest run` → **652 文件 / 4987 用例通过**（1 skipped, 1 todo；末轮修正后复跑）
   - `tsc -b` 干净；`eslint src/` 干净；`check:solid` 通过（含 `check-plugin-manifests`）
   - Rust：`cargo test -p pylon-core --lib agent_detection` → 36 passed；
     `cargo test --lib agent_config` → 64 passed；`cargo test --lib gateway` → 231 passed
@@ -174,9 +175,11 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
 | 偏差 | 说明 |
 | --- | --- |
 | spec 写「命令名按 `startsWith`、keywords 按 `startsWith`」，实现为 keywords 按 **`includes`** | 中文无词边界，「会话」应能命中关键词「新会话」，前缀匹配会漏。已在代码注释与插件开发者文档写明该语义。 |
-| spec 未写「user 层无命中时回落到全量」 | 实现中加了这条例外（默认层是防淹没，不是「搜到了也不给用」），否则用户敲 `/browser.` 会看到空菜单。 |
+| spec 未写「user 层无命中时回落到全量」 | 实现中曾加这条例外，**审查 P1 判定过宽后删除**：条件是「user 层为空」而不是「用户在敲内部命令」，敲 `/b` 就会漏出 34 条 browser 命令、`/s` 漏出 11 条 skin 命令——正是本 issue 要治的病。现在默认层严格只列 user 级，内部命令一律经底部「显示全部命令」显式展开（该切换项进环选，键盘可达），并补了「普通前缀不漏出内部命令」的回归用例。 |
 | spec 预计 #326 需修 `load.rs` + 前端展示面 | 实际还必须修 `identityStore.setAgents` 与 6 处 `|| 'peri'` 回退——否则展示面修复在裸启动上不生效（审查发现）。 |
 | spec 期望 #325 只加前端映射表 | 实际按裁决同时扩了 Rust 诊断 DTO（结构化归因），见方案要点 4。 |
+| spec 裁决 1 要求「移除对 message 文本正则的依赖」 | 现已做到：呈现层优先取 `diagnostic.executable`，正则只在旧载荷缺该字段时兜底（审查 P2 指出此前只改了一半）。 |
+| 码表规模 | spec 未定规模；落地为 **111 条**——审查 P2 指出首版只覆盖 78 条、漏掉整片「用户能碰到」的词表后补齐：Gateway/实例存储 18 条、插件运行时 8 条、ACP 崩溃原因 5 条、`agent_spawn_io_failed`、以及 `invalid_transition`/`route_in_use` 等。同时删掉两条不可能出现的条目（`renderer.mount.failed` 是猜的名字，真实码是 `renderer.slot.*` / `application_mount_failed`；`agent_detection_refresh_cancelled` 后端只作为 `protocol_error` 的 message 发出）。 |
 
 ## 未解问题
 
@@ -188,6 +191,12 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
 4. **磁盘**：G: 在本次会话期间一度仅剩 796 MB（`src-tauri/target` 34 GB），`npx` 因 ENOSPC 失败过；
    已改用 `node node_modules/vitest/vitest.mjs` 规避。未清理任何构建产物（共享工作树）。
 5. `App.tsx` 之外仍有演示/夹具字符串 `'peri'`（`chatMockData.ts`、`demo/` 等），属演示数据，未动。
+6. **`agent_detection_refresh_cancelled` 的语义错位**（审查 P2 发现）：后端把它塞进 `PylonError::Protocol` 的
+   message，于是用户主动取消探测会看到「错误码 protocol_error」；码表因此不再收录它。修法是让后端为取消
+   发一个中性结果（不报错）或独立码——属 Rust 域，未在本 PR 动。
+7. **候选折叠后的归因**：`candidate_id` 在候选合并前算出，多启动形式的 Agent（hermes/claude-code）
+   失败的那个形式可能不在最终候选列表里。前端已按可执行文件路径回退匹配兜住卡片归因；Rust 侧未改
+   （合并循环重写归属更彻底，但属独立改动）。
 
 ## 并行交集
 

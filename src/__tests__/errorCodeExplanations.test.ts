@@ -10,7 +10,6 @@ import { ERROR_CODE_EXPLANATIONS, explainErrorCode } from '../errorCodeExplanati
  * 解释不是空串、状态词集合精确」。
  */
 const EXPECTED_CODES = [
-  // Agent 启动与连接
   'agent_executable_missing',
   'agent_spawn_failed',
   'agent_initialize_failed',
@@ -18,8 +17,12 @@ const EXPECTED_CODES = [
   'agent_crashed',
   'agent_runtime_unavailable',
   'no_active_agent',
-  'agent_detection_refresh_cancelled',
-  // Agent 探测（pylon-core 诊断码）
+  'agent_spawn_io_failed',
+  'writer_failed',
+  'writer_timeout',
+  'stdout_closed',
+  'pending_lock_poisoned',
+  'overloaded',
   'version_probe_spawn_failed',
   'version_probe_timeout',
   'version_probe_wait_failed',
@@ -29,7 +32,6 @@ const EXPECTED_CODES = [
   'unknown_detector_id',
   'candidate_limit_reached',
   'adapter_version_below_declared_minimum',
-  // 会话与存储
   'session_not_found',
   'session_binding_unavailable',
   'session_deleted',
@@ -52,18 +54,15 @@ const EXPECTED_CODES = [
   'database_future_schema',
   'database_schema_invalid',
   'database_integrity_failed',
-  // 保留策略
   'invalid_retention_policy',
   'retention_unavailable',
   'retention_revision_conflict',
   'retention_stale_preview',
-  // 用户数据
   'user_data_revision_conflict',
   'user_data_unavailable',
   'user_data_corrupt',
   'user_data_not_found',
   'invalid_owner_key',
-  // 配置
   'config_error',
   'config_read_error',
   'config_parse_error',
@@ -76,7 +75,6 @@ const EXPECTED_CODES = [
   'config_lock_busy',
   'config_active_agent_protected',
   'config_not_applied',
-  // ACP 传输
   'acp_error',
   'connect_error',
   'connection_closed',
@@ -84,7 +82,6 @@ const EXPECTED_CODES = [
   'write_timeout',
   'rpc_timeout',
   'rpc_error',
-  // 其它宿主域
   'serialize_error',
   'io_error',
   'protocol_error',
@@ -92,11 +89,38 @@ const EXPECTED_CODES = [
   'prism_error',
   'git_error',
   'command_error',
-  // 前端语义码
   'provider.error',
   'turn.failed',
   'wire.unknown',
-  'renderer.mount.failed',
+  'renderer.slot.mount.failed',
+  'renderer.slot.runtime.failed',
+  'application_mount_failed',
+  'gateway_adapter_unavailable',
+  'gateway_config_lock_poisoned',
+  'gateway_delivery_failed',
+  'gateway_instance_not_connected',
+  'gateway_instance_not_found',
+  'gateway_invalid_config',
+  'adapter_unavailable',
+  'route_in_use',
+  'invalid_transition',
+  'instance_not_found',
+  'instance_store_corrupt',
+  'instance_store_io',
+  'instance_store_write_failed',
+  'credential_missing',
+  'credential_corrupt',
+  'credential_io',
+  'credential_key_unavailable',
+  'credential_store_error',
+  'plugin_not_found',
+  'plugin_invalid_id',
+  'plugin_manifest_invalid',
+  'plugin_io',
+  'plugin_resource_invalid',
+  'plugin_source_invalid',
+  'plugin_state_conflict',
+  'plugin_transaction_failed',
 ] as const
 
 describe('errorCodeExplanations（#325 码表单源）', () => {
@@ -124,10 +148,9 @@ describe('errorCodeExplanations（#325 码表单源）', () => {
     expect(explainErrorCode('')).toBeNull()
   })
 
-  it('已知码按原样取回', () => {
-    expect(explainErrorCode('config_revision_conflict')?.summary).toBe(
-      ERROR_CODE_EXPLANATIONS.config_revision_conflict.summary,
-    )
-    expect(explainErrorCode('version_probe_spawn_failed')?.summary).toContain('系统拒绝执行该程序')
+  it('已知码取回的就是表里那条解释（字面量钉一条，防措辞被无声改掉）', () => {
+    expect(explainErrorCode('config_revision_conflict')?.summary).toBe('配置文件已被别处改动，本次保存基于旧版本')
+    expect(explainErrorCode('version_probe_spawn_failed')?.summary).toContain('无法执行该程序')
+    expect(explainErrorCode('provider.error')?.summary).toBe(ERROR_CODE_EXPLANATIONS['provider.error'].summary)
   })
 })

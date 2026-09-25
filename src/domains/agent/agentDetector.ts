@@ -13,13 +13,15 @@ export type AgentProtocolAvailability = 'not_tested' | 'verified' | 'failed'
 export interface AgentDetectionDiagnostic {
   code: string
   stage: string
-  detectorId?: string
+  /** 后端 Option 序列化为 `null`（不是省略字段），故这里的可选字段必须同时接受 null。 */
+  detectorId?: string | null
   /** 结构化归因：诊断属于哪个候选（对齐 `AgentRuntimeCandidate.candidateId`）。
-   *  探测类诊断必定有值；选择/预算类诊断无候选上下文（#325）。 */
-  candidateId?: string
-  /** 结构化归因：被探测的可执行文件绝对路径（探测类诊断必定有值）。
-   *  有了它，前端不必再从 `message` 里正则抠路径（#325）。 */
-  executable?: string
+   *  真正发起了探测的诊断有值；选择类诊断（未知 detector、候选截断）无候选上下文（#325）。 */
+  candidateId?: string | null
+  /** 结构化归因：被探测的可执行文件绝对路径。真正发起了探测的诊断有值——
+   *  预算耗尽这类「未真正探测」的陈述不带路径。有了它，前端优先用它而不是从
+   *  `message` 里正则抠路径（#325）。 */
+  executable?: string | null
   message: string
   retryable: boolean
 }
@@ -201,11 +203,13 @@ function normalizeDiagnostics(raw: unknown): AgentDetectionDiagnostic[] {
   return raw.filter((item): item is AgentDetectionDiagnostic => {
     if (!item || typeof item !== 'object') return false
     const value = item as Partial<AgentDetectionDiagnostic>
+    // `== null` 同时放行 undefined 与 null：后端 Option 序列化成显式 null，只认 undefined
+    // 会把「选择类诊断」整条丢掉（`candidate_limit_reached` 就是这么一直不可见的）。
     return typeof value.code === 'string' && value.code.trim().length > 0
       && typeof value.stage === 'string' && value.stage.trim().length > 0
-      && (value.detectorId === undefined || typeof value.detectorId === 'string')
-      && (value.candidateId === undefined || typeof value.candidateId === 'string')
-      && (value.executable === undefined || typeof value.executable === 'string')
+      && (value.detectorId == null || typeof value.detectorId === 'string')
+      && (value.candidateId == null || typeof value.candidateId === 'string')
+      && (value.executable == null || typeof value.executable === 'string')
       && typeof value.message === 'string' && typeof value.retryable === 'boolean'
   })
 }

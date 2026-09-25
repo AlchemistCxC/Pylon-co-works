@@ -241,14 +241,23 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
    */
   const probeFailureByAgentId = useMemo(() => {
     const byCandidateId = new Map<string, AgentDetectionDiagnostic>()
+    const byExecutable = new Map<string, AgentDetectionDiagnostic>()
     for (const diagnostic of detectionDiagnostics) {
+      // 预算耗尽是对**全局预算**的陈述，不是这个可执行文件的事实——把它画到卡片上会让一个
+      // 可能完全正常的 Agent 显示「探测失败」。它仍留在「发现的运行时」块里（#325 审查）。
+      if (diagnostic.code === 'detection_budget_exhausted') continue
       if (diagnostic.candidateId) byCandidateId.set(diagnostic.candidateId, diagnostic)
+      if (diagnostic.executable) byExecutable.set(diagnostic.executable.toLowerCase(), diagnostic)
     }
     const byAgentId = new Map<string, AgentDetectionDiagnostic>()
     for (const candidate of candidates) {
       const agentId = candidate.alreadyImportedAgentId
-      const diagnostic = agentId ? byCandidateId.get(candidate.candidateId) : undefined
-      if (agentId && diagnostic) byAgentId.set(agentId, diagnostic)
+      if (!agentId) continue
+      // 身份折叠会把同一 Agent 的多种可执行形式合成一个候选，失败那个形式的 candidateId
+      // 可能已不在报告里——此时按可执行文件路径回退匹配（Windows 路径大小写不敏感）。
+      const diagnostic = byCandidateId.get(candidate.candidateId)
+        ?? byExecutable.get(candidate.executable.toLowerCase())
+      if (diagnostic && !byAgentId.has(agentId)) byAgentId.set(agentId, diagnostic)
     }
     return byAgentId
   }, [candidates, detectionDiagnostics])
@@ -799,16 +808,21 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
             {/* #325：探测失败的原因必须落到**这张卡**上——此前只有「未激活」，
                 真实原因（version_probe_spawn_failed os error 193 等）只进控制台。
                 归因走结构化字段：诊断带 candidateId，候选带 alreadyImportedAgentId。 */}
-            {probeFailure && (
+            {probeFailure && status.status !== 'connected' && (
               <div className="set-hint agent-runtime-failure" role="status">
                 探测失败：<code>{probeFailure.code}</code>
                 <span> {explainErrorCode(probeFailure.code)?.summary ?? '原因见运行日志'}</span>
+                {/* 归因可能来自同 provider 的另一个可执行形式：把被测路径写出来，用户才
+                    知道失败的不是卡片上那个 exe。 */}
+                {probeFailure.executable && <span className="agent-runtime-failure-path">{probeFailure.executable}</span>}
                 <button className="ps-btn sm" type="button" disabled={detecting} onClick={() => void detectRuntimes(true)}>
                   {detecting ? '探测中…' : '重试探测'}
                 </button>
               </div>
             )}
-            {!probeFailure && status.recentError && (
+            {/* 与探测失败各自独立：探测失败是「能不能启动」的事实，recentError 是运行期事实，
+                两者可以同时成立，不能互相顶掉。 */}
+            {status.recentError && (
               <div className="set-hint agent-runtime-failure" role="status">最近错误：{status.recentError}</div>
             )}
 

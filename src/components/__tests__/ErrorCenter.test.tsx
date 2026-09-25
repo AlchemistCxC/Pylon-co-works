@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import ErrorCenter from '../ErrorCenter'
 import { addError, clearErrors, getErrors } from '../../errorCenter'
+import { ERROR_CODE_EXPLANATIONS } from '../../errorCodeExplanations.ts'
 
 afterEach(() => {
   cleanup()
@@ -76,6 +77,28 @@ describe('ErrorCenter', () => {
     expect(screen.getByText(/session-1/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '关闭该错误' }))
     expect(screen.queryByText('本地历史已恢复，远端补充失败')).toBeNull()
+  })
+
+  // #325：技术详情区的码旁边必须有人话解释；未知码保留原文（不编解释、不留空行）。
+  test('技术详情区给已知码配人话解释，未知码只留原文', () => {
+    addError({
+      action: '保存配置', message: '配置写入被拒', code: 'config_revision_conflict',
+      scope: { kind: 'app', id: 'settings' }, key: 'settings:save:app',
+    })
+    addError({
+      action: '未知操作', message: '未知失败', code: 'brand_new_failure',
+      scope: { kind: 'app', id: 'settings' }, key: 'settings:unknown:app',
+    })
+    render(<ErrorCenter />)
+    fireEvent.click(screen.getByRole('button', { name: '查看运行错误' }))
+
+    fireEvent.click(screen.getAllByText('详细信息')[0]!)
+    expect(screen.getByText(ERROR_CODE_EXPLANATIONS.config_revision_conflict.summary)).toBeTruthy()
+    expect(screen.getByText(ERROR_CODE_EXPLANATIONS.config_revision_conflict.hint!)).toBeTruthy()
+
+    fireEvent.click(screen.getAllByText('详细信息')[1]!)
+    expect(screen.getByText(/brand_new_failure/)).toBeTruthy()
+    expect(screen.queryByText(/brand_new_failure 的人话/)).toBeNull()
   })
 
   test('diagnostic 错误不显示全局 badge', () => {
