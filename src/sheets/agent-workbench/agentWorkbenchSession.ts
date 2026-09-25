@@ -457,10 +457,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   // 广播兜底轨重复投递同一终帧是安全的——两条路都到就只是个 no-op。
   const handleTerminalSignal = (signal: CanonicalTerminalSignal): void => {
     if (!signal.source) return
-    const payload = signal.payload as { cancelled?: unknown; failure?: unknown } | null
+    const payload = signal.payload as { cancelled?: unknown; failure?: unknown; data?: { stopReason?: unknown } } | null
+    // #324：done 帧携带 stopReason=cancelled（内核中性结算的用户主动停止）——
+    // 页脚按「已停止」呈现，不冒充自然完成。
+    const doneStopReason = payload && typeof payload.data === 'object' && payload.data !== null
+      ? payload.data.stopReason
+      : undefined
     const reason: 'done' | 'cancelled' | 'error' = signal.kind === 'error'
       ? (payload?.cancelled === true ? 'cancelled' : 'error')
-      : 'done'
+      : doneStopReason === 'cancelled' ? 'cancelled' : 'done'
     const failure = signal.kind === 'error' && payload && typeof payload === 'object' && typeof payload.failure === 'object'
       ? payload.failure as PromptFailureMetadata
       : undefined

@@ -1285,6 +1285,19 @@ impl FakeAgent {
                     "initialize" => {
                         Self::write_frame(out, &Self::response(&id, Some(json!({})), None));
                     }
+                    // #324 集成切片：send_message 路径先建会话再 prompt——
+                    // 本场景原先只服务直连 AcpClient 的传输层测试，补 session/new
+                    // 应答使内核级 send→cancel→中性结算 E2E 可达。
+                    "session/new" => {
+                        let session_id = config
+                            .session_id
+                            .as_deref()
+                            .unwrap_or("fake-cancel-session");
+                        Self::write_frame(
+                            out,
+                            &Self::response(&id, Some(json!({"sessionId": session_id})), None),
+                        );
+                    }
                     "session/prompt" => {
                         self.pending_prompt = Some(id.clone());
                     }
