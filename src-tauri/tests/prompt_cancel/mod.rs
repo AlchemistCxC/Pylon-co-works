@@ -22,7 +22,9 @@ fn collect_updates(value: &serde_json::Value, found: &mut Vec<(String, serde_jso
                 collect_updates(item, found);
             }
         }
-        serde_json::Value::Array(items) => items.iter().for_each(|item| collect_updates(item, found)),
+        serde_json::Value::Array(items) => {
+            items.iter().for_each(|item| collect_updates(item, found))
+        }
         _ => {}
     }
 }
@@ -44,7 +46,13 @@ async fn user_cancel_settles_via_done_channel_not_error() {
     let (send_result, cancel_result) = tokio::join!(
         async {
             harness
-                .send_message("cancel-agent", "local:cancel", Some("profile-1"), "hello", "")
+                .send_message(
+                    "cancel-agent",
+                    "local:cancel",
+                    Some("profile-1"),
+                    "hello",
+                    "",
+                )
                 .await
         },
         async {
@@ -74,10 +82,8 @@ async fn user_cancel_settles_via_done_channel_not_error() {
         "cancelled turn must commit a done update; got {kinds:?}"
     );
     assert!(
-        updates
-            .iter()
-            .any(|(kind, update)| kind == "done"
-                && update.get("stopReason") == Some(&serde_json::json!("cancelled"))),
+        updates.iter().any(|(kind, update)| kind == "done"
+            && update.get("stopReason") == Some(&serde_json::json!("cancelled"))),
         "done update must carry stopReason=cancelled"
     );
 }

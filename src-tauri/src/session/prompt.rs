@@ -1659,15 +1659,25 @@ mod tests {
     /// 缺失字段不享中性结算（仍走 #316 闭式表 fail-closed）。
     #[test]
     fn is_cancelled_stop_response_matches_exact_spelling_only() {
-        assert!(is_cancelled_stop_response(&serde_json::json!({"stopReason": "cancelled"})));
+        assert!(is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": "cancelled"})
+        ));
         assert!(is_cancelled_stop_response(&serde_json::json!({
             "stopReason": "cancelled",
             "usage": {"total": 3}
         })));
-        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": " cancelled"})));
-        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": "Cancelled"})));
-        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": ""})));
-        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": 42})));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": " cancelled"})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": "Cancelled"})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": ""})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": 42})
+        ));
         assert!(!is_cancelled_stop_response(&serde_json::json!({})));
     }
 

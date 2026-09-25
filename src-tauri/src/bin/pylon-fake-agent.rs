@@ -1295,11 +1295,7 @@ impl FakeAgent {
                             .unwrap_or("fake-cancel-session");
                         Self::write_frame(
                             out,
-                            &Self::response(
-                                &id,
-                                Some(json!({"sessionId": session_id})),
-                                None,
-                            ),
+                            &Self::response(&id, Some(json!({"sessionId": session_id})), None),
                         );
                     }
                     "session/prompt" => {
