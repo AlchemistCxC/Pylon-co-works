@@ -25,8 +25,11 @@ mod routing;
 
 // #317 批次二 ④：主泵六缝提取——决策归子模块、副作用适配归调用点（同 routing 惯例）。
 mod canonical_flush;
+// #331/U4：逐帧热路径基准（cfg(test)，--nocapture 读数）。
 mod crash_reconnect;
 mod fallback_route;
+#[cfg(test)]
+mod frame_path_bench;
 mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
@@ -145,14 +148,9 @@ fn apply_update_event_with_pet_policy(
     // Keep the ACP reducer alongside the legacy SessionInfo fields during the
     // migration. It emits no UI events; canonical commit/publication remains
     // governed by the existing routing transaction below.
-    let deltas = session.acp_state.apply(&crate::acp::RawMessage {
-        id: None,
-        method: Some(crate::acp::NOTIF_SESSION_UPDATE.to_string()),
-        kind: crate::acp::AcpKind::SessionUpdate,
-        result: None,
-        params: Some(serde_json::json!({"update": update})),
-        error: None,
-    });
+    // P2（#334）：零拷贝直喂——原实现按 `{"update": update}` 重包一份整树深拷贝
+    // 喂 `apply`，逐帧成本随 payload 体量放大（frame_path_bench 读数一）。
+    let deltas = session.acp_state.apply_session_update(update);
     // Typed reducer output is consumed here at the kernel boundary. Existing
     // canonical/session updates below remain the publication authority; this
     // adapter only mirrors reducer-owned scalar domains into the live session.
@@ -1083,8 +1081,13 @@ async fn handle_session_update<R: tauri::Runtime>(
     ingress_seq: u64,
     wire: Option<Arc<crate::acp::AcpWireCapture>>,
     pending_batch: Option<&mut Vec<PendingCanonicalPublish>>,
-    mut payload: serde_json::Value,
+    payload: serde_json::Value,
 ) -> bool {
+    // P2（#334）：payload 以 Arc 共享——routing::decide 在锁内需要完整 input，
+    // 而 `update` 借用贯穿锁内 reducer 调用，深拷贝无法换成 move；改为引用计数
+    // 共享后逐帧不再有 payload 级深拷贝（发布侧在 ingest 完成后取回唯一引用，
+    // 消费顺序已核实：ingest 先于 publish）。
+    let payload = Arc::new(payload);
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
         None => {
@@ -1243,7 +1246,9 @@ async fn handle_session_update<R: tauri::Runtime>(
             classification,
             variant,
             replay_loading,
-            payload: payload.clone(),
+            // P2（#334）：Arc 引用计数共享，原整份 payload 深拷贝已拆除；
+            // 原件继续由本函数持有，发布侧消费。
+            payload: Arc::clone(&payload),
             wire_ordinal,
         };
         let decision = routing::decide(&input);
@@ -1475,6 +1480,14 @@ async fn handle_session_update<R: tauri::Runtime>(
     if !decision.publish {
         return true;
     }
+    // P2（#334）：发布取回唯一引用。ingest 已完成（commit await 返回）且
+    // `input` 不再被读取，drop 后 Arc 引用计数回到 1，`try_unwrap` 零拷贝
+    // 取回原件注入 source/canonicalEvent；计数非 1 理论不可达，克隆兜底。
+    drop(input);
+    let mut payload = match Arc::try_unwrap(payload) {
+        Ok(value) => value,
+        Err(arc) => (*arc).clone(),
+    };
     if let serde_json::Value::Object(ref mut map) = payload {
         map.insert(
             "source".to_string(),
@@ -2188,13 +2201,13 @@ mod tests {
                     classification: crate::acp::ReplayClassification::Live,
                     variant: Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
                     replay_loading: false,
-                    payload: serde_json::json!({
+                    payload: std::sync::Arc::new(serde_json::json!({
                         "sessionId": "peri-s1",
                         "update": {
                             "sessionUpdate": if ordinal == 3 {"done"} else {"agent_message_chunk"},
                             "content": {"text": if ordinal == 1 {"a"} else {"b"}}
                         }
-                    }),
+                    })),
                     wire_ordinal: Some(ordinal),
                 },
                 decision,

@@ -1214,6 +1214,8 @@
 .lifecycle-files,
 .lifecycle-identifiers { color: var(--lifecycle-muted-foreground, var(--text-dim)); }
 .lifecycle-identifiers { font-family: var(--mono); font-size: var(--font-size-xs); }
+/* #325：技术详情里错误码的人话解释——次要文本，与标识符同层但不抢裸码。 */
+.lifecycle-code-meaning { display: block; margin-top: 4px; color: var(--lifecycle-muted-foreground, var(--text-dim)); font-size: var(--font-size-xs); }
 .lifecycle-technical,
 .system-notice-data { min-width: 0; }
 .lifecycle-technical > summary,

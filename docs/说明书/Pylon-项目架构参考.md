@@ -286,9 +286,17 @@ flowchart TB
 
 配置来源优先级：
 
-1. 环境变量指定路径。
+1. 环境变量 `PYLON_AGENTS_CONFIG` 指定路径。
 2. 可执行文件旁的 `agents.yaml`。
-3. embedded 配置。
+3. 编译期嵌入的兜底样例（`src-tauri/src/agent_config/embedded_agents.yaml`）。
+
+第 3 档是**零 Agent 的注释样例**，因此「既无环境变量、exe 旁也无 agents.yaml」时应用以
+**零 Agent** 启动：干净空态 + 设置 → Agent 的引导（「发现的运行时」验证 → 导入，或
+「新建 Agent」手填 exe 后用「测试连接」验证，见 #326）。
+**零 Agent 是合法的读取状态**（`agents: {}`）；但 `agents` 键本身必需，缺键按配置错误报出，
+拼错的键名不会被静默当成空表。写入路径相反：配置**变更**不得把 agents 表清空
+（`validate_candidate` 拒绝删到零 Agent——删到空表是操作失误而非意图）。仓库根的 `agents.example.yaml` 是**开发模板与测试夹具**，
+不再参与嵌入（此前被 `include_str!` 预加载，导致首屏出现两个占位 exe 必然启动失败的 Agent）。
 
 当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 

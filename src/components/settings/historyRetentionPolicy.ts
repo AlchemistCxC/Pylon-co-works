@@ -5,15 +5,30 @@
  * 数量保留）、ISSUE-06 D-15（默认永久保存，字段缺失/解析失败回退永久保存，
  * 用户选择非永久策略必须显示预计影响，保存策略不等于立即清理）。
  *
- * 与后端实施契约（src-tauri/src/session/retention.rs）保持档位/默认值一致：
- * - by_time 档位（天）：[7, 30, 90, 180, 365]，默认 30
- * - by_count 档位（条）：[100, 500, 1000, 5000, 10000]，默认 1000
+ * 档位/默认值**单源在 Rust**（src-tauri/pylon-session/src/retention.rs），
+ * 由 `scripts/generate-retention-policy.mjs` 生成到
+ * `historyRetentionPolicy.contract.ts`，本文件只引入再导出并承担读取/校验/
+ * 影响提示逻辑（#331/U3 裁决；`check:retention-policy` 门禁守同步）。
  * - 默认模式：permanent；任何非法输入一律回退 permanent，禁止因默认值变化
  *   自动删除历史（D-15）。
  *
  * 本模块只负责策略的读取/校验/影响提示，**不包含任何删除路径**；实际删除由
  * Rust 消息仓库在事务边界安全调度（D-11/D-15）。
  */
+
+import {
+  DEFAULT_COUNT_LIMIT,
+  DEFAULT_TIME_DAYS,
+  RETENTION_COUNT_LIMITS,
+  RETENTION_TIME_DAYS,
+} from './historyRetentionPolicy.contract'
+
+export {
+  DEFAULT_COUNT_LIMIT,
+  DEFAULT_TIME_DAYS,
+  RETENTION_COUNT_LIMITS,
+  RETENTION_TIME_DAYS,
+}
 
 export type RetentionMode = 'permanent' | 'by_time' | 'by_count'
 
@@ -24,15 +39,6 @@ export interface RetentionPolicy {
   /** by_count 档位（每 Session 保留的 canonical 事件条数），仅在 mode === 'by_count' 时有效 */
   count?: number
 }
-
-/** 按时间保留的档位（天）。档位即契约：越档值视为非法 → 回退永久保存。 */
-export const RETENTION_TIME_DAYS = [7, 30, 90, 180, 365] as const
-/** 按数量保留的档位（每 Session canonical 事件条数）。 */
-export const RETENTION_COUNT_LIMITS = [100, 500, 1000, 5000, 10000] as const
-/** 选择按时间保留时的默认档位（天）。 */
-export const DEFAULT_TIME_DAYS = 30
-/** 选择按数量保留时的默认档位（条）。 */
-export const DEFAULT_COUNT_LIMIT = 1000
 
 /** D-15 默认：永久保存（不执行自动清理）。 */
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = { mode: 'permanent' }

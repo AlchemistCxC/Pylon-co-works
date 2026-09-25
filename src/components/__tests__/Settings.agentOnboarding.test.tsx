@@ -50,4 +50,20 @@ describe('Settings Agent onboarding', () => {
 
     expect(screen.getByTestId('agent-runtime-panel')).toHaveAttribute('data-agent-id', 'peri')
   })
+
+  // #326：零 Agent 是合法首跑状态。此前该卡片回落硬编码 'peri'，会在没有这个 Agent 时
+  // 显示一个不存在的名字/ID（与「预置必然失败的占位 Agent」同一类病）。
+  it('零 Agent 时当前 Agent 概况如实空态，不伪造 Agent', () => {
+    // 走生产路径：list_agents 返回空表 → store 清空 activeAgent（不是直接塞 ''）
+    useIdentityStore.getState().setAgents([])
+    expect(useIdentityStore.getState().activeAgent).toBe('')
+    mountSettingsSheet({ domain: 'agents-connections', section: 'agent' })
+
+    expect(screen.getByText('尚未配置 Agent')).toBeInTheDocument()
+    expect(screen.queryByText('peri')).toBeNull()
+    expect(screen.getByText('状态：未配置')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新连接' })).toBeDisabled()
+    // 结构化新建入口照常可用（引导落点）
+    expect(screen.getByTestId('agent-runtime-panel')).toBeInTheDocument()
+  })
 })

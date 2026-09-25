@@ -29,12 +29,13 @@ pub enum RetentionMode {
 pub const TIME_DAYS_TIERS: [u32; 5] = [7, 30, 90, 180, 365];
 /// 按数量保留的档位（每 Session 消息条数）。
 pub const COUNT_LIMIT_TIERS: [u32; 5] = [100, 500, 1000, 5000, 10000];
-/// 选择按时间保留时的默认档位（天）。Rust 侧零消费者：UI 预设展示读的是
-/// TS 侧同名常量（src/components/settings/historyRetentionPolicy.ts），两处
-/// 值与文档注释逐字相同，属契约双写——单源化方向待 #331/U3 裁决后收口。
+/// 选择按时间保留时的默认档位（天）。Rust 单源定义（#331/U3 裁决）：TS 侧
+/// 同名常量由 scripts/generate-retention-policy.mjs 从本文件生成并经
+/// check:retention-policy 门禁校验；Rust 运行时无直接消费者（UI 展示读 TS 侧），
+/// 保留为单源锚点。
 #[allow(dead_code)]
 pub const DEFAULT_TIME_DAYS: u32 = 30;
-/// 选择按数量保留时的默认档位（条）。Rust 侧零消费者（同 DEFAULT_TIME_DAYS）。
+/// 选择按数量保留时的默认档位（条）。单源定义（同 DEFAULT_TIME_DAYS）。
 #[allow(dead_code)]
 pub const DEFAULT_COUNT_LIMIT: u32 = 1000;
 

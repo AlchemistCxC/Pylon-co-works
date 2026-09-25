@@ -22,7 +22,7 @@ export default function FileContextPanel({ ctx }: { ctx: SheetContext }) {
   const touchedFilesRecord = useWorkspaceStore(s => s.touchedFiles)
   const relatedSources = activeFile ? sourcesForPath(touchedFilesRecord, activeFile) : []
   const sessions = useIdentityStore(s => s.sessions)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  const activeAgent = useIdentityStore(s => s.activeAgent)
 
   return (
     <div className="context-panel-contribution">
@@ -42,7 +42,9 @@ export default function FileContextPanel({ ctx }: { ctx: SheetContext }) {
                   className="search-result-row"
                   onClick={() => {
                     ctx.selectSession(session?.id ?? null)
-                    ctx.openSheet({ kind: 'agent', title: session?.name || source, agentId: activeAgent })
+                    // owner 用会话自己的（不是当前 active Agent）——否则切过 Agent 后会把
+                    // 别人的会话挂到当前 Agent 的 sheet 上（#326 审查顺带发现）。
+                    ctx.openSheet({ kind: 'agent', title: session?.name || source, agentId: session?.agentId ?? activeAgent })
                   }}
                 >
                   <span className="search-result-path">{source}</span>

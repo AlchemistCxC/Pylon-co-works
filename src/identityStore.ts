@@ -192,6 +192,8 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     { id: 'qq:user:unknown', name: '访客' },
   ],
   agents: [],
+  // 启动前的占位初值（list_agents 到达后由 setAgents 收敛：列表里没有它就清空为 ''）。
+  // 零 Agent 首跑时它只活到首次 list_agents 返回（#326）。
   activeAgent: 'peri',
   lastPersistError: null,
   identityPersistence: { profiles: 'unknown', sessions: 'unknown' },
@@ -732,6 +734,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     // Agent lifecycle 是 live active authority；list_agents 的 active=true 用于配置
     // 初始化/重载后的前后端对账。列表未提供 active 时保留当前值，兼容 browser fixture。
     const backendActive = a.find(agent => agent.active === true)?.id
+    // #326：当前 Agent 已不在列表里（含「零 Agent」）时必须清空 activeAgent——否则它会一直
+    // 停在 store 初值的 'peri'，界面上凭空多出一个不存在的 Agent（设置卡片、权限切片、
+    // 会话归属都按它算）。列表里有当前 Agent 但未标 active 时仍保留（browser fixture 口径）。
+    if (!a.some(agent => agent.id === state.activeAgent)) {
+      const next = backendActive ?? ''
+      return state.activeAgent === next ? { agents: a } : { agents: a, activeAgent: next }
+    }
     const agentState = backendActive ? useWorkspaceStore.getState().sheetAgentStates[backendActive] : undefined
     return {
       agents: a,

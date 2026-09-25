@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { presentDetectionDiagnostic } from '../agentDetectionDiagnostics.ts'
+import { explainErrorCode } from '../../../errorCodeExplanations.ts'
 import type { AgentDetectionDiagnostic } from '../../../domains/agent/agentDetector.ts'
 
 /**
@@ -20,7 +21,7 @@ describe('presentDetectionDiagnostic（#116 子项 10）', () => {
     const { text } = presentDetectionDiagnostic(REAL_SPAWN_FAILURE)
     expect(text).toContain('版本探测')
     expect(text).toContain('C:\\Users\\AlchemistCxC\\.local\\bin\\hermes')
-    expect(text).toContain('系统拒绝执行该程序')
+    expect(text).toContain('无法执行该程序')
     expect(text).not.toMatch(/version_probe/)
     expect(text).not.toMatch(/os error|%1|Win32/)
   })
@@ -30,6 +31,20 @@ describe('presentDetectionDiagnostic（#116 子项 10）', () => {
     expect(raw).toContain('version_probe_spawn_failed')
     expect(raw).toContain('os error 193')
     expect(raw).toContain('builtin.detector.hermes')
+  })
+
+  // #325：候选路径优先取结构化字段（`executable`），不再依赖 message 文本格式。
+  it('候选路径优先取结构化 executable，message 改文案也不受影响', () => {
+    const { text } = presentDetectionDiagnostic({
+      code: 'version_probe_spawn_failed',
+      stage: 'version_probe',
+      detectorId: 'builtin.detector.hermes',
+      candidateId: 'hermes:abc',
+      executable: 'D:\\tools\\hermes-acp.exe',
+      message: '（未来的后端文案，不含路径）',
+      retryable: false,
+    })
+    expect(text).toContain('D:\\tools\\hermes-acp.exe')
   })
 
   it('可重试的诊断在可见文本里标注可重试，不可重试的不标注', () => {
@@ -48,7 +63,8 @@ describe('presentDetectionDiagnostic（#116 子项 10）', () => {
     expect(text).toContain('运行时探测')
     expect(text).not.toContain('future_stage_v2')
     expect(text).toContain('peri')
-    expect(text).toContain('执行超时')
+    // 解释文案归全站单源码表（#325）：这里断言「用的就是那一份」，而不是抄一遍字面量。
+    expect(text).toContain(explainErrorCode('version_probe_timeout')!.summary)
   })
 
   it('未登记诊断码走泛称而不是把 code 摆到 UI 上', () => {

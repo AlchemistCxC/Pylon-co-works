@@ -340,6 +340,15 @@ pub(crate) fn validate_candidate(
     let (agents, gateway) = parse_domains(content, base_dir);
     let agents = agents?;
     gateway?;
+    // 写入路径守卫，与读取路径**故意相反**：#326 起「零 Agent」是合法的读取状态
+    // （裸启动首跑空态 + 引导），但配置**变更**不得把用户删到没有任何 Agent——
+    // 删到空表是操作失误而非意图。故此断言只在这里，不放进 parse()，否则首跑空态
+    // 会被判非法。
+    if agents.is_empty() {
+        return Err(ConfigError::Invalid(
+            "配置变更不得清空 agents 表：至少保留一个 Agent".to_string(),
+        ));
+    }
     Ok(agents)
 }
 

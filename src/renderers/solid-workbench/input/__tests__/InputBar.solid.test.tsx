@@ -14,7 +14,8 @@ import type { InputPredictionProvider } from '../inputPredictionProvider.ts'
 
 const modelCommand = getCommandRegistry().register(
   createPluginIdentity('test.solid-input', 'solid-input-test'),
-  { id: 'solid-test-model', name: 'model', description: '切换模型', inputHint: ' <name>', priority: -100 },
+  // `tier: 'user'`：它是日常命令，不声明即 internal（#329 默认档），默认层就看不到它。
+  { id: 'solid-test-model', name: 'model', tier: 'user', description: '切换模型', inputHint: ' <name>', priority: -100 },
 )
 
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -341,6 +342,63 @@ describe('SolidInputBar', () => {
 
     expect(textarea.value).toBe('/model <name> ')
     expect(services.commands.calls).toHaveLength(0)
+  })
+
+  // #329：默认菜单只列 user 级；内部/开发者命令折叠在「全部」里（切换项进环选，键盘可达）。
+  it('命令菜单默认只列 user 级，「全部」展开后可及内部命令', () => {
+    const identity = createPluginIdentity('test.solid-input', 'solid-input-test')
+    const userCommand = getCommandRegistry().register(identity, {
+      id: 'solid-test-user-command', name: 'zz-user-command', tier: 'user', description: '用户级命令', priority: -300,
+    })
+    const internalCommand = getCommandRegistry().register(identity, {
+      id: 'solid-test-internal-command', name: 'zz-internal-command', description: '内部命令', priority: -300,
+    })
+    try {
+      const { services, textarea } = renderInput()
+      fireEvent.input(textarea, { target: { value: '/zz-' } })
+
+      // 默认层：只看得到 user 级
+      expect(screen.getByRole('option', { name: /zz-user-command/ })).toBeTruthy()
+      expect(screen.queryByRole('option', { name: /zz-internal-command/ })).toBeNull()
+
+      // 切换项在环选里（user 命中 1 条 → 它是第 2 行）：键盘 ArrowDown + Enter 即可展开，
+      // 且不得被当成普通消息发出去
+      const toggle = screen.getByRole('option', { name: /显示全部命令/ })
+      expect(toggle).toHaveClass('cmd-toggle')
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+
+      expect(screen.getByRole('option', { name: /zz-internal-command/ })).toBeTruthy()
+      expect(screen.getByRole('option', { name: /zz-user-command/ })).toBeTruthy()
+      expect(services.commands.calls).toHaveLength(0)
+
+      // 「只看常用命令」收回去：内部命令重新折叠
+      fireEvent.click(screen.getByRole('option', { name: /只看常用命令/ }))
+      expect(screen.queryByRole('option', { name: /zz-internal-command/ })).toBeNull()
+    } finally {
+      void userCommand.dispose()
+      void internalCommand.dispose()
+    }
+  })
+
+  // #329 审查 P1：曾有一条「user 层无命中就放行全量」的例外，条件是「user 层为空」而不是
+  // 「用户在敲内部命令」——敲 `/b`/`/s` 这类普通前缀就会漏出几十条内部命令，正是本 issue
+  // 要治的病。现在默认层严格只列 user 级，内部命令一律经「全部」显式展开。
+  it('普通前缀不会漏出内部命令（默认层严格只列 user 级）', () => {
+    const identity = createPluginIdentity('test.solid-input', 'solid-input-test')
+    const internalOnly = getCommandRegistry().register(identity, {
+      id: 'solid-test-zb-command', name: 'zb-internal-only', description: '内部命令', priority: -300,
+    })
+    try {
+      const { textarea } = renderInput()
+      fireEvent.input(textarea, { target: { value: '/zb' } })
+
+      expect(screen.queryByRole('option', { name: /zb-internal-only/ })).toBeNull()
+      // 命中全被折叠时，切换项仍给出「还有多少条」并可达
+      expect(screen.getByRole('option', { name: /显示全部命令，含内部 1 条/ })).toBeTruthy()
+    } finally {
+      void internalOnly.dispose()
+    }
   })
 
   it('实时消费 canonical session commands，且同名插件命令不覆盖会话权威', async () => {

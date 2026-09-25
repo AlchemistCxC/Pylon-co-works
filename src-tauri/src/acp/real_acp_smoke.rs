@@ -16,7 +16,9 @@ use crate::agent_config::AgentDef;
 /// 从生效配置读取指定 id 的 agent（不硬编码路径；agent 缺失时测试失败）。
 fn configured_agent(id: &str) -> AgentDef {
     let agents = crate::agent_config::load().expect("生效 agents.yaml 必须可解析");
-    agents.get(id).expect("指定 agent 必须存在").clone()
+    // #326：解析失败与「没有配这个 agent」是两回事——零 Agent 配置下 load() 返回 Ok(空表)，
+    // 此处才会因缺 agent 失败（消息指向配置内容，不指向解析）。
+    agents.get(id).expect("生效配置里必须声明该 agent").clone()
 }
 
 /// 从生效配置读取 default agent（不硬编码任何 agent；agents.yaml 缺 default 时测试失败）。
@@ -24,7 +26,7 @@ fn default_acp_agent() -> AgentDef {
     let agents = crate::agent_config::load().expect("生效 agents.yaml 必须可解析");
     let id = crate::agent_config::default_agent_id(&agents)
         .expect("default agent 解析必须成功")
-        .expect("agents.yaml 必须声明 default: true 的 agent");
+        .expect("生效配置必须声明 default: true 的 agent");
     let agent = agents.get(&id).expect("default agent 必须存在").clone();
     if agent.transport != "subprocess" {
         panic!("default agent {id} 不是 subprocess transport——本测试只覆盖 ACP subprocess 链路");

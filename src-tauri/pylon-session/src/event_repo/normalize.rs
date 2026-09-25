@@ -268,7 +268,13 @@ pub(super) fn normalize_kernel_event(
 
     let identity = resolve_identity(update);
     // 借用已结束：原树 move 进 redact（纯函数，等价于原先的 clone 后重建，少一次整树拷贝）。
-    let raw_for_storage = redact_journal_credentials(input.raw_payload, false);
+    // #334/P2：raw_payload 为 Arc 共享传入——发布侧在 ingest 完成后才取回唯一
+    // 引用，故此处计数通常为 2（pending 批次仍持有），解包失败即克隆保正确；
+    // 消费顺序约定见 KernelEventInput.raw_payload 文档。
+    let raw_for_storage = redact_journal_credentials(
+        std::sync::Arc::try_unwrap(input.raw_payload).unwrap_or_else(|arc| (*arc).clone()),
+        false,
+    );
     let (
         raw_payload,
         raw_payload_json,

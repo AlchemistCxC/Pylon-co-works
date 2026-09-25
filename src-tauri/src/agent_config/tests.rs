@@ -1001,9 +1001,13 @@ fn load_and_load_gateway_config_share_read_entry() {
     let gateway_text = load_gateway_config();
     match doc {
         Ok(doc) => {
-            // 有来源 → load 解析成功则 gateway 文本即该内容
+            // 不变量是「两域读同一份文本」，不是「agent 非空」——#326 起零 Agent 合法。
+            // 用独立的 serde 结构对账（而非再跑一遍同一管线比长度，那是同义反复）：
+            // 保证完整管线没有丢掉配置里声明的 agent。
             if let Ok(agents) = agents {
-                assert!(!agents.is_empty());
+                let declared: AgentConfigFile =
+                    serde_yml::from_str(&doc.content).expect("同一文本必须可解析");
+                assert_eq!(agents.len(), declared.agents.len());
             }
             assert_eq!(
                 gateway_text.as_ref().map(|text| text.as_str()),
@@ -1015,6 +1019,56 @@ fn load_and_load_gateway_config_share_read_entry() {
             assert!(gateway_text.is_err());
         }
     }
+}
+
+#[test]
+fn embedded_source_serves_the_zero_agent_sample() {
+    // #326 回归锁：内嵌兜底必须**接线**到 `agent_config/embedded_agents.yaml`。只断言
+    // 「那个文件是零 Agent」会在 load.rs 被改回仓库根示例时照样绿——本用例从来源解析
+    // 一路走到文本比对面。
+    if !matches!(resolve_config_source().0, ConfigSource::Embedded) {
+        // 开发机可能配了 PYLON_AGENTS_CONFIG 或 exe 旁 agents.yaml（外置来源优先）。
+        // 环境变量是进程级的，改动它有并发风险，故外置来源下跳过；CI 无外置配置时必跑。
+        return;
+    }
+    let doc = read_config_document().expect("内嵌兜底必须可读");
+    assert_eq!(doc.content, include_str!("embedded_agents.yaml"));
+    assert!(
+        doc.base_dir.is_none(),
+        "内嵌来源无 base_dir（不做相对路径绝对化）"
+    );
+    assert!(
+        parse_agents(&doc.content, None)
+            .expect("内嵌兜底必须可解析")
+            .is_empty(),
+        "内嵌兜底不得注册任何 Agent"
+    );
+}
+
+#[test]
+fn parse_accepts_zero_agents_but_requires_the_key() {
+    // #326：显式空映射是合法的「零 Agent」状态（内嵌兜底即零 Agent，首跑干净空态）。
+    let agents = parse("agents: {}\n").expect("零 Agent 必须合法");
+    assert!(agents.is_empty());
+    // 但 `agents` 键本身仍必需：拼错的键名不得被静默当成「零 Agent」。
+    let missing = parse("agentss: {}\n");
+    assert!(missing.is_err(), "缺 agents 键必须报错，而不是降级为空表");
+}
+
+#[test]
+fn embedded_fallback_registers_no_agent_and_keeps_gateway_parsable() {
+    // #326 回归守卫：内嵌兜底是**零 Agent 的注释样例**。裸启动首屏必须是干净空态 +
+    // 引导，不得预置占位 Agent——占位 exe（<PERI_EXE_PATH> 一类）必然启动失败，
+    // 会盖掉引导（issue 原文「两个必然启动失败的 Agent」）。
+    // 仓库根 agents.example.yaml 是开发模板 + 测试夹具，不属于内嵌兜底。
+    let content = include_str!("embedded_agents.yaml");
+    let (agents, gateway) = parse_domains(content, None);
+    let agents = agents.expect("内嵌兜底必须可解析");
+    assert!(agents.is_empty(), "内嵌兜底不得预置任何 Agent");
+    assert!(gateway.is_ok(), "内嵌兜底必须让 gateway 域照常解析");
+    // 也不得用空的 tool_dictionary 覆盖前端内置 fallback（保持「未配置」语义）。
+    let config: AgentConfigFile = serde_yml::from_str(content).expect("解析");
+    assert!(config.tool_dictionary.is_empty());
 }
 
 // ── Phase 3 配置写入纯函数层（§5.5）──
