@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, createEffect, onCleanup, type JSX } from 'solid-js'
+import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
 import { createScrollUserIntent } from '../../../components/chat/scrollUserIntent.ts'
@@ -84,6 +84,42 @@ export function AssistantContent(props: {
   semanticContent?: JSX.Element
 }) {
   const { copied, markCopied } = createCopyFeedback()
+  const [completionPhase, setCompletionPhase] = createSignal<'idle' | 'settling' | 'complete'>('idle')
+  let wasStreaming = props.streaming === true
+  let completed = false
+  let settleTimer: ReturnType<typeof setTimeout> | undefined
+  let clearTimer: ReturnType<typeof setTimeout> | undefined
+  const clearMotionTimers = () => {
+    if (settleTimer !== undefined) clearTimeout(settleTimer)
+    if (clearTimer !== undefined) clearTimeout(clearTimer)
+    settleTimer = undefined
+    clearTimer = undefined
+  }
+  createEffect(() => {
+    // The terminal flag can arrive before the display scheduler reveals its
+    // remaining text. Each visible growth postpones the single finish cue.
+    const visibleText = props.text
+    if (props.streaming === true) {
+      wasStreaming = true
+      completed = false
+      clearMotionTimers()
+      setCompletionPhase('idle')
+      return
+    }
+    if (!wasStreaming || completed || visibleText.length === 0) return
+    clearMotionTimers()
+    setCompletionPhase('settling')
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined
+      completed = true
+      setCompletionPhase('complete')
+      clearTimer = setTimeout(() => {
+        clearTimer = undefined
+        setCompletionPhase('idle')
+      }, 760)
+    }, 440)
+  })
+  onCleanup(clearMotionTimers)
 
   const copy = () => {
     void navigator.clipboard?.writeText(props.text).catch(() => {})
@@ -105,8 +141,11 @@ export function AssistantContent(props: {
         <Show when={props.semanticContent !== undefined} fallback={<MarkdownContent text={props.text} streaming={props.streaming} />}>
           {props.semanticContent}
         </Show>
-        <Show when={props.streaming}>
+        <Show when={props.streaming || completionPhase() === 'settling'}>
           <span class="term-stream-sheen" aria-hidden="true" />
+        </Show>
+        <Show when={completionPhase() === 'complete'}>
+          <span class="term-stream-completion" aria-hidden="true" />
         </Show>
       </div>
     </div>
@@ -267,7 +306,7 @@ export function ReasoningBlock(props: {
                 只对**超阈值**正文惰性化：短正文保持既有的「折叠也在 DOM 里」契约（页面查找、
                 既有断言、诊断几何都依赖它），长正文改为展开才解析/渲染。复制不受影响（走 props.text）。 */}
             <Show when={collapse.open() || props.text.length <= LAZY_REASONING_BODY_CHARS}>
-              <MarkdownContent text={props.text} streaming={props.running} typewriter={false} />
+              <MarkdownContent text={props.text} streaming={props.running} typewriter={false} settleMotion={false} />
             </Show>
           </div>
         </SolidCollapsibleRegion>

@@ -2132,6 +2132,95 @@
   72%,100% { transform:translate3d(100%,0,0); }
 }
 
+/* A terminal response keeps the tail sweep while paced text catches up. Once
+   the last visible growth has settled, a short line gathers into a light dot. */
+.term-stream-completion {
+  position:absolute;
+  inset:auto 0 0 auto;
+  width:min(7rem,100%);
+  height:1.15rem;
+  pointer-events:none;
+  overflow:hidden;
+}
+.term-stream-completion::before {
+  content:'';
+  position:absolute;
+  inset:auto 0 .16rem;
+  height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent-soft-strong),var(--accent));
+  transform-origin:right;
+  animation:pylon-stream-finish-line 720ms cubic-bezier(.2,.75,.2,1) both;
+}
+.term-stream-completion::after {
+  content:'';
+  position:absolute;
+  right:0;
+  bottom:.02rem;
+  width:4px;
+  height:4px;
+  border-radius:50%;
+  background:var(--accent);
+  box-shadow:0 0 12px var(--accent-soft-strong);
+  animation:pylon-stream-finish-dot 720ms ease-out both;
+}
+@keyframes pylon-stream-finish-line {
+  0% { opacity:0; transform:translate3d(-48%,0,0) scaleX(.65); }
+  35% { opacity:.8; transform:translate3d(0,0,0) scaleX(1); }
+  100% { opacity:0; transform:translate3d(0,0,0) scaleX(0); }
+}
+@keyframes pylon-stream-finish-dot {
+  0%,25% { opacity:0; transform:scale(.4); }
+  55% { opacity:1; transform:scale(1.6); }
+  100% { opacity:0; transform:scale(.3); }
+}
+
+/* Stable Markdown blocks receive one local top-edge trace. The row and parsed
+   descendants remain in place, so syntax updates never replay a subtree enter. */
+.term-assistant :is(.term-code-block,.term-table-wrap,.term-blockquote,ul,ol,h1,h2,h3,h4,h5,h6)[data-md-settle="true"] {
+  position:relative;
+}
+.term-assistant :is(.term-code-block,.term-table-wrap,.term-blockquote,ul,ol,h1,h2,h3,h4,h5,h6)[data-md-settle="true"]::after {
+  content:'';
+  position:absolute;
+  inset:0 0 auto;
+  height:2px;
+  pointer-events:none;
+  background:linear-gradient(90deg,var(--accent),var(--accent-soft-strong),transparent 80%);
+  transform-origin:left;
+  animation:pylon-markdown-settle 580ms cubic-bezier(.2,.75,.2,1) both;
+}
+@keyframes pylon-markdown-settle {
+  0% { opacity:0; transform:translate3d(-.35rem,0,0) scaleX(.2); }
+  40% { opacity:.8; transform:translate3d(0,0,0) scaleX(1); }
+  100% { opacity:0; transform:translate3d(0,0,0) scaleX(1); }
+}
+
+/* Result receipts belong to the existing tool card, including collapsed cards.
+   The effect is armed only for live tools that first acquire output. */
+.solid-workbench-activity-slot[data-result-receipt="new"] .term-tool-head::before,
+.solid-workbench-activity-group[data-result-receipt="new"] > .term-tool-head::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(105deg,transparent 15%,var(--accent-soft) 43%,var(--accent-soft-strong) 52%,transparent 82%);
+  animation:pylon-tool-result-sweep 700ms cubic-bezier(.2,.75,.2,1) both;
+}
+.solid-workbench-activity-slot[data-result-receipt="new"] .term-tool-body,
+.solid-workbench-activity-group[data-result-receipt="new"] > .term-tool-body {
+  animation:pylon-tool-result-reveal 480ms cubic-bezier(.2,.75,.2,1) both;
+}
+@keyframes pylon-tool-result-sweep {
+  0% { opacity:0; transform:translate3d(-85%,0,0); }
+  38% { opacity:.85; }
+  100% { opacity:0; transform:translate3d(85%,0,0); }
+}
+@keyframes pylon-tool-result-reveal {
+  0% { opacity:.65; transform:translate3d(0,4px,0); }
+  100% { opacity:1; transform:translate3d(0,0,0); }
+}
+
 /* The cursor follows the last revealed text leaf, including parsed Markdown
    and open code fences. Its zero-sized anchor does not change line wrapping. */
 .term-typewriter-cursor {
@@ -2163,7 +2252,7 @@
 }
 
 /* The rail retains a quieter continuous signal while the sweep crosses the
-   tail. Both stop when the authoritative live flag clears. */
+   tail. The rail stops with the live flag; the sweep waits for text catch-up. */
 .term-row-assistant[data-streaming="true"],
 .term-row-reasoning[data-streaming="true"],
 .plain-message-list__row[data-streaming="true"] .term-row-assistant {
@@ -2190,6 +2279,10 @@
 .chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"],
 .chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"]::before,
 .chat-view[data-reduced-motion="true"] .term-stream-sheen,
+.chat-view[data-reduced-motion="true"] .term-stream-completion,
+.chat-view[data-reduced-motion="true"] [data-md-settle="true"]::after,
+.chat-view[data-reduced-motion="true"] [data-result-receipt="new"] .term-tool-head::before,
+.chat-view[data-reduced-motion="true"] [data-result-receipt="new"] .term-tool-body,
 .chat-view[data-reduced-motion="true"] .term-row-assistant[data-streaming="true"]::after,
 .chat-view[data-reduced-motion="true"] .term-row-reasoning[data-streaming="true"]::after,
 .chat-view[data-reduced-motion="true"] .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
@@ -2197,14 +2290,23 @@
 }
 .chat-view[data-reduced-motion="true"] .plain-message-list__row[data-entry="new"]::before,
 .chat-view[data-reduced-motion="true"] .term-stream-sheen,
+.chat-view[data-reduced-motion="true"] .term-stream-completion,
+.chat-view[data-reduced-motion="true"] [data-md-settle="true"]::after,
+.chat-view[data-reduced-motion="true"] [data-result-receipt="new"] .term-tool-head::before,
 .chat-view[data-reduced-motion="true"] .term-typewriter-cursor,
 .chat-view[data-reduced-motion="true"] .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
+.term-tool[data-reduced-motion="true"] > .term-tool-head::before { display:none; }
+.term-tool[data-reduced-motion="true"] > .term-tool-body { animation:none; }
 @media (prefers-reduced-motion:reduce) {
   .plain-message-list__row[data-entry="new"] > .term-row,
   .plain-message-list__row[data-entry="new"]::before,
   .solid-workbench-activity-slot[data-entry="new"],
   .solid-workbench-activity-slot[data-entry="new"]::before,
   .term-stream-sheen,
+  .term-stream-completion,
+  [data-md-settle="true"]::after,
+  [data-result-receipt="new"] .term-tool-head::before,
+  [data-result-receipt="new"] .term-tool-body,
   .term-row-assistant[data-streaming="true"]::after,
   .term-row-reasoning[data-streaming="true"]::after,
   .plain-message-list__row[data-streaming="true"] .term-row-assistant::after {
@@ -2212,6 +2314,9 @@
   }
   .plain-message-list__row[data-entry="new"]::before,
   .term-stream-sheen,
+  .term-stream-completion,
+  [data-md-settle="true"]::after,
+  [data-result-receipt="new"] .term-tool-head::before,
   .term-typewriter-cursor,
   .solid-workbench-activity-slot[data-entry="new"]::before { display:none; }
 }

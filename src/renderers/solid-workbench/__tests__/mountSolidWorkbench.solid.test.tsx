@@ -179,7 +179,7 @@ describe('mountSolidWorkbench', () => {
       provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
     })
     const started = envelope(1, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } })
-    const completed = envelope(2, { type: 'tool.completed', tool: { status: 'completed' } })
+    const completed = envelope(2, { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '读取结果' }] } })
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
       ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
     })
@@ -195,6 +195,8 @@ describe('mountSolidWorkbench', () => {
       ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
     })
     await waitFor(() => expect(host.querySelector('[data-activity-id="motion-tool"]')).toBe(slot))
+    await waitFor(() => expect(slot).toHaveAttribute('data-result-receipt', 'new'))
+    await waitFor(() => expect(slot).not.toHaveAttribute('data-result-receipt'), { timeout: 1_000 })
     await waitFor(() => expect(slot).not.toHaveAttribute('data-entry'), { timeout: 1_000 })
     expect(host.querySelectorAll('[data-activity-id="motion-tool"]')).toHaveLength(1)
   })
@@ -222,6 +224,15 @@ describe('mountSolidWorkbench', () => {
       return value!
     })
     expect(slot).not.toHaveAttribute('data-entry')
+    const completed = createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-25T00:00:02.000Z', sequence: 2,
+      source: { provider: 'acp', sourceId: 'static-tool-result' }, identity: { toolCallId: 'static-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '已完成' }] } },
+    })
+    services.runtime.replaceDocument(projectWorkbench([started, completed]).document, options)
+    await waitFor(() => expect(host.querySelector('[data-activity-id="static-tool"]')).toBe(slot))
+    expect(slot).not.toHaveAttribute('data-result-receipt')
   })
 
   it('按 canonical sequence 把工具活动插入用户消息与助手回复之间', async () => {
