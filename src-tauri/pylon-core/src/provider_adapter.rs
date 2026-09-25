@@ -179,6 +179,7 @@ mod tests {
                 "peri.tokenStats": true,
                 "peri.skillNames": true,
                 "peri.replay": true,
+                // #315：Peri 扩展通知通道（peri/agent_event 等 Category ③/⑤）。
                 "peri.agentEvent": true,
                 "peri.agentEventDone": true,
                 "peri.unstableEvent": true,

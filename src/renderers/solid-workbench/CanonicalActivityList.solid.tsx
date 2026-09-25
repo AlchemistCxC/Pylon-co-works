@@ -12,6 +12,7 @@ import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/s
 import { fallbackRenderCommands } from './solidBuiltinContentRenderer.solid.tsx'
 import type { SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { WorkbenchContentSlot } from './WorkbenchContentSlot.solid.tsx'
+import { createEntryMotion } from './entryMotion.solid.tsx'
 
 function safeDomId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, character => `%${character.charCodeAt(0).toString(16).padStart(4, '0')}%`)
@@ -19,6 +20,7 @@ function safeDomId(value: string): string {
 
 function CanonicalActivitySlot(props: {
   activity: WorkbenchActivityNode
+  entering?: () => boolean
   document: WorkbenchDocument
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
@@ -54,6 +56,7 @@ function CanonicalActivitySlot(props: {
       ref={root}
       class={`solid-workbench-activity-slot term-row ${props.activity.kind === 'tool' ? 'term-row-tool' : 'term-row-activity'}`}
       data-activity-id={props.activity.id}
+      data-entry={props.entering?.() ? 'new' : undefined}
     >
       <WorkbenchContentSlot
         nodeId={`${props.document.sessionId}:${props.activity.id}`}
@@ -96,17 +99,23 @@ export function CanonicalActivityList(props: {
     const activities = props.activities
     if (!document) {
       setRows([])
+      expandedSessionId = undefined
       return
     }
-    if (expandedSessionId !== document.sessionId) {
+    const newSession = expandedSessionId !== document.sessionId
+    if (newSession) {
       expandedSessionId = document.sessionId
       setExpandedGroups({})
     }
     const previous = new Map(untrack(rows).map(row => [row.key, row]))
+    const animateNew = untrack(() => !newSession
+      && props.context.runtimeSnapshot().generating
+      && !props.context.input().replayReadonly
+      && !props.context.input().reducedMotion)
     setRows(activities.map(activity => {
       const key = `${document.sessionId}:${activity.id}`
       const existing = previous.get(key)
-      if (!existing) return createStableActivityRow(key, activity)
+      if (!existing) return createStableActivityRow(key, activity, animateNew && activity.kind === 'tool')
       existing.update(activity)
       return existing
     }))
@@ -163,6 +172,7 @@ export function CanonicalActivityList(props: {
         }
         return <CanonicalActivitySlot
           activity={unit.activity}
+          entering={unit.entering}
           document={document()}
           context={props.context}
           connectorPort={props.connectorPort}
@@ -314,14 +324,17 @@ function resolveActivitySlotId(kind: string, context: SolidWorkbenchContextValue
 interface StableActivityRow {
   readonly key: string
   readonly activity: WorkbenchActivityNode
+  entering(): boolean
   update(activity: WorkbenchActivityNode): void
 }
 
-function createStableActivityRow(key: string, initialActivity: WorkbenchActivityNode): StableActivityRow {
+function createStableActivityRow(key: string, initialActivity: WorkbenchActivityNode, entering: boolean): StableActivityRow {
   const [current, setCurrent] = createSignal(initialActivity)
+  const entry = createEntryMotion(entering)
   return {
     key,
     get activity() { return current() },
+    entering: entry,
     update: setCurrent,
   }
 }

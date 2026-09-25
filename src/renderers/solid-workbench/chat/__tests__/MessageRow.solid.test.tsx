@@ -5,7 +5,7 @@ import { createSignal } from 'solid-js'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
-import { ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
+import { AssistantContent, ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
 
 const APPEARANCE: Pick<WorkbenchAppearanceSnapshot,
   'userName' | 'userPrefix' | 'userColor' | 'assistantDot' | 'assistantDotGlyph' | 'assistantDotImage'> = {
@@ -31,6 +31,22 @@ afterEach(() => {
 })
 
 describe('SolidMessageRow', () => {
+  it('keeps streamed content mounted while the sweep appears and clears with live state', () => {
+    const [streaming, setStreaming] = createSignal(true)
+    const result = render(() => <AssistantContent
+      text="live"
+      appearance={APPEARANCE}
+      streaming={streaming()}
+      semanticContent={<span data-testid="stable-content">live</span>}
+    />)
+    const body = result.container.querySelector('.term-assistant-body')
+    const content = result.getByTestId('stable-content')
+    expect(body?.querySelector('.term-stream-sheen')).toHaveAttribute('aria-hidden', 'true')
+    setStreaming(false)
+    expect(body?.querySelector('.term-stream-sheen')).toBeNull()
+    expect(result.getByTestId('stable-content')).toBe(content)
+  })
+
   it.each(['wheel', 'touch', 'keyboard'])('inner reasoning respects %s intent inside its 24px sticky band (#74)', async inputKind => {
     const callbacks: (() => void)[] = []
     vi.stubGlobal('requestAnimationFrame', (fn: () => void) => callbacks.push(fn))

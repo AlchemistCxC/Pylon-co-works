@@ -117,9 +117,10 @@ describe('C16 provider coverage inventory', () => {
 
     expect(sourceOnly.map(item => item.id).sort(), 'SOURCE-ONLY 必须与 not-transported 双向一致')
       .toEqual(notTransported.map(item => item.id).sort())
-    // #315：peri 16 个 Category ③ 单元经 peri/agent_event 扩展通道转出（WIRE-EXTENSION），
-    // SOURCE-ONLY 从 47 收敛到 31（差额逐项见 periCoverage followUp：hitlPending 通道
-    // 上游休眠、TurnCommitted 载荷上游显式抑制、Stage*/queue/plugin 家族仍为 tracer-only）。
+    // #315：peri 16 个 Category ③ 单元脱离 SOURCE-ONLY（15 项经 peri/agent_event
+    // 扩展通道 + peri-12 经标准 usage_update._meta 深消费），SOURCE-ONLY 从 47 收敛到
+    // 31（差额逐项见 periCoverage followUp：hitlPending 通道上游休眠、TurnCommitted
+    // 载荷上游显式抑制、Stage*/queue/plugin 家族仍为 tracer-only）。
     expect(sourceOnly, '固定 provider revision 下的 SOURCE-ONLY 分布发生未审计漂移').toHaveLength(31)
     for (const item of sourceOnly) {
       expect(item.pylonAnchors, `${item.id} 未到 wire，不得保留目标 seam/unknown fallback 等 Pylon 消费锚点`)
@@ -127,8 +128,8 @@ describe('C16 provider coverage inventory', () => {
     }
 
     expect(items.filter(item => item.transportStatus === 'WIRE-EXTENSION').map(item => item.id).sort(),
-      '#315 后 peri/agent_event 承载的扩展 wire 单元（16 项）').toEqual([
-      'peri-05', 'peri-08', 'peri-10', 'peri-12', 'peri-13', 'peri-14', 'peri-15',
+      '#315 后 peri/agent_event 承载的扩展 wire 单元（15 项；peri-12 carrier 为标准 usage_update._meta，归 WIRE-STANDARD）').toEqual([
+      'peri-05', 'peri-08', 'peri-10', 'peri-13', 'peri-14', 'peri-15',
       'peri-16', 'peri-17', 'peri-21', 'peri-22', 'peri-23', 'peri-24', 'peri-25',
       'peri-26', 'peri-34',
     ])

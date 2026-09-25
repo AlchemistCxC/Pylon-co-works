@@ -171,6 +171,59 @@ function installAnimatedScrollTo(viewport: HTMLElement, model: ScrollModel, pump
 }
 
 describe('mountSolidWorkbench', () => {
+  it('marks a live tool arrival once while later status projections reuse its card', async () => {
+    const { host, services } = mountPreview(undefined, { reducedMotion: false })
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'acp', sourceId: `motion-${sequence}` }, identity: { toolCallId: 'motion-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const started = envelope(1, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } })
+    const completed = envelope(2, { type: 'tool.completed', tool: { status: 'completed' } })
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    services.runtime.replaceDocument(projectWorkbench([started]).document, {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    const slot = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-activity-id="motion-tool"]')
+      expect(value).toHaveAttribute('data-entry', 'new')
+      return value!
+    })
+    services.runtime.replaceDocument(projectWorkbench([started, completed]).document, {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    await waitFor(() => expect(host.querySelector('[data-activity-id="motion-tool"]')).toBe(slot))
+    await waitFor(() => expect(slot).not.toHaveAttribute('data-entry'), { timeout: 1_000 })
+    expect(host.querySelectorAll('[data-activity-id="motion-tool"]')).toHaveLength(1)
+  })
+
+  it.each([
+    { reducedMotion: false, generating: false },
+    { reducedMotion: true, generating: true },
+  ])('keeps a restored or reduced-motion tool static (%j)', async ({ reducedMotion, generating }) => {
+    const { host, services } = mountPreview(undefined, { reducedMotion })
+    const started = createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-25T00:00:01.000Z', sequence: 1,
+      source: { provider: 'acp', sourceId: 'static-tool' }, identity: { toolCallId: 'static-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } },
+    })
+    const options = {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true,
+      generationPatch: { generating },
+    }
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), options)
+    services.runtime.replaceDocument(projectWorkbench([started]).document, options)
+    const slot = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-activity-id="static-tool"]')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    expect(slot).not.toHaveAttribute('data-entry')
+  })
+
   it('按 canonical sequence 把工具活动插入用户消息与助手回复之间', async () => {
     const { host, services } = mountPreview()
     const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({

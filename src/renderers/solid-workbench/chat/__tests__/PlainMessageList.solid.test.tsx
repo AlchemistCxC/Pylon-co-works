@@ -52,6 +52,41 @@ afterEach(() => {
 })
 
 describe('PlainMessageList', () => {
+  it('marks only live tail appends and expires the entry before a row can remount', () => {
+    vi.useFakeTimers()
+    try {
+      let live = false
+      let port!: MessageListPort
+      const result = render(() => <PlainMessageList initialItems={ITEMS} animateEntry={() => live}
+        onPortReady={value => { port = value }} renderItem={item => item.key} />)
+      const third = createMessageListItems([descriptor({ id: 'm3', role: 'assistant', sender: 'agent', content: 'three', time: '10:02' })])[0]!
+      const fourth = createMessageListItems([descriptor({ id: 'm4', role: 'assistant', sender: 'agent', content: 'four', time: '10:03' })])[0]!
+
+      expect(result.container.querySelector('[data-entry="new"]')).toBeNull()
+      port.setItems([...ITEMS, third])
+      expect(result.container.querySelector('[data-message-id="m3"]')).not.toHaveAttribute('data-entry')
+
+      live = true
+      port.setItems([...ITEMS, third, fourth])
+      const row = result.container.querySelector('[data-message-id="m4"]')
+      expect(row).toHaveAttribute('data-entry', 'new')
+      port.setItems([...ITEMS, third, createMessageListItems([descriptor({
+        id: 'm4', role: 'assistant', sender: 'agent', content: 'four updated', time: '10:03',
+      })])[0]!])
+      expect(result.container.querySelector('[data-message-id="m4"]')).toBe(row)
+      expect(row).toHaveAttribute('data-entry', 'new')
+
+      vi.advanceTimersByTime(760)
+      expect(row).not.toHaveAttribute('data-entry')
+      port.setItems([createMessageListItems([descriptor({
+        id: 'history', role: 'assistant', sender: 'agent', content: 'old session', time: '09:00',
+      })])[0]!])
+      expect(result.container.querySelector('[data-message-id="history"]')).not.toHaveAttribute('data-entry')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not revisit keys when the immutable input array is unchanged', () => {
     let reads = 0
     const items = ITEMS.map(item => ({ get key() { reads++; return item.key }, descriptor: item.descriptor }))
