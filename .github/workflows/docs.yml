@@ -1,0 +1,60 @@
+name: Deploy Docs
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  # configure-pages 的 enablement: true 需要 administration:write 才能在
+  # Pages 未启用时自动创建（build_type=workflow），免手动开设置
+  administration: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # P46：bun 负责依赖安装与脚本编排；vitepress 由 Node 宿主执行
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: bun install --frozen-lockfile
+      - run: bun run docs:build
+
+      # 首跑时 Pages 可能尚未启用：enablement 由 workflow 自行创建，无需仓库设置
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

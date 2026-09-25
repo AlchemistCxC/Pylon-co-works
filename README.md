@@ -7,6 +7,8 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 
 它连接本地 Agent，管理工作区与会话，并把对话、思考、工具、文件和权限请求放在同一个工作面中。Pylon 不提供模型，也不绑定某一家 Agent；能通过 ACP 接入的本地 runtime，都可以使用同一套界面。
 
+📖 **[在线文档](https://alchemistcxc.github.io/Pylon-co-works/)**：发行包清单、Agent 检测器、插件系统（用户版/开发者版）、CLI 命令表与架构参考等篇目的导航与全文搜索版。
+
 ## 你可以用 Pylon 做什么
 
 - 连接和切换多个本地 Agent runtime，为每个 Agent 保留独立会话。
