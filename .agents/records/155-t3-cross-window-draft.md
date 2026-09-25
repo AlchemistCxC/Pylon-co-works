@@ -47,7 +47,7 @@
 
 ## 证据
 
-- commit：功能本体 `c8b4ccbe`；合入主线两次——`48170945`（#331/#334–336/#325–329/#339）与 `a754e8f4`（#338/#345/#346，PR 冲突解除后 GitHub 才会重建 pull_request 工作流）。
+- 合入：#347 已并入 main（`4537e171`）。功能本体 `c8b4ccbe`；合入主线两次——`48170945`（#331/#334–336/#325–329/#339）与 `a754e8f4`（#338/#345/#346，PR 冲突解除后 GitHub 才会重建 pull_request 工作流）。
 - CI（PR #347，head `a754e8f4`）：六项全绿——clippy 基线门禁、Rust fmt+测试+构建、ACP shadow parity、vitest 分片 ×2、前端静态门禁。仓库既有的 `docs.yml` 在 main 推送上同样 startup_failure（0 job），与本分支无关。
 - clippy 基线门禁（CI `rust-clippy` job 同款：`cargo clippy --workspace --all-targets` + `scripts/check-clippy-baseline.mjs` 逐 crate）：修复 `runtime.rs` 的 `draft_flush_tx` 嵌套泛型 `clippy::type_complexity` 新增（抽 `DraftFlushSender` 别名）后，六个 crate 全部零新增。
 - `bun run check:all`：退出码 0——前端 vitest 652 个测试文件通过（1 skipped），cargo test --workspace --lib 各 crate 全绿（pylon 841、pylon-session 等均 0 failed），shadow parity、cargo fmt --check 与全部 solid/边界守卫通过。
