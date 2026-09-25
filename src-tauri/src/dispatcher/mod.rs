@@ -1056,8 +1056,9 @@ pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
 /// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
 /// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
 // clippy 2026-09-22：参数为各锁/上下文的按引用透传（window/gateway/sessions/
-// binding_health/pet/update_channels/generation），与 flush_pending_canonical 同一
-// 调用点形态，结构体重构收益低。
+// binding_health/pet/update_channels/generation），20 参为 kernel seam 入口形态
+// （#335 曾以「与 flush_pending_canonical 同形态」为据，后者已结构体化；本函数
+// 的结构体收口属 #331/U2b 后续另一案，届时摘除）。
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::Window<R>,
@@ -1831,9 +1832,10 @@ impl<R: tauri::Runtime> NotificationPump<R> {
     /// 路由分支链（原主循环体内联分支逐一迁入，次序不变）：ProviderExtension
     /// 包络 → 窗口 flush 判定 → 崩溃 / elicitation 完成 / 权限请求 / terminal /
     /// fs / 私有交互 / 未知通知 / session/update 内核路径。每分支副作用完成后
-    /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自三处窗口 flush
-    /// 失败，或 `handle_session_update` 返回 false（mutation 后本代结束/锁异常
-    /// 等该函数自身的退出判定，见其文档）。
+    /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自本函数内两处
+    /// 窗口 flush 失败，或 `handle_session_update` 返回 false（mutation 后本代
+    /// 结束/锁异常等该函数自身的退出判定，见其文档；定时 flush 的失败经
+    /// `pump_step` 以 `PumpStep::Stop` 表达，不经本函数）。
     async fn route_frame(
         &mut self,
         mut raw: crate::acp::RawMessage,

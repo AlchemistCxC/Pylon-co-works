@@ -101,7 +101,7 @@ handle_crash 装配，同步执行——纯字段装配无 await，提前于 spa
 | #334 P4 值比较与 owner_mismatch 行为不变 | ✅ bench 自检 `should_flush_batch_rejects_cross_owner_pending` 通过；审查确认检查原样 |
 | #335 allow 计数下降、clippy 基线 added=0 | ✅ 5→1（偏差见上）；基线 added=[] |
 | #335 建会话行为测试原样通过 | ✅ session 135 全绿；revive_tests 9 处实参逐一对照 |
-| #336 `start_notification_dispatcher` ≤150 行 | ✅ 21 行（new 85/run 59/pump_step 34/route_frame 166 各司其职） |
+| #336 `start_notification_dispatcher` ≤150 行 | ✅ 21 行（new 103/run 59/pump_step 34/route_frame 166，raw span 含注释；骨架级约束仅指编排入口本体） |
 | #336 逐语句对照（次序/锁点/校验点） | ✅ 语句 1:1 搬运；审查 agent 独立对照 |
 | 三 issue 审查 | ✅ #334 可合入（A–F 全过）/ #335 可合入（A–F 全过，P2 注释建议已落实）/ #336 见下 |
 
@@ -129,8 +129,9 @@ reducer 单独读数无设计改动对象（P2 消的是总入口与 reducer 之
 运行噪声；issue 基线语境（reducer 1,348 vs 总入口 7,096）的差值部分即本次消除对象。
 
 **门禁**：`cargo test --workspace --lib` 1,410 全绿；`bun run check:acp-shadow` EXIT 0；
-`check-clippy-baseline` added=[]（routing.rs large_enum_variant 随 Arc 化消失，mod.rs
-新增 1 处已按仓规定点 allow 附 reason）。
+`check-clippy-baseline` added=[]（routing.rs:119 `CommitOutcome` 的 large_enum_variant
+告警仍存在、由既有 baseline 条目吸收，并未随 Arc 化消失——勿据此删 baseline 条目；
+mod.rs 新增 1 处已按仓规定点 allow 附 reason）。
 
 **审查**：三个 issue 各派独立审查 agent（只读，#334 审查者在临时 worktree 实跑全量
 测试复核提交信息计数）。#334/#335 判定「可合入」（各 1 条 P2 注释建议，已落实）；
