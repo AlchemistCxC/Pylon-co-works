@@ -85,6 +85,10 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/userDataRepository.ts',
   'src/workspaceEntityStore.ts',
   'src/workspace-sheets/activateAgentSheet.ts',
+  // #317 内联 invoke 适配器收口：共享 transport（26 文件的内联适配器替换为同一
+  // 引用，收窄而非扩大直发面）——与 hookBridgeDispatcher 同形态的基础设施级
+  // IPC 缝，按先例登记。
+  'src/infrastructure/acp/tauriTransport.ts',
 ])
 
 /** Solid/plugin legacy imports; these are the next migration inventory. */
