@@ -196,6 +196,15 @@ pub struct AcpProtocolConfig {
     /// H12 session/load 回放收集上限；None = 10_000。
     #[serde(default)]
     pub replay_max_events: Option<usize>,
+    /// #316 fs 宿主门：agent | host | unrestricted。None = **host**（默认广告
+    /// `fs:{readTextFile,writeTextFile}` 并以 workspace root 沙箱执行 fs 请求；
+    /// 用户显式 `agent` 可回到 agent 自持）。与 [`Self::host_terminal`] 分门控。
+    #[serde(default, deserialize_with = "deserialize_host_tools_mode")]
+    pub host_tools: Option<HostToolsMode>,
+    /// #316 terminal 宿主门：agent | host | unrestricted。None = **agent**
+    /// （不广告不执行 terminal/*，与 fs 门独立）。
+    #[serde(default, deserialize_with = "deserialize_host_tools_mode")]
+    pub host_terminal: Option<HostToolsMode>,
 }
 
 /// D2 切 model 途径（枚举化替代顶层 bool；双格式反序列化兼容 bool|string）。
@@ -241,6 +250,18 @@ pub enum McpServersMode {
     /// ——Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是
     /// 用户责任，默认 Always = 现状 wire，安全。
     OmitIfEmpty,
+}
+
+/// #316 宿主工具门（fs / terminal 分门控，取值同环境变量
+/// `PYLON_ACP_HOST_TOOLS` 的历史词表）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostToolsMode {
+    /// agent 自持：Pylon 不广告不执行该通道的宿主方法（fail-closed）。
+    Agent,
+    /// 宿主执行，fs 侧严格限制在 workspace root（terminal 侧无根语义，等同开启）。
+    Host,
+    /// 宿主执行，不设根限制。
+    Unrestricted,
 }
 
 /// H10/H11 附件限制值对象（prompt_blocks 参数化载体）。
@@ -289,6 +310,8 @@ pub static DEFAULT_ACCPROTOCOL: AcpProtocolConfig = AcpProtocolConfig {
     max_attachments: None,
     max_attachment_bytes: None,
     replay_max_events: None,
+    host_tools: None,
+    host_terminal: None,
 };
 
 impl AcpProtocolConfig {
@@ -355,6 +378,16 @@ impl AcpProtocolConfig {
     /// H12 session/load 回放收集上限（缺省 10_000）。
     pub fn replay_max(&self) -> usize {
         self.replay_max_events.unwrap_or(DEFAULT_REPLAY_MAX_EVENTS)
+    }
+
+    /// #316 fs 宿主门（缺省 [`HostToolsMode::Host`]——默认广告并执行 fs）。
+    pub fn host_tools_mode(&self) -> HostToolsMode {
+        self.host_tools.unwrap_or(HostToolsMode::Host)
+    }
+
+    /// #316 terminal 宿主门（缺省 [`HostToolsMode::Agent`]——默认不广告不执行）。
+    pub fn host_terminal_mode(&self) -> HostToolsMode {
+        self.host_terminal.unwrap_or(HostToolsMode::Agent)
     }
 
     /// H3 initialize protocolVersion（缺省 1）。
@@ -434,6 +467,25 @@ where
         "omit_if_empty" => Ok(McpServersMode::OmitIfEmpty),
         other => Err(D::Error::custom(format!(
             "unknown acp.mcp_servers value: {other:?}（可选 always/omit_if_empty）"
+        ))),
+    }
+}
+
+/// #316 宿主门反序列化：字符串 "agent" | "host" | "unrestricted"。
+pub fn deserialize_host_tools_mode<'de, D>(
+    deserializer: D,
+) -> Result<Option<HostToolsMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = String::deserialize(deserializer)?;
+    match value.as_str() {
+        "agent" => Ok(Some(HostToolsMode::Agent)),
+        "host" => Ok(Some(HostToolsMode::Host)),
+        "unrestricted" => Ok(Some(HostToolsMode::Unrestricted)),
+        other => Err(D::Error::custom(format!(
+            "unknown acp.host_tools/host_terminal value: {other:?}（可选 agent/host/unrestricted）"
         ))),
     }
 }
@@ -696,6 +748,26 @@ impl AgentDef {
             match protocol.mcp_servers {
                 McpServersMode::Always => "always",
                 McpServersMode::OmitIfEmpty => "omit-if-empty",
+            },
+        );
+        // #316：宿主门参与指纹——改开关必须触发 PendingRestart/重连，
+        // 否则 caps 广告与执行门禁漂移不可观测。
+        field(
+            &mut hasher,
+            "host-tools-fs",
+            match protocol.host_tools_mode() {
+                HostToolsMode::Agent => "agent",
+                HostToolsMode::Host => "host",
+                HostToolsMode::Unrestricted => "unrestricted",
+            },
+        );
+        field(
+            &mut hasher,
+            "host-tools-terminal",
+            match protocol.host_terminal_mode() {
+                HostToolsMode::Agent => "agent",
+                HostToolsMode::Host => "host",
+                HostToolsMode::Unrestricted => "unrestricted",
             },
         );
         json(&mut hasher, &protocol.initialize_caps());

@@ -11,7 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
@@ -103,8 +103,8 @@ function LazyDialogFallback() {
 }
 
 // FE-AUD-008：typed client 收口 command literal（注入真实 transport）
-const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
+const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
@@ -326,7 +326,7 @@ export default function App() {
       // P1-1：controller 只作用在当前 agent 的权限切片
       getCurrentAgentId: () => useIdentityStore.getState().activeAgent || 'peri',
       listen: (event, handler) => listen(event, handler),
-      invoke: (cmd, args) => invoke(cmd, args),
+      invoke: tauriInvokeTransport,
     })
     registerPermissionController(controller)
     return () => {

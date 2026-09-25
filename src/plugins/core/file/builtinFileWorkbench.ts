@@ -1,5 +1,5 @@
 import { lazy } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../../infrastructure/acp/tauriTransport.ts'
 import { createWorkspaceClient } from '../../../infrastructure/tauri/workspaceClient.ts'
 import { normalizeWorkspaceText } from '../../../infrastructure/tauri/workspaceContracts.ts'
 import { normalizeWorkspaceSearchResults } from '../../../infrastructure/tauri/workspaceSearchContracts.ts'
@@ -15,7 +15,7 @@ const SearchActivity = lazy(() => views().then(module => ({ default: module.Sear
 const ScmActivity = lazy(() => views().then(module => ({ default: module.ScmActivity })))
 const ViewsActivity = lazy(() => views().then(module => ({ default: module.ViewsActivity })))
 const FileViewHost = lazy(() => import('../../../sheets/file/FileViewHost.tsx'))
-const client = createWorkspaceClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+const client = createWorkspaceClient({ invoke: tauriInvokeTransport })
 
 /** 0-A4：FileSheet 可读/可编辑上限——与后端 MAX_PREVIEW_BYTES（1MB）对齐。 */
 export const FILE_SHEET_MAX_READ_BYTES = 1024 * 1024

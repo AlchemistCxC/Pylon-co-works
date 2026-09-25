@@ -167,7 +167,63 @@ fn session_update_variant_wire_strings_are_stable() {
         SessionUpdateVariant::from_str("current_mode_update"),
         Some(SessionUpdateVariant::CurrentModeUpdate)
     );
+    // #316：官方 agent_thought_chunk + Peri 私有别名 + plan 入契约表。
+    assert_eq!(
+        SessionUpdateVariant::from_str("agent_thought_chunk"),
+        Some(SessionUpdateVariant::AgentThoughtChunk)
+    );
+    assert_eq!(
+        SessionUpdateVariant::from_str("agent_reasoning_chunk"),
+        Some(SessionUpdateVariant::AgentThoughtChunk)
+    );
+    assert_eq!(
+        SessionUpdateVariant::from_str("plan"),
+        Some(SessionUpdateVariant::Plan)
+    );
     assert_eq!(SessionUpdateVariant::from_str("unknown_variant"), None);
+}
+
+#[test]
+fn prompt_stop_outcome_rejects_malformed_stop_reasons() {
+    // #316 审查边界：空白 stopReason 归畸形（不享宽松降级）；非字符串归畸形。
+    let error = prompt_stop_outcome(&serde_json::json!({"stopReason": "   "}))
+        .expect_err("blank stop reason must be rejected");
+    assert!(error
+        .to_string()
+        .contains("invalid session/prompt response"));
+    let error = prompt_stop_outcome(&serde_json::json!({"stopReason": 42}))
+        .expect_err("non-string stop reason must be rejected");
+    assert!(error
+        .to_string()
+        .contains("invalid session/prompt response"));
+}
+
+#[test]
+fn validate_protocol_version_accepts_numeric_string_and_rejects_mismatch() {
+    // 数字字符串 = 同一信息的非合规格式：比对不放过（可过则过，不合即 fail）。
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": "1"}), 1),
+        Ok(())
+    );
+    assert!(validate_protocol_version(&serde_json::json!({"protocolVersion": "2"}), 1).is_err());
+    assert!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": "abc"}), 1).is_err(),
+        "不可解析的 protocolVersion 必须 fail-closed"
+    );
+}
+
+#[test]
+fn classify_session_update_tolerates_peri_lenient_usage_shape() {
+    // Peri 残缺 usage：typed（used 必填 size 缺失）失败 → fallback 仍归
+    // UsageUpdate——fallback 设计的存在理由（#316 审查点名用例）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 123,
+            "value": 456
+        })),
+        Some(SessionUpdateVariant::UsageUpdate)
+    );
 }
 
 #[test]
@@ -270,38 +326,90 @@ fn accepts_valid_session_id_after_trimming_whitespace() {
 
 #[test]
 fn validates_prompt_stop_reasons() {
+    // #316：typed 判定表——max_tokens 转正为合法终态，未知值 warn 降级 end_turn。
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "end_turn"})),
-        Ok("end_turn")
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "end_turn"})),
+        Ok(PromptStopOutcome::EndTurn)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "max_turn_requests"})),
-        Ok("max_turn_requests")
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "max_turn_requests"})),
+        Ok(PromptStopOutcome::MaxTurnRequests)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "cancelled"}))
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "max_tokens"})),
+        Ok(PromptStopOutcome::MaxTokens)
+    );
+    assert_eq!(
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "cancelled"}))
             .expect_err("cancelled must not complete normally")
             .to_string(),
         "prompt cancelled"
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "refusal"}))
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "refusal"}))
             .expect_err("refusal must not complete normally")
             .to_string(),
         "prompt refused by agent"
     );
+    // 行为变化（#316 已批准）：未知 stopReason 不再硬错——宽松降级 end_turn。
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "paused"}))
-            .expect_err("unknown stop reason must be rejected")
-            .to_string(),
-        "unsupported prompt stopReason: paused"
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "paused"})),
+        Ok(PromptStopOutcome::EndTurn)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({}))
+        prompt_stop_outcome(&serde_json::json!({}))
             .expect_err("missing stop reason must be rejected")
             .to_string(),
         "invalid session/prompt response: {}"
     );
+}
+
+#[test]
+fn validates_initialize_protocol_version_echo() {
+    // 一致 → 放行；缺字段 → lenient 放行（存量 agent 兼容）；不一致 → fail-closed。
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": 1}), 1),
+        Ok(())
+    );
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"agentCapabilities": {}}), 1),
+        Ok(())
+    );
+    let mismatch = validate_protocol_version(&serde_json::json!({"protocolVersion": 2}), 1)
+        .expect_err("version mismatch must fail");
+    assert!(mismatch.contains("requested 1"), "{mismatch}");
+    assert!(mismatch.contains("answered 2"), "{mismatch}");
+}
+
+#[test]
+fn classify_session_update_prefers_typed_and_falls_back_to_aliases() {
+    use crate::acp::SessionUpdateVariant as V;
+    // typed-first：官方形状（含未消费字段）直接命中。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "thinking"}
+        })),
+        Some(V::AgentThoughtChunk)
+    );
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "plan",
+            "entries": [{"content": "step", "priority": "high", "status": "pending"}]
+        })),
+        Some(V::Plan)
+    );
+    // raw-fallback：Peri 私有别名（typed 解析不认识 agent_reasoning_chunk）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({"sessionUpdate": "agent_reasoning_chunk"})),
+        Some(V::AgentThoughtChunk)
+    );
+    // 未知变体 → None（raw 照常 publish，与旧 `_ => {}` 一致）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({"sessionUpdate": "banana"})),
+        None
+    );
+    assert_eq!(classify_session_update(&serde_json::json!({})), None);
 }
 
 #[test]
@@ -603,8 +711,8 @@ async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
         "prompt response must carry a wire id"
     );
     assert_eq!(
-        prompt_stop_reason(&response.result.unwrap()).unwrap(),
-        "end_turn"
+        prompt_stop_outcome(&response.result.unwrap()).unwrap(),
+        crate::acp::PromptStopOutcome::EndTurn
     );
 
     client.kill().expect("explicit child cleanup must succeed");
@@ -653,8 +761,8 @@ async fn wire_trace_preserves_id_kinds_and_full_sequence() {
         .expect("fake ACP prompt response must arrive")
         .expect("fake ACP prompt pending must settle");
     assert_eq!(
-        prompt_stop_reason(&response.result.unwrap()).unwrap(),
-        "end_turn"
+        prompt_stop_outcome(&response.result.unwrap()).unwrap(),
+        crate::acp::PromptStopOutcome::EndTurn
     );
 
     // 轮询等待 writer/reader 线程把全部 wire 记录落进 ring buffer。
@@ -1912,4 +2020,51 @@ async fn claude_wrapper_puts_declared_client_capabilities_on_the_wire() {
     );
     assert!(!hermes_meta.contains_key("jetbrains.air"));
     assert!(hermes_meta.contains_key("peri.replay"));
+}
+
+#[test]
+fn acp_kind_classifies_elicitation_complete_notification() {
+    // #316：elicitation/complete 归控制帧通知（URL 模式外带交互完成）。
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("elicitation/complete")),
+        crate::acp::AcpKind::ElicitationComplete
+    );
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("session/update")),
+        crate::acp::AcpKind::SessionUpdate
+    );
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("peri/agent_event")),
+        crate::acp::AcpKind::ProviderExtension
+    );
+}
+
+#[test]
+fn prompt_image_attachment_block_matches_official_wire_shape() {
+    // #316 审查 P2：typed ContentBlock::Image 的 mimeType rename 是幂等批次
+    // 最脆的一环——钉住官方形状 {"type":"image","mimeType","data"}。
+    use base64::Engine as _;
+    let dir = crate::test_utils::unique_temp("attachment-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("pixel.png");
+    // 最小合法 PNG：8 字节签名 + IHDR（infer 按签名识别，无需完整解码）。
+    // 字节串字面量：无数组折行宽度歧义（rustfmt 跨版本稳定）。
+    let bytes: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89";
+    std::fs::write(&path, bytes).unwrap();
+    let blocks = prompt_blocks(
+        "看图".to_string(),
+        &[path.to_string_lossy().into_owned()],
+        crate::agent_config::AttachmentLimits::default(),
+    )
+    .expect("png attachment must serialize");
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(
+        blocks[1],
+        serde_json::json!({
+            "type": "image",
+            "mimeType": "image/png",
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+        })
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

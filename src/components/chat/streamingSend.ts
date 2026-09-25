@@ -1,4 +1,5 @@
-import { invoke, type Channel } from '@tauri-apps/api/core'
+import { type Channel } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { getCanonicalEventFeed, type CanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { closeStreamChannel, openStreamChannel, type StreamFrame, type StreamFrameHandler } from './streamChannel.ts'
@@ -33,7 +34,7 @@ export class StreamingPromptFailure extends Error {
 }
 
 const productionDependencies: StreamingSendDependencies = {
-  invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+  invoke: tauriInvokeTransport,
   open: openStreamChannel,
   close: closeStreamChannel,
   feed: getCanonicalEventFeed,

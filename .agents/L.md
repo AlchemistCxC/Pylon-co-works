@@ -859,3 +859,58 @@
 
 **共享树状况（§2.1 报备）**：工作树存在 **#301 的未提交在途改动**（两个虚拟化测试文件，本分支自己已声明的 WIP）。我未 abort、未 stage、未触碰该文件域；本条目与后续改动一律以 pathspec 提交，不会连带其内容。
 
+
+---
+
+[2026-09-25 00] [Miyaki Kumo] [#316]
+
+**开工：issue316（ACP v1 协议面补强——修错组 + fs/terminal 能力通电 + elicitation form + 官方 SDK 类型化幂等批次）。** spec 见 `.agents/spec/316-acp-v1-hardening.md`。
+
+本轮文件域（请勿改写、勿连带提交）：
+
+- 后端：`src-tauri/pylon-acp/src/**`（protocol/state/turn_ledger/client/engine/host_tools/error 等）、`src-tauri/src/dispatcher/mod.rs`、`src-tauri/src/permission.rs`、`src-tauri/src/lifecycle/mod.rs`、`src-tauri/src/runtime.rs`、`src-tauri/src/agent_config/load.rs`、`src-tauri/pylon-core/src/agent_config/types.rs`、`src-tauri/tests/golden-traces/**`（重生成）
+- 前端：`src/infrastructure/acp/permissionController.ts` 及测试、`src/domains/permission/permissionTypes.ts`、`src/components/PermissionDialog.tsx`（#306 已 CLOSED，无在途冲突）及新增表单卡组件
+- 配置/文档：`agents.example.yaml`、`docs/说明书/Pylon-模块维护地图.md`、`docs/说明书/Pylon-项目架构参考.md`、`src-tauri/vendor/acp/ORIGIN.md`、`.agents/records/316-*.md`（完工时新增）、本文件
+
+**我不碰**：`src/sheets/**`、`src/workspace-sheets/**`、`src/components/chat/**`、`.agents/decisions/**`、`package.json`/锁文件、`tsconfig*`/`vite*`（#solidify 合并在途域）。
+
+**共享树状况（§2.1 报备）**：工作树存在**未收口的 merge**（MERGE_HEAD 在途，staged 为 solidify→main 同步结果）与本分支未暂存改动（`src/sheets/file/FileViewHost.tsx` 等）。按禁区我**不 abort、不 stage、不 conclude 该 merge**；本条目声明与其余改动均暂以工作树形式存在，待合并收口后以 pathspec 补提交。施工先行（cargo/vitest 本地验证不受影响）。
+
+---
+
+[2026-09-25 03] [Kumo] [#315]
+
+**开工：issue315 归一化缺口收敛（peri 扩展通道开闸 + _meta 深消费 + hermes 字典反解 + 双栈映射单源化）。**
+
+注意：本条目写入时工作树存在 #279 在途合并（MERGE_HEAD 活跃），按规范本条目暂不单独提交 L.md，待合并收工后随 #315 首个提交一并入库。
+
+**我方文件域（请勿改写、勿连带提交）**：
+- Rust：`src-tauri/pylon-core/src/agent_config/types.rs`、`src-tauri/pylon-acp/src/client.rs`、`src-tauri/src/dispatcher/{mod,routing}.rs`（仅 OtherNotification 路由段）及上述 crate 的测试
+- 前端：`src/domains/workbench/normalizers/**`、`src/domains/workbench/coverage/**`、`src/domains/events/canonicalNormalizer.ts`、`src/domains/tool/{toolResolution,builtinToolRenderers,toolPresentation}.ts`、`src/infrastructure/acp/chatContracts.ts`（如需）
+- 配置/文档：`agents.yaml`、`agents.example.yaml`、`docs/说明书/`、`.agents/records/`、`.agents/spec/315-*`
+
+---
+
+[2026-09-25] [kumo] [ADR 整理（用户直接授权，无 issue）]
+
+**进行中：`.agents/decisions/` 24 份 ADR 通审整理（去历史裁决痕迹 + 编号去重 + 修订整合）。** 共享树 MERGE_HEAD 在途，本任务全程**不 stage、不 commit**，改动停在工作树，待合并收口后 pathspec 补提交。
+
+文件域（请勿改写、勿连带提交）：
+- `.agents/decisions/**`：24 份通改（深度收敛改写 0008/0011/0018/0020 四份，其余去裁决痕迹/状态订正；`0004-model-selector-convergence.md` 已改名 `0025-*`）。**不动** `0023-frontend-shell-*`（#279 域）与 `0024-filesheet-*`（他方已重命名）
+- 交叉引用同步（仅注释/文档句，其中 `Pylon-模块维护地图.md` 只动「ADR-0018 修订 1」一处字样，与 #316 域不重叠）：`src/components/chat/lezerHighlight.ts`、`src/domains/workbench/workbenchProjector.ts`、`scripts/compute-parity/{index.ts,README.md}`、`scripts/perf-bench/{fixtures/envelopes.ts,suites/eventsSuite.ts,suites/projectorSuite.ts}`、`docs/说明书/Pylon-模块维护地图.md`、`.agents/dev-standards.md`（算力判据一条 + 顺手修正其中已过期的「wasm 面 = 解析/高亮」表述）、本文件
+- 仓外归档：`../Docs/Archive/ADR-00{08,11,18,20}-*-pre-consolidation-20260925.md`（四份改写前全文快照，不入版本控制）
+
+**我不碰**：`.agents/records/**`、`.agents/spec/**`、一切产品代码逻辑、他人在途域（#279/#301/#306/#315/#316、AgentSheet 视觉域、`FileTabView.tsx` 冲突文件）。
+
+---
+
+[2026-09-25 04] [Kumo] [#317]
+
+**开工：issue317 代码异味清偿批次一（机械修复层）——调试残留/死分支/FileReference 守卫/41 处 invoke 适配器收口/transaction.rs expect 链/workspaceClient 归一化。** spec 见 `.agents/spec/317-smell-cleanup-batch1.md`。
+
+本轮文件域（请勿改写、勿连带提交）：
+- 前端：`src/domains/workbench/workbenchProjector.ts`（仅 :874/:878/:1315-1331 产品逻辑两处）、`src/renderers/solid-workbench/chat/content/FileReference.solid.tsx`、`src/infrastructure/tauri/workspaceClient.ts`、新增 `src/infrastructure/acp/tauriTransport.ts`、以及内联适配器调用点：`App.tsx`、`components/{Settings.tsx,settings/AgentConfigEditor.tsx,settings/AgentRuntimePanel.tsx,sidebar/useSidebarContributionProps.ts,chat/sessionModel.ts,chat/sessionMode.ts}`、`sheets/{RuntimeSheetView.tsx,OverviewSheetView.tsx,browser/BrowserSheetView.tsx,history/HistorySheetView.solid.tsx}`、`application/transactions/openOwnedSessionTransaction.ts`
+- 后端：`src-tauri/src/plugin_cmds/transaction.rs`
+- 记录：`.agents/records/317-*.md`（完工时新增）、`.agents/spec/317-*`、本文件
+
+**我不碰**：#316 域（`pylon-acp/**`、`dispatcher/**`、`permissionController.ts` 等）、#315 域（`normalizers/**`、`coverage/**` 等）、ADR 通审域（`.agents/decisions/**`）、`package.json`/锁文件。**连带预告**：`workbenchProjector.ts` 现存 1 行在途注释措辞改动（ADR 通审条目 :4 "scope 修订"），与我的编辑不同行，提交该文件时将随 pathspec 一并入库，届时通审条目无需重复提交该文件。L.md 已有在途未提交内容（#316/#315/ADR 通审条目），本条目按 #315 先例**不提交 L.md**（提交会连带他人在途条目），留工作树待整体收口。

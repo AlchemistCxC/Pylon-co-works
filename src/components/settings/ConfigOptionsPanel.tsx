@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useRuntimeStore } from '../../runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import type { AgentContext } from '../../agentContext'
@@ -37,7 +37,7 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
     })
     patch(value)
     try {
-      await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setConfigOption({ agentId: context.agentId, source: context.source, key: id, value })
+      await createChatClient({ invoke: tauriInvokeTransport }).setConfigOption({ agentId: context.agentId, source: context.source, key: id, value })
       resolveRuntimeErrors({ key: `session-config:${toAgentContextKey(context)}:${id}` })
     } catch (error) {
       if (latestReqRef.current[id] !== seq) return

@@ -16,7 +16,7 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { activeForAgent, type PermissionAction, type PermissionState } from '../../domains/permission/permissionState.ts'
 import type { PermissionOption, PermissionRequest } from '../../domains/permission/permissionTypes.ts'
 import { normalizeInteractionEnvelope } from '../../domains/activity/interaction.ts'
-import { createInteractionResponseTransport } from './interactionTransport.ts'
+import { createInteractionResponseTransport, type InteractionResponseAnswer } from './interactionTransport.ts'
 
 export interface PermissionControllerDeps {
   /** store 写入口：dispatch 纯 reducer action */
@@ -34,8 +34,9 @@ export interface PermissionControllerDeps {
 }
 
 export interface PermissionController {
-  /** 用户/超时选择 option：choose → invoke → resolve；失败回 pending 可重试 */
-  choose: (requestId: string, optionId: string) => Promise<void>
+  /** 用户/超时选择 option：choose → invoke → resolve；失败回 pending 可重试。
+   * #316 elicitation：accept 提交时经 values 携带表单值（后端原样进 content）。 */
+  choose: (requestId: string, optionId: string, values?: InteractionResponseAnswer['values']) => Promise<void>
   /**
    * #209：**本地收口**——放弃这条请求，只清前端状态，不向后端宣称 agent 已收到应答
    * （reducer 的 `reject` 就是这个语义）。
@@ -71,20 +72,25 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  * options 非空且每项含 optionId；否则 null */
 export function normalizePermissionRequest(payload: unknown): PermissionRequest | null {
   const envelope = normalizeInteractionEnvelope(payload)
-  if (!envelope || envelope.eventType !== 'permission.request' || !isPlainObject(envelope.payload)) return null
+  // #316：elicitation.request 走同一 normalize 链（eventType 分派渲染层）。
+  const isElicitation = envelope?.eventType === 'elicitation.request'
+  if (!envelope || (envelope.eventType !== 'permission.request' && !isElicitation) || !isPlainObject(envelope.payload)) return null
   if (!envelope.agentId || !envelope.sessionId || !envelope.requestId || envelope.clientGeneration === undefined) return null
   const body = envelope.payload
   // ACP-01：requestId 是 wire 原值字符串回显（数字 id 也以 "7" 传输）——保留原样，
   // 不再 Number() 收窄（string id "perm-1" 曾因 isFinite(NaN) 被整单丢弃）。
   const requestId = envelope.requestId
-  const options = Array.isArray(body.options)
-    ? body.options
-        .filter(isPlainObject)
-        // 先筛 optionId 存在（缺失经 String 会变成 'undefined' 字符串而漏过），再宽容强转
-        .filter(option => option.optionId != null && String(option.optionId).length > 0)
-        .map(option => ({ ...option, optionId: String(option.optionId) }))
-    : []
-  if (options.length === 0) return null
+  const options = isElicitation
+    ? []
+    : Array.isArray(body.options)
+      ? body.options
+          .filter(isPlainObject)
+          // 先筛 optionId 存在（缺失经 String 会变成 'undefined' 字符串而漏过），再宽容强转
+          .filter(option => option.optionId != null && String(option.optionId).length > 0)
+          .map(option => ({ ...option, optionId: String(option.optionId) }))
+      : []
+  // elicitation 无 options（三值按钮由卡片自渲染）；permission 维持非空硬门。
+  if (!isElicitation && options.length === 0) return null
   return {
     requestId,
     provider: envelope.provider,
@@ -102,6 +108,11 @@ export function normalizePermissionRequest(payload: unknown): PermissionRequest 
     // 前端只用于倒计时展示，不再自行持有 300s 常量。
     deadlineMs: typeof body.deadlineMs === 'number' ? body.deadlineMs : undefined,
     options,
+    // #316 elicitation 字段（permission 请求恒 undefined）。
+    interactionKind: isElicitation ? 'elicitation' : 'permission',
+    elicitMessage: typeof body.message === 'string' ? body.message : undefined,
+    requestedSchema: isPlainObject(body.requestedSchema) ? body.requestedSchema : undefined,
+    elicitUrl: typeof body.url === 'string' ? body.url : undefined,
   }
 }
 
@@ -141,7 +152,11 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     deps.dispatch(action)
   }
 
-  const approve = async (requestId: string, optionId: string) => {
+  const approve = async (
+    requestId: string,
+    optionId: string,
+    values?: InteractionResponseAnswer['values'],
+  ) => {
     try {
       const agentId = currentAgentId()
       const active = activeForAgent(deps.getState(), agentId)
@@ -157,7 +172,7 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
           clientGeneration: request.clientGeneration,
         },
         kind: 'approval',
-      }, { optionId })
+      }, values ? { optionId, values } : { optionId })
       dispatch({ type: 'resolve', agentId, requestId, ok: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -179,7 +194,9 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
   const handleResolved = (payload: unknown) => {
     if (disposed) return
     const envelope = isPlainObject(payload) ? payload : {}
-    if (envelope.eventType !== 'permission.resolved') return
+    // #316：interaction.resolved（elicitation/complete 收敛 URL/私有卡）与
+    // permission.resolved 同一 settle 语义——按 requestId+clientGeneration 关卡。
+    if (envelope.eventType !== 'permission.resolved' && envelope.eventType !== 'interaction.resolved') return
     const agentId = typeof envelope.agentId === 'string' ? envelope.agentId : ''
     const requestId = typeof envelope.requestId === 'string' ? envelope.requestId : ''
     const clientGeneration = typeof envelope.clientGeneration === 'number' ? envelope.clientGeneration : undefined
@@ -215,9 +232,13 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
     dispatch({ type: 'reject', agentId: currentAgentId(), requestId })
   }
 
-  const choose = async (requestId: string, optionId: string) => {
+  const choose = async (
+    requestId: string,
+    optionId: string,
+    values?: InteractionResponseAnswer['values'],
+  ) => {
     dispatch({ type: 'choose', agentId: currentAgentId(), requestId, optionId })
-    await approve(requestId, optionId)
+    await approve(requestId, optionId, values)
   }
 
   // #98（AC14）：冷挂载/刷新只凭 agent_status 快照恢复 pending interaction——

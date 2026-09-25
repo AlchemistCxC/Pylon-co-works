@@ -136,6 +136,9 @@ pub enum AcpKind {
     /// #315 provider 私有扩展通知（peri/agent_event 等；dispatcher 包络为
     /// session/update 形状后走标准通路，见 [`wrap_provider_extension_notification`]）。
     ProviderExtension,
+    /// #316：elicitation/complete —— URL 模式外带交互完成通知（agent→client；
+    /// 官方契约：客户端忽略未知/已完成 id）。
+    ElicitationComplete,
     /// 其他通知（透传忽略，dispatcher 不处理）。
     OtherNotification,
 }
@@ -145,6 +148,7 @@ impl AcpKind {
         match method {
             None => Self::Response,
             Some(NOTIF_AGENT_CRASHED) => Self::Crashed,
+            Some(super::NOTIF_ELICITATION_COMPLETE) => Self::ElicitationComplete,
             Some(METHOD_SESSION_REQUEST_PERMISSION) => Self::PermissionRequest,
             Some(NOTIF_SESSION_UPDATE) => Self::SessionUpdate,
             Some(
@@ -437,14 +441,14 @@ impl AcpClient {
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
+    /// #316：params 由官方 `CancelNotification` 构造（wire 与手写 json!
+    /// 逐字节一致：{"sessionId":..}）。
     pub async fn cancel_session(&self, session_id: &str) -> Result<(), AcpError> {
-        self.send_notification(
-            METHOD_SESSION_CANCEL,
-            serde_json::json!({
-                "sessionId": session_id
-            }),
-        )
-        .await
+        let notification =
+            agent_client_protocol_schema::v1::CancelNotification::new(session_id.to_string());
+        let params = serde_json::to_value(notification)
+            .map_err(|error| AcpError::Child(format!("serialize session/cancel: {error}")))?;
+        self.send_notification(METHOD_SESSION_CANCEL, params).await
     }
 
     /// Connect from AgentDef with optional structured runtime log sink.
@@ -538,6 +542,23 @@ impl AcpClient {
                     establishment_order: declared_establishment_order(agent.provider.as_deref()),
                 };
                 let stderr_mark = stderr_tail.mark();
+                // #316：宿主门解析一次（YAML+env 单一来源）——结论同时喂
+                // initialize 广告注入与 runtime 门禁（lifecycle 用同一 resolve），
+                // 消除「广告 fs 但门禁拒答」的同源破窗。
+                let host_env = agent
+                    .env
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                let host_policy = crate::host_tools::HostToolsPolicy::resolve(
+                    client.protocol.host_tools,
+                    client.protocol.host_terminal,
+                    &host_env,
+                )
+                .unwrap_or_else(|error| {
+                    tracing::warn!("invalid host tools policy; using fail-closed gates: {error}");
+                    crate::host_tools::HostToolsPolicy::closed()
+                });
                 // Initialize——B2：握手三段由纯函数 `build_initialize_plan` 成形
                 // （G1-03 覆盖制语义不变：clientCapabilities D1 / protocolVersion H3 /
                 // clientInfo H4，wire 逐字节不变），client 只消费计划。
@@ -545,6 +566,7 @@ impl AcpClient {
                 let initialize_plan = super::initialize_plan::build_initialize_plan(
                     &client.protocol,
                     agent.provider.as_deref(),
+                    host_policy,
                 )?;
                 let initialize_response = match client
                     .call_async(METHOD_INITIALIZE, initialize_plan.params())
@@ -581,6 +603,21 @@ impl AcpClient {
                             return Err(failure.into());
                         }
                     };
+                // #316：protocolVersion 回显校验——官方契约要求版本不一致时
+                // 客户端断连并告知用户。缺字段 lenient 放行（存量非合规 agent
+                // 不因本校验新增失败），存在且不一致 fail-closed。
+                if let Err(message) = super::protocol::validate_protocol_version(
+                    &initialize_response,
+                    initialize_plan.protocol_version,
+                ) {
+                    let mut failure =
+                        AgentConnectFailure::preflight("protocol_version_mismatch", message);
+                    let tail = stderr_tail.tail_since(stderr_mark, 8, 2048);
+                    if !tail.lines.is_empty() {
+                        failure.stderr_excerpt = Some(tail.lines.join("\n"));
+                    }
+                    return Err(failure.into());
+                }
                 // B2：initialize 完成（能力协商成功）之后，session/new 才被允许。
                 client
                     .session_ready

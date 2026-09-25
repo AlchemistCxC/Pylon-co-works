@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { useRuntimeStore } from '../../runtimeStore'
 import { applySessionModeChange, normalizeSessionMode } from './sessionModeState'
@@ -14,7 +14,7 @@ export function setSessionMode(context: AgentContext, nextMode: string): Promise
     nextMode: normalizedMode,
     previousMode,
     writeMode: mode => useRuntimeStore.getState().setSessionMode(context, mode),
-    invokeSet: (targetSource, mode) => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setMode({
+    invokeSet: (targetSource, mode) => createChatClient({ invoke: tauriInvokeTransport }).setMode({
       // OWNER-02：Session owner 显式 agentId（从 AgentContext 读取）。
       agentId: context.agentId,
       source: targetSource,

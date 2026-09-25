@@ -289,6 +289,12 @@ pub(crate) async fn close_session(
     close_session_rpc(&state, &runtime, &peri_id, generation, true).await?;
     // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
+    // #316：回收该 session 名下的宿主终端（terminal registry 按 periId 归属），
+    // 防 agent 会话关闭后终端进程跨代残留。
+    let released = runtime.terminal_registry.release_session(&peri_id).await;
+    if released > 0 {
+        tracing::debug!(peri_id, released, "closed session host terminals released");
+    }
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(PylonError::Protocol(format!(

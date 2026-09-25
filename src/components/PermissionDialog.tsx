@@ -4,6 +4,7 @@ import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { getPermissionController } from '../infrastructure/acp/permissionController'
 import { activeForAgent } from '../domains/permission/permissionState.ts'
 import { resolvePermissionButtons } from '../domains/permission/permissionButtons.ts'
+import ElicitationRequestCard from './ElicitationRequestCard.tsx'
 
 /**
  * PermissionDialog — 动态权限弹窗（P0-03）。
@@ -71,31 +72,52 @@ export default function PermissionDialog() {
       }}
     >
       <div className={DIALOG}>
-        <div className={TITLE}>{request.title || '工具权限请求'}</div>
+        <div className={TITLE}>
+          {request.title
+            || (request.interactionKind === 'elicitation' ? 'Agent 信息请求' : '工具权限请求')}
+        </div>
         {request.toolCallId && <div className={META}>toolCallId: {request.toolCallId}</div>}
         {request.prompt && <div className={PROMPT}>{request.prompt}</div>}
+        {request.interactionKind === 'elicitation' && request.elicitMessage && (
+          <div className={PROMPT}>{request.elicitMessage}</div>
+        )}
         {/* 失败原因必须可见：此前 `choose` 失败只把状态退回 pending，界面上「点了没反应」。 */}
         {active.lastError && <div className={ERROR} role="alert">上次应答失败：{active.lastError}</div>}
-        <div className={OPTIONS}>
-          {buttons.map(button => (
+        {request.interactionKind === 'elicitation' ? (
+          // #316：标准 elicitation form 卡——三值应答（accept 带表单值/decline/cancel）。
+          <ElicitationRequestCard
+            key={request.requestId}
+            request={request}
+            answering={answering}
+            onSubmit={values => {
+              if (answering) return
+              void getPermissionController()?.choose(request.requestId, 'accept', values)
+            }}
+            onDecline={() => onChoose('declined')}
+            onCancel={() => onChoose('cancel')}
+          />
+        ) : (
+          <div className={OPTIONS}>
+            {buttons.map(button => (
+              <button
+                autoFocus={buttons.indexOf(button) === 0}
+                key={button.optionId}
+                type="button"
+                className={BTN}
+                disabled={answering}
+                onClick={() => onChoose(button.optionId)}
+              >
+                {button.label}
+              </button>
+            ))}
             <button
-              autoFocus={buttons.indexOf(button) === 0}
-              key={button.optionId}
               type="button"
-              className={BTN}
-              disabled={answering}
-              onClick={() => onChoose(button.optionId)}
-            >
-              {button.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className={DISMISS}
-            title="只关闭这个弹窗；agent 那一侧的真实状态由它自己的终态事件收敛"
-            onClick={onAbandon}
-          >关闭</button>
-        </div>
+              className={DISMISS}
+              title="只关闭这个弹窗；agent 那一侧的真实状态由它自己的终态事件收敛"
+              onClick={onAbandon}
+            >关闭</button>
+          </div>
+        )}
       </div>
     </div>
   )

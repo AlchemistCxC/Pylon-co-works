@@ -203,3 +203,18 @@
 1. 新增迁入文件：复制到 `src-tauri/vendor/acp/` → 在本文件 §3 追加出处登记（含 `sourcePath`、`modifications`、license 信息；provenance 机器校验已退役，见篇首注记）。
 2. 修改已迁入副本：**不要**直接改 `vendor/` 里的文件；在 Pylon adapter 中改写，并在本文件 `modifications` 字段记录改动摘要。若确需改动副本本身（例如去掉不可编译的前端依赖），必须在 `modifications` 写明并更新 `sha256`。
 3. 新增 crate 落点、依赖方向与职责边界按施工书 §0 纪律同步登记到 `Docs/Pylon-问题台账.md` P60 条目。
+
+## §6 追记：HostStrict/HostUnrestricted 配置入口接入 AgentDef schema（#316，2026-09-25）
+
+历史记录（本文 182-188 行）所述「`HostStrict`/`HostUnrestricted` 的配置入口尚未接入
+AgentDef schema、仅有 `PYLON_ACP_HOST_TOOLS` 环境变量入口」的缺口，已于 issue
+[#316](https://github.com/AlchemistCxC/Pylon-co-works/issues/316) 关闭：
+
+- `acp.host_tools`（fs 门，默认 `host`）与 `acp.host_terminal`（terminal 门，默认
+  `agent`）直接进 `AcpProtocolConfig`；YAML 声明优先，env 变量降级为未声明门的
+  兼容回退。
+- 宿主门与 initialize `clientCapabilities` 广告同源联动（门开注入官方形状
+  `fs:{readTextFile,writeTextFile}`，门关裁剪声明；显式 `initialize_caps` 路径
+  不追加不裁剪）。
+- strict 沙箱根同时改为取自 Pylon 会话工作区（`SessionInfo.cwd`），不再信任
+  agent 自报的请求参数。

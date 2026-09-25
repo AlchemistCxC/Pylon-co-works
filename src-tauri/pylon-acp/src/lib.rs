@@ -44,8 +44,8 @@ mod state;
 pub use state::{AcpSessionState, AcpStateDelta};
 pub mod turn_ledger;
 pub use turn_ledger::{
-    empty_turn_cause, terminal_cause_from_prompt_result, BeginOutcome, SettleOutcome, TurnKey,
-    TurnLedger, TurnTerminalCause,
+    empty_turn_cause, terminal_cause_from_prompt_result, ActivityFlags, BeginOutcome,
+    SettleOutcome, TurnKey, TurnLedger, TurnTerminalCause,
 };
 pub mod wire_trace;
 pub use engine::{
@@ -54,8 +54,9 @@ pub use engine::{
 };
 pub use engine::{CrashReason, BROADCAST_CAP, DEFAULT_WRITE_TIMEOUT_SECS, NOTIFICATION_CHAN_CAP};
 pub use protocol::{
-    load_params, prompt_blocks, prompt_stop_reason, resume_capability_advertised, resume_params,
-    session_id_from, session_prompt_params,
+    classify_session_update, load_params, prompt_blocks, prompt_stop_outcome,
+    resume_capability_advertised, resume_params, session_id_from, session_prompt_params,
+    validate_protocol_version, PromptStopOutcome,
 };
 pub use protocol::{
     session_close_params, session_new_params, session_set_config_option_params,

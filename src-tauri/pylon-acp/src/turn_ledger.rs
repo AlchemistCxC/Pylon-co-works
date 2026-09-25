@@ -176,6 +176,9 @@ pub struct TurnRecord {
     pub saw_text: bool,
     /// 本 turn 是否观测到 live 工具调用（empty-turn 判定输入）。
     pub saw_tool: bool,
+    /// 本 turn 是否观测到 live 思考流（#316：thinking-only 回合算有产出，
+    /// 不再误判 agent-empty）。
+    pub saw_thinking: bool,
 }
 
 /// [`TurnKey`] 的可序列化快照形态。
@@ -229,6 +232,17 @@ pub struct TurnLedger {
     late_terminal_events: AtomicU64,
 }
 
+/// #99/#316：empty-turn 判定的活动标志（文本/工具/思考三 bit，可叠加）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ActivityFlags {
+    /// 观测到 live 正文 chunk。
+    pub saw_text: bool,
+    /// 观测到 live 工具调用/更新。
+    pub saw_tool: bool,
+    /// 观测到 live 思考流（thinking-only 回合算有产出）。
+    pub saw_thinking: bool,
+}
+
 impl TurnLedger {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
@@ -258,6 +272,7 @@ impl TurnLedger {
                     last_ingress_seq: 0,
                     saw_text: false,
                     saw_tool: false,
+                    saw_thinking: false,
                 });
                 BeginOutcome::Started
             }
@@ -286,9 +301,9 @@ impl TurnLedger {
     }
 
     /// 会话作用域的活动推进（dispatcher 用：不持有 turn_id，命中该会话在途的
-    /// 唯一 turn）——刷新 ingress cursor / 文本与工具标志，并把阶段推进到
-    /// Streaming。多活跃 turn（理论竞态）时取 turn_id 最小者，与
-    /// `settle_by_session` 的选择语义一致（评审 E9）。
+    /// 唯一 turn）——刷新 ingress cursor / [`ActivityFlags`] 标志（#316 加思考
+    /// 位），并把阶段推进到 Streaming。多活跃 turn（理论竞态）时取 turn_id
+    /// 最小者，与 `settle_by_session` 的选择语义一致（评审 E9）。
     /// 返回是否命中在途 turn（false = 回合未登记或已终态，迟到活动只算诊断）。
     pub fn note_session_activity(
         &self,
@@ -296,8 +311,7 @@ impl TurnLedger {
         remote_session_id: &str,
         generation: u64,
         ingress_seq: u64,
-        saw_text: bool,
-        saw_tool: bool,
+        flags: ActivityFlags,
     ) -> bool {
         let mut records = self.lock();
         let target = records
@@ -320,8 +334,9 @@ impl TurnLedger {
                 };
                 if let Some(record) = records.get_mut(&key) {
                     record.last_ingress_seq = record.last_ingress_seq.max(ingress_seq);
-                    record.saw_text |= saw_text;
-                    record.saw_tool |= saw_tool;
+                    record.saw_text |= flags.saw_text;
+                    record.saw_tool |= flags.saw_tool;
+                    record.saw_thinking |= flags.saw_thinking;
                     if phase_rank(record.phase) < phase_rank(TurnPhase::Streaming) {
                         record.phase = TurnPhase::Streaming;
                     }
@@ -541,8 +556,10 @@ fn phase_rank(phase: TurnPhase) -> u8 {
 
 /// 从 session/prompt 响应 result 推导终态 cause（纯函数，供 prompt 路径与测试共用）。
 ///
-/// 与 `prompt_stop_reason` 的接受集对齐：end_turn / max_turn_requests 是协议级
-/// 成功；refusal / cancelled 是协议级提前终止；其余/缺失 = protocol error。
+/// 与 `prompt_stop_outcome` 的判定表对齐（#316）：end_turn / max_tokens /
+/// max_turn_requests 是协议级成功（max_tokens 达上限也是合法终态，UI 凭
+/// done 载荷里的 stopReason 区分提示）；refusal / cancelled 是协议级提前
+/// 终止；其余/缺失 = protocol error。
 pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerminalCause {
     let stop_reason = result
         .get("stopReason")
@@ -550,6 +567,7 @@ pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerm
         .map(str::trim);
     match stop_reason {
         Some("end_turn") => TurnTerminalCause::Completed,
+        Some("max_tokens") => TurnTerminalCause::Completed,
         Some("max_turn_requests") => TurnTerminalCause::MaxTurn,
         Some("cancelled") => TurnTerminalCause::Cancelled,
         Some("refusal") => TurnTerminalCause::Refusal,
@@ -560,14 +578,17 @@ pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerm
 /// empty-turn cause 推导（纯函数）。
 ///
 /// 优先级：agent 明确取消/拒绝 → 它们本身就是"无文本"的权威解释；否则有工具
-/// 无文本 = tool-only（合法成功）；完全无产出 = agent-empty；把本函数用在
-/// 不代表"成功收尾"的终态上属于调用方契约破坏，防御性归 unknown（不猜）。
+/// 无文本 = tool-only（合法成功）；有思考流无文本 = 同样算有产出（#316：
+/// thinking-only 回合判 completed，不再误报 agent-empty）；完全无产出 =
+/// agent-empty；把本函数用在不代表"成功收尾"的终态上属于调用方契约破坏，
+/// 防御性归 unknown（不猜）。
 pub fn empty_turn_cause(
     terminal: &TurnTerminalCause,
     saw_text: bool,
     saw_tool: bool,
+    saw_thinking: bool,
 ) -> Option<EmptyTurnCause> {
-    if saw_text {
+    if saw_text || saw_thinking {
         return None;
     }
     match terminal {
@@ -725,8 +746,26 @@ mod tests {
         let ledger = ledger();
         let k = key(9);
         ledger.begin(k.clone(), 0);
-        ledger.note_session_activity("local:s1", "peri-s1", 1, 5, true, false);
-        ledger.note_session_activity("local:s1", "peri-s1", 1, 3, false, true); // 乱序 cursor 不回退
+        ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            5,
+            ActivityFlags {
+                saw_text: true,
+                ..Default::default()
+            },
+        );
+        ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            3,
+            ActivityFlags {
+                saw_tool: true,
+                ..Default::default()
+            },
+        ); // 乱序 cursor 不回退
         let record = ledger.snapshot(&k).unwrap();
         assert_eq!(record.last_ingress_seq, 5);
         assert!(record.saw_text);
@@ -823,28 +862,51 @@ mod tests {
     fn empty_turn_cause_prioritizes_tool_only_and_agent_states() {
         // 有文本 → 不是空回合
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, true, false),
+            empty_turn_cause(&TurnTerminalCause::Completed, true, false, false),
             None
         );
         // 有工具无文本 → tool-only
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, false, true),
+            empty_turn_cause(&TurnTerminalCause::Completed, false, true, false),
             Some(EmptyTurnCause::ToolOnly)
         );
         // 取消/拒绝本身解释了空文本
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Cancelled, false, false),
+            empty_turn_cause(&TurnTerminalCause::Cancelled, false, false, false),
             Some(EmptyTurnCause::Cancelled)
         );
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Refusal, false, false),
+            empty_turn_cause(&TurnTerminalCause::Refusal, false, false, false),
             Some(EmptyTurnCause::Refusal)
         );
         // 完全无产出 → agent-empty
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, false, false),
+            empty_turn_cause(&TurnTerminalCause::Completed, false, false, false),
             Some(EmptyTurnCause::AgentEmpty)
         );
+        // #316：只有思考流也算有产出 → 不是空回合
+        assert_eq!(
+            empty_turn_cause(&TurnTerminalCause::Completed, false, false, true),
+            None
+        );
+    }
+
+    #[test]
+    fn note_session_activity_ors_thinking_flag() {
+        let ledger = ledger();
+        ledger.begin(key(7), 0);
+        assert!(ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            1,
+            ActivityFlags {
+                saw_thinking: true,
+                ..Default::default()
+            }
+        ));
+        let record = ledger.snapshot(&key(7)).expect("turn must be tracked");
+        assert!(!record.saw_text && !record.saw_tool && record.saw_thinking);
     }
 
     #[test]

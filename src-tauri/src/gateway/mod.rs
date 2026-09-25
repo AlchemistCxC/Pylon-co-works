@@ -452,10 +452,8 @@ fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<Stri
         return None;
     }
     let update = payload.get("update")?;
-    if update
-        .get("sessionUpdate")
-        .and_then(|v| v.as_str())
-        .and_then(crate::acp::SessionUpdateVariant::from_str)
+    // #316：变体分类单一入口（typed-first + 宽容 fallback）。
+    if crate::acp::classify_session_update(update)
         != Some(crate::acp::SessionUpdateVariant::AgentMessageChunk)
     {
         return None;

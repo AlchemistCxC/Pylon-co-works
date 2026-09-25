@@ -23,6 +23,8 @@ pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 /// session/update 通知名官方为 pub，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
+/// #316：elicitation/complete —— URL 模式外带交互完成通知（agent→client）。
+pub const NOTIF_ELICITATION_COMPLETE: &str = CLIENT_METHOD_NAMES.elicitation_complete;
 /// #315 Peri 私有扩展通知（Category ③/⑤，peri 侧 `PeriCaps` 经
 /// `clientCapabilities._meta` 协商开启；wire method 名即包络后的 sessionUpdate
 /// 判别符，见 `client::wrap_provider_extension_notification`）。命名对照 peri-acp

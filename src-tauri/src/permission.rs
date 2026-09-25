@@ -887,6 +887,13 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
             let _ = runtime
                 .interactions
                 .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
+            // #316：私有交互（elicitation/ask-user）同批收敛——崩溃后 store 残留
+            // 条目会在 interaction_list 里悬挂到下次 generation 替换。
+            let stale_private = runtime.private_interactions.snapshot().len();
+            if stale_private > 0 {
+                tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
+            }
+            runtime.private_interactions.cancel_all();
             continue;
         }
         let expired: Vec<(RequestId, String, String, u64, Vec<PermissionOption>)> = runtime
@@ -968,6 +975,70 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
 
 #[cfg(test)]
 mod tests {
+    use crate::private_interaction::PendingPrivateInteraction;
+
+    fn private_elicitation_pending() -> PendingPrivateInteraction {
+        PendingPrivateInteraction {
+            provider: "peri".into(),
+            agent_id: "a1".into(),
+            session_id: "peri-s1".into(),
+            method: "elicitation/create".into(),
+            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
+            params: serde_json::json!({"sessionId": "peri-s1", "elicitationId": "el-1"}),
+            question_specs: None,
+            client_generation: 1,
+            enqueued_at: crate::time::Timestamp::now(),
+        }
+    }
+
+    /// #316：runtime 死亡分支必须连 private_interactions 一起清——否则崩溃后
+    /// 残留条目会在 interaction_list 里悬挂到下次 generation 替换。
+    #[tokio::test]
+    async fn dead_runtime_clears_private_interactions() {
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_runtime("a1", crate::runtime::AgentRuntime::new_disconnected())
+            .build();
+        let runtime = state.runtimes.get("a1").expect("runtime 已注入");
+        let request_id = crate::acp::RequestId::Number(41);
+        runtime
+            .private_interactions
+            .insert(request_id.clone(), private_elicitation_pending())
+            .expect("insert 必须成功");
+        let _ = runtime
+            .interactions
+            .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                request_id: "41".into(),
+                method: "elicitation/create".into(),
+                kind: "elicitation".into(),
+                session_id: "peri-s1".into(),
+                agent_id: "a1".into(),
+                client_generation: 1,
+                enqueued_at: crate::time::Timestamp::now(),
+                event: serde_json::json!({}),
+                state: crate::acp::interaction_queue::InteractionEntryState::Active,
+            });
+
+        // 置死：主动 stop 标记（disconnected client 的 kill 只置位、无真实子进程）。
+        let _ = runtime.acp.lock().await.kill();
+        assert!(runtime.acp.lock().await.is_dead());
+
+        let outcomes = check_pending_permission_timeouts(&state).await;
+        let _ = outcomes;
+        assert!(
+            runtime.private_interactions.snapshot().is_empty(),
+            "死亡分支必须清空私有交互残留"
+        );
+        assert!(
+            runtime
+                .interactions
+                .snapshot()
+                .ok()
+                .map(|entries| entries.is_empty())
+                .unwrap_or(true),
+            "统一交互队列必须全量 drain"
+        );
+    }
+
     use super::*;
     use crate::runtime::AgentRuntime;
 

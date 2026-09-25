@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { useIdentityStore } from '../../identityStore'
@@ -71,7 +71,7 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
   createEffect(() => {
     const sheetId = props.sheet.id
     let disposed = false
-    const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const client = createSessionClient({ invoke: tauriInvokeTransport })
     client.listPersistedSessions().then(value => {
       if (!disposed) {
         setRaw(value)
@@ -118,7 +118,7 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
     const validation = validateExportPath(outputPath)
     if (validation) { setExportError(validation); return }
     try {
-      const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      const client = createSessionClient({ invoke: tauriInvokeTransport })
       await client.exportSession({ agentId: owner.agentId, periId, format: 'markdown', outputPath })
       resolveRuntimeErrors({ key: `history:${props.sheet.id}:export:${periId}` })
     } catch (error) {

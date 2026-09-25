@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { useIdentityStore } from '../identityStore'
@@ -16,7 +16,7 @@ export async function activateAgentSheet(
   options?: { silent?: boolean },
 ): Promise<boolean> {
   const agentClient = createAgentClient({
-    invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
+    invoke: tauriInvokeTransport,
   })
   const result = await switchAgentTransaction(agentId, agentName, {
     switchAgent: () => agentClient.switchAgent(agentId),

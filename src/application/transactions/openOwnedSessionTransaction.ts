@@ -12,7 +12,7 @@
  * - transport        切换 owner Agent 失败
  * - mismatch         复查时 Session 已变化（删除/owner 变更）
  */
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import type { Session } from '../../identityStore'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
@@ -31,10 +31,10 @@ import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
 export function createStandardSwitchAgent(getAgentName: (agentId: string) => string | undefined): (agentId: string) => Promise<TransactionResult<string>> {
   const operationKey = (agentId: string, action: string) => `agent-switch:${agentId}:${action}`
   return (agentId: string) => switchAgentTransaction(agentId, getAgentName(agentId) ?? agentId, {
-    switchAgent: id => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).switchAgent(id),
+    switchAgent: id => createAgentClient({ invoke: tauriInvokeTransport }).switchAgent(id),
     resetRuntime: () => useRuntimeStore.getState().resetAll(),
     setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
-    fetchAgentStatus: () => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).agentStatus(),
+    fetchAgentStatus: () => createAgentClient({ invoke: tauriInvokeTransport }).agentStatus(),
     applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
     reportError: (action, error) => reportRuntimeError(action, error, agentId, {
       key: operationKey(agentId, action),

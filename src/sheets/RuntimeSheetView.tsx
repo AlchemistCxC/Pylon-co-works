@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
@@ -33,7 +33,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
   useEffect(() => {
     // 浏览器模式 mock 后端已装（demo）：invoke/listen 经假 __TAURI_INTERNALS__ 返回 mock 数据
     let disposed = false
-    createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).startupDiagnostics().then(raw => {
+    createRuntimeClient({ invoke: tauriInvokeTransport }).startupDiagnostics().then(raw => {
       if (!disposed) {
         setDiagnostics(normalizeStartupDiagnostics(raw))
         resolveRuntimeErrors({ key: runtimeErrorKey('读取启动诊断') })
@@ -46,7 +46,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
         recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
       })
     })
-    createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listRuntimeLogs().then(raw => {
+    createRuntimeClient({ invoke: tauriInvokeTransport }).listRuntimeLogs().then(raw => {
       if (!disposed) {
         setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
         resolveRuntimeErrors({ key: runtimeErrorKey('读取运行日志') })
@@ -60,7 +60,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
       })
     })
     // B2：挂载时开 live 推送、卸载时关（ringbuffer pull 兜底不受影响）
-    const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
     void runtimeClient.setRuntimeLogLive(true).catch(() => {})
     const unlisten = listen<unknown>('pylon:runtime-log', event => {
       if (disposed) return
@@ -80,7 +80,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
 
   const clear = async () => {
     try {
-      await createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).clearRuntimeLogs()
+      await createRuntimeClient({ invoke: tauriInvokeTransport }).clearRuntimeLogs()
       setEntries([])
       resolveRuntimeErrors({ key: runtimeErrorKey('清空运行日志') })
     } catch (error) {

@@ -191,7 +191,8 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
-    runtime.set_host_tools_policy(&host_env);
+    // #316：YAML 双门声明优先，env 兼容回退（见 HostToolsPolicy::resolve）。
+    runtime.set_host_tools_policy(agent.protocol(), &host_env);
     // 本地 client epoch 与远端 Session continuity 分开表达。Unknown 不迁移旧映射；
     // replace 后由有界 probe 收敛，Invalidated 直接清除，Preserved 才直接迁移。
     let activation = ClientActivation {
@@ -609,6 +610,12 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
         // A4：清空流式通道注册——旧 runtime 的 channel 随 dispatcher 一起失效，
         // 防 kill 后残留帧投递到已被前端废弃的通道对象。
         old.clear_update_channels();
+        // #316：清空宿主终端注册表——旧 runtime 的 terminal/* 子进程不再跨代
+        // 泄漏（registry 本体随 runtime 保留复用，仅清终端）。
+        let cleared = old.terminal_registry.clear().await;
+        if cleared > 0 {
+            tracing::debug!(agent_id, cleared, "host terminals cleared on runtime stop");
+        }
         let mut acp = old.acp.lock().await;
         let _ = acp.kill();
         drop(acp);

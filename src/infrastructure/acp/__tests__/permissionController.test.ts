@@ -111,11 +111,11 @@ const wirePayload = (requestId: number, options: string[]) => ({
 })
 
 // ACP-03（§5.6）：后端唯一计时/应答——permission.resolved terminal 事件载荷。
-const resolvedEvent = (requestId: string, clientGeneration?: number) => ({
+const resolvedEvent = (requestId: string, clientGeneration?: number, eventType = 'permission.resolved') => ({
   provider: 'peri',
   agentId: 'peri',
   sessionId: 's1',
-  eventType: 'permission.resolved',
+  eventType,
   requestId,
   clientGeneration,
   optionId: 'reject_once',
@@ -129,7 +129,11 @@ interface Harness {
   stopCalled: boolean
   state: () => PermissionState
   receive: (requestId?: number, options?: string[]) => void
-  emitResolved: (requestId: string, clientGeneration?: number) => void
+  emitResolved: (
+    requestId: string,
+    clientGeneration?: number,
+    eventType?: 'permission.resolved' | 'interaction.resolved',
+  ) => void
 }
 
 function setup(options: string[], invokeImpl?: (cmd: string, args: Record<string, unknown>) => Promise<unknown>): Harness {
@@ -153,7 +157,11 @@ function setup(options: string[], invokeImpl?: (cmd: string, args: Record<string
   }
   const controller = createPermissionController(deps)
   const receive = (requestId = 1, opts = options) => { expect(handler).not.toBeNull(); handler!({ payload: wirePayload(requestId, opts) }) }
-  const emitResolved = (requestId: string, clientGeneration?: number) => { expect(handler).not.toBeNull(); handler!({ payload: resolvedEvent(requestId, clientGeneration) }) }
+  const emitResolved = (
+    requestId: string,
+    clientGeneration?: number,
+    eventType: 'permission.resolved' | 'interaction.resolved' = 'permission.resolved',
+  ) => { expect(handler).not.toBeNull(); handler!({ payload: resolvedEvent(requestId, clientGeneration, eventType) }) }
   return { controller, actions, invokeCalls, get stopCalled() { return stopCalled }, state: () => state, receive, emitResolved }
 }
 
@@ -287,5 +295,128 @@ describe('#98 冷挂载：seedFromSnapshot 恢复 pending interaction', () => {
     h.controller.seedFromSnapshot(null)
     h.controller.seedFromSnapshot(undefined)
     expect(h.actions).toHaveLength(0)
+  })
+})
+
+// ── #316 elicitation form：normalize 放行 + choose 携带 values ──
+
+describe('normalizePermissionRequest elicitation（#316）', () => {
+  const elicitEvent = (payload: Record<string, unknown>): unknown => ({
+    provider: 'peri',
+    agentId: 'peri-a',
+    sessionId: 's1',
+    eventType: 'elicitation.request',
+    requestId: 'e-9',
+    clientGeneration: 1,
+    payload,
+  })
+
+  it('elicitation.request 无 options 也放行（permission 维持非空硬门）', () => {
+    const request = normalizePermissionRequest(elicitEvent({
+      message: '请填写项目名',
+      requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    }))
+    expect(request).not.toBeNull()
+    expect(request?.interactionKind).toBe('elicitation')
+    expect(request?.elicitMessage).toBe('请填写项目名')
+    expect(request?.requestedSchema).toMatchObject({ type: 'object' })
+  })
+
+  it('permission.request 仍标注 interactionKind=permission（渲染分派锚点）', () => {
+    const request = normalizePermissionRequest(eventWith('perm-1'))
+    expect(request?.interactionKind).toBe('permission')
+  })
+
+  it('url 模式标记进 elicitUrl（卡片降级拒绝/取消）', () => {
+    const request = normalizePermissionRequest(elicitEvent({
+      message: '完成登录',
+      url: 'https://example.com/auth',
+      elicitationId: 'el-1',
+    }))
+    expect(request?.elicitUrl).toBe('https://example.com/auth')
+    expect(request?.requestedSchema).toBeUndefined()
+  })
+})
+
+describe('choose elicitation（#316 values 透传）', () => {
+  it('accept 携带 values 原样进 respond_interaction answer', async () => {
+    const invokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> = []
+    const h = setup(['allow_once'], async (cmd, args) => {
+      invokeCalls.push({ cmd, args })
+      return null
+    })
+    h.receive()
+    await h.controller.choose('1', 'accept', { name: '栖' })
+    const call = invokeCalls.find(entry => entry.cmd === 'respond_interaction')
+    expect(call).toBeDefined()
+    const answer = call?.args.answer as Record<string, unknown>
+    expect(answer.optionId).toBe('accept')
+    expect(answer.values).toEqual({ name: '栖' })
+  })
+
+  it('decline/cancel 不携带 values', async () => {
+    const invokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> = []
+    const h = setup(['allow_once'], async (cmd, args) => {
+      invokeCalls.push({ cmd, args })
+      return null
+    })
+    h.receive()
+    await h.controller.choose('1', 'declined')
+    const answer = invokeCalls.find(entry => entry.cmd === 'respond_interaction')?.args.answer as Record<string, unknown>
+    expect(answer.optionId).toBe('declined')
+    expect(answer.values).toBeUndefined()
+  })
+})
+
+describe('permissionState elicitation choose（#316 P1-1 回归）', () => {
+  it('elicitation 请求 choose accept → status=answering（不经 options 表）', () => {
+    const state = permissionReducer(EMPTY_PERMISSION_STATE, {
+      type: 'receive',
+      request: {
+        requestId: 'e-1',
+        provider: 'peri',
+        agentId: 'peri',
+        sessionId: 's1',
+        clientGeneration: 1,
+        interactionKind: 'elicitation',
+        elicitMessage: '请填写',
+        requestedSchema: { type: 'object', properties: {} },
+        options: [],
+      },
+      now: 1000,
+    })
+    const next = permissionReducer(state, {
+      type: 'choose',
+      agentId: 'peri',
+      requestId: 'e-1',
+      optionId: 'accept',
+    })
+    expect(next.byAgent.peri?.active?.status).toBe('answering')
+  })
+
+  it('elicitation interaction.resolved 事件关卡（handleResolved 兼容）', async () => {
+    const h = setup(['allow_once'])
+    // 直接以 elicitation 事件入队（绕过 receive 的 permission 形状）
+    h.controller.seedFromSnapshot({
+      pendingInteractions: [
+        {
+          requestId: 'e-2',
+          kind: 'elicitation',
+          state: 'active',
+          payload: {
+            eventType: 'elicitation.request',
+            provider: 'peri',
+            agentId: 'peri',
+            sessionId: 's1',
+            requestId: 'e-2',
+            clientGeneration: 1,
+            payload: { message: 'm' },
+          },
+        },
+      ],
+    })
+    // 模拟 elicitation/complete 收敛事件（eventType=interaction.resolved）
+    h.emitResolved('e-2', 1, 'interaction.resolved')
+    expect(h.state().byAgent.peri?.active).toBeNull()
   })
 })

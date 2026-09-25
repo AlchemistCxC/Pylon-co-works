@@ -124,11 +124,11 @@ fn refine_empty_turn(
     ) {
         return cause;
     }
-    let (ledger_text, ledger_tool) = runtime
+    let (ledger_text, ledger_tool, ledger_thinking) = runtime
         .turn_ledger
         .snapshot(turn_key)
-        .map(|record| (record.saw_text, record.saw_tool))
-        .unwrap_or((false, false));
+        .map(|record| (record.saw_text, record.saw_tool, record.saw_thinking))
+        .unwrap_or((false, false, false));
     let (saw_text, saw_tool) = match runtime.sessions.lock() {
         Ok(sessions) => match sessions.get(&turn_key.local_session_id) {
             Some(session) => (
@@ -141,7 +141,9 @@ fn refine_empty_turn(
     };
     let saw_text = ledger_text || saw_text;
     let saw_tool = ledger_tool || saw_tool;
-    match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool) {
+    // #316：思考流只有账本侧证据（会话 live 态无对应投影），ledger_thinking
+    // 单独透传——thinking-only 回合判有产出，不再误报 agent-empty。
+    match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool, ledger_thinking) {
         Some(empty) => crate::acp::TurnTerminalCause::EmptyTurn { cause: empty },
         None => cause,
     }
@@ -595,19 +597,18 @@ async fn finalize_response<R: tauri::Runtime>(
     let prompt_generation = flow.generation;
     let is_first = flow.is_first;
     let message_round = flow.message_round;
-    crate::acp::prompt_stop_reason(&data).map_err(|error| {
+    // #316：stopReason 闭式判定表（typed-first）。max_tokens 转正为合法终态
+    // （pet on_maxed + done 正常广播，UI 凭 stopReason 文案提示）；未知值在
+    // 协议层已 warn 降级 end_turn；refusal/cancelled 维持 Err。
+    let stop = crate::acp::prompt_stop_outcome(&data).map_err(|error| {
         let error = error.to_string();
-        // M5 感知：refusal / max_turn 区分于普通失败
+        // M5 感知：refusal 区分于普通失败（max_turn_requests 现走 Ok 终态，
+        // 旧错误分支里的 max_turn 探测随之消亡）。
         if error.contains("refused") {
             let _ = state
                 .pet
                 .lock()
                 .map(|mut pet| crate::pet::on_refused(&mut pet));
-        } else if error.contains("max_turn") {
-            let _ = state
-                .pet
-                .lock()
-                .map(|mut pet| crate::pet::on_maxed(&mut pet));
         } else {
             let _ = state
                 .pet
@@ -616,6 +617,12 @@ async fn finalize_response<R: tauri::Runtime>(
         }
         error
     })?;
+    if matches!(stop, crate::acp::PromptStopOutcome::MaxTokens) {
+        let _ = state
+            .pet
+            .lock()
+            .map(|mut pet| crate::pet::on_maxed(&mut pet));
+    }
     if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
         let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
         return Err(error.into());
@@ -1573,9 +1580,16 @@ mod tests {
         };
         runtime.turn_ledger.begin(key.clone(), 0);
         // 账本只见到工具活动 → tool-only
-        runtime
-            .turn_ledger
-            .note_session_activity("local:r1", "peri-r1", 1, 1, false, true);
+        runtime.turn_ledger.note_session_activity(
+            "local:r1",
+            "peri-r1",
+            1,
+            1,
+            crate::acp::ActivityFlags {
+                saw_tool: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(
             refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
             TurnTerminalCause::EmptyTurn {
@@ -1583,11 +1597,40 @@ mod tests {
             }
         );
         // 账本随后见到文本 → 不再是空回合
-        runtime
-            .turn_ledger
-            .note_session_activity("local:r1", "peri-r1", 1, 2, true, false);
+        runtime.turn_ledger.note_session_activity(
+            "local:r1",
+            "peri-r1",
+            1,
+            2,
+            crate::acp::ActivityFlags {
+                saw_text: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(
             refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
+            TurnTerminalCause::Completed
+        );
+        // #316：只有思考流也算有产出（thinking-only 回合不再误报 agent-empty）。
+        let thinking_key = crate::acp::TurnKey {
+            local_session_id: "local:thinking".to_string(),
+            remote_session_id: "peri-thinking".to_string(),
+            generation: 1,
+            turn_id: 1,
+        };
+        runtime.turn_ledger.begin(thinking_key.clone(), 0);
+        runtime.turn_ledger.note_session_activity(
+            "local:thinking",
+            "peri-thinking",
+            1,
+            1,
+            crate::acp::ActivityFlags {
+                saw_thinking: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            refine_empty_turn(&runtime, &thinking_key, TurnTerminalCause::Completed),
             TurnTerminalCause::Completed
         );
         // 未登记 turn 且会话无活动 → agent-empty 保守归类

@@ -318,6 +318,40 @@ impl TerminalRegistry {
         self.terminals.lock().await.remove(id);
         terminal.kill().await
     }
+
+    /// #316：终止并清出某会话名下的全部终端（session 关闭/映射移除时调用），
+    /// 返回清理数。终端进程是 Pylon 子进程——不清理会在 agent 重启后跨代泄漏。
+    pub async fn release_session(&self, session_id: &str) -> usize {
+        let owned: Vec<String> = {
+            let terminals = self.terminals.lock().await;
+            terminals
+                .iter()
+                .filter(|(_, terminal)| terminal.session_id == session_id)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for id in &owned {
+            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+                let _ = terminal.kill().await;
+            }
+        }
+        owned.len()
+    }
+
+    /// #316：清空注册表全部终端（`stop_agent_runtime` 停旧 runtime 时调用），
+    /// 返回清理数。
+    pub async fn clear(&self) -> usize {
+        let ids: Vec<String> = {
+            let terminals = self.terminals.lock().await;
+            terminals.keys().cloned().collect()
+        };
+        for id in &ids {
+            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+                let _ = terminal.kill().await;
+            }
+        }
+        ids.len()
+    }
 }
 
 fn spawn_reader<R: Read + Send + 'static>(
@@ -346,6 +380,52 @@ fn spawn_reader<R: Read + Send + 'static>(
 mod tests {
     use super::*;
     use crate::terminal_policy::TerminalExitStatus;
+
+    async fn insert_exited(registry: &TerminalRegistry, session_id: &str) -> String {
+        let id = registry
+            .insert(session_id.into(), 1024, ManagedChild::empty())
+            .await;
+        // 空 child 永远不会退出——预置已退出状态，让 release/clear 的 kill 走
+        // 早退路径（测试只关心注册表清点与归属，不关心真实进程）。
+        let terminal = registry.find(&id, session_id).await.unwrap();
+        terminal.completion.send_replace(TerminalCompletion::Exited(
+            TerminalExitStatus::new().exit_code(0),
+        ));
+        id
+    }
+
+    /// #316：release_session 只清指定会话名下的终端，其余会话不受累。
+    #[tokio::test]
+    async fn release_session_removes_only_matching_session() {
+        let registry = TerminalRegistry::default();
+        let a = insert_exited(&registry, "session-a").await;
+        let b = insert_exited(&registry, "session-b").await;
+
+        let removed = registry.release_session("session-a").await;
+        assert_eq!(removed, 1);
+        assert!(registry.snapshot(&a, "session-a").await.is_err());
+        assert!(
+            registry.snapshot(&b, "session-b").await.is_ok(),
+            "其他会话的终端不得被误清"
+        );
+
+        let removed_again = registry.release_session("session-a").await;
+        assert_eq!(removed_again, 0, "重复释放计数为 0（幂等）");
+    }
+
+    /// #316：clear 清空全部会话的终端（runtime 停止时调用）。
+    #[tokio::test]
+    async fn clear_removes_all_terminals_and_reports_count() {
+        let registry = TerminalRegistry::default();
+        insert_exited(&registry, "session-a").await;
+        insert_exited(&registry, "session-b").await;
+        insert_exited(&registry, "session-c").await;
+
+        let removed = registry.clear().await;
+        assert_eq!(removed, 3);
+        let removed_again = registry.clear().await;
+        assert_eq!(removed_again, 0, "重复 clear 计数为 0（幂等）");
+    }
 
     #[tokio::test]
     async fn healthy_long_running_terminal_has_no_error_deadline() {

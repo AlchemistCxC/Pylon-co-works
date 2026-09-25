@@ -37,6 +37,11 @@ export interface GitOperationResult {
   status: GitStatusWithBranch
 }
 
+/** 0-C2：git_show_file / git_diff 的文本回执宽容 normalize——后端 `Result<String, _>`，非串回退空串。 */
+export function normalizeGitText(raw: unknown): string {
+  return typeof raw === 'string' ? raw : ''
+}
+
 /** ISSUE-15 W4：宽容 normalize——entries 走 normalizeGitStatus；branch 三态派生（真实名/detached/占位）。 */
 export function normalizeGitStatusWithBranch(raw: unknown): GitStatusWithBranch {
   const result = isPlainObject(raw) ? raw : {}

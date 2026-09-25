@@ -444,6 +444,23 @@ fn runtime_fingerprint_ignores_display_fields_and_tracks_runtime_fields() {
             });
             value
         },
+        // #316：宿主门入指纹——改开关必须触发 PendingRestart/重连。
+        {
+            let mut value = baseline.clone();
+            value.acp = Some(AcpProtocolConfig {
+                host_tools: Some(crate::agent_config::HostToolsMode::Agent),
+                ..Default::default()
+            });
+            value
+        },
+        {
+            let mut value = baseline.clone();
+            value.acp = Some(AcpProtocolConfig {
+                host_terminal: Some(crate::agent_config::HostToolsMode::Unrestricted),
+                ..Default::default()
+            });
+            value
+        },
     ] {
         assert_ne!(expected, changed.runtime_fingerprint());
     }
@@ -490,6 +507,74 @@ fn close_via_rpc_default_true() {
     assert!(!config.close_via_rpc(), "session_close: false 必须跳过 RPC");
     config.session_close = Some(true);
     assert!(config.close_via_rpc(), "session_close: true 必须尝试 RPC");
+}
+
+/// #316：host_tools/host_terminal 的 serde 路径——合法词表、非法值 fail-closed、
+/// 缺省走访问器默认（fs=host / terminal=agent）。
+#[test]
+fn parses_host_tools_gates_and_rejects_unknown_values() {
+    let yaml = "agents:
+  gates:
+    name: A
+    transport: subprocess
+    exe: a
+    acp:
+      host_tools: unrestricted
+      host_terminal: host
+  default-gates:
+    name: B
+    transport: subprocess
+    exe: b
+";
+    let path = std::env::temp_dir().join(format!(
+        "pylon-agents-hosttools-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&path, yaml).expect("write temp agent config");
+    let agents = load_from_path(&path).expect("load runtime agent config");
+    std::fs::remove_file(&path).ok();
+
+    let gates = agents["gates"].protocol();
+    assert_eq!(
+        gates.host_tools_mode(),
+        crate::agent_config::HostToolsMode::Unrestricted
+    );
+    assert_eq!(
+        gates.host_terminal_mode(),
+        crate::agent_config::HostToolsMode::Host
+    );
+
+    // 缺省：双门走访问器默认（fs=host / terminal=agent）。
+    let defaults = agents["default-gates"].protocol();
+    assert_eq!(
+        defaults.host_tools_mode(),
+        crate::agent_config::HostToolsMode::Host
+    );
+    assert_eq!(
+        defaults.host_terminal_mode(),
+        crate::agent_config::HostToolsMode::Agent
+    );
+
+    // 非法值在反序列化层拒绝（带可选值清单）。
+    let bad = "agents:
+  bad:
+    name: C
+    transport: subprocess
+    exe: c
+    acp:
+      host_tools: typo
+";
+    let bad_path = std::env::temp_dir().join(format!(
+        "pylon-agents-hosttools-bad-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&bad_path, bad).expect("write temp agent config");
+    let error = load_from_path(&bad_path).expect_err("非法 host_tools 值必须 fail-closed");
+    std::fs::remove_file(&bad_path).ok();
+    assert!(
+        error.to_string().contains("host_tools"),
+        "报错必须指明字段与可选值：{error}"
+    );
 }
 
 /// G1-01：D2 双格式反序列化——acp 段内 bool|string 五形态 + 顶层 legacy bool

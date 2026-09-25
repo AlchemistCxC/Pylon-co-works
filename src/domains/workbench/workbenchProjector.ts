@@ -2,7 +2,7 @@
  * A04：唯一 Workbench projector（**TS 活实现**）。
  *
  * 2026-09-21：投影折叠自 Rust/WASM **回退**到本文件（判决与依据见 ADR-0018 的 scope
- * 修订）。回退理由是基准数据，不是口味：
+ * 收窄）。回退理由是基准数据，不是口味：
  * - 速度：wasm 投影在现实入口（mixed flow）只有 1.12×、页级 2.08→1.92×，而合成 delta
  *   形 6.75× 的根因是 Rust 折叠本体比 TS 整条管线慢数倍/事件（数据模型问题，非边界问题）；
  * - 内存：文档必须在计算核里与 JS 里**各存一份**，同 workload 持有成本实测 4.4–6.1×，
@@ -871,11 +871,9 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
         || providerIdentityKey(envelope.identity) === '' && previous.running === true
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
-  if (role === 'user' && (globalThis as any).__DEBUG_ECHO__) console.log('[dbg] reduceMessage user', JSON.stringify({ type: event.type, origin: envelope.provenance?.origin, seq: envelope.sequence, eid: envelope.eventId, content: content.slice(0, 12), incomingOptimistic }))
   const duplicateIndex = role === 'user'
     ? findCorrelatedUserEcho(document.messages, envelope, content, incomingOptimistic)
     : -1
-  if ((globalThis as any).__DEBUG_ECHO__ && role === 'user') console.log('[dbg] duplicateIndex', duplicateIndex, 'prevIdentity', JSON.stringify(document.messages.at(-1)?.identity), 'echoIdentity', JSON.stringify(envelope.identity), 'prevOptimistic', document.messages.at(-1)?.optimistic, 'prevRunning', document.messages.at(-1)?.running)
   if (duplicateIndex >= 0) {
     // Prefer the Kernel-committed row regardless of whether it arrives before
     // or after the debounced optimistic append. Replacement at the optimistic
@@ -1323,11 +1321,12 @@ const ACTIVITY_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
 function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next: WorkbenchActivityNode): WorkbenchActivityNode | null {
   if (!previous || !ACTIVITY_TERMINAL_STATUSES.has(previous.status)) return null
   const filled: Record<string, unknown> = { ...previous }
+  // 终态保护即"仅补缺字段"：已存在字段（含 status 与首个终态时刻的 progress 快照）
+  // 不被迟到事件覆盖——覆盖逻辑只存在于 filled[key] === undefined 分支。
   for (const [key, value] of Object.entries(next)) {
     if (value === undefined) continue
-    if (filled[key] === undefined) { filled[key] = value; continue }
-    // 终态保护：status 不被迟到事件改写；progress 保持首个终态时刻的快照
-    if (key === 'status') continue
+    if (filled[key] !== undefined) continue
+    filled[key] = value
   }
   filled.orphan = next.orphan && Boolean(previous.parentId)
   // SAFETY: filled 由 previous 起、经逐字段补齐后必含该节点的全部必需字段。
