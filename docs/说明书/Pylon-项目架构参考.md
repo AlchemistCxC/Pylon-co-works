@@ -98,7 +98,7 @@ flowchart TB
 | `src/plugins/core` | 第一方插件的具体贡献 implementation | Product Plugin implementation | 按目标贡献定向阅读 |
 | `src/components/chat` | 消息投影、发送事务、replay 协调与呈现纯逻辑 | 当前横跨 Product 与概念 Kernel | `streamingSend.ts`、`chatReplayCoordinator.ts`、`messagePipeline.ts` |
 | `src/sheets/agent-workbench` | Workbench 会话运行时（TurnClock 生成时钟）、生命周期 IPC 编排与命令面 | Product Workbench | `agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
-| `src/identityStore.ts` | Profile/Session/Agent 前端状态与 hydration | 当前横跨 Product 与概念 Kernel | 同时阅读 `userDataRepository.ts` |
+| `src/domains/identity` | Profile/Session/Agent 前端状态与 hydration（#351 自 src 根下沉；跨域联动经 `src/app/ports/identityCrossDomainPort` 装配） | 当前横跨 Product 与概念 Kernel | 同时阅读 `src/infrastructure/persistence/`（userDataRepository / identityBackendSync） |
 | `src/infrastructure/events` | canonical feed/cursor、repository/sink/scheduler、pluginEventBus | 当前概念 Kernel implementation | `canonicalEventFeed.ts`、sink、scheduler、repository |
 | `src/infrastructure/acp` | Tauri command typed clients | Adapter | 目标 command client 及测试 |
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |

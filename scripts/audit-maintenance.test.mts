@@ -9,7 +9,10 @@ describe('maintenance module classification', () => {
     expect(moduleFor('src-tauri/src/terminal.rs')).toBe('rust-host')
   })
   it('does not hide a new frontend directory behind the legacy root group', () => {
-    expect(moduleFor('src/identityStore.ts')).toBe('frontend-root')
+    // #351 前端根目录归类：下沉文件受所属模块桶约束（domain），根桶仅存入口与
+    // 主题/预设集群（#266 域，store.ts 为其代表）。
+    expect(moduleFor('src/store.ts')).toBe('frontend-root')
+    expect(moduleFor('src/domains/identity/identityStore.ts')).toBe('domain')
     expect(moduleFor('src/new-feature/implementation.ts')).toBeUndefined()
   })
   it('keeps vendor, fixtures and test code out of production ownership counts', () => {
