@@ -73,7 +73,6 @@ export function useGitStatus(target: WorkspaceTarget | null, provider: GitProvid
         key: errorKey,
         scope: { kind: 'sheet', id: `git:${targetKey ?? 'none'}` },
         source: 'git.hook',
-        recovery: { kind: 'open-runtime-log', sheetId: `git:${targetKey ?? 'none'}` },
       })
     })
     return () => { disposed = true }

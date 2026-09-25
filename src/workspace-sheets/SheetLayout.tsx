@@ -162,7 +162,6 @@ export default function SheetLayout(props: SheetLayoutProps) {
       scope: matcher.scope,
       key: 'app:persistence',
       source: 'persistence',
-      recovery: { kind: 'open-runtime-log' },
     })
   }, [workspacePersistError, identityPersistError])
 

@@ -131,7 +131,6 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         key: errorKey('读取 Git 信息'),
         scope: { kind: 'sheet', id: `git:${targetKey ?? 'none'}` },
         source: 'git.panel',
-        recovery: { kind: 'open-runtime-log', sheetId: `git:${targetKey ?? 'none'}` },
       })
     })
   }, [target, targetKey, provider, refreshRevision, errorKey])
@@ -164,7 +163,6 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         key: `git:${sourceAtStart ?? 'none'}:${action}`,
         scope: { kind: 'sheet', id: `git:${sourceAtStart ?? 'none'}` },
         source: 'git.panel',
-        recovery: { kind: 'open-runtime-log', sheetId: `git:${sourceAtStart ?? 'none'}` },
       })
     } finally {
       if (requestContext.current.source === sourceAtStart) setBusyAction(null)

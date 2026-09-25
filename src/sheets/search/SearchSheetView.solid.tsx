@@ -89,7 +89,6 @@ export default function SearchSheetView(props: SearchSheetViewProps) {
           key: `search:${sheetId}:${needle}`,
           scope: { kind: 'sheet', id: sheetId },
           source: 'search.sheet',
-          recovery: { kind: 'open-runtime-log', sheetId },
         })
       })
   })
@@ -119,7 +118,6 @@ export default function SearchSheetView(props: SearchSheetViewProps) {
         key: `search-open:${props.sheet.id}:${session.id}`,
         scope: { kind: 'sheet', id: props.sheet.id },
         source: 'search.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: props.sheet.id },
       })
     }
   }

@@ -164,7 +164,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-placeholder:${session.id}`,
         scope: { kind: 'session', id: session.id },
         source: 'chat.session-placeholder',
-        recovery: { kind: 'open-runtime-log', sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       })
       return undefined
@@ -228,7 +227,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-create:${session.id}`,
         scope: { kind: 'session', id: session.id },
         source: 'chat.session-create',
-        recovery: { kind: 'open-runtime-log', sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       })
     }
@@ -335,7 +333,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-recovery:${session.id}`,
         scope: { kind: 'session' as const, id: session.id },
         source: 'chat.session-recovery',
-        recovery: { kind: 'open-runtime-log' as const, sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       }
       // canonical 首屏占位已经提供可用历史时，远端 ACP replay 失败不应

@@ -23,7 +23,6 @@ export default class SheetErrorBoundary extends Component<Props, State> {
       key: `sheet-render:${this.props.sheetId}`,
       scope: { kind: 'sheet', id: this.props.sheetId },
       source: 'sheet.boundary',
-      recovery: { kind: 'open-runtime-log', sheetId: this.props.sheetId },
     })
   }
 

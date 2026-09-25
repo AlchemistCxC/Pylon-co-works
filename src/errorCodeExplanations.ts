@@ -13,24 +13,32 @@
  * 防止悄悄改词或漏码。
  *
  * 只写"这意味着什么 + 能做什么"，不写实现细节（错误码本身已由界面在旁展示）。
+ *
+ * `recovery`（#338）：错误中心恢复按钮按码派生的**单源**——解释与下一步动作同表维护，
+ * hint 语义指向哪里、按钮就路由到哪里。未标注的码由 `recoveryForCode` 兜底为
+ * 「查看运行日志」（纯诊断动作，不猜修复方式）。
  */
+import type { RecoveryKind } from './runtimeError.ts'
+
 export interface ErrorCodeExplanation {
   /** 一句话：这个失败意味着什么。 */
   readonly summary: string
   /** 常见下一步（可选；能给可操作建议时才写）。 */
   readonly hint?: string
+  /** 错误中心恢复按钮的路由（#338）；缺省走「查看运行日志」诊断兜底。 */
+  readonly recovery?: RecoveryKind
 }
 
 export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanation>> = Object.freeze({
   // ── Agent 启动与连接（宿主 agent 域）──
-  agent_executable_missing: { summary: '配置里那个可执行文件不存在或不可执行', hint: '在 设置 → Agent 里重新选择 exe 路径' },
-  agent_spawn_failed: { summary: 'Agent 进程启动失败', hint: '确认该程序能独立运行，并检查运行日志里的系统错误' },
-  agent_initialize_failed: { summary: 'Agent 启动了，但 ACP 握手没通过', hint: '确认这是支持 ACP 的 Agent，且版本不过旧' },
-  agent_connection_timeout: { summary: '连接 Agent 超时，未在预算内完成握手', hint: '可能是首次启动较慢或进程卡住；查看运行日志后重试' },
-  agent_crashed: { summary: 'Agent 进程意外退出' },
-  agent_runtime_unavailable: { summary: '当前没有可用的 Agent 运行时', hint: '先在 设置 → Agent 中完成连接' },
-  no_active_agent: { summary: '还没有选择要使用的 Agent', hint: '在 设置 → Agent 中新建或切换一个 Agent' },
-  agent_spawn_io_failed: { summary: '启动 Agent 进程时发生 IO 错误', hint: '确认该程序存在且当前用户有权执行' },
+  agent_executable_missing: { summary: '配置里那个可执行文件不存在或不可执行', hint: '在 设置 → Agent 里重新选择 exe 路径', recovery: 'select-agent-executable' },
+  agent_spawn_failed: { summary: 'Agent 进程启动失败', hint: '确认该程序能独立运行，并检查运行日志里的系统错误', recovery: 'open-runtime-log' },
+  agent_initialize_failed: { summary: 'Agent 启动了，但 ACP 握手没通过', hint: '确认这是支持 ACP 的 Agent，且版本不过旧', recovery: 'open-runtime-log' },
+  agent_connection_timeout: { summary: '连接 Agent 超时，未在预算内完成握手', hint: '可能是首次启动较慢或进程卡住；查看运行日志后重试', recovery: 'open-runtime-log' },
+  agent_crashed: { summary: 'Agent 进程意外退出', recovery: 'open-runtime-log' },
+  agent_runtime_unavailable: { summary: '当前没有可用的 Agent 运行时', hint: '先在 设置 → Agent 中完成连接', recovery: 'open-agent-settings' },
+  no_active_agent: { summary: '还没有选择要使用的 Agent', hint: '在 设置 → Agent 中新建或切换一个 Agent', recovery: 'open-agent-settings' },
+  agent_spawn_io_failed: { summary: '启动 Agent 进程时发生 IO 错误', hint: '确认该程序存在且当前用户有权执行', recovery: 'open-runtime-log' },
   // Agent 崩溃的具体原因（pylon-acp cause 词表，会作为 cause.code 出现在错误卡里）
   writer_failed: { summary: '向 Agent 进程写入失败，连接已按崩溃收敛', hint: '在运行日志里查看该进程的最后输出' },
   writer_timeout: { summary: 'Agent 进程长时间不读取输入（写超时），连接已按崩溃收敛' },
@@ -39,7 +47,7 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   overloaded: { summary: 'Agent 入站事件速率超过背压上限，连接按过载收敛（事件有缺口）' },
 
   // ── Agent 探测（pylon-core 诊断码）──
-  version_probe_spawn_failed: { summary: '无法执行该程序（不存在、无权限，或不是有效的可执行文件）', hint: '在 设置 → Agent 里重新选择 exe 路径' },
+  version_probe_spawn_failed: { summary: '无法执行该程序（不存在、无权限，或不是有效的可执行文件）', hint: '在 设置 → Agent 里重新选择 exe 路径', recovery: 'select-agent-executable' },
   version_probe_timeout: { summary: '探测超时，该程序未在预算内返回版本信息' },
   version_probe_wait_failed: { summary: '等待探测子进程结束时失败' },
   version_probe_non_zero: { summary: '该程序返回了非零退出码（版本探测未成功）' },
@@ -88,26 +96,26 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
 
   // ── 配置（agents.yaml / 网关 / 主题 envelope）──
   config_error: { summary: '配置内容不合法' },
-  config_read_error: { summary: '读不到配置文件', hint: '确认 设置 → Agent 里的配置路径存在且可读' },
-  config_parse_error: { summary: '配置文件语法有错（YAML 解析失败）', hint: '先在 设置 → Agent 的高级 YAML 区修正语法' },
-  config_invalid_agent: { summary: '某个 Agent 的配置字段非法', hint: '错误详情里会指出是哪个 Agent' },
-  config_read_only: { summary: '当前配置来自内嵌兜底或只读位置，不能直接写入', hint: '新建 Agent 时 Pylon 会在 exe 旁生成 agents.yaml' },
-  config_write_error: { summary: '写配置文件失败', hint: '确认配置文件可写（未被占用、目录存在）' },
-  config_revision_conflict: { summary: '配置文件已被别处改动，本次保存基于旧版本', hint: '点「重载配置」拿到最新内容后再保存' },
+  config_read_error: { summary: '读不到配置文件', hint: '确认 设置 → Agent 里的配置路径存在且可读', recovery: 'open-agent-settings' },
+  config_parse_error: { summary: '配置文件语法有错（YAML 解析失败）', hint: '先在 设置 → Agent 的高级 YAML 区修正语法', recovery: 'open-agent-settings' },
+  config_invalid_agent: { summary: '某个 Agent 的配置字段非法', hint: '错误详情里会指出是哪个 Agent', recovery: 'open-agent-settings' },
+  config_read_only: { summary: '当前配置来自内嵌兜底或只读位置，不能直接写入', hint: '新建 Agent 时 Pylon 会在 exe 旁生成 agents.yaml', recovery: 'open-agent-settings' },
+  config_write_error: { summary: '写配置文件失败', hint: '确认配置文件可写（未被占用、目录存在）', recovery: 'open-agent-settings' },
+  config_revision_conflict: { summary: '配置文件已被别处改动，本次保存基于旧版本', hint: '点「重载配置」拿到最新内容后再保存', recovery: 'open-agent-settings' },
   config_revision_required: { summary: '保存缺少版本号（revision）而无法保证不覆盖别人的改动' },
-  config_backup_error: { summary: '写入前的备份步骤失败', hint: '确认配置目录可写' },
+  config_backup_error: { summary: '写入前的备份步骤失败', hint: '确认配置目录可写', recovery: 'open-agent-settings' },
   config_lock_busy: { summary: '另一处正在写入配置，请稍后重试' },
-  config_active_agent_protected: { summary: '不能删除当前正在使用的 Agent', hint: '先切换到别的 Agent 再删除它' },
-  config_not_applied: { summary: '改动已写入磁盘，但当前运行中的配置还没切换过去', hint: '重载配置或重连 Agent 后生效' },
+  config_active_agent_protected: { summary: '不能删除当前正在使用的 Agent', hint: '先切换到别的 Agent 再删除它', recovery: 'open-agent-settings' },
+  config_not_applied: { summary: '改动已写入磁盘，但当前运行中的配置还没切换过去', hint: '重载配置或重连 Agent 后生效', recovery: 'open-agent-settings' },
 
   // ── ACP 传输（pylon-acp 引擎）──
   acp_error: { summary: 'Agent 通信协议层报错' },
-  connect_error: { summary: '与 Agent 建立连接失败' },
-  connection_closed: { summary: '与 Agent 的连接已关闭' },
-  transport_error: { summary: 'Agent 子进程通道出错' },
-  write_timeout: { summary: '向 Agent 写入超时' },
-  rpc_timeout: { summary: '等待 Agent 响应超时' },
-  rpc_error: { summary: 'Agent 返回了协议层错误' },
+  connect_error: { summary: '与 Agent 建立连接失败', recovery: 'open-runtime-log' },
+  connection_closed: { summary: '与 Agent 的连接已关闭', recovery: 'open-runtime-log' },
+  transport_error: { summary: 'Agent 子进程通道出错', recovery: 'open-runtime-log' },
+  write_timeout: { summary: '向 Agent 写入超时', recovery: 'open-runtime-log' },
+  rpc_timeout: { summary: '等待 Agent 响应超时', recovery: 'open-runtime-log' },
+  rpc_error: { summary: 'Agent 返回了协议层错误', recovery: 'open-runtime-log' },
 
   // ── 其它宿主域 ──
   serialize_error: { summary: '数据序列化失败（内部不一致）' },

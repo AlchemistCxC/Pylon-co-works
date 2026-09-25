@@ -113,7 +113,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
         readBackRoutes: readMigrated,
         reportError: (action, error) => reportRuntimeError(action, error, undefined, {
           key: operationKey(action), scope: sheetScope, source: 'gateway',
-          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
         }),
       },
     )
@@ -124,7 +123,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
         setWriteStatus({ kind: 'lock-poisoned' })
         reportRuntimeError('保存网关配置', new Error(result.message), undefined, {
           key: operationKey('保存网关配置'), scope: sheetScope, source: 'gateway',
-          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
         })
       }
       else setWriteStatus({ kind: 'error', message: result.message })
@@ -158,7 +156,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
         setError(err instanceof Error ? err.message : String(err))
         reportRuntimeError('读取网关状态', err, undefined, {
           key: operationKey('读取网关状态'), scope: sheetScope, source: 'gateway',
-          recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
         })
       }
     })
@@ -176,7 +173,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
     }).catch(err => {
       if (!disposed) reportRuntimeError('读取平台会话', err, undefined, {
         key: operationKey('读取平台会话'), scope: sheetScope, source: 'gateway',
-        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
       })
     })
     return () => { disposed = true }
@@ -192,7 +188,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
       setInstanceError(err instanceof Error ? err.message : String(err))
       reportRuntimeError('读取网关实例', err, undefined, {
         key: operationKey('读取网关实例'), scope: sheetScope, source: 'gateway',
-        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
       })
     }
   }, [gatewayClient, operationKey, sheet.id, sheetScope])
@@ -207,7 +202,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
     }).catch(err => {
       if (!disposed) reportRuntimeError('读取平台目录', err, undefined, {
         key: operationKey('读取平台目录'), scope: sheetScope, source: 'gateway',
-        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
       })
     })
     return () => { disposed = true }
@@ -243,7 +237,6 @@ export default function GatewaySheetView({ sheet }: { sheet: SheetRecord; ctx: S
       setInstanceError(err instanceof Error ? err.message : String(err))
       reportRuntimeError(operation, err, undefined, {
         key: operationKey(operation), scope: sheetScope, source: 'gateway',
-        recovery: { kind: 'open-runtime-log', sheetId: sheet.id },
       })
     }
   }

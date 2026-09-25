@@ -40,7 +40,6 @@ export function createStandardSwitchAgent(getAgentName: (agentId: string) => str
       key: operationKey(agentId, action),
       scope: { kind: 'agent', id: agentId },
       source: 'agent.switch',
-      recovery: { kind: 'open-runtime-log', agentId },
     }),
     resolveError: action => resolveRuntimeErrors({
       key: operationKey(agentId, action),

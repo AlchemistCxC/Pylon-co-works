@@ -364,7 +364,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = `自定义预设不存在：${canonicalId}`
         reportRuntimeError('应用自定义预设', new Error(message), undefined, {
           key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: canonicalId, failedProvider: 'preset', message, rolledBack: true, revision }
       }
@@ -382,7 +381,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = `自定义预设主题缺失：${presetId}`
         reportRuntimeError('准备应用预设', new Error(message), undefined, {
           key: `preset-prepare:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: presetId, failedProvider: 'builtin.theme', message, rolledBack: true, revision }
       }
@@ -459,7 +457,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = error instanceof Error ? error.message : String(error)
         reportRuntimeError('应用预设', error, undefined, {
           key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: presetId, failedProvider, message, rolledBack: true, revision }
       }
@@ -479,7 +476,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = error instanceof Error ? error.message : String(error)
         reportRuntimeError('应用预设', error, undefined, {
           key: `preset:${canonicalId}`, scope: { kind: 'operation', id: `preset:${canonicalId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: canonicalId, failedProvider: 'unknown', message, rolledBack: false, revision }
       }
@@ -539,7 +535,6 @@ export const useStore = create<ThemeState>()(persist(
           key: 'app:theme-persistence',
           scope: { kind: 'app', id: 'theme' },
           source: 'theme.persistence',
-          recovery: { kind: 'open-runtime-log' },
         })
       }
     },

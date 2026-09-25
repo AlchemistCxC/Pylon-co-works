@@ -242,7 +242,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         key: runtimeErrorKey,
         scope,
         source: 'workbench.runtime',
-        recovery: { kind: 'open-runtime-log', sessionId: session?.id },
         recoveryAction: {
           label: '重试会话恢复',
           run: () => session ? sessionRuntime.bind(session) : undefined,
@@ -517,7 +516,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       key,
       scope,
       source: 'renderer-suite',
-      recovery: { kind: 'open-runtime-log', sessionId: session?.id, suiteId: failure.suiteId },
       recoveryAction: { label: '重试 Solid', run: () => retrySolidRef.current() },
     })
   }, [failure, fatal, props.sheet.id, session, session?.id, session?.agentId])

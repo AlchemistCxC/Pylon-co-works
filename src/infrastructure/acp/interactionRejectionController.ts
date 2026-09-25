@@ -77,7 +77,6 @@ export function createInteractionRejectionController(
       scope: rejection.sessionId
         ? { kind: 'session', id: rejection.sessionId }
         : rejection.agentId ? { kind: 'agent', id: rejection.agentId } : { kind: 'app', id: 'interaction' },
-      recovery: { kind: 'open-runtime-log', sessionId: rejection.sessionId },
     })
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent<InteractionRejection>('pylon:interaction-rejected', { detail: rejection }))
@@ -98,7 +97,6 @@ export function createInteractionRejectionController(
       key: 'acp:interaction-listener',
       scope: { kind: 'app', id: 'interaction' },
       source: 'acp.interaction',
-      recovery: { kind: 'open-runtime-log' },
     })
   })
 

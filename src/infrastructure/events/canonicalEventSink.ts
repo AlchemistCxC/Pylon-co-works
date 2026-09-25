@@ -90,7 +90,6 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       key: errorKey(ownerKey),
       scope: { kind: 'operation', id: ownerKey },
       source: 'canonical.sink',
-      recovery: { kind: 'open-runtime-log' },
     })
   })
   const resolveError = (ownerKey: string): void => {

@@ -273,7 +273,6 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     key: panelErrorKey(operation, agentId),
     scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'agent-settings' },
     source: 'settings.agent-runtime',
-    recovery: { kind: 'open-runtime-log', agentId },
   })
   const resolvePanelError = (operation: string, agentId?: string) => resolveRuntimeErrors({ key: panelErrorKey(operation, agentId) })
 
@@ -326,7 +325,6 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
           key: `agent-detection:${diagnostic.code}:${diagnostic.detectorId ?? 'all'}`,
           scope: { kind: 'app', id: 'agent-detection' },
           source: 'settings.agent-runtime',
-          recovery: { kind: 'open-runtime-log' },
         })
       }
       setDetectionPreflight(report.preflight)
