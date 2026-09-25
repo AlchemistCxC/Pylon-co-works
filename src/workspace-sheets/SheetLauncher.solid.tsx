@@ -53,7 +53,7 @@ interface LauncherItem {
  * （[cmdk-input]/[cmdk-group-heading]/[cmdk-group-items]/[cmdk-item] + data-selected/
  * data-disabled）。键盘 ↑↓ 循环选区、Enter 选中、Esc/遮罩点击关闭。
  *
- * 索引串 = **所有可搜字段的并集**：条目标题 + 描述 + 注册处声明的 `keywords`。
+ * 索引串 = **所有可搜字段的并集**：条目标题 + 描述 + 种类 + 注册处声明的 `keywords`。
  * 描述是中文而条目标题多为英文，故必须并入索引，否则中文界面下搜索不可达
  * （#327）；`keywords` 承载注册处声明的中英双语同义词。
  */
@@ -141,8 +141,8 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
     }))
     .filter(group => group.options.length > 0))
   // 管理入口是宿主自有卡片（非插件贡献），中英双语检索词直接写进索引串。
-  const settingsVisible = createMemo(() => matches('management settings theme agent 设置 主题 外观 偏好 配置'))
-  const profilesVisible = createMemo(() => matches('management profiles profile 档案 身份 用户 配置'))
+  const settingsVisible = createMemo(() => matches('management settings theme agent 设置 主题 外观 偏好 配置 管理'))
+  const profilesVisible = createMemo(() => matches('management profiles profile 档案 身份 用户 配置 管理'))
 
   // Agent 组的两套空态文案：真无 Agent（引导去设置新建）与查询无命中（提示换词）
   // 语义不同，不能共用一句。

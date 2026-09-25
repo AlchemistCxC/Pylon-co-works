@@ -99,6 +99,54 @@ describe('SheetLauncher Registry 卡片', () => {
     expect(screen.queryByText(/list_agents/)).toBeNull()
   })
 
+  it('有 Agent 但查询无命中时给出换词提示，不谎报「没有可用 Agent」', () => {
+    render(<SheetLauncher
+      open
+      agents={[{ id: 'peri', name: 'Peri' }]}
+      sheets={[]}
+      onOpenChange={vi.fn()}
+      onFocusSheet={vi.fn()}
+      onOpenSheet={vi.fn()}
+      onOpenSettings={vi.fn()}
+      onOpenProfiles={vi.fn()}
+    />)
+    fireEvent.input(screen.getByPlaceholderText('搜索 Sheet、Agent 或管理入口...'), { target: { value: 'zzz-无此条目' } })
+
+    expect(screen.getByText('没有匹配的 Agent')).toBeInTheDocument()
+    expect(screen.queryByText('还没有可用的 Agent')).toBeNull()
+  })
+
+  it('不可启动的条目显示中文徽标而非内部状态词', () => {
+    const registration = registerWorkspace(createPluginIdentity('test.launcher-disabled', 'disabled-card'), {
+      kind: 'test.disabled',
+      label: 'Disabled',
+      singleton: true,
+      getSingletonKey: () => 'test.disabled',
+      sidebarMode: 'none',
+      launch: { kind: 'test.disabled', title: 'Disabled Sheet', description: '不可启动的条目标记', launchable: false, icon: 'activity' },
+      component: () => null,
+      createInitialState: () => undefined,
+      serialize: state => state,
+      deserialize: state => state,
+    })
+    try {
+      render(<SheetLauncher
+        open
+        agents={[]}
+        sheets={[]}
+        onOpenChange={vi.fn()}
+        onFocusSheet={vi.fn()}
+        onOpenSheet={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenProfiles={vi.fn()}
+      />)
+      expect(screen.getByText('暂不可用')).toBeInTheDocument()
+      expect(screen.queryByText('unavailable')).toBeNull()
+    } finally {
+      registration.dispose()
+    }
+  })
+
   it('插件声明未知图标键时使用 host 通用图标，不加载插件 React 组件', () => {
     const registration = registerWorkspace(createPluginIdentity('test.launcher-card', 'unknown-icon'), {
       kind: 'test.unknown-icon',

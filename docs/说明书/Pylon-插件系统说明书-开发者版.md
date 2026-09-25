@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` / `2.4` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -363,15 +363,17 @@ commands.describe(id)
 
 `name` 不得以 `/` 开头；执行时可通过 id、name 或 alias 解析。
 
-命令描述符可选字段：`aliases`（**执行别名**——输入 `/别名` 可直接命中并执行）、
-`keywords`（**检索关键词**，自 API 2.4 起）、`inputHint`（输入建议里展示的参数提示）、
+命令描述符可选字段：`aliases`（**执行别名**——`commands.execute('/别名')` 与 CLI 面可直接命中）、
+`keywords`（**检索关键词**，自 API 2.4 起为契约表面）、`inputHint`（输入建议里展示的参数提示）、
 `agentPromptSnippet`（注入 agent 的命令行文本，缺省由宿主按 name/description 生成）、
 `permission`（`read` / `edit` / `execute` / `gate`，仅声明用）。
 
 `keywords` 只影响输入框 `/` 建议列表的过滤（大小写不敏感子串匹配），**不参与执行解析**。
 命令名是英文唯一键，中文界面下用户无法用母语检索；插件应声明母语检索词让命令可被搜到，
-例如 `keywords: ['诊断', 'health']`。`aliases` 与 `keywords` 是不同的两根轴：前者进执行命名空间，
-后者只进检索面。
+例如 `keywords: ['诊断', 'health']`。`aliases` 与 `keywords` 是不同的两根轴：前者进执行命名空间
+（但输入框的 Enter 补全只会把它改写成规范命令名，`/别名` 回车不会直接执行），后者只进检索面。
+命令描述符是运行时注册的，不在 manifest 内，故宿主对这两个字段**不做 API 版本闸门**——
+`api` 声明低版本并不阻止使用它们，版本号只标注契约表面自哪个 minor 起存在。
 
 ### 6.2 Hooks
 
@@ -509,7 +511,7 @@ launch: {
 
 `icon` 是由 Host 解释的稳定字符串，不是 React 组件。当前内置键包括 `activity`、`agent`、`boxes`、`clock`、`folder-tree`、`globe`、`history`、`layout-dashboard`、`messages`、`plus`、`search`、`settings`、`sliders`、`waypoints`；未知键安全降级为通用 Workspace 图标。**Agent 左栏模块的 `icon` 与 `headerActions[].icon` 消费同一张映射表**（见 §6.8）。`categoryOrder` 与 `order` 只控制 Launcher 排序，不是跨插件视觉 token。
 
-`keywords` 是 Launcher 的**检索词**（大小写不敏感子串匹配）。索引串 = 标题 + 描述 + 分类标签 + `keywords`，
+`keywords` 是 Launcher 的**检索词**（大小写不敏感子串匹配）。索引串 = 标题 + 描述 + 种类 + 分类标签 + `keywords`，
 所以中文 `description` 本身就可被搜到；`keywords` 用于补**描述里没出现的同义词与母语词**——
 界面是中文而 `title` 多为英文，插件应同时声明中英检索词（如 `['inspect', '诊断']`），否则中文用户只能靠描述里的字面词命中。
 

@@ -40,7 +40,14 @@ for (const rel of required) check(`结构 ${rel}`, existsSync(join(kitRoot, rel)
 const sdk = await import(pathToFileURL(join(kitRoot, 'sdk', 'pylon-plugin-sdk.js')))
 check('SDK 导出完整', ['definePlugin', 'createSettingsSurface', 'createPluginLogger', 'VISUAL_SEMANTIC_TOKENS']
   .every(key => key in sdk))
-check('SDK 版本 allowlist', sdk.PYLON_PLUGIN_API_SUPPORTED.join('/') === '1.0/1.1/1.2')
+// 期望值从随包的 manifest schema 推导，不写死——写死会在每次 API 升 minor 后失真
+// （旧写法固定 '1.0/1.1/1.2'，宿主早已到 2.x 却无人发现，因为它不在任何门禁链上）。
+const schemaApiVersions = JSON.parse(readFileSync(join(kitRoot, 'sdk', 'pylon-plugin-manifest.schema.json'), 'utf8'))
+  .properties.api.enum
+check('SDK 版本 allowlist 与 manifest schema 一致',
+  sdk.PYLON_PLUGIN_API_SUPPORTED.join('/') === schemaApiVersions.join('/'))
+check('SDK 版本 allowlist 覆盖到最新版',
+  sdk.PYLON_PLUGIN_API_SUPPORTED.includes(sdk.PYLON_PLUGIN_API_LATEST))
 check('SDK 能力词表导出', Array.isArray(sdk.PYLON_PLUGIN_CAPABILITIES)
   && sdk.PYLON_PLUGIN_CAPABILITIES.includes('plugin.management'))
 

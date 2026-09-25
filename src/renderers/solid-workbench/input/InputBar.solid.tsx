@@ -3,6 +3,7 @@ import {
   resolveFallbackCommands,
   filterCommandSuggestions,
   parseSlashCommand,
+  attachPluginKeywords,
   type CommandSuggestion,
 } from '../../../components/chat/commandRegistry.ts'
 import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
@@ -435,7 +436,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
         const parsed = parseSlashCommand(draft())
         if (suggestion && parsed?.name.toLowerCase() !== suggestion.cmd.toLowerCase()) {
           event.preventDefault()
-          applySuggestion(suggestion)
+          // 中文名（`/模型 deepseek`）永远走这条补全路径，必须把已输入参数带过去——
+          // 否则用户敲的参数会被提示串顶掉，且不可撤销（#327）。
+          applySuggestion(suggestion, parsed?.args)
           return
         }
       }
@@ -500,8 +503,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
     }
   }
 
-  const applySuggestion = (suggestion: CommandSuggestion) => {
-    const args = suggestion.args.trim()
+  /** `typedArgs` = 用户已输入的参数（如 `/模型 deepseek` 的 `deepseek`）；缺省用提示串。 */
+  const applySuggestion = (suggestion: CommandSuggestion, typedArgs?: string) => {
+    const args = typedArgs?.trim() || suggestion.args.trim()
     setDraft(`${suggestion.cmd}${args ? ` ${args}` : ''} `)
     setCommandIndex(0)
     textarea?.focus()
@@ -609,14 +613,16 @@ export function SolidInputBar(props: SolidInputBarProps) {
   )
 }
 
+/** 会话上报命令 → 建议项。宿主注册表里声明的检索词按命令名并回：只靠上报字段，
+ *  中文界面下 `/新` 搜不到英文命令名（#327）。 */
 function sessionCommandSuggestions(commands: readonly SessionCommand[]): readonly CommandSuggestion[] {
-  return commands
+  return attachPluginKeywords(commands
     .filter(command => command.availability !== false && command.availability !== 'unavailable')
     .map(command => ({
       cmd: command.name.startsWith('/') ? command.name : `/${command.name}`,
       args: command.inputHint ?? '',
       info: command.description ?? command.capability ?? '会话命令',
-    }))
+    })))
 }
 
 function sameAttachments(left: readonly WorkbenchAttachment[], right: readonly WorkbenchAttachment[]): boolean {

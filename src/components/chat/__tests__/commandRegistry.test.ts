@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import {
+  attachPluginKeywords,
   filterCommandSuggestions,
   parseSlashCommand,
   resolveFallbackCommands,
@@ -40,5 +41,18 @@ describe('commandRegistry', () => {
     const fallback = resolveFallbackCommands()
     expect(filterCommandSuggestions('/MO', fallback)[0]?.cmd).toBe('/model')
     expect(filterCommandSuggestions('/', fallback)).toHaveLength(fallback.length)
+  })
+
+  // agent 上报命令时输入栏只用上报项（不上报则用注册表 fallback），故检索词必须
+  // 按命令名并回，否则那条分支上中文又搜不到（#327）。
+  it('把宿主检索词按名并回建议项', () => {
+    const attached = attachPluginKeywords([
+      { cmd: '/new', args: '', info: '新会话' },
+      { cmd: '/vendor-extra', args: '', info: '插件命令' },
+    ])
+    expect(attached[0]?.keywords).toEqual(['新会话', '新建', '新建会话'])
+    // 未注册命令不得凭空获得检索词
+    expect(attached[1]?.keywords).toBeUndefined()
+    expect(filterCommandSuggestions('/新', attached).map(command => command.cmd)).toEqual(['/new'])
   })
 })
