@@ -1084,15 +1084,16 @@ impl ManagedProbeChild {
 
 impl Drop for ManagedProbeChild {
     fn drop(&mut self) {
-        if self.reaped {
-            return;
-        }
+        // 已收割则无清理；unix 下向进程组发 SIGKILL。Windows 无内联清理路径
+        //（job 句柄关闭 + kill_on_drop 兜底），故把 cfg 放在整条语句上、不用
+        // 早退 return——Windows 编译下 return 之后无语句，会命中
+        // clippy::needless_return（且该 lint 在 CI 的 unix 目标不触发，#331）。
         #[cfg(unix)]
-        if let Some(pid) = self.pid {
-            unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+        if !self.reaped {
+            if let Some(pid) = self.pid {
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
         }
-        // Windows job close kills the tree; kill_on_drop below covers the
-        // direct child when job attachment was unavailable.
     }
 }
 

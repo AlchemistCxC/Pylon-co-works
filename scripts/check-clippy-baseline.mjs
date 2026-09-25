@@ -62,6 +62,22 @@ const crateDir = flags.get("crate-dir") ?? "src-tauri";
 const workspacePackage = flags.get("package");
 const write = flags.get("write") === true || flags.get("write") === "true";
 
+/** package_id → 包名：`#name@version` 取 # 与 @ 之间；无 @ 的 path 依赖
+ *（`path+file:///…/pkg#version`）取 # 前路径尾段。#331 裁决修复。 */
+const workspacePackageName = (packageId) => {
+  if (typeof packageId !== "string") return "";
+  const hash = packageId.lastIndexOf("#");
+  if (hash < 0) return "";
+  const at = packageId.lastIndexOf("@");
+  if (at > hash) return packageId.slice(hash + 1, at);
+  const beforeHash = packageId.slice(0, hash);
+  const separator = Math.max(
+    beforeHash.lastIndexOf("/"),
+    beforeHash.lastIndexOf("\\"),
+  );
+  return beforeHash.slice(separator + 1);
+};
+
 if (!clippyPath || !baselinePath) {
   console.error(
     "usage: node scripts/check-clippy-baseline.mjs <clippy.json> <baseline.json> [--crate=name] [--crate-dir=dir] [--write]",
@@ -97,10 +113,11 @@ for (const line of readFileSync(resolve(root, clippyPath), "utf8").split(
   if (workspacePackage) {
     // workspace 级输入：package_id 形如 `path+file:///...#pylon-core@1.0.0`，
     // 取 # 与 @ 之间的包名过滤；非 compiler-message 行（无 package_id）跳过。
+    // #331 裁决修正：path 依赖存在**无版本**形态 `path+file:///...pylon-core#1.0.0`
+    //（Cargo.toml version 与目录名不构成 `#name@ver`），此时包名取 # 之前的
+    // 路径尾段——否则该 crate 的诊断整体对棘轮不可见（盲区）。
     const packageId = typeof payload.package_id === "string" ? payload.package_id : "";
-    const hash = packageId.lastIndexOf("#");
-    const at = packageId.lastIndexOf("@");
-    const name = hash >= 0 ? packageId.slice(hash + 1, at > hash ? at : undefined) : "";
+    const name = workspacePackageName(packageId);
     if (name !== workspacePackage) continue;
   }
   const code = message.code?.code ?? `rustc-${message.level}`;
