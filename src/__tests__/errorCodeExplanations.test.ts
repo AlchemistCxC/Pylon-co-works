@@ -154,3 +154,38 @@ describe('errorCodeExplanations（#325 码表单源）', () => {
     expect(explainErrorCode('provider.error')?.summary).toBe(ERROR_CODE_EXPLANATIONS['provider.error'].summary)
   })
 })
+
+describe('errorCodeExplanations（#338 恢复动作同源派生）', () => {
+  const KINDS = ['open-agent-settings', 'select-agent-executable', 'open-runtime-log'] as const
+
+  it('标注的 recovery 值必须属于合法 kind 集合', () => {
+    for (const [code, explanation] of Object.entries(ERROR_CODE_EXPLANATIONS)) {
+      if (explanation.recovery !== undefined) {
+        expect(KINDS, `${code} 的 recovery 不是合法 kind`).toContain(explanation.recovery)
+      }
+    }
+  })
+
+  it('关键码 → kind 映射钉死（错配回归即红灯）', () => {
+    // 可执行文件不存在 → 选择可执行文件
+    expect(ERROR_CODE_EXPLANATIONS['agent_executable_missing'].recovery).toBe('select-agent-executable')
+    expect(ERROR_CODE_EXPLANATIONS['version_probe_spawn_failed'].recovery).toBe('select-agent-executable')
+    // 配置只读/写失败与配置域 → 打开 Agent 设置
+    for (const code of ['config_read_only', 'config_write_error', 'config_parse_error', 'no_active_agent']) {
+      expect(ERROR_CODE_EXPLANATIONS[code].recovery, code).toBe('open-agent-settings')
+    }
+    // 传输/初始化失败 → 查看运行日志（显式入表，不依赖兜底）
+    for (const code of ['agent_spawn_failed', 'agent_initialize_failed', 'agent_connection_timeout', 'transport_error', 'connect_error']) {
+      expect(ERROR_CODE_EXPLANATIONS[code].recovery, code).toBe('open-runtime-log')
+    }
+  })
+
+  it('recoveryForCode：查表命中即表值，查表无果（含无码）兜底查看运行日志', async () => {
+    const { recoveryForCode } = await import('../runtimeError.ts')
+    expect(recoveryForCode('agent_executable_missing', 'peri-1')).toEqual({ kind: 'select-agent-executable', agentId: 'peri-1' })
+    expect(recoveryForCode('config_read_only')).toEqual({ kind: 'open-agent-settings' })
+    expect(recoveryForCode('user_data_unavailable')).toEqual({ kind: 'open-runtime-log' })
+    expect(recoveryForCode(undefined)).toEqual({ kind: 'open-runtime-log' })
+    expect(recoveryForCode('brand_new_failure')).toEqual({ kind: 'open-runtime-log' })
+  })
+})

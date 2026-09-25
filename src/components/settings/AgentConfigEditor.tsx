@@ -44,7 +44,6 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
           key: `agent-config:${agentId}`,
           scope: { kind: 'agent', id: agentId },
           source: 'settings.agent-config',
-          recovery: { kind: 'open-runtime-log', agentId },
         })
       }
     }

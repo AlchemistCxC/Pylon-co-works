@@ -318,7 +318,6 @@ function reportCommandFailure(
     key: `${commandErrorPrefix(binding, command)}${error.code}`,
     scope,
     source: 'workbench.command',
-    recovery: { kind: 'open-runtime-log', sessionId: binding.sessionId ?? undefined },
     metadata: {
       command,
       suiteId: binding.suiteId,

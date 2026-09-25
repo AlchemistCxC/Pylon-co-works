@@ -48,7 +48,6 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
         key: errorKey(relativePath ?? ''),
         scope: { kind: 'sheet', id: `file-tree:${targetKey ?? 'none'}` },
         source: 'file.tree',
-        recovery: { kind: 'open-runtime-log', sheetId: `file-tree:${targetKey ?? 'none'}` },
       })
     } finally {
       if (isCurrentSourceRequest(requestContext.current, token)) {

@@ -95,7 +95,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       .catch(error => {
         if (!disposed) reportRuntimeError('读取 MCP 配置', error, undefined, {
           key: `cwd:${workspace.id}:mcp`, scope: { kind: 'operation', id: `cwd:${workspace.id}:mcp` }, source: 'settings.cwd',
-          recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
         })
       })
     return () => { disposed = true }
@@ -131,7 +130,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       setSaveError('无法打开文件夹选择器，详情见右下角错误中心')
       reportRuntimeError('打开工作区选择器', error, undefined, {
         key: `cwd:${workspace.id}:picker`, scope: { kind: 'operation', id: `cwd:${workspace.id}:picker` }, source: 'settings.cwd',
-        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
       })
     }
   }
@@ -162,7 +160,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       setSaveError('保存工作区设置失败，详情见右下角错误中心')
       reportRuntimeError('保存工作区设置', error, undefined, {
         key: `cwd:${workspace.id}:save`, scope: { kind: 'sheet', id: workspace.id }, source: 'settings.cwd',
-        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
       })
     } finally {
       setSaving(false)

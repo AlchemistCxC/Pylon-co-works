@@ -75,7 +75,6 @@ export function createIdentityBackendSync(host: IdentityBackendSyncHost): (domai
       }))
       reportRuntimeError(`同步用户数据到后端失败（${domain}）`, error, undefined, {
         key: `identity:sync:${domain}`, scope: { kind: 'app', id: 'identity' }, source: 'identity.sync',
-        recovery: { kind: 'open-runtime-log' },
       })
     }
     if (domains.includes('profiles') && state.identityPersistence.profiles !== 'degraded-readonly') {

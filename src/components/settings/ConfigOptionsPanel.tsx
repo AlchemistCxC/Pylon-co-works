@@ -46,7 +46,6 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
         key: `session-config:${toAgentContextKey(context)}:${id}`,
         scope: { kind: 'operation', id: `session-config:${toAgentContextKey(context)}:${id}` },
         source: 'chat.config-option',
-        recovery: { kind: 'open-runtime-log', sessionId: context.source },
       })
       setErrors(state => ({ ...state, [id]: '保存失败，详情见右下角错误中心' }))
     } finally {

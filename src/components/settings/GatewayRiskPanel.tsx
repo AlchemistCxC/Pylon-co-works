@@ -61,7 +61,6 @@ export default function GatewayRiskPanel() {
           key: 'settings:gateway-risk:instances',
           scope: { kind: 'app', id: 'settings-gateway' },
           source: 'settings.gateway-risk',
-          recovery: { kind: 'open-runtime-log' },
         })
       })
       .finally(() => { if (mountedRef.current) setLoading(false) })

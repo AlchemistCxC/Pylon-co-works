@@ -121,7 +121,6 @@ export default function PluginManager({
         appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`)
         reportRuntimeError('读取 API 1.0 插件包', error, undefined, {
           key: 'plugin-manager:list', scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
-          recovery: { kind: 'open-runtime-log' },
         })
       })
   }, [appendLog, nativePackagesAvailable, refresh, service])
@@ -141,7 +140,6 @@ export default function PluginManager({
         scope: { kind: 'operation', id: `plugin:${failure.pluginId}` },
         source: 'kernel.plugin-bootstrap',
         metadata: { pluginId: failure.pluginId, stage: failure.stage, code: failure.code },
-        recovery: { kind: 'open-runtime-log', suiteId: failure.pluginId },
         recoveryAction: failure.retryable
           ? { label: `重试 ${failure.pluginId}`, run: () => bootstrap.retryPlugin(failure.pluginId) }
           : undefined,
@@ -164,7 +162,6 @@ export default function PluginManager({
       } else {
         reportRuntimeError(label, new Error(result.message ?? '未知错误'), undefined, {
           key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
-          recovery: { kind: 'open-runtime-log' },
         })
       }
       await refresh()
@@ -172,7 +169,6 @@ export default function PluginManager({
       appendLog(`${label}失败：${error instanceof Error ? error.message : String(error)}`)
       reportRuntimeError(label, error, undefined, {
         key: `plugin-manager:${label}`, scope: { kind: 'app', id: 'settings-plugin-manager' }, source: 'settings.plugin-manager',
-        recovery: { kind: 'open-runtime-log' },
       })
     } finally {
       setBusy(null)

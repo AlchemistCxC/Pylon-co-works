@@ -74,7 +74,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       .catch(error => {
         if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
           key: 'overview:startup-diagnostics', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-          recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
         })
       })
     return () => { disposed = true }
@@ -90,7 +89,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     } catch (error) {
       reportRuntimeError('迁移 AppData 到便携目录', error, undefined, {
         key: 'overview:migrate-portable', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
       })
     } finally {
       setMigrationBusy(false)
@@ -110,7 +108,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     }).catch(err => {
       if (!disposed) reportRuntimeError('读取最近会话', err, undefined, {
         key: 'overview:recent-sessions', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
       })
     })
     return () => { disposed = true }
@@ -136,7 +133,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
           key: `overview:agent:${agent.id}:${action}`,
           scope: { kind: 'agent', id: agent.id },
           source: 'overview.agent-switch',
-          recovery: { kind: 'open-runtime-log', agentId: agent.id },
         })
       },
       resolveError: action => resolveRuntimeErrors({ key: `overview:agent:${agent.id}:${action}` }),
