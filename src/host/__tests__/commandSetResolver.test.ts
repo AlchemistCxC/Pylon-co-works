@@ -102,8 +102,9 @@ describe('commandSetResolver（v2 Command Registry）', () => {
       .filter((name): name is string => Boolean(name))
 
     expect(injectedNames.length).toBeGreaterThan(6)
-    expect(injectedNames.every(name => tiers.has(name))).toBe(true)
-    // 关键：注入面按 priority 截断，**不是**按 tier 过滤——internal 命令必须仍在注入文本里。
+    // 关键：注入面按 priority 截断，**不是**按 tier 过滤——注入序列必须正好是
+    // resolvePluginCommands()（按 priority/name 排序）的前缀，不多不少。
+    expect(injectedNames).toEqual(all.slice(0, injectedNames.length).map(command => command.name))
     expect(injectedNames.filter(name => tiers.get(name) === 'internal').length).toBeGreaterThan(0)
   })
 

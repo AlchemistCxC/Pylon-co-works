@@ -4,6 +4,7 @@ import {
   filterCommandSuggestions,
   parseSlashCommand,
   decorateSuggestions,
+  selectUserTier,
   type CommandSuggestion,
 } from '../../../components/chat/commandRegistry.ts'
 import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
@@ -125,17 +126,15 @@ export function SolidInputBar(props: SolidInputBarProps) {
       : resolveFallbackCommands()
     return filterCommandSuggestions(draft(), source)
   })
-  const userSuggestions = createMemo(() => suggestions().filter(suggestion => suggestion.tier !== 'internal'))
+  const userSuggestions = createMemo(() => selectUserTier(suggestions()))
   /** #329 分层：默认只列 user 级；内部/开发者命令折叠在「全部」里。
-   *  但用户已经明确在敲某条内部命令时（user 层无命中而整体有命中）不挡路——默认层是为了
-   *  「别让内部命令淹没日常命令」，不是「搜到了也不给用」。 */
-  const suggestionList = createMemo(() => {
-    const all = suggestions()
-    if (showAllCommands()) return all
-    const user = userSuggestions()
-    return user.length > 0 ? user : all
-  })
-  const hiddenInternalCount = createMemo(() => suggestions().length - userSuggestions().length)
+   *  **不做「user 层没命中就放行全量」的例外**——那个条件太宽（敲 `/s` 就会漏出 11 条
+   *  skin 命令，正是本 issue 要治的「内部命令淹没日常命令」）。用户要找内部命令时，
+   *  面板底部的切换项就在环选里，一格键的距离。 */
+  const suggestionList = createMemo(() => showAllCommands() ? suggestions() : userSuggestions())
+  /** 「全部」里比默认层多出来的条数——按**实际隐藏量**算，不按命中量算：
+   *  否则默认层为空的查询会报出「含内部 N 条」但一条也没藏（#329 审查 P2）。 */
+  const hiddenInternalCount = createMemo(() => suggestions().length - suggestionList().length)
   /** 面板行 = 命令项 + 一个「全部/常用」切换项（进环选，键盘可达）。 */
   const paletteRows = createMemo<PaletteRow[]>(() => {
     const rows: PaletteRow[] = suggestionList().map(suggestion => ({ kind: 'command', key: `cmd:${suggestion.cmd}`, suggestion }))
@@ -146,6 +145,18 @@ export function SolidInputBar(props: SolidInputBarProps) {
     setShowAllCommands(current => !current)
     setCommandIndex(0)
   }
+  // 展开状态跟着这一次 `/` 输入走：草稿不再是斜杠命令就收回（否则展开会粘到整个应用
+  // 会话，「只看常用命令」的控件也随面板一起消失，用户再也收不回来）。
+  createEffect(() => {
+    if (!draft().trimStart().startsWith('/')) setShowAllCommands(false)
+  })
+  // 展开后列表可能高于面板：键盘选中的行必须可见（否则是「选中了但看不见」）。
+  createEffect(() => {
+    const index = commandIndex()
+    if (!draft().trimStart().startsWith('/')) return
+    const rows = inputBar?.querySelectorAll('.command-palette .cmd-item')
+    rows?.[index]?.scrollIntoView({ block: 'nearest' })
+  })
   // 列表长度会随查询/分层切换变化：索引越界会让「回车」落到面板外（被当成普通消息发出）。
   createEffect(() => {
     if (commandIndex() >= paletteRows().length) setCommandIndex(0)
@@ -568,7 +579,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
               ? <button
                   type="button"
                   role="option"
-                  aria-selected={index() === commandIndex()}
+                  aria-label={showAllCommands() ? '只看常用命令' : `显示全部命令，含内部 ${hiddenInternalCount()} 条`}
                   class={`cmd-item cmd-toggle${index() === commandIndex() ? ' active' : ''}`}
                   onClick={toggleCommandLayer}
                 >

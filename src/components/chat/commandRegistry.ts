@@ -66,6 +66,16 @@ export function decorateSuggestions(
 }
 
 /**
+ * 默认层筛选：只保留 user 级命令（`internal` 是折叠层，由调用方的「全部」控件负责展开）。
+ *
+ * 判定归这里而不是各调用点自己写 `filter(s => s.tier !== ...)`——下一个消费者（启动器、
+ * CLI 面板…）不该有机会静默拿到 77 条内部命令（#329 审查）。
+ */
+export function selectUserTier(suggestions: readonly CommandSuggestion[]): CommandSuggestion[] {
+  return suggestions.filter(suggestion => suggestion.tier !== 'internal')
+}
+
+/**
  * 过滤 `/` 建议列表。
  *
  * 命令名按前缀匹配（命令名是英文唯一键，前缀是最省输入的用法）；`keywords` 按子串匹配

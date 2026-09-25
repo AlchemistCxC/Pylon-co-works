@@ -179,3 +179,8 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   }
   globalThis.ResizeObserver = ResizeObserverShim as unknown as typeof ResizeObserver
 }
+// #329：命令面板在展开「全部」后可能超出面板高度，键盘选中的行需要 `scrollIntoView`
+// 把它带进视口；jsdom 未实现该方法（调用会抛 TypeError），故在测试环境补空实现。
+if (typeof window !== 'undefined' && typeof window.Element.prototype.scrollIntoView !== 'function') {
+  window.Element.prototype.scrollIntoView = function scrollIntoView() {}
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import {
   decorateSuggestions,
+  selectUserTier,
   filterCommandSuggestions,
   parseSlashCommand,
   resolveFallbackCommands,
@@ -45,6 +46,16 @@ describe('commandRegistry', () => {
 
   // agent 上报命令时输入栏只用上报项（不上报则用注册表 fallback），故检索词与分层档
   // 必须按命令名并回，否则那条分支上中文搜不到（#327）、分层也落不了地（#329）。
+  it('默认层筛选只留 user 级（internal 由「全部」控件负责展开）', () => {
+    const rows = [
+      { cmd: '/new', args: '', info: '新会话', tier: 'user' as const },
+      { cmd: '/browser.agent-click', args: '', info: '内部命令', tier: 'internal' as const },
+      // 未声明档位的来源（旧载荷/手写建议项）按非 internal 处理，保持既有可见性不变
+      { cmd: '/legacy', args: '', info: '未声明档位' },
+    ]
+    expect(selectUserTier(rows).map(row => row.cmd)).toEqual(['/new', '/legacy'])
+  })
+
   it('把宿主检索词与可见性档按名并回建议项', () => {
     const attached = decorateSuggestions([
       { cmd: '/new', args: '', info: '新会话' },
