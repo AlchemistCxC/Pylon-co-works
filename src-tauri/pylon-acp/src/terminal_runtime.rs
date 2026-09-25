@@ -203,6 +203,8 @@ impl TerminalRegistry {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        // #348 A3：terminal 输出走管道，不在用户桌面开控制台窗口。
+        super::process::hide_console_window(&mut command);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }

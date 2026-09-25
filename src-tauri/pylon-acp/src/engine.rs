@@ -1,6 +1,6 @@
 //! A1a：官方 SDK 连接引擎（D1=①）。
 //!
-//! 本模块只承载**协议栈接缝**：把 `agent-client-protocol 2.1.0` 的连接、字节桥与
+//! 本模块只承载**协议栈接缝**：把 `agent-client-protocol 2.2.0` 的连接、字节桥与
 //! wire 观测接到 Pylon 既有的 `AcpWireHub` 上。Pylon 的业务纪律（canonical 单一
 //! 写者、owner/generation 校验、commit-before-publish）仍由 dispatcher/session 层
 //! 负责，本模块不复制第二套状态。
@@ -39,7 +39,10 @@ use std::future::Future;
 pub const BROADCAST_CAP: usize = 256;
 /// 单消费者 Kernel inbox 容量（慢 dispatcher 施加背压而非丢帧）。
 pub const NOTIFICATION_CHAN_CAP: usize = 4096;
-/// 写通道/取消等待超时（秒）——agent 忙碌不读 stdin 时防止无限挂起。
+/// 取消等待超时（秒）——只包住 `wait_prompt_with_recovery` 判死截断后
+/// cancel 请求的队列等待，**不保护物理 stdin 写**（SDK Channel 无界、物理写
+/// 无超时；#348 A1 词表勘误：原注释「agent 忙碌不读 stdin 时防止无限挂起」
+/// 夸大了保护范围）。
 pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
 /// #99：控制帧 inbox 容量（agent 请求/崩溃广播走优先级通道，不被通知洪泛饿死）。
 pub const CONTROL_INBOX_CAP: usize = 64;
@@ -138,6 +141,37 @@ pub enum PublishOutcome {
     /// 下游通道已关闭（消费端消失）：帧无法投递，计入 `closed_dropped`
     /// 遥测。连接终止本身由既有 crash/shutdown 路径显式收敛（评审 E7）。
     DroppedClosed,
+}
+
+/// #348 A1：崩溃控制帧的唯一构造点——`reason` 走 [`CrashReason`] 稳定词表，
+/// 禁止散落手拼 JSON（`terminate_overloaded` 与子侧传输收尾共用）。
+fn crash_control_frame(reason: CrashReason) -> ClassifiedMessage {
+    ClassifiedMessage::live(RawMessage {
+        id: None,
+        kind: super::AcpKind::Crashed,
+        method: Some(super::NOTIF_AGENT_CRASHED.to_string()),
+        result: None,
+        params: Some(serde_json::json!({
+            "reason": reason.as_str()
+        })),
+        error: None,
+    })
+}
+
+/// #348 A1：子侧传输 future 的 Err 分类——[`CrashReason::WriterFailed`]
+/// 的唯一产生点。与官方 SDK 2.2.0 实现核对：**干净关闭时传输 future 返回
+/// `Ok`**（`try_join!` 两个传输 actor 正常收尾），根本不进入 Err 分支——
+/// 防误报的第一道防线是「Ok 不发帧」。SDK 的 `incoming_transport_closed`
+/// 标记只为**挂起请求**合成（SentRequest 侧收尾），不会作为传输 future 的
+/// Err 出现，故 `None` 臂是防御性代码（生产输入不可达，保留以对冲 SDK 行为
+/// 变化）；`Some` 臂覆盖非 EOF 的物理传输错误（stdin 写 EPIPE / stdout 读
+/// IO 错误）。
+fn transport_failure_reason(error: &agent_client_protocol::Error) -> Option<CrashReason> {
+    if agent_client_protocol::is_incoming_transport_closed(error) {
+        None
+    } else {
+        Some(CrashReason::WriterFailed)
+    }
 }
 
 impl InboundRelay {
@@ -245,17 +279,7 @@ impl InboundRelay {
             spilled_total = self.telemetry.spilled_total.load(Ordering::Acquire),
             "acp inbound relay overloaded; terminating connection with explicit gap"
         );
-        let crash = ClassifiedMessage::live(RawMessage {
-            id: None,
-            kind: super::AcpKind::Crashed,
-            method: Some(super::NOTIF_AGENT_CRASHED.to_string()),
-            result: None,
-            params: Some(serde_json::json!({
-                "reason": CrashReason::Overloaded.as_str()
-            })),
-            error: None,
-        });
-        let _ = self.relay(crash);
+        let _ = self.relay(crash_control_frame(CrashReason::Overloaded));
         self.crashed.store(true, Ordering::Release);
         let _ = self.crashed_watch.send(true);
         let _ = self.shutdown.send(true);
@@ -608,6 +632,8 @@ pub async fn spawn_agent_child(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // #348 A3：Windows 上隐藏 agent 控制台窗口（与 preflight 探针同纪律）。
+    super::process::hide_console_window(&mut cmd);
     super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
         pylon_core::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
@@ -1017,15 +1043,6 @@ pub fn spawn_sdk_engine(
     tokio::spawn(async move {
         let _ = run_wire_bridge(sdk_bridge_side, child_channel, bridge_wire).await;
     });
-    let child_crashed = crashed.clone();
-    let child_crashed_watch = crashed_watch.clone();
-    tokio::spawn(async move {
-        let _ = child_future.await;
-        // 子侧传输结束 = 子进程退出（含 EOF）：等价 legacy reader 的崩溃信号。
-        // 不依赖 SDK 的 EOF 语义（`incoming_closed` 在洪泛/批量场景未必及时完成）。
-        child_crashed.store(true, Ordering::Release);
-        let _ = child_crashed_watch.send(true);
-    });
 
     let (updates_tx, updates_rx) = mpsc::channel(super::NOTIFICATION_CHAN_CAP);
     // #99：控制帧通道（agent 请求/崩溃广播走优先级 lane）+ 可靠中继。
@@ -1052,6 +1069,40 @@ pub fn spawn_sdk_engine(
         crashed: crashed.clone(),
         crashed_watch: crashed_watch.clone(),
     };
+
+    // 子侧传输收尾（#348 A1：区分正常关闭与物理传输失败）。干净关闭 =
+    // child_future 返回 `Ok`——不进 Err 分支、不发崩溃控制帧；crashed 信号
+    // 照常置位：子进程退出（含 EOF）是权威崩溃信号，等价 legacy reader，
+    // 不依赖 SDK 的 EOF 语义（`incoming_closed` 在洪泛/批量场景未必及时完成）。
+    // Err 时非 SDK 关闭标记的由 [`transport_failure_reason`] 判为
+    // `WriterFailed`，经既有 InboundRelay 控制帧通道发崩溃帧补全终因。已收敛
+    // 的连接（过载等已发过崩溃帧）不再竞争修正 reason（watch 缺省
+    // `stdout_closed` / 既有控制帧 last-write-wins 不被覆盖）。
+    let child_crashed = crashed.clone();
+    let child_crashed_watch = crashed_watch.clone();
+    let child_end_relay = relay.clone();
+    tokio::spawn(async move {
+        let outcome = child_future.await;
+        if let Err(error) = &outcome {
+            if !child_crashed.load(Ordering::Acquire) {
+                match transport_failure_reason(error) {
+                    Some(reason) => {
+                        tracing::warn!(
+                            error = %error,
+                            reason = reason.as_str(),
+                            "acp child transport failed; broadcasting crash control frame"
+                        );
+                        let _ = child_end_relay.relay(crash_control_frame(reason));
+                    }
+                    None => {
+                        tracing::debug!(error = %error, "acp child transport closed cleanly");
+                    }
+                }
+            }
+        }
+        child_crashed.store(true, Ordering::Release);
+        let _ = child_crashed_watch.send(true);
+    });
 
     let join = spawn_sdk_client(
         SdkEngineConfig {
@@ -1110,6 +1161,58 @@ mod tests {
                 8,
             ),
         }
+    }
+
+    /// #348 A1：分类器对 SDK 谓词的委托——`is_incoming_transport_closed`
+    /// 标记不算传输失败，其余 Err 一律判 `WriterFailed`。
+    /// 注意：手工构造标记错误喂分类器，锁定的是**委托关系**，不是生产输入
+    /// （SDK 只为挂起请求合成该标记，不作为传输 future 的 Err 出现）；生产
+    /// 路径的干净关闭走「Ok 不发帧」，由下方真实传输 future 用例覆盖。
+    #[test]
+    fn transport_failure_reason_delegates_to_the_sdk_closed_marker_predicate() {
+        let closed_marker = agent_client_protocol::Error::internal_error()
+            .data(serde_json::json!({"reason": "incoming_transport_closed"}));
+        assert_eq!(transport_failure_reason(&closed_marker), None);
+
+        let physical_error = agent_client_protocol::Error::internal_error();
+        assert_eq!(
+            transport_failure_reason(&physical_error),
+            Some(CrashReason::WriterFailed)
+        );
+    }
+
+    /// #348 A1（真实路径）：干净关闭 = 传输 future 返回 `Ok`（SDK `try_join!`
+    /// 两个传输 actor 正常收尾）。生产收尾任务靠「Ok 不发帧」防误报——
+    /// `transport_failure_reason` 只在 Err 时出场，本用例不构造不可达的
+    /// 带标记 Err，而是断言真实传输 future 在干净 EOF 下的 Ok 收敛。
+    #[tokio::test]
+    async fn clean_child_transport_close_completes_ok_without_failure() {
+        let (agent_io, client_io) = tokio::io::duplex(64 * 1024);
+        let (client_read, client_write) = tokio::io::split(client_io);
+        let transport = byte_streams(client_read, client_write);
+        let (child_channel, child_future) =
+            <_ as ConnectTo<Client>>::into_channel_and_future(transport);
+        drop(child_channel); // 出站侧无帧：outgoing actor 输入排空即完成
+        drop(agent_io); // 对端整体关闭 = 入站侧干净 EOF（整体 drop 才会传播
+                        // EOF；split 半关闭不触及底层管道状态）
+        let outcome = tokio::time::timeout(Duration::from_secs(5), child_future)
+            .await
+            .expect("干净关闭必须收敛，不得挂起");
+        assert!(
+            outcome.is_ok(),
+            "干净关闭必须是 Ok（try_join 两 actor 正常收尾），实际 {outcome:?}"
+        );
+    }
+
+    /// #348 A1：崩溃控制帧的唯一构造——reason 必须是稳定词表 wire code。
+    #[test]
+    fn crash_control_frame_carries_stable_reason_code() {
+        let frame = crash_control_frame(CrashReason::WriterFailed);
+        assert_eq!(frame.raw.kind, crate::AcpKind::Crashed);
+        assert_eq!(
+            frame.raw.params,
+            Some(serde_json::json!({"reason": "writer_failed"}))
+        );
     }
 
     /// A1a 步骤 2/4 证据：SDK 客户端连上字节流并**非类型化**收到 agent 通知。
@@ -2067,17 +2170,25 @@ fn smallest_nonzero(durations: [std::time::Duration; 3]) -> std::time::Duration 
 }
 
 /// ISSUE-17 W1（LR2-WI06）：ACP crash 原因稳定枚举（wire snake_case 字符串）。
-/// 禁止用错误文本正则区分 crash 类型（ISSUE-17 禁止事项）——writer 失败/超时/EOF
+/// 禁止用错误文本正则区分 crash 类型（ISSUE-17 禁止事项）——writer 失败/EOF
 /// 必须用稳定 code 区分，供 dispatcher 消费 reason 生成用户可读文案并保留诊断字段。
+/// 词表纪律（#348 A1）：每个变体必须有可指出的产生点，不留无产生者的死变体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrashReason {
-    /// stdin 写失败（EPIPE/JoinError 等）。
+    /// 物理传输失败（stdin 写 EPIPE / stdout 读 IO 错误）。产生点 =
+    /// `spawn_sdk_engine` 子侧传输收尾的 [`transport_failure_reason`] 分类。
     WriterFailed,
-    /// stdin 写超时（agent 存活但不读 stdin）。
-    WriterTimeout,
     /// stdout EOF（agent 进程退出/管道关闭）。
     StdoutClosed,
     /// pending 分片锁中毒（保守收敛，fail-closed）。
+    ///
+    /// 豁免保留（#348 返工裁定）：本仓**无产生点**——release 为
+    /// `panic = "abort"`，锁中毒即进程终止，本变体描述的「保守收敛」在
+    /// release 下不可达。未按词表纪律摘除，因前端错误码词表
+    /// （`src/app/errorCodeExplanations.ts` 的 `pending_lock_poisoned` 词条）
+    /// 已承载该 code 的文案，前端域属另一在途批次；反向映射
+    /// `crash_reason_from_code` 对远端传入的该 code 仍按词表放行。
+    /// 前端词条收编或删除后应一并摘除本变体。
     PendingLockPoisoned,
     /// #99：入站投递过载（inbox+spill 均满，显式 gap 终止连接）。
     Overloaded,
@@ -2087,7 +2198,6 @@ impl CrashReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             CrashReason::WriterFailed => "writer_failed",
-            CrashReason::WriterTimeout => "writer_timeout",
             CrashReason::StdoutClosed => "stdout_closed",
             CrashReason::PendingLockPoisoned => "pending_lock_poisoned",
             CrashReason::Overloaded => "overloaded",

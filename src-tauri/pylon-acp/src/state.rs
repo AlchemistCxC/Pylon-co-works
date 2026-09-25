@@ -257,6 +257,11 @@ impl AcpSessionState {
                 self.mode = Some(mode.clone());
                 Some(AcpStateDelta::Mode { mode })
             }
+            // #348 A4：显式有臂——commands 清单由 dispatcher 投影进 SessionInfo
+            // 快照（`session.commands_snapshot`），live reducer 有意不复制第二份
+            // 投影；但必须显式吞掉而非落 `Unknown`（未知变体证据面只留给真正的
+            // 未来变体）。
+            "available_commands_update" => None,
             "session_info_update" | "config_option_update" => {
                 let model = update
                     .get("models")
@@ -379,6 +384,21 @@ mod tests {
             error: None,
         };
         assert!(state.apply(&response).is_empty());
+    }
+
+    /// #348 A4：`available_commands_update` 显式不投影（commands 归 dispatcher
+    /// 的 SessionInfo 快照），但**不得**落 `Unknown`。
+    #[test]
+    fn available_commands_update_is_intentionally_not_projected() {
+        let mut state = AcpSessionState::default();
+        let deltas = state.apply(&update(serde_json::json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [{"name": "compact", "description": "Compact context"}]
+        })));
+        assert!(
+            deltas.is_empty(),
+            "commands 快照归 dispatcher 投影，reducer 不得产出 Unknown"
+        );
     }
 
     #[test]

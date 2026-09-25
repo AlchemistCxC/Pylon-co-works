@@ -15,6 +15,15 @@
 use crate::error::{AcpError, AgentConnectFailure};
 use pylon_core::agent_config::{AcpProtocolConfig, McpServersMode};
 
+/// #348 A6：Pylon 接受的 ACP `protocolVersion` 白名单（fail-closed）。
+///
+/// Pylon 只有 v1 wire 实现（代码 100% 走 `agent_client_protocol_schema::v1`，
+/// 未启用 `unstable_protocol_v2`）；官方将 V2 定性为 unstable draft 且必须
+/// 显式选择。`validate_protocol_version` 只验「agent 回显 == 请求」，拦不住
+/// 「请求 2、agent 回 2」的互相确认；本集合在计划层拦住「发出 Pylon 无实现
+/// 的版本号」。将来启用 v2 时只扩这一处。
+const SUPPORTED_PROTOCOL_VERSIONS: &[u16] = &[1];
+
 /// initialize 握手计划：三段参数的不可变成形。
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitializePlan {
@@ -45,6 +54,15 @@ pub fn build_initialize_plan(
     let mut client_capabilities = protocol
         .initialize_caps_for_provider(provider)
         .map_err(invalid)?;
+    // #348 A6：protocolVersion 接受集合断言——集合外的用户配置当场失败，
+    // 不再静默发出（稳定码沿用 `agent_client_capabilities_invalid`，不扩词表）。
+    let requested_protocol_version = protocol.protocol_version();
+    if !SUPPORTED_PROTOCOL_VERSIONS.contains(&requested_protocol_version) {
+        return Err(invalid(format!(
+            "acp.protocol_version = {requested_protocol_version} 不在 Pylon 支持集合 \
+             {SUPPORTED_PROTOCOL_VERSIONS:?} 内（Pylon 当前仅有 v1 wire 实现）"
+        )));
+    }
     // 显式 YAML 覆盖此前不经任何形状校验：`initialize_caps: 42` 会把标量
     // clientCapabilities 发上 wire。顶层必须是 object（B2 fail-closed）。
     if !client_capabilities.is_object() {
@@ -241,6 +259,36 @@ mod tests {
             panic!("非法 caps 必须映射为 Connect 失败");
         };
         assert_eq!(failure.code, "agent_client_capabilities_invalid");
+    }
+
+    /// #348 A6：protocolVersion 接受集合 fail-closed——集合外的用户配置当场
+    /// 拒绝（此前静默发出 Pylon 无实现的版本号）；集合内与缺省照常放行。
+    #[test]
+    fn initialize_plan_rejects_unsupported_protocol_version() {
+        let mut config = protocol();
+        config.protocol_version = Some(2);
+        let AcpError::Connect(failure) =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap_err()
+        else {
+            panic!("集合外 protocol_version 必须映射为 Connect 失败");
+        };
+        assert_eq!(failure.code, "agent_client_capabilities_invalid");
+
+        config.protocol_version = Some(1);
+        assert!(build_initialize_plan(
+            &config,
+            None,
+            crate::host_tools::HostToolsPolicy::default()
+        )
+        .is_ok());
+        config.protocol_version = None;
+        assert!(build_initialize_plan(
+            &config,
+            None,
+            crate::host_tools::HostToolsPolicy::default()
+        )
+        .is_ok());
     }
 
     fn registry(capabilities: serde_json::Value) -> crate::CapabilityRegistry {

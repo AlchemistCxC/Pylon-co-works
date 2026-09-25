@@ -22,17 +22,17 @@
 
 | 候选 | 版本 | 依赖的 schema | 结论 |
 | --- | --- | --- | --- |
-| 官方 `agent-client-protocol` | `2.1.0`（pin schema `1.7.0`） | `agent-client-protocol-schema 1.7.0` | **采用**（D1=①） |
+| 官方 `agent-client-protocol` | 声明 `^2.2.0`（lock 实测 2.2.0；A0 定版时为 `2.1.0` / pin schema `1.7.0`） | `agent-client-protocol-schema 1.9.1` | **采用**（D1=①） |
 | codeg `sacp` / `sacp-tokio` | `11.0.0`（crates.io 最新，2026-03-16） | `agent-client-protocol-schema ^0.11.0` | **不采用** |
 | Pylon 现状（手写 ACP） | — | `agent-client-protocol-schema 1.4` | 升级到 1.7（5 处引用：`acp/error.rs`、`acp/protocol.rs`、`mcp.rs`、`permission.rs`×2） |
 
-不采用 sacp 的依据：`sacp 11.0.0` 依赖 `agent-client-protocol-schema ^0.11.0`，与 Pylon 现有 1.4.0 及官方 2.1.0 所 pin 的 1.7.0 不同代；codeg 的 `vendor/sacp-tokio` 是实质 fork（`vendor/sacp-tokio/src/acp_agent.rs` 567→1405 行，新增 `kill_tree` 与 `with_current_dir/on_spawn/on_exit`），不随 crates.io 维护。
+不采用 sacp 的依据（A0 时点事实）：`sacp 11.0.0` 依赖 `agent-client-protocol-schema ^0.11.0`，与 Pylon 现有 1.4.0 及官方 A0 定版 2.1.0 所 pin 的 1.7.0 不同代（当前 lock 已随 caret 漂移至 2.2.0 / 1.9.1，见上表）；codeg 的 `vendor/sacp-tokio` 是实质 fork（`vendor/sacp-tokio/src/acp_agent.rs` 567→1405 行，新增 `kill_tree` 与 `with_current_dir/on_spawn/on_exit`），不随 crates.io 维护。
 
 配套约束：
 
 - **不可混用** `agent-client-protocol-tokio`（最新 0.11.1 依赖 `agent-client-protocol ^0.11.1`）；Pylon 自行用 `tokio_util::compat` 桥接 `ByteStreams`。
-- A7-M 使用 `agent-client-protocol-rmcp 3.1.0`（依赖 `agent-client-protocol ^2.1.0` + `rmcp ^2.1.0`）；`rmcp` 最新为 3.2.0，本工程固定 2.1.x，不得引入第二个 rmcp major。
-- schema `1.7.0`：`session_resume` 为标准方法；`session_fork` 在 `unstable_session_fork` feature 之后；`session_set_model` 仍是 Hermes 私有扩展，不得当作标准方法。
+- A7-M 未落地，当前依赖树不含 rmcp（`Cargo.lock` 无 rmcp 条目）。原 A0 时点约束（`agent-client-protocol-rmcp 3.1.0` 依赖 `agent-client-protocol ^2.1.0` + `rmcp ^2.1.0`，不得引入第二个 rmcp major）在将来真正落地 A7-M 时再评估。
+- schema `1.9.1`：`session_resume` 为标准方法；`session_fork` 在 `unstable_session_fork` feature 之后；`session_set_model` 仍是 Hermes 私有扩展，不得当作标准方法。1.7→1.9 的实质 delta：session notices / compaction 为 feature 门控新增、`tool_call_name` 转正为标准字段——排查 wire 形状时勿再按 1.7 口径。
 
 ## 3. 迁入文件登记（机器可读）
 
@@ -157,7 +157,7 @@
 
 - 来源：锁定 commit `b2eec98ce8d082ad48803918dd9a21ab08d1d3d4`，`src-tauri/src/acp/terminal_runtime.rs` 的 `enforce_output_limit`、`decode_available_utf8`、`default_platform_shell`、`shell_wrapped_command`、`map_exit_status` 及其限值常量。
 - 目标：`src-tauri/src/acp/terminal_policy.rs`。迁入纯输出预算、增量 UTF-8 解码、shell family/wrapper 参数、平台默认 shell 和 typed `TerminalExitStatus`；Pylon 保留既有 `ManagedChild` 作为进程所有者，未复制 codeg `TerminalRuntime`/AppState/协议 handler。
-- 适配：`TerminalExitStatus` 字段为 `exitCode`/`signal`；核验 schema 1.7 的 `schema::v1::TerminalExitStatus` 已存在，后续 responder 应直接映射到官方类型，不再新增第二个 wire DTO。
+- 适配：`TerminalExitStatus` 字段为 `exitCode`/`signal`；核验 schema 1.9.1 的 `schema::v1::TerminalExitStatus` 已存在，后续 responder 应直接映射到官方类型，不再新增第二个 wire DTO。
 - 证据：terminal policy 定向测试覆盖 UTF-8 partial chunk、字节截断、shell 参数、默认 shell、DTO 序列化；未将纯策略测试误标为完整 terminal runtime 验收。
 
 ### A4 terminal registry seam

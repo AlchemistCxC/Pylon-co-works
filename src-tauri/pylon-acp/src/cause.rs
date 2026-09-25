@@ -49,8 +49,11 @@ pub fn connect_failure_cause(failure: &AgentConnectFailure) -> DiagnosticCause {
 /// 运行时退出 → 统一 cause。code 词表 = `CrashReason::as_str` 的封闭集。
 pub fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
     let summary = match reason {
-        CrashReason::WriterFailed => "Agent 进程 stdin 写入失败，连接已按崩溃收敛",
-        CrashReason::WriterTimeout => "Agent 进程长时间不读 stdin（写超时），连接已按崩溃收敛",
+        // 覆盖双向物理 IO 错误（engine.rs transport_failure_reason：stdin 写
+        // EPIPE 与 stdout 读 IO 错误都归本变体），措辞不写死「写入」。
+        CrashReason::WriterFailed => {
+            "Agent 进程管道通信失败（stdin 写 / stdout 读物理 IO 错误），连接已按崩溃收敛"
+        }
         CrashReason::StdoutClosed => "Agent 进程已退出（stdout 关闭）",
         CrashReason::PendingLockPoisoned => "内部 pending 状态锁中毒，连接已按崩溃收敛",
         CrashReason::Overloaded => "Agent 入站事件速率超过背压上限，连接已按过载收敛（显式 gap）",
@@ -68,7 +71,6 @@ pub fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
 pub fn crash_reason_from_code(code: &str) -> Option<CrashReason> {
     match code {
         "writer_failed" => Some(CrashReason::WriterFailed),
-        "writer_timeout" => Some(CrashReason::WriterTimeout),
         "stdout_closed" => Some(CrashReason::StdoutClosed),
         "pending_lock_poisoned" => Some(CrashReason::PendingLockPoisoned),
         "overloaded" => Some(CrashReason::Overloaded),
@@ -111,11 +113,11 @@ mod tests {
     }
 
     /// 崩溃 cause 的 code 词表 = CrashReason 的封闭集，且全部 fail 级。
+    /// #348 A1：`writer_timeout` 死变体已裁除（无写超时语义即无产生点）。
     #[test]
     fn crash_cause_uses_the_crash_reason_vocabulary() {
         let codes: Vec<String> = [
             CrashReason::WriterFailed,
-            CrashReason::WriterTimeout,
             CrashReason::StdoutClosed,
             CrashReason::PendingLockPoisoned,
             CrashReason::Overloaded,
@@ -127,7 +129,6 @@ mod tests {
             codes,
             vec![
                 "writer_failed",
-                "writer_timeout",
                 "stdout_closed",
                 "pending_lock_poisoned",
                 "overloaded",
@@ -136,7 +137,6 @@ mod tests {
         );
         for reason in [
             CrashReason::WriterFailed,
-            CrashReason::WriterTimeout,
             CrashReason::StdoutClosed,
             CrashReason::PendingLockPoisoned,
             CrashReason::Overloaded,

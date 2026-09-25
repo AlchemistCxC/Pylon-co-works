@@ -1699,6 +1699,9 @@ async fn fake_acp_initialize_defaults_to_unified_capabilities() {
 }
 
 /// G1-03：声明 protocol_version/client_info 后按声明进 wire（覆盖路径）。
+/// #348 A6 白名单（`SUPPORTED_PROTOCOL_VERSIONS = &[1]`）落地后，版本这一半
+/// 的声明值只能取 1——与缺省同值，**不再具备区分度**；本用例真正区分缺省的
+/// 是 client_info（9.9.9）。集合外值（如 2）的拒绝见下一条 connect 级用例。
 #[tokio::test]
 async fn custom_protocol_version_and_client_info_reach_wire() {
     let trace_path =
@@ -1726,7 +1729,7 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
         hermes_profile: None,
         acp_args: Vec::new(),
         acp: Some(crate::agent_config::AcpProtocolConfig {
-            protocol_version: Some(2),
+            protocol_version: Some(1),
             client_info: Some(serde_json::json!({"name": "Pylon", "version": "9.9.9"})),
             ..Default::default()
         }),
@@ -1745,9 +1748,10 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
             value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
         })
         .expect("initialize must be traced");
+    // 与缺省同值（白名单内仅 1），此断言只守「声明值原样进 wire」的通路。
     assert_eq!(
         request["params"]["protocolVersion"],
-        serde_json::json!(2),
+        serde_json::json!(1),
         "声明的 protocol_version 必须进 wire"
     );
     assert_eq!(
@@ -1760,6 +1764,76 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
         request["params"]["clientCapabilities"]["tokenStats"],
         serde_json::json!(true)
     );
+}
+
+/// #348 A6：集合外 protocol_version（2）在真实 connect 级 fail-closed——
+/// `build_initialize_plan` 在发送 initialize **之前**拒绝，错误码为
+/// `agent_client_capabilities_invalid`，且该次运行的 trace 里不出现
+/// `initialize` 行（声明值未落 wire）。
+#[tokio::test]
+async fn unsupported_protocol_version_fails_connect_before_wire() {
+    let trace_path =
+        std::env::temp_dir().join(format!("pylon-acp-pv2-reject-{}.jsonl", std::process::id()));
+    let agent = crate::agent_config::AgentDef {
+        name: "fake-acp-pv2-reject".to_string(),
+        provider: None,
+        transport: "subprocess".to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
+        args: vec![
+            "--scenario".to_string(),
+            "trace-all".to_string(),
+            "--trace-file".to_string(),
+            trace_path.to_string_lossy().into_owned(),
+            "--trace-mode".to_string(),
+            "all".to_string(),
+        ],
+        cwd: None,
+        env: HashMap::new(),
+        default: false,
+        set_model_api: false,
+        model: None,
+        hermes_profile: None,
+        acp_args: Vec::new(),
+        acp: Some(crate::agent_config::AcpProtocolConfig {
+            protocol_version: Some(2),
+            ..Default::default()
+        }),
+    };
+    let error = AcpClient::connect_with_logs(&agent, None)
+        .await
+        .err()
+        .expect("protocol_version 2 must fail connect");
+    let AcpError::Connect(failure) = error else {
+        panic!("expected typed connect failure for protocol_version 2")
+    };
+    assert_eq!(failure.code, "agent_client_capabilities_invalid");
+    assert!(!failure.retryable);
+    // fake agent 启动即创建 trace 文件；给子进程留出落盘时间。
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let initialize_reached_wire = std::fs::read_to_string(&trace_path)
+        .map(|trace| {
+            trace.lines().any(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("method")
+                            .and_then(|m| m.as_str())
+                            .map(str::to_string)
+                    })
+                    .as_deref()
+                    == Some(METHOD_INITIALIZE)
+            })
+        })
+        // 文件不存在同样证明 initialize 未发出（fake agent 未收到任何帧）。
+        .unwrap_or(false);
+    assert!(
+        !initialize_reached_wire,
+        "被拒绝的 initialize 不得出现在 wire trace 中"
+    );
+    std::fs::remove_file(&trace_path).ok();
 }
 
 /// 方案 G 演进：hermes_profile 绝对路径 → 子进程 HERMES_HOME 注入。
