@@ -31,7 +31,8 @@ describe('canonicalEventTypeFor（wire → canonical 映射）', () => {
     ['usage_update', undefined, 'usage.updated'],
     ['plan', undefined, 'plan.replaced'],
     ['current_mode_update', undefined, 'session.mode-updated'],
-    ['session_info_update', undefined, 'session.model-updated'],
+    // #315 P2：session_info_update 口径按 workbench 语义收敛（mode 是包内必有事实）。
+    ['session_info_update', undefined, 'session.mode-updated'],
     ['config_option_update', undefined, 'session.config-updated'],
     ['available_commands_update', undefined, 'session.commands-updated'],
   ])('%s + %s → %s', (sessionUpdate, status, expected) => {

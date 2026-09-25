@@ -176,7 +176,12 @@ mod tests {
             "_meta": {
                 "peri.tokenStats": true,
                 "peri.skillNames": true,
-                "peri.replay": true
+                "peri.replay": true,
+                // #315：Peri 扩展通知通道（peri/agent_event 等 Category ③/⑤）。
+                "peri.agentEvent": true,
+                "peri.agentEventDone": true,
+                "peri.unstableEvent": true,
+                "peri.prediction": true
             }
         });
         assert_eq!(
@@ -202,6 +207,10 @@ mod tests {
                     "peri.tokenStats": true,
                     "peri.skillNames": true,
                     "peri.replay": true,
+                    "peri.agentEvent": true,
+                    "peri.agentEventDone": true,
+                    "peri.unstableEvent": true,
+                    "peri.prediction": true,
                     "subagent-transcript": true,
                     "jetbrains.air": {
                         "version": 1,

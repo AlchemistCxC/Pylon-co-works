@@ -440,13 +440,23 @@ where
 
 /// D1 统一默认 clientCapabilities（现值：tokenStats + _meta.peri.*，Hermes 忽略无害；
 /// `_meta.peri.*` 是 Peri wire 契约，不得从默认 caps 移除——07 文档 §4.3）。
+///
+/// #315：补声明 `agentEvent/agentEventDone/unstableEvent/prediction`——peri 侧
+/// `PeriCaps`（peri-acp-types/src/peri_caps.rs）据此开启 `peri/agent_event`
+/// 等 Category ③/⑤ 通知通道；未声明的 `peri.hitlPending`（上游无发送者，通道
+/// 休眠）、`peri.contextUsage`（无独立门控点）、`peri.sourceAgentId`（event_sink
+/// 已无条件注入 `_peri.sourceAgentId`，不依赖声明）维持缺省 false。
 pub fn default_initialize_caps() -> serde_json::Value {
     serde_json::json!({
         "tokenStats": true,
         "_meta": {
             "peri.tokenStats": true,
             "peri.skillNames": true,
-            "peri.replay": true
+            "peri.replay": true,
+            "peri.agentEvent": true,
+            "peri.agentEventDone": true,
+            "peri.unstableEvent": true,
+            "peri.prediction": true
         }
     })
 }
