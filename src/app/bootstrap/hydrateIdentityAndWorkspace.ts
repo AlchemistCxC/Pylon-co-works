@@ -1,5 +1,5 @@
-import type { ProfilePersistenceState } from '../../profilePersistence.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import type { ProfilePersistenceState } from '../../domains/identity/profilePersistence.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { markLegacyMigrationComplete } from '../../infrastructure/persistence/legacyKeyMigration.ts'

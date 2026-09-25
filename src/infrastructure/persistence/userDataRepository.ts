@@ -16,8 +16,8 @@
  *
  * browser 模式不经过本模块（identityStore 直接同步读写 localStorage，读路径不变）。
  */
-import { IS_TAURI } from './infrastructure/tauri/env'
-import { wireErrorParts } from './infrastructure/tauri/errorPayload'
+import { IS_TAURI } from '../tauri/env'
+import { wireErrorParts } from '../tauri/errorPayload'
 
 export type UserDataKey = 'profiles' | 'sessions'
 

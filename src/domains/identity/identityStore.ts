@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import { CORE_COMMAND_SET_PLUGIN_ID } from './contracts/agentCommandSet.ts'
+import { CORE_COMMAND_SET_PLUGIN_ID } from '../../contracts/agentCommandSet.ts'
 import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION, type LegacySession, type OwnerHints } from './sessionPersistence'
 import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
-import { useWorkspaceStore } from './workspaceStore'
-import { useRuntimeStore } from './runtimeStore'
-import { clearSessionUiState } from './components/chat/sessionUiState'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { resolveUnresolvedSessionTransaction } from './app/bootstrap/resolveUnresolvedSessionTransaction'
+import { useWorkspaceStore } from '../../workspaceStore'
+import { useRuntimeStore } from '../../runtimeStore'
+import { clearSessionUiState } from '../../components/chat/sessionUiState'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
 import {
   canMutateIdentityDomain,
   hasBackend,
@@ -14,24 +14,24 @@ import {
   persistMergingUnresolved,
   updateIdentityCacheMeta,
 } from './identityPersistence.ts'
-import { createIdentityBackendSync, userDataRepository } from './identityBackendSync.ts'
+import { createIdentityBackendSync, userDataRepository } from '../../infrastructure/persistence/identityBackendSync.ts'
 import {
   mergePluginNamespace,
   type PluginDataPlane,
   type PluginNamespaceRoot,
-} from './domains/pluginData/pluginNamespace.ts'
-import { registerPluginSessionDataPort } from './plugin-runtime/sessionData/sessionDataPort.ts'
-import { getSessionCreationRegistry } from './plugin-runtime/runtimeServices.ts'
-import { compileSessionCreationSnapshot } from './plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
-import type { SessionCreationSnapshot } from './plugin-runtime/session-creation/sessionCreationTypes.ts'
-import type { AgentEntry } from './domains/agent/agentEntry.ts'
+} from '../pluginData/pluginNamespace.ts'
+import { registerPluginSessionDataPort } from '../../plugin-runtime/sessionData/sessionDataPort.ts'
+import { getSessionCreationRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { compileSessionCreationSnapshot } from '../../plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
+import type { SessionCreationSnapshot } from '../../plugin-runtime/session-creation/sessionCreationTypes.ts'
+import type { AgentEntry } from '../agent/agentEntry.ts'
 
-export type { AgentEntry } from './domains/agent/agentEntry.ts'
+export type { AgentEntry } from '../agent/agentEntry.ts'
 
 // #228 批次D：持久化与后端同步切至独立模块；以下 re-export 保持既有公开 import 面
 // （消费方仍从 identityStore 取这些名字，零改动）。
 export { IDENTITY_CACHE_META_KEY } from './identityPersistence.ts'
-export { flushIdentityBackend, refreshSessionsBackend } from './identityBackendSync.ts'
+export { flushIdentityBackend, refreshSessionsBackend } from '../../infrastructure/persistence/identityBackendSync.ts'
 
 /**
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。

@@ -4,7 +4,7 @@
  * 只提供纯 builder；真实桌面端永远不会加载这些会话。场景刻意覆盖长标题、空态、
  * 多语言、长上下文、工具状态矩阵、错误恢复、插件开发和窄窗口文案。
  */
-import type { Session } from '../identityStore.ts'
+import type { Session } from '../domains/identity/identityStore.ts'
 import type { Message } from '../components/chat/messageTypes.ts'
 import type { Workspace } from '../workspaceEntities.ts'
 import type { InstalledPluginPackage } from '../infrastructure/plugins/pluginPackageClient.ts'

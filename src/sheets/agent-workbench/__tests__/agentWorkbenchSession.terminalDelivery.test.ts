@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import type { CanonicalTerminalSignal } from '../../../infrastructure/events/canonicalEventFeed.ts'
 
 /**

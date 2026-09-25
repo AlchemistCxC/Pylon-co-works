@@ -23,7 +23,7 @@ import {
   loadRetentionPolicyPayload,
   overwriteRetentionPolicy,
   syncImportedRetentionPolicy,
-} from '../retentionPolicyRepository'
+} from '../infrastructure/persistence/retentionPolicyRepository'
 
 let fakeInvoke: FakeInvoke
 

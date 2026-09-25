@@ -17,7 +17,7 @@
  */
 
 import { IS_TAURI } from '../infrastructure/tauri/env'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useRuntimeStore } from '../runtimeStore'
 import {

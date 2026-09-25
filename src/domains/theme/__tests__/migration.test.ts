@@ -4,7 +4,7 @@ import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.t
 import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
-import { PROFILE_SCHEMA_VERSION } from '../../../profilePersistence.ts'
+import { PROFILE_SCHEMA_VERSION } from '../../identity/profilePersistence.ts'
 import { readFileSync } from 'node:fs'
 import { CC_LAYOUT_SCHEMA_VERSION } from '../../../ccLayoutState.ts'
 

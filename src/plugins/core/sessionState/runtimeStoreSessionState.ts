@@ -21,7 +21,7 @@ import {
   type SessionResponseObject,
   type SessionUpdate,
 } from '../../../infrastructure/acp/chatContracts.ts'
-import type { AgentContext } from '../../../agentContext.ts'
+import type { AgentContext } from '../../../domains/agent/agentContext.ts'
 
 export const CORE_SESSION_STATE_SYNC_PLUGIN_ID = 'core.sessionState.runtimeStore'
 

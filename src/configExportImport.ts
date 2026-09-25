@@ -8,8 +8,8 @@
  * I14-W8：Tauri 模式导出聚合后端 versioned user store 的 profiles/sessions envelope
  * （权威源）；导入预检对 profiles/sessions 值做结构校验（损坏拒绝、legacy 形状兼容）。
  */
-import { PROFILE_STORAGE_KEY } from './profilePersistence'
-import { SESSION_STORAGE_KEY } from './sessionPersistence'
+import { PROFILE_STORAGE_KEY } from './domains/identity/profilePersistence'
+import { SESSION_STORAGE_KEY } from './domains/identity/sessionPersistence'
 import { RETENTION_STORAGE_KEY } from './components/settings/historyRetentionPolicy'
 import { isRetentionPolicyValid, type RetentionPolicy } from './components/settings/historyRetentionPolicy'
 

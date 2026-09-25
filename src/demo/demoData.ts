@@ -5,7 +5,7 @@
  * 演示叙事：Peri 前端重构 / Hermes 部署检查 / GM 世界观 / 日志排障 四条会话 +
  * 归档存档 + gateway/runtime/git/workspace 数据。
  */
-import type { Session } from '../identityStore.ts'
+import type { Session } from '../domains/identity/identityStore.ts'
 import type { Message } from '../components/chat/messageTypes.ts'
 import type { WorkspaceBackendEntry } from '../infrastructure/tauri/workspaceContracts.ts'
 import type { RuntimeLogEntry } from '../domains/runtime/runtimeLogs.ts'

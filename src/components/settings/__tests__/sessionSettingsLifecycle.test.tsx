@@ -8,9 +8,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, waitFor, cleanup, fireEvent, screen } from '@testing-library/react'
 import { FakeInvoke } from '../../../test/fakeInvoke'
-import { useIdentityStore } from '../../../identityStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
 import SessionSettings from '../../SessionSettings'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../../domains/identity/identityStore'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },

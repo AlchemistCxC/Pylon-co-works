@@ -1,4 +1,4 @@
-import type { AgentContext } from '../../agentContext.ts'
+import type { AgentContext } from '../../domains/agent/agentContext.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 import type { WorkspaceEntry, WorkspaceTextPreview } from '../../components/right-panel/rightPanelTypes.ts'
 import type { WorkspaceSearchResult } from '../../infrastructure/tauri/workspaceSearchContracts.ts'

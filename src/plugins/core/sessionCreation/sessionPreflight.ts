@@ -1,4 +1,4 @@
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import { getSessionCreationRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { runSessionCreationPhase } from '../../../plugin-runtime/session-creation/runSessionCreationPhase.ts'
 import type { SessionCreationJson, SessionCreationPhaseResult } from '../../../plugin-runtime/session-creation/sessionCreationTypes.ts'

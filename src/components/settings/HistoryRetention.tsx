@@ -22,7 +22,7 @@ import {
   saveRetentionPolicy,
   type RetentionPolicySnapshot,
   type RetentionPreview,
-} from '../../retentionPolicyRepository'
+} from '../../infrastructure/persistence/retentionPolicyRepository'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 
 /**

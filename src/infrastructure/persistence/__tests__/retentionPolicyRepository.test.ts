@@ -5,17 +5,17 @@
  * Tauri 模式（后端权威读/写/损坏回退/conflict）见 retentionPolicyRepository.tauri.test.ts。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeInvoke } from '../test/fakeInvoke'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 vi.mock('@tauri-apps/api/core', async () => {
-  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 import { loadRetentionPolicy, previewRetentionPolicy, pruneRetentionPolicy, saveRetentionPolicy } from '../retentionPolicyRepository'
-import { RETENTION_STORAGE_KEY } from '../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../../../components/settings/historyRetentionPolicy'
 
 let fakeInvoke: FakeInvoke
 

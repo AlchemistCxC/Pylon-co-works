@@ -6,7 +6,7 @@
  * `connected` 早 ~2.4s，恢复必然失败并留下错误条；叠加 F4 即 #56 的完整现场。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const store = vi.hoisted(() => {
   const listeners = new Set<() => void>()
@@ -87,7 +87,7 @@ vi.mock('../../../components/chat/chatReplayTrace.ts', () => ({
   replayErrorCode: () => 'replay-error',
   safeContentEvidence: () => ({}),
 }))
-vi.mock('../../../identityStore.ts', () => ({
+vi.mock('../../../domains/identity/identityStore.ts', () => ({
   useIdentityStore: {
     getState: () => ({
       profiles: [{ id: 'profile', name: 'profile', persona: 'persona', model: 'profile-model' }],

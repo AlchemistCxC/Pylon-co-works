@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore'
-import type { AgentContext } from '../../agentContext'
-import { toAgentContextKey } from '../../agentContext'
+import type { AgentContext } from '../../domains/agent/agentContext'
+import { toAgentContextKey } from '../../domains/agent/agentContext'
 import FileTypeIcon from './FileTypeIcon'
 
 /** 触碰时间格式化（HH:MM；可测） */

@@ -13,8 +13,8 @@
  * - mismatch         复查时 Session 已变化（删除/owner 变更）
  */
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import type { Session } from '../../identityStore'
-import { useIdentityStore } from '../../identityStore'
+import type { Session } from '../../domains/identity/identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'

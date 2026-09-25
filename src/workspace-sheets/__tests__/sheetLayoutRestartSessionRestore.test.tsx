@@ -15,7 +15,7 @@ import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, act } from '@testing-library/react'
 import SheetLayout from '../SheetLayout'
 import { useWorkspaceStore } from '../../workspaceStore'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useHydrationStore } from '../../app/bootstrap/hydrationState'
 import { resetStores } from '../../test/resetStores'
 

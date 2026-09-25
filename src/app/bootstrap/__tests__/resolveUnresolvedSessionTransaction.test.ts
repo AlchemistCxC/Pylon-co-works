@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveUnresolvedSessionTransaction } from '../resolveUnresolvedSessionTransaction'
-import type { LegacySession } from '../../../sessionPersistence'
+import type { LegacySession } from '../../../domains/identity/sessionPersistence'
 
 type Agent = { id: string; name: string }
 

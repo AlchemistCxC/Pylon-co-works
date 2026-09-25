@@ -10,7 +10,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRuntimeStore } from '../../../runtimeStore'
-import { toAgentContextKey } from '../../../agentContext'
+import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { switchAgentTransaction } from '../switchAgentTransaction'
 import { selectAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../../components/settings/agentTypes'
 

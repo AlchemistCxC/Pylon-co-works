@@ -9,7 +9,7 @@
  * 本地删除失败仍返回 transport（可重试），本地会话保留；远端 close/finalize 失败不回滚
  * 已完成的本地删除。UI 收尾（关对话框/选中态）由调用方在 ok 后处理。
  */
-import type { Session } from '../../identityStore'
+import type { Session } from '../../domains/identity/identityStore'
 import type { TransactionResult } from './transactionResult'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema'
 

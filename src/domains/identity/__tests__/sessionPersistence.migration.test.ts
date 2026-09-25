@@ -27,10 +27,10 @@ import {
 } from '../sessionPersistence'
 import type { PersistedProfile } from '../profilePersistence'
 import type { Session } from '../identityStore'
-import { CORE_COMMAND_SET_PLUGIN_ID } from '../contracts/agentCommandSet'
+import { CORE_COMMAND_SET_PLUGIN_ID } from '../../../contracts/agentCommandSet'
 import { useIdentityStore } from '../identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
-import { resetStores } from '../test/resetStores'
+import { useWorkspaceStore } from '../../../workspaceStore'
+import { resetStores } from '../../../test/resetStores'
 
 const PROFILES: PersistedProfile[] = [{ id: 'profile-a', name: 'Profile A', persona: 'p', model: 'm' }]
 

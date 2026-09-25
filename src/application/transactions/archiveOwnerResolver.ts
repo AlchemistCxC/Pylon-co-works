@@ -1,4 +1,4 @@
-import type { Session } from '../../identityStore'
+import type { Session } from '../../domains/identity/identityStore'
 import type { TransactionResult } from './transactionResult'
 
 export type ArchivedOwnerResolution =

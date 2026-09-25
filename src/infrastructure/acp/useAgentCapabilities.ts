@@ -1,4 +1,4 @@
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveCapabilitySnapshot, type AgentCapabilitySnapshot } from './agentContracts'
 

@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildExportPayload, buildExportPayloadAsync, preflightImportPayload } from '../configExportImport'
-import { PROFILE_STORAGE_KEY } from '../profilePersistence'
-import { SESSION_STORAGE_KEY } from '../sessionPersistence'
+import { PROFILE_STORAGE_KEY } from '../domains/identity/profilePersistence'
+import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
 
 interface StorageLike {
   getItem(key: string): string | null

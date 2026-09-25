@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useSyncExternalStore } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../workspaceStore'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'

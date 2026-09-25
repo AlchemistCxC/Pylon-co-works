@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../test/fakeInvoke'
 import { mountSettingsSheet } from '../test/settingsSheetHarness'
 import { openOrFocusSettingsSheet } from '../sheets/settingsSheetNavigation'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
 
 const { invokeRef } = vi.hoisted(() => ({

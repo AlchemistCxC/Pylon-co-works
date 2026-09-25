@@ -9,7 +9,7 @@
  */
 import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './sessionResponseProjection.ts'
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveGenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {

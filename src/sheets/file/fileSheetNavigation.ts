@@ -1,5 +1,5 @@
-import type { Session } from '../../identityStore.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 

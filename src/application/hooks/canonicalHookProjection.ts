@@ -19,7 +19,7 @@ import type {
   CanonicalProjectionEvent,
   HookName,
 } from '../../plugin-runtime/hooks/hookTypes.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
 

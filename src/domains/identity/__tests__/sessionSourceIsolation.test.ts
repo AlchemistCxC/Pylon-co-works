@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useIdentityStore } from '../identityStore'
-import { resetStores } from '../test/resetStores'
+import { resetStores } from '../../../test/resetStores'
 
 beforeEach(() => {
   localStorage.clear()

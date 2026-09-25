@@ -6,16 +6,16 @@
  * - save 带 expectedRevision 调 retention_policy_set；conflict 错误透传
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeInvoke } from '../test/fakeInvoke'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 vi.mock('@tauri-apps/api/core', async () => {
-  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
-vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+vi.mock('../../tauri/env', () => ({ IS_TAURI: true }))
 
 import {
   loadRetentionPolicy,

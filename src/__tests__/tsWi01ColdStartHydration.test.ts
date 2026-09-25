@@ -3,8 +3,8 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { hydrateIdentityAndWorkspace } from '../app/bootstrap/hydrateIdentityAndWorkspace'
-import { useIdentityStore } from '../identityStore'
-import { SESSION_STORAGE_KEY } from '../sessionPersistence'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
 import { resetStores } from '../test/resetStores'
 import { useWorkspaceStore } from '../workspaceStore'
 

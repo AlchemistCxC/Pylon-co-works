@@ -14,7 +14,7 @@
 
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { exportThreeSourcesForSession, type ThreeSourceArtifact } from '../domains/export/threeSourceExport'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 
 export interface Obs04ConsoleApi {

@@ -2,8 +2,8 @@ import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { useRuntimeStore } from '../../runtimeStore'
 import { applySessionModelChange } from './sessionModelState'
-import type { AgentContext } from '../../agentContext'
-import { toAgentContextKey } from '../../agentContext'
+import type { AgentContext } from '../../domains/agent/agentContext'
+import { toAgentContextKey } from '../../domains/agent/agentContext'
 
 export function setSessionModel(context: AgentContext, nextModel: string): Promise<void> {
   const store = useRuntimeStore.getState()

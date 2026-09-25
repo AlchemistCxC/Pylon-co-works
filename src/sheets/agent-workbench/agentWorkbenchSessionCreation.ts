@@ -1,5 +1,5 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import type { SessionCreateInput } from '../../domains/workbench/workbenchCommandFacade.ts'

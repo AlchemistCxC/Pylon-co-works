@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import Select from './ui/Select.tsx'
 

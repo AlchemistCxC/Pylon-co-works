@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import { render, Show } from 'solid-js/web'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
-import type { AgentContext } from '../../agentContext'
+import type { AgentContext } from '../../domains/agent/agentContext'
 import { useWorkspaceStore, touchedFileVersionKey } from '../../workspaceStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'

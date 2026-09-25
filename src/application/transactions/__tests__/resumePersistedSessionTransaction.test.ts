@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { resumePersistedSessionTransaction } from '../resumePersistedSessionTransaction'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../../domains/identity/identityStore'
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useWorkspaceStore } from '../workspaceStore'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useStore } from '../store'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
 import { resolveSessionSource } from '../components/chat/sessionCommandState'

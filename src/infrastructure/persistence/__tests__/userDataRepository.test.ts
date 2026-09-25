@@ -9,13 +9,13 @@
  * - selectUserDataRepository 非 Tauri 环境返回 null
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeInvoke } from '../test/fakeInvoke'
+import { FakeInvoke } from '../../../test/fakeInvoke'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 vi.mock('@tauri-apps/api/core', async () => {
-  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 import {

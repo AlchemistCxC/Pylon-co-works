@@ -1,8 +1,8 @@
 import type { PersistedProfile } from './profilePersistence.ts'
 import type { Session, Turn } from './identityStore.ts'
-import { normalizePluginNamespaceRoot } from './domains/pluginData/pluginNamespace.ts'
-import { normalizeSessionCreationSnapshot } from './plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
-import type { SessionCreationSnapshot } from './plugin-runtime/session-creation/sessionCreationTypes.ts'
+import { normalizePluginNamespaceRoot } from '../pluginData/pluginNamespace.ts'
+import { normalizeSessionCreationSnapshot } from '../../plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
+import type { SessionCreationSnapshot } from '../../plugin-runtime/session-creation/sessionCreationTypes.ts'
 
 // H2：DTO 单源——Session 定义在 identityStore（域类型），持久化层引用之；
 // PersistedProfile 定义在 profilePersistence。删除逐字节重复的本地声明，

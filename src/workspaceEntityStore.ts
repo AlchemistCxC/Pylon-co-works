@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
 
 const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
-import { useIdentityStore } from './identityStore'
+import { useIdentityStore } from './domains/identity/identityStore'
 import {
   isAbsolutePath,
   newLocalWorkspaceId,

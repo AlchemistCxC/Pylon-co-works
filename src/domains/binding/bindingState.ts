@@ -21,7 +21,7 @@
 import type { AgentConnectionStatus, AgentStatus } from '../../components/settings/agentTypes'
 import type { SessionBindingSnapshot } from '../../components/settings/agentTypes'
 import { statusLabel } from '../../components/settings/agentTypes'
-import type { Session } from '../../identityStore'
+import type { Session } from '../identity/identityStore'
 
 export type BindingState =
   | { kind: 'idle' }

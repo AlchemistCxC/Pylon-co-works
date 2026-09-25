@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useAgentCapabilities } from '../useAgentCapabilities'
 import { useRuntimeStore } from '../../../runtimeStore'
-import { useIdentityStore } from '../../../identityStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
 import type { AgentStatus } from '../../../components/settings/agentTypes'
 
 function status(partial: Partial<AgentStatus>): AgentStatus {

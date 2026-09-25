@@ -8,12 +8,12 @@
  * 避免 identityStore ↔ 本模块的运行时循环依赖。localStorage 持久化 helper 见
  * identityPersistence；store 本体仍在 identityStore。
  */
-import { resolveRuntimeErrors, reportRuntimeError } from './runtimeError.ts'
+import { resolveRuntimeErrors, reportRuntimeError } from '../../runtimeError.ts'
 import { selectUserDataRepository, type UserDataRepository } from './userDataRepository.ts'
-import { PROFILE_ENVELOPE_VERSION } from './profilePersistence.ts'
-import { SESSION_SCHEMA_VERSION } from './sessionPersistence.ts'
-import { updateIdentityCacheMeta } from './identityPersistence.ts'
-import type { IdentityPersistenceState, Profile, Session, SessionHydrationState, Turn } from './identityStore.ts'
+import { PROFILE_ENVELOPE_VERSION } from '../../domains/identity/profilePersistence.ts'
+import { SESSION_SCHEMA_VERSION } from '../../domains/identity/sessionPersistence.ts'
+import { updateIdentityCacheMeta } from '../../domains/identity/identityPersistence.ts'
+import type { IdentityPersistenceState, Profile, Session, SessionHydrationState, Turn } from '../../domains/identity/identityStore.ts'
 
 // ── I14-W5：后端 user store 写穿（Tauri 模式） ──
 // composition root 选择：Tauri 走后端 versioned store；browser 模式 null（不经本仓库）。

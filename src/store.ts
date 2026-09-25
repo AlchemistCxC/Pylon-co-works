@@ -35,14 +35,14 @@ import {
   type AssembleGlobalPresetOptions,
   type GlobalPresetZoneSlice,
 } from './domains/theme/presetReducer.ts'
-import type { Profile } from './identityStore.ts'
+import type { Profile } from './domains/identity/identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, PresetProviderTransactionError, recordPayload, type PresentationPresetPayload, type PresetApplyResult, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
-export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
+export type { Profile, Session, UserMapping, AgentEntry } from './domains/identity/identityStore'
 export type { SessionConfig } from './runtimeStore'
 
 export interface ThemeSettings {
@@ -585,6 +585,6 @@ function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts')
 }
 
 // ── 组合出口：按域导入点 ──
-export { useIdentityStore } from './identityStore'
+export { useIdentityStore } from './domains/identity/identityStore'
 export { useRuntimeStore } from './runtimeStore'
 export { useWorkspaceStore } from './workspaceStore'

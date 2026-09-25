@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SheetTabStrip from '../SheetTabStrip'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { resetStores } from '../../test/resetStores'
 import type { SheetRecord } from '../sheetTypes'
 

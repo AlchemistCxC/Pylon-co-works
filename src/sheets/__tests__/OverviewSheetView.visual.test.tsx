@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import OverviewSheetView from '../OverviewSheetView.tsx'
-import { useIdentityStore } from '../../identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { resetStores } from '../../test/resetStores.ts'

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useIdentityStore } from '../identityStore.ts'
-import { resetStores } from '../test/resetStores.ts'
+import { resetStores } from '../../../test/resetStores.ts'
 
 describe('Agent registry reconciliation', () => {
   beforeEach(() => resetStores())

@@ -6,7 +6,7 @@
  * 纯 helper 模块：不 import store（类型经 type-only 反向引用，编译期擦除，无运行时环）。
  * store 本体（状态与变更逻辑）仍在 identityStore；后端 SQLite 写穿见 identityBackendSync。
  */
-import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env.ts'
+import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { persistSessionsWithUnresolved } from './sessionPersistence.ts'
 import type { Session, SessionHydrationState, IdentityPersistenceState, Turn } from './identityStore.ts'
 

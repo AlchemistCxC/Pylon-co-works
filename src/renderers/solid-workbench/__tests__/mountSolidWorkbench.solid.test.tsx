@@ -21,7 +21,7 @@ import { parseTranslateOffset } from '../input/ccPlacementCollision.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []

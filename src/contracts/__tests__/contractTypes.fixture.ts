@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../identityStore.ts'
+import type { AgentEntry } from '../../domains/identity/identityStore.ts'
 import type { CommandSetProvider } from '../agentCommandSet.ts'
 import type { HookDefinition } from '../../plugin-runtime/hooks/hookTypes.ts'
 import type { SearchProvider } from '../searchProvider.ts'

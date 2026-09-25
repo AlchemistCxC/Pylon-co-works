@@ -6,7 +6,7 @@ import { messageSnapshotToWorkbenchEnvelopes } from '../../sheets/agent-workbenc
 import type { Message } from '../../components/chat/messageTypes.ts'
 import { persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 
 /** The shape an ACP provider advertises: every option carries its own choices. */
 const PROVIDER_OPTIONS = [

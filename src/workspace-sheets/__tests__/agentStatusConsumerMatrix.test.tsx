@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resetStores } from '../../test/resetStores'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'

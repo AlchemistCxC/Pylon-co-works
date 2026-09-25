@@ -9,7 +9,7 @@ import { activateBuiltinPlugin, getPackageInstallationService, getPluginRuntime 
 import { getPluginEventBus, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { useIdentityStore, type Session } from '../../identityStore.ts'
+import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchRendererFactory, WorkbenchRendererInstance } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'

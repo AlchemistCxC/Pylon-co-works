@@ -7,9 +7,9 @@
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { useIdentityStore } from '../identityStore'
-import { resetStores } from '../test/resetStores'
-import { MemoryStorage } from '../test/memoryStorage'
-import { buildExportPayload, applyImportPayload } from '../configExportImport'
+import { resetStores } from '../../../test/resetStores'
+import { MemoryStorage } from '../../../test/memoryStorage'
+import { buildExportPayload, applyImportPayload } from '../../../configExportImport'
 
 const PROFILE_KEY = 'pylon-profiles'
 

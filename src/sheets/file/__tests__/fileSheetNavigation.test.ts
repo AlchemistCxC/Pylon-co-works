@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
+import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
 import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
 import { useWorkspaceStore } from '../../../workspaceStore.ts'
 import { createSheetState } from '../../../workspace-sheets/sheetState.ts'

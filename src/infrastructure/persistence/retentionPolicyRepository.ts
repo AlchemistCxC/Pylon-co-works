@@ -11,8 +11,8 @@
  *   按 code "retention_revision_conflict" 分支（重读 + 提示）。
  */
 
-import { IS_TAURI } from './infrastructure/tauri/env'
-import { wireErrorParts } from './infrastructure/tauri/errorPayload'
+import { IS_TAURI } from '../tauri/env'
+import { wireErrorParts } from '../tauri/errorPayload'
 import { invoke } from '@tauri-apps/api/core'
 import {
   DEFAULT_RETENTION_POLICY,
@@ -22,7 +22,7 @@ import {
   writeRetentionPolicy,
   type RetentionPolicy,
   type StorageLike,
-} from './components/settings/historyRetentionPolicy'
+} from '../../components/settings/historyRetentionPolicy'
 
 /** 后端 retention_policy 行（MsgRepo RetentionPolicyRow 的 camelCase wire 形状）。 */
 export interface BackendRetentionPolicyRow {

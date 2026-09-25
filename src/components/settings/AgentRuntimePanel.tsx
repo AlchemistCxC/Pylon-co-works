@@ -10,7 +10,7 @@ import {
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
 import { explainErrorCode } from '../../errorCodeExplanations.ts'
-import { useIdentityStore, type AgentEntry } from '../../identityStore'
+import { useIdentityStore, type AgentEntry } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'

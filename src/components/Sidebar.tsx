@@ -1,6 +1,6 @@
 import { Fragment, Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ChevronsUpDown, PawPrint, SlidersHorizontal } from 'lucide-react'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 
 import type { SheetContext } from '../workspace-sheets/sheetTypes'

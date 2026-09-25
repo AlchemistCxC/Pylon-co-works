@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { useRuntimeStore } from '../../runtimeStore'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../runtimeError'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
-import type { Session } from '../../identityStore'
+import type { Session } from '../../domains/identity/identityStore'
 
 export function resolveDispatchOwnerSession(
   sessions: readonly Session[],

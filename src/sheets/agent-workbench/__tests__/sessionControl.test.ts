@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import { extractModeConfig, extractModelConfig } from '../../../infrastructure/acp/chatContracts.ts'
 import { normalizeSessionMode } from '../../../components/chat/sessionModeState.ts'
 

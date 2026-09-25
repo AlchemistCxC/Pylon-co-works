@@ -10,7 +10,7 @@ import { useStore } from '../../../store.ts'
 import { DEFAULT_INTERFACE_MODE, DEFAULT_INTERFACE_PROFILES, useInterfaceModeStore } from '../interfaceModeStore.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
+import { useIdentityStore } from '../../identity/identityStore.ts'
 
 const registrations: AsyncDisposable[] = []
 

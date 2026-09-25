@@ -10,8 +10,8 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { SESSION_STORAGE_KEY } from '../sessionPersistence'
 import { useIdentityStore } from '../identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
-import { resetStores } from '../test/resetStores'
+import { useWorkspaceStore } from '../../../workspaceStore'
+import { resetStores } from '../../../test/resetStores'
 import type { PersistedProfile } from '../profilePersistence'
 
 const PROFILES: PersistedProfile[] = [{ id: 'profile-a', name: 'Profile A', persona: 'p', model: 'm' }]

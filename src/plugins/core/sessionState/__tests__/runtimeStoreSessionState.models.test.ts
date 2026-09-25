@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { toAgentContextKey } from '../../../../agentContext.ts'
+import { toAgentContextKey } from '../../../../domains/agent/agentContext.ts'
 import { useRuntimeStore } from '../../../../runtimeStore.ts'
 import { BUILTIN_SESSION_STATE_SYNC_PROVIDER } from '../runtimeStoreSessionState.ts'
 

@@ -1,5 +1,5 @@
 import { useWorkspaceStore } from '../../workspaceStore'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { sourcesForPath } from '../../domains/file/fileRelations'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 

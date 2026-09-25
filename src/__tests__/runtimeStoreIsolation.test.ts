@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../runtimeStore'
-import { toAgentContextKey } from '../agentContext'
+import { toAgentContextKey } from '../domains/agent/agentContext'
 import { EMPTY_PERMISSION_STATE } from '../domains/permission/permissionState'
 
 /**

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { resolveUnresolvedSessionTransaction } from '../app/bootstrap/resolveUnresolvedSessionTransaction'
-import type { LegacySession } from '../sessionPersistence'
+import type { LegacySession } from '../domains/identity/sessionPersistence'
 import Select from './ui/Select.tsx'
 
 /**

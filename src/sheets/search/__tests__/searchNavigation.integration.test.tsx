@@ -10,7 +10,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import SearchSheetView from '../SearchSheetView'
-import { useIdentityStore } from '../../../identityStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
 import { resetStores } from '../../../test/resetStores'
 import { sessionUiStateGet } from '../../../components/chat/sessionUiState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'

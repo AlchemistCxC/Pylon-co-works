@@ -9,10 +9,10 @@
  * ④ sheets（agent 先开聚焦）⑤ setActiveSession（SheetLayout 子 effect 先跑，
  * 写回 effect 随其持久化）⑥ 每次补 runtime 状态灯/模式/权限。
  */
-import { useIdentityStore } from '../identityStore.ts'
+import { useIdentityStore } from '../domains/identity/identityStore.ts'
 import { useWorkspaceStore } from '../workspaceStore.ts'
 import { useRuntimeStore } from '../runtimeStore.ts'
-import { persistSessions } from '../sessionPersistence.ts'
+import { persistSessions } from '../domains/identity/sessionPersistence.ts'
 import { messageStorageKey, persistMessageSnapshot } from '../components/chat/messagePersistence.ts'
 import { buildDemoAgents, buildDemoMessages, buildDemoPermissionRequest, buildDemoSessions } from './demoData.ts'
 import { buildVisualQaMessages, buildVisualQaSessions, buildVisualQaWorkspaces } from './visualQaData.ts'

@@ -15,7 +15,7 @@
  */
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
-import { useIdentityStore, type Session } from '../../identityStore.ts'
+import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
@@ -23,7 +23,7 @@ import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
 import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../components/chat/chatReplayTrace.ts'
 import { clearMessageStorage } from '../../components/chat/messagePersistence.ts'
-import { sessionContext } from '../../agentContext.ts'
+import { sessionContext } from '../../domains/agent/agentContext.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'

@@ -1,7 +1,7 @@
 import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 

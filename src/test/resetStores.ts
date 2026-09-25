@@ -6,7 +6,7 @@
  */
 
 import { useStore } from '../store'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { useWorkspaceStore } from '../workspaceStore'
 import { clearAllSessionUiState } from '../components/chat/sessionUiState'

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../../test/fakeInvoke'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSession } from '../../../sheets/agent-workbench/agentWorkbenchSessionCreation.ts'
 import { AgentWorkbenchLifecycle } from '../../../sheets/agent-workbench/agentWorkbenchLifecycle.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
@@ -26,7 +26,7 @@ class TolerantFakeInvoke extends FakeInvoke {
     })
   }
 }
-vi.mock('../../../identityStore.ts', () => ({ useIdentityStore: { getState: mocks.identity } }))
+vi.mock('../../../domains/identity/identityStore.ts', () => ({ useIdentityStore: { getState: mocks.identity } }))
 vi.mock('../../../runtimeStore.ts', () => ({ useRuntimeStore: { getState: mocks.runtime } }))
 vi.mock('../../../workspaceEntityStore.ts', () => ({ useWorkspaceEntityStore: { getState: () => ({ workspaces: [] }) } }))
 vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({ runSessionPreflight: mocks.preflight }))
