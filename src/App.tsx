@@ -12,7 +12,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
-import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
+import { loadWindowSize, persistWindowSize } from './infrastructure/persistence/windowSizePersistence'
 import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
 import {
