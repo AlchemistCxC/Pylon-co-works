@@ -1536,9 +1536,10 @@ async fn handle_session_update<R: tauri::Runtime>(
 /// 分流）。Frame = 产出本帧进入路由分支；Skipped = 本迭代副作用已完成（崩溃
 /// watch 触发处理 / 窗口 flush 完成），跳过路由直接下一轮；Stop = 主循环退出
 /// （inbox 关闭 / 窗口 flush 失败）。
-// Frame 变体按值携带整帧 ClassifiedMessage（含 raw payload，与其余单元变体
-// 大小差 3 倍以上）——Box 化需每帧一次堆分配，与 #334 逐帧热路径降分配目标
-// 相悖；本枚举是泵取流程控制面，值语义保留属有意取舍，故定点豁免本 lint。
+// Frame 变体按值携带整帧 ClassifiedMessage（含 raw payload，与其他变体的
+// 尺寸差超过 lint 的 200 字节阈值）——Box 化需每帧一次堆分配，与 #334 逐帧
+// 热路径降分配目标相悖；本枚举是泵取流程控制面，值语义保留属有意取舍，
+// 故定点豁免本 lint。
 #[allow(
     clippy::large_enum_variant,
     reason = "Frame 按值携带整帧以避免每帧堆分配；Box 化与 #334 降分配方向相悖"
@@ -1830,7 +1831,9 @@ impl<R: tauri::Runtime> NotificationPump<R> {
     /// 路由分支链（原主循环体内联分支逐一迁入，次序不变）：ProviderExtension
     /// 包络 → 窗口 flush 判定 → 崩溃 / elicitation 完成 / 权限请求 / terminal /
     /// fs / 私有交互 / 未知通知 / session/update 内核路径。每分支副作用完成后
-    /// 返回 true（继续下一帧）；flush 失败或代际结束返回 false（主循环退出）。
+    /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自三处窗口 flush
+    /// 失败，或 `handle_session_update` 返回 false（mutation 后本代结束/锁异常
+    /// 等该函数自身的退出判定，见其文档）。
     async fn route_frame(
         &mut self,
         mut raw: crate::acp::RawMessage,
