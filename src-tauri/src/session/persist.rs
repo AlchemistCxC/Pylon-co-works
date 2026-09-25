@@ -52,18 +52,8 @@ fn replay_journal_commit_outcome(status: &str) -> &'static str {
 }
 
 fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
-    match error {
-        crate::acp::AcpError::ConnectionClosed => "connection_closed",
-        crate::acp::AcpError::WriteTimeout => "write_timeout",
-        crate::acp::AcpError::RpcTimeout => "rpc_timeout",
-        crate::acp::AcpError::ReplayTimeout { .. } => "replay_timeout",
-        crate::acp::AcpError::ReplayLagged { .. } => "replay_lag",
-        crate::acp::AcpError::ReplayStreamClosed => "replay_transport_error",
-        crate::acp::AcpError::ReplayLoadInProgress => "replay_load_in_progress",
-        crate::acp::AcpError::Rpc(_) => "rpc_error",
-        crate::acp::AcpError::Connect(_) => "connect_error",
-        crate::acp::AcpError::Child(_) => "transport_error",
-    }
+    // #317 批次二 2c：词汇表单源化到 AcpError::code()（本函数保留为回放语义命名点）。
+    error.code()
 }
 
 /// load_persisted_session 各失败臂共用的收敛：先回滚本次临时 slot，回滚成功

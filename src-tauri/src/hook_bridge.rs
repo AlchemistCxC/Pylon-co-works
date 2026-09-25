@@ -30,6 +30,8 @@ use tokio::sync::oneshot;
 
 use pylon_core::cli_client::MAX_TIMEOUT_MS;
 
+use crate::error::PylonError;
+
 /// kernel beforeSend 钩子的默认硬超时（Rust 时钟；B5）。
 pub(crate) const DEFAULT_HOOK_TIMEOUT_MS: u64 = 3_000;
 
@@ -561,7 +563,7 @@ fn rollback_ingest_seen(state: &crate::AppState, resolved: &crate::gateway::Reso
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn pylon_hook_ready(app: tauri::AppHandle) -> Result<(), String> {
+pub(crate) async fn pylon_hook_ready(app: tauri::AppHandle) -> Result<(), PylonError> {
     app.state::<crate::AppState>().hook_bridge.mark_started();
     Ok(())
 }
@@ -572,7 +574,7 @@ pub(crate) async fn pylon_hook_respond(
     request_id: String,
     result: Option<Value>,
     error: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     let response = match error {
         Some(error) => Err(error),
         None => Ok(result.unwrap_or(Value::Null)),
@@ -580,6 +582,7 @@ pub(crate) async fn pylon_hook_respond(
     app.state::<crate::AppState>()
         .hook_bridge
         .respond(&request_id, response)
+        .map_err(PylonError::Command)
 }
 
 /// 前端钩子面清单同步（D1：仅存储 + 日志 + 派发闸；D4 扩展为 manifest join
@@ -588,7 +591,7 @@ pub(crate) async fn pylon_hook_respond(
 pub(crate) async fn hook_registry_sync(
     app: tauri::AppHandle,
     payload: Value,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     app.state::<crate::AppState>()
         .hook_bridge
         .sync_registry(&payload);

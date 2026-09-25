@@ -11,6 +11,7 @@
  * 单例就绪；且 kernelBootstrapServices 静态依赖 compositionRoot，直接静态
  * 反向 import 会成环）。
  */
+import { errorMessage } from '../../infrastructure/tauri/errorPayload.ts'
 import type { BuiltinPluginDefinition, PluginRuntime } from '../pluginRuntime.ts'
 import type { PluginScope } from '../pluginScope.ts'
 import type { PluginIdentity } from '../pluginIdentity.ts'
@@ -201,7 +202,11 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
       ),
       isProductRequired: pluginId => options.getBuiltinCriticality(pluginId) === 'product-required',
       processOverview: async () => {
-        const descriptors = await hostProcessClient().list()
+        // #317 批次二：宿主侧把 invoke 拒绝值（{code,message}）归一为 Error，
+        // SDK 消费方（插件面板）拿到的永远是可读 Error 实例。
+        const descriptors = await hostProcessClient().list().catch(error => {
+          throw new Error(errorMessage(error))
+        })
         return descriptors.map(descriptor => ({
           processId: descriptor.processId,
           pluginId: descriptor.pluginId,
@@ -230,7 +235,10 @@ export function createRuntimeManagementApiFactory(options: RuntimeManagementWiri
         }
         return nodes.sort((a, b) => a.pluginId.localeCompare(b.pluginId))
       },
-      terminatePluginProcess: processId => hostProcessClient().terminate(processId),
+      terminatePluginProcess: processId =>
+        hostProcessClient().terminate(processId).catch(error => {
+          throw new Error(errorMessage(error))
+        }),
       retryCleanup: async runtimeInstanceId => {
         const result = await options.getRuntime().retryCleanup(runtimeInstanceId)
         if (result.complete) return { complete: true }

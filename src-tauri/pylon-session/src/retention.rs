@@ -102,9 +102,6 @@ impl RetentionPolicy {
 
 use std::sync::Arc;
 
-use serde::ser::SerializeMap;
-use serde::Serialize as SerdeSerialize;
-
 use crate::error::SessionError;
 use crate::msg_repo::{MsgRepo, RetentionPolicyRow, RetentionPreview};
 
@@ -134,14 +131,8 @@ impl RetentionError {
     }
 }
 
-impl SerdeSerialize for RetentionError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// 保留策略执行错误 wire `{ code, message }`（#317 批次二：实现单源化到共享宏）。
+crate::impl_wire_code_message_serialize!(RetentionError);
 
 /// 保留策略 service：spawn_blocking 边界 + 命令层 DTO（与 MessageService 同构）。
 pub struct RetentionService {

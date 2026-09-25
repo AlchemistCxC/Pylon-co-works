@@ -1,4 +1,5 @@
 import type { Message } from './messageTypes'
+import { errorCode } from '../../infrastructure/tauri/errorPayload'
 
 export const CHAT_REPLAY_TRACE_FLAG = 'pylon-chat-replay-trace'
 export const CHAT_REPLAY_TRACE_KEY = 'pylon-chat-replay-trace-jsonl'
@@ -105,9 +106,7 @@ export function readChatReplayTrace(): ChatReplayTraceEvent[] {
  * one stable fallback understood by the cross-line contract tests.
  */
 export function replayErrorCode(error: unknown): string {
-  if (error && typeof error === 'object' && 'code' in error) {
-    const code = (error as { code?: unknown }).code
-    if (typeof code === 'string' && /^[a-z0-9][a-z0-9_.-]*$/.test(code)) return code
-  }
+  const code = errorCode(error)
+  if (code && /^[a-z0-9][a-z0-9_.-]*$/.test(code)) return code
   return 'replay_load_failed'
 }

@@ -18,6 +18,25 @@ pub mod user_data;
 pub use error::SessionError;
 pub use owner::DurableSessionOwner;
 
+/// B1.2 结构化错误 wire 形状的单源实现：`{ "code", "message" }` 两键 map。
+/// 本 crate 四个仓库错误类型（EventError/MessageError/UserDataError/RetentionError）
+/// 共用（code 由各类型 `code()` 提供，message 走 Display）；与宿主 crate 的同名宏
+/// 同构——序列化输出与既往手写 impl 逐字节一致（DEL-05 矩阵测试看守）。
+#[macro_export]
+macro_rules! impl_wire_code_message_serialize {
+    ($ty:ty) => {
+        impl serde::Serialize for $ty {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("code", self.code())?;
+                map.serialize_entry("message", &self.to_string())?;
+                map.end()
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 mod del01_schema_audit;
 #[cfg(test)]

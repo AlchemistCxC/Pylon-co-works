@@ -62,7 +62,7 @@ flowchart LR
 | --- | --- |
 | `kernel/applicationRuntime*` 是 application 层的 deprecated 转发，只剩根挂载组件和测试消费者 | 消费者直接依赖 application；删除旧转发，运行时实现不复制 |
 | `lifecycle/mod.rs` 的后半部为内联测试，连接/切换/重连通过 `do_connect_and_replace` 共享锁序 | 不为缩短文件搬动锁和并发流程；后续行为变更与对应 characterization 测试一起处理 |
-| `dispatcher/mod.rs` 已有 `routing` 模块；宠物事件在 sessions 锁内收集、锁外按序应用 | 继续拆块必须保持锁外副作用时序；不是本轮纯 UI 投影拆分的附带改动 |
+| `dispatcher/` 已有 `routing`、`canonical_flush`、`crash_reconnect`、`interaction_route`、`host_tools_gate`、`permission_route`、`fallback_route` 缝模块（#317 批次二）；宠物事件在 sessions 锁内收集、锁外按序应用 | 继续拆块必须保持锁外副作用时序；路由顺序与锁持有范围不得随重构改变 |
 | OBS 04—07 的采集对象、trace 包装与返回 API 不同 | 不把相似安装守卫抽成泛用全局注册器；保留 DEV 隔离和各自证据语义 |
 | 根 store 与部分产品模块仍在 runtime 边界白名单 | 已知迁移债务仍报告；不能通过新增豁免宣称模块化完成 |
 

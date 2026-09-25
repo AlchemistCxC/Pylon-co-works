@@ -252,6 +252,25 @@ impl AcpError {
             RecoveryFailureClass::Unavailable
         }
     }
+
+    /// 机器可读错误码（#317 批次二 2c：边界区分度保留）。词汇表与宿主
+    /// `session/persist.rs::replay_load_error_code` 的既有回放契约逐字一致——
+    /// 本方法是该词汇表的单源（persist.rs 改为转调本方法）。
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ConnectionClosed => "connection_closed",
+            Self::WriteTimeout => "write_timeout",
+            Self::RpcTimeout => "rpc_timeout",
+            Self::ReplayTimeout { .. } => "replay_timeout",
+            Self::ReplayLagged { .. } => "replay_lag",
+            Self::ReplayStreamClosed => "replay_transport_error",
+            Self::ReplayLoadInProgress => "replay_load_in_progress",
+            Self::Rpc(_) => "rpc_error",
+            Self::Connect(_) => "connect_error",
+            Self::Child(_) => "transport_error",
+        }
+    }
+
     pub fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
         let Self::Rpc(raw) = self else {
             return None;
@@ -394,6 +413,46 @@ mod resume_failure_tests {
         assert_eq!(
             AcpError::ConnectionClosed.recovery_failure_class(),
             RecoveryFailureClass::Unavailable
+        );
+    }
+}
+
+#[cfg(test)]
+mod wire_code_tests {
+    use super::AcpError;
+
+    /// #317 批次二 2c：边界码表稳定性——词汇表与宿主 persist.rs 回放契约逐字一致，
+    /// 前端 replayErrorCode 按 code 透传，拼写不得漂移。
+    #[test]
+    fn wire_codes_are_stable_and_machine_readable() {
+        assert_eq!(AcpError::ConnectionClosed.code(), "connection_closed");
+        assert_eq!(AcpError::WriteTimeout.code(), "write_timeout");
+        assert_eq!(AcpError::RpcTimeout.code(), "rpc_timeout");
+        assert_eq!(
+            AcpError::ReplayTimeout { seconds: 30 }.code(),
+            "replay_timeout"
+        );
+        assert_eq!(AcpError::ReplayLagged { count: 1 }.code(), "replay_lag");
+        assert_eq!(
+            AcpError::ReplayStreamClosed.code(),
+            "replay_transport_error"
+        );
+        assert_eq!(
+            AcpError::ReplayLoadInProgress.code(),
+            "replay_load_in_progress"
+        );
+        assert_eq!(AcpError::Rpc("x".into()).code(), "rpc_error");
+        assert_eq!(
+            AcpError::Connect(Box::new(crate::error::AgentConnectFailure::preflight(
+                "preflight",
+                "unavailable".into(),
+            )))
+            .code(),
+            "connect_error"
+        );
+        assert_eq!(
+            AcpError::Child("spawn failed".into()).code(),
+            "transport_error"
         );
     }
 }

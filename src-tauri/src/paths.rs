@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use crate::error::PylonError;
+
 /// 本次启动实际采用的存储模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -408,35 +410,40 @@ pub(crate) fn migrate_appdata_to_portable_staged(
 pub(crate) async fn migrate_appdata_to_portable(
     app: tauri::AppHandle,
     state: tauri::State<'_, crate::AppState>,
-) -> Result<serde_json::Value, String> {
-    let dirs = state.data_dirs_cloned()?;
+) -> Result<serde_json::Value, PylonError> {
+    let dirs = state.data_dirs_cloned().map_err(PylonError::Command)?;
     if dirs.mode != StorageMode::Portable {
-        return Err("portable_migration_unavailable: 当前不是 portable 模式".to_string());
+        return Err(PylonError::Command(
+            "portable_migration_unavailable: 当前不是 portable 模式".into(),
+        ));
     }
     {
         let message_service = state
             .message_service
             .lock()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| PylonError::Command(error.to_string()))?;
         if message_service.is_some() {
-            return Err(
+            return Err(PylonError::Command(
                 "portable_migration_unavailable: 持久化服务已初始化，请在启动迁移提示中选择迁移"
-                    .to_string(),
-            );
+                    .into(),
+            ));
         }
     }
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| PylonError::Command(error.to_string()))?;
     let app_config_dir = app
         .path()
         .app_config_dir()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| PylonError::Command(error.to_string()))?;
     if !migration_available(&dirs, &app_data_dir, &app_config_dir) {
-        return Err("portable_migration_unavailable: 迁移条件不满足".to_string());
+        return Err(PylonError::Command(
+            "portable_migration_unavailable: 迁移条件不满足".into(),
+        ));
     }
-    migrate_appdata_to_portable_staged(&app_data_dir, &app_config_dir, &dirs.data_root)?;
+    migrate_appdata_to_portable_staged(&app_data_dir, &app_config_dir, &dirs.data_root)
+        .map_err(PylonError::Command)?;
     Ok(serde_json::json!({ "migrated": true }))
 }
 

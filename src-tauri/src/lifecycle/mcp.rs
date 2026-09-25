@@ -16,7 +16,7 @@ pub(crate) fn mcp_persist_path(state: &AppState) -> Result<std::path::PathBuf, S
 }
 
 /// 原子写 MCP 配置：唯一临时文件 + rename，中断不留半截 JSON。经 agent_config
-/// 正身 [`crate::agent_config::AtomicWriteOptions`] 收敛（issue #228 批次D）。
+/// 正身 [`pylon_foundations::atomic_write::AtomicWriteOptions`] 收敛（issue #228 批次D）。
 /// 历史行为保留：不 fsync 临时文件（best-effort 持久化）。写失败只 warn，
 /// 不阻断主流程。
 pub(crate) fn persist_mcp_if_possible(state: &AppState, servers: &[crate::mcp::McpServerConfig]) {
@@ -34,10 +34,10 @@ pub(crate) fn persist_mcp_if_possible(state: &AppState, servers: &[crate::mcp::M
             return;
         }
     };
-    if let Err(error) = crate::agent_config::write_file_atomically(
+    if let Err(error) = pylon_foundations::atomic_write::write_file_atomically(
         &path,
         json.as_bytes(),
-        crate::agent_config::AtomicWriteOptions::best_effort_data_file(),
+        pylon_foundations::atomic_write::AtomicWriteOptions::best_effort_data_file(),
     ) {
         tracing::warn!("persist MCP config failed: {error}");
     }
@@ -77,10 +77,11 @@ pub(crate) async fn get_mcp_servers(
 pub(crate) async fn set_mcp_servers(
     state: tauri::State<'_, AppState>,
     servers: Option<Vec<crate::mcp::McpServerConfig>>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<serde_json::Value>, PylonError> {
     // O13：单次 clone（validate 消耗 clone，原值 move 进 runtime_mcp；
     // persist 在锁内借用 guard——原实现 serialized/persisted 两次 clone）。
-    let serialized = crate::mcp::validate_and_serialize(servers.clone())?;
+    let serialized =
+        crate::mcp::validate_and_serialize(servers.clone()).map_err(PylonError::Command)?;
     // C8：写 runtime_mcp + 落盘全程持写序锁——并发 set_mcp_servers 串行，
     // 磁盘必为最后一次设置（重启不回滚到旧配置）。
     let _mcp_write_guard = state.mcp_write_lock.lock().await;
@@ -88,7 +89,7 @@ pub(crate) async fn set_mcp_servers(
         let mut guard = state
             .runtime_mcp
             .lock()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| PylonError::Command(error.to_string()))?;
         *guard = servers;
         // P1（E10）：wire 缓存与 runtime_mcp 同锁写入（读路径 miss 时回退重算并回填）。
         if let Ok(mut cache) = state.mcp_wire.lock() {

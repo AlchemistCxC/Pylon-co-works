@@ -16,6 +16,8 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+
+use crate::error::PylonError;
 use tokio::sync::oneshot;
 
 use crate::acp::ManagedChild;
@@ -939,25 +941,29 @@ pub(crate) async fn plugin_process_spawn(
     package_instance_id: Option<String>,
     executable_id: String,
     options: Option<PluginProcessOptions>,
-) -> Result<PluginProcessDescriptor, String> {
-    app.state::<crate::AppState>().plugin_processes.spawn(
-        app.clone(),
-        plugin_id,
-        runtime_instance_id,
-        package_instance_id,
-        executable_id,
-        options.unwrap_or_default(),
-    )
+) -> Result<PluginProcessDescriptor, PylonError> {
+    app.state::<crate::AppState>()
+        .plugin_processes
+        .spawn(
+            app.clone(),
+            plugin_id,
+            runtime_instance_id,
+            package_instance_id,
+            executable_id,
+            options.unwrap_or_default(),
+        )
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
 pub(crate) async fn plugin_process_list(
     app: AppHandle,
     runtime_instance_id: Option<String>,
-) -> Result<Vec<PluginProcessDescriptor>, String> {
+) -> Result<Vec<PluginProcessDescriptor>, PylonError> {
     app.state::<crate::AppState>()
         .plugin_processes
         .list(runtime_instance_id.as_deref())
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
@@ -966,12 +972,11 @@ pub(crate) async fn plugin_process_logs(
     process_id: String,
     stream: Option<String>,
     limit: Option<usize>,
-) -> Result<Vec<PluginProcessEvent>, String> {
-    app.state::<crate::AppState>().plugin_processes.logs(
-        &process_id,
-        stream.as_deref(),
-        limit.unwrap_or(200),
-    )
+) -> Result<Vec<PluginProcessEvent>, PylonError> {
+    app.state::<crate::AppState>()
+        .plugin_processes
+        .logs(&process_id, stream.as_deref(), limit.unwrap_or(200))
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
@@ -979,13 +984,14 @@ pub(crate) async fn plugin_process_write(
     app: AppHandle,
     process_id: String,
     data_base64: String,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data_base64)
-        .map_err(|error| format!("invalid process write base64: {error}"))?;
+        .map_err(|error| PylonError::Command(format!("invalid process write base64: {error}")))?;
     app.state::<crate::AppState>()
         .plugin_processes
         .write(&process_id, &bytes)
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
@@ -996,7 +1002,7 @@ pub(crate) async fn plugin_process_request(
     params: Option<Value>,
     timeout_ms: Option<u64>,
     request_id: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, PylonError> {
     app.state::<crate::AppState>()
         .plugin_processes
         .request(
@@ -1007,6 +1013,7 @@ pub(crate) async fn plugin_process_request(
             request_id,
         )
         .await
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
@@ -1014,28 +1021,34 @@ pub(crate) async fn plugin_process_cancel(
     app: AppHandle,
     process_id: String,
     request_id: String,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     app.state::<crate::AppState>()
         .plugin_processes
         .cancel(&process_id, &request_id)
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
 pub(crate) async fn plugin_process_terminate(
     app: AppHandle,
     process_id: String,
-) -> Result<(), String> {
+) -> Result<(), PylonError> {
     app.state::<crate::AppState>()
         .plugin_processes
         .terminate(app.clone(), &process_id)
         .await
+        .map_err(PylonError::Command)
 }
 
 #[tauri::command]
-pub(crate) async fn plugin_process_kill(app: AppHandle, process_id: String) -> Result<(), String> {
+pub(crate) async fn plugin_process_kill(
+    app: AppHandle,
+    process_id: String,
+) -> Result<(), PylonError> {
     app.state::<crate::AppState>()
         .plugin_processes
         .kill(&app, &process_id)
+        .map_err(PylonError::Command)
 }
 
 use tauri::Manager;

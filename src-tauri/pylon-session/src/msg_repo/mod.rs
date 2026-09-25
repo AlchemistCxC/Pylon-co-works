@@ -16,7 +16,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::ser::SerializeMap;
 use serde::Serialize;
 
 use crate::error::SessionError;
@@ -239,16 +238,10 @@ impl MessageError {
     }
 }
 
-/// B1.2：结构化错误 wire `{ code, message }`（W2 IPC——Tauri command 直接返回
-/// `Result<T, MessageError>`，前端按 code 分支，message 仅展示）。与 SessionError 同形。
-impl Serialize for MessageError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化错误 wire `{ code, message }`（W2 IPC——Tauri command 直接返回
+// `Result<T, MessageError>`，前端按 code 分支，message 仅展示）。与 SessionError 同形；
+// #317 批次二：实现单源化到共享宏。
+crate::impl_wire_code_message_serialize!(MessageError);
 
 impl From<rusqlite::Error> for MessageError {
     fn from(error: rusqlite::Error) -> Self {

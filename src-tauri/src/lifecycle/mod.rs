@@ -560,11 +560,13 @@ pub(crate) async fn set_session_state(
     remote_session_id: Option<String>,
     state: serde_json::Value,
     app_state: tauri::State<'_, crate::AppState>,
-) -> Result<(), crate::session::MessageError> {
+) -> Result<(), PylonError> {
+    // #317 批次二：错误经 PylonError::MessagePersistence 委托，wire code 逐字不变。
     let service = crate::session::message_service_of(&app_state)?;
     service
         .set_session_state(owner, remote_session_id, state)
         .await
+        .map_err(PylonError::from)
 }
 
 #[tauri::command]

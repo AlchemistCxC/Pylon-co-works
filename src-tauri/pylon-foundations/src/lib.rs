@@ -6,6 +6,7 @@
 //! 错误源）、`cwd`/`paths`（AppState / tauri::command）、`runtime_log`（依赖
 //! correlation，待其摆脱 agent_config 后可随阶段二迁入）。
 
+pub mod atomic_write;
 pub mod event_names;
 pub mod git;
 pub mod sanitize;

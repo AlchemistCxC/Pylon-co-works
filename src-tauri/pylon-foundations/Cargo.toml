@@ -11,3 +11,7 @@ regex = "1.13.1"
 thiserror = "2"
 encoding_rs = "0.8.35"
 tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros"] }
+
+# #317 批次二 ③：原子写正身（MoveFileExW 替换）下沉本 crate 所需的 Windows 原语。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

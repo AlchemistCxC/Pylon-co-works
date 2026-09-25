@@ -1,4 +1,5 @@
 import { addError, resolveRuntimeErrors as resolveStoredRuntimeErrors } from './errorCenter.ts'
+import { errorCode } from './infrastructure/tauri/errorPayload.ts'
 import type { RuntimeErrorMatcher } from './errorCenter.ts'
 
 export type RecoveryKind =
@@ -183,7 +184,7 @@ function structuredErrorParts(error: unknown): { code?: string; message: string 
       const shape = error as StructuredWireError
       if (typeof shape.message === 'string' && shape.message.trim().length > 0) {
         return {
-          code: typeof shape.code === 'string' && shape.code.trim() ? shape.code.trim() : undefined,
+          code: errorCode(error) ?? undefined,
           message: shape.message.trim(),
         }
       }

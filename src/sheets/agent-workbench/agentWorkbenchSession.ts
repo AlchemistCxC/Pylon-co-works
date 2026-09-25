@@ -1,23 +1,21 @@
 /**
  * Workbench session host: binding, canonical replay/live reconciliation and
  * generation ownership. Stateless response/snapshot adapters live alongside
- * this module; they cannot mutate lifecycle state or access persistence.
+ * this module (agentWorkbenchProjection.ts); they cannot mutate lifecycle
+ * state or access persistence. The TurnClock/liveness subsystem
+ * (agentWorkbenchTurnClock.ts) and the optimistic-echo subsystem
+ * (agentWorkbenchOptimisticEcho.ts) are extracted collaborators; the shared
+ * binding/fold state lives in the `binding`/`fold` objects below.
  */
 import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './sessionResponseProjection.ts'
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../identityStore.ts'
-import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
-import { parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
-import { resolveGenerationLedgerTerminalReason, resolveKernelLiveness, type GenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
+import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
+import { resolveGenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {
-  canonicalBatchChunksOf,
-  canonicalBatchSpanOf,
-  isCanonicalBatchDeltaType,
-} from '../../infrastructure/events/canonicalEventBatch.ts'
-import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
-import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type SessionEvent, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
-import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
-import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
+  createWorkbenchEnvelope,
+  type WorkbenchEventEnvelope,
+} from '../../domains/workbench/events/workbenchEventSchema.ts'
 import {
   createWorkbenchDocument,
   projectWorkbench,
@@ -25,7 +23,6 @@ import {
   type WorkbenchDocument,
 } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
-import { reduceGenerationActivity } from '../../domains/activity/generationStateMachine.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
@@ -36,7 +33,6 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import { resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
-  findConfigOption,
   extractModelConfig,
   extractModeConfig,
   extractConfigOptionValue,
@@ -44,8 +40,22 @@ import {
   type PromptFailureMetadata,
   type SessionResponseObject,
 } from '../../infrastructure/acp/chatContracts.ts'
-import type { SessionConfigOption } from '../../domains/workbench/session/sessionSurface.ts'
-import { getCanonicalEventFeed, subscribeWindowTerminalFrames, type CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
+import {
+  canonicalDurationFromRows,
+  canonicalHasTerminalFromRows,
+  isLiveTextDelta,
+  localSessionFactEvent,
+  runningTailStartTime,
+  toWorkbenchEnvelopes,
+  withJournalDiagnostic,
+  type LocalSessionFact,
+} from './agentWorkbenchProjection.ts'
+import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
+import { createAgentWorkbenchOptimisticEcho } from './agentWorkbenchOptimisticEcho.ts'
+import type { CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
+import { getCanonicalEventFeed, subscribeWindowTerminalFrames } from '../../infrastructure/events/canonicalEventFeed.ts'
+
+export type { LocalSessionFact } from './agentWorkbenchProjection.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
@@ -77,226 +87,6 @@ export function workbenchSessionBindingKey(session: Session | undefined): string
   ].join('\u0000')
 }
 
-function normalizeCanonicalRowToEnvelopes(
-  event: CanonicalConversationEvent,
-  raw: unknown,
-  sequence: number,
-  eventId: string,
-  coverage?: readonly [number, number],
-): readonly WorkbenchEventEnvelope[] {
-  const provider = event.provenance?.provider ?? event.owner.agentId
-  const optimistic = isOptimisticUserEvent(raw)
-  const normalized = normalizeAgentEvent(raw, {
-    provider,
-    sessionId: event.owner.localSessionId,
-    sourceId: eventId,
-    sequence,
-    recordedAt: event.receivedAt,
-    occurredAt: event.occurredAt,
-    agentId: event.owner.agentId,
-    provenance: optimistic
-      ? { origin: 'optimistic-local', trust: 'unverified', provider }
-      : event.provenance ?? { origin: 'migration', trust: 'unverified', provider },
-  })
-  return normalized.events.map((envelope, index) => Object.freeze({
-    ...envelope,
-    eventId: normalized.events.length === 1 ? eventId : envelope.eventId,
-    identity: Object.freeze({ ...event.identity, ...envelope.identity }),
-    // coverage 是**行级**幂等键（投影器按"跨度是否已覆盖"整条丢弃），所以一行只能盖一条：
-    // 一个 config 包会产出多条语义事件（options + 当前 mode/model），若全都盖 [seq,seq]，
-    // 投影器会把同行的其余事件当成重复丢掉 —— 重放后就只剩一条，中控与配置面板各说各话。
-    // 其余事件按 eventId 幂等（同一次重放不会重复入账）。
-    ...(coverage && index === 0 ? { coverage: Object.freeze([coverage[0], coverage[1]]) as readonly [number, number] } : {}),
-  }))
-}
-
-/**
- * #81 L1 → #226：sink 的 batch 行（typedPayload.seqSpan + rawPayload = 原始 chunk 数组）
- * 展开。归一规则**不另起第二套**：仍逐 chunk 过 `normalizeAgentEvent`（方言/扩展归一原样
- * 生效），但只收割语义 parts 与 identity，随后把整段 run 合成**一个**段级信封——对齐
- * `turn.unit` delta-run 段的形状（coverage=[seqStart, seqEnd]、sourceId=`ownerKey#seqEnd`）。
- *
- * 与逐 chunk 展开的投影终态逐字节等价：
- * - run 内 sequence 相邻 ⇒ chunk 之间不存在 timeline 边界条目 ⇒ fold 决策单次求值等价；
- * - parts 拼接满足结合律 ⇒ 投影器一次性 coalesce 与逐 chunk 增量 coalesce 终态一致；
- * - message identity 终态 = 末个非空 chunk（append 覆盖语义）；time/occurredAt 取行值
- *   （= 首 chunk，`buildBatchRow` 保留首条时间戳）。
- * 收益：per-chunk 的信封冻结、投影归约与单点 coverage 全部消失——冷重放信封数随
- * 折叠比（最高 2000×）下降。任一 chunk 归一偏离期望形状（方言跨界/多事件/角色不符）
- * → 整行退回逐 chunk 展开，raw 保真不丢。
- */
-function expandCanonicalBatchRow(event: CanonicalConversationEvent): readonly WorkbenchEventEnvelope[] {
-  const ownerKey = toCanonicalOwnerKey(event.owner)
-  const chunks = canonicalBatchChunksOf(event)
-  if (!chunks) {
-    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
-  }
-  const span = canonicalBatchSpanOf(event)!
-  const perChunk = (): readonly WorkbenchEventEnvelope[] => chunks.flatMap((raw, index) => {
-    const sequence = span[0] + index
-    const eventId = `${ownerKey}#${sequence}`
-    return normalizeCanonicalRowToEnvelopes(event, raw, sequence, eventId, [sequence, sequence])
-  })
-  const provider = event.provenance?.provider ?? event.owner.agentId
-  const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
-  const expectedType = event.eventType === 'assistant.text.delta.batch' ? 'message.delta' : 'reasoning.delta'
-  const parts: ContentPart[] = []
-  let lastIdentity: WorkbenchEventEnvelope['identity'] | undefined
-  for (let index = 0; index < chunks.length; index += 1) {
-    const sequence = span[0] + index
-    const normalized = normalizeAgentEvent(chunks[index], {
-      provider,
-      sessionId: event.owner.localSessionId,
-      sourceId: `${ownerKey}#${sequence}`,
-      sequence,
-      recordedAt: event.receivedAt,
-      occurredAt: event.occurredAt,
-      agentId: event.owner.agentId,
-      provenance,
-    })
-    if (normalized.events.length !== 1) return perChunk()
-    const semantic = normalized.events[0]!
-    // 期望类型按字面量分支判定（TS 对联合类型变量的比较不收窄 event 联合）。
-    if (expectedType === 'message.delta') {
-      if (semantic.event.type !== 'message.delta' || semantic.event.role !== 'assistant') return perChunk()
-    } else if (semantic.event.type !== 'reasoning.delta') {
-      return perChunk()
-    }
-    parts.push(...(semantic.event.parts ?? []))
-    if (Object.keys(semantic.identity).length > 0) lastIdentity = semantic.identity
-  }
-  return [Object.freeze(createWorkbenchEnvelope({
-    sessionId: event.owner.localSessionId,
-    sequence: span[1],
-    recordedAt: event.receivedAt,
-    occurredAt: event.occurredAt,
-    source: { provider, sourceId: `${ownerKey}#${span[1]}` },
-    identity: Object.freeze({ ...event.identity, ...(lastIdentity ?? {}) }),
-    provenance,
-    coverage: [span[0], span[1]],
-    event: expectedType === 'message.delta'
-      ? { type: 'message.delta', role: 'assistant', parts }
-      : { type: 'reasoning.delta', parts },
-  }))]
-}
-
-/**
- * #81 L2：turn.unit 单元行按 segments 展开为 segment 级信封——delta-run 段重建为
- * message/reasoning delta 信封（coverage = [seqStart, seqEnd]，journal 权威跨度，
- * appliedRanges 覆盖判断据此与逐 chunk 行互斥）；整行 segment 递归走既有单行路径。
- * 形状损坏的单元行退回单行归一（产出 event.unknown，不丢证据）。
- *
- * **段级隔离**：单个整行 segment 不可读（形状损坏/校验失败）时，只把**该段**退化为
- * `event.unknown`（raw 保留、coverage 取该段自身跨度），其余段照常展开——一个坏段
- * 不得吞掉整轮的正文内容（#81 回归的放大源：形状不匹配曾使整轮塌成一条 unknown）。
- */
-function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: string): readonly WorkbenchEventEnvelope[] {
-  const payload = parseTurnUnitPayload(event)
-  if (!payload) {
-    return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
-  }
-  const provider = event.provenance?.provider ?? event.owner.agentId
-  const provenance = event.provenance ?? { origin: 'migration' as const, trust: 'unverified' as const, provider }
-  return payload.segments.flatMap((segment, index) => {
-    if (segment.kind === 'event') {
-      const inner = canonicalRowToWorkbench(segment.event)
-      if (inner !== undefined && inner.length > 0) return inner
-      // 段级隔离：该段退化为单行归一。eventId 缺失时用 `<unit>#segment-<i>` 保唯一，
-      // 否则两条坏段会共用同一 id 而被 appliedEventIds 去重吃掉一条。
-      const innerEventId = segment.event.eventId
-      return normalizeCanonicalRowToEnvelopes(
-        segment.event,
-        segment.event.rawPayload,
-        segment.event.sequence,
-        typeof innerEventId === 'string' && innerEventId.length > 0 ? innerEventId : `${event.eventId}#segment-${index}`,
-        [segment.event.sequence, segment.event.sequence],
-      )
-    }
-    const seqEnd = segment.seqEnd
-    const part: { kind: 'text' | 'markdown'; text: string } = { kind: segment.markdown ? 'markdown' : 'text', text: segment.text }
-    return [Object.freeze(createWorkbenchEnvelope({
-      sessionId: event.owner.localSessionId,
-      sequence: seqEnd,
-      recordedAt: segment.occurredAt,
-      occurredAt: segment.occurredAt,
-      source: { provider, sourceId: `${ownerKey}#${seqEnd}` },
-      identity: segment.identity ?? {},
-      provenance,
-      coverage: [segment.seqStart, segment.seqEnd],
-      event: segment.eventType === 'assistant.text.delta'
-        ? { type: 'message.delta', role: 'assistant', parts: [part] }
-        : { type: 'reasoning.delta', parts: [part] },
-    }))]
-  })
-}
-
-function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
-  if (!row || typeof row !== 'object' || !('owner' in row) || !('rawPayload' in row) || !('eventType' in row)) return undefined
-  if (validateCanonicalEvent(row).length > 0) return []
-  const event = row as CanonicalConversationEvent
-  if (event.eventType === 'turn.unit') return expandCanonicalUnitRow(event, toCanonicalOwnerKey(event.owner))
-  if (isCanonicalBatchDeltaType(event.eventType)) return expandCanonicalBatchRow(event)
-  return normalizeCanonicalRowToEnvelopes(event, event.rawPayload, event.sequence, event.eventId, [event.sequence, event.sequence])
-}
-
-function isOptimisticUserEvent(raw: unknown): boolean {
-  if (!raw || typeof raw !== 'object') return false
-  const envelope = raw as Record<string, unknown>
-  const params = envelope.params && typeof envelope.params === 'object' ? envelope.params as Record<string, unknown> : undefined
-  const updateValue = envelope.update ?? params?.update
-  if (!updateValue || typeof updateValue !== 'object') return false
-  const update = updateValue as Record<string, unknown>
-  const meta = update._meta && typeof update._meta === 'object' ? update._meta as Record<string, unknown> : undefined
-  return update.sessionUpdate === 'user_message_chunk' && meta?.pylonOptimisticUser === true
-}
-
-function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[] {
-  const canonical = canonicalRowToWorkbench(value)
-  if (canonical !== undefined) return canonical
-  const migrated = migrateWorkbenchEnvelope(value)
-  return migrated.ok ? [migrated.value] : []
-}
-
-function canonicalBoundaryRows(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
-  return rows.filter((row): row is CanonicalTurnBoundaryEvent => (
-    isRecord(row)
-    && typeof row.sequence === 'number'
-    && typeof row.eventType === 'string'
-  ))
-}
-
-function canonicalDurationFromRows(rows: readonly unknown[]) {
-  return deriveCanonicalTurnDuration(canonicalBoundaryRows(rows))
-}
-
-function canonicalHasTerminalFromRows(rows: readonly unknown[]): boolean {
-  return hasCanonicalTurnTerminal(canonicalBoundaryRows(rows))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function withJournalDiagnostic(document: WorkbenchDocument, count: number): WorkbenchDocument {
-  const message = `canonical journal 有 ${count} 条事件无法迁移`
-  return {
-    ...document,
-    diagnostics: [
-      ...document.diagnostics.filter(item => item.code !== 'canonical.journal.malformed'),
-      {
-        code: 'canonical.journal.malformed', message, level: 'error',
-        eventId: `canonical-load:${document.sessionId}`, sequence: document.revision,
-        data: { malformedCount: count },
-      },
-    ],
-  }
-}
-
-/**
- * 终帧 window 广播兜底：订阅 `pylon:done`/`pylon:error` 的窗口事件。后端
- * `finalize_response`/`publish_prompt_failure` 两条收尾路径都无条件走
- * `emit_event_all` 广播，所以这条路与 Channel 是否存在无关。
- */
 function defaultTerminalFallbackListener(listener: (signal: CanonicalTerminalSignal) => void): () => void {
   return subscribeWindowTerminalFrames(listener)
 }
@@ -315,53 +105,6 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   }
 }
 
-/** A write Pylon performed itself and the provider confirmed. */
-export type LocalSessionFact =
-  | { readonly kind: 'model'; readonly model: string }
-  | { readonly kind: 'mode'; readonly mode: string }
-  | { readonly kind: 'option'; readonly id: string; readonly value: string | boolean }
-
-/** SessionConfigOption is JSON by construction; its readonly index signature is just
- * what stops TS from unifying it with JsonValue on its own. */
-function withOptionValue(
-  options: readonly SessionConfigOption[],
-  index: number,
-  value: string | boolean,
-): readonly JsonValue[] {
-  return options.map((option, at) => (at === index ? { ...option, value } : option)) as unknown as readonly JsonValue[]
-}
-
-/** The option a semantic resolves to (shared ACP classifier), carrying a new value. */
-function withSemanticValue(
-  options: readonly SessionConfigOption[],
-  semantic: 'model' | 'mode',
-  value: string,
-): readonly JsonValue[] | undefined {
-  const index = options.findIndex(option => findConfigOption([option], semantic) !== undefined)
-  return index < 0 ? undefined : withOptionValue(options, index, value)
-}
-
-function localSessionFactEvent(fact: LocalSessionFact, document: WorkbenchDocument): SessionEvent | undefined {
-  const options = document.session.options
-  // The control center reads `session.mode` / `session.model` while the config panel
-  // reads the option's `value`, and nothing synchronises the two fields — so a local
-  // write has to fill both, or the two surfaces disagree (after a reload only the
-  // provider's advertisement survives and the control center falls back).
-  if (fact.kind === 'model') {
-    const merged = withSemanticValue(options, 'model', fact.model)
-    return { type: 'session.model-updated', model: fact.model, ...(merged ? { options: merged } : {}) }
-  }
-  if (fact.kind === 'mode') {
-    const merged = withSemanticValue(options, 'mode', fact.mode)
-    return { type: 'session.mode-updated', mode: fact.mode, ...(merged ? { options: merged } : {}) }
-  }
-  // `session.config-updated` replaces the whole option list, so a single-option
-  // write carries the merged list — the other options are not ours to drop.
-  const index = options.findIndex(option => option.id === fact.id)
-  if (index < 0) return undefined
-  return { type: 'session.config-updated', options: withOptionValue(options, index, fact.value) }
-}
-
 export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
@@ -375,22 +118,136 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   })
   const appearance = createZustandWorkbenchAppearanceStore()
   const sessionUi = createSessionUiStore()
-  let boundSessionId: string | undefined
-  let boundProvider = 'acp'
-  let boundSessionBindingKey: string | undefined
+  // 会话宿主的共享绑定/折叠状态（原散落闭包 let 的单源化，接口见
+  // agentWorkbenchOptimisticEcho.ts）：子系统与宿主经同一对象读写，跨块共享的
+  // 竞态控制面（generation/epoch/source/...）由此显式化。
+  const binding = {
+    boundSessionId: undefined as string | undefined,
+    boundProvider: 'acp',
+    boundSessionBindingKey: undefined as string | undefined,
+    ownerKey: undefined as string | undefined,
+    source: undefined as string | undefined,
+    generation: 0,
+    turnEpoch: 0,
+    loading: false,
+    buffered: [] as WorkbenchEventEnvelope[],
+    malformedCount: 0,
+    destroyed: false,
+    // A canonical replay can finish after this runtime's initial bind. Keep a
+    // separate, coalesced refresh seam so the same binding key does not make a
+    // later durable tool terminal event invisible (bind itself is intentionally
+    // idempotent for ordinary Session metadata updates).
+    refreshInFlight: null as Promise<void> | null,
+    // Every canonical read gets a monotonically increasing token. A bind read
+    // that started before a refresh (or before a new bind) must not publish its
+    // older snapshot after the newer read has won the race.
+    canonicalReadEpoch: 0,
+    selectorRequestInFlight: false,
+  }
+  // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
+  // 是其产出的物化视图。foldLog 保留全部已折信封（到达序、按 eventId 去重，与投影
+  // 核幂等判据同口径——refresh 全量重折的 journal 行不会重复入日志），供 reject 回滚
+  // 时「整页重折、剔除被拒乐观信封」重建投影核——wasm 侧没有就地删除已入账事件的出口。
+  const fold = {
+    log: [] as WorkbenchEventEnvelope[],
+    ids: new Set<string>(),
+    // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
+    // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
+    journalDiagnosticCount: 0,
+  }
+  /** Responses from the atomic empty-state create transaction can arrive
+   * before React has rebound the Workbench to the newly-added local Session.
+   * Keep them keyed by local Session.id until that bind completes. */
+  const pendingSessionResponses = new Map<string, SessionResponseObject[]>()
+  const appliedSessionResponseKeys = new Map<string, { key: string; session: WorkbenchDocument['session'] | undefined }>()
+  const transientSequenceBySource = new Map<string, number>()
+
+  const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
+    const current = runtime.getSnapshot()
+    if (!current.document) {
+      runtime.update(patch)
+      return
+    }
+    const { document: _ignoredDocument, ...generationPatch } = patch
+    runtime.applyDocument(current.document, {
+      ownerKey: binding.ownerKey,
+      generation: binding.generation,
+      preserveGeneration: false,
+      generationPatch,
+    })
+  }
+
+  /**
+   * 页级折叠（**TS 纯函数投影核**）：一页一次「文档入、文档出」。
+   *
+   * 2026-09-21 投影自 wasm 回退 TS（判决与依据见 ADR-0018 的 scope 修订）：wasm 投影在现实
+   * 入口只有 1.12×、页级 1.92×，而文档必须在核里与 JS 里**各存一份**（持有成本 4.4–6.1×）
+   * —— 换来的是负收益。回退后文档只有一份，也再没有「核就绪」这回事。
+   *
+   * `base` 的语义是**承重的**，别一律省：
+   * - 缺省 = 续折当前文档（live / session-response / refresh 的语义）；
+   * - **冷装载（bind）与回滚重折必须显式传新的空文档** —— 那是「重建」不是「续折」；
+   *   上游那条「审核修复：恢复基线的 `initialDocument: current`」指的就是这里别传错。
+   */
+  const foldPage = (
+    envelopes: readonly WorkbenchEventEnvelope[],
+    base?: WorkbenchDocument,
+  ): WorkbenchDocument => {
+    const initial = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source ?? '')
+    const projected = projectWorkbench(envelopes, { initialDocument: initial }).document
+    for (const envelope of envelopes) {
+      if (fold.ids.has(envelope.eventId)) continue
+      fold.ids.add(envelope.eventId)
+      fold.log.push(envelope)
+    }
+    return fold.journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, fold.journalDiagnosticCount) : projected
+  }
+
+  /**
+   * 单事件折叠（live 路径）：走**单事件归约器**而不是 `foldPage([one])`。
+   * 页级入口为取得工作数组所有权会整份复制 timeline（#205 的优化），逐事件用它就是
+   * Θ(N²) —— 这正是 #205 当初把 live 从页级入口挪开的原因，不要合流。
+   */
+  const foldEvent = (
+    envelope: WorkbenchEventEnvelope,
+    base?: WorkbenchDocument,
+  ): WorkbenchDocument => {
+    const current = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source ?? '')
+    const next = reduceWorkbenchEvent(current, envelope)
+    if (binding.boundSessionId && (next.session.model !== current.session.model || next.session.mode !== current.session.mode || next.session.options !== current.session.options)) {
+      sessionUi.set(binding.boundSessionId, 'selector-pending', '')
+    }
+    return next
+  }
+
+  const clock = createAgentWorkbenchTurnClock({
+    runtime,
+    updateRuntimeState,
+    getSource: () => binding.source,
+  })
+  const echo = createAgentWorkbenchOptimisticEcho({
+    runtime,
+    binding,
+    fold,
+    clock,
+    updateRuntimeState,
+    foldPage,
+    foldEvent,
+  })
+
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
     // P52 D4：controller React 状态面死亡——乐观 echo 撤销只剩 document 侧投影。
-    optimisticDocument: projectOptimisticUser,
-    rejectOptimisticDocument: rejectOptimisticUser,
+    optimisticDocument: echo.project,
+    rejectOptimisticDocument: echo.reject,
     resolveConfigOption(sessionId, key) {
-      if (boundSessionId !== sessionId) return undefined
+      if (binding.boundSessionId !== sessionId) return undefined
       const option = runtime.getSnapshot().document?.session.options.find(item => item.id === key)
       return option ? { value: option.value, version: option.version } : undefined
     },
     resolveInteraction(sessionId, interactionId): ResolvedWorkbenchInteraction | undefined {
       const snapshot = runtime.getSnapshot()
-      if (boundSessionId !== sessionId) return undefined
+      if (binding.boundSessionId !== sessionId) return undefined
       const interaction = snapshot.document?.interactions.find(item => item.id === interactionId && item.status === 'requested')
       const request = interaction?.request
       if (!request || typeof request !== 'object' || Array.isArray(request)) return undefined
@@ -414,450 +271,35 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       }
     },
   })
-  let ownerKey: string | undefined
-  let source: string | undefined
-  let generation = 0
-  let turnEpoch = 0
-  let loading = false
-  let buffered: WorkbenchEventEnvelope[] = []
-  let malformedCount = 0
-  let destroyed = false
-  // A canonical replay can finish after this runtime's initial bind. Keep a
-  // separate, coalesced refresh seam so the same binding key does not make a
-  // later durable tool terminal event invisible (bind itself is intentionally
-  // idempotent for ordinary Session metadata updates).
-  let refreshInFlight: Promise<void> | null = null
-  // Every canonical read gets a monotonically increasing token. A bind read
-  // that started before a refresh (or before a new bind) must not publish its
-  // older snapshot after the newer read has won the race.
-  let canonicalReadEpoch = 0
-  /** Responses from the atomic empty-state create transaction can arrive
-   * before React has rebound the Workbench to the newly-added local Session.
-   * Keep them keyed by local Session.id until that bind completes. */
-  const pendingSessionResponses = new Map<string, SessionResponseObject[]>()
-  const appliedSessionResponseKeys = new Map<string, { key: string; session: WorkbenchDocument['session'] | undefined }>()
-  let selectorRequestInFlight = false
-  const transientSequenceBySource = new Map<string, number>()
-  const pendingOptimisticBySource = new Map<string, Array<{
-    clientMessageId: string
-    content: string
-    priorCanonicalMatches: number
-    envelope: WorkbenchEventEnvelope
-  }>>()
-
-  // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
-  // 是其产出的物化视图。foldLog 保留全部已折信封（到达序、按 eventId 去重，与投影
-  // 核幂等判据同口径——refresh 全量重折的 journal 行不会重复入日志），供 reject 回滚
-  // 时「整页重折、剔除被拒乐观信封」重建投影核——wasm 侧没有就地删除已入账事件的出口。
-  let foldLog: WorkbenchEventEnvelope[] = []
-  const foldLogIds = new Set<string>()
-  // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
-  // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
-  let journalDiagnosticCount = 0
-
-  /**
-   * 页级折叠（**TS 纯函数投影核**）：一页一次「文档入、文档出」。
-   *
-   * 2026-09-21 投影自 wasm 回退 TS（判决与依据见 ADR-0018 的 scope 修订）：wasm 投影在现实
-   * 入口只有 1.12×、页级 1.92×，而文档必须在核里与 JS 里**各存一份**（持有成本 4.4–6.1×）
-   * —— 换来的是负收益。回退后文档只有一份，也再没有「核就绪」这回事。
-   *
-   * `base` 的语义是**承重的**，别一律省：
-   * - 缺省 = 续折当前文档（live / session-response / refresh 的语义）；
-   * - **冷装载（bind）与回滚重折必须显式传新的空文档** —— 那是「重建」不是「续折」；
-   *   上游那条「审核修复：恢复基线的 `initialDocument: current`」指的就是这里别传错。
-   */
-  const foldPage = (
-    envelopes: readonly WorkbenchEventEnvelope[],
-    base?: WorkbenchDocument,
-  ): WorkbenchDocument => {
-    const initial = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(source ?? '')
-    const projected = projectWorkbench(envelopes, { initialDocument: initial }).document
-    for (const envelope of envelopes) {
-      if (foldLogIds.has(envelope.eventId)) continue
-      foldLogIds.add(envelope.eventId)
-      foldLog.push(envelope)
-    }
-    return journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, journalDiagnosticCount) : projected
-  }
-
-  /**
-   * 单事件折叠（live 路径）：走**单事件归约器**而不是 `foldPage([one])`。
-   * 页级入口为取得工作数组所有权会整份复制 timeline（#205 的优化），逐事件用它就是
-   * Θ(N²) —— 这正是 #205 当初把 live 从页级入口挪开的原因，不要合流。
-   */
-  const foldEvent = (
-    envelope: WorkbenchEventEnvelope,
-    base?: WorkbenchDocument,
-  ): WorkbenchDocument => {
-    const current = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(source ?? '')
-    const next = reduceWorkbenchEvent(current, envelope)
-    if (boundSessionId && (next.session.model !== current.session.model || next.session.mode !== current.session.mode || next.session.options !== current.session.options)) {
-      sessionUi.set(boundSessionId, 'selector-pending', '')
-    }
-    return next
-  }
-
-  /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
-   *  source → 该 source 上"仅时钟起点"的 clientMessageId。发送被拒时据此精确撤销，
-   *  不误伤同 source 上由外部客户端 echo 启动的回合（issue #68 配套）。 */
-  const clockOnlyStarts = new Map<string, string>()
-
-  const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
-    const current = runtime.getSnapshot()
-    if (!current.document) {
-      runtime.update(patch)
-      return
-    }
-    const { document: _ignoredDocument, ...generationPatch } = patch
-    runtime.applyDocument(current.document, {
-      ownerKey,
-      generation,
-      preserveGeneration: false,
-      generationPatch,
-    })
-  }
-
-  // P52 D3 TurnClock —— 生成时钟唯一主人（source 隔离，事件驱动）。
-  // 回合起点 = 发送入口（乐观投影）；终态 = feed 终帧（done/error/cancelled）
-  // 或 canonical 终态证据（bind/refresh 时 journal 已终态）；拒绝发送 = 回滚。
-  // bind 换源不销毁旧 source 的时钟（切回可恢复指示器，等价原 controller 的
-  // source-scoped runtime）；终态幂等：首个终态 wins（K03），后续只忽略。
-  // lastTokenAt 由每条该 source 的 canonical envelope 刷新（touch）——projector
-  // 的 append-delta 不更新 message.time，文档派生的 lastTokenAt 会停滞。
-  interface TurnClockEntry {
-    generationStart: number
-    lastTokenAt: number
-    terminal: boolean
-  }
-  const turnClocks = new Map<string, TurnClockEntry>()
-  /**
-   * 最近一次 canonical 重载读到的 #99 账本终态，按 source 隔离。
-   *
-   * 单独存而不是只用作 refresh 的入参：`refresh` 对同 source 会去重（`refreshInFlight`），
-   * 一次早于终态收敛发起的重载可能与携带账本的那次同窗，入参会被去重丢掉。按 source
-   * 保留最近观测到的终态即可让在途的那次重载用上它。
-   *
-   * **新回合起点必须清空**（见 `turnClockStart`）：否则上一回合的终态会被当成本回合的
-   * 证据，把在途的新回合判成已收敛。
-   */
-  const ledgerTerminalBySource = new Map<string, GenerationLedgerTerminalReason>()
-
-  /**
-   * #217/ADR-0017：内核在途回合标记，按 source 隔离（`livenessSource: 'kernel'` 的
-   * 事实来源）。语义严格为「本进程已派发 prompt、尚未收到终态」。
-   *
-   * **条目只由 refresh（真实内核快照）创建**：`resolveKernelLiveness` 有表态才入表。
-   * 本地生命周期（发送入口/终帧/回滚）只**更新已存在的条目**——它们是内核事实的
-   * 及时Fresh化（派发后内核必然置位、终帧即内核收敛证据），但不得**制造**内核权威：
-   * 旧内核（快照永无 `turnInFlight` 字段）的宿主必须永久保持 `'clock'` 权威，#213 的
-   * 采纳启发式不能被一个前端自造的表态关闭（ADR 兼容矩阵：新前端 + 旧内核）。
-   *
-   * refresh 写入的新鲜度守卫：观测 false 而该 source 存在活动本地时钟时不覆盖
-   * （load 链与发送竞态时本地生命周期更新；内核若真已收敛，终帧随后到达自会落静）；
-   * 观测 true 而本地时钟已封存时同理不覆盖（终帧比早于它合成的快照更新——否则
-   * late 快照会在终态之后复活生成态，正是 ADR 风险条款点名的故障类）。
-   *
-   * 无内核表态（旧内核/快照缺字段）的 source 不入表 ⇒ 活性回退 `'clock'` 权威；
-   * 两条 applyLive 采纳启发式只在**有内核表态**时停用（ADR-0017 收敛推断）。
-   */
-  const kernelLivenessBySource = new Map<string, boolean>()
-
-  /**
-   * #217：内核回合身份戳（`${generation}:${turnId}`，取自快照 `turn.key`）。终帧
-   * 不携带 turnId，但它收敛的就是「最近一次 active 快照」里的那个回合——把该身份
-   * 记为 settled，此后带**同一身份**的 `turnInFlight=true` 快照即可判定为早于终态
-   * 的 stale（无本地时钟的他窗回合在终帧后没有时钟可作旁证，这是唯一的判别依据）；
-   * 不同身份 = 新回合，照常采纳。
-   */
-  const kernelTurnStamps = new Map<string, { active?: string; settled?: string }>()
-
-  /** 从冷挂载快照读回合身份戳（缺 key/字段非数值 ⇒ undefined，不猜）。 */
-  const kernelTurnStampOf = (snapshot: unknown): string | undefined => {
-    if (snapshot === null || typeof snapshot !== 'object') return undefined
-    const turn = (snapshot as { turn?: { key?: unknown } | null }).turn
-    const key = turn !== null && typeof turn === 'object' ? (turn as { key?: unknown }).key : undefined
-    if (key === null || typeof key !== 'object') return undefined
-    const generation = (key as { generation?: unknown }).generation
-    const turnId = (key as { turnId?: unknown }).turnId
-    return typeof generation === 'number' && typeof turnId === 'number'
-      ? `${generation}:${turnId}`
-      : undefined
-  }
-
-  /** #217：本 source 的有效活性权威——内核表态优先（kernel > clock > document）。 */
-  const effectiveLiveness = (targetSource: string): { source: 'kernel' | 'clock'; generating: boolean } => {
-    const kernelFact = kernelLivenessBySource.get(targetSource)
-    if (kernelFact !== undefined) return { source: 'kernel', generating: kernelFact }
-    return { source: 'clock', generating: turnClockGenerating(targetSource) }
-  }
-
-  const turnClockStart = (targetSource: string, at: number): void => {
-    turnClocks.set(targetSource, { generationStart: at, lastTokenAt: at, terminal: false })
-    ledgerTerminalBySource.delete(targetSource)
-  }
-
-  /** 每条 live envelope 刷新活性；返回 undefined = 无活动回合（不写 patch）。 */
-  const turnClockTouch = (targetSource: string, at: number): number | undefined => {
-    const entry = turnClocks.get(targetSource)
-    if (!entry || entry.terminal) return undefined
-    entry.lastTokenAt = Math.max(entry.lastTokenAt, at)
-    return entry.lastTokenAt
-  }
-
-  /** 终帧到达：写 live 终态摘要（elapsed = 终点 - 本进程观察到的起点）。 */
-  const turnClockTerminal = (targetSource: string, reason: 'done' | 'cancelled' | 'error', at: number, failure?: PromptFailureMetadata): void => {
-    const entry = turnClocks.get(targetSource)
-    if (!entry || entry.terminal) {
-      // #217：无时钟（本 source 的回合由他窗派发）或已封存——终帧仍是内核已收敛的
-      // 权威证据，但只 Fresh化**已存在**的内核条目并落静快照。终帧双轨投递
-      // （Channel + 广播）与本窗未绑定的 source 都会走到这里：内核条目不存在
-      // （纯时钟/旧内核宿主）时保持既有 no-op 语义；settleRuntimeLiveness 自身
-      // 只作用于当前绑定的 source（防跨 source 误伤）。
-      if (kernelLivenessBySource.has(targetSource)) {
-        kernelLivenessBySource.set(targetSource, false)
-        const stamps = kernelTurnStamps.get(targetSource)
-        if (stamps?.active !== undefined) kernelTurnStamps.set(targetSource, { settled: stamps.active })
-        settleRuntimeLiveness(targetSource)
-      }
-      return
-    }
-    entry.terminal = true
-    // 回合已有终态："仅时钟起点"的记账已完成使命。
-    clockOnlyStarts.delete(targetSource)
-    // #217：终帧 = 内核已收敛（后端终态先于终帧发布）——内核活性事实同步落静
-    // （仅更新已有条目；无内核表态的宿主不得被制造出内核权威）。
-    if (kernelLivenessBySource.has(targetSource)) {
-      kernelLivenessBySource.set(targetSource, false)
-      const stamps = kernelTurnStamps.get(targetSource)
-      if (stamps?.active !== undefined) kernelTurnStamps.set(targetSource, { settled: stamps.active })
-    }
-    if (source !== targetSource) return
-    updateRuntimeState({
-      summary: {
-        elapsedMs: Math.max(0, at - entry.generationStart),
-        tokenCount: runtime.getSnapshot().tokenCount,
-        completedFrame: '',
-        reason,
-        ...(failure ? { failure } : {}),
-        durationSource: 'live-monotonic',
-        durationAvailable: true,
-      },
-    })
-  }
-
-  /** 发送被拒绝：活动回合回滚（后续帧不得复活指示器）。 */
-  const turnClockRollback = (targetSource: string): void => {
-    const entry = turnClocks.get(targetSource)
-    if (!entry || entry.terminal) return
-    turnClocks.delete(targetSource)
-    // #217：派发从未发生（或被拒）——内核在途事实同样为否（仅更新已有条目）。
-    if (kernelLivenessBySource.has(targetSource)) kernelLivenessBySource.set(targetSource, false)
-  }
-
-  /** bind/refresh 发现 journal 已终态：封存时钟但不写摘要——展示由 displayOnly
-   * 恢复路径承担（elapsed 用 canonical 时长，不含离开会话的挂钟时间）。 */
-  const settleTurnClockFromDocument = (targetSource: string, hasTerminal: boolean): void => {
-    if (!hasTerminal) return
-    const entry = turnClocks.get(targetSource)
-    if (!entry || entry.terminal) return
-    entry.terminal = true
-  }
-
-  /** bind/refresh 后把活动时钟写回快照（覆盖投影间隙的 Date.now() 回退）。 */
-  const reconcileTurnClock = (targetSource: string): void => {
-    const entry = turnClocks.get(targetSource)
-    if (!entry || entry.terminal) return
-    // #217：内核已就本 source 表态「不在途」时，时钟不得复活生成态（权威让位）。
-    if (kernelLivenessBySource.get(targetSource) === false) return
-    updateRuntimeState({
-      generating: true,
-      generationStart: entry.generationStart,
-      lastTokenAt: entry.lastTokenAt,
-      summary: null,
-    })
-  }
-
-  /** #213：本 source 是否有一个未终结的回合时钟（权威活性的值）。 */
-  const turnClockGenerating = (targetSource: string): boolean => {
-    const entry = turnClocks.get(targetSource)
-    return entry !== undefined && !entry.terminal
-  }
-
-  /**
-   * #213：`reconcileTurnClock` 的对偶——权威活性说「本 source 已无在途回合」时，
-   * 必须**明确**把快照推回静止。
-   *
-   * 此前这一步是文档派生顺手完成的（重放出的 `running` 尾行为 false 就自然收敛），
-   * 而文档派生的活性已让位给回合时钟：时钟封存（或无时钟）后若不再表态，页脚会永久停在
-   * 生成态——正是 #213 的现象。已终态时幂等（`generating` 已为假则不动）。
-   */
-  const settleRuntimeLiveness = (targetSource: string): void => {
-    // #217：本函数的第二、三步作用于**当前绑定 source** 的全局快照——targetSource
-    // 非绑定 source 时必须早退，否则任意他 source 的终帧会把正在生成的会话压熄
-    // （终帧投递不过滤绑定 source，且双轨设计上重复投递）。
-    if (targetSource !== source) return
-    // #217：活性判定走有效权威（kernel > clock）——内核说在途时不得落静。
-    if (effectiveLiveness(targetSource).generating) return
-    if (!runtime.getSnapshot().generating) return
-    updateRuntimeState({
-      generating: false,
-      generationStart: 0,
-      lastTokenAt: undefined,
-      generationPhase: undefined,
-      generationActivity: undefined,
-      thinkingStart: undefined,
-    })
-  }
-
-  function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
-    if (destroyed) return
-    // P52 D3：回合起点属于**发送入口**，不属于 bind。空态创建路径
-    // （ControlCenter.createEmptySession → selectSession → send 同一 tick）下会话已被
-    // 选中但 bind 尚未完成；若在这里因"未绑定"早退，终帧到达时 turnClocks 没有该 source
-    // 的条目，turnClockTerminal 会直接 return ⇒ 终态摘要永不发布（issue #68）。
-    // 故时钟先无条件建立/覆盖；文档投影与快照 patch 仍严格限于已绑定的本 source。
-    const now = Date.now()
-    turnClockStart(targetSource, now)
-    // #217：发送入口 = 派发意图——内核在出站成功时会置位同一事实（begin 同点）。
-    // 仅 Fresh化已存在的内核条目（权威立即回到 kernel）；无内核表态的宿主不得被
-    // 制造出内核权威（保持 #213 时钟权威，兼容旧内核）。
-    if (kernelLivenessBySource.has(targetSource)) kernelLivenessBySource.set(targetSource, true)
-    if (targetSource !== source || !boundSessionId) {
-      // 仅时钟起点：文档投影要等 bind 之后由 canonical echo 承担。
-      clockOnlyStarts.set(targetSource, clientMessageId)
-      return
-    }
-    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(targetSource)
-    const existing = pendingOptimisticBySource.get(targetSource) ?? []
-    if (existing.some(item => item.clientMessageId === clientMessageId)) return
-    const envelope = createWorkbenchEnvelope({
-      eventId: `optimistic:${targetSource}:${clientMessageId}`,
-      sessionId: targetSource,
-      sequence: current.revision + existing.length + 1,
-      recordedAt: new Date(now).toISOString(),
-      source: { provider: 'local-user', sourceId: clientMessageId },
-      identity: { interactionId: clientMessageId },
-      provenance: { origin: 'optimistic-local', trust: 'unverified' },
-      event: { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: content }] },
-    })
-    existing.push({
-      clientMessageId,
-      content,
-      priorCanonicalMatches: current.messages.filter(message => message.role === 'user'
-        && message.content === content && message.optimistic !== true).length
-        + existing.filter(item => item.content === content).length,
-      envelope,
-    })
-    pendingOptimisticBySource.set(targetSource, existing)
-    turnEpoch += 1
-    runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, turnEpoch, terminalFence: null, preserveGeneration: true })
-    updateRuntimeState({
-      generating: true,
-      generationStart: now,
-      lastTokenAt: now,
-      generationPhase: { kind: 'thinking' },
-      generationActivity: reduceGenerationActivity(undefined, { type: 'start', at: now }),
-      summary: null,
-    })
-  }
-
-  function rejectOptimisticUser(targetSource: string, clientMessageId: string): void {
-    const pending = pendingOptimisticBySource.get(targetSource) ?? []
-    const rejected = pending.find(item => item.clientMessageId === clientMessageId)
-    if (!rejected) {
-      // 空态路径（尚未 bind）没有文档投影可撤：projectOptimisticUser 只记了"仅时钟起点"。
-      // 拒绝时同样必须撤销时钟，否则 bind 后的 reconcileTurnClock 会把从未发出的回合
-      // 复活成常驻 spinner（issue #68 配套）。
-      if (clockOnlyStarts.get(targetSource) === clientMessageId) {
-        clockOnlyStarts.delete(targetSource)
-        turnClockRollback(targetSource)
-      }
-      return
-    }
-    const remaining = pending.filter(item => item !== rejected)
-    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
-    else pendingOptimisticBySource.delete(targetSource)
-    if (source !== targetSource) return
-    const current = runtime.getSnapshot().document
-    if (!current) return
-    // 折叠状态在 wasm 投影核里，没有「就地删除已入账事件」的出口：按「从未发送」
-    // 语义从折叠日志剔除被拒乐观信封后整页重折（一帧过界），重建出的文档替换展示。
-    // 注意这与旧的手工 filter 有一个已登记的角落差异：乐观 user 行在到达序里
-    // settle 过的 running 行不会被还原（重建视角里它从未发生）。
-    const remainingLog = foldLog.filter(item => item !== rejected.envelope)
-    foldLog = []
-    foldLogIds.clear()
-    const document = foldPage(remainingLog, createWorkbenchDocument(source ?? ''))
-    runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
-    // P52 D3：发送被拒 = 回合回滚；若无其它在途乐观回合，时钟一并撤销，
-    // 后续迟到帧不得经 updateRuntimeState 复活指示器（原 controller 侧由
-    // reject-optimistic-user reducer 承担）。
-    if (remaining.length === 0) turnClockRollback(targetSource)
-    const existingActivity = runtime.getSnapshot().generationActivity
-    updateRuntimeState({
-      // #213：回滚后的活性只认"是否还有未撤销的乐观回合"——**不得**再看文档里有没有
-      // `running` 行。那条推断在权威化之后成了漏网语义：一个带截断残行的旧会话（无时钟、
-      // 无终态）会让被拒的发送把页脚永久顶成生成中。
-      generating: remaining.length > 0,
-      generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
-      generationActivity: remaining.length > 0
-        ? existingActivity ?? reduceGenerationActivity(undefined, { type: 'start', at: Date.now() })
-        : undefined,
-    })
-  }
-
-  const withPendingOptimistic = (targetSource: string, base: WorkbenchDocument): WorkbenchDocument => {
-    const pending = pendingOptimisticBySource.get(targetSource) ?? []
-    if (pending.length === 0) return base
-    // canonical 回声计数按 base 统计：pending 信封全是 optimistic-local，折叠它们
-    // 不会新增非乐观 user 行，先剪枝再批量折入与逐个计数同判。
-    const candidates = pending.filter(item => {
-      const canonicalMatches = base.messages.filter(message => message.role === 'user'
-        && message.content === item.content && message.optimistic !== true).length
-      return canonicalMatches <= item.priorCanonicalMatches
-    })
-    let document = base
-    if (candidates.length > 0) {
-      // 剩余 pending 一页折入：bind 重建投影核后是真正入账；refresh 路径里已入账的
-      // 乐观信封按 eventId 幂等跳过（no-op）。存活检查看最终文档的 optimistic 行。
-      document = foldPage(candidates.map(item => item.envelope), base)
-    }
-    const remaining = candidates.filter(item => document.messages.some(message => message.optimistic
-      && message.identity.interactionId === item.clientMessageId))
-    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
-    else pendingOptimisticBySource.delete(targetSource)
-    return document
-  }
 
   const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string): void => {
-    if (destroyed || !boundSessionId || !source || targetSessionId !== boundSessionId) return
+    if (binding.destroyed || !binding.boundSessionId || !binding.source || targetSessionId !== binding.boundSessionId) return
     const key = sessionResponseProjectionKey(response)
     const last = appliedSessionResponseKeys.get(targetSessionId)
     if (last?.key === key && last.session === runtime.getSnapshot().document?.session) return
 
-    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(source)
-    const bufferedMax = buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
-    const previousTransient = transientSequenceBySource.get(source) ?? 0
+    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source)
+    const bufferedMax = binding.buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
+    const previousTransient = transientSequenceBySource.get(binding.source) ?? 0
     const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
-    transientSequenceBySource.set(source, sequence)
-    const envelope = createSessionResponseEnvelope(source, boundProvider, response, sequence)
-    if (loading) {
-      buffered.push(envelope)
+    transientSequenceBySource.set(binding.source, sequence)
+    const envelope = createSessionResponseEnvelope(binding.source, binding.boundProvider, response, sequence)
+    if (binding.loading) {
+      binding.buffered.push(envelope)
       appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
       return
     }
-    runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, preserveGeneration: true })
+    runtime.applyDocument(foldEvent(envelope), { ownerKey: binding.ownerKey, generation: binding.generation, preserveGeneration: true })
     appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
   }
 
   const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
-    if (destroyed) return
+    if (binding.destroyed) return
     const normalized = sessionResponseObject(response)
-    const target = targetSessionId?.trim() || boundSessionId
+    const target = targetSessionId?.trim() || binding.boundSessionId
     if (!target) return
-    if (boundSessionId && (target === boundSessionId || target === source)) {
-      enqueueSessionResponse(normalized, boundSessionId)
+    if (binding.boundSessionId && (target === binding.boundSessionId || target === binding.source)) {
+      enqueueSessionResponse(normalized, binding.boundSessionId)
       return
     }
     const pending = pendingSessionResponses.get(target) ?? []
@@ -872,27 +314,27 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     fact: LocalSessionFact,
     request: () => Promise<unknown>,
   ): Promise<void> => {
-    if (destroyed || !boundSessionId || source !== context.source || boundProvider !== context.agentId) throw new Error('selector_owner_stale')
-    if (selectorRequestInFlight) throw new Error('selector_request_in_flight')
-    const requestGeneration = generation
-    const sessionId = boundSessionId
+    if (binding.destroyed || !binding.boundSessionId || binding.source !== context.source || binding.boundProvider !== context.agentId) throw new Error('selector_owner_stale')
+    if (binding.selectorRequestInFlight) throw new Error('selector_request_in_flight')
+    const requestGeneration = binding.generation
+    const sessionId = binding.boundSessionId
     const before = runtime.getSnapshot().document?.session
-    selectorRequestInFlight = true
+    binding.selectorRequestInFlight = true
     sessionUi.set(sessionId, 'selector-pending', '')
     try {
       const response = sessionResponseObject(await request())
-      if (destroyed || generation !== requestGeneration || boundSessionId !== sessionId) return
+      if (binding.destroyed || binding.generation !== requestGeneration || binding.boundSessionId !== sessionId) return
       const current = runtime.getSnapshot().document ?? createWorkbenchDocument(context.source)
       const receivedSelectorUpdate = before && (before.model !== current.session.model || before.mode !== current.session.mode || before.options !== current.session.options)
       const model = extractModelConfig(response.configOptions, response).model
       const mode = extractModeConfig(response).mode
       const options = response.configOptions ?? response.config_options
       if (options?.length) {
-        const sequence = Math.max(current.revision, transientSequenceBySource.get(context.source) ?? 0, ...buffered.map(item => item.sequence)) + 1
+        const sequence = Math.max(current.revision, transientSequenceBySource.get(context.source) ?? 0, ...binding.buffered.map(item => item.sequence)) + 1
         transientSequenceBySource.set(context.source, sequence)
-        const envelope = createSessionResponseEnvelope(context.source, boundProvider, response, sequence, 'session.config-updated')
-        if (loading) buffered.push(envelope)
-        else runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, preserveGeneration: true })
+        const envelope = createSessionResponseEnvelope(context.source, binding.boundProvider, response, sequence, 'session.config-updated')
+        if (binding.loading) binding.buffered.push(envelope)
+        else runtime.applyDocument(foldEvent(envelope), { ownerKey: binding.ownerKey, generation: binding.generation, preserveGeneration: true })
       } else {
         if (model) applyLocalSessionFact({ kind: 'model', model }, context.source)
         if (mode) applyLocalSessionFact({ kind: 'mode', mode }, context.source)
@@ -904,7 +346,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         sessionUi.set(sessionId, 'selector-pending', `${requested}（等待 Agent 确认）`)
       }
     } finally {
-      selectorRequestInFlight = false
+      binding.selectorRequestInFlight = false
     }
   }
 
@@ -923,57 +365,36 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * A fact states only the value that changed, so the rest of the surface stays.
    */
   const applyLocalSessionFact = (fact: LocalSessionFact, targetSessionId?: string): void => {
-    if (destroyed || !boundSessionId || !source) return
+    if (binding.destroyed || !binding.boundSessionId || !binding.source) return
     const target = targetSessionId?.trim()
-    if (target && target !== boundSessionId && target !== source) return
-    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(source)
+    if (target && target !== binding.boundSessionId && target !== binding.source) return
+    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source)
     const event = localSessionFactEvent(fact, current)
     if (!event) return
-    const bufferedMax = buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
-    const previousTransient = transientSequenceBySource.get(source) ?? 0
+    const bufferedMax = binding.buffered.reduce((max, item) => Math.max(max, item.sequence), 0)
+    const previousTransient = transientSequenceBySource.get(binding.source) ?? 0
     const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
-    transientSequenceBySource.set(source, sequence)
+    transientSequenceBySource.set(binding.source, sequence)
     const envelope = createWorkbenchEnvelope({
-      eventId: `local-fact:${source}:${sequence}`,
-      sessionId: source,
+      eventId: `local-fact:${binding.source}:${sequence}`,
+      sessionId: binding.source,
       sequence,
       recordedAt: new Date().toISOString(),
       source: { provider: 'local-write', sourceId: `local-fact:${sequence}` },
       provenance: {
         origin: 'local-observed',
         trust: 'authoritative',
-        provider: boundProvider,
+        provider: binding.boundProvider,
         orderConfidence: 'observed',
         synthetic: { reason: 'local-write-confirmed' },
       },
       event,
     })
-    if (loading) {
-      buffered.push(envelope)
+    if (binding.loading) {
+      binding.buffered.push(envelope)
       return
     }
-    runtime.applyDocument(foldEvent(envelope), { ownerKey, generation, preserveGeneration: true })
-  }
-
-  const confirmPendingFromEnvelope = (envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope => {
-    if (envelope.provenance.origin === 'optimistic-local') return envelope
-    if ((envelope.event.type !== 'message.delta' && envelope.event.type !== 'message.completed')
-      || envelope.event.role !== 'user') return envelope
-    const content = (envelope.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('')
-    const targetSource = envelope.sessionId
-    const pending = pendingOptimisticBySource.get(targetSource) ?? []
-    const requestId = envelope.identity.interactionId
-    const matched = (requestId ? pending.find(item => item.clientMessageId === requestId) : undefined)
-      ?? pending.find(item => item.content === content)
-    if (!matched) return envelope
-    const remaining = pending.filter(item => item !== matched)
-    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
-    else pendingOptimisticBySource.delete(targetSource)
-    if (requestId === matched.clientMessageId) return envelope
-    return Object.freeze({
-      ...envelope,
-      identity: Object.freeze({ ...envelope.identity, interactionId: matched.clientMessageId }),
-    })
+    runtime.applyDocument(foldEvent(envelope), { ownerKey: binding.ownerKey, generation: binding.generation, preserveGeneration: true })
   }
 
   const applyLive = (incoming: WorkbenchEventEnvelope) => {
@@ -982,10 +403,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const isUserStart = incoming.event.type === 'message.delta' && incoming.event.role === 'user'
       && !(priorUser?.running === true)
     const content = isUserStart ? (incoming.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('') : ''
-    const pending = pendingOptimisticBySource.get(incoming.sessionId) ?? []
-    const echoesOptimistic = pending.some(item => item.clientMessageId === incoming.identity.interactionId || item.content === content)
-    if (isUserStart && !echoesOptimistic) turnEpoch += 1
-    const envelope = confirmPendingFromEnvelope(incoming)
+    const echoesOptimistic = echo.matchesPending(incoming.sessionId, incoming.identity.interactionId, content)
+    if (isUserStart && !echoesOptimistic) binding.turnEpoch += 1
+    const envelope = echo.confirm(incoming)
     const envelopeTime = envelope.occurredAt ? Date.parse(envelope.occurredAt) || Date.now() : Date.now()
     // P52 D3：非乐观 user echo 是真实回合起点（发送方可能是同账号其它客户端）；
     // 覆盖 TurnClock，与 applyDocument 的 terminalFence:null 清除通道对齐。
@@ -996,15 +416,15 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // #217：本 source 有内核表态（kernelLivenessBySource.has）时，"采纳实时帧"的
     // 启发式停用——是否在途由内核事实回答，本进程不再从观察物猜（ADR-0017 收敛
     // 推断）。clockOnlyStarts 的记账保留（canonical echo 仍需确认派发意图）。
-    const kernelAuthoritative = kernelLivenessBySource.has(envelope.sessionId)
-    if (isUserStart && !echoesOptimistic && !loading) {
+    const kernelAuthoritative = clock.kernelAuthoritative(envelope.sessionId)
+    if (isUserStart && !echoesOptimistic && !binding.loading) {
       // 空态路径的回合起点已在发送入口建立：live echo 不得把它推迟到 echo 时刻
       // （elapsed 从用户发出算起，与已绑定路径一致）。
-      if (!kernelAuthoritative && !clockOnlyStarts.has(envelope.sessionId)) turnClockStart(envelope.sessionId, envelopeTime)
-      clockOnlyStarts.delete(envelope.sessionId)
+      if (!kernelAuthoritative && !clock.hasClockOnlyStart(envelope.sessionId)) clock.start(envelope.sessionId, envelopeTime)
+      clock.clearClockOnlyStart(envelope.sessionId)
       // #213：权威活性必须**明确表态**——不能再指望文档里那个 running 行把 generating 顶起来
       // （文档派生的活性已让位给回合时钟）。回合不终结，时钟就一直是权威。
-      if (!kernelAuthoritative) reconcileTurnClock(envelope.sessionId)
+      if (!kernelAuthoritative) clock.reconcile(envelope.sessionId)
     }
     // #213 补强：本 source 还没有回合时钟时，**实时**文本 delta 本身就是「在途回合」的证据
     //（同账号其它客户端先开了回合、本进程后启动）。起点取文档里首个 running 行的时间，
@@ -1012,18 +432,18 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     //（见上），不在此列。
     // #217：内核表态可用时本启发式停用——他端先开回合的"是否在途"由内核回答（语义
     // 严格为「本进程已派发 prompt」），不再从实时帧采纳。
-    if (!kernelAuthoritative && !loading && isLiveTextDelta(incoming) && turnClocks.get(envelope.sessionId) === undefined) {
-      turnClockStart(envelope.sessionId, runningTailStartTime(currentBefore) ?? envelopeTime)
-      reconcileTurnClock(envelope.sessionId)
+    if (!kernelAuthoritative && !binding.loading && isLiveTextDelta(incoming) && !clock.hasClock(envelope.sessionId)) {
+      clock.start(envelope.sessionId, runningTailStartTime(currentBefore) ?? envelopeTime)
+      clock.reconcile(envelope.sessionId)
     }
     // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
-    turnClockTouch(envelope.sessionId, envelopeTime)
-    if (loading) { buffered.push(envelope); return }
-    const liveness = effectiveLiveness(envelope.sessionId)
+    clock.touch(envelope.sessionId, envelopeTime)
+    if (binding.loading) { binding.buffered.push(envelope); return }
+    const liveness = clock.effectiveLiveness(envelope.sessionId)
     runtime.applyDocument(foldEvent(envelope), {
-      ownerKey,
-      generation,
-      turnEpoch,
+      ownerKey: binding.ownerKey,
+      generation: binding.generation,
+      turnEpoch: binding.turnEpoch,
       terminalFence: isUserStart ? null : undefined,
       preserveGeneration: true,
       livenessSource: liveness.source,
@@ -1031,30 +451,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     })
   }
 
-/**
- * #213：实时**产出**帧——agent 正在写正文/思考（乐观帧与 user 回声另走各自的时钟通道）。
- *
- * 刻意排除 `role === 'user'`：user 帧不是"agent 在产出"的证据，而 `runningTailStartTime`
- * 取的是文档里最早的 running 行，含陈旧截断行 ⇒ 会算出虚胖的 elapsed。
- */
-function isLiveTextDelta(envelope: WorkbenchEventEnvelope): boolean {
-  const type = envelope.event.type
-  if (type !== 'message.delta' && type !== 'reasoning.delta') return false
-  const role = (envelope.event as { role?: string }).role
-  return type === 'reasoning.delta' || role === 'assistant'
-}
-
-/** #213 补强：文档里首个 running 行的时间——他端已在进行中的回合，其起点不是"我们看见它"的时刻。 */
-function runningTailStartTime(document: WorkbenchDocument | undefined): number | undefined {
-  let earliest: number | undefined
-  for (const message of document?.messages ?? []) {
-    if (message.running !== true) continue
-    const at = Date.parse(message.time ?? '')
-    if (!Number.isFinite(at)) continue
-    if (earliest === undefined || at < earliest) earliest = at
-  }
-  return earliest
-}
   // P52 D3：feed 终帧信号 → TurnClock 终态（done/error；cancelled 映射 cancelled）。
   // 时钟幂等：首个终态 wins；不在当前 source 的终帧只封存该 source 的时钟。
   // 终态收敛的唯一入口：TurnClock 幂等（首个终态 wins），故 Channel 主轨与 window
@@ -1068,29 +464,110 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
     const failure = signal.kind === 'error' && payload && typeof payload === 'object' && typeof payload.failure === 'object'
       ? payload.failure as PromptFailureMetadata
       : undefined
-    turnClockTerminal(signal.source, reason, Date.now(), failure)
+    clock.terminal(signal.source, reason, Date.now(), failure)
   }
   const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(handleTerminalSignal)
   const unsubscribeTerminalFallback = listenTerminalFallback(handleTerminalSignal)
   const unsubscribeEvents = subscribe(event => {
-    if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return
+    if (binding.destroyed || !binding.ownerKey || !binding.source || !event || typeof event !== 'object') return
     const candidate = event as { owner?: Parameters<typeof toCanonicalOwnerKey>[0]; sessionId?: unknown }
-    const matchesOwner = candidate.owner ? toCanonicalOwnerKey(candidate.owner) === ownerKey : candidate.sessionId === source
+    const matchesOwner = candidate.owner ? toCanonicalOwnerKey(candidate.owner) === binding.ownerKey : candidate.sessionId === binding.source
     if (!matchesOwner) return
     const envelopes = toWorkbenchEnvelopes(event)
     if (envelopes.length > 0) envelopes.forEach(applyLive)
     else {
-      malformedCount += 1
-      journalDiagnosticCount = malformedCount
-      if (!loading) {
+      binding.malformedCount += 1
+      fold.journalDiagnosticCount = binding.malformedCount
+      if (!binding.loading) {
         const snapshot = runtime.getSnapshot()
-        if (snapshot.document) runtime.replaceDocument(withJournalDiagnostic(snapshot.document, malformedCount), {
-          ownerKey, generation, sessionId: snapshot.sessionId,
+        if (snapshot.document) runtime.replaceDocument(withJournalDiagnostic(snapshot.document, binding.malformedCount), {
+          ownerKey: binding.ownerKey, generation: binding.generation, sessionId: snapshot.sessionId,
         })
-        updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` })
+        updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${binding.malformedCount} 条事件无法迁移` })
       }
     }
   })
+
+  /**
+   * Canonical 重载/冷装载的成功尾巴（refresh 与 bind 的共享发布路径）：把折好的
+   * 文档替换进 runtime、按权威活性申报、收敛时钟与账本证据、按需发布 display-only
+   * 摘要。`withLedgerEvidence` 区分两条路——refresh 携带 #99 账本快照（bind 不据
+   * journal 终态**行**置内核表态，内核事实只来自冷挂载快照的 turnInFlight/账本、
+   * 终帧与本地生命周期）。
+   */
+  const publishCanonicalRead = (input: {
+    readSource: string
+    readOwnerKey: string
+    readGeneration: number
+    readSessionId: string
+    envelopes: readonly WorkbenchEventEnvelope[]
+    bufferedAtRead: readonly WorkbenchEventEnvelope[]
+    base: WorkbenchDocument
+    malformedCount: number
+    canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
+    canonicalHasTerminal: boolean
+    withLedgerEvidence: boolean
+  }): void => {
+    const projected = foldPage(
+      input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead],
+      input.base,
+    )
+    const reconciled = echo.withPending(input.readSource, projected)
+    const document = input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled
+    binding.buffered = []
+    binding.loading = false
+    const readLiveness = clock.effectiveLiveness(input.readSource)
+    runtime.replaceDocument(document, {
+      ownerKey: input.readOwnerKey,
+      generation: input.readGeneration,
+      sessionId: input.readSessionId,
+      livenessSource: readLiveness.source,
+      livenessGenerating: readLiveness.generating,
+    })
+    if (input.malformedCount > 0) {
+      updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${input.malformedCount} 条事件无法迁移` })
+    } else {
+      updateRuntimeState({ status: 'ready', error: null })
+      // A successful canonical refresh is authoritative evidence that any
+      // earlier recoverable bind/replay notice for this session is stale.
+      // Resolve by stable key only; errors from other sessions remain.
+      resolveRuntimeErrors({ key: `session-recovery:${input.readSessionId}`, source: 'chat.session-recovery' })
+    }
+    // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
+    // #99：账本是第二条终态证据——journal 读可能早于终态行落盘（后端
+    // "done 先于 persist"），只认 journal 会让这类读把在途投影判成当前事实，
+    // 既封不住时钟、也补不出摘要。
+    // #217：终态证据同样收敛内核在途事实——账本/journal 终态就是内核自己在说
+    // 「回合已终态」（终帧丢失时这是唯一落静路，displayOnly 摘要依赖它）。
+    const ledgerTerminalReason = input.withLedgerEvidence ? clock.ledgerTerminalOf(input.readSource) : undefined
+    const hasTerminalEvidence = input.canonicalHasTerminal || ledgerTerminalReason !== undefined
+    clock.settleFromDocument(input.readSource, hasTerminalEvidence)
+    // #217：终态证据收敛内核事实。**只认账本终态**（ledgerTerminalReason，内核
+    // 自己的账本）——journal 终态行是文档历史，不是内核活性事实，不得制造内核
+    // 条目（时钟封存那一半维持 #99 无条件既有语义，kernel 写跟随账本那一半）。
+    // 这是无条件写，与顶部的新鲜度守卫刻意不同：账本终态是点时内核事实的
+    // 收敛陈述，早于它发出的 true 快照已被守卫二的回合身份挡住。
+    if (ledgerTerminalReason !== undefined) clock.settleKernelFromLedger(input.readSource)
+    clock.settleRuntimeLiveness(input.readSource)
+    clock.reconcile(input.readSource)
+    const settled = runtime.getSnapshot()
+    if (!settled.generating && !settled.summary && hasTerminalEvidence) {
+      updateRuntimeState({
+        summary: {
+          elapsedMs: input.canonicalDuration?.elapsedMs ?? 0,
+          tokenCount: settled.tokenCount,
+          completedFrame: '',
+          reason: ledgerTerminalReason ?? 'done',
+          durationSource: input.canonicalDuration?.source ?? 'unknown',
+          durationAvailable: input.canonicalDuration !== undefined,
+          // Display-only restore: must not synthesize a terminal fence
+          // (see normalizeRuntimeSnapshot), or the next controller-driven
+          // generation cannot restart the indicator after a rebind.
+          displayOnly: true,
+        },
+      })
+    }
+  }
 
   /**
    * Canonical 重载：把 journal 读回来的投影折回文档，并据此收敛时钟。
@@ -1102,52 +579,20 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
    * **或** 账本说已收敛——只认前者会让一次早于终态行落盘的读把摘要判成不存在。
    */
   const refresh = async (session: Session | undefined, ledgerTurn?: unknown): Promise<void> => {
-    if (destroyed || !session || !ownerKey || !boundSessionId || !source) return
+    if (binding.destroyed || !session || !binding.ownerKey || !binding.boundSessionId || !binding.source) return
     const bindingKey = workbenchSessionBindingKey(session)
-    const refreshOwnerKey = ownerKey
-    const refreshSource = source
-    const refreshSessionId = boundSessionId
-    const refreshGeneration = generation
-    if (bindingKey !== boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
-    if (refreshInFlight) return refreshInFlight
-    const refreshEpoch = ++canonicalReadEpoch
+    const refreshOwnerKey = binding.ownerKey
+    const refreshSource = binding.source
+    const refreshSessionId = binding.boundSessionId
+    const refreshGeneration = binding.generation
+    if (bindingKey !== binding.boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
+    if (binding.refreshInFlight) return binding.refreshInFlight
+    const refreshEpoch = ++binding.canonicalReadEpoch
     // 账本终态按 source 归档；本次调用的账本可能被去重丢掉，但归档会留下。
     const ledgerTerminalReason = resolveGenerationLedgerTerminalReason(ledgerTurn)
-    if (ledgerTerminalReason !== undefined) ledgerTerminalBySource.set(refreshSource, ledgerTerminalReason)
-    // #217：内核在途事实随快照入库（条目只由此创建——内核真实表态）。双向新鲜度
-    // 守卫：快照的时点可能早于本地生命周期——
-    //  · false 而本地时钟活动：不覆盖（load/发送竞态下本地更新；内核真收敛则终帧
-    //    随后到达自会落静）；
-    //  · true 而本地时钟已封存：不覆盖（终帧比该快照新；采纳会让 late 快照在终态
-    //    之后复活生成态——merge 层还会顺带清掉 terminalFence，ADR 风险条款的故障类）。
-    const kernelFact = resolveKernelLiveness(ledgerTurn)
-    if (kernelFact !== undefined) {
-      const clockEntry = turnClocks.get(refreshSource)
-      // 守卫一（时钟旁证）：无本地时钟 ⇒ 快照是唯一事实，采纳；时钟活动 ⇒ 只认
-      // true（false 必是竞态旧值）；时钟已封存 ⇒ 只认 false（true 必是早于终态的
-      // 旧快照）。
-      const clockAllows = clockEntry === undefined
-        ? true
-        : clockEntry.terminal ? !kernelFact : kernelFact
-      // 守卫二（回合身份）：true 快照的身份与已记 settled 的身份相同 ⇒ 它是早于
-      // 终态的同一回合（终帧不携带 turnId，身份戳是唯一判别依据）；不同/缺身份
-      // 视为新回合，照常采纳。
-      const stamp = kernelTurnStampOf(ledgerTurn)
-      const stamps = kernelTurnStamps.get(refreshSource)
-      const stampAllows = !(kernelFact
-        && stamps?.settled !== undefined
-        && stamp !== undefined
-        && stamp === stamps.settled)
-      if (clockAllows && stampAllows) {
-        kernelLivenessBySource.set(refreshSource, kernelFact)
-        if (kernelFact) {
-          kernelTurnStamps.set(refreshSource, stamp !== undefined ? { active: stamp } : {})
-        } else {
-          // 内核自己确认了「不在途」：settled 标记完成使命。
-          kernelTurnStamps.delete(refreshSource)
-        }
-      }
-    }
+    if (ledgerTerminalReason !== undefined) clock.archiveLedgerTerminal(refreshSource, ledgerTerminalReason)
+    // #217：内核在途事实随快照入库（守卫逻辑见 clock.observeKernelSnapshot）。
+    clock.observeKernelSnapshot(refreshSource, ledgerTurn)
 
     const run = (async () => {
       try {
@@ -1157,9 +602,9 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         // Session switches/rebinds invalidate the result. Do not let a late
         // canonical read replace the document belonging to the new owner.
-        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
-          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
-          || canonicalReadEpoch !== refreshEpoch) return
+        if (binding.destroyed || bindingKey !== binding.boundSessionBindingKey || binding.ownerKey !== refreshOwnerKey
+          || binding.source !== refreshSource || binding.boundSessionId !== refreshSessionId || binding.generation !== refreshGeneration
+          || binding.canonicalReadEpoch !== refreshEpoch) return
 
         let refreshMalformedCount = 0
         const envelopes = rows.flatMap(row => {
@@ -1172,90 +617,39 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         // while that read was in flight into the winning projection and release
         // the load buffer. Otherwise those events would remain stranded behind
         // the invalidated bind promise.
-        const bufferedAtRefresh = buffered
+        const bufferedAtRefresh = binding.buffered
         // #81 L2：保留折入式投影（读快照建立后提交的 live 行不得被 replace 丢弃）。
         // 粒度互斥由 coverage 区间承担：journal 信封（单元 segment/逐 chunk）对
         // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
         // 行同判幂等，整页重折即收敛。
-        if (refreshMalformedCount > 0) journalDiagnosticCount = refreshMalformedCount
+        if (refreshMalformedCount > 0) fold.journalDiagnosticCount = refreshMalformedCount
         // #204③：foldLog 以本次 journal 权威集**整体替换**。此前 log 永远保留 bind 时代
         // 的旧信封实例——refresh 重建文档后它们不再与文档共享事件对象，等于把一整份
         // 旧事件图钉在内存里（大会话的主要留存浪费之一）。替换后 log 的信封与文档
         // timeline 共享同一语义事件对象（仅余信封壳），且被拒回滚的整页重折源恰好
         // 就是这份 journal 权威集（未提交的乐观行由 withPendingOptimistic 随后补入）。
-        foldLog = []
-        foldLogIds.clear()
-        const projected = foldPage(
-          bufferedAtRefresh.length === 0 ? envelopes : [...envelopes, ...bufferedAtRefresh],
-          current,
-        )
-        const reconciled = withPendingOptimistic(refreshSource, projected)
-        const document = refreshMalformedCount > 0
-          ? withJournalDiagnostic(reconciled, refreshMalformedCount)
-          : reconciled
-        buffered = []
-        loading = false
-        const refreshLiveness = effectiveLiveness(refreshSource)
-        runtime.replaceDocument(document, {
-          ownerKey: refreshOwnerKey,
-          generation: refreshGeneration,
-          sessionId: refreshSessionId,
-          livenessSource: refreshLiveness.source,
-          livenessGenerating: refreshLiveness.generating,
+        fold.log = []
+        fold.ids.clear()
+        publishCanonicalRead({
+          readSource: refreshSource,
+          readOwnerKey: refreshOwnerKey,
+          readGeneration: refreshGeneration,
+          readSessionId: refreshSessionId,
+          envelopes,
+          bufferedAtRead: bufferedAtRefresh,
+          base: current,
+          malformedCount: refreshMalformedCount,
+          canonicalDuration,
+          canonicalHasTerminal,
+          withLedgerEvidence: true,
         })
-        if (refreshMalformedCount > 0) {
-          updateRuntimeState({ status: 'degraded', error: `canonical journal 有 ${refreshMalformedCount} 条事件无法迁移` })
-        } else {
-          updateRuntimeState({ status: 'ready', error: null })
-          // A successful canonical refresh is authoritative evidence that any
-          // earlier recoverable bind/replay notice for this session is stale.
-          // Resolve by stable key only; errors from other sessions remain.
-          resolveRuntimeErrors({ key: `session-recovery:${refreshSessionId}`, source: 'chat.session-recovery' })
-        }
-        // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
-        // #99：账本是第二条终态证据——journal 读可能早于终态行落盘（后端
-        // "done 先于 persist"），只认 journal 会让这类读把在途投影判成当前事实，
-        // 既封不住时钟、也补不出摘要。
-        // #217：终态证据同样收敛内核在途事实——账本/journal 终态就是内核自己在说
-        // 「回合已终态」（终帧丢失时这是唯一落静路，displayOnly 摘要依赖它）。
-        const ledgerTerminalReason = ledgerTerminalBySource.get(refreshSource)
-        const hasTerminalEvidence = canonicalHasTerminal || ledgerTerminalReason !== undefined
-        settleTurnClockFromDocument(refreshSource, hasTerminalEvidence)
-        // #217：终态证据收敛内核事实。**只认账本终态**（ledgerTerminalReason，内核
-        // 自己的账本）——journal 终态行是文档历史，不是内核活性事实，不得制造内核
-        // 条目（时钟封存那一半维持 #99 无条件既有语义，kernel 写跟随账本那一半）。
-        // 这是无条件写，与顶部的新鲜度守卫刻意不同：账本终态是点时内核事实的
-        // 收敛陈述，早于它发出的 true 快照已被守卫二的回合身份挡住。
-        if (ledgerTerminalReason !== undefined) {
-          kernelLivenessBySource.set(refreshSource, false)
-          kernelTurnStamps.delete(refreshSource)
-        }
-        settleRuntimeLiveness(refreshSource)
-        reconcileTurnClock(refreshSource)
-        const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && hasTerminalEvidence) {
-          updateRuntimeState({
-            summary: {
-              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
-              tokenCount: settled.tokenCount,
-              completedFrame: '',
-              reason: ledgerTerminalReason ?? 'done',
-              durationSource: canonicalDuration?.source ?? 'unknown',
-              durationAvailable: canonicalDuration !== undefined,
-              // Display-only restore: must not synthesize a terminal fence
-              // (see normalizeRuntimeSnapshot), or the next controller-driven
-              // generation cannot restart the indicator after a rebind.
-              displayOnly: true,
-            },
-          })
-        }
       } catch (error) {
-        if (destroyed || bindingKey !== boundSessionBindingKey || ownerKey !== refreshOwnerKey
-          || source !== refreshSource || boundSessionId !== refreshSessionId || generation !== refreshGeneration
-          || canonicalReadEpoch !== refreshEpoch) return
-        const bufferedAfterFailure = buffered
-        buffered = []
-        loading = false
+        if (binding.destroyed || bindingKey !== binding.boundSessionBindingKey || binding.ownerKey !== refreshOwnerKey
+          || binding.source !== refreshSource || binding.boundSessionId !== refreshSessionId || binding.generation !== refreshGeneration
+          || binding.canonicalReadEpoch !== refreshEpoch) return
+        const bufferedAfterFailure = binding.buffered
+        binding.buffered = []
+        binding.loading = false
         // A failed refresh may have superseded the initial bind read. Keep
         // already-observed live/session-response events visible even though
         // the canonical reload itself is degraded.
@@ -1270,9 +664,9 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       }
     })()
     const pending = run.finally(() => {
-      if (refreshInFlight === pending) refreshInFlight = null
+      if (binding.refreshInFlight === pending) binding.refreshInFlight = null
     })
-    refreshInFlight = pending
+    binding.refreshInFlight = pending
     return pending
   }
 
@@ -1295,42 +689,42 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       // boundSessionId/source 必须在本函数首个 await 前就位（发送入口的乐观投影
       // 依赖它们判定「已绑定」），Node 宿主的 wasm 导入即就绪，浏览器端在此补一次
       // 异步等待，后续 folding 都在就绪之后。
-      if (boundSessionBindingKey === nextBindingKey) return
+      if (binding.boundSessionBindingKey === nextBindingKey) return
       // Session objects are recreated for ordinary metadata updates (name,
       // lastReplyAt, autoName) and when canonical replay completes. Rebinding
       // in those cases replaces the whole document and looks like a page
       // refresh. Keep this seam idempotent; explicit identity changes still
       // pass through the normal reload path below. Workspace reloads use the
       // dedicated lifecycle/reload-token seam instead of rebinding here.
-      boundSessionBindingKey = nextBindingKey
+      binding.boundSessionBindingKey = nextBindingKey
       // Invalidate any in-flight refresh for the previous binding. Its own
       // epoch/key guard will make the eventual result a no-op; clearing the
       // pointer lets the new binding schedule its own refresh immediately.
-      canonicalReadEpoch += 1
-      refreshInFlight = null
-      const nextGeneration = ++generation
+      binding.canonicalReadEpoch += 1
+      binding.refreshInFlight = null
+      const nextGeneration = ++binding.generation
       // #204 ②：`turnEpoch` 是 runtime 局部的**单调**围栏（`workbenchRuntime.acceptDocument`
       // 对 live 帧执行 `options.turnEpoch < snapshot.turnEpoch` 即拒收）。绑定重建不得把它
       // 回落为 0——切回时 snapshot 的 epoch 仍停在切走前那一轮，回落会让切回后到达的思考帧
       // 被静默丢弃（正文截断在切换点），并在终帧后的 journal 重折里另起一块（思考块分裂）。
       // 这里承接当前值，新回合仍由 applyLive 的 user 帧推进（`turnEpoch += 1`）。
-      turnEpoch = runtime.getSnapshot().turnEpoch ?? 0
-      boundSessionId = session?.id
-      boundProvider = session?.agentId || 'acp'
-      source = session?.source
-      ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
-      buffered = []
-      malformedCount = 0
-      journalDiagnosticCount = 0
+      binding.turnEpoch = runtime.getSnapshot().turnEpoch ?? 0
+      binding.boundSessionId = session?.id
+      binding.boundProvider = session?.agentId || 'acp'
+      binding.source = session?.source
+      binding.ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
+      binding.buffered = []
+      binding.malformedCount = 0
+      fold.journalDiagnosticCount = 0
       // 绑定重建：折叠日志清空（journal 重放会重新入日志），文档由下面的整页折从空文档起。
-      foldLog = []
-      foldLogIds.clear()
-      loading = Boolean(session)
+      fold.log = []
+      fold.ids.clear()
+      binding.loading = Boolean(session)
       // #217：空文档的活性申报走有效权威（内核表态随 source 的 map 跨 rebind 保留；
       // 无表态回退时钟，语义与 #213 一致）。
-      const bindLiveness = effectiveLiveness(session?.source ?? '')
+      const bindLiveness = clock.effectiveLiveness(session?.source ?? '')
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
-        ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
+        ownerKey: binding.ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, turnEpoch: binding.turnEpoch, terminalFence: null, sessionId: session?.id ?? null,
         // #213：**必须**随这发空文档申报权威值。不申报时 merge 会继承上一个会话的
         // `livenessSource`/`generating`（切走一个在途会话 ⇒ 空文档带 generating:true 发布一拍，
         // 页脚闪一次 spinner、调度器还会按"直播"处理）。
@@ -1349,22 +743,20 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
       // P52 D3：bind 重置读 TurnClock——时钟按 source 隔离，切回同 source 的
       // 活动回合恢复（reconcileTurnClock 在 journal 读完成后执行）。
       // #217：内核已表态「不在途」时，活动时钟不得顶起生成态（权威让位）。
-      const activeClock = source ? turnClocks.get(source) : undefined
-      const clockActive = Boolean(activeClock && !activeClock.terminal
-        && kernelLivenessBySource.get(source ?? '') !== false)
+      const activeClock = binding.source ? clock.activeUnsettledClock(binding.source) : undefined
       updateRuntimeState({
-        status: loading ? 'loading' : 'idle', error: null,
-        ...(clockActive
-          ? { generating: true, generationStart: activeClock!.generationStart, lastTokenAt: activeClock!.lastTokenAt, summary: null }
+        status: binding.loading ? 'loading' : 'idle', error: null,
+        ...(activeClock
+          ? { generating: true, generationStart: activeClock.generationStart, lastTokenAt: activeClock.lastTokenAt, summary: null }
           : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, generationActivity: undefined, thinkingStart: undefined, summary: null }),
       })
-      if (!session || !ownerKey) return
-      const loadingOwnerKey = ownerKey
-      const bindReadEpoch = canonicalReadEpoch
+      if (!session || !binding.ownerKey) return
+      const loadingOwnerKey = binding.ownerKey
+      const bindReadEpoch = binding.canonicalReadEpoch
       // loadAll 必须**同步**调用：hanging-load 测试在 bind() 返回的同步窗口内拿 release 句柄。
       await loadAll(loadingOwnerKey).then(async rows => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
-          || canonicalReadEpoch !== bindReadEpoch) return
+        if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
+          || binding.canonicalReadEpoch !== bindReadEpoch) return
         const canonicalDuration = canonicalDurationFromRows(rows)
         const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
         const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
@@ -1384,7 +776,7 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
           for (const row of source) {
             const migrated = toWorkbenchEnvelopes(row)
             if (migrated.length === 0) {
-              malformedCount += 1
+              binding.malformedCount += 1
               continue
             }
             for (const envelope of migrated) envelopes.push(envelope)
@@ -1394,72 +786,39 @@ function runningTailStartTime(document: WorkbenchDocument | undefined): number |
         collect(browserSnapshot)
         // buffered 为空是冷切会话的常态：入参已是有序数组，整页一帧过界
         //（回放按页合批，边界穿越 2 次，与页内事件数无关）。
-        if (malformedCount > 0) journalDiagnosticCount = malformedCount
+        if (binding.malformedCount > 0) fold.journalDiagnosticCount = binding.malformedCount
         // 冷装载 = 重建：显式以空文档为基座（不是续折当前文档）。
-        const projected = foldPage(
-          buffered.length === 0 ? envelopes : [...envelopes, ...buffered],
-          createWorkbenchDocument(session.source),
-        )
-        const reconciled = withPendingOptimistic(session.source, projected)
-        const document = malformedCount > 0 ? withJournalDiagnostic(reconciled, malformedCount) : reconciled
-        buffered = []; loading = false
         // #213：本进程的回合时钟（turnClocks）是活性的权威来源，随文档一并申报——
         // 否则重放出的 `running` 尾行会让 generating 复活成永久「生成中」。
         // #217：权威升级为内核在途事实优先（kernel > clock，见 effectiveLiveness）。
-        const bindLoadLiveness = effectiveLiveness(session.source)
-        runtime.replaceDocument(document, {
-          ownerKey: loadingOwnerKey,
-          generation: nextGeneration,
-          sessionId: session.id,
-          livenessSource: bindLoadLiveness.source,
-          livenessGenerating: bindLoadLiveness.generating,
+        publishCanonicalRead({
+          readSource: session.source,
+          readOwnerKey: loadingOwnerKey,
+          readGeneration: nextGeneration,
+          readSessionId: session.id,
+          envelopes,
+          bufferedAtRead: binding.buffered,
+          base: createWorkbenchDocument(session.source),
+          malformedCount: binding.malformedCount,
+          canonicalDuration,
+          canonicalHasTerminal,
+          withLedgerEvidence: false,
         })
-        updateRuntimeState(malformedCount > 0
-          ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
-          : { status: 'ready', error: null })
-        if (malformedCount === 0) {
-          resolveRuntimeErrors({ key: `session-recovery:${session.id}`, source: 'chat.session-recovery' })
-        }
-        // P52 D3：journal 终态证据封存时钟；活动时钟覆盖投影间隙的回退。
-        // #217：注意 journal 终态**行**不是内核活性事实（重放历史里上一回合的
-        // done 行与本回合是否在途无关）——bind 阶段不据此置内核表态；内核事实
-        // 只来自冷挂载快照的 turnInFlight/账本（refresh）、终帧与本地生命周期。
-        settleTurnClockFromDocument(session.source, canonicalHasTerminal)
-        settleRuntimeLiveness(session.source)
-        reconcileTurnClock(session.source)
-        // A restarted process has no live terminal summary, while the
-        // canonical document already contains the completed turn. Publish a
-        // display-only done summary so the footer remains in its terminal
-        // state instead of disappearing; this does not add a journal event.
-        const settled = runtime.getSnapshot()
-        if (!settled.generating && !settled.summary && canonicalHasTerminal) {
-          updateRuntimeState({
-            summary: {
-              elapsedMs: canonicalDuration?.elapsedMs ?? 0,
-              tokenCount: settled.tokenCount,
-              completedFrame: '',
-              reason: 'done',
-              durationSource: canonicalDuration?.source ?? 'unknown',
-              durationAvailable: canonicalDuration !== undefined,
-              // Display-only restore: must not synthesize a terminal fence
-              // (see normalizeRuntimeSnapshot), or the next controller-driven
-              // generation cannot restart the indicator after a rebind.
-              displayOnly: true,
-            },
-          })
-        }
       }).catch(error => {
-        if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey
-          || canonicalReadEpoch !== bindReadEpoch) return
-        loading = false; buffered = []
+        if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
+          || binding.canonicalReadEpoch !== bindReadEpoch) return
+        binding.loading = false
+        binding.buffered = []
         updateRuntimeState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
       })
     },
     destroy() {
-      if (destroyed) return
-      destroyed = true; unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
-      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear(); turnClocks.clear(); clockOnlyStarts.clear(); ledgerTerminalBySource.clear(); kernelLivenessBySource.clear(); kernelTurnStamps.clear()
-      foldLog = []; foldLogIds.clear()
+      if (binding.destroyed) return
+      binding.destroyed = true
+      unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
+      clock.clearAll(); echo.clear()
+      fold.log = []; fold.ids.clear()
     },
   }
 }

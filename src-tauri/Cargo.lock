@@ -3120,7 +3120,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "pylon"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "aes-gcm",
  "agent-client-protocol",
@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-acp"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
@@ -3199,7 +3199,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-canonical-types"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "serde",
  "serde_json",
@@ -3207,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-compute"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "serde",
  "serde-wasm-bindgen",
@@ -3241,11 +3241,12 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "pylon-markdown"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "comrak",
  "serde",
@@ -3265,7 +3266,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-session"
-version = "0.2.9-PAC"
+version = "0.3.0-AUE"
 dependencies = [
  "chrono",
  "pylon-canonical-types",

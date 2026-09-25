@@ -1,8 +1,5 @@
 //! 事件仓库结构化错误。
 
-use serde::ser::SerializeMap;
-use serde::Serialize;
-
 /// 事件仓库结构化错误（B1.2：前端按 code 分支，message 展示用）。
 #[derive(Debug, thiserror::Error)]
 pub enum EventError {
@@ -44,15 +41,9 @@ impl EventError {
     }
 }
 
-/// B1.2：结构化错误 wire `{ code, message }`（与 MessageError/UserDataError 同形）。
-impl Serialize for EventError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化错误 wire `{ code, message }`（与 MessageError/UserDataError 同形；
+// #317 批次二：实现单源化到共享宏）。
+crate::impl_wire_code_message_serialize!(EventError);
 
 impl From<rusqlite::Error> for EventError {
     fn from(error: rusqlite::Error) -> Self {
