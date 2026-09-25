@@ -1,4 +1,5 @@
 import type { AgentDetectionDiagnostic } from '../../domains/agent/agentDetector.ts'
+import { explainErrorCode } from '../../errorCodeExplanations.ts'
 
 /**
  * #116 子项 10：Agent 探测诊断的**呈现口径**。
@@ -18,16 +19,14 @@ const STAGE_LABELS: Readonly<Record<string, string>> = {
 }
 const STAGE_FALLBACK = '运行时探测'
 
-/** 内部诊断码 → 本地化失败原因（与 pylon-core/src/agent_detection.rs 的产出码一一对应）。 */
-const CODE_REASONS: Readonly<Record<string, string>> = {
-  detection_budget_exhausted: '探测总预算已耗尽，未启动版本探测',
-  version_probe_spawn_failed: '系统拒绝执行该程序（不是有效的可执行文件）',
-  version_probe_timeout: '执行超时，未在预算内返回',
-  version_probe_wait_failed: '等待子进程结束时失败',
-  version_probe_non_zero: '程序返回了非零退出码',
-  version_probe_empty: '执行成功但没有输出版本文本',
-}
+/**
+ * 内部诊断码 → 本地化失败原因。
+ *
+ * 解释取自全站单源码表 `src/errorCodeExplanations.ts`（#325）——此前这里是该词表的
+ * 手抄副本，两处各自漂移无人看守。表里没有的码走泛称，绝不把内部码摆到 UI 上。
+ */
 const REASON_FALLBACK = '探测失败（完整原因见运行日志）'
+const reasonFor = (code: string) => explainErrorCode(code)?.summary ?? REASON_FALLBACK
 
 /** 后端 message 里的候选路径（`无法执行 <exe> 版本探针: …`）。 */
 const CANDIDATE_PATTERN = /(?:[A-Za-z]:[\\/]|\/)[^\s:：]+/
@@ -52,7 +51,7 @@ export function presentDetectionDiagnostic(
   const stage = STAGE_LABELS[diagnostic.stage] ?? STAGE_FALLBACK
   const candidate = CANDIDATE_PATTERN.exec(diagnostic.message)?.[0]
     ?? detectorShortName(diagnostic.detectorId)
-  const reason = CODE_REASONS[diagnostic.code] ?? REASON_FALLBACK
+  const reason = reasonFor(diagnostic.code)
   const detail = diagnostic.retryable ? `${reason}（可重试）` : reason
   return {
     text: [stage, candidate, detail].filter((part): part is string => Boolean(part)).join(' · '),

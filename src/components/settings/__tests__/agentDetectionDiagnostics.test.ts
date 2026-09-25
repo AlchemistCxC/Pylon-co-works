@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { presentDetectionDiagnostic } from '../agentDetectionDiagnostics.ts'
+import { explainErrorCode } from '../../../errorCodeExplanations.ts'
 import type { AgentDetectionDiagnostic } from '../../../domains/agent/agentDetector.ts'
 
 /**
@@ -48,7 +49,8 @@ describe('presentDetectionDiagnostic（#116 子项 10）', () => {
     expect(text).toContain('运行时探测')
     expect(text).not.toContain('future_stage_v2')
     expect(text).toContain('peri')
-    expect(text).toContain('执行超时')
+    // 解释文案归全站单源码表（#325）：这里断言「用的就是那一份」，而不是抄一遍字面量。
+    expect(text).toContain(explainErrorCode('version_probe_timeout')!.summary)
   })
 
   it('未登记诊断码走泛称而不是把 code 摆到 UI 上', () => {

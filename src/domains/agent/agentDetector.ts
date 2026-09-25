@@ -14,6 +14,12 @@ export interface AgentDetectionDiagnostic {
   code: string
   stage: string
   detectorId?: string
+  /** 结构化归因：诊断属于哪个候选（对齐 `AgentRuntimeCandidate.candidateId`）。
+   *  探测类诊断必定有值；选择/预算类诊断无候选上下文（#325）。 */
+  candidateId?: string
+  /** 结构化归因：被探测的可执行文件绝对路径（探测类诊断必定有值）。
+   *  有了它，前端不必再从 `message` 里正则抠路径（#325）。 */
+  executable?: string
   message: string
   retryable: boolean
 }
@@ -198,6 +204,8 @@ function normalizeDiagnostics(raw: unknown): AgentDetectionDiagnostic[] {
     return typeof value.code === 'string' && value.code.trim().length > 0
       && typeof value.stage === 'string' && value.stage.trim().length > 0
       && (value.detectorId === undefined || typeof value.detectorId === 'string')
+      && (value.candidateId === undefined || typeof value.candidateId === 'string')
+      && (value.executable === undefined || typeof value.executable === 'string')
       && typeof value.message === 'string' && typeof value.retryable === 'boolean'
   })
 }

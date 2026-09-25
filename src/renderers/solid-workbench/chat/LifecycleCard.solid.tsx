@@ -1,5 +1,6 @@
 import { Show, createEffect, createSignal } from 'solid-js'
 import type { LifecycleState, NormalizedError } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { explainErrorCode } from '../../../errorCodeExplanations.ts'
 import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 
 export interface SolidLifecycleAppearance {
@@ -266,10 +267,13 @@ function ErrorDetails(props: { error: NormalizedError; appearance: SolidLifecycl
       : []),
     props.appearance.showEventIds ? props.error.eventId : undefined,
   ].filter(Boolean).join(' · ')
+  // #325：技术详情里的裸码旁边给人话解释；未知码保留原文（不编解释）。
+  const explanation = () => explainErrorCode(props.error.code)
   return (
     <details class="lifecycle-technical" open={props.appearance.technicalDetailsExpanded}>
       <summary>{props.error.userSummary}</summary>
       <pre>{props.error.technicalMessage ?? props.error.userSummary}{props.error.code ? `\ncode: ${props.error.code}` : ''}</pre>
+      <Show when={explanation()}>{value => <small class="lifecycle-code-meaning">{value().summary}{value().hint ? ` · ${value().hint}` : ''}</small>}</Show>
       <Show when={identifiers()}>{value => <small class="lifecycle-identifiers">{value()}</small>}</Show>
       <Show when={props.error.cause}>
         {cause => <div class="lifecycle-cause"><span>原因</span><ErrorDetails error={cause()} appearance={props.appearance} /></div>}

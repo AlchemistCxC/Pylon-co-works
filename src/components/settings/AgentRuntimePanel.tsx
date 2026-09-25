@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
@@ -9,6 +9,7 @@ import {
 } from '../../infrastructure/acp/agentClient'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
+import { explainErrorCode } from '../../errorCodeExplanations.ts'
 import { useIdentityStore, type AgentEntry } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
@@ -233,6 +234,24 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const [detectionTruncated, setDetectionTruncated] = useState(false)
   const [detectionCompleted, setDetectionCompleted] = useState(false)
   const [detecting, setDetecting] = useState(false)
+  /**
+   * #325：把探测诊断按候选归因到具体 Agent——诊断带 `candidateId`，候选带
+   * `alreadyImportedAgentId`，两者在候选上合流。此前卡片只能显示「未激活」，真实
+   * 失败原因（`version_probe_spawn_failed` os error 193 等）只进控制台。
+   */
+  const probeFailureByAgentId = useMemo(() => {
+    const byCandidateId = new Map<string, AgentDetectionDiagnostic>()
+    for (const diagnostic of detectionDiagnostics) {
+      if (diagnostic.candidateId) byCandidateId.set(diagnostic.candidateId, diagnostic)
+    }
+    const byAgentId = new Map<string, AgentDetectionDiagnostic>()
+    for (const candidate of candidates) {
+      const agentId = candidate.alreadyImportedAgentId
+      const diagnostic = agentId ? byCandidateId.get(candidate.candidateId) : undefined
+      if (agentId && diagnostic) byAgentId.set(agentId, diagnostic)
+    }
+    return byAgentId
+  }, [candidates, detectionDiagnostics])
   const [candidateValidation, setCandidateValidation] = useState<Record<string, AgentCandidateValidationState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
   const [provisioningCandidateId, setProvisioningCandidateId] = useState<string | null>(null)
@@ -273,14 +292,16 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
     }
   }
 
-  const detectRuntimes = async () => {
+  /** `force` = 绕过后端三态 TTL 缓存重跑探测（用户点「重新探测」时必须为真，否则可能只是
+   *  读缓存——上一版就是这样点了没反应的，#325）。 */
+  const detectRuntimes = async (force = false) => {
     if (detecting) return
     setDetecting(true)
     setDetectionCompleted(false)
     try {
       const registered = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
       const detectors = registered.length > 0 ? registered : builtinAgentCatalog.detectors()
-      const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors))
+      const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors), force)
       if (!mountedRef.current) return
       setCandidates(report.candidates)
       setSelectedCandidateId(current => report.candidates.some(candidate => candidate.candidateId === current)
@@ -766,6 +787,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       {agents.map(agent => {
         const status = selectAgentStatus(agent.id, activeAgent, agentStatuses)
         const isEditing = editingId === agent.id
+        const probeFailure = probeFailureByAgentId.get(agent.id)
         return (
           <div className="agent-runtime-card" key={agent.id}>
             <div className="set-hint" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -774,6 +796,21 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
             </div>
             <div className="set-hint">id：{agent.id} · provider：{agent.provider ?? '—'} · transport：{agent.transport ?? 'subprocess'}</div>
             <div className="set-hint">状态：{statusLabel(status.status)} · 配置：{activationLabel(agent.configActivationState)} · exe：{isEditing ? '' : (agent.exe ?? '—')}</div>
+            {/* #325：探测失败的原因必须落到**这张卡**上——此前只有「未激活」，
+                真实原因（version_probe_spawn_failed os error 193 等）只进控制台。
+                归因走结构化字段：诊断带 candidateId，候选带 alreadyImportedAgentId。 */}
+            {probeFailure && (
+              <div className="set-hint agent-runtime-failure" role="status">
+                探测失败：<code>{probeFailure.code}</code>
+                <span> {explainErrorCode(probeFailure.code)?.summary ?? '原因见运行日志'}</span>
+                <button className="ps-btn sm" type="button" disabled={detecting} onClick={() => void detectRuntimes(true)}>
+                  {detecting ? '探测中…' : '重试探测'}
+                </button>
+              </div>
+            )}
+            {!probeFailure && status.recentError && (
+              <div className="set-hint agent-runtime-failure" role="status">最近错误：{status.recentError}</div>
+            )}
 
             {isEditing && (
               <div className="agent-runtime-edit">
@@ -834,7 +871,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       <section className="agent-runtime-discovery" aria-label="发现的运行时">
         <div className="set-preset-row" style={{ marginTop: 12 }}>
           <strong>发现的运行时（{candidates.length}）</strong>
-          <button className="ps-btn sm" type="button" disabled={detecting} onClick={() => void detectRuntimes()}>{detecting ? '探测中…' : '重新探测'}</button>
+          <button className="ps-btn sm" type="button" disabled={detecting} onClick={() => void detectRuntimes(true)}>{detecting ? '探测中…' : '重新探测'}</button>
         </div>
         {(detectionElapsedMs > 0 || detectionTruncated) && (
           <div className="set-hint">探测耗时：{detectionElapsedMs}ms{detectionTruncated ? ' · 结果已截断' : ''}</div>

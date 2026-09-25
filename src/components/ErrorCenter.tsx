@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import { clearErrors, dismissError, useErrors, type ErrorEntry } from '../errorCenter'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
+import { explainErrorCode } from '../errorCodeExplanations.ts'
 import { safeJson } from '../utils/safeJson.ts'
 
 function recoveryLabel(kind: NonNullable<ErrorEntry['recovery']>['kind']): string {
@@ -75,11 +76,15 @@ async function runRecoveryAction(entry: ErrorEntry): Promise<void> {
 
 function ErrorTechnicalDetails({ entry }: { entry: ErrorEntry }) {
   const scope = scopeLabel(entry)
+  // #325：错误码旁边给人话解释——裸码（config_revision_conflict / provider.error…）用户
+  // 无从下手。未知码保留原文，不编解释。
+  const explanation = explainErrorCode(entry.code)
   return (
     <details className="error-center-details">
       <summary>详细信息</summary>
       <dl className="error-center-detail-list">
-        {entry.code && <div><dt>错误码</dt><dd><code>{entry.code}</code></dd></div>}
+        {entry.code && <div><dt>错误码</dt><dd><code>{entry.code}</code>{explanation && <span className="error-center-code-meaning">{explanation.summary}</span>}</dd></div>}
+        {explanation?.hint && <div><dt>可以这样处理</dt><dd>{explanation.hint}</dd></div>}
         {entry.source && <div><dt>来源</dt><dd>{entry.source}</dd></div>}
         {scope && <div><dt>作用域</dt><dd>{scope}</dd></div>}
         {entry.recovery && <div><dt>恢复动作</dt><dd><code>{entry.recovery.kind}</code></dd></div>}

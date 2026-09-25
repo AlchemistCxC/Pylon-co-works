@@ -532,6 +532,9 @@ body[data-interface-mode="tactical-blue"] .agent-switch-card.active { border-col
 .agent-runtime-card .set-hint {
   margin: 2px 0;
 }
+/* #325：卡片上的失败原因行——状态之外的可解释性，用警示色与普通提示区分。 */
+.agent-runtime-failure { display:flex; align-items:center; gap:6px; flex-wrap:wrap; color: var(--warning, var(--text)); }
+.agent-runtime-failure code { font-family: var(--mono); color: var(--text-dim); }
 .agent-candidate-option { margin-top:6px; }
 .agent-candidate-row {
   display:flex; width:100%; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px;

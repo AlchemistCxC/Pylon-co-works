@@ -28,6 +28,16 @@ pub struct AgentDetectionDiagnostic {
     pub code: String,
     pub stage: String,
     pub detector_id: Option<String>,
+    /// 结构化归因：诊断属于哪个候选（对齐 `AgentRuntimeCandidate.candidate_id`）。
+    ///
+    /// 探测类诊断（`stage == "version_probe"`）必定有值——前端据此把失败原因挂到对应
+    /// Agent 卡，而不必再从 `message` 里正则抠路径。选择/预算类诊断无候选上下文，为 None。
+    pub candidate_id: Option<String>,
+    /// 结构化归因：被探测的可执行文件绝对路径（探测类诊断必定有值）。
+    ///
+    /// 预算耗尽这类「未真正探测」的诊断即便发生在某个候选的探测包装里，也不带路径：
+    /// 那是对全局预算的陈述，不是关于这个可执行文件的事实。
+    pub executable: Option<String>,
     pub message: String,
     pub retryable: bool,
 }
@@ -1110,8 +1120,11 @@ async fn read_bounded<R: AsyncRead + Unpin>(mut reader: R) -> std::io::Result<Ve
     }
 }
 
+/// 探测阶段的诊断（带被测可执行文件；`candidateId` 由聚合循环补齐——候选 id 依赖
+/// 稳定的 (detector, path, args) 指纹，在候选成型处才算得出）。
 fn probe_diagnostic(
     detector_id: &str,
+    executable: Option<&Path>,
     code: &str,
     message: String,
     retryable: bool,
@@ -1120,6 +1133,27 @@ fn probe_diagnostic(
         code: code.into(),
         stage: "version_probe".into(),
         detector_id: Some(detector_id.into()),
+        candidate_id: None,
+        executable: executable.map(|path| path.to_string_lossy().into_owned()),
+        message,
+        retryable,
+    }
+}
+
+/// 选择/扫描阶段的诊断：没有候选上下文，两个归因字段恒为 None。
+fn scan_diagnostic(
+    stage: &str,
+    detector_id: Option<String>,
+    code: &str,
+    message: String,
+    retryable: bool,
+) -> AgentDetectionDiagnostic {
+    AgentDetectionDiagnostic {
+        code: code.into(),
+        stage: stage.into(),
+        detector_id,
+        candidate_id: None,
+        executable: None,
         message,
         retryable,
     }
@@ -1169,6 +1203,7 @@ async fn version_probe(
             startability: Startability::NotTested,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
+                None,
                 "detection_budget_exhausted",
                 "Agent discovery 总预算已耗尽，未启动 version probe".into(),
                 true,
@@ -1216,6 +1251,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
+                    Some(&executable),
                     "version_probe_spawn_failed",
                     format!(
                         "无法执行 {} 版本探针: {error}",
@@ -1244,6 +1280,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
+                    Some(&executable),
                     "version_probe_timeout",
                     format!("{} 版本探针超时", executable.to_string_lossy()),
                     true,
@@ -1259,6 +1296,7 @@ async fn probe_version_uncached(
                 startability: Startability::Failed,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
+                    Some(&executable),
                     "version_probe_wait_failed",
                     format!(
                         "等待 {} 版本探针失败: {error}",
@@ -1275,6 +1313,7 @@ async fn probe_version_uncached(
             startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
+                Some(&executable),
                 "version_probe_non_zero",
                 format!("{} 版本探针返回 {status}", executable.to_string_lossy()),
                 false,
@@ -1292,6 +1331,7 @@ async fn probe_version_uncached(
             startability: Startability::Failed,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
+                Some(&executable),
                 "version_probe_empty",
                 format!("{} 版本探针未返回版本文本", executable.to_string_lossy()),
                 false,
@@ -1410,13 +1450,13 @@ pub async fn detect_agent_runtime_candidates_inner(
         let mut seen = HashSet::new();
         for detector_id in requested.iter().filter(|id| seen.insert(id.as_str())) {
             if !available.contains(detector_id.as_str()) {
-                diagnostics.push(AgentDetectionDiagnostic {
-                    code: "unknown_detector_id".into(),
-                    stage: "selection".into(),
-                    detector_id: Some(detector_id.clone()),
-                    message: format!("未知 Agent detector: {detector_id}"),
-                    retryable: false,
-                });
+                diagnostics.push(scan_diagnostic(
+                    "selection",
+                    Some(detector_id.clone()),
+                    "unknown_detector_id",
+                    format!("未知 Agent detector: {detector_id}"),
+                    false,
+                ));
             }
         }
     }
@@ -1465,13 +1505,13 @@ pub async fn detect_agent_runtime_candidates_inner(
         Ok(Ok(result)) => result,
         Ok(Err(error)) => return Err(format!("Agent detection scan task failed: {error}")),
         Err(_) => {
-            diagnostics.push(AgentDetectionDiagnostic {
-                code: "detection_budget_exhausted".into(),
-                stage: "scan".into(),
-                detector_id: None,
-                message: "Agent discovery 扫描超过总预算".into(),
-                retryable: true,
-            });
+            diagnostics.push(scan_diagnostic(
+                "scan",
+                None,
+                "detection_budget_exhausted",
+                "Agent discovery 扫描超过总预算".into(),
+                true,
+            ));
             return Ok(AgentDetectionReport {
                 candidates: Vec::new(),
                 providers: Vec::new(),
@@ -1502,16 +1542,16 @@ pub async fn detect_agent_runtime_candidates_inner(
     });
     let discovered_truncated = discovered.len() > limits.max_candidates;
     if discovered_truncated {
-        diagnostics.push(AgentDetectionDiagnostic {
-            code: "candidate_limit_reached".into(),
-            stage: "selection".into(),
-            detector_id: None,
-            message: format!(
+        diagnostics.push(scan_diagnostic(
+            "selection",
+            None,
+            "candidate_limit_reached",
+            format!(
                 "Agent 候选超过上限 {}，已在 version probe 前按稳定优先级截断",
                 limits.max_candidates
             ),
-            retryable: false,
-        });
+            false,
+        ));
         discovered.truncate(limits.max_candidates);
     }
 
@@ -1537,16 +1577,20 @@ pub async fn detect_agent_runtime_candidates_inner(
 
     let mut ranked_candidates = Vec::new();
     for (rule, located, config, probe) in probed {
-        if let Some(diagnostic) = probe.diagnostic {
+        // 候选 id 先算：探测失败的诊断要带上它（#325）——前端据此把失败原因挂到对应
+        // Agent 卡。缓存命中的失败诊断也走这里补归因，故两条路径口径一致。
+        let path = located.executable;
+        let key = path_key(&path);
+        let candidate_args = located.args;
+        let candidate_id = stable_candidate_id(&rule.detector_id, &key, &candidate_args);
+        if let Some(mut diagnostic) = probe.diagnostic {
+            diagnostic.candidate_id = Some(candidate_id.clone());
             diagnostics.push(diagnostic);
         }
         let version = probe.version;
         let startability = probe.startability;
         let alias_index = located.alias_index;
-        let path = located.executable;
         let source = located.source;
-        let key = path_key(&path);
-        let candidate_args = located.args;
         // issue #67B：导入侧同口径——“已导入”按 **provider 身份** 判定，不再要求 exe/args
         // 逐字相等。否则同一 agent 换一种启动形式（不同 invocation / 不同安装路径）会被显示
         // 成"未导入"，前端随后把 id 追加 -2 后缀，重复导入由此发生（探测侧的去重必须与
@@ -1585,7 +1629,6 @@ pub async fn detect_agent_runtime_candidates_inner(
                 detail: version.clone(),
             })
         }
-        let candidate_id = stable_candidate_id(&rule.detector_id, &key, &candidate_args);
         let identity_confidence = if version.is_some() || structured_config_match {
             IdentityConfidence::High
         } else {
@@ -1655,16 +1698,16 @@ pub async fn detect_agent_runtime_candidates_inner(
     });
     let candidates_truncated = ranked_candidates.len() > limits.max_candidates;
     if candidates_truncated && !discovered_truncated {
-        diagnostics.push(AgentDetectionDiagnostic {
-            code: "candidate_limit_reached".into(),
-            stage: "selection".into(),
-            detector_id: None,
-            message: format!(
+        diagnostics.push(scan_diagnostic(
+            "selection",
+            None,
+            "candidate_limit_reached",
+            format!(
                 "Agent 候选超过上限 {}，已按稳定优先级截断",
                 limits.max_candidates
             ),
-            retryable: false,
-        });
+            false,
+        ));
         ranked_candidates.truncate(limits.max_candidates);
     }
     let candidates: Vec<AgentRuntimeCandidate> = ranked_candidates
@@ -1750,16 +1793,16 @@ pub async fn detect_agent_runtime_candidates_inner(
         let observed = candidate_version.or_else(|| provider.adapter_version.clone());
         if let Some(version) = observed {
             if !crate::agent_preflight::version_at_least(Some(&version), Some(minimum)) {
-                diagnostics.push(AgentDetectionDiagnostic {
-                    code: "adapter_version_below_declared_minimum".into(),
-                    stage: "version".into(),
-                    detector_id: Some(provider.detector_id.clone()),
-                    message: format!(
+                diagnostics.push(scan_diagnostic(
+                    "version",
+                    Some(provider.detector_id.clone()),
+                    "adapter_version_below_declared_minimum",
+                    format!(
                         "{} 的版本 {version} 低于 catalog 声明的下限 {minimum}",
                         provider.provider
                     ),
-                    retryable: true,
-                });
+                    true,
+                ));
             }
         }
     }
@@ -2423,6 +2466,9 @@ mod tests {
             report.diagnostics[0].detector_id.as_deref(),
             Some("missing.detector")
         );
+        // 选择类诊断没有候选上下文：两个归因字段恒为 None（与探测类诊断区分开）。
+        assert_eq!(report.diagnostics[0].candidate_id, None);
+        assert_eq!(report.diagnostics[0].executable, None);
     }
 
     #[tokio::test]
@@ -3029,11 +3075,26 @@ mod tests {
         .unwrap();
 
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert!(report
+        let timeout = report
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
+            .find(|diagnostic| diagnostic.code == "version_probe_timeout")
+            .expect("必须报告探针超时");
         assert_eq!(report.candidates[0].startability, Startability::Failed);
+        // #325：探测失败必须**结构化**归因到候选与可执行文件——前端据此把失败原因挂到
+        // 对应 Agent 卡，而不必再从 message 里正则抠路径（旧前端就是这么做的）。
+        assert!(
+            timeout
+                .executable
+                .as_deref()
+                .is_some_and(|path| path.contains("peri")),
+            "探测诊断必须带被测可执行文件路径：{timeout:?}"
+        );
+        assert_eq!(
+            timeout.candidate_id.as_deref(),
+            Some(report.candidates[0].candidate_id.as_str()),
+            "探测诊断的 candidateId 必须指向本报告里真实存在的候选"
+        );
     }
 
     #[test]
@@ -3175,13 +3236,13 @@ mod tests {
         );
 
         let mut retryable = clean.clone();
-        retryable.diagnostics.push(AgentDetectionDiagnostic {
-            code: "version_probe_timeout".into(),
-            stage: "version_probe".into(),
-            detector_id: None,
-            message: "探针超时".into(),
-            retryable: true,
-        });
+        retryable.diagnostics.push(scan_diagnostic(
+            "version_probe",
+            None,
+            "version_probe_timeout",
+            "探针超时".into(),
+            true,
+        ));
         assert_eq!(
             DetectionOutcome::classify(&Ok(retryable)),
             DetectionOutcome::Unknown
