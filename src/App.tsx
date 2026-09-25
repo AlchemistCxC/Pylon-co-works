@@ -34,6 +34,7 @@ import { createInteractionRejectionController } from './infrastructure/acp/inter
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
+import { useModalOverlayVeil } from './app/modalOverlayStore'
 import { startupMark, reportStartupTiming } from './app/startupTiming'
 import PermissionDialog from './components/PermissionDialog'
 import ErrorCenter from './components/ErrorCenter'
@@ -475,6 +476,12 @@ export default function App() {
     return () => { unlisten?.() }
   }, [])
   const profilesOpen = showProfileEdit
+  // #309：原生子视图（浏览器 WebView2 子窗口）在原生层位于 DOM 之上，覆盖层盖不住它。
+  // 模态覆盖层打开期间让原生子视图暂时隐藏（页面继续运行），否则覆盖层上的按钮被
+  // 原生页面吃掉点击；关闭后由消费方恢复可见。
+  useModalOverlayVeil('sheet-launcher', showSheetLauncher)
+  useModalOverlayVeil('profile-editor', profilesOpen)
+  useModalOverlayVeil('session-settings', sessionSettingsId !== null)
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>

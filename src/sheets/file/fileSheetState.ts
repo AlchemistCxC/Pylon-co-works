@@ -134,10 +134,3 @@ export function parseFileTabs(raw: string | undefined): FileTabState {
     return EMPTY_FILE_TAB_STATE
   }
 }
-
-/** 由文件路径推断高亮语言（md 走渲染器；其余走 highlightCode scope） */
-export function languageFromPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() ?? ''
-  const map: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', json: 'json', css: 'css', html: 'html', rs: 'rust', py: 'python', go: 'go', md: 'markdown', yaml: 'yaml', yml: 'yaml', toml: 'toml', sh: 'shell' }
-  return map[ext] ?? 'text'
-}

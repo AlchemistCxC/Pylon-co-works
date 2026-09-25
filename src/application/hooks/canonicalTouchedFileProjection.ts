@@ -12,16 +12,15 @@
  * extractTouchedPath：kind=edit 主判定 + 旧工具名回退）。绝对路径对会话 workdir
  * （workspaceId 绑定的 rootPath 优先）求相对，求不出 → 丢弃（防 FileSheet 永远匹配
  * 不到）。重复投递无害：touchedFiles LRU 按 path 去重；touchVersion 单调递增只会
- * 触发消费端的 300ms debounce。
+ * 触发消费端的 300ms debounce。tool.call.failed 的失败尝试同样入列（touchVersion
+ * 只表达「工具宣称触碰」，不区分是否真的写盘——消费端 probeDisk 才是磁盘真值判定）。
  */
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema'
 import { useIdentityStore } from '../../identityStore.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
-import { extractTouchedPath, relativizePath } from '../../infrastructure/acp/touchedFiles.ts'
+import { EDIT_TOOL_NAMES, extractTouchedPath, relativizePath } from '../../infrastructure/acp/touchedFiles.ts'
 import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
-
-const EDIT_TOOL_NAMES = ['Edit', 'Write', 'edit', 'write_file', 'patch']
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

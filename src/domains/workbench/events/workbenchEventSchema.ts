@@ -112,6 +112,8 @@ export interface SessionEvent {
   readonly mode?: string
   readonly status?: string
   readonly commands?: readonly JsonValue[]
+  /** #315：peri skillNames cap 载荷（AvailableCommandsUpdate._meta.skillNames）。 */
+  readonly skillNames?: readonly JsonValue[]
   readonly options?: readonly JsonValue[]
   readonly usage?: JsonValue
   readonly stopReason?: string

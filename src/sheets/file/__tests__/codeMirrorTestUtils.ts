@@ -24,3 +24,16 @@ export function replaceFileEditorValue(view: EditorView, value: string): void {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
   })
 }
+
+/** 0-A1：常驻单内核的可编辑态探针（只读 = contentDOM contentEditable false）。 */
+export function fileEditorEditable(): boolean {
+  return fileEditorView().contentDOM.getAttribute('contenteditable') === 'true'
+}
+
+export async function waitForFileEditable(expected: boolean): Promise<void> {
+  await waitFor(() => {
+    if (fileEditorEditable() !== expected) {
+      throw new Error(`Editor editable state has not settled: ${fileEditorEditable()}`)
+    }
+  })
+}
