@@ -192,6 +192,8 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     { id: 'qq:user:unknown', name: '访客' },
   ],
   agents: [],
+  // 启动前的占位初值（list_agents 到达后由 setAgents 收敛：列表里没有它就清空为 ''）。
+  // 零 Agent 首跑时它只活到首次 list_agents 返回（#326）。
   activeAgent: 'peri',
   lastPersistError: null,
   identityPersistence: { profiles: 'unknown', sessions: 'unknown' },

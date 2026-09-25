@@ -7,7 +7,9 @@
 
 - issue：#325（失败可解释）、#326（裸启动零占位 Agent）、#327（中文界面启动器/命令菜单不可达）、#329（`/` 命令菜单分层）
 - 分支：`kumo/prometheus`
-- 提交范围：`65f6775d..HEAD`（各 issue 独立提交，逐条列出见「证据」）
+- 提交范围：`65f6775d..HEAD`（各 issue 独立提交，逐条列出见「证据」）。
+  **注意：该范围是共享集成分支，不止本批**——除本批提交外还含 `#331` 后端质量清偿 4 条、
+  `#334`（并行 agent 的 dispatcher 逐帧热路径）1 条与协调板提交；它们的文件域本批一律未碰。
 - 日期：2026-09-25
 - **不在本批次**：#328 —— 用户裁决「有意设计、明确不做」，未施工。调查结论见下节。
 
@@ -170,6 +172,23 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
 - 手工验证：**未做真机（webview2）验收**——本批改到了首屏与设置页布局，按 `.agents/dev-standards.md:82`
   本应实机看一眼；受限环境（磁盘 99% 满、需重建 Tauri 应用）未执行，列为限制，见「未解问题」。
 
+## 整体审查（第三轮）落地结果
+
+在四个 issue 各自审查并修正之后，又派了一轮整体（集成）审查，逐条处置：
+
+| 审查发现 | 处置 |
+| --- | --- |
+| `sheetAgentStates['']` 会被写进持久化记忆（零 Agent 时 `''` 不是实体，却落 localStorage 并喂给会话归属推断） | 已修：`SheetLayout` 读写该记忆前先 `if (!activeAgent) return` |
+| 零 Agent 时 `OverviewSheetView` 仍可能铸出「无主 agent sheet」 | 已修：owner 查不到时改为把用户送到 Agent 配置入口 |
+| `FileContextPanel` 打开会话用**当前** `activeAgent` 当 owner（切过 Agent 后会挂错人） | 已修：用会话自己的 `session.agentId` 兜底 |
+| 零 Agent 时 `workspace_create` 仍会收到 `agentId: ''`（空 owner 落库） | 已修：直接拒绝并给可见提示「先配置 Agent」 |
+| `EmptySheetHost` 里硬编码 `openSheet({ title: 'Peri', agentId: 'peri' })`（当前不可达，但正是 #326 清掉的那类占位） | 已修：改为打开 Overview |
+| 完整敲出 internal 命令名时 Enter 先被切换项吃掉（要多按一次才发出去） | 已修：命令名与建议完全相等时不拦截 Enter |
+| 档位「缺省 internal」政策有两处落点 | 已修：只留 `CommandRegistry.toDescriptor`，消费方不再重复兜底 |
+| 提交范围未声明含外来提交（本批 PR 是共享分支） | 已修：本记录与 PR 正文都写明范围含 `#331`/`#334` 与协调提交 |
+| **首帧 `activeAgent` 初值仍是 `'peri'`**（list_agents 到达前会渲染一个幻影 Agent） | **未改**：改成 `''` 会牵动与 #326 无关的用例前提（搜索定位的 owner 断言等），超出本批边界；作为残余限制登记。`setAgents` 一到即收敛为空串 |
+| 两处结构相同的「建议项」类型（`CommandSetSuggestion` / `CommandSuggestion`） | 未合并（P3 可选清理，另立时机） |
+
 ## 与 spec 的偏差
 
 | 偏差 | 说明 |
@@ -191,10 +210,13 @@ pylon-core `version_probe_timeout_is_bounded_and_visible`（扩为含归因断�
 4. **磁盘**：G: 在本次会话期间一度仅剩 796 MB（`src-tauri/target` 34 GB），`npx` 因 ENOSPC 失败过；
    已改用 `node node_modules/vitest/vitest.mjs` 规避。未清理任何构建产物（共享工作树）。
 5. `App.tsx` 之外仍有演示/夹具字符串 `'peri'`（`chatMockData.ts`、`demo/` 等），属演示数据，未动。
-6. **`agent_detection_refresh_cancelled` 的语义错位**（审查 P2 发现）：后端把它塞进 `PylonError::Protocol` 的
+6. **首帧幻影 Agent**：`identityStore.activeAgent` 初值仍是 `'peri'`（list_agents 到达前的占位）。
+   零 Agent 首跑时它会活到首次 `setAgents` 返回（亚秒级），期间 Overview/Settings 可能渲染一次
+   「peri」。改成 `''` 会牵动与 #326 无关的用例前提，故留给后续清理。
+7. **`agent_detection_refresh_cancelled` 的语义错位**（审查 P2 发现）：后端把它塞进 `PylonError::Protocol` 的
    message，于是用户主动取消探测会看到「错误码 protocol_error」；码表因此不再收录它。修法是让后端为取消
    发一个中性结果（不报错）或独立码——属 Rust 域，未在本 PR 动。
-7. **候选折叠后的归因**：`candidate_id` 在候选合并前算出，多启动形式的 Agent（hermes/claude-code）
+8. **候选折叠后的归因**：`candidate_id` 在候选合并前算出，多启动形式的 Agent（hermes/claude-code）
    失败的那个形式可能不在最终候选列表里。前端已按可执行文件路径回退匹配兜住卡片归因；Rust 侧未改
    （合并循环重写归属更彻底，但属独立改动）。
 

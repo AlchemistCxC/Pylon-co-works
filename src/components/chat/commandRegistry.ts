@@ -36,12 +36,13 @@ export function resolveCommandSuggestions(commands: readonly AvailableCommand[])
 }
 
 /** 宿主注册表里各命令的检索词与可见性档，按命令名（小写）索引。 */
-function pluginCommandMetadata(): ReadonlyMap<string, { keywords?: readonly string[]; tier: CommandTier }> {
-  const table = new Map<string, { keywords?: readonly string[]; tier: CommandTier }>()
+function pluginCommandMetadata(): ReadonlyMap<string, { keywords?: readonly string[]; tier?: CommandTier }> {
+  const table = new Map<string, { keywords?: readonly string[]; tier?: CommandTier }>()
   for (const command of resolveCommandSetDescriptors()) {
     table.set(command.name.toLowerCase(), {
       ...(command.keywords ? { keywords: command.keywords } : {}),
-      tier: command.tier ?? 'internal',
+      // 档位政策（缺省 internal）的唯一落点在 CommandRegistry.toDescriptor；这里不重复兜底。
+      tier: command.tier,
     })
   }
   return table

@@ -474,13 +474,18 @@ export function SolidInputBar(props: SolidInputBarProps) {
     if (paletteRows().length > 0) {
       if (event.key === 'Enter' && !event.shiftKey && !composing) {
         const row = paletteRows()[commandIndex()]
-        if (row?.kind === 'toggle') {
+        const parsed = parseSlashCommand(draft())
+        // 用户已经把某条命令名完整敲出来（可能是被折叠的 internal 命令）时，Enter 该发给它，
+        // 而不是先被切换项吃掉——否则「直接输入命令名使用」要多按一次（#329 审查）。
+        const exact = parsed
+          ? suggestions().find(item => item.cmd.toLowerCase() === parsed.name.toLowerCase())
+          : undefined
+        if (row?.kind === 'toggle' && !exact) {
           event.preventDefault()
           toggleCommandLayer()
           return
         }
-        const parsed = parseSlashCommand(draft())
-        if (row && parsed?.name.toLowerCase() !== row.suggestion.cmd.toLowerCase()) {
+        if (row?.kind === 'command' && !exact && parsed?.name.toLowerCase() !== row.suggestion.cmd.toLowerCase()) {
           event.preventDefault()
           // 中文名（`/模型 deepseek`）永远走这条补全路径，必须把已输入参数带过去——
           // 否则用户敲的参数会被提示串顶掉，且不可撤销（#327）。

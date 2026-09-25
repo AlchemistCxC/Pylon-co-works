@@ -208,7 +208,10 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     }
     const resolvedOwnerId = ownerAgentId || activeAgent
     const owner = agents.find(agent => agent.id === resolvedOwnerId)
-    ctx.openSheet({ kind: 'agent', title: owner?.name ?? resolvedOwnerId, agentId: resolvedOwnerId })
+    // #326：没有可用 owner（零 Agent 首跑）时不铸「无主 agent sheet」——那会写入一份
+    // 没有主人的会话归属记忆。改为把用户送到配置入口。
+    if (!owner) { openAgentSettings(); return }
+    ctx.openSheet({ kind: 'agent', title: owner.name, agentId: owner.id })
   }
 
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
