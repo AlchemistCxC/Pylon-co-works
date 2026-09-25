@@ -88,7 +88,22 @@
 
 - U1–U6 的最终裁决权在仓库主；本批按上列最小路径执行，改判时不冲突（结构体收口、单源化、dispatcher 拆分、基准补齐均可在此基线上另立批次）。
 - C1 待 #324 合入后补做（一处注释改写，`prompt.rs:349-353` 邻域）。
-- **G1 相邻发现（未处理，供裁决）**：`check-clippy-baseline.mjs` 的 package 过滤按 `#名字@版本` 切分 package_id，而 path 依赖存在无版本形态（如 `pylon-core#1.0.0`），解析结果为 `"1.0.0"` ≠ 包名——**pylon-core 的诊断对棘轮整体不可见**。同机实测中 `pylon-core/src/agent_detection.rs:1088`（`impl Drop for ManagedProbeChild`）确有 `clippy::needless_return` 触发，且为 `#[cfg(unix)]` 造成的平台相关 lint（Windows 下 cfg 块为空使 `return;` 冗余；issue 审查时「已消失」与此吻合）。按 G1 验收该基线条目已移除；脚本解析修复与该 lint 的代码处理是否立项由仓库主决定。
+
+## 裁决与后续（2026-09-25 用户裁决落地，本记录随批更新）
+
+四项裁决经 AskUserQuestion 取得，全部当批落地：
+
+| 裁决 | 结论 | 落地 |
+| --- | --- | --- |
+| U3 契约单源 | **(a) Rust 生成 TS + 门禁** | `scripts/generate-retention-policy.mjs`（`--check` 双模式，锚点失效即报错）→ 生成 `historyRetentionPolicy.contract.ts`；手写文件只引入再导出；`check:retention-policy` 挂入 `check:frontend`/`check:frontend:static` 链（CI 静态门禁自动覆盖）；retention.rs 注释更新为单源定义 |
+| U4 逐帧基准 | **(a) 先补基准再改 P2–P5** | `dispatcher/frame_path_bench.rs`（cfg(test) 四测试 + 跨 owner 拒绝自检，对齐 storage_write_bench 方法论：断言功能不变量、不钉墙钟）。基线读数：逐帧总入口 7,096 ns/帧、reducer 单独 1,348 ns/帧（P2 深拷贝占比 ~5.7× 的量化证据）、`should_flush_batch` 2,296 ns/帧、rawOutput 累积 12,659→17,061 ns/帧（P5 O(K²) 实证）。P2/P3/P5 解禁登记为 #334 |
+| G1 相邻发现① | **修脚本解析** | `check-clippy-baseline.mjs` 补无版本 path 依赖（`pylon-core#1.0.0`）的包名解析（取 `#` 前路径尾段）。验证：旧 JSON + 新脚本 = pylon-core 诊断可见（修复前不可见） |
+| G1 相邻发现② | **修 lint 代码** | `agent_detection.rs` `impl Drop for ManagedProbeChild` 重构：cfg 提到整条语句、消除早退 `return`（Windows 编译下其后无语句才触发该 lint）。验证：pylon-core 单独 clippy 零诊断；基线 `added` 全 0 |
+| U1/U2 后续 | **U1b + U2b 都列入批次** | 登记后续 issue：#335（U1b 参数结构体收口，含 canonical_flush 四调用点去重）、#336（U2b 拆 `start_notification_dispatcher`）；dispatcher 大函数其余两个继续延后 |
+
+说明书同步：`Pylon-模块维护地图.md` 新增「保留策略契约单源」行（canonical 行同形态）。
+
+U3 无需 ADR：裁决结论是**确认** dev-standards 既有单源方向对新契约的适用，未改变依赖方向（ADR 登记标准看「改变依赖方向/数据所有权/持久化契约」——本裁决两者皆未改变）。
 
 ## 并行交集
 
