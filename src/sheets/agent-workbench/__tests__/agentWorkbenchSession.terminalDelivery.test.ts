@@ -99,6 +99,30 @@ describe('terminal delivery does not depend on the per-source IPC Channel (issue
     expect(service.runtime.getSnapshot().summary).toBe(first)
     service.destroy()
   })
+
+  it('#324: a done frame carrying stopReason=cancelled summarizes as cancelled (已停止), not a natural completion', async () => {
+    const active = session('session-cancelled', 'local:cancelled')
+    const listeners: Array<(signal: CanonicalTerminalSignal) => void> = []
+    const service = runtimeFor(active, {
+      listenTerminalFallback: listener => { listeners.push(listener); return () => {} },
+    })
+
+    await service.commands.send(active.id, { text: '首条消息' })
+    await service.bind(active)
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    // 内核 #324 中性结算：done 帧 + stopReason=cancelled（用户主动停止）。
+    listeners[0]({
+      source: active.source,
+      kind: 'done',
+      payload: { source: active.source, data: { stopReason: 'cancelled' } },
+    })
+
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating).toBe(false)
+    expect(snapshot.summary).toMatchObject({ reason: 'cancelled' })
+    service.destroy()
+  })
 })
 
 describe('#99 cold-mount turn ledger is the second terminal evidence (issue #68 residue)', () => {
