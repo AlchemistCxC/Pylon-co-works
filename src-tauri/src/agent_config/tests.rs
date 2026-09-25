@@ -1001,11 +1001,13 @@ fn load_and_load_gateway_config_share_read_entry() {
     let gateway_text = load_gateway_config();
     match doc {
         Ok(doc) => {
-            // 有来源 → load 解析成功则 gateway 文本即该内容。
             // 不变量是「两域读同一份文本」，不是「agent 非空」——#326 起零 Agent 合法。
+            // 用独立的 serde 结构对账（而非再跑一遍同一管线比长度，那是同义反复）：
+            // 保证完整管线没有丢掉配置里声明的 agent。
             if let Ok(agents) = agents {
-                let parsed = parse_domains(&doc.content, doc.base_dir.as_deref()).0;
-                assert_eq!(parsed.map(|a| a.len()).ok(), Some(agents.len()));
+                let declared: AgentConfigFile =
+                    serde_yml::from_str(&doc.content).expect("同一文本必须可解析");
+                assert_eq!(agents.len(), declared.agents.len());
             }
             assert_eq!(
                 gateway_text.as_ref().map(|text| text.as_str()),
@@ -1017,6 +1019,30 @@ fn load_and_load_gateway_config_share_read_entry() {
             assert!(gateway_text.is_err());
         }
     }
+}
+
+#[test]
+fn embedded_source_serves_the_zero_agent_sample() {
+    // #326 回归锁：内嵌兜底必须**接线**到 `agent_config/embedded_agents.yaml`。只断言
+    // 「那个文件是零 Agent」会在 load.rs 被改回仓库根示例时照样绿——本用例从来源解析
+    // 一路走到文本比对面。
+    if !matches!(resolve_config_source().0, ConfigSource::Embedded) {
+        // 开发机可能配了 PYLON_AGENTS_CONFIG 或 exe 旁 agents.yaml（外置来源优先）。
+        // 环境变量是进程级的，改动它有并发风险，故外置来源下跳过；CI 无外置配置时必跑。
+        return;
+    }
+    let doc = read_config_document().expect("内嵌兜底必须可读");
+    assert_eq!(doc.content, include_str!("embedded_agents.yaml"));
+    assert!(
+        doc.base_dir.is_none(),
+        "内嵌来源无 base_dir（不做相对路径绝对化）"
+    );
+    assert!(
+        parse_agents(&doc.content, None)
+            .expect("内嵌兜底必须可解析")
+            .is_empty(),
+        "内嵌兜底不得注册任何 Agent"
+    );
 }
 
 #[test]

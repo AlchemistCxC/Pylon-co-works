@@ -45,7 +45,8 @@ export interface BindingResolutionInput {
   /** App 层激活会话 id（InputBar sessionId） */
   activeSessionId: string | null
   sessions: readonly Session[]
-  /** identityStore.activeAgent 原值（冷启动默认 'peri'；空串 = 尚未确定，不参与冲突判定） */
+  /** identityStore.activeAgent 原值（**空串 = 没有 Agent**：零 Agent 首跑，或尚未确定；
+   *  空串不参与冲突判定） */
   activeAgent: string
   /** runtimeStore.agentStatuses[owner]（缺失 = 状态快照尚未到达 → restoring） */
   ownerStatus: AgentStatus | null | undefined

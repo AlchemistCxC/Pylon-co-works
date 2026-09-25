@@ -22,7 +22,7 @@ export default function FileContextPanel({ ctx }: { ctx: SheetContext }) {
   const touchedFilesRecord = useWorkspaceStore(s => s.touchedFiles)
   const relatedSources = activeFile ? sourcesForPath(touchedFilesRecord, activeFile) : []
   const sessions = useIdentityStore(s => s.sessions)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  const activeAgent = useIdentityStore(s => s.activeAgent)
 
   return (
     <div className="context-panel-contribution">

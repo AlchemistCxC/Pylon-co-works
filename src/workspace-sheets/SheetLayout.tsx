@@ -70,8 +70,9 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   const identityActiveAgent = useIdentityStore(s => s.activeAgent)
   const sheetOwnerAgentId = activeSheet?.kind === 'agent' ? activeSheet.agentId : undefined
-  // 冷启动：激活 agent sheet 时，activeAgent 以恢复出的 sheet owner 为准，避免固定回退 peri。
-  const activeAgent = sheetOwnerAgentId ?? (identityActiveAgent || 'peri')
+  // 冷启动：激活 agent sheet 时，activeAgent 以恢复出的 sheet owner 为准。空串 = 没有 Agent
+  //（#326 零 Agent 首跑），不得回落硬编码 'peri' 造出一个不存在的 Agent。
+  const activeAgent = sheetOwnerAgentId ?? identityActiveAgent
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const sessions = useIdentityStore(s => s.sessions)
   const sheetAgentStates = useWorkspaceStore(s => s.sheetAgentStates)

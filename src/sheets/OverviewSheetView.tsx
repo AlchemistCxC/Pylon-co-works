@@ -46,7 +46,8 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const [tacticalPanel, setTacticalPanel] = useState<TacticalPanel>('home')
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  // #326：空串 = 没有 Agent（零 Agent 首跑）。空串下所有按 agent 的查找自然不命中。
+  const activeAgent = useIdentityStore(s => s.activeAgent)
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const workspaces = useWorkspaceEntityStore(s => s.workspaces)
