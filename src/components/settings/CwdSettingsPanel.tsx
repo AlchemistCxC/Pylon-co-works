@@ -10,10 +10,10 @@ import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts
 import { FolderSearch, X } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import type { Workspace } from '../../workspaceEntities'
-import { isAbsolutePath } from '../../workspaceEntities'
+import type { Workspace } from '../../domains/workspace/workspaceEntities'
+import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
 import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 

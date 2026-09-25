@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '../../../domains/identity/identityStore.ts'
-import { useRuntimeStore } from '../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import { createAgentWorkbenchCommandFacade } from '../agentWorkbenchCommands.ts'
 import type { InteractionResponseIdentity } from '../../../domains/agent/agentContracts.ts'
 

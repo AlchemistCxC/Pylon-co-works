@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { normalizeAgentStatus, type AgentStatus } from '../agentTypes'
 
 const status = (lifecycle: AgentStatus['status'], generation?: number): AgentStatus => ({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { toAgentContextKey } from '../../../domains/agent/agentContext'
 
 describe('runtime reset boundary', () => {

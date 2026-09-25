@@ -10,8 +10,8 @@ import { buildDemoAgents, buildDemoMessages, buildDemoPermissionRequest, buildDe
 import { persistMessageSnapshot, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import { runBrowserDemoSeed } from '../../app/bootstrap/browserDemoBootstrap.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 

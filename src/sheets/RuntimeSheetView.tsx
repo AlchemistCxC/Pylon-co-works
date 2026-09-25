@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { listen } from '@tauri-apps/api/event'
-import { useRuntimeStore } from '../runtimeStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
 import { useDiagnosticErrors, useErrorHistory, type ErrorEntry } from '../errorCenter.ts'
 import { createRuntimeClient } from '../infrastructure/tauri/runtimeClient'

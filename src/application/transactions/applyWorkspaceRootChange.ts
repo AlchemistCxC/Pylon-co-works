@@ -4,7 +4,7 @@
  * 用户裁决：会话 cwd 创建后不再变更。rootPath 更新只影响「之后新建/绑定」的会话；
  * 既有绑定会话保持各自创建时冻结的 cwd，不 close、不 reload、不改 workdir。
  */
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { reportRuntimeError } from '../../runtimeError.ts'
 
 export type WorkspaceRootChangeResult =

@@ -1,7 +1,7 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'

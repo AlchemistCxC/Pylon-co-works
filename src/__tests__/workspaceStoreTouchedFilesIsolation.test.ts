@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useWorkspaceStore, touchedFileVersionKey } from '../workspaceStore'
+import { useWorkspaceStore, touchedFileVersionKey } from '../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../domains/agent/agentContext'
 
 /**

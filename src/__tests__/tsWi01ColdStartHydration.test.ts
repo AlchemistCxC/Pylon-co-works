@@ -6,7 +6,7 @@ import { hydrateIdentityAndWorkspace } from '../app/bootstrap/hydrateIdentityAnd
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
 import { resetStores } from '../test/resetStores'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 
 const legacySession = {
   id: 'legacy-session', name: 'Legacy', source: 'local:legacy-session', profileId: 'profile-a',

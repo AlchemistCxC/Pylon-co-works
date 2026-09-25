@@ -6,7 +6,7 @@ import { setSessionModel } from '../../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../../components/chat/sessionMode.ts'
 import { createSessionClient } from '../../../infrastructure/acp/sessionClient.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
-import { useWorkspaceStore } from '../../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
 import { record, text } from '../../../utils/wireGuards.ts'
 
 function positional(args: Record<string, unknown>, index: number): unknown {

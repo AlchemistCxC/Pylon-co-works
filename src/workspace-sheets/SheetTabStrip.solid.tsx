@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack }
 import { Portal, render } from 'solid-js/web'
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { activateAgentSheet } from './activateAgentSheet'
 import { selectAgentStatus, type AgentStatus } from '../components/settings/agentTypes'
 import { createZustandSignal } from '../sheets/solidStoreBridge.ts'

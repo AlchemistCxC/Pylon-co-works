@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
 import { sheetReducer } from '../workspace-sheets/sheetState'

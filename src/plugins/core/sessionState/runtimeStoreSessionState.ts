@@ -8,7 +8,7 @@
 import {
   type SessionStateSyncProvider,
 } from '../../../contracts/sessionStateSync.ts'
-import { useRuntimeStore } from '../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import {
   extractConfigOptionId,
   extractConfigOptionValue,

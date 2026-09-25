@@ -8,7 +8,7 @@ import type { ClientTransport } from '../acp/agentClient.ts'
 import { normalizeWorkspaceEntries, normalizeWorkspaceFileIndexPage, normalizeWorkspaceText } from './workspaceContracts.ts'
 import { normalizeGitStatus, normalizeGitHistory, normalizeGitOperationResult, normalizeGitSequenceState, normalizeGitStatusWithBranch, normalizeGitText, type GitSequenceState } from './gitContracts.ts'
 import { normalizeWorkspaceSearchResults } from './workspaceSearchContracts.ts'
-import { normalizeWorkspaceShape, type Workspace } from '../../workspaceEntities.ts'
+import { normalizeWorkspaceShape, type Workspace } from '../../domains/workspace/workspaceEntities.ts'
 import type { WorkspaceTargetWire } from '../../domains/workspace/workspaceTarget.ts'
 
 export function createWorkspaceClient(transport: ClientTransport) {

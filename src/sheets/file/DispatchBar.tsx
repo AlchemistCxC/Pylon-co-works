@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../runtimeError'
 import { createChatClient } from '../../infrastructure/acp/chatClient'

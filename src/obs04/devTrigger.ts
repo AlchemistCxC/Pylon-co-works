@@ -15,7 +15,7 @@
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { exportThreeSourcesForSession, type ThreeSourceArtifact } from '../domains/export/threeSourceExport'
 import { useIdentityStore } from '../domains/identity/identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 
 export interface Obs04ConsoleApi {
   __pylonExportThreeSources: (sessionId?: string) => Promise<ThreeSourceArtifact['summary']>

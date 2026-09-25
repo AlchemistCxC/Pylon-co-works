@@ -9,7 +9,7 @@ import type { ContextPanelContributionProps } from '../../plugin-runtime/context
 import type { ContextPanelSurfaceInput } from '../../plugin-runtime/context-panel/contextPanelSurfaceProtocol.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
-import { useRightRailStore } from '../../rightRailStore.ts'
+import { useRightRailStore } from './rightRailStore.ts'
 import { RendererSettingsSchemaHost } from '../settings/RendererSettingField.tsx'
 
 export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet: SheetRecord; ctx: SheetContext; activePanelId?: string | null }) {

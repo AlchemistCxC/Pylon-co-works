@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { readLegacyLayoutSnapshot } from './infrastructure/persistence/legacyKeyMigration.ts'
+import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 export const RIGHT_RAIL_MIN_WIDTH = 220
 export const RIGHT_RAIL_MAX_WIDTH = 560

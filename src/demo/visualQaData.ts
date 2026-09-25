@@ -6,7 +6,7 @@
  */
 import type { Session } from '../domains/identity/identityStore.ts'
 import type { Message } from '../components/chat/messageTypes.ts'
-import type { Workspace } from '../workspaceEntities.ts'
+import type { Workspace } from '../domains/workspace/workspaceEntities.ts'
 import type { InstalledPluginPackage } from '../infrastructure/plugins/pluginPackageClient.ts'
 import { createMockMessages } from '../components/chat/chatMockData.ts'
 

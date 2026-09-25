@@ -1,4 +1,4 @@
-import { useRuntimeStore } from '../runtimeStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { getPermissionController } from '../infrastructure/acp/permissionController'

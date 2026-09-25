@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Workspace } from '../../../workspaceEntities'
+import type { Workspace } from '../../../domains/workspace/workspaceEntities'
 
 const updateWorkspace = vi.hoisted(() => vi.fn(async () => undefined))
-vi.mock('../../../workspaceEntityStore', () => ({
+vi.mock('../../../infrastructure/persistence/workspaceEntityStore', () => ({
   useWorkspaceEntityStore: (selector: (state: { updateWorkspace: typeof updateWorkspace }) => unknown) =>
     selector({ updateWorkspace }),
 }))

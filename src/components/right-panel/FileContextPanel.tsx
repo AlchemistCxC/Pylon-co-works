@@ -1,4 +1,4 @@
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { sourcesForPath } from '../../domains/file/fileRelations'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'

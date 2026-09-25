@@ -2,7 +2,7 @@
 import { useSyncExternalStore } from 'react'
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import { agentAdvertisedModelEntries } from '../agentAdvertisedModels.ts'
 
 afterEach(cleanup)

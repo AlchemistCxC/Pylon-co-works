@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useStore } from '../store'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
@@ -15,7 +15,7 @@ import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
-import { useRightRailStore } from '../rightRailStore.ts'
+import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
 
 /**

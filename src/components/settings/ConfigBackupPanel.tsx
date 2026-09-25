@@ -5,7 +5,7 @@ import { buildExportPayloadAsync, configFileName, preflightImportPayload } from 
 import { loadRetentionPolicyPayload } from '../../infrastructure/persistence/retentionPolicyRepository'
 import { syncImportedRetentionPolicy } from '../../infrastructure/persistence/retentionPolicyRepository'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { reportRuntimeError } from '../../runtimeError'
 import { selectUserDataRepository } from '../../infrastructure/persistence/userDataRepository'
 import { importConfigurationTransaction } from '../../application/transactions/importConfigurationTransaction'

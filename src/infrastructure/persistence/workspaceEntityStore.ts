@@ -7,10 +7,10 @@
  */
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
+import { IS_TAURI, isBrowserMockRuntime } from '../tauri/env'
 
 const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
-import { useIdentityStore } from './domains/identity/identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import {
   isAbsolutePath,
   newLocalWorkspaceId,
@@ -19,7 +19,7 @@ import {
   serializeWorkspaces,
   WORKSPACE_STORAGE_KEY,
   type Workspace,
-} from './workspaceEntities'
+} from '../../domains/workspace/workspaceEntities'
 
 const readMirror = (): Workspace[] => {
   try {

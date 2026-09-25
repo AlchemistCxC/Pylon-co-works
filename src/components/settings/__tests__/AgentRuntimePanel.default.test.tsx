@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import AgentRuntimePanel from '../AgentRuntimePanel'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
-import { useWorkspaceStore } from '../../../workspaceStore'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import { explainErrorCode } from '../../../errorCodeExplanations.ts'
 

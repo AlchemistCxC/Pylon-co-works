@@ -10,7 +10,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { SESSION_STORAGE_KEY } from '../sessionPersistence'
 import { useIdentityStore } from '../identityStore'
-import { useWorkspaceStore } from '../../../workspaceStore'
+import { useWorkspaceStore } from '../../workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import type { PersistedProfile } from '../profilePersistence'
 

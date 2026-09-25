@@ -16,7 +16,7 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'

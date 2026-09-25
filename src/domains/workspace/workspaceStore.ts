@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { createSheetState, sheetReducer } from './workspace-sheets/sheetState.ts'
+import { createSheetState, sheetReducer } from '../../workspace-sheets/sheetState.ts'
 import {
   DEFAULT_SHEET_LAYOUT,
   loadSheetStateV2,
@@ -7,16 +7,16 @@ import {
   type PersistedSheetState,
   type SheetLayoutState,
   type SheetWorkspaceState,
-} from './workspace-sheets/sheetPersistence.ts'
-import { readShowPet, writeShowPet } from './workspace-sheets/showPetPersistence.ts'
-import { pushTouchedFile, type TouchedFile } from './infrastructure/acp/touchedFiles.ts'
-import type { SheetInput, SheetId } from './workspace-sheets/sheetTypes.ts'
-import type { AgentContext, AgentContextKey } from './domains/agent/agentContext.ts'
-import { toAgentContextKey } from './domains/agent/agentContext.ts'
-import { normalizeFilePath } from './domains/file/fileRelations.ts'
-import { resolveWorkspace } from './workspace-sheets/workspaceRegistry.ts'
-import { useRightRailStore } from './rightRailStore.ts'
-import { readLegacyLayoutSnapshot } from './infrastructure/persistence/legacyKeyMigration.ts'
+} from '../../workspace-sheets/sheetPersistence.ts'
+import { readShowPet, writeShowPet } from '../../workspace-sheets/showPetPersistence.ts'
+import { pushTouchedFile, type TouchedFile } from '../../infrastructure/acp/touchedFiles.ts'
+import type { SheetInput, SheetId } from '../../workspace-sheets/sheetTypes.ts'
+import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
+import { toAgentContextKey } from '../agent/agentContext.ts'
+import { normalizeFilePath } from '../file/fileRelations.ts'
+import { resolveWorkspace } from '../../workspace-sheets/workspaceRegistry.ts'
+import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
+import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 /** I01-W3：touchedFiles 刷新版本戳 key——context key + normalized path 二元（禁止冒号 split）。 */
 export function touchedFileVersionKey(context: AgentContext, path: string): string {

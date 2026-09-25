@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { runReconnectCommand } from '../reconnectCommand'
 import type { AgentStatus } from '../agentTypes'
 

@@ -56,7 +56,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
-vi.mock('../../../runtimeStore.ts', () => ({
+vi.mock('../../../domains/runtime/runtimeStore.ts', () => ({
   useRuntimeStore: { getState: store.getState, subscribe: store.subscribe },
 }))
 vi.mock('../../../runtimeError.ts', () => ({

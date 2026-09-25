@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useReplayPostureStore } from '../components/chat/replayPostureStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'

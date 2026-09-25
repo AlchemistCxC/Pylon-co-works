@@ -1,11 +1,11 @@
 import { create } from 'zustand'
-import type { ConfigOption, ModelChoice } from './infrastructure/acp/chatContracts.ts'
-import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime.ts'
-import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from './components/settings/agentTypes.ts'
-import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState.ts'
-import { normalizeApprovalMode, type ApprovalMode } from './domains/permission/approvalMode.ts'
-import type { AgentContext, AgentContextKey } from './domains/agent/agentContext.ts'
-import { toAgentContextKey } from './domains/agent/agentContext.ts'
+import type { ConfigOption, ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
+import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from '../../components/chat/sessionRuntime.ts'
+import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from '../../components/settings/agentTypes.ts'
+import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from '../permission/permissionState.ts'
+import { normalizeApprovalMode, type ApprovalMode } from '../permission/approvalMode.ts'
+import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
+import { toAgentContextKey } from '../agent/agentContext.ts'
 
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
 export interface SessionConfig {

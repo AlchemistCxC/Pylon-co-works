@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PermissionDialog from '../PermissionDialog.tsx'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { resetStores } from '../../test/resetStores'
 import type { PermissionRequest } from '../../domains/permission/permissionTypes.ts'

@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeInvoke } from '../test/fakeInvoke'
-import { serializeWorkspaces, type Workspace } from '../workspaceEntities.ts'
+import { FakeInvoke } from '../../../test/fakeInvoke'
+import { serializeWorkspaces, type Workspace } from '../../../domains/workspace/workspaceEntities.ts'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 vi.mock('@tauri-apps/api/core', async () => {
-  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
-vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
+vi.mock('../../tauri/env', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 

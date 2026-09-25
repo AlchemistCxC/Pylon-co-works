@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { toAgentContextKey } from '../../../../domains/agent/agentContext.ts'
-import { useRuntimeStore } from '../../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../../domains/runtime/runtimeStore.ts'
 import { BUILTIN_SESSION_STATE_SYNC_PROVIDER } from '../runtimeStoreSessionState.ts'
 
 const context = { agentId: 'hermes', source: 'local:session-p56' }

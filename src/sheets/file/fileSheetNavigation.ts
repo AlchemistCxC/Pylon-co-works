@@ -1,7 +1,7 @@
 import type { Session } from '../../domains/identity/identityStore.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 
 export const FILE_NAVIGATION_METADATA_KEY = 'pendingFileNavigation'
 

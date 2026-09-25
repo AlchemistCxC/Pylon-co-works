@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
 import FileTypeIcon from './FileTypeIcon'

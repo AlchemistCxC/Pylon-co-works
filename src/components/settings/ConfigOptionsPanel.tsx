@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'

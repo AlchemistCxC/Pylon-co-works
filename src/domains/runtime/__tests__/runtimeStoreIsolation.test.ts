@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../runtimeStore'
-import { toAgentContextKey } from '../domains/agent/agentContext'
-import { EMPTY_PERMISSION_STATE } from '../domains/permission/permissionState'
+import { toAgentContextKey } from '../../agent/agentContext'
+import { EMPTY_PERMISSION_STATE } from '../../permission/permissionState'
 
 /**
  * I01-W2：双 Agent 同名 source 隔离——会话运行时状态（config/mode/stats）

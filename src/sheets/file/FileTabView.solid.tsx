@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, onCleanup, untrack } from 'soli
 import { render, Show } from 'solid-js/web'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { AgentContext } from '../../domains/agent/agentContext'
-import { useWorkspaceStore, touchedFileVersionKey } from '../../workspaceStore'
+import { useWorkspaceStore, touchedFileVersionKey } from '../../domains/workspace/workspaceStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'

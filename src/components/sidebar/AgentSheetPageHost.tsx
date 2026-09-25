@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useSyncExternalStore } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { normalizePageState, resolveOpenPage } from '../../plugin-runtime/sidebar/sidebarBlockState.ts'

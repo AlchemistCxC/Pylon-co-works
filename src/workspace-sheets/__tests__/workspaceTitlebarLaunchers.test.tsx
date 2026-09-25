@@ -5,7 +5,7 @@ import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import { resetStores } from '../../test/resetStores'
 import { getCommandRegistry, getContextPanelRegistry, getTitlebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
-import { useRightRailStore } from '../../rightRailStore.ts'
+import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
 
 const baseProps = {
   sheets: [],

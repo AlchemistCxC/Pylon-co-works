@@ -43,7 +43,7 @@ import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPar
 import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
 export type { Profile, Session, UserMapping, AgentEntry } from './domains/identity/identityStore'
-export type { SessionConfig } from './runtimeStore'
+export type { SessionConfig } from './domains/runtime/runtimeStore'
 
 export interface ThemeSettings {
   /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
@@ -586,5 +586,5 @@ function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts')
 
 // ── 组合出口：按域导入点 ──
 export { useIdentityStore } from './domains/identity/identityStore'
-export { useRuntimeStore } from './runtimeStore'
-export { useWorkspaceStore } from './workspaceStore'
+export { useRuntimeStore } from './domains/runtime/runtimeStore'
+export { useWorkspaceStore } from './domains/workspace/workspaceStore'

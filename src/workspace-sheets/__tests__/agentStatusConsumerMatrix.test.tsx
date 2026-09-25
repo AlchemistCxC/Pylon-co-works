@@ -2,7 +2,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { resetStores } from '../../test/resetStores'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { openOrFocusSettingsSheet } from '../../sheets/settingsSheetNavigation'

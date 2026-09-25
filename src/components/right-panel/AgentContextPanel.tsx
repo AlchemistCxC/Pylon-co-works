@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { FileCode2, Files, Search } from 'lucide-react'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
 import { useSessionUiState} from '../chat/sessionUiState'
 import { searchValuesMatchQuery } from '../chat/messageSearchIndex'
