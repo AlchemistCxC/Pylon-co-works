@@ -81,6 +81,11 @@ pub(crate) fn should_flush_batch(
                 });
                 // None（查无会话/owner 缺失）一律按跨 owner 判 flush，与原
                 // `current_owner != pending.input.owner` 的不等语义一致。
+                // 等价性前提：批次条目仅在 decision.persist_canonical=true 时
+                // 入队（routing.rs），该判定要求 owner.is_some()——即
+                // expected=Some 恒成立。若未来放宽入队条件（允许 owner=None
+                // 条目入批），此处「查无会话 → flush」与原「None == None → 不
+                // flush」将出现可观察差异，须一并复审。
                 flush_batch = !current_owner_matches.unwrap_or(false);
             }
         }
@@ -135,21 +140,35 @@ fn publish_committed_update<R: tauri::Runtime>(
     );
 }
 
-// clippy 2026-09-19：9 参沿用 R8 显式参数风格（window/gateway/channels/pet/
-// generation/agent_id + 可选 event/message service + 批次），与 handle_session_update
-// 同一调用点形态，结构体重构收益低。
-#[allow(clippy::too_many_arguments)]
+/// #335/U1b：flush 的环境上下文收敛——dispatcher 主循环四个 flush 调用点共用的
+/// 8 项服务/句柄引用（原逐参手抄 ×4，任何增删要同步 4 处；字段清单唯一处为
+/// `NotificationPump::flush_context`，#336 起每次 flush 现场构造，取值时机与原
+/// 「调用点逐参求值」逐点一致）。字段与原形参一一对应，锁语义/调用时序不变。
+pub(crate) struct CanonicalFlushContext<'a, R: tauri::Runtime> {
+    pub(crate) window: &'a tauri::Window<R>,
+    pub(crate) gateway: &'a crate::gateway::GatewayCore,
+    pub(crate) update_channels: &'a crate::runtime::UpdateChannelMap,
+    pub(crate) pet: &'a std::sync::Mutex<PetState>,
+    pub(crate) client_generation: &'a std::sync::atomic::AtomicU64,
+    pub(crate) agent_id: &'a str,
+    pub(crate) event_service: Option<&'a Arc<crate::session::EventService>>,
+    pub(crate) message_service: Option<&'a Arc<crate::session::MessageService>>,
+}
+
 pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
-    window: &tauri::Window<R>,
-    gateway: &crate::gateway::GatewayCore,
-    update_channels: &crate::runtime::UpdateChannelMap,
-    pet: &std::sync::Mutex<PetState>,
-    client_generation: &std::sync::atomic::AtomicU64,
-    agent_id: &str,
-    event_service: Option<&Arc<crate::session::EventService>>,
-    message_service: Option<&Arc<crate::session::MessageService>>,
+    context: &CanonicalFlushContext<'_, R>,
     pending: Vec<PendingCanonicalPublish>,
 ) -> bool {
+    let CanonicalFlushContext {
+        window,
+        gateway,
+        update_channels,
+        pet,
+        client_generation,
+        agent_id,
+        event_service,
+        message_service,
+    } = *context;
     if pending.is_empty() {
         return true;
     }

@@ -1034,14 +1034,19 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         // &dyn callback across the await would make the command future
         // non-Send); the callback is replaced by a plain Option<String> out.
         let mut recreated_peri_id: Option<String> = None;
-        let mapping = match ensure_session_mapping(
+        // #335/U1b：装配参数收敛为结构体；具名绑定（借用须跨 await 存活，
+        // 语句级临时不可用）。
+        let assembly = SessionAssembly {
             state,
             runtime,
             source,
-            profile_id.as_deref(),
+            profile_id: profile_id.as_deref(),
             persona,
-            &session_cwd,
-            &requested_mcp_servers,
+            session_cwd: &session_cwd,
+            wire_mcp_servers: &requested_mcp_servers,
+        };
+        let mapping = match ensure_session_mapping(
+            &assembly,
             revived_peri_id.as_deref(),
             &mut recreated_peri_id,
         )

@@ -63,7 +63,7 @@ flowchart LR
 | --- | --- |
 | `kernel/applicationRuntime*` 是 application 层的 deprecated 转发，只剩根挂载组件和测试消费者 | 消费者直接依赖 application；删除旧转发，运行时实现不复制 |
 | `lifecycle/mod.rs` 的后半部为内联测试，连接/切换/重连通过 `do_connect_and_replace` 共享锁序 | 不为缩短文件搬动锁和并发流程；后续行为变更与对应 characterization 测试一起处理 |
-| `dispatcher/` 已有 `routing`、`canonical_flush`、`crash_reconnect`、`interaction_route`、`host_tools_gate`、`permission_route`、`fallback_route` 缝模块（#317 批次二）；宠物事件在 sessions 锁内收集、锁外按序应用 | 继续拆块必须保持锁外副作用时序；路由顺序与锁持有范围不得随重构改变 |
+| `dispatcher/` 已有 `routing`、`canonical_flush`、`crash_reconnect`、`interaction_route`、`host_tools_gate`、`permission_route`、`fallback_route` 缝模块（#317 批次二）；宠物事件在 sessions 锁内收集、锁外按序应用。#336/U2b：主泵 `start_notification_dispatcher` 为编排入口（复位+装配+spawn），循环骨架在 `NotificationPump::{new,run,pump_step,route_frame}`——分支各一行模块调用，`route_frame` 的 return true/false 精确映射原 continue/break；flush 环境经 `flush_context()` 现场构造（#335 `CanonicalFlushContext` 字段清单唯一处）。#334：逐帧热路径 payload 经 `Arc<Value>` 共享进 ingest（ingest 先、publish 后取回唯一引用），reducer 走 `AcpSessionState::apply_session_update` 零拷贝入口，`turn_ledger` 拆 active/terminal 双表（单 Mutex）后 `note_session_activity` 只扫 active 表 | 继续拆块必须保持锁外副作用时序；路由顺序与锁持有范围不得随重构改变（对照基准 = `route_frame` 分支次序与 `pump_step` biased 优先级） |
 | OBS 04—07 的采集对象、trace 包装与返回 API 不同 | 不把相似安装守卫抽成泛用全局注册器；保留 DEV 隔离和各自证据语义 |
 | 根 store 与部分产品模块仍在 runtime 边界白名单 | 已知迁移债务仍报告；不能通过新增豁免宣称模块化完成 |
 

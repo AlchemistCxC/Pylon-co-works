@@ -35,7 +35,7 @@ mod interaction_route;
 mod permission_route;
 
 use canonical_flush::{
-    flush_pending_canonical, should_flush_batch, PendingCanonicalPublish,
+    flush_pending_canonical, should_flush_batch, CanonicalFlushContext, PendingCanonicalPublish,
     PENDING_CANONICAL_FLUSH_INTERVAL,
 };
 use crash_reconnect::CrashReconnectHandler;
@@ -1056,8 +1056,9 @@ pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
 /// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
 /// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
 // clippy 2026-09-22：参数为各锁/上下文的按引用透传（window/gateway/sessions/
-// binding_health/pet/update_channels/generation），与 flush_pending_canonical 同一
-// 调用点形态，结构体重构收益低。
+// binding_health/pet/update_channels/generation），20 参为 kernel seam 入口形态
+// （#335 曾以「与 flush_pending_canonical 同形态」为据，后者已结构体化；本函数
+// 的结构体收口属 #331/U2b 后续另一案，届时摘除）。
 #[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::Window<R>,
@@ -1532,8 +1533,32 @@ async fn handle_session_update<R: tauri::Runtime>(
     true
 }
 
+/// 单帧泵取的失败/跳过策略（#336/U2b：select! 封装为具名函数后，循环骨架凭此
+/// 分流）。Frame = 产出本帧进入路由分支；Skipped = 本迭代副作用已完成（崩溃
+/// watch 触发处理 / 窗口 flush 完成），跳过路由直接下一轮；Stop = 主循环退出
+/// （inbox 关闭 / 窗口 flush 失败）。
+// Frame 变体按值携带整帧 ClassifiedMessage（含 raw payload，与其他变体的
+// 尺寸差超过 lint 的 200 字节阈值）——Box 化需每帧一次堆分配，与 #334 逐帧
+// 热路径降分配目标相悖；本枚举是泵取流程控制面，值语义保留属有意取舍，
+// 故定点豁免本 lint。
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Frame 按值携带整帧以避免每帧堆分配；Box 化与 #334 降分配方向相悖"
+)]
+enum PumpStep {
+    Frame(crate::acp::ClassifiedMessage),
+    Skipped,
+    Stop,
+}
+
 /// 启动（或重启）通知分发器：消费 ACP 单消费者无损通知 inbox，把事件路由到
 /// 前端（WebView 事件）与平台（gateway deliver_all），并处理崩溃/权限/宠物感知。
+///
+/// #336/U2b：本函数降为「复位旧任务 + 装配 + spawn」编排入口；句柄克隆/
+/// agent_id 解析/崩溃处理器装配收敛进 [`NotificationPump::new`]，主循环骨架在
+/// [`NotificationPump::run`]，泵取与路由分支各为具名方法（失败/跳过策略见
+/// [`PumpStep`] 与 `route_frame` 返回值文档）。语句次序、锁获取点、generation
+/// 校验点与拆分前逐一对照保持。
 pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     handles: &AppStateHandles,
     runtime: &Arc<AgentRuntime>,
@@ -1548,52 +1573,104 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     if let Some(handle) = task.take() {
         handle.abort();
     }
-    let acp = runtime.acp.clone();
-    let sessions = runtime.sessions.clone();
-    let binding_health = runtime.binding_health.clone();
-    let pet = handles.pet.clone();
-    let generation = runtime
-        .client_generation
-        .load(std::sync::atomic::Ordering::Acquire);
-    let client_generation = runtime.client_generation.clone();
-    let agents = handles.agents.clone();
-    let active_agent = handles.active_agent.clone();
-    let agent_runtime = runtime.agent_runtime.clone();
-    let runtime_logs = handles.runtime_logs.clone();
-    let runtimes = handles.runtimes.clone();
-    let gateway = handles.gateway.clone();
-    let approval_mode = handles.approval_mode.clone();
-    let event_service_slot = handles.event_service.clone();
-    let event_service = event_service_slot.lock().ok().and_then(|slot| slot.clone());
-    let message_service_slot = handles.message_service.clone();
-    let message_service = handles
-        .message_service
-        .lock()
-        .ok()
-        .and_then(|slot| slot.clone());
-    let hook_bridge = handles.hook_bridge.clone();
-    let pending_permissions = runtime.pending_permissions.clone();
-    let terminal_registry = runtime.terminal_registry.clone();
-    let host_tools_policy = runtime.host_tools_policy.clone();
-    let private_interactions = runtime.private_interactions.clone();
-    let agent_id = handles
-        .runtimes
-        .all_with_ids()
-        .into_iter()
-        .find(|(_, candidate)| Arc::ptr_eq(candidate, runtime))
-        .map(|(id, _)| id)
-        .unwrap_or_else(|| "unknown".to_string());
-    // P1-3（R2-WI03）：provider 不再启动时捕获——每次 PermissionRequest 从活配置解析
-    // （见主循环对应分支），reload 修改实例 provider 后新请求即用新 provider。
-    let runtime_for_reconnect = runtime.clone();
+    // 装配在 spawn 前同步完成（new 仅克隆字段，原克隆段同样在任务复位后、
+    // 首次 poll 前执行，无可观察时序差异）；pump 所有权移入任务。
+    let pump = NotificationPump::new(handles, runtime, window);
     *task = Some(tokio::spawn(async move {
-        let notification_inbox = acp.lock().await.notification_inbox();
-        // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
-        // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
-        let mut crashed_rx = acp.lock().await.crashed_receiver();
+        pump.run().await;
+    }));
+}
+
+/// 通知泵主循环的共享环境束（#336/U2b：原 spawn 闭包捕获的局部变量逐一收敛为
+/// 字段，分支具名方法经 `self` 访问，消除逐参手抄传递）。字段与原克隆段一一
+/// 对应。`handle_crash`/reconnect_epoch 原在任务内构造——纯字段装配无副作用、
+/// 无 await，提前到 `new()`（spawn 前）不改变任何可观察时序（首个 await 仍是
+/// `run()` 内的 inbox 获取）。
+struct NotificationPump<R: tauri::Runtime> {
+    acp: Arc<tokio::sync::Mutex<AcpClient>>,
+    sessions: Arc<std::sync::Mutex<std::collections::HashMap<String, SessionInfo>>>,
+    binding_health: Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<String, crate::agent::runtime::SessionBindingHealth>,
+        >,
+    >,
+    pet: Arc<std::sync::Mutex<PetState>>,
+    /// 本 dispatcher 代际（构造时刻快照；每轮循环与 client_generation 复核）。
+    generation: u64,
+    client_generation: Arc<std::sync::atomic::AtomicU64>,
+    agent_id: String,
+    agents: Arc<std::sync::Mutex<std::collections::HashMap<String, crate::agent_config::AgentDef>>>,
+    runtimes: Arc<crate::runtime::AgentRuntimeManager>,
+    gateway: Arc<crate::gateway::GatewayCore>,
+    approval_mode: Arc<std::sync::Mutex<String>>,
+    event_service: Option<Arc<crate::session::EventService>>,
+    message_service: Option<Arc<crate::session::MessageService>>,
+    hook_bridge: Arc<crate::hook_bridge::HookBridge>,
+    pending_permissions:
+        Arc<std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>>,
+    terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
+    host_tools_policy: Arc<std::sync::Mutex<crate::acp::host_tools::HostToolsPolicy>>,
+    private_interactions: crate::private_interaction::PrivateInteractionOwner,
+    /// 本泵所属 runtime（重连/update_channels/mapping_ready/账本等 per-agent 状态入口）。
+    runtime: Arc<AgentRuntime>,
+    window: tauri::Window<R>,
+    handle_crash: CrashReconnectHandler<R>,
+    /// 任务启动时从 acp 一次性捕获（需 async 锁，`run()` 开头赋值；时序与
+    /// 原任务内获取一致——inbox/crashed_receiver 之后、进循环之前）。
+    wire_trace: Option<Arc<crate::acp::AcpWireCapture>>,
+    /// 在途 canonical 批次（窗口未 flush 的 durable+publish 待办）。
+    pending_batch: Vec<PendingCanonicalPublish>,
+}
+
+impl<R: tauri::Runtime> NotificationPump<R> {
+    /// 原主循环前置克隆段（O8 复位之后的句柄准备）原样收敛：字段逐一对应原
+    /// 局部变量；agent_id 解析、CrashReconnectHandler 装配原样保留。
+    fn new(
+        handles: &AppStateHandles,
+        runtime: &Arc<AgentRuntime>,
+        window: tauri::Window<R>,
+    ) -> Self {
+        let acp = runtime.acp.clone();
+        let sessions = runtime.sessions.clone();
+        let binding_health = runtime.binding_health.clone();
+        let pet = handles.pet.clone();
+        let generation = runtime
+            .client_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        let client_generation = runtime.client_generation.clone();
+        let agents = handles.agents.clone();
+        let active_agent = handles.active_agent.clone();
+        let agent_runtime = runtime.agent_runtime.clone();
+        let runtime_logs = handles.runtime_logs.clone();
+        let runtimes = handles.runtimes.clone();
+        let gateway = handles.gateway.clone();
+        let approval_mode = handles.approval_mode.clone();
+        let event_service_slot = handles.event_service.clone();
+        let event_service = event_service_slot.lock().ok().and_then(|slot| slot.clone());
+        let message_service_slot = handles.message_service.clone();
+        let message_service = handles
+            .message_service
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
+        let hook_bridge = handles.hook_bridge.clone();
+        let pending_permissions = runtime.pending_permissions.clone();
+        let terminal_registry = runtime.terminal_registry.clone();
+        let host_tools_policy = runtime.host_tools_policy.clone();
+        let private_interactions = runtime.private_interactions.clone();
+        let agent_id = handles
+            .runtimes
+            .all_with_ids()
+            .into_iter()
+            .find(|(_, candidate)| Arc::ptr_eq(candidate, runtime))
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| "unknown".to_string());
+        // P1-3（R2-WI03）：provider 不再启动时捕获——每次 PermissionRequest 从活配置解析
+        // （见主循环对应分支），reload 修改实例 provider 后新请求即用新 provider。
+        let runtime_for_reconnect = runtime.clone();
         // R7：自动重连状态组（reconnect_epoch / remaining_attempts / pending_reconnect）。
         // - reconnect_epoch：本 dispatcher 实例（=本 runtime 代际）的崩溃通知计数，
-        //   每次 handle_crash 通知 +1（含被防重入标志吸收的重复/新一轮通知——被吸收
+        //   每次 handle 通知 +1（含被防重入标志吸收的重复/新一轮通知——被吸收
         //   的通知以 epoch 变化表达"重连意图待消费"，不再被静默吞掉）。
         // - remaining_attempts：重连循环内的局部尝试计数（预算），epoch 变化时重置。
         // - pending_reconnect 概念：epoch 变化即"新一轮崩溃在重连循环期间到来"——
@@ -1607,304 +1684,374 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         // ISSUE-17 W1（LR2-WI06）：handle 接收 crash reason（稳定 code，transport.rs
         // CrashReason::as_str）——不再硬编码 stdout closed；用户可读文案保留原始 code
         // （不覆盖诊断字段）。
-        let handle_crash = {
-            // #317 批次二 ④：原内联闭包提取为 CrashReconnectHandler（崩溃处理 +
-            // 自动重连状态机，R7/A7/O-4/ISSUE-17 语义逐位保留）。
-            CrashReconnectHandler::new(
-                AppStateHandles {
-                    runtimes: runtimes.clone(),
-                    agents: agents.clone(),
-                    active_agent: active_agent.clone(),
-                    pet: pet.clone(),
-                    runtime_logs: runtime_logs.clone(),
-                    gateway: gateway.clone(),
-                    approval_mode: approval_mode.clone(),
-                    event_service: event_service_slot.clone(),
-                    message_service: message_service_slot.clone(),
-                    hook_bridge: hook_bridge.clone(),
-                },
-                agent_runtime.clone(),
-                window.clone(),
-                runtime_for_reconnect.clone(),
-                reconnect_epoch.clone(),
-            )
-        };
+        let handle_crash = CrashReconnectHandler::new(
+            AppStateHandles {
+                runtimes: runtimes.clone(),
+                agents: agents.clone(),
+                active_agent,
+                pet: pet.clone(),
+                runtime_logs,
+                gateway: gateway.clone(),
+                approval_mode: approval_mode.clone(),
+                event_service: event_service_slot,
+                message_service: message_service_slot,
+                hook_bridge: hook_bridge.clone(),
+            },
+            agent_runtime,
+            window.clone(),
+            runtime_for_reconnect,
+            reconnect_epoch,
+        );
+        Self {
+            acp,
+            sessions,
+            binding_health,
+            pet,
+            generation,
+            client_generation,
+            agent_id,
+            agents,
+            runtimes,
+            gateway,
+            approval_mode,
+            event_service,
+            message_service,
+            hook_bridge,
+            pending_permissions,
+            terminal_registry,
+            host_tools_policy,
+            private_interactions,
+            runtime: runtime.clone(),
+            window,
+            handle_crash,
+            wire_trace: None,
+            pending_batch: Vec::new(),
+        }
+    }
+
+    /// 主循环骨架（#336/U2b）：代际复核 → 泵取一帧 → 代际复核 → 路由分支；
+    /// 循环后为退出统一收口（兜底 flush + 账本代际清理）。
+    async fn run(mut self) {
+        let notification_inbox = self.acp.lock().await.notification_inbox();
+        // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
+        // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
+        let mut crashed_rx = self.acp.lock().await.crashed_receiver();
         // 订阅即查现值：崩溃发生在订阅之前（connect 成功后立刻 EOF、dispatcher
         // 尚未启动）时 changed() 不会触发，只能靠 watch 保留的最新值兜底。
         if *crashed_rx.borrow_and_update() {
             // watch 通道只携带 bool 不携带 reason → 缺省 stdout_closed（订阅前 EOF 场景）
-            handle_crash
+            self.handle_crash
                 .handle(crate::acp::CrashReason::StdoutClosed.as_str().to_string())
                 .await;
         }
-        let wire_trace = acp.lock().await.wire_trace();
-        let mut pending_batch: Vec<PendingCanonicalPublish> = Vec::new();
+        self.wire_trace = self.acp.lock().await.wire_trace();
         loop {
-            if client_generation.load(Ordering::Acquire) != generation {
+            if self.client_generation.load(Ordering::Acquire) != self.generation {
                 // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
                 break;
             }
-            let raw = tokio::select! {
-                biased;
-                // #99 优先级规则（可测试）：crash watch > 控制帧（agent 请求/崩溃广播）
-                // > 普通通知。控制帧独立有界通道，通知洪泛时仍能有界时间内被路由；
-                // 每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
-                changed = crashed_rx.changed() => {
-                    if changed.is_ok() && *crashed_rx.borrow_and_update() {
-                        // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
-                        handle_crash.handle(crate::acp::CrashReason::StdoutClosed.as_str().to_string()).await;
+            match self.pump_step(&notification_inbox, &mut crashed_rx).await {
+                PumpStep::Frame(classified) => {
+                    let crate::acp::ClassifiedMessage {
+                        raw,
+                        classification,
+                        wire_ordinal,
+                        ingress_seq,
+                    } = classified;
+                    if self.client_generation.load(Ordering::Acquire) != self.generation {
+                        break;
                     }
-                    continue;
-                }
-                raw = notification_inbox.recv_control() => raw,
-                raw = notification_inbox.recv() => raw,
-                _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !pending_batch.is_empty() => {
-                    let batch = std::mem::take(&mut pending_batch);
-                    if !flush_pending_canonical(
-                        &window,
-                        &gateway,
-                        &runtime_for_reconnect.update_channels,
-                        &pet,
-                        &client_generation,
-                        &agent_id,
-                        event_service.as_ref(),
-                        message_service.as_ref(),
-                        batch,
-                    )
-                    .await
+                    // 路由分支链：false = 主循环退出（flush 失败 / 代际结束）。
+                    if !self
+                        .route_frame(raw, classification, wire_ordinal, ingress_seq)
+                        .await
                     {
                         break;
                     }
-                    continue;
                 }
-            };
-            let classified = match raw {
-                Some(classified) => classified,
-                None => break,
-            };
-            let crate::acp::ClassifiedMessage {
-                mut raw,
-                classification,
-                wire_ordinal,
-                ingress_seq,
-            } = classified;
-            if client_generation.load(Ordering::Acquire) != generation {
-                break;
-            }
-            // #315：provider 私有扩展通知（peri/agent_event 等）就地包络为
-            // session/update 形状——载荷字段原样保留，只补通道判别符；此后与本
-            // 批窗口内的标准 update 完全同质（durable canonical + publish 共用
-            // 通路，routing 对未知 sessionUpdate 变体照常 publish/persist）。
-            if raw.kind == crate::acp::AcpKind::ProviderExtension {
-                let method = raw.method.clone().unwrap_or_default();
-                match crate::acp::wrap_provider_extension_notification(&method, raw.params.take()) {
-                    Some(wrapped) => {
-                        tracing::debug!("provider 扩展通知 {} 已包络为 session/update", method);
-                        raw.kind = crate::acp::AcpKind::SessionUpdate;
-                        raw.params = Some(wrapped);
-                    }
-                    None => {
-                        tracing::warn!(
-                            "provider 扩展通知 {} 缺 object params/sessionId，丢弃",
-                            method
-                        );
-                        continue;
-                    }
-                }
-            }
-            let flush_batch = should_flush_batch(
-                &pending_batch,
-                &raw,
-                &classification,
-                &sessions,
-                generation,
-                &agent_id,
-            );
-            if flush_batch && !pending_batch.is_empty() {
-                let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
-                    break;
-                }
-            }
-            if raw.kind == crate::acp::AcpKind::Crashed {
-                // ISSUE-17 W1：broadcast 携带 reason（params.reason，稳定 code）——
-                // dispatcher 保留原始 code 生成用户可读文案；缺省 stdout_closed
-                let reason = raw
-                    .params
-                    .as_ref()
-                    .and_then(|p| p.get("reason"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(crate::acp::CrashReason::StdoutClosed.as_str())
-                    .to_string();
-                handle_crash.handle(reason).await;
-                continue;
-            }
-            if raw.kind == crate::acp::AcpKind::ElicitationComplete {
-                // #316：elicitation/complete —— URL 模式外带交互完成通知（form 模式
-                // 同步应答不产生本通知）。官方契约：客户端忽略未知/已完成 id。
-                // 收敛匹配中的 pending elicitation 卡（URL 模式 UI 本期不做）。
-                route_elicitation_complete(&window, &runtimes, &agent_id, raw.params.as_ref())
-                    .await;
-                continue;
-            }
-            if raw.kind == crate::acp::AcpKind::PermissionRequest {
-                // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
-                // ACP-01：id 为原始 variant（number/string）——string-id agent 请求不再丢弃。
-                route_permission_request(
-                    &window,
-                    &acp,
-                    &client_generation,
-                    &approval_mode,
-                    &pending_permissions,
-                    &sessions,
-                    &hook_bridge,
-                    &runtimes,
-                    &agents,
-                    &agent_id,
-                    raw,
-                )
-                .await;
-                continue;
-            }
-            if matches!(
-                raw.method.as_deref(),
-                Some("terminal/create")
-                    | Some("terminal/output")
-                    | Some("terminal/wait_for_exit")
-                    | Some("terminal/waitForExit")
-                    | Some("terminal/kill")
-                    | Some("terminal/release")
-            ) {
-                route_terminal_request(&acp, &terminal_registry, &host_tools_policy, raw).await;
-                continue;
-            }
-            if matches!(
-                raw.method.as_deref(),
-                Some("fs/read_text_file") | Some("fs/write_text_file")
-            ) {
-                route_fs_request(&acp, &host_tools_policy, &sessions, generation, raw).await;
-                continue;
-            }
-            // Providers may expose a new approval/question/oauth method before a
-            // dedicated AcpKind/adapter exists.  Do not silently drop an identified
-            // request: answer it with Method Not Found and surface a diagnostic event.
-            if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
-                route_private_interaction(
-                    &window,
-                    &acp,
-                    &agents,
-                    &private_interactions,
-                    &runtimes,
-                    &agent_id,
-                    generation,
-                    raw,
-                )
-                .await;
-                continue;
-            }
-            if raw.kind != crate::acp::AcpKind::SessionUpdate {
-                route_unknown_notification(&acp, &raw).await;
-                continue;
-            }
-            let payload = match raw.params {
-                Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
-                _ => {
-                    tracing::warn!("ACP session/update missing object params");
-                    continue;
-                }
-            };
-            let terminal_boundary = payload
-                .get("update")
-                .and_then(|update| update.get("sessionUpdate"))
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|kind| matches!(kind, "done" | "error" | "cancelled"));
-            if !handle_session_update(
-                &window,
-                &gateway,
-                &sessions,
-                &binding_health,
-                &pet,
-                &runtime_for_reconnect.update_channels,
-                &client_generation,
-                generation,
-                &runtime_for_reconnect.mapping_ready,
-                &agent_id,
-                event_service.as_ref(),
-                message_service.as_ref(),
-                classification,
-                wire_ordinal,
-                &runtime_for_reconnect.turn_ledger,
-                &runtime_for_reconnect.probe_sessions,
-                ingress_seq,
-                wire_trace.clone(),
-                Some(&mut pending_batch),
-                payload,
-            )
-            .await
-            {
-                break;
-            }
-            if terminal_boundary && !pending_batch.is_empty() {
-                let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
-                    break;
-                }
+                PumpStep::Skipped => continue,
+                PumpStep::Stop => break,
             }
         }
-        if !pending_batch.is_empty() {
-            let batch = std::mem::take(&mut pending_batch);
-            let _ = flush_pending_canonical(
-                &window,
-                &gateway,
-                &runtime_for_reconnect.update_channels,
-                &pet,
-                &client_generation,
-                &agent_id,
-                event_service.as_ref(),
-                message_service.as_ref(),
-                batch,
-            )
-            .await;
+        if !self.pending_batch.is_empty() {
+            let batch = std::mem::take(&mut self.pending_batch);
+            let _ = flush_pending_canonical(&self.flush_context(), batch).await;
         }
         // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
         // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
         // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn
         // （可观测，且永远无法改写新代际状态）。
-        let dropped = runtime_for_reconnect
-            .turn_ledger
-            .drop_generation(generation);
+        let dropped = self.runtime.turn_ledger.drop_generation(self.generation);
         if dropped > 0 {
             tracing::info!(
                 dropped,
-                generation,
+                generation = self.generation,
                 "stale-generation turn entries dropped by turn ledger"
             );
         }
-    }));
+    }
+
+    /// 泵取一步（原 tokio::select! 原样迁入）：biased 优先级 = 崩溃 watch >
+    /// 控制帧（agent 请求/崩溃广播）> 普通通知 > 窗口 flush 定时（仅在途批次
+    /// 非空时参与竞争）；每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
+    async fn pump_step(
+        &mut self,
+        inbox: &crate::acp::NotificationInbox,
+        crashed_rx: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> PumpStep {
+        tokio::select! {
+            biased;
+            changed = crashed_rx.changed() => {
+                if changed.is_ok() && *crashed_rx.borrow_and_update() {
+                    // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
+                    self.handle_crash
+                        .handle(crate::acp::CrashReason::StdoutClosed.as_str().to_string())
+                        .await;
+                }
+                PumpStep::Skipped
+            }
+            raw = inbox.recv_control() => match raw {
+                Some(classified) => PumpStep::Frame(classified),
+                None => PumpStep::Stop,
+            },
+            raw = inbox.recv() => match raw {
+                Some(classified) => PumpStep::Frame(classified),
+                None => PumpStep::Stop,
+            },
+            _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !self.pending_batch.is_empty() => {
+                let batch = std::mem::take(&mut self.pending_batch);
+                if !flush_pending_canonical(&self.flush_context(), batch).await {
+                    PumpStep::Stop
+                } else {
+                    PumpStep::Skipped
+                }
+            }
+        }
+    }
+
+    /// 路由分支链（原主循环体内联分支逐一迁入，次序不变）：ProviderExtension
+    /// 包络 → 窗口 flush 判定 → 崩溃 / elicitation 完成 / 权限请求 / terminal /
+    /// fs / 私有交互 / 未知通知 / session/update 内核路径。每分支副作用完成后
+    /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自本函数内两处
+    /// 窗口 flush 失败，或 `handle_session_update` 返回 false（mutation 后本代
+    /// 结束/锁异常等该函数自身的退出判定，见其文档；定时 flush 的失败经
+    /// `pump_step` 以 `PumpStep::Stop` 表达，不经本函数）。
+    async fn route_frame(
+        &mut self,
+        mut raw: crate::acp::RawMessage,
+        classification: crate::acp::ReplayClassification,
+        wire_ordinal: Option<u64>,
+        ingress_seq: u64,
+    ) -> bool {
+        // #315：provider 私有扩展通知（peri/agent_event 等）就地包络为
+        // session/update 形状——载荷字段原样保留，只补通道判别符；此后与本
+        // 批窗口内的标准 update 完全同质（durable canonical + publish 共用
+        // 通路，routing 对未知 sessionUpdate 变体照常 publish/persist）。
+        if !wrap_provider_extension_frame(&mut raw) {
+            return true;
+        }
+        let flush_batch = should_flush_batch(
+            &self.pending_batch,
+            &raw,
+            &classification,
+            &self.sessions,
+            self.generation,
+            &self.agent_id,
+        );
+        if flush_batch && !self.pending_batch.is_empty() {
+            let batch = std::mem::take(&mut self.pending_batch);
+            if !flush_pending_canonical(&self.flush_context(), batch).await {
+                return false;
+            }
+        }
+        if raw.kind == crate::acp::AcpKind::Crashed {
+            // ISSUE-17 W1：broadcast 携带 reason（params.reason，稳定 code）——
+            // dispatcher 保留原始 code 生成用户可读文案；缺省 stdout_closed
+            let reason = crash_reason_from_params(raw.params.as_ref());
+            self.handle_crash.handle(reason).await;
+            return true;
+        }
+        if raw.kind == crate::acp::AcpKind::ElicitationComplete {
+            // #316：elicitation/complete —— URL 模式外带交互完成通知（form 模式
+            // 同步应答不产生本通知）。官方契约：客户端忽略未知/已完成 id。
+            // 收敛匹配中的 pending elicitation 卡（URL 模式 UI 本期不做）。
+            route_elicitation_complete(
+                &self.window,
+                &self.runtimes,
+                &self.agent_id,
+                raw.params.as_ref(),
+            )
+            .await;
+            return true;
+        }
+        if raw.kind == crate::acp::AcpKind::PermissionRequest {
+            // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
+            // ACP-01：id 为原始 variant（number/string）——string-id agent 请求不再丢弃。
+            route_permission_request(
+                &self.window,
+                &self.acp,
+                &self.client_generation,
+                &self.approval_mode,
+                &self.pending_permissions,
+                &self.sessions,
+                &self.hook_bridge,
+                &self.runtimes,
+                &self.agents,
+                &self.agent_id,
+                raw,
+            )
+            .await;
+            return true;
+        }
+        if matches!(
+            raw.method.as_deref(),
+            Some("terminal/create")
+                | Some("terminal/output")
+                | Some("terminal/wait_for_exit")
+                | Some("terminal/waitForExit")
+                | Some("terminal/kill")
+                | Some("terminal/release")
+        ) {
+            route_terminal_request(
+                &self.acp,
+                &self.terminal_registry,
+                &self.host_tools_policy,
+                raw,
+            )
+            .await;
+            return true;
+        }
+        if matches!(
+            raw.method.as_deref(),
+            Some("fs/read_text_file") | Some("fs/write_text_file")
+        ) {
+            route_fs_request(
+                &self.acp,
+                &self.host_tools_policy,
+                &self.sessions,
+                self.generation,
+                raw,
+            )
+            .await;
+            return true;
+        }
+        // Providers may expose a new approval/question/oauth method before a
+        // dedicated AcpKind/adapter exists.  Do not silently drop an identified
+        // request: answer it with Method Not Found and surface a diagnostic event.
+        if crate::protocol_adapter::looks_like_interaction_method(raw.method.as_deref()) {
+            route_private_interaction(
+                &self.window,
+                &self.acp,
+                &self.agents,
+                &self.private_interactions,
+                &self.runtimes,
+                &self.agent_id,
+                self.generation,
+                raw,
+            )
+            .await;
+            return true;
+        }
+        if raw.kind != crate::acp::AcpKind::SessionUpdate {
+            route_unknown_notification(&self.acp, &raw).await;
+            return true;
+        }
+        let payload = match raw.params {
+            Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
+            _ => {
+                tracing::warn!("ACP session/update missing object params");
+                return true;
+            }
+        };
+        let terminal_boundary = payload
+            .get("update")
+            .and_then(|update| update.get("sessionUpdate"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kind| matches!(kind, "done" | "error" | "cancelled"));
+        if !handle_session_update(
+            &self.window,
+            &self.gateway,
+            &self.sessions,
+            &self.binding_health,
+            &self.pet,
+            &self.runtime.update_channels,
+            &self.client_generation,
+            self.generation,
+            &self.runtime.mapping_ready,
+            &self.agent_id,
+            self.event_service.as_ref(),
+            self.message_service.as_ref(),
+            classification,
+            wire_ordinal,
+            &self.runtime.turn_ledger,
+            &self.runtime.probe_sessions,
+            ingress_seq,
+            self.wire_trace.clone(),
+            Some(&mut self.pending_batch),
+            payload,
+        )
+        .await
+        {
+            return false;
+        }
+        if terminal_boundary && !self.pending_batch.is_empty() {
+            let batch = std::mem::take(&mut self.pending_batch);
+            if !flush_pending_canonical(&self.flush_context(), batch).await {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// flush 环境上下文（#335/U1b 收敛面）：字段清单唯一处（原四调用点手抄 ×4
+    /// 的去重靠本方法）；纯引用装配，无副作用，值与调用点逐参形态一致。
+    fn flush_context(&self) -> CanonicalFlushContext<'_, R> {
+        CanonicalFlushContext {
+            window: &self.window,
+            gateway: &self.gateway,
+            update_channels: &self.runtime.update_channels,
+            pet: &self.pet,
+            client_generation: &self.client_generation,
+            agent_id: &self.agent_id,
+            event_service: self.event_service.as_ref(),
+            message_service: self.message_service.as_ref(),
+        }
+    }
+}
+
+/// #315：provider 私有扩展通知就地包络（原主循环内联分支抽出）。载荷字段原样
+/// 保留，只补通道判别符，包络为 session/update 形状；返回 false = 缺 object
+/// params/sessionId（帧丢弃，仅告警）。
+fn wrap_provider_extension_frame(raw: &mut crate::acp::RawMessage) -> bool {
+    if raw.kind != crate::acp::AcpKind::ProviderExtension {
+        return true;
+    }
+    let method = raw.method.clone().unwrap_or_default();
+    match crate::acp::wrap_provider_extension_notification(&method, raw.params.take()) {
+        Some(wrapped) => {
+            tracing::debug!("provider 扩展通知 {} 已包络为 session/update", method);
+            raw.kind = crate::acp::AcpKind::SessionUpdate;
+            raw.params = Some(wrapped);
+            true
+        }
+        None => {
+            tracing::warn!(
+                "provider 扩展通知 {} 缺 object params/sessionId，丢弃",
+                method
+            );
+            false
+        }
+    }
+}
+
+/// Crashed 帧的 reason 提取（ISSUE-17 W1）：broadcast 携带 reason（params.reason，
+/// 稳定 code）；缺省 stdout_closed。
+fn crash_reason_from_params(params: Option<&serde_json::Value>) -> String {
+    params
+        .and_then(|p| p.get("reason"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(crate::acp::CrashReason::StdoutClosed.as_str())
+        .to_string()
 }
 
 #[cfg(test)]
@@ -2220,20 +2367,22 @@ mod tests {
                 wire: Some(wire.clone()),
             })
             .collect();
-        assert!(
-            flush_pending_canonical(
-                &window.as_ref().window(),
-                &gateway,
-                &update_channels,
-                &std::sync::Mutex::new(crate::pet::PetState::default()),
-                &AtomicU64::new(1),
-                "agent",
-                Some(&event_service),
-                None,
-                pending,
-            )
-            .await
-        );
+        // #335/U1b：上下文结构体化后，测试侧的临时值需具名绑定（结构体字段
+        // 借用不能指向语句级临时）。
+        let flush_pet = std::sync::Mutex::new(crate::pet::PetState::default());
+        let flush_generation = AtomicU64::new(1);
+        let flush_window = window.as_ref().window();
+        let flush_context = CanonicalFlushContext {
+            window: &flush_window,
+            gateway: &gateway,
+            update_channels: &update_channels,
+            pet: &flush_pet,
+            client_generation: &flush_generation,
+            agent_id: "agent",
+            event_service: Some(&event_service),
+            message_service: None,
+        };
+        assert!(flush_pending_canonical(&flush_context, pending).await);
         assert_eq!(
             event_service.revision(owner.key().unwrap()).await.unwrap(),
             4
