@@ -335,6 +335,13 @@ context.presentation
 context.settings
 context.fonts
 context.sessionCreation
+context.interfaceModes
+context.shellRecipes
+context.titlebar
+context.storage
+context.ccWidget
+context.presets
+context.management?
 ```
 
 ### 6.1 Commands
@@ -454,6 +461,7 @@ context.hooks.register('permission.request', {
 { action: 'continue', event? }
 { action: 'cancel', reason }
 { action: 'respond', output }
+{ action: 'send', message }
 void
 ```
 
@@ -491,6 +499,7 @@ workspace.describe(kind)
   launch?,
   component,
   sidebar?,
+  contextPanel?,
   createInitialState,
   serialize,
   deserialize,
@@ -689,6 +698,7 @@ search
 export
 event-projector
 session-state
+agent-detector
 agent-instance-sink
 tool-dictionary-sink
 ```
@@ -814,6 +824,7 @@ context.sidebar.registerAgentSidebarContribution({
   activeAgentId, activeSessionId,
   presentation: 'block' | 'page',
   collapsed, pageOpen,
+  query?: string,
   blockAction: { actionId, nonce } | null,
   sessions: { id, name, workspaceId }[],
   workspaces: { id, name, rootPath }[],
@@ -831,7 +842,7 @@ context.sidebar.registerAgentSidebarContribution({
 
 **整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`——不需要维护两份组件，两种体量共享同一批数据与回调。整页**替换该 Sheet 的聊天视图，但不是新 Sheet**：左栏仍是该 Sheet 的左栏，Esc 或页面头部「返回」回到聊天。
 
-**内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）、以及四个 mock 模块（定时 / 自动化 / 任务 / 扩展）。**模块自己拥有自己的查询**——宿主不再下发 `query`，插件想过滤自己的内容就在自己的组件里存。
+**内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）、以及四个 mock 模块（定时 / 自动化 / 任务 / 扩展）。**模块自己拥有自己的查询**——block 体量不下发查询词，插件想过滤自己的内容就在自己的组件里存；page 体量的 `host:input` 会携带宿主头部页面搜索框的当前词 `query?`（宿主当前恒传空串，协议位保留）。
 
 **顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏、也不参与排序（钉在栈底，拖拽落点被钳在钉区之前）；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。次序偏好在收纳时统一收敛，因此手改过的旧偏好同样不会把常驻模块排到前面。
 
@@ -861,7 +872,7 @@ context.contextPanel.register({
 
 没显式选过时的默认顺序：**亲和当前 Sheet 种类的面板 → 第一个 `global` 面板 → 列表第一个**。用户一旦在切换器里选过，那次选择跨 Sheet 保持（`rightRailStore.activePanelId`），切 Sheet 不会把它抢回默认值。右栏头部的切换器列出全部通过 `when` 的面板；**切换器的标签是宿主渲染的，插件不画自己的标签行**。
 
-`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`，通过 `host:input` 接收可序列化宿主状态（含 `presentation` / `collapsed` / `pageOpen` / `blockAction`），并用受控的 `host:*` 事件请求选择会话、创建会话或收起面板。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
+`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`。**两类隔离面的输入与回传事件不同**：左栏模块经 `host:input` 接收含 `presentation` / `collapsed` / `pageOpen` / `blockAction` 的可序列化宿主状态，用受控的 `host:*` 事件请求选择会话或创建会话；右栏面板经 `host:input` 接收 `{ workspaceKind, sheet, activeSessionId, values }`（`sheet` 是当前 Sheet 的 `{ id, kind, title, agentId?, metadata? }` 投影，`values` 是面板 settings 适配器的当前值快照），回传事件词表为 `host:collapse` / `host:select-session` / `settings:set` / `settings:remove`（后两者写/删面板内嵌设置，见 SDK 出口 `CONTEXT_PANEL_SURFACE_EVENTS`）。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 
 Workspace 自身的 `sidebar` 仍负责声明整块左栏壳；Agent 左栏内部内容、FileSheet workbench activity，以及通用右栏内容分别由对应 contribution registry 管理，不建立第二套 `kind → sidebar` 映射。
 
@@ -991,11 +1002,13 @@ API：
 | `createSettingsSurface(definition)` | 声明式设置页（见下） |
 | `VISUAL_SEMANTIC_TOKENS` / `VISUAL_SEMANTIC_ROLE_TOKENS` | 宿主视觉语义 token 名（§6.4.2 纪律的唯一真值） |
 | `SIDEBAR_SURFACE_EVENTS` / `CONTEXT_PANEL_SURFACE_EVENTS` | 隔离面可回传事件词表（宿主真源常量） |
+| `PYLON_PLUGIN_API_MIN` / `PYLON_PLUGIN_API_LATEST` / `PYLON_PLUGIN_CAPABILITIES` / `PLUGIN_STORAGE_BUDGET_BYTES` 等 | 版本、能力与配额常量；settings-target grammar helpers（`validateSettingsTarget` / `stringifySettingsTarget` / `parseSettingsTarget`）与错误类（`PluginStorageError` / `PluginManagementError`） |
 
 `createSettingsSurface` 把 §6.10 协议（`host:input` 进、`settings:set` 出）封装成字段清单，纯 DOM 渲染、样式消费语义 token，返回值直接交给 `context.settings.registerPage`：
 
 ```ts
 context.ui.registerSurface(createSettingsSurface({
+  id: 'example.settings.surface',
   description: '示例设置',
   fields: [
     { type: 'text', key: 'greetingName', label: '问候名' },
@@ -1005,7 +1018,7 @@ context.ui.registerSurface(createSettingsSurface({
 }))
 context.settings.registerPage({
   id: 'example.settings-page', label: 'Example', order: 900,
-  renderKind: 'isolated-surface', surfaceId: '…',
+  renderKind: 'isolated-surface', surfaceId: 'example.settings.surface',
 })
 ```
 
@@ -1048,6 +1061,7 @@ PluginSettingsPageHost 同款）/ `__settings` / `__storage` / sessions·turns �
 ```ts
 context.storage.setValue('lastQuery', { text: 'refactor', at: Date.now() })
 context.storage.getValue('lastQuery')
+context.storage.removeValue('lastQuery')
 context.storage.keys()
 context.storage.clear()
 ```
@@ -1077,8 +1091,9 @@ SDK 由 `bun run build:plugin-sdk` 从同一源码同时生成两种形态：
 
 #### 6.11.5 发行包内开发（无源码环境）
 
-发行包自带 `resources/sdk/pylon-plugin-sdk.js`（单文件 ESM，经 Tauri resources
-打包）。**不装 Node、不碰源码仓库**也能写插件：
+发行包自带 `resources/sdk/` 插件开发分发包**全量**：单文件 ESM runtime
+`pylon-plugin-sdk.js`、`testing.js`、`types/` 类型声明与 manifest schema
+（2026-09 起由 `dist-plugin-sdk/normal` 全量收集入包）。**不装 Node、不碰源码仓库**也能写插件：
 
 1. 建插件目录，把发行包 `resources/sdk/pylon-plugin-sdk.js` 复制进去；
 2. 写 `pylon-plugin.json`（用随包的 `pylon-plugin-manifest.schema.json` 做编辑器校验）；
@@ -1096,10 +1111,38 @@ export default definePlugin({
 4. "设置 → 插件" 安装该目录。入口经 `import(entryUrl)` 以真实 URL 加载，
    ESM 相对导入按入口文件自身解析——无需任何打包器。
 
-边界：纯 JS 路径没有类型检查（SDK API 表见本章各节与 starter 示例）；
-需要类型声明或 `createMockContext` 时使用正常版 SDK（插件开发套件的 `sdk/`）。
-打包脚本对离线 runtime 有 64KB 体积守卫，并拒绝 testing/宿主运行时闭包；超限或
-依赖泄漏说明 `src/sdk` 边界被破坏，构建会直接失败。
+边界：纯 JS 路径没有类型检查（SDK API 表见本章各节与 starter 示例；编辑器补全
+可用随包 `resources/sdk/types/` 声明）。打包脚本对离线单文件 runtime 有 64KB
+体积守卫，并拒绝 testing/宿主运行时闭包（守卫在 `build:plugin-sdk` 构建期执行）；
+超限或依赖泄漏说明 `src/sdk` 边界被破坏，构建会直接失败。
+
+#### 6.12 元件、预设与管理面
+
+`context.ccWidget.registerWidget(contribution)`（`PluginCcWidgetApi`）向中央控制台元件定义表注册元件，随 Scope 回收。`CcWidgetContribution` 形状：
+
+```ts
+{
+  id,             // 全局唯一
+  label,
+  category?,
+  render?: { kind: 'host-renderer', rendererKey } | { kind: 'isolated-surface', surfaceId },
+  propertyFields?,       // 框架中立的属性元数据，产品层可细化
+  defaultPlacement?,     // { anchor, side?, order, offsetX, offsetY }——声明式「贴谁 + 哪一侧」，无 slot 概念
+}
+```
+
+`context.presets.registerPreset(contribution)`（`PluginPresetApi`）注册预设载荷，随 Scope 回收。`PresetContribution` 形状：
+
+```ts
+{
+  id,       // 全局唯一
+  label,
+  scope?,   // 归属标记（如界面模式 id），框架中立、不枚举
+  payload,  // 框架中立的预设载荷，产品层可细化
+}
+```
+
+`context.management?`（API 1.2，capability 门控）仅当 manifest 声明 `plugin.management` **且**用户已授权时装配；未声明或未授权时属性**不存在**——是条件装配，不是返回空实现（见 §6.11.1 的 `{ management: true }` mock 与 `pluginManagementTypes.ts`）。
 
 ---
 
@@ -1370,7 +1413,7 @@ operation inspect / logs / cancel
 event log
 ```
 
-内置第一方插件当前注册 64 个可执行 Command，覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格、插件设置、主题/配置预检、完整 Skin 闭环和 Browser Sheet 控制面。运行时事实以以下命令为准：
+内置第一方插件当前注册 83 个可执行 Command（其中非 Browser 的 49 条由 `builtinCliCommandCoverage.test.ts` 的 EXPECTED 清单锚定，Browser Sheet 控制面 34 条），覆盖核心会话快捷命令、File/Git、布局与 Sheet、呈现风格、插件设置、主题/配置预检、完整 Skin 闭环和 Browser Sheet 控制面。运行时事实以以下命令为准：
 
 ```powershell
 pylon-cli command list --executable true --json
