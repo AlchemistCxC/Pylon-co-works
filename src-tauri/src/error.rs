@@ -88,6 +88,11 @@ pub enum PylonError {
     /// message 保留原文案；机器码统一 `command_error`（原裸 String 无码，此为净新增）。
     #[error("{0}")]
     Command(String),
+    /// ACP 域错误整包委托（#317 批次二 2c：边界区分度保留）——细分 code 经
+    /// AcpError::code 委派（persist.rs 回放词汇表单源化），message 为 Display 原文；
+    /// ReplayLoadInProgress 仍由 acp/mod.rs 特判折入 Storage（既有契约）。
+    #[error(transparent)]
+    AcpDomain(pylon_acp::AcpError),
 }
 
 impl PylonError {
@@ -115,6 +120,7 @@ impl PylonError {
             Self::UserData(error) => error.code(),
             Self::Retention(error) => error.code(),
             Self::Command(_) => "command_error",
+            Self::AcpDomain(error) => error.code(),
         }
     }
 }
@@ -191,6 +197,19 @@ mod tests {
     #[test]
     fn error_codes_are_stable_and_machine_readable() {
         assert_eq!(PylonError::Acp("x".into()).code(), "acp_error");
+        assert_eq!(PylonError::Command("x".into()).code(), "command_error");
+        // #317 批次二 2c：AcpDomain 细分码委托（词汇表 = persist.rs 回放契约）。
+        assert_eq!(
+            PylonError::AcpDomain(pylon_acp::AcpError::RpcTimeout).code(),
+            "rpc_timeout"
+        );
+        assert_eq!(
+            PylonError::AcpDomain(pylon_acp::AcpError::Connect(Box::new(
+                pylon_acp::AgentConnectFailure::preflight("preflight", "unavailable".into())
+            )))
+            .code(),
+            "connect_error"
+        );
         assert_eq!(PylonError::AgentCrashed.code(), "agent_crashed");
         assert_eq!(PylonError::NoActiveAgent.code(), "no_active_agent");
         assert_eq!(PylonError::Serialize("x".into()).code(), "serialize_error");
