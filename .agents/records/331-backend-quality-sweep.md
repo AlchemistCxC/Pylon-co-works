@@ -57,7 +57,7 @@
 | M1 | ✅ create.rs 四处具备与 `engine.rs:819` 同形态的 `#[allow(…, reason = …)]` |
 | P4 | ✅ `should_flush_batch` 路径无 `serde_json::to_string` 身份比较 |
 | M3 | ✅ dev-standards 成文（主形态 `lock().unwrap()` + 错误边界 `map_err` 例外 + 中毒免疫值 `into_inner` 例外） |
-| M2 | ✅ `run_setup_pipeline` 函数体 22 行（≤150），18 阶段失败策略逐行标注于编排处首屏 |
+| M2 | ✅ `run_setup_pipeline` 函数体 23 行（≤150），18 阶段失败策略逐行标注于编排处首屏 |
 | 门禁 | ✅ 全绿（见证据）；测试修改严格限于测试处置点名的 retention.rs 两处 |
 
 ## 测试处置

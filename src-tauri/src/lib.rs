@@ -762,7 +762,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
 // P3a（#106）：setup 管道提取——DataDirs 解析→portable 迁移→workspace 恢复→storage 诊断
 // →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
 // run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
-// #331/M2：16 个阶段拆为具名 `setup_*` 函数，失败策略在编排处逐行标注——
+// #331/M2：18 个阶段拆为具名 `setup_*` 函数，失败策略在编排处逐行标注——
 // 〔致命〕Err 上抛中止启动；〔可见〕tracing 报错但不中止；〔静默〕warn 后继续。
 // 阶段顺序即依赖顺序（施工文档 §2.3），不得重排。
 pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
