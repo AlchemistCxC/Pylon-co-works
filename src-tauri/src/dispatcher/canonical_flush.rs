@@ -81,6 +81,11 @@ pub(crate) fn should_flush_batch(
                 });
                 // None（查无会话/owner 缺失）一律按跨 owner 判 flush，与原
                 // `current_owner != pending.input.owner` 的不等语义一致。
+                // 等价性前提：批次条目仅在 decision.persist_canonical=true 时
+                // 入队（routing.rs），该判定要求 owner.is_some()——即
+                // expected=Some 恒成立。若未来放宽入队条件（允许 owner=None
+                // 条目入批），此处「查无会话 → flush」与原「None == None → 不
+                // flush」将出现可观察差异，须一并复审。
                 flush_batch = !current_owner_matches.unwrap_or(false);
             }
         }
@@ -136,8 +141,9 @@ fn publish_committed_update<R: tauri::Runtime>(
 }
 
 /// #335/U1b：flush 的环境上下文收敛——dispatcher 主循环四个 flush 调用点共用的
-/// 8 项服务/句柄引用（原逐参手抄 ×4，任何增删要同步 4 处）。上下文在任务启动处
-/// 装配一次、整循环共用；字段与原形参一一对应，锁语义/调用时序不变。
+/// 8 项服务/句柄引用（原逐参手抄 ×4，任何增删要同步 4 处；字段清单唯一处为
+/// `NotificationPump::flush_context`，#336 起每次 flush 现场构造，取值时机与原
+/// 「调用点逐参求值」逐点一致）。字段与原形参一一对应，锁语义/调用时序不变。
 pub(crate) struct CanonicalFlushContext<'a, R: tauri::Runtime> {
     pub(crate) window: &'a tauri::Window<R>,
     pub(crate) gateway: &'a crate::gateway::GatewayCore,
