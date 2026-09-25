@@ -65,7 +65,6 @@ pub enum AcpStateDelta {
 /// creating a second UI row.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AcpSessionState {
-    pub messages: Vec<String>,
     pub tools: BTreeMap<String, serde_json::Value>,
     pub pending_permissions: Vec<(String, String)>,
     pub usage: Option<(u64, Option<u64>)>,
@@ -244,14 +243,6 @@ impl AcpSessionState {
                 variant: other.to_owned(),
             }),
         };
-        if let Some(
-            AcpStateDelta::Text { text }
-            | AcpStateDelta::Reasoning { text }
-            | AcpStateDelta::UserText { text },
-        ) = delta.as_ref()
-        {
-            self.messages.push(text.clone());
-        }
         delta.into_iter().collect()
     }
 
