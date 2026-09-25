@@ -58,6 +58,15 @@
 - **产物记账**：`check:bundle` 的 wasm 预算段独立于 js 总额；新增 wasm 依赖后按实产物重定标，不把 wasm 折进 js 总额（会让既存产物变成超限）。
 - **跨语言契约的单源方向**：成对的 wire 契约（事件类型词表等）以 Rust 为单源，TS 侧由脚本生成（`scripts/generate-canonical-event-types.mjs`），不用「两处手抄 + 门禁兜底」。
 
+## Rust 锁中毒处理（#331 成文）
+
+release profile 为 `panic = "abort"`（`src-tauri/Cargo.toml`）：任一 panic 即进程终止，锁中毒后不存在「恢复后继续运行」的窗口，策略差异只影响 dev 构建下的可诊断性与错误可传播性。约定：
+
+- **主形态**：`lock().unwrap()`。中毒意味着已有 panic 正在扩散（release 下进程即将 abort），跟随 panic 是正确行为；unwrap 的 panic 位置即故障点。`.expect(...)` 语义相同（同属「跟随 panic」，仅多一条消息），视同主形态，改动相邻代码时顺手对齐为 `unwrap` 即可，不做专项清扫。
+- **例外一（错误边界）**：在能向调用方返回 `Result` 的边界（tauri command、service 方法、把失败作为领域错误上报的路径），用 `lock().map_err(...)` 把 PoisonError 转入既有错误域——调用方可见的失败优先于进程死亡。
+- **例外二（中毒免疫值）**：锁保护的内容在中毒后依然自洽（如 `gateway/qq/auth.rs` 的 token 缓存），可用 `lock().unwrap_or_else(|e| e.into_inner())` 就地恢复。
+- 不引入上述之外的新形态；新增代码按主形态与两类例外落点选择。
+
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。

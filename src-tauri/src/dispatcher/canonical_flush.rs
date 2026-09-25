@@ -61,28 +61,22 @@ pub(crate) fn should_flush_batch(
         if let Some(pending) = pending_batch.first() {
             flush_batch = session_id != Some(pending.input.remote_session_id.as_str());
             if !flush_batch {
-                let current_owner_key = session_id.and_then(|session_id| {
+                // 身份比较用 DurableSessionOwner 值（derive PartialEq，#331/P4）：
+                // 原实现两侧各走一次 owner.key()（serde_json::to_string）——窗口内
+                // 每帧两次序列化只为比一个三元组。key 为三字段 JSON 串、对结构体
+                // 值单射，值比较语义相同。
+                let current_owner = session_id.and_then(|session_id| {
                     sessions.lock().ok().and_then(|items| {
                         items.iter().find_map(|(source, session)| {
                             if session.peri_id == session_id && session.generation == generation {
-                                session
-                                    .durable_owner(agent_id, source)
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|owner| owner.key().ok())
+                                session.durable_owner(agent_id, source).ok().flatten()
                             } else {
                                 None
                             }
                         })
                     })
                 });
-                flush_batch = current_owner_key.as_deref()
-                    != pending
-                        .input
-                        .owner
-                        .as_ref()
-                        .and_then(|owner| owner.key().ok())
-                        .as_deref();
+                flush_batch = current_owner != pending.input.owner;
             }
         }
     }

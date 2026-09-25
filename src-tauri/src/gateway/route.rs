@@ -382,7 +382,9 @@ impl EntityRouteTable {
 /// Route 解析状态（I12-A-BE-01 契约冻结；D-04：实例删除后 route 保留并
 /// disabled，不级联删除）。上游按本状态决定 ingest/deliver 是否放行。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // 解析状态由诊断/前端展示消费
+// 契约冻结的先行实现：当前仅 route.rs 内联测试消费（Rust/TS 生产面均未接线），
+// 待 BE-02 生命周期接入真实实例注册表后沿用本契约（摘除条件 = 接线落地）。
+#[allow(dead_code)]
 pub enum RouteResolveStatus {
     /// 实例存在且已连接 → 可 ingest/deliver。
     Active,
@@ -400,7 +402,8 @@ pub enum RouteResolveStatus {
 ///
 /// 语义（D-04）：引用的实例不存在 → InstanceMissing（route 保留 + disabled）；
 /// 实例存在但未连接 → InstanceNotConnected；未引用实例 → Unbound（legacy 兼容）。
-#[allow(dead_code)] // 诊断辅助（前端状态展示）
+// 同 RouteResolveStatus：当前仅内联测试消费，摘除条件 = BE-02 接线落地。
+#[allow(dead_code)]
 pub fn resolve_route_status(
     binding: &EntityBinding,
     instance_status: impl FnOnce(&str) -> Option<InstanceStatus>,

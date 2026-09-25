@@ -2,16 +2,9 @@
   "version": 3,
   "note": "P60 clippy baseline v3 (relative: zero new diagnostics; fingerprint carries crate + occurrence count)",
   "counts": {
-    "pylon | clippy::large_enum_variant | src-tauri/src/dispatcher/routing.rs | large size difference between variants": 1,
-    "pylon | clippy::too_many_arguments | src-tauri/src/runtime_log.rs | this function has too many arguments (8/7)": 1,
-    "pylon | clippy::too_many_arguments | src-tauri/src/runtime_log.rs | this function has too many arguments (9/7)": 1,
-    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (11/7)": 1,
-    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (12/7)": 1,
-    "pylon | clippy::too_many_arguments | src-tauri/src/session/create.rs | this function has too many arguments (9/7)": 2,
-    "pylon-core | clippy::needless_return | src-tauri/pylon-core/src/agent_detection.rs | unneeded `return` statement": 1
+    "pylon | clippy::large_enum_variant | src-tauri/src/dispatcher/routing.rs | large size difference between variants": 1
   },
   "crates": [
-    "pylon",
-    "pylon-core"
+    "pylon"
   ]
 }

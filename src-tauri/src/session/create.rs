@@ -684,6 +684,10 @@ fn plan_initial_model(
 /// operation is intentionally atomic from the caller's perspective: a failed
 /// setting RPC is returned so the newly-created remote session can be closed
 /// before any local mapping is published.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "装配函数：逐项应用空态控制中心的可选初始值（model/reasoning/mode）；初始选项收敛为结构体后可摘"
+)]
 async fn apply_initial_session_options(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -870,6 +874,10 @@ async fn apply_initial_session_options(
 /// RPC + 插入"全程；tokio Mutex 不可重入，本函数内部不取锁）；RPC await 期间
 /// 不持 sessions 锁（V14），await 后 ensure_generation（RPC 后位置不变量）。
 /// "Session creation failed" 日志在本函数内发出（唯一出口）。
+#[allow(
+    clippy::too_many_arguments,
+    reason = "装配函数：建会话全流程（检查+RPC+插入+可选 close）显式参数；创建参数收敛为结构体后可摘"
+)]
 async fn create_session_slot(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -1024,6 +1032,10 @@ async fn create_session_slot(
 /// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
 /// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
+#[allow(
+    clippy::too_many_arguments,
+    reason = "装配函数：复用/复活/新建三分支共用同一显式参数面；与 create_session_slot 一并收敛为结构体后可摘"
+)]
 pub(crate) async fn ensure_session_mapping(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -1405,6 +1417,10 @@ pub(crate) fn restore_previous_slot(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "IPC 契约签名：参数与 wire 面一一对应不可折叠；摘除条件 = 改为 payload 结构体并同步前端调用方"
+)]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
