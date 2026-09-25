@@ -20,6 +20,8 @@ export interface MarkdownContentProps {
   inline?: boolean
   /** Reasoning uses its own activity treatment; the typing tip belongs to assistant prose. */
   typewriter?: boolean
+  /** Reasoning and read-only uses may opt out of assistant block completion motion. */
+  settleMotion?: boolean
 }
 
 export function MarkdownContent(props: MarkdownContentProps) {
@@ -39,7 +41,7 @@ export function MarkdownContent(props: MarkdownContentProps) {
   return (
     <Show when={incremental} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
       <StreamingMarkdownBlocks text={() => props.text} streaming={() => props.streaming === true}
-        typewriter={props.typewriter !== false} inline={props.inline} />
+        typewriter={props.typewriter !== false} settleMotion={props.settleMotion !== false} inline={props.inline} />
     </Show>
   )
 }
@@ -53,6 +55,9 @@ interface StreamingBlockRow {
   setTail(value: boolean): void
   readonly text: string
   update(text: string): void
+  settling(): boolean
+  pulseSettle(): void
+  dispose(): void
 }
 
 /** 由当前文本推导出的一行（顺序即渲染顺序）。 */
@@ -112,7 +117,7 @@ function deriveRowSpecs(visible: string, final: boolean): DerivedRows {
   return { specs, stableSpecs, paragraphs: ends.length + (unstable.length > 0 ? 1 : 0) }
 }
 
-function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; typewriter: boolean; inline?: boolean }) {
+function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; typewriter: boolean; settleMotion: boolean; inline?: boolean }) {
   let nextId = 1
   // 行集合 = 当前文本的函数。这里刻意不保留任何独立于文本的累积状态：旧实现里的
   // committedText / hiddenLeading / stableRows 累积 + reset() 正是漂移的来源。
@@ -125,7 +130,10 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   const lastRowId = createMemo(() => rows().at(-1)?.id)
   const [typing, setTyping] = createSignal(false)
   let clearTyping: ReturnType<typeof setTimeout> | undefined
-  onCleanup(() => { if (clearTyping !== undefined) clearTimeout(clearTyping) })
+  onCleanup(() => {
+    if (clearTyping !== undefined) clearTimeout(clearTyping)
+    for (const row of rendered) row.dispose()
+  })
 
   const reconcile = (text: string, final: boolean) => {
     // 非后继输入（回退/换挡/重放）只作为只读计数，不再需要特殊分支：推导只看当前文本。
@@ -162,10 +170,13 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
       }
       // 位置对账：文本未变就不碰 signal（不多余重解析），变了就地更新——保持 DOM 身份是
       // 尾块逐拍增长不闪烁、稳定块（含代码块）不重挂载的前提。
+      const wasTail = candidate.tail()
       if (candidate.text !== specText) candidate.update(specText)
       candidate.setTail(derived.specs[index]!.tail)
+      if (props.settleMotion && !reset && wasTail && !derived.specs[index]!.tail) candidate.pulseSettle()
       nextRows.push(candidate)
     }
+    for (const removed of rendered.slice(nextRows.length)) removed.dispose()
     rendered = nextRows
     setRows(nextRows)
   }
@@ -179,6 +190,7 @@ function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => b
   return <For each={rows()}>{row => <StreamingMarkdownBlock
     row={row}
     streaming={props.streaming}
+    settleMotion={props.settleMotion}
     typing={props.typewriter ? () => typing() && lastRowId() === row.id : undefined}
     inline={props.inline}
   />}</For>
@@ -205,18 +217,41 @@ function trimRowStructuralWhitespace(text: string): string {
 function createStreamingBlockRow(id: number, initialText: string, tail: boolean): StreamingBlockRow {
   const [text, setText] = createSignal(initialText)
   const [isTail, setIsTail] = createSignal(tail)
-  return { id, tail: isTail, setTail: setIsTail, get text() { return text() }, update: setText }
+  const [settling, setSettling] = createSignal(false)
+  let settledOnce = false
+  let clearSettle: ReturnType<typeof setTimeout> | undefined
+  return {
+    id, tail: isTail, setTail: setIsTail, get text() { return text() }, update: setText,
+    settling,
+    pulseSettle: () => {
+      if (settledOnce) return
+      settledOnce = true
+      setSettling(true)
+      clearSettle = setTimeout(() => {
+        clearSettle = undefined
+        setSettling(false)
+      }, 620)
+    },
+    dispose: () => { if (clearSettle !== undefined) clearTimeout(clearSettle) },
+  }
 }
 
-function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; typing?: () => boolean; inline?: boolean }) {
+function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; settleMotion: boolean; typing?: () => boolean; inline?: boolean }) {
   const text = () => props.row.text
   const openCodeTail = createMemo(() => props.streaming() ? splitOpenCodeFenceTail(text()) : null)
+  let wasOpenCodeTail = openCodeTail() !== null
+  createEffect(() => {
+    const open = openCodeTail() !== null
+    if (props.settleMotion && wasOpenCodeTail && !open && props.streaming()) props.row.pulseSettle()
+    wasOpenCodeTail = open
+  })
   // P57 S3-A11：增长尾块的中间态解析绕 LRU 缓存（同前缀同长度的文本永不再命中，
   // 只会挤掉 stable 块的缓存条目）；行晋升为 stable 后恢复缓存。
   const cacheModel = () => !props.row.tail()
   return <Show
     when={openCodeTail() !== null}
-    fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} typing={props.typing} />}
+    fallback={<MarkdownSegment text={text} inline={props.inline} cache={cacheModel} typing={props.typing}
+      settling={props.row.settling} />}
   >
     <Show when={openCodeTail()?.prefix}>
       {prefix => <MarkdownSegment text={prefix()} inline={props.inline} cache={cacheModel} />}
@@ -264,7 +299,7 @@ function StreamingCodeBlock(props: { language: () => string | undefined; code: (
  * 不再回落到原始文本——流式尾块旧模型是同文本前缀，短暂滞后无感，而原始
  * `**`/`` ` `` 标记不再泄漏到 DOM。仅首次解析（从未 resolve）渲染骨架。
  */
-function MarkdownSegment(props: { text: string | (() => string); inline?: boolean; cache?: () => boolean; typing?: () => boolean }) {
+function MarkdownSegment(props: { text: string | (() => string); inline?: boolean; cache?: () => boolean; typing?: () => boolean; settling?: () => boolean }) {
   const text = () => typeof props.text === 'function' ? props.text() : props.text
   const typing = () => props.typing?.() === true
   const canType = props.typing !== undefined
@@ -299,7 +334,7 @@ function MarkdownSegment(props: { text: string | (() => string); inline?: boolea
           const lastIndex = canType ? createMemo(() => lastContentIndex(resolved().children)) : () => -1
           return <For each={resolved().children}>{(node, index) => {
             const lastAtMount = canType && index() === lastIndex()
-            return <MarkdownNode node={node} typingTail={lastAtMount
+            return <MarkdownNode node={node} settling={props.settling} typingTail={lastAtMount
               ? () => typing() && index() === lastIndex()
               : undefined} />
           }}</For>
@@ -313,7 +348,7 @@ function TypingCursor() {
   return <span class="term-typewriter-cursor" aria-hidden="true" />
 }
 
-function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => boolean }): JSX.Element {
+function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => boolean; settling?: () => boolean }): JSX.Element {
   if (props.node.type === 'text') return props.typingTail
     ? <>{props.node.value}<Show when={props.typingTail()}><TypingCursor /></Show></>
     : props.node.value
@@ -324,7 +359,7 @@ function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => bool
   const node = props.node
   if (node.tagName === 'pre') {
     const code = extractCodeBlock(node)
-    if (code) return <CodeBlock language={code.language} code={code.code} />
+    if (code) return <CodeBlock language={code.language} code={code.code} settling={props.settling} />
   }
   if (node.tagName === 'code') {
     return <code class="term-inline-code"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></code>
@@ -353,10 +388,10 @@ function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => bool
       : <span class="term-markdown-image-alt">{alt}</span>
   }
   if (node.tagName === 'blockquote') {
-    return <blockquote class="term-blockquote"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></blockquote>
+    return <blockquote class="term-blockquote" data-md-settle={props.settling?.() ? 'true' : undefined}><MarkdownChildren children={node.children} typingTail={props.typingTail} /></blockquote>
   }
   if (node.tagName === 'table') {
-    return <div class="term-table-wrap"><table class="term-table"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></table></div>
+    return <div class="term-table-wrap" data-md-settle={props.settling?.() ? 'true' : undefined}><table class="term-table"><MarkdownChildren children={node.children} typingTail={props.typingTail} /></table></div>
   }
   // #267：数学公式（span.math-inline / div.math-display，解析侧 remark-math 形状）
   // → Temml 渲染 MathML；失败回落 latex 原文（见 mathRender.tsx）。
@@ -400,7 +435,9 @@ function MarkdownNode(props: { node: MarkdownRenderNode; typingTail?: () => bool
   const cellAlign = (tagName === 'th' || tagName === 'td') && typeof node.properties.align === 'string'
     ? node.properties.align
     : undefined
-  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}>
+  const settleBlock = tagName === 'ul' || tagName === 'ol' || /^h[1-6]$/.test(tagName)
+  return <Dynamic component={tagName} class={blockClass} id={nodeId} align={cellAlign}
+    data-md-settle={settleBlock && props.settling?.() ? 'true' : undefined}>
     <MarkdownChildren children={node.children} typingTail={props.typingTail} />
   </Dynamic>
 }
@@ -424,7 +461,7 @@ function lastContentIndex(children: readonly MarkdownRenderNode[]): number {
   return -1
 }
 
-function CodeBlock(props: { language?: string; code: string }) {
+function CodeBlock(props: { language?: string; code: string; settling?: () => boolean }) {
   const lines = () => props.code.split('\n')
   // #221：行 HTML 缓存 + 视口外降级。lineHtmls 持有 sanitize 后的每行高亮串（与旧
   // 路径同口径，逐字节一致）；降级只清 `.term-code-text` 的 span 树换成纯文本行，
@@ -476,7 +513,7 @@ function CodeBlock(props: { language?: string; code: string }) {
   })
 
   return (
-    <div class="term-code-block" ref={root}>
+    <div class="term-code-block" data-md-settle={props.settling?.() ? 'true' : undefined} ref={root}>
         <For each={lines()}>{(line, index) => (
           <div class="term-code-line">
             <span class="term-code-gutter">│ </span>

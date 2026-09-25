@@ -66,6 +66,34 @@ describe('C00 streaming root identity (1000 chunks)', () => {
     expect(lines[1]?.querySelector('.term-typewriter-cursor')).not.toBeNull()
   })
 
+  it('marks a newly stable list once while preserving an earlier stable heading', async () => {
+    const [state, setState] = createSignal({ text: '# 已稳定\n\n- 第一项', streaming: true })
+    const result = render(() => <MarkdownContent text={state().text} streaming={state().streaming} />)
+    const heading = await waitFor(() => {
+      const node = result.container.querySelector('h1')
+      if (!node) throw new Error('heading not ready')
+      return node
+    }, FLUSH_BUDGET)
+    await waitFor(() => expect(result.container.querySelector('ul')).not.toBeNull(), FLUSH_BUDGET)
+    expect(result.container.querySelector('[data-md-settle]')).toBeNull()
+
+    setState({ text: '# 已稳定\n\n- 第一项', streaming: false })
+    expect(result.container.querySelector('ul')).toHaveAttribute('data-md-settle', 'true')
+    expect(result.container.querySelector('h1')).toBe(heading)
+    await new Promise(resolve => setTimeout(resolve, 650))
+    expect(result.container.querySelector('[data-md-settle]')).toBeNull()
+    setState({ text: '# 已稳定\n\n- 第一项修订', streaming: false })
+    expect(result.container.querySelector('[data-md-settle]')).toBeNull()
+  })
+
+  it('marks a code fence when its closing delimiter appears', async () => {
+    const [text, setText] = createSignal('```ts\nconst value = 1')
+    const result = render(() => <MarkdownContent text={text()} streaming />)
+    expect(result.container.querySelector('[data-streaming-code="true"]')).not.toBeNull()
+    setText('```ts\nconst value = 1\n```')
+    await waitFor(() => expect(result.container.querySelector('.term-code-block')).toHaveAttribute('data-md-settle', 'true'), FLUSH_BUDGET)
+  })
+
   it.each([
     '- **父项**\n\n  - **子项**\n\n    子项续写。',
     '> **引用**\n\n> 续写引用。',

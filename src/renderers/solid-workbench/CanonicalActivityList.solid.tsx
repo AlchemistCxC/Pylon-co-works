@@ -18,6 +18,35 @@ function safeDomId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, character => `%${character.charCodeAt(0).toString(16).padStart(4, '0')}%`)
 }
 
+/** Display-only receipt for the first result of a tool observed during a live turn. */
+function createResultReceipt(hasOutput: () => boolean, armAtMount: boolean): () => boolean {
+  const [visible, setVisible] = createSignal(false)
+  let previousOutput = untrack(hasOutput)
+  let armed = armAtMount && !previousOutput
+  let clearReceipt: ReturnType<typeof setTimeout> | undefined
+  createEffect(() => {
+    const output = hasOutput()
+    if (armed && !previousOutput && output) {
+      armed = false
+      setVisible(true)
+      clearReceipt = setTimeout(() => {
+        clearReceipt = undefined
+        setVisible(false)
+      }, 760)
+    }
+    previousOutput = output
+  })
+  onCleanup(() => { if (clearReceipt !== undefined) clearTimeout(clearReceipt) })
+  return visible
+}
+
+function hasToolOutput(snapshot: ReturnType<typeof toolInvocationSnapshot>): boolean {
+  const result = snapshot?.result
+  return result !== undefined && (
+    result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
+  )
+}
+
 function CanonicalActivitySlot(props: {
   activity: WorkbenchActivityNode
   entering?: () => boolean
@@ -29,6 +58,13 @@ function CanonicalActivitySlot(props: {
   let unregisterTool = () => {}
   let observer: MutationObserver | undefined
   const toolSnapshot = () => props.activity.kind === 'tool' ? toolInvocationSnapshot(props.document, props.activity.id) : null
+  const resultReceipt = createResultReceipt(
+    () => hasToolOutput(toolSnapshot()),
+    untrack(() => props.activity.kind === 'tool'
+      && props.context.runtimeSnapshot().generating
+      && !props.context.input().replayReadonly
+      && !props.context.input().reducedMotion),
+  )
   const kind = () => activityRenderKind(props.activity, props.context)
   createEffect(() => {
     unregisterTool()
@@ -57,6 +93,7 @@ function CanonicalActivitySlot(props: {
       class={`solid-workbench-activity-slot term-row ${props.activity.kind === 'tool' ? 'term-row-tool' : 'term-row-activity'}`}
       data-activity-id={props.activity.id}
       data-entry={props.entering?.() ? 'new' : undefined}
+      data-result-receipt={resultReceipt() ? 'new' : undefined}
     >
       <WorkbenchContentSlot
         nodeId={`${props.document.sessionId}:${props.activity.id}`}
@@ -201,12 +238,11 @@ function CanonicalActivityGroup(props: {
     const snapshot = lastSnapshot()
     return normalizeToolStatus(snapshot?.status ?? snapshot?.result?.status ?? lastActivity().status)
   }
-  const hasOutput = () => {
-    const result = lastSnapshot()?.result
-    return result !== undefined && (
-      result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
-    )
-  }
+  const hasOutput = () => hasToolOutput(lastSnapshot())
+  const resultReceipt = createResultReceipt(hasOutput, untrack(() =>
+    props.context.runtimeSnapshot().generating
+    && !props.context.input().replayReadonly
+    && !props.context.input().reducedMotion))
   const presentation = () => toolStatePresentation(state(), hasOutput())
   const label = () => {
     const snapshot = lastSnapshot()
@@ -243,6 +279,7 @@ function CanonicalActivityGroup(props: {
     }}
     data-group-status={group().status}
     data-last-tool-status={lastActivity().status}
+    data-result-receipt={resultReceipt() ? 'new' : undefined}
   >
     <button
       class="term-tool-head solid-workbench-activity-group-head"
