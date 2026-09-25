@@ -6,12 +6,13 @@
 //! --nocapture` 运行并读取打印值；**断言只钉功能不变量，不钉墙钟**（时序断言在
 //! CI 会抖动），数字供开发记录对比「改造前/后」。
 //!
-//! 覆盖四个逐帧组件：
-//! 1. `apply_update_event_with_pet_policy`（dispatcher 逐帧总入口，含 P2 第一处
-//!    的 `json!` 喂食深拷贝 + reducer 应用 + delta 匹配）；
+//! 覆盖五个逐帧组件：
+//! 1. `apply_update_event_with_pet_policy`（dispatcher 逐帧总入口；#334 后为
+//!    `apply_session_update` 零拷贝直喂，含 reducer 应用 + delta 匹配）；
 //! 2. `AcpSessionState::apply`（pylon-acp reducer 单独，chunk 文本路径）；
-//! 3. `should_flush_batch`（P4 已改 `DurableSessionOwner` 值比较的窗口归属决策）；
-//! 4. tool `rawOutput` 累积（P5 的 O(K²)——K=64 与 K=512 的每轮成本对比呈现增长）。
+//! 3. `should_flush_batch`（P4 值比较 + #334 字段级借用 owner 比较的窗口归属决策）；
+//! 4. tool `rawOutput` 累积（P5 原地扩展改造对象——K=64 与 K=512 的每轮成本对比）；
+//! 5. `TurnLedger::note_session_activity`（P3 改造对象——在途/终态账本的每 chunk 成本）。
 
 use std::time::Instant;
 
@@ -79,7 +80,7 @@ fn bench_pending_batch(owner: DurableSessionOwner) -> Vec<PendingCanonicalPublis
                 classification: ReplayClassification::Live,
                 variant: None,
                 replay_loading: false,
-                payload: serde_json::json!({"seq": 0}),
+                payload: std::sync::Arc::new(serde_json::json!({"seq": 0})),
                 wire_ordinal: None,
             },
             decision: super::routing::RoutingDecision {
@@ -218,6 +219,64 @@ fn frame_cost_tool_raw_output_accumulation_grows_quadratic() {
             accumulated.len()
         );
     }
+}
+
+/// P3 基线证据（#334）：`note_session_activity` 的每 chunk 成本随账本表规模
+/// 的关系——16 个会话已终态（保留裁剪后仍留存）+ 1 个在途 turn，测量命中在途
+/// turn 的每 chunk 成本。功能不变量：命中后 ingress cursor 单调、标志按或叠加。
+#[test]
+fn frame_cost_turn_ledger_note_session_activity_with_retained_terminals() {
+    const FRAMES: usize = 20_000;
+    const SESSIONS: usize = 16;
+    let ledger = crate::acp::TurnLedger::new();
+    // 16 个已终态 turn（各自独立 remote 会话，settle 后进入终态保留裁剪集）。
+    for index in 0..SESSIONS {
+        let key = crate::acp::TurnKey {
+            local_session_id: BENCH_SOURCE.to_string(),
+            remote_session_id: format!("peri-done-{index}"),
+            generation: 1,
+            turn_id: index as u64,
+        };
+        ledger.begin(key, 0);
+        ledger.settle(
+            &crate::acp::TurnKey {
+                local_session_id: BENCH_SOURCE.to_string(),
+                remote_session_id: format!("peri-done-{index}"),
+                generation: 1,
+                turn_id: index as u64,
+            },
+            crate::acp::TurnTerminalCause::Completed,
+            1,
+            None,
+        );
+    }
+    // 1 个在途 turn（热路径命中对象）。
+    let active_key = crate::acp::TurnKey {
+        local_session_id: BENCH_SOURCE.to_string(),
+        remote_session_id: BENCH_PERI_ID.to_string(),
+        generation: 1,
+        turn_id: 999,
+    };
+    assert!(matches!(
+        ledger.begin(active_key, 0),
+        crate::acp::BeginOutcome::Started
+    ));
+    let flags = crate::acp::ActivityFlags {
+        saw_text: true,
+        saw_tool: false,
+        saw_thinking: false,
+    };
+    let started = Instant::now();
+    for seq in 0..FRAMES as u64 {
+        assert!(
+            ledger.note_session_activity(BENCH_SOURCE, BENCH_PERI_ID, 1, seq, flags),
+            "在途 turn 必须命中"
+        );
+    }
+    println!(
+        "frame-bench note_session_activity(1-active + {SESSIONS}-retained): {} ns/frame (N={FRAMES})",
+        ns_per_iter(started, FRAMES)
+    );
 }
 
 /// 基准自检：`should_flush_batch` 的跨 owner 批次拒绝仍生效（P4 改动面回归）。

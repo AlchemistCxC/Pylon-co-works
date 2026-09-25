@@ -37,7 +37,8 @@ fn kernel_input(raw_payload: serde_json::Value) -> KernelEventInput {
         remote_session_id: Some("remote-1".to_string()),
         client_generation: 5,
         received_at: "2026-08-20T00:00:00.000Z".to_string(),
-        raw_payload,
+        // #334/P2：KernelEventInput.raw_payload 归一为 Arc 共享语义，测试直传 Value。
+        raw_payload: std::sync::Arc::new(raw_payload),
         recovery_import: false,
     }
 }

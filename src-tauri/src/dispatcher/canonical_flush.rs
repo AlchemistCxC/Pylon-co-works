@@ -63,20 +63,25 @@ pub(crate) fn should_flush_batch(
             if !flush_batch {
                 // 身份比较用 DurableSessionOwner 值（derive PartialEq，#331/P4）：
                 // 原实现两侧各走一次 owner.key()（serde_json::to_string）——窗口内
-                // 每帧两次序列化只为比一个三元组。key 为三字段 JSON 串、对结构体
-                // 值单射，值比较语义相同。
-                let current_owner = session_id.and_then(|session_id| {
+                // 每帧两次序列化只为比一个三元组。#334 收尾：原 `durable_owner()`
+                // 每帧构造三个 String + validate 只为值比较，改字段级借用比较
+                // （expected 恒经 validate，三字段非空 ⇒ 字段全等即校验等价）。
+                let current_owner_matches = session_id.and_then(|session_id| {
                     sessions.lock().ok().and_then(|items| {
                         items.iter().find_map(|(source, session)| {
                             if session.peri_id == session_id && session.generation == generation {
-                                session.durable_owner(agent_id, source).ok().flatten()
+                                pending.input.owner.as_ref().map(|owner| {
+                                    session.durable_owner_matches(agent_id, source, owner)
+                                })
                             } else {
                                 None
                             }
                         })
                     })
                 });
-                flush_batch = current_owner != pending.input.owner;
+                // None（查无会话/owner 缺失）一律按跨 owner 判 flush，与原
+                // `current_owner != pending.input.owner` 的不等语义一致。
+                flush_batch = !current_owner_matches.unwrap_or(false);
             }
         }
     }
@@ -177,9 +182,11 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         return true;
     }
     let remote_session_id = Some(first.input.remote_session_id.clone());
+    // P2（#334）：Arc 引用计数共享进 ingest（原整份 payload 批次深拷贝拆除）；
+    // 发布侧稍后对每项 `Arc::try_unwrap` 取回唯一引用。
     let raw_payloads = pending
         .iter()
-        .map(|item| item.input.payload.clone())
+        .map(|item| Arc::clone(&item.input.payload))
         .collect::<Vec<_>>();
     let Some(event_service) = event_service else {
         tracing::error!(
@@ -253,12 +260,19 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
             return false;
         }
         if item.decision.publish {
+            // P2（#334）：ingest 已完成（共享 Arc 已随 ingest 调用结束释放），
+            // 计数回到 1，`try_unwrap` 零拷贝取回原件；计数非 1 理论不可达，
+            // 克隆兜底保正确。
+            let payload = match Arc::try_unwrap(item.input.payload) {
+                Ok(value) => value,
+                Err(arc) => (*arc).clone(),
+            };
             publish_committed_update(
                 window,
                 gateway,
                 update_channels,
                 &item.input.source,
-                item.input.payload,
+                payload,
                 event,
             );
         }
