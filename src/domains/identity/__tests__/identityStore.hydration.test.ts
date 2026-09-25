@@ -23,6 +23,7 @@ vi.mock('../../../infrastructure/tauri/env', () => ({ IS_TAURI: true, isBrowserM
 import { flushIdentityBackend, IDENTITY_CACHE_META_KEY, useIdentityStore } from '../identityStore'
 import { PROFILE_STORAGE_KEY } from '../profilePersistence'
 import { SESSION_STORAGE_KEY } from '../sessionPersistence'
+import '../../../app/bootstrap/identityCrossDomainWiring'
 
 /** 未注册命令 resolve undefined（对齐 mockReset 后 vi.fn 的默认行为） */
 class TolerantFakeInvoke extends FakeInvoke {

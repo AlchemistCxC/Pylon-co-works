@@ -15,6 +15,7 @@ import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.t
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
 import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import '../app/bootstrap/identityCrossDomainWiring'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)

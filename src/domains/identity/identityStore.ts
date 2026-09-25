@@ -2,11 +2,10 @@ import { create } from 'zustand'
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../contracts/agentCommandSet.ts'
 import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION, type LegacySession, type OwnerHints } from './sessionPersistence'
 import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
-import { useWorkspaceStore } from '../workspace/workspaceStore'
-import { useRuntimeStore } from '../runtime/runtimeStore'
 import { clearSessionUiState } from '../../components/chat/sessionUiState'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
+import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
 import {
   canMutateIdentityDomain,
   hasBackend,
@@ -175,7 +174,7 @@ const DEFAULT_PROFILES: Profile[] = [
 function ownerHintsFromSheetStates(): OwnerHints {
   return {
     activeSessionByAgent: Object.fromEntries(
-      Object.entries(useWorkspaceStore.getState().sheetAgentStates)
+      Object.entries(identityCrossDomain().sheetAgentStates())
         .map(([agentId, sheetState]) => [agentId, sheetState.activeSessionId]),
     ),
   }
@@ -203,7 +202,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     if (!state.profiles.some(profile => profile.id === id)) return state
     const activeProfileId = id
     // 联动：同步当前 agent 的 sheet 状态并持久化
-    useWorkspaceStore.getState().patchSheetAgentState(state.activeAgent, { activeProfileId })
+    identityCrossDomain().patchSheetAgentState(state.activeAgent, { activeProfileId })
     // FE-AUD-002：activeProfileId 落 pylon-profiles
     const ok = persistProfiles(localStorage, { profiles: state.profiles, activeProfileId })
     identityMutationSeq += 1
@@ -250,11 +249,11 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         // I14-W7 CR-03：sheet 状态里的 activeProfileId 同步（引用已删 profile → fallback，
         // 与 browser 路径语义一致）
         const fallback = parsed.activeProfileId
-        const agentStates = Object.fromEntries(Object.entries(useWorkspaceStore.getState().sheetAgentStates).map(([agentId, sheetState]) => [
+        const agentStates = Object.fromEntries(Object.entries(identityCrossDomain().sheetAgentStates()).map(([agentId, sheetState]) => [
           agentId,
           sheetState.activeProfileId === id ? { ...sheetState, activeProfileId: fallback } : sheetState,
         ]))
-        useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
+        identityCrossDomain().patchSheetAgentStates(agentStates)
       }
       if (sessionsEnv) {
         const hints = ownerHintsFromSheetStates()
@@ -279,11 +278,11 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       const sessions = state.sessions.map(session => session.profileId === id ? { ...session, profileId: fallbackProfileId } : session)
       const sessionsOk = persistMergingUnresolved(sessions, state.turns, state.sessionHydration)
       // 联动：sheet 状态里的 activeProfileId 同步
-      const agentStates = Object.fromEntries(Object.entries(useWorkspaceStore.getState().sheetAgentStates).map(([agentId, sheetState]) => [
+      const agentStates = Object.fromEntries(Object.entries(identityCrossDomain().sheetAgentStates()).map(([agentId, sheetState]) => [
         agentId,
         sheetState.activeProfileId === id ? { ...sheetState, activeProfileId: fallbackProfileId } : sheetState,
       ]))
-      useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
+      identityCrossDomain().patchSheetAgentStates(agentStates)
       // FE-AUD-002：删除原子完成 active fallback 并写盘
       const activeProfileId = state.activeProfileId === id ? fallbackProfileId : state.activeProfileId
       const profilesOk = persistProfiles(localStorage, { profiles, activeProfileId })
@@ -524,13 +523,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     if (!removed) return { sessions, turns, lastPersistError: persistFlag(sessionsOk, state.lastPersistError) }
     // 联动：清 runtime（live stats/modes/config/generating）、sheet 状态与会话级 UI 状态
     // I01-W2：按 AgentContext（agentId+source）清理，同名 source 其他 Agent 的会话不受影响
-    useRuntimeStore.getState().clearSessionSource({ agentId: removed.agentId, source: removed.source })
+    identityCrossDomain().clearSessionSource({ agentId: removed.agentId, source: removed.source })
     clearSessionUiState(id)
-    const agentStates = Object.fromEntries(Object.entries(useWorkspaceStore.getState().sheetAgentStates).map(([agentId, sheetState]) => [
+    const agentStates = Object.fromEntries(Object.entries(identityCrossDomain().sheetAgentStates()).map(([agentId, sheetState]) => [
       agentId,
       sheetState.activeSessionId === id ? { ...sheetState, activeSessionId: undefined } : sheetState,
     ]))
-    useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
+    identityCrossDomain().patchSheetAgentStates(agentStates)
     identityMutationSeq += 1
     queueMicrotask(syncIdentityToBackend)
     return { sessions, turns, lastPersistError: persistFlag(sessionsOk, state.lastPersistError) }
@@ -725,7 +724,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   setAgents: (a) => set((state) => {
     // FE-AUD-005：agents 到达后仅 prune 无效 agent sheet，不重复全量 hydrate
     //（hydrate 已由 bootstrap hydrateDomains 完成；全量替换会覆盖启动期用户操作）
-    useWorkspaceStore.getState().pruneAgentSheets(a.map(agent => agent.id))
+    identityCrossDomain().pruneAgentSheets(a.map(agent => agent.id))
     // Agent lifecycle 是 live active authority；list_agents 的 active=true 用于配置
     // 初始化/重载后的前后端对账。列表未提供 active 时保留当前值，兼容 browser fixture。
     const backendActive = a.find(agent => agent.active === true)?.id
@@ -736,7 +735,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       const next = backendActive ?? ''
       return state.activeAgent === next ? { agents: a } : { agents: a, activeAgent: next }
     }
-    const agentState = backendActive ? useWorkspaceStore.getState().sheetAgentStates[backendActive] : undefined
+    const agentState = backendActive ? identityCrossDomain().sheetAgentStates()[backendActive] : undefined
     return {
       agents: a,
       ...(backendActive && backendActive !== state.activeAgent ? {
@@ -746,7 +745,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     }
   }),
   setActiveAgent: (id) => set(() => {
-    const agentState = useWorkspaceStore.getState().sheetAgentStates[id]
+    const agentState = identityCrossDomain().sheetAgentStates()[id]
     return {
       activeAgent: id,
       ...(agentState?.activeProfileId ? { activeProfileId: agentState.activeProfileId } : {}),

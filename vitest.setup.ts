@@ -51,7 +51,7 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/sheets/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
   'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
   // A 类：错误路径契约
-  'src/__tests__/identityStore.hydration.test.ts',
+  'src/domains/identity/__tests__/identityStore.hydration.test.ts',
   'src/__tests__/replay/canonicalEventFeed.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceLayoutChange.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
