@@ -2709,7 +2709,6 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::private_interaction::PendingPrivateInteraction;
 
     fn pending_elicitation(elicitation_id: &str) -> PendingPrivateInteraction {

@@ -2048,11 +2048,8 @@ fn prompt_image_attachment_block_matches_official_wire_shape() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("pixel.png");
     // 最小合法 PNG：8 字节签名 + IHDR（infer 按签名识别，无需完整解码）。
-    let bytes: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89,
-    ];
+    // 字节串字面量：无数组折行宽度歧义（rustfmt 跨版本稳定）。
+    let bytes: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89";
     std::fs::write(&path, bytes).unwrap();
     let blocks = prompt_blocks(
         "看图".to_string(),
