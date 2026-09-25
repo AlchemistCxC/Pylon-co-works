@@ -10,7 +10,7 @@ import {
   sectionZone,
   type SettingsDomainId,
   type SettingsSectionId,
-} from '../settingsDomains.ts'
+} from '../components/settings/settingsDomains.ts'
 import { GROUP_ORDER } from '../themeFieldDefs'
 import { useStore } from '../store'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'

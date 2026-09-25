@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
+import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../cc/ccHeightState.ts'
 import { resolveCcHiddenWidgetIds } from '../../cc/widgetDefinitions.ts'
 import { THEME_DEFAULTS, THEME_PRESET_KEYS, THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
 import { clampPresetCcHeight, filterPresetTheme, syncPresetCcHeight, toThemeDelta } from '../presetReducer.ts'

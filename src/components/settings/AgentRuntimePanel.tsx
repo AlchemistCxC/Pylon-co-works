@@ -7,9 +7,9 @@ import {
   type AgentCreateConfig,
   type AgentsConfigDocument,
 } from '../../infrastructure/acp/agentClient'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
-import { explainErrorCode } from '../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../app/errorCodeExplanations.ts'
 import { useIdentityStore, type AgentEntry } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'

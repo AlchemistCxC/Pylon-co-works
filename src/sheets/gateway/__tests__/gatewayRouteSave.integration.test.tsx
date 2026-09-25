@@ -15,7 +15,7 @@ import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 import GatewaySheetView from '../GatewaySheetView'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import { clearErrors, getErrors } from '../../../errorCenter.ts'
+import { clearErrors, getErrors } from '../../../app/errorCenter.ts'
 
 const fakeInvoke = new FakeInvoke()
 

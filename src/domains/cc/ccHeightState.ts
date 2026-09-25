@@ -1,4 +1,4 @@
-import { isWidgetVisible, STATUS_WIDGET_IDS } from './domains/cc/widgetDefinitions.ts'
+import { isWidgetVisible, STATUS_WIDGET_IDS } from './widgetDefinitions.ts'
 
 export type CcInputMode = 'cli' | 'default' | string
 export type CcFooterLayout = 'free' | 'peri' | string

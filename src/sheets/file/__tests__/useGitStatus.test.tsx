@@ -9,7 +9,7 @@ import { resetStores } from '../../../test/resetStores'
 // 0-C3：useGitStatus 单测——拉取/守卫/applyStatus 回填/refresh/目标切换清空语义
 //（仅目标切换清空旧数据；手动刷新保留旧数据直至新数据落地，0-A review 反馈修复）。
 
-vi.mock('../../../runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
+vi.mock('../../../app/runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
 
 const target: WorkspaceTarget = {
   sessionId: 'session-a',

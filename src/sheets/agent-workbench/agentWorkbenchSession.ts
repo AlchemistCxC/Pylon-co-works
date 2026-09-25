@@ -30,7 +30,7 @@ import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragme
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
-import { resolveRuntimeErrors } from '../../runtimeError.ts'
+import { resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 import {
   extractModelConfig,

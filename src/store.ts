@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './ccLayoutState.ts'
-import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './domains/cc/ccLayoutState.ts'
+import type { CcLayoutV3, CcWidgetPlacement } from './domains/cc/ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { ZONE_FIELDS } from './themeFieldDefs.ts'
@@ -14,7 +14,7 @@ import {
   removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from './domains/cc/ccHeightState.ts'
 import { resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'

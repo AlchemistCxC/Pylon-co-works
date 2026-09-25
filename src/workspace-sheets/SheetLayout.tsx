@@ -16,7 +16,7 @@ import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './work
 import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
 import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。

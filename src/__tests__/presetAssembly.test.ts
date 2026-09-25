@@ -24,7 +24,7 @@ import {
   DEFAULT_CC_LAYOUT,
   cloneCcLayout,
   type CcLayoutV3,
-} from '../ccLayoutState.ts'
+} from '../domains/cc/ccLayoutState.ts'
 import {
   PRESET_ZONES,
   applyZonePresetReducer,

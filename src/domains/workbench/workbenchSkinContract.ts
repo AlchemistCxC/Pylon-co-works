@@ -1,5 +1,5 @@
-import { toCssBackgroundImage } from '../../backgroundImage.ts'
-import { cloneCcLayout } from '../../ccLayoutState.ts'
+import { toCssBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
+import { cloneCcLayout } from '../cc/ccLayoutState.ts'
 import type { CustomPreset } from '../../customPresets.ts'
 import { DEFAULTS } from '../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../presets/index.ts'

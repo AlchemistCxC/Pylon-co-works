@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef } from '../../../themeFieldDefs'
-import { buildSettingsSearchIndex } from '../../../settingsDomains'
+import { buildSettingsSearchIndex } from '../../../components/settings/settingsDomains'
 
 const defs = THEME_FIELD_DEFS as Record<string, ThemeFieldDef>
 const keys = THEME_FIELD_KEYS as readonly string[]

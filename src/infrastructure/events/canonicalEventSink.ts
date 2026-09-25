@@ -23,7 +23,7 @@ import {
   type CanonicalEventOwner,
 } from '../../domains/events/eventSchema'
 import { canonicalBatchSpanOf, mergeAdjacentDeltaChunks } from './canonicalEventBatch'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import {
   asCanonicalEventRepositoryError,
   tauriCanonicalEventRepository,

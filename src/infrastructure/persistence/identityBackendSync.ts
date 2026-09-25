@@ -8,7 +8,7 @@
  * 避免 identityStore ↔ 本模块的运行时循环依赖。localStorage 持久化 helper 见
  * identityPersistence；store 本体仍在 identityStore。
  */
-import { resolveRuntimeErrors, reportRuntimeError } from '../../runtimeError.ts'
+import { resolveRuntimeErrors, reportRuntimeError } from '../../app/runtimeError.ts'
 import { selectUserDataRepository, type UserDataRepository } from './userDataRepository.ts'
 import { PROFILE_ENVELOPE_VERSION } from '../../domains/identity/profilePersistence.ts'
 import { SESSION_SCHEMA_VERSION } from '../../domains/identity/sessionPersistence.ts'

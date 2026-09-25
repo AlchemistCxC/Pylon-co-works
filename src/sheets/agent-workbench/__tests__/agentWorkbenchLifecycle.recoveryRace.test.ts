@@ -59,7 +59,7 @@ vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrows
 vi.mock('../../../domains/runtime/runtimeStore.ts', () => ({
   useRuntimeStore: { getState: store.getState, subscribe: store.subscribe },
 }))
-vi.mock('../../../runtimeError.ts', () => ({
+vi.mock('../../../app/runtimeError.ts', () => ({
   reportRuntimeError: mocks.reportError,
   reportRuntimeDiagnostic: mocks.reportDiagnostic,
   resolveRuntimeErrors: mocks.resolveErrors,

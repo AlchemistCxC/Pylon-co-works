@@ -1,5 +1,5 @@
 import type { AgentDetectionDiagnostic } from '../../domains/agent/agentDetector.ts'
-import { explainErrorCode } from '../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../app/errorCodeExplanations.ts'
 
 /**
  * #116 子项 10：Agent 探测诊断的**呈现口径**。

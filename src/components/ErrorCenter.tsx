@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
-import { clearErrors, dismissError, useErrors, type ErrorEntry } from '../errorCenter'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
-import { explainErrorCode } from '../errorCodeExplanations.ts'
+import { clearErrors, dismissError, useErrors, type ErrorEntry } from '../app/errorCenter'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
+import { explainErrorCode } from '../app/errorCodeExplanations.ts'
 import { safeJson } from '../utils/safeJson.ts'
 
 function recoveryLabel(kind: NonNullable<ErrorEntry['recovery']>['kind']): string {

@@ -33,7 +33,7 @@ vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({ ru
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({ getHookRuntime: () => ({ invoke: mocks.hook }) }))
 vi.mock('../../../application/transactions/sessionHookTransactions.ts', () => ({ runSessionBoundaryHook: mocks.boundary }))
 vi.mock('../../../domains/sessionState/sessionStateSync.ts', () => ({ applySessionStateResponse: mocks.apply }))
-vi.mock('../../../runtimeError.ts', () => ({ reportRuntimeError: mocks.report, resolveRuntimeErrors: vi.fn() }))
+vi.mock('../../../app/runtimeError.ts', () => ({ reportRuntimeError: mocks.report, resolveRuntimeErrors: vi.fn() }))
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 
 function deferred<T>() {

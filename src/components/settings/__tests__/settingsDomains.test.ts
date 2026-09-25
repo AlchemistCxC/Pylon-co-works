@@ -21,7 +21,7 @@ import {
   normalizeSettingsIntent,
   buildSettingsSearchIndex,
 } from '../settingsDomains'
-import { ZONES } from '../themeFieldDefs'
+import { ZONES } from '../../../themeFieldDefs'
 
 /** 当前 Settings 的全部设置块（Settings.tsx 各分区枚举；新增块必须在此登记） */
 const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [

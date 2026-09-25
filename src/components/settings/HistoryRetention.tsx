@@ -23,7 +23,7 @@ import {
   type RetentionPolicySnapshot,
   type RetentionPreview,
 } from '../../infrastructure/persistence/retentionPolicyRepository'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 
 /**
  * HistoryRetention — 消息历史保留策略设置（I13-A-FE-02，D-03/D-15）。

@@ -6,24 +6,24 @@
  * - loadRetentionPolicyPayload 返回原始 payload（不解析/不回退）
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeInvoke } from '../test/fakeInvoke'
+import { FakeInvoke } from '../../test/fakeInvoke'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
 }))
 vi.mock('@tauri-apps/api/core', async () => {
-  const { tauriCoreMock } = await import('../test-utils/tauriCoreMock')
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
-vi.mock('../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
+vi.mock('../../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
 
 import { buildExportPayloadAsync } from '../configExportImport'
-import { RETENTION_STORAGE_KEY } from '../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../../components/settings/historyRetentionPolicy'
 import {
   loadRetentionPolicyPayload,
   overwriteRetentionPolicy,
   syncImportedRetentionPolicy,
-} from '../infrastructure/persistence/retentionPolicyRepository'
+} from '../../infrastructure/persistence/retentionPolicyRepository'
 
 let fakeInvoke: FakeInvoke
 

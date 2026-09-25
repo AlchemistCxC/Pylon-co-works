@@ -13,7 +13,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
 import {
   closeOtherWorkspaces,

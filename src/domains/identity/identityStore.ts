@@ -5,7 +5,7 @@ import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KE
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useRuntimeStore } from '../runtime/runtimeStore'
 import { clearSessionUiState } from '../../components/chat/sessionUiState'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
 import {
   canMutateIdentityDomain,

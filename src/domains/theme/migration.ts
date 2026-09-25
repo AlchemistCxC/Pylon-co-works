@@ -5,7 +5,7 @@
  * 依赖全显式 .ts，node 可直接 import 做确定性迁移测试。
  */
 import { normalizeCustomPresetId, normalizeCustomPresets } from '../../customPresets.ts'
-import { normalizeCcLayout, type CcLayoutV3 } from '../../ccLayoutState.ts'
+import { normalizeCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import {
   clampCcHeight,
   resolveVisibleStatusWidgetCount,
@@ -13,7 +13,7 @@ import {
   type CcHintMode,
   type CcInputMode,
   type CcOverflowMode,
-} from '../../ccHeightState.ts'
+} from '../cc/ccHeightState.ts'
 import { normalizeThemeState } from '../../themeFieldDefs.ts'
 import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'

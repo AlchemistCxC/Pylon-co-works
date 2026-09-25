@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildExportPayload, CONFIG_STORAGE_KEYS, preflightImportPayload } from '../configExportImport'
-import { RETENTION_STORAGE_KEY } from '../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../../components/settings/historyRetentionPolicy'
 
 interface StorageLike {
   getItem(key: string): string | null

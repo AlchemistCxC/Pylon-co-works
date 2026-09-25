@@ -5,7 +5,7 @@ import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Se
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'

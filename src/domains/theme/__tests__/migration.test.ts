@@ -1,12 +1,12 @@
 // 迁移自 scripts/test-theme-migration.mts（P91 A1）
 import { describe, expect, it } from 'vitest'
 import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
-import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
 import { PROFILE_SCHEMA_VERSION } from '../../identity/profilePersistence.ts'
 import { readFileSync } from 'node:fs'
-import { CC_LAYOUT_SCHEMA_VERSION } from '../../../ccLayoutState.ts'
+import { CC_LAYOUT_SCHEMA_VERSION } from '../../cc/ccLayoutState.ts'
 
 const migrationSource = readFileSync('src/domains/theme/migration.ts', 'utf8')
 

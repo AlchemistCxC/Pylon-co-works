@@ -1,4 +1,4 @@
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { isRecord } from '../../utils/wireGuards.ts'
 
 export interface InteractionRejection {

@@ -1,5 +1,5 @@
 import { addError, resolveRuntimeErrors as resolveStoredRuntimeErrors } from './errorCenter.ts'
-import { errorCode } from './infrastructure/tauri/errorPayload.ts'
+import { errorCode } from '../infrastructure/tauri/errorPayload.ts'
 import { ERROR_CODE_EXPLANATIONS } from './errorCodeExplanations.ts'
 import type { RuntimeErrorMatcher } from './errorCenter.ts'
 

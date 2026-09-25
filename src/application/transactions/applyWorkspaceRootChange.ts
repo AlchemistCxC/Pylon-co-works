@@ -5,7 +5,7 @@
  * 既有绑定会话保持各自创建时冻结的 cwd，不 close、不 reload、不改 workdir。
  */
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export type WorkspaceRootChangeResult =
   | { ok: true }

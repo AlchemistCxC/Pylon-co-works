@@ -1,8 +1,8 @@
-import { CC_WIDGET_GROUPS } from './domains/cc/widgetDefinitions.ts'
-import type { CcRegisteredSlotId, CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_GROUPS } from './widgetDefinitions.ts'
+import type { CcRegisteredSlotId, CcWidgetId } from './widgetDefinitions.ts'
 
-export type { CcRegisteredSlotId, CcWidgetId } from './domains/cc/widgetDefinitions.ts'
-export { CC_REGISTERED_SLOT_IDS } from './domains/cc/widgetDefinitions.ts'
+export type { CcRegisteredSlotId, CcWidgetId } from './widgetDefinitions.ts'
+export { CC_REGISTERED_SLOT_IDS } from './widgetDefinitions.ts'
 
 /**
  * ★ #238 刀3：**槽位层整体拆除**。原来的 `CcSlot`（输入区/状态左/状态右/操作区）、

@@ -16,7 +16,7 @@ import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
 import { activateInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import type { TitlebarContext, TitlebarRegistryEntry } from '../plugin-runtime/titlebar/titlebarTypes.ts'
 import { resolveLaunchIcon } from './launchIcons.solid.tsx'
-import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../settingsDomains.ts'
+import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../components/settings/settingsDomains.ts'
 import { createZustandSignal } from '../sheets/solidStoreBridge.ts'
 
 // 插件贡献 React 岛：island 文件是 React 面（内含 ErrorBoundary/Suspense/插件 React

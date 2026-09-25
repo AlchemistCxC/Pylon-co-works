@@ -17,7 +17,7 @@ import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrast
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
-import { clearErrors, getErrors } from '../../errorCenter.ts'
+import { clearErrors, getErrors } from '../../app/errorCenter.ts'
 import { messageStorageKey, persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import { FakeInvoke } from '../../test/fakeInvoke'
 

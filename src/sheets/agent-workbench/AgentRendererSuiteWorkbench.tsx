@@ -39,7 +39,7 @@ import { useWorkspaceEntityStore } from '../../infrastructure/persistence/worksp
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatTime } from '../utils.ts'
+import { formatTime } from '../relativeTime.ts'
 
 /**
  * #116 子项 4：侧栏相对时间原先是「刚刚 + m ago / h ago / d ago」中英混用，

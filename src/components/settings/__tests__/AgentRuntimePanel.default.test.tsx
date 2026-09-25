@@ -6,7 +6,7 @@ import AgentRuntimePanel from '../AgentRuntimePanel'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
-import { explainErrorCode } from '../../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../../app/errorCodeExplanations.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 

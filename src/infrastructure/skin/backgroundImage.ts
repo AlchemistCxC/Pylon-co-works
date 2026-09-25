@@ -1,5 +1,5 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { hasTauriRuntime, type TauriWindow } from './infrastructure/tauri/env.ts'
+import { hasTauriRuntime, type TauriWindow } from '../tauri/env.ts'
 
 export interface BackgroundImageResult {
   source: string | null

@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import ErrorCenter from '../ErrorCenter'
-import { addError, clearErrors, getErrors } from '../../errorCenter'
-import { ERROR_CODE_EXPLANATIONS } from '../../errorCodeExplanations.ts'
+import { addError, clearErrors, getErrors } from '../../app/errorCenter'
+import { ERROR_CODE_EXPLANATIONS } from '../../app/errorCodeExplanations.ts'
 
 afterEach(() => {
   cleanup()

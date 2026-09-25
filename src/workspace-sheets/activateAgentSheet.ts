@@ -3,7 +3,7 @@ import { switchAgentTransaction } from '../application/transactions/switchAgentT
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 
 /**
  * Release 1.x Agent Sheet activation boundary: switch the single GUI runtime

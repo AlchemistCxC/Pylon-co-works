@@ -11,7 +11,7 @@ import { createInteractionResponseTransport } from '../../infrastructure/acp/int
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../domains/agent/agentContext.ts'
 import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
-import { formatRuntimeError, reportRuntimeError } from '../../runtimeError.ts'
+import { formatRuntimeError, reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
