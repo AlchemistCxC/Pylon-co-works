@@ -82,6 +82,9 @@ export interface WorkbenchMessage {
   readonly optimistic?: boolean
   readonly sequence: number
   readonly running: boolean
+  /** #155 T3：重启恢复的临时消息，等待用户决定保留或丢弃。 */
+  readonly interruptedDraft?: boolean
+  readonly draftId?: string
   readonly time: string
   /** C01：reasoning 完成/redacted 时记录的思考时长（首 delta → 终态 occurredAt）。 */
   readonly thoughtDurationMs?: number

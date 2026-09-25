@@ -1,8 +1,10 @@
 //! 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use super::draft::{DraftCommitChunk, DraftFragment, DraftFragmentInput};
 use super::normalize::{mark_replay_import, normalize_kernel_event, parse_canonical_event};
 use super::repo::{EventRepo, RollupTrimReport};
 use super::row::{
@@ -15,15 +17,146 @@ use crate::owner::DurableSessionOwner;
 /// 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
 pub struct EventService {
     pub(super) repo: Arc<EventRepo>,
+    active_drafts: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl EventService {
+    pub async fn keep_interrupted_draft(
+        &self,
+        owner_key: String,
+        draft_id: String,
+    ) -> Result<EventAppendResult, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            if active.contains(&(owner_key.clone(), draft_id.clone())) {
+                return Err(EventError::DraftPending(owner_key));
+            }
+            repo.keep_interrupted_draft(&owner_key, &draft_id)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft keep task failed: {error}")))?
+    }
+
+    pub async fn discard_interrupted_draft(
+        &self,
+        owner_key: String,
+        draft_id: String,
+    ) -> Result<bool, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            if active.contains(&(owner_key.clone(), draft_id.clone())) {
+                return Err(EventError::DraftPending(owner_key));
+            }
+            repo.discard_interrupted_draft(&owner_key, &draft_id)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft discard task failed: {error}")))?
+    }
+
+    /// 已存 draft 前缀与同 run 的内存尾部一起收口；正式历史和片段清理同事务。
+    pub async fn commit_draft_events(
+        &self,
+        owner: DurableSessionOwner,
+        remote_session_id: Option<String>,
+        client_generation: u64,
+        draft_id: String,
+        chunks: Vec<DraftCommitChunk>,
+    ) -> Result<EventAppendResult, EventError> {
+        let client_generation = i64::try_from(client_generation)
+            .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
+        let inputs = chunks
+            .into_iter()
+            .map(|chunk| KernelEventInput {
+                owner: owner.clone(),
+                remote_session_id: remote_session_id.clone(),
+                client_generation,
+                received_at: chunk.received_at,
+                raw_payload: chunk.raw_payload,
+                recovery_import: false,
+            })
+            .collect();
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let owner_key = owner
+                .key()
+                .map_err(|error| EventError::Invalid(error.to_string()))?;
+            let result = repo.commit_draft_events(inputs, &draft_id)?;
+            active.remove(&(owner_key, draft_id));
+            Ok(result)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft commit task failed: {error}")))?
+    }
+
+    /// 在途片段独立持久化；返回经过落盘同款脱敏的片段供成功后发布。
+    pub async fn append_draft_fragment(
+        &self,
+        input: DraftFragmentInput,
+    ) -> Result<DraftFragment, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let mut fragment = repo.append_draft_fragment(input)?;
+            active.insert((fragment.owner_key.clone(), fragment.draft_id.clone()));
+            fragment.interrupted = false;
+            Ok(fragment)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft append task failed: {error}")))?
+    }
+
+    /// 专用冷挂载 seam；调用方不得把结果混进 evt_* 历史游标。
+    pub async fn list_draft_fragments(
+        &self,
+        owner_key: String,
+    ) -> Result<Vec<DraftFragment>, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let mut fragments = repo.list_draft_fragments(&owner_key)?;
+            for fragment in &mut fragments {
+                fragment.interrupted =
+                    !active.contains(&(fragment.owner_key.clone(), fragment.draft_id.clone()));
+            }
+            Ok(fragments)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft read task failed: {error}")))?
+    }
+
+    /// Dispatcher exited without committing this run (crash, generation switch).
+    /// The stored fragments remain durable and become user-resolvable.
+    pub fn abandon_draft(&self, owner_key: &str, draft_id: &str) {
+        if let Ok(mut active) = self.active_drafts.lock() {
+            active.remove(&(owner_key.to_owned(), draft_id.to_owned()));
+        }
+    }
+
     /// 打开（或创建）生产仓库并迁移到最新 schema。调用方须先创建 DB 父目录；
     /// 失败返回 Err——启动路径不得静默回退。
     pub fn open_db(path: &Path) -> Result<EventService, EventError> {
         let repo = EventRepo::open(path)?;
         Ok(EventService {
             repo: Arc::new(repo),
+            active_drafts: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -33,6 +166,7 @@ impl EventService {
         let repo = EventRepo::open_in_memory()?;
         Ok(EventService {
             repo: Arc::new(repo),
+            active_drafts: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -312,5 +446,58 @@ impl EventService {
             .map_err(|error| {
                 EventError::Unavailable(format!("event repo search task failed: {error}"))
             })?
+    }
+}
+
+#[cfg(test)]
+mod draft_status_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn live_draft_cannot_be_resolved_until_dispatcher_abandons_it() {
+        let service = EventService::in_memory().unwrap();
+        let owner = DurableSessionOwner::new("p", "a", "local:s");
+        let owner_key = owner.key().unwrap();
+        service.append_draft_fragment(DraftFragmentInput {
+            owner, draft_id: "run-1".into(), fragment_index: 0,
+            client_generation: 1, remote_session_id: Some("remote-s".into()),
+            event_type: "assistant.text.delta".into(), identity: None,
+            raw_payload: vec![serde_json::json!({
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "partial"}}
+            })],
+            first_received_at: "2026-09-25T00:00:00.000Z".into(),
+        }).await.unwrap();
+        assert!(
+            !service
+                .list_draft_fragments(owner_key.clone())
+                .await
+                .unwrap()[0]
+                .interrupted
+        );
+        assert_eq!(
+            service
+                .keep_interrupted_draft(owner_key.clone(), "run-1".into())
+                .await
+                .unwrap_err()
+                .code(),
+            "draft_pending",
+        );
+        service.abandon_draft(&owner_key, "run-1");
+        assert!(
+            service
+                .list_draft_fragments(owner_key.clone())
+                .await
+                .unwrap()[0]
+                .interrupted
+        );
+        assert_eq!(
+            service
+                .keep_interrupted_draft(owner_key, "run-1".into())
+                .await
+                .unwrap()
+                .events
+                .len(),
+            1
+        );
     }
 }

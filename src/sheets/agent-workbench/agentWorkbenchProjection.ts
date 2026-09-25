@@ -205,6 +205,28 @@ export function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnv
   return migrated.ok ? [migrated.value] : []
 }
 
+/** 持久化 draft 只供 Workbench 临时投影；不生成 canonical coverage。 */
+export function draftChunkToWorkbenchEnvelopes(input: {
+  provider: string
+  source: string
+  draftId: string
+  chunkIndex: number
+  raw: unknown
+  sequence: number
+  recordedAt: string
+}): readonly WorkbenchEventEnvelope[] {
+  return normalizeAgentEvent(input.raw, {
+    provider: input.provider,
+    sessionId: input.source,
+    sourceId: `draft:${input.draftId}:${input.chunkIndex}`,
+    sequence: input.sequence,
+    recordedAt: input.recordedAt,
+    occurredAt: input.recordedAt,
+    agentId: input.provider,
+    provenance: { origin: 'local-observed', trust: 'authoritative', provider: input.provider },
+  }).events
+}
+
 function canonicalBoundaryRows(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
   return rows.filter((row): row is CanonicalTurnBoundaryEvent => (
     isRecord(row)

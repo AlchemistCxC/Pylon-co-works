@@ -1,4 +1,4 @@
-import { Index, Match, Show, Switch, createMemo } from 'solid-js'
+import { Index, Match, Show, Switch, createMemo, createSignal } from 'solid-js'
 import { normalizeToolVisualState } from './toolConnectorProjection.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
@@ -19,7 +19,24 @@ export function WorkbenchRow(props: {
   context: SolidWorkbenchContextValue
   children?: import('solid-js').JSX.Element
 }) {
+  const [draftBusy, setDraftBusy] = createSignal(false)
+  const [draftError, setDraftError] = createSignal('')
   const current = () => props.descriptor.renderMessage
+  const resolveDraft = async (action: 'keep' | 'discard') => {
+    const draftId = current().message.draftId
+    const sessionId = props.context.runtimeSnapshot().sessionId
+    if (!draftId || !sessionId || !props.context.commands.resolveDraft || draftBusy()) return
+    setDraftBusy(true)
+    setDraftError('')
+    try {
+      const result = await props.context.commands.resolveDraft(sessionId, draftId, action)
+      if (!result.ok) setDraftError(result.error ?? '临时内容处理失败')
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDraftBusy(false)
+    }
+  }
   const visualState = () => normalizeToolVisualState(props.descriptor.toolVisualState)
   // message.* Slots own row framing. Reasoning is a content.* contract and must
   // stay inside the reasoning row, where WorkbenchMessageContent supplies its
@@ -69,6 +86,14 @@ export function WorkbenchRow(props: {
           />
         </Match>
       </Switch>
+      <Show when={current().message.interruptedDraft === true && current().message.draftId}>
+        <div class="mt-1 flex items-center gap-2 text-xs opacity-80" role="status">
+          <span>临时内容已中断</span>
+          <button type="button" disabled={draftBusy()} onClick={() => { void resolveDraft('keep') }}>保留为历史</button>
+          <button type="button" disabled={draftBusy()} onClick={() => { void resolveDraft('discard') }}>丢弃</button>
+          <Show when={draftError()}><span role="alert">{draftError()}</span></Show>
+        </div>
+      </Show>
       {props.children}
     </>
   )

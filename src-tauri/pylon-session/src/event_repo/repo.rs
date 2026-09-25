@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::draft::verify_draft_commit_prefix;
 use super::fold::{
     flush_delta_run, fold_adjacent_delta_runs, foldable_delta_base, identity_keys_equal,
     raw_payload_bytes, MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES,
@@ -26,7 +27,7 @@ const INSERT_EVENT_SQL: &str = "INSERT INTO canonical_events
       raw_payload, created_at, provenance)
  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
  ON CONFLICT(owner_key, sequence) DO NOTHING";
-const TOMBSTONE_STATE_SQL: &str = "SELECT state FROM deleted_sessions
+pub(super) const TOMBSTONE_STATE_SQL: &str = "SELECT state FROM deleted_sessions
      WHERE owner_key = ?1 OR (session_id = ?2 AND owner_scope = 'legacy')
      LIMIT 1";
 const MAX_SEQUENCE_SQL: &str = "SELECT MAX(sequence) FROM canonical_events WHERE owner_key = ?1";
@@ -230,6 +231,16 @@ impl EventRepo {
                 "{owner_key}（tombstone state={state}）"
             )));
         }
+        let draft_pending: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM canonical_draft_fragments WHERE owner_key = ?1)",
+                params![owner_key],
+                |row| row.get(0),
+            )
+            .map_err(EventError::from)?;
+        if draft_pending {
+            return Err(EventError::DraftPending(owner_key.clone()));
+        }
         let current: i64 = tx
             .prepare_cached(MAX_SEQUENCE_SQL)
             .map_err(EventError::from)?
@@ -273,12 +284,31 @@ impl EventRepo {
         self.ingest_kernel_events(vec![input])
     }
 
-    /// Kernel batch ingest：同一 owner 的输入共享一条 SQLite transaction，但仍保持
-    /// 每个输入一条 append-only canonical 行。sequence 只在这里推进，因此批量路径与
-    /// 单事件路径共享同一 revision/terminal-unit 语义，后续 dispatcher 窗口可以直接复用。
+    /// Kernel batch ingest：同一 owner 的输入共享一条 SQLite transaction。相邻同类
+    /// delta 在本次调用内折成 batch 行；sequence 只在这里推进，terminal unit 同事务追加。
     pub(super) fn ingest_kernel_events(
         &self,
         inputs: Vec<KernelEventInput>,
+    ) -> Result<EventAppendResult, EventError> {
+        self.ingest_kernel_events_with_draft(inputs, None)
+    }
+
+    /// 跨窗口 run 收口：正式行追加与已存临时片段删除必须原子完成。
+    pub(super) fn commit_draft_events(
+        &self,
+        inputs: Vec<KernelEventInput>,
+        draft_id: &str,
+    ) -> Result<EventAppendResult, EventError> {
+        if draft_id.is_empty() {
+            return Err(EventError::Invalid("draft_id must not be empty".into()));
+        }
+        self.ingest_kernel_events_with_draft(inputs, Some(draft_id))
+    }
+
+    fn ingest_kernel_events_with_draft(
+        &self,
+        inputs: Vec<KernelEventInput>,
+        draft_id: Option<&str>,
     ) -> Result<EventAppendResult, EventError> {
         let Some(first) = inputs.first() else {
             return Ok(EventAppendResult {
@@ -320,6 +350,20 @@ impl EventRepo {
                 "{owner_key}（tombstone state={state}）"
             )));
         }
+        let pending_draft: Option<String> = tx
+            .query_row(
+                "SELECT draft_id FROM canonical_draft_fragments WHERE owner_key = ?1 LIMIT 1",
+                params![owner_key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(EventError::from)?;
+        if pending_draft
+            .as_deref()
+            .is_some_and(|open| Some(open) != draft_id)
+        {
+            return Err(EventError::DraftPending(owner_key));
+        }
         let revision: i64 = tx
             .prepare_cached(MAX_SEQUENCE_SQL)
             .map_err(EventError::from)?
@@ -329,6 +373,9 @@ impl EventRepo {
             .flatten()
             .unwrap_or(0);
         let mut final_revision = revision;
+        if let Some(draft_id) = draft_id {
+            verify_draft_commit_prefix(&tx, &owner_key, draft_id, &inputs)?;
+        }
         let mut result_events = Vec::with_capacity(inputs.len());
         // ADR-0016（#155 T3-1）：写侧行聚合——**顺序流式**折叠（不是「先全归一化再折」）。
         //
@@ -446,6 +493,13 @@ impl EventRepo {
         // 这里没有后续事件来推进编号，故必须读回本段的最大 sequence。
         if let Some(sequence) = flush_run!() {
             final_revision = sequence;
+        }
+        if let Some(draft_id) = draft_id {
+            tx.execute(
+                "DELETE FROM canonical_draft_fragments WHERE owner_key = ?1 AND draft_id = ?2",
+                params![owner_key, draft_id],
+            )
+            .map_err(EventError::from)?;
         }
         tx.commit().map_err(EventError::from)?;
         Ok(EventAppendResult {

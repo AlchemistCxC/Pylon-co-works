@@ -34,6 +34,7 @@ use rusqlite::{params, OptionalExtension};
 #[cfg(test)]
 use crate::owner::DurableSessionOwner;
 
+mod draft;
 mod error;
 mod fold;
 mod normalize;
@@ -43,6 +44,9 @@ mod repo;
 mod row;
 mod service;
 
+pub use draft::{
+    draft_candidate, DraftCandidate, DraftCommitChunk, DraftFragment, DraftFragmentInput,
+};
 pub use error::EventError;
 pub use fold::row_input_span_width;
 pub use normalize::{canonical_event_wire, parse_canonical_event};
@@ -70,3 +74,6 @@ mod tests;
 
 #[cfg(test)]
 mod fold_tests;
+
+#[cfg(test)]
+mod draft_bench;

@@ -149,6 +149,12 @@ fn refine_empty_turn(
     }
 }
 
+/// SDK outbound pump may surface a closed transport as a synthetic response
+/// error string. It has the same recovery semantics as ConnectionClosed.
+fn is_closed_transport_response(raw: &acp::RawMessage) -> bool {
+    raw.error.as_ref().and_then(serde_json::Value::as_str) == Some("ACP connection closed")
+}
+
 /// #99：从 prompt 响应帧结算 turn 终态（wire 权威，先于展示/持久化路径执行，
 /// 保证 ensure_generation 等后续失败也不会让 turn 悬在账本外）。
 fn settle_turn_from_response(
@@ -156,7 +162,9 @@ fn settle_turn_from_response(
     turn_key: &crate::acp::TurnKey,
     raw: &acp::RawMessage,
 ) {
-    let mut cause = if raw.error.is_some() {
+    let mut cause = if is_closed_transport_response(raw) {
+        crate::acp::TurnTerminalCause::ConnectionLost
+    } else if raw.error.is_some() {
         crate::acp::TurnTerminalCause::ProtocolError
     } else {
         let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
@@ -247,6 +255,16 @@ async fn ingest_prompt_event(
     let Some(owner) = owner else {
         return Ok(None);
     };
+    if raw_payload
+        .pointer("/update/sessionUpdate")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| matches!(kind, "done" | "error" | "cancelled"))
+    {
+        runtime
+            .flush_draft_before_terminal(source, generation)
+            .await
+            .map_err(PylonError::Protocol)?;
+    }
     let result = event_service_of(state)?
         .ingest_event(owner, remote_session_id, generation, raw_payload)
         .await?;
@@ -314,19 +332,38 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
         if let Some(failure) = failure {
             update["failure"] = failure.to_json();
         }
-        let result = event_service_of(state)?
-            .ingest_event(
-                owner,
-                remote_session_id,
-                state.current_generation(runtime),
-                serde_json::json!({
-                    "source": ctx.source,
-                    "update": update,
-                }),
-            )
-            .await?;
-        if let Some(committed_event) = result.events.into_iter().next() {
-            error_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+        let event_service = event_service_of(state)?;
+        let connection_lost_with_draft = failure
+            .is_some_and(|failure| failure.source == "connection")
+            && !event_service
+                .list_draft_fragments(
+                    owner
+                        .key()
+                        .map_err(|error| PylonError::Protocol(error.to_string()))?,
+                )
+                .await?
+                .is_empty();
+        if !connection_lost_with_draft {
+            runtime
+                .flush_draft_before_terminal(&ctx.source, state.current_generation(runtime))
+                .await
+                .map_err(PylonError::Protocol)?;
+            let result = event_service
+                .ingest_event(
+                    owner,
+                    remote_session_id,
+                    state.current_generation(runtime),
+                    serde_json::json!({
+                        "source": ctx.source,
+                        "update": update,
+                    }),
+                )
+                .await?;
+            if let Some(committed_event) = result.events.into_iter().next() {
+                error_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+            }
+        } else {
+            error_payload["draftInterrupted"] = serde_json::Value::Bool(true);
         }
     }
     if let Some(window) = window {
@@ -1416,15 +1453,24 @@ async fn settle_prompt_response<R: tauri::Runtime>(
             "stale session mapping for source: {source}"
         )));
     }
+    let connection_closed = is_closed_transport_response(&raw);
     if let Some(error) = raw.error {
         let error = error.to_string();
         *failure = Some(PromptFailureMetadata {
-            source: "provider",
+            source: if connection_closed {
+                "connection"
+            } else {
+                "provider"
+            },
             actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
-            provider_message: Some(error.clone()),
+            provider_message: (!connection_closed).then_some(error.clone()),
             ..Default::default()
         });
-        let typed_error = AcpError::Rpc(error.clone());
+        let typed_error = if connection_closed {
+            AcpError::ConnectionClosed
+        } else {
+            AcpError::Rpc(error.clone())
+        };
         let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
         // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
         // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
@@ -1660,6 +1706,24 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
 mod tests {
     use super::*;
 
+    #[test]
+    fn sdk_synthetic_closed_response_has_connection_semantics() {
+        let raw = acp::RawMessage {
+            id: None,
+            method: None,
+            kind: acp::AcpKind::Response,
+            result: None,
+            params: None,
+            error: Some(serde_json::json!("ACP connection closed")),
+        };
+        assert!(is_closed_transport_response(&raw));
+        let provider = acp::RawMessage {
+            error: Some(serde_json::json!({"code": -32000, "message": "provider failed"})),
+            ..raw
+        };
+        assert!(!is_closed_transport_response(&provider));
+    }
+
     /// #324：拦截谓词只认精确 `stopReason: "cancelled"`——空白/大小写变体与
     /// 缺失字段不享中性结算（仍走 #316 闭式表 fail-closed）。
     #[test]
@@ -1848,6 +1912,83 @@ mod tests {
             "one successful prompt produces one authoritative user row"
         );
         assert_eq!(page.events[0], row);
+    }
+
+    #[tokio::test]
+    async fn prompt_terminal_waits_for_draft_commit_before_allocating_sequence() {
+        let source = "local:draft-terminal";
+        let agent_id = "prompt-agent";
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session =
+            SessionInfo::new("remote-draft".into(), String::new(), ".".into(), false, 3);
+        session.profile_id = Some("profile-prompt".into());
+        runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .insert(source.into(), session);
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent(agent_id)
+            .with_agent(crate::test_utils::fake_acp_agent_stub(agent_id))
+            .with_runtime(agent_id, runtime.clone())
+            .build();
+        let service = Arc::new(EventService::in_memory().unwrap());
+        *state.event_service.lock().unwrap() = Some(service.clone());
+        let owner = DurableSessionOwner::new("profile-prompt", agent_id, source);
+        let owner_key = owner.key().unwrap();
+        let raw = serde_json::json!({
+            "source": source,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "draft text"}}
+        });
+        service
+            .append_draft_fragment(crate::session::DraftFragmentInput {
+                owner: owner.clone(),
+                draft_id: "run".into(),
+                fragment_index: 0,
+                client_generation: 3,
+                remote_session_id: Some("remote-draft".into()),
+                event_type: "assistant.text.delta".into(),
+                identity: None,
+                raw_payload: vec![raw.clone()],
+                first_received_at: "2026-09-25T00:00:00.000Z".into(),
+            })
+            .await
+            .unwrap();
+        let mut requests = runtime.install_draft_flush_channel(3);
+        let terminal = ingest_prompt_event(
+            &state,
+            &runtime,
+            source,
+            Some("remote-draft".into()),
+            3,
+            serde_json::json!({"source": source, "update": {"sessionUpdate": "done"}}),
+        );
+        let close_draft = async {
+            let request = requests.recv().await.unwrap();
+            assert_eq!(request.source, source);
+            let committed = service
+                .commit_draft_events(
+                    owner,
+                    Some("remote-draft".into()),
+                    3,
+                    "run".into(),
+                    vec![crate::session::DraftCommitChunk {
+                        raw_payload: std::sync::Arc::new(raw),
+                        received_at: "2026-09-25T00:00:00.000Z".into(),
+                    }],
+                )
+                .await
+                .unwrap();
+            assert_eq!(committed.events[0].sequence, 1);
+            request.reply.send(Ok(())).unwrap();
+        };
+        let (terminal, ()) = tokio::join!(terminal, close_draft);
+        assert_eq!(terminal.unwrap().unwrap().sequence, 2);
+        assert!(service
+            .list_draft_fragments(owner_key)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// B-02 / C0-OPT：完整 send_prompt_core 成功路径仍只为用户 prompt 产生一条

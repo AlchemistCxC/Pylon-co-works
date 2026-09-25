@@ -42,6 +42,36 @@ export interface CanonicalEventRawExport {
   rawPayloadJson: string
 }
 
+/** #155 T3：独立于 canonical revision 的持久化在途片段。 */
+export interface CanonicalDraftFragment {
+  ownerKey: string
+  draftId: string
+  fragmentIndex: number
+  clientGeneration: number
+  remoteSessionId: string | null
+  eventType: 'assistant.text.delta' | 'assistant.thinking.delta'
+  identity: Record<string, unknown> | null
+  rawPayload: unknown[]
+  firstReceivedAt: string
+  createdAt: number
+  interrupted: boolean
+}
+
+export async function loadCanonicalDraftFragments(ownerKey: string): Promise<CanonicalDraftFragment[]> {
+  return invoke<CanonicalDraftFragment[]>('evt_draft_list', { ownerKey })
+    .catch(rejectCanonicalEventRepositoryError)
+}
+
+export async function keepInterruptedDraft(ownerKey: string, draftId: string): Promise<CanonicalEventAppendResult> {
+  return invoke<CanonicalEventAppendResult>('evt_draft_keep', { ownerKey, draftId })
+    .catch(rejectCanonicalEventRepositoryError)
+}
+
+export async function discardInterruptedDraft(ownerKey: string, draftId: string): Promise<boolean> {
+  return invoke<boolean>('evt_draft_discard', { ownerKey, draftId })
+    .catch(rejectCanonicalEventRepositoryError)
+}
+
 /** 事件仓库结构化错误（前端按 code 分支；message 展示用）。 */
 export class CanonicalEventRepositoryError extends Error {
   readonly code: string | undefined

@@ -25,6 +25,7 @@ mod routing;
 
 // #317 批次二 ④：主泵六缝提取——决策归子模块、副作用适配归调用点（同 routing 惯例）。
 mod canonical_flush;
+mod draft_flush;
 // #331/U4：逐帧热路径基准（cfg(test)，--nocapture 读数）。
 mod crash_reconnect;
 mod fallback_route;
@@ -34,11 +35,16 @@ mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
 
+#[cfg(test)]
+use canonical_flush::flush_pending_canonical;
 use canonical_flush::{
-    flush_pending_canonical, should_flush_batch, CanonicalFlushContext, PendingCanonicalPublish,
+    should_flush_batch, CanonicalFlushContext, PendingCanonicalPublish,
     PENDING_CANONICAL_FLUSH_INTERVAL,
 };
 use crash_reconnect::CrashReconnectHandler;
+use draft_flush::{
+    absorb_window, commit_open_draft, publish_due_draft, DraftRun, DRAFT_PERSIST_INTERVAL,
+};
 use fallback_route::route_unknown_notification;
 use host_tools_gate::{route_fs_request, route_terminal_request};
 use interaction_route::{route_elicitation_complete, route_private_interaction};
@@ -1586,6 +1592,26 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
 /// 对应。`handle_crash`/reconnect_epoch 原在任务内构造——纯字段装配无副作用、
 /// 无 await，提前到 `new()`（spawn 前）不改变任何可观察时序（首个 await 仍是
 /// `run()` 内的 inbox 获取）。
+// flush 环境上下文（#335/U1b 收敛面）：字段清单唯一处（原多调用点手抄的去重
+// 靠本宏）。以宏而非 `&self` 方法装配是刻意的——方法接收者会把借用覆盖到整个
+// self，与 draft 路径（#155 T3）的 `&mut self.draft_run` 无法并存；宏展开成
+// 字段级表达式，8 个字段引用与 draft_run/pending_batch 天然不相交，同一函数
+// 体内可并列借用。
+macro_rules! pump_flush_context {
+    ($self:expr) => {
+        CanonicalFlushContext {
+            window: &$self.window,
+            gateway: &$self.gateway,
+            update_channels: &$self.runtime.update_channels,
+            pet: &$self.pet,
+            client_generation: &$self.client_generation,
+            agent_id: &$self.agent_id,
+            event_service: $self.event_service.as_ref(),
+            message_service: $self.message_service.as_ref(),
+        }
+    };
+}
+
 struct NotificationPump<R: tauri::Runtime> {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     sessions: Arc<std::sync::Mutex<std::collections::HashMap<String, SessionInfo>>>,
@@ -1620,6 +1646,11 @@ struct NotificationPump<R: tauri::Runtime> {
     wire_trace: Option<Arc<crate::acp::AcpWireCapture>>,
     /// 在途 canonical 批次（窗口未 flush 的 durable+publish 待办）。
     pending_batch: Vec<PendingCanonicalPublish>,
+    /// #155 T3：prompt 终态屏障请求接收端（`install_draft_flush_channel` 装配，
+    /// 本代际 dispatcher 独占；重新 install 会替换发送端，旧接收端随之作废）。
+    draft_flush_rx: tokio::sync::mpsc::UnboundedReceiver<crate::runtime::DraftFlushRequest>,
+    /// #155 T3：在途跨窗口 draft run（None = 当前无聚合中的助手消息）。
+    draft_run: Option<DraftRun>,
 }
 
 impl<R: tauri::Runtime> NotificationPump<R> {
@@ -1702,6 +1733,9 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             runtime_for_reconnect,
             reconnect_epoch,
         );
+        // #155 T3：prompt 终态写路径经本通道请求 dispatcher 先收口在途 draft
+        // 再分配终态序列。装配时点与拆分前一致（任务复位后、spawn 前）。
+        let draft_flush_rx = runtime.install_draft_flush_channel(generation);
         Self {
             acp,
             sessions,
@@ -1726,6 +1760,8 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             handle_crash,
             wire_trace: None,
             pending_batch: Vec::new(),
+            draft_flush_rx,
+            draft_run: None,
         }
     }
 
@@ -1745,12 +1781,21 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 .await;
         }
         self.wire_trace = self.acp.lock().await.wire_trace();
+        // #155 T3：draft 片段持久化节流时钟——interval 需要 tokio 定时器上下文，
+        // 在 run()（async）内构造而非 new()（spawn 前同步装配）；首次 tick 立即
+        // 消费，与拆分前任务体内的构造时序一致。
+        let mut draft_interval = tokio::time::interval(DRAFT_PERSIST_INTERVAL);
+        draft_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        draft_interval.tick().await;
         loop {
             if self.client_generation.load(Ordering::Acquire) != self.generation {
                 // #99：代际失配退出（清理统一在循环结束后收口，评审 E6）。
                 break;
             }
-            match self.pump_step(&notification_inbox, &mut crashed_rx).await {
+            match self
+                .pump_step(&notification_inbox, &mut crashed_rx, &mut draft_interval)
+                .await
+            {
                 PumpStep::Frame(classified) => {
                     let crate::acp::ClassifiedMessage {
                         raw,
@@ -1772,11 +1817,39 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 PumpStep::Skipped => continue,
                 PumpStep::Stop => break,
             }
+            if self.draft_run.is_some() && !self.pending_batch.is_empty() {
+                // 在途 run 的下一帧立即判同质/预算；非 delta 与 owner 切换不可等 8 ms。
+                let batch = std::mem::take(&mut self.pending_batch);
+                if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await {
+                    break;
+                }
+            }
+            if self.draft_run.is_none() && self.pending_batch.len() == 1 {
+                // 首个可折 delta 立即占位，关上外部 evt_append 的到达顺序竞态。
+                let first = &self.pending_batch[0];
+                if first
+                    .input
+                    .owner
+                    .as_ref()
+                    .and_then(|owner| {
+                        crate::session::draft_candidate(owner, first.input.payload.clone())
+                    })
+                    .is_some()
+                {
+                    let batch = std::mem::take(&mut self.pending_batch);
+                    if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await
+                    {
+                        break;
+                    }
+                }
+            }
         }
         if !self.pending_batch.is_empty() {
             let batch = std::mem::take(&mut self.pending_batch);
-            let _ = flush_pending_canonical(&self.flush_context(), batch).await;
+            let _ = absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await;
         }
+        // 无终态退出时保留可恢复的片段，不把残缺消息冒充正式历史。
+        let _ = publish_due_draft(&pump_flush_context!(self), &mut self.draft_run).await;
         // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
         // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
         // 旧代际 turn 条目整体收敛；此后旧代际的迟到结算归 UnknownTurn
@@ -1791,18 +1864,33 @@ impl<R: tauri::Runtime> NotificationPump<R> {
         }
     }
 
-    /// 泵取一步（原 tokio::select! 原样迁入）：biased 优先级 = 崩溃 watch >
-    /// 控制帧（agent 请求/崩溃广播）> 普通通知 > 窗口 flush 定时（仅在途批次
-    /// 非空时参与竞争）；每帧携带 ingress_seq，优先级不改变同一连接的序列语义。
+    /// 泵取一步（#336/U2b 迁入主干 + #155 T3 两个 draft 臂）：biased 优先级 =
+    /// 崩溃 watch > 控制帧（agent 请求/崩溃广播）> 普通通知 > prompt 终态 draft
+    /// 收口请求 > 窗口 flush 定时（仅在途批次非空时参与竞争）> draft 片段节流
+    /// 时钟（仅在途 run 存在时参与竞争）；每帧携带 ingress_seq，优先级不改变
+    /// 同一连接的序列语义。
     async fn pump_step(
         &mut self,
         inbox: &crate::acp::NotificationInbox,
         crashed_rx: &mut tokio::sync::watch::Receiver<bool>,
+        draft_interval: &mut tokio::time::Interval,
     ) -> PumpStep {
         tokio::select! {
             biased;
             changed = crashed_rx.changed() => {
                 if changed.is_ok() && *crashed_rx.borrow_and_update() {
+                    // #155 T3：崩溃信号先收口在途 draft（未消费批次吸收 + 已落盘
+                    // 片段发布，保留为可恢复中断片段），再处理崩溃/重连。
+                    if !self.pending_batch.is_empty() {
+                        let batch = std::mem::take(&mut self.pending_batch);
+                        if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await
+                        {
+                            return PumpStep::Stop;
+                        }
+                    }
+                    if !publish_due_draft(&pump_flush_context!(self), &mut self.draft_run).await {
+                        return PumpStep::Stop;
+                    }
                     // watch 通道只携带 bool → 缺省 stdout_closed（reason 经 broadcast params 携带）
                     self.handle_crash
                         .handle(crate::acp::CrashReason::StdoutClosed.as_str().to_string())
@@ -1818,13 +1906,46 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 Some(classified) => PumpStep::Frame(classified),
                 None => PumpStep::Stop,
             },
+            // Lower priority than queued ACP updates: the response task
+            // must not overtake delta notifications preceding its response.
+            request = self.draft_flush_rx.recv() => {
+                if let Some(request) = request {
+                    tracing::debug!(source = %request.source, "closing canonical draft before prompt terminal");
+                    if !self.pending_batch.is_empty() {
+                        let batch = std::mem::take(&mut self.pending_batch);
+                        if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await
+                        {
+                            let _ = request.reply.send(Err("draft window flush failed".into()));
+                            return PumpStep::Stop;
+                        }
+                    }
+                    if !commit_open_draft(&pump_flush_context!(self), &mut self.draft_run).await {
+                        let _ = request.reply.send(Err("draft commit failed".into()));
+                        return PumpStep::Stop;
+                    }
+                    let _ = request.reply.send(Ok(()));
+                }
+                PumpStep::Skipped
+            }
             _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !self.pending_batch.is_empty() => {
                 let batch = std::mem::take(&mut self.pending_batch);
-                if !flush_pending_canonical(&self.flush_context(), batch).await {
+                if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await {
                     PumpStep::Stop
                 } else {
                     PumpStep::Skipped
                 }
+            }
+            _ = draft_interval.tick(), if self.draft_run.is_some() => {
+                if !self.pending_batch.is_empty() {
+                    let batch = std::mem::take(&mut self.pending_batch);
+                    if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await {
+                        return PumpStep::Stop;
+                    }
+                }
+                if !publish_due_draft(&pump_flush_context!(self), &mut self.draft_run).await {
+                    return PumpStep::Stop;
+                }
+                PumpStep::Skipped
             }
         }
     }
@@ -1833,8 +1954,9 @@ impl<R: tauri::Runtime> NotificationPump<R> {
     /// 包络 → 窗口 flush 判定 → 崩溃 / elicitation 完成 / 权限请求 / terminal /
     /// fs / 私有交互 / 未知通知 / session/update 内核路径。每分支副作用完成后
     /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自本函数内两处
-    /// 窗口 flush 失败，或 `handle_session_update` 返回 false（mutation 后本代
-    /// 结束/锁异常等该函数自身的退出判定，见其文档；定时 flush 的失败经
+    /// 窗口 flush 失败（#155 T3 起经 draft 吸收路径，普通批次照常直flush、
+    /// 可折 delta 进在途 run），或 `handle_session_update` 返回 false（mutation
+    /// 后本代结束/锁异常等该函数自身的退出判定，见其文档；定时 flush 的失败经
     /// `pump_step` 以 `PumpStep::Stop` 表达，不经本函数）。
     async fn route_frame(
         &mut self,
@@ -1860,11 +1982,16 @@ impl<R: tauri::Runtime> NotificationPump<R> {
         );
         if flush_batch && !self.pending_batch.is_empty() {
             let batch = std::mem::take(&mut self.pending_batch);
-            if !flush_pending_canonical(&self.flush_context(), batch).await {
+            if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await {
                 return false;
             }
         }
         if raw.kind == crate::acp::AcpKind::Crashed {
+            // #155 T3：崩溃收尾先把已落盘的在途片段发布出来（保留为可恢复中断
+            // 片段，不冒充正式历史），再走崩溃/重连处理。
+            if !publish_due_draft(&pump_flush_context!(self), &mut self.draft_run).await {
+                return false;
+            }
             // ISSUE-17 W1：broadcast 携带 reason（params.reason，稳定 code）——
             // dispatcher 保留原始 code 生成用户可读文案；缺省 stdout_closed
             let reason = crash_reason_from_params(raw.params.as_ref());
@@ -1996,26 +2123,11 @@ impl<R: tauri::Runtime> NotificationPump<R> {
         }
         if terminal_boundary && !self.pending_batch.is_empty() {
             let batch = std::mem::take(&mut self.pending_batch);
-            if !flush_pending_canonical(&self.flush_context(), batch).await {
+            if !absorb_window(&pump_flush_context!(self), &mut self.draft_run, batch).await {
                 return false;
             }
         }
         true
-    }
-
-    /// flush 环境上下文（#335/U1b 收敛面）：字段清单唯一处（原四调用点手抄 ×4
-    /// 的去重靠本方法）；纯引用装配，无副作用，值与调用点逐参形态一致。
-    fn flush_context(&self) -> CanonicalFlushContext<'_, R> {
-        CanonicalFlushContext {
-            window: &self.window,
-            gateway: &self.gateway,
-            update_channels: &self.runtime.update_channels,
-            pet: &self.pet,
-            client_generation: &self.client_generation,
-            agent_id: &self.agent_id,
-            event_service: self.event_service.as_ref(),
-            message_service: self.message_service.as_ref(),
-        }
     }
 }
 

@@ -39,6 +39,7 @@ fn migrate_fresh_db_to_current_version_without_message_tables() {
         "deleted_sessions",
         "retention_policy",
         "canonical_events",
+        "canonical_draft_fragments",
         "rollup_migration_state",
         "session_state_snapshots",
     ] {
@@ -60,6 +61,46 @@ fn migrate_fresh_db_to_current_version_without_message_tables() {
             "v15 fresh DB 不得包含死表/legacy active table {dropped}: {tables:?}"
         );
     }
+}
+
+#[test]
+fn v15_upgrade_adds_draft_table_without_losing_canonical_history() {
+    let path = unique_temp_db_path();
+    {
+        let repo = MsgRepo::open(&path).expect("open current schema");
+        let conn = repo.conn.lock().unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO canonical_events
+               (owner_key, remote_session_id, sequence, client_generation, occurred_at,
+                received_at, event_type, payload_version, identity, typed_payload,
+                raw_payload, created_at, provenance)
+               VALUES ('["p","a","local:s"]', NULL, 7, 1, 't', 't',
+                       'assistant.text.delta', 1, NULL, '{"text":"保留"}', '{}', 1, 0);
+               DROP TABLE canonical_draft_fragments;
+               PRAGMA user_version = 15;"#,
+        )
+        .expect("prepare v15 fixture");
+    }
+    let upgraded = MsgRepo::open(&path).expect("upgrade v15 to v16");
+    let conn = upgraded.conn.lock().unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 16);
+    let payload: String = conn
+        .query_row(
+            "SELECT typed_payload FROM canonical_events WHERE owner_key = ?1 AND sequence = 7",
+            params![r#"["p","a","local:s"]"#],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(payload, r#"{"text":"保留"}"#);
+    assert!(table_names(&conn)
+        .iter()
+        .any(|name| name == "canonical_draft_fragments"));
+    drop(conn);
+    drop(upgraded);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]

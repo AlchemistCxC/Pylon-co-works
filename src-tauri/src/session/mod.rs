@@ -748,6 +748,43 @@ pub(crate) async fn evt_list(
         .map_err(PylonError::from)
 }
 
+/// #155 T3：独立读取已落盘的在途片段，供会话重启后标记为中断内容。
+/// 片段不属于 canonical 历史，也不推进 revision。
+#[tauri::command]
+pub(crate) async fn evt_draft_list(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+) -> Result<Vec<DraftFragment>, PylonError> {
+    require_event_service(&state)?
+        .list_draft_fragments(owner_key)
+        .await
+        .map_err(PylonError::from)
+}
+
+#[tauri::command]
+pub(crate) async fn evt_draft_keep(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+    draft_id: String,
+) -> Result<EventAppendResult, PylonError> {
+    require_event_service(&state)?
+        .keep_interrupted_draft(owner_key, draft_id)
+        .await
+        .map_err(PylonError::from)
+}
+
+#[tauri::command]
+pub(crate) async fn evt_draft_discard(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+    draft_id: String,
+) -> Result<bool, PylonError> {
+    require_event_service(&state)?
+        .discard_interrupted_draft(owner_key, draft_id)
+        .await
+        .map_err(PylonError::from)
+}
+
 /// Corrupt-row forensic export: returns the exact stored JSON text without decoding it.
 #[tauri::command]
 pub(crate) async fn evt_export_raw(

@@ -140,10 +140,11 @@ fn publish_committed_update<R: tauri::Runtime>(
     );
 }
 
-/// #335/U1b：flush 的环境上下文收敛——dispatcher 主循环四个 flush 调用点共用的
-/// 8 项服务/句柄引用（原逐参手抄 ×4，任何增删要同步 4 处；字段清单唯一处为
+/// #335/U1b：flush 的环境上下文收敛——dispatcher 主循环各 flush 调用点共用的
+/// 8 项服务/句柄引用（原逐参手抄，任何增删要同步多处；字段清单唯一处为
 /// `NotificationPump::flush_context`，#336 起每次 flush 现场构造，取值时机与原
-/// 「调用点逐参求值」逐点一致）。字段与原形参一一对应，锁语义/调用时序不变。
+/// 「调用点逐参求值」逐点一致）。#155 T3 的 draft 吸收/提交路径（draft_flush）
+/// 字段面完全相同，直接共用本结构。字段与原形参一一对应，锁语义/调用时序不变。
 pub(crate) struct CanonicalFlushContext<'a, R: tauri::Runtime> {
     pub(crate) window: &'a tauri::Window<R>,
     pub(crate) gateway: &'a crate::gateway::GatewayCore,
@@ -169,6 +170,68 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         event_service,
         message_service,
     } = *context;
+    flush_pending_canonical_inner(
+        window,
+        gateway,
+        update_channels,
+        pet,
+        client_generation,
+        agent_id,
+        event_service,
+        message_service,
+        pending,
+        None,
+    )
+    .await
+}
+
+/// #155 T3：draft 提交——在途 run 的全部待办以一个正式 batch 原子落盘（同一
+/// 事务删除对应片段），随后按 publish 决策发布（携带 `committedDraftId` 供前端
+/// 清理临时投影）。
+pub(crate) async fn flush_committed_draft<R: tauri::Runtime>(
+    context: &CanonicalFlushContext<'_, R>,
+    pending: Vec<PendingCanonicalPublish>,
+    draft_id: String,
+    chunks: Vec<crate::session::DraftCommitChunk>,
+) -> bool {
+    let CanonicalFlushContext {
+        window,
+        gateway,
+        update_channels,
+        pet,
+        client_generation,
+        agent_id,
+        event_service,
+        message_service,
+    } = *context;
+    flush_pending_canonical_inner(
+        window,
+        gateway,
+        update_channels,
+        pet,
+        client_generation,
+        agent_id,
+        event_service,
+        message_service,
+        pending,
+        Some((draft_id, chunks)),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn flush_pending_canonical_inner<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    gateway: &crate::gateway::GatewayCore,
+    update_channels: &crate::runtime::UpdateChannelMap,
+    pet: &std::sync::Mutex<PetState>,
+    client_generation: &std::sync::atomic::AtomicU64,
+    agent_id: &str,
+    event_service: Option<&Arc<crate::session::EventService>>,
+    message_service: Option<&Arc<crate::session::MessageService>>,
+    pending: Vec<PendingCanonicalPublish>,
+    mut draft: Option<(String, Vec<crate::session::DraftCommitChunk>)>,
+) -> bool {
     if pending.is_empty() {
         return true;
     }
@@ -202,11 +265,16 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
     }
     let remote_session_id = Some(first.input.remote_session_id.clone());
     // P2（#334）：Arc 引用计数共享进 ingest（原整份 payload 批次深拷贝拆除）；
-    // 发布侧稍后对每项 `Arc::try_unwrap` 取回唯一引用。
-    let raw_payloads = pending
-        .iter()
-        .map(|item| Arc::clone(&item.input.payload))
-        .collect::<Vec<_>>();
+    // 发布侧稍后对每项 `Arc::try_unwrap` 取回唯一引用。draft 提交不经 ingest，
+    // 不预取共享（否则发布侧计数非 1，try_unwrap 恒走克隆兜底）。
+    let raw_payloads = if draft.is_none() {
+        pending
+            .iter()
+            .map(|item| Arc::clone(&item.input.payload))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let Some(event_service) = event_service else {
         tracing::error!(
             code = "event_db_unavailable",
@@ -216,16 +284,36 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         );
         return true;
     };
-    let append = match event_service
-        .ingest_events(owner, remote_session_id, generation, raw_payloads)
-        .await
-    {
+    let append_result = if let Some((draft_id, chunks)) = draft.as_ref() {
+        event_service
+            .commit_draft_events(
+                owner,
+                remote_session_id,
+                generation,
+                draft_id.clone(),
+                chunks.clone(),
+            )
+            .await
+    } else {
+        event_service
+            .ingest_events(owner, remote_session_id, generation, raw_payloads)
+            .await
+    };
+    let append = match append_result {
         Ok(result) => result,
         Err(error) => {
             log_canonical_ingest_error(&error, agent_id, &first.input.source);
-            return true;
+            // A failed draft commit must stop this dispatcher generation. The
+            // persisted fragments remain recoverable; continuing would feed
+            // later same-owner events into the draft_pending gate and drop them.
+            return draft.is_none();
         }
     };
+    // draft chunks 的 payload 与 pending 项共享同一 Arc——提交调用完成后即无
+    // 用途，释放引用让发布侧 `Arc::try_unwrap` 取回唯一引用（P2 不变量）。
+    if let Some((_, chunks)) = draft.as_mut() {
+        chunks.clear();
+    }
     // ADR-0016：内核写侧把相邻同类 delta 折成一条 `*.delta.batch` 行（span 占位），结果行数
     // 可以少于本窗口输入数。配对按**跨度宽度**展开——span 内每个 wire 帧都记在承载它的那一行上
     // （这正是 durable 事实：这些帧就存在这一行里）。
@@ -281,11 +369,20 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         if item.decision.publish {
             // P2（#334）：ingest 已完成（共享 Arc 已随 ingest 调用结束释放），
             // 计数回到 1，`try_unwrap` 零拷贝取回原件；计数非 1 理论不可达，
-            // 克隆兜底保正确。
-            let payload = match Arc::try_unwrap(item.input.payload) {
+            // 克隆兜底保正确。#155 T3：draft 提交路径的正式行发布时携带
+            // `committedDraftId`，前端凭它清理对应临时投影。
+            let mut payload = match Arc::try_unwrap(item.input.payload) {
                 Ok(value) => value,
                 Err(arc) => (*arc).clone(),
             };
+            if let Some((draft_id, _)) = draft.as_ref() {
+                if let serde_json::Value::Object(map) = &mut payload {
+                    map.insert(
+                        "committedDraftId".into(),
+                        serde_json::Value::String(draft_id.clone()),
+                    );
+                }
+            }
             publish_committed_update(
                 window,
                 gateway,

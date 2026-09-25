@@ -102,9 +102,23 @@ impl Default for ProbeSessionRegistry {
     }
 }
 
+pub(crate) struct DraftFlushRequest {
+    pub source: String,
+    pub reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+}
+
+/// #155 T3：prompt 终态 draft 收口请求的发送端槽位（代际 + 发送端）。抽别名是
+/// clippy::type_complexity 的要求，同时给「代际不符即视为无 dispatcher」这条
+/// 语义一个可命名处。
+pub(crate) type DraftFlushSender =
+    Arc<Mutex<Option<(u64, tokio::sync::mpsc::UnboundedSender<DraftFlushRequest>)>>>;
+
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Prompt terminal writes ask the dispatcher to close the preceding
+    /// cross-window draft before allocating the terminal sequence.
+    pub(crate) draft_flush_tx: DraftFlushSender,
     pub session_creation: Arc<tokio::sync::Mutex<()>>,
     pub agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
     pub client_generation: Arc<AtomicU64>,
@@ -150,11 +164,53 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    pub(crate) fn install_draft_flush_channel(
+        &self,
+        generation: u64,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<DraftFlushRequest> {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        if let Ok(mut slot) = self.draft_flush_tx.lock() {
+            *slot = Some((generation, sender));
+        }
+        receiver
+    }
+
+    pub(crate) async fn flush_draft_before_terminal(
+        &self,
+        source: &str,
+        generation: u64,
+    ) -> Result<(), String> {
+        let sender = self
+            .draft_flush_tx
+            .lock()
+            .map_err(|_| "draft flush channel lock poisoned".to_string())?
+            .as_ref()
+            .filter(|(current, _)| *current == generation)
+            .map(|(_, sender)| sender.clone());
+        let Some(sender) = sender else {
+            // There may be no dispatcher for a prompt with no live updates.
+            // A stored draft, if any, is still guarded by draft_pending.
+            return Ok(());
+        };
+        let (reply, received) = tokio::sync::oneshot::channel();
+        sender
+            .send(DraftFlushRequest {
+                source: source.to_owned(),
+                reply,
+            })
+            .map_err(|_| "draft dispatcher is unavailable".to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), received)
+            .await
+            .map_err(|_| "draft dispatcher flush timed out".to_string())?
+            .map_err(|_| "draft dispatcher closed before flush".to_string())?
+    }
+
     /// 以 disconnected 状态新建一个空 runtime（启动/降级路径用）。
     pub fn new_disconnected() -> Arc<Self> {
         Arc::new(Self {
             acp: Arc::new(tokio::sync::Mutex::new(AcpClient::disconnected())),
             notification_task: Arc::new(Mutex::new(None)),
+            draft_flush_tx: Arc::new(Mutex::new(None)),
             session_creation: Arc::new(tokio::sync::Mutex::new(())),
             agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             client_generation: Arc::new(AtomicU64::new(0)),
@@ -418,6 +474,21 @@ impl Default for AgentRuntimeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn prompt_terminal_waits_for_dispatcher_draft_flush_ack() {
+        let runtime = AgentRuntime::new_disconnected();
+        let mut requests = runtime.install_draft_flush_channel(3);
+        let waiting = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.flush_draft_before_terminal("local:s", 3).await })
+        };
+        let request = requests.recv().await.expect("flush request");
+        assert_eq!(request.source, "local:s");
+        assert!(!waiting.is_finished(), "terminal must wait for commit");
+        request.reply.send(Ok(())).unwrap();
+        waiting.await.unwrap().unwrap();
+    }
 
     /// #99（评审 E2 回归锁）：冷挂载快照的真实 wire 形状——本测试钉住
     /// `turn.phase` / `turn.terminal.cause` / `sequence.lastIngressSeq` /
