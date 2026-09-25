@@ -10,6 +10,9 @@ export const CORE_COMMAND_SET_PLUGIN_ID = 'core.commandSet.builtin'
 /** 命令权限档（与既有 permission 模式语义对齐，仅声明用）。 */
 export type CommandPermission = 'read' | 'edit' | 'execute' | 'gate'
 
+/** 命令可见性档：`user` 进默认的 `/` 菜单，`internal` 折叠在「全部」里（#329）。 */
+export type CommandTier = 'user' | 'internal'
+
 export interface CommandSetDescriptor {
   /** 命令名（不含斜杠），小写唯一键。 */
   name: string
@@ -21,6 +24,14 @@ export interface CommandSetDescriptor {
    * （插件贡献命令同样适用）。匹配用子串，故「新会话」可被「会话」命中。
    */
   keywords?: readonly string[]
+  /**
+   * 可见性档（缺省 = `internal`）：输入框 `/` 菜单默认只列 `user` 级命令，
+   * 内部/开发者命令（`browser.agent-*`、`skin.*` 这类带原始 JSON 参数签名的）
+   * 折叠在「全部」分组里，不淹没日常可用命令（#329）。
+   *
+   * 只影响**人看的菜单**；`buildAgentCommandPrompt` 的注入面与执行面继续看到全量命令。
+   */
+  tier?: CommandTier
   description: string
   /** 输入提示（人机侧 args 展示）。 */
   inputHint?: string

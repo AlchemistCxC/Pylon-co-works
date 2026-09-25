@@ -22,8 +22,10 @@ export const PYLON_PLUGIN_API_LATEST = '2.4' as const
  *  **2.3 只做加法**：会话视图新增可选字段 `pinned`，左栏贡献 props 新增可选回调
  *  `onToggleSessionPin`（会话置顶）。
  *
- *  **2.4 只做加法**：命令描述符（`CommandSetDescriptor`）新增可选 `keywords`
- *  （人机侧检索词，让中文界面下能用母语搜到英文命令名；不参与执行解析）。
+ *  **2.4 只做加法**：命令描述符（`CommandSetDescriptor`）新增两个可选字段——`keywords`
+ *  （人机侧检索词，让中文界面下能用母语搜到英文命令名；不参与执行解析）与 `tier`
+ *  （可见性档 `user` / `internal`，缺省 internal；输入框 `/` 菜单默认只列 user 级，
+ *  避免内部/开发者命令淹没日常命令）。两者都只作用于人看的菜单，不改执行面。
  *
  *  升版注意：本数组末尾是 `PYLON_PLUGIN_API_LATEST`，**升 minor 时必须把上一个 latest
  *  显式写回列表**，否则旧版本会被静默移出 allowlist（`packageManifest.test.ts` 看守）。 */

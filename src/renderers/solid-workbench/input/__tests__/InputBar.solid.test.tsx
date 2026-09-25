@@ -343,6 +343,32 @@ describe('SolidInputBar', () => {
     expect(services.commands.calls).toHaveLength(0)
   })
 
+  // #329：默认菜单只列 user 级；内部/开发者命令折叠在「全部」里（切换项进环选，键盘可达）。
+  it('命令菜单默认只列 user 级，「全部」展开后可及内部命令', () => {
+    const identity = createPluginIdentity('test.solid-input', 'solid-input-test')
+    const userCommand = getCommandRegistry().register(identity, {
+      id: 'solid-test-user-command', name: 'zz-user-command', tier: 'user', description: '用户级命令', priority: -300,
+    })
+    const internalCommand = getCommandRegistry().register(identity, {
+      id: 'solid-test-internal-command', name: 'zz-internal-command', description: '内部命令', priority: -300,
+    })
+    try {
+      const { textarea } = renderInput()
+      fireEvent.input(textarea, { target: { value: '/zz-' } })
+
+      expect(screen.getByRole('option', { name: /zz-user-command/ })).toBeTruthy()
+      expect(screen.queryByRole('option', { name: /zz-internal-command/ })).toBeNull()
+
+      fireEvent.click(screen.getByRole('option', { name: /显示全部命令/ }))
+
+      expect(screen.getByRole('option', { name: /zz-internal-command/ })).toBeTruthy()
+      expect(screen.getByRole('option', { name: /zz-user-command/ })).toBeTruthy()
+    } finally {
+      void userCommand.dispose()
+      void internalCommand.dispose()
+    }
+  })
+
   it('实时消费 canonical session commands，且同名插件命令不覆盖会话权威', async () => {
     const { services, textarea } = renderInput()
     const document = projectWorkbench([createWorkbenchEnvelope({

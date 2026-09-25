@@ -1,5 +1,6 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import type { AvailableCommand } from '../../infrastructure/acp/chatContracts.ts'
+import type { CommandTier } from '../../contracts/agentCommandSet.ts'
 import {
   resolveCommandSetDescriptors,
   resolveCommandSetSuggestions,
@@ -13,6 +14,8 @@ export interface CommandSuggestion {
   info: string
   /** 检索关键词（中英双语）；命令名是英文唯一键，中文界面下靠它可达。 */
   keywords?: readonly string[]
+  /** 可见性档；`internal` 折叠在「全部」里（#329）。 */
+  tier?: CommandTier
 }
 
 export function resolveFallbackCommands(): readonly CommandSuggestion[] {
@@ -32,29 +35,33 @@ export function resolveCommandSuggestions(commands: readonly AvailableCommand[])
   return resolveCommandSetSuggestions(commands)
 }
 
-/** 宿主注册表里各命令的检索词，按命令名（小写）索引。 */
-function pluginCommandKeywords(): ReadonlyMap<string, readonly string[]> {
-  const table = new Map<string, readonly string[]>()
+/** 宿主注册表里各命令的检索词与可见性档，按命令名（小写）索引。 */
+function pluginCommandMetadata(): ReadonlyMap<string, { keywords?: readonly string[]; tier: CommandTier }> {
+  const table = new Map<string, { keywords?: readonly string[]; tier: CommandTier }>()
   for (const command of resolveCommandSetDescriptors()) {
-    if (command.keywords) table.set(command.name.toLowerCase(), command.keywords)
+    table.set(command.name.toLowerCase(), {
+      ...(command.keywords ? { keywords: command.keywords } : {}),
+      tier: command.tier ?? 'internal',
+    })
   }
   return table
 }
 
 /**
- * 把宿主检索词按命令名并回一组建议项。
+ * 把宿主注册表里的元数据（检索词 + 可见性档）按命令名并回一组建议项。
  *
- * 会话上报的命令（`session.commands`）只有英文名与描述，没有检索词字段；输入栏在
- * 「agent 上报了命令」这条分支上只用上报项，于是中文界面下 `/新` 又搜不到（#327）。
- * 未在注册表里的命令原样返回，不凭空获得检索词。
+ * 会话上报的命令（`session.commands`）只有英文名与描述，没有这两个字段；输入栏在
+ * 「agent 上报了命令」这条分支上只用上报项，于是中文界面下 `/新` 又搜不到（#327），
+ * 分层也落不了地（#329）。`fallbackTier` 是注册表里查不到该命令时的档位。
  */
-export function attachPluginKeywords(
+export function decorateSuggestions(
   suggestions: readonly CommandSuggestion[],
+  fallbackTier: CommandTier,
 ): CommandSuggestion[] {
-  const keywords = pluginCommandKeywords()
+  const metadata = pluginCommandMetadata()
   return suggestions.map(suggestion => {
-    const matched = keywords.get(suggestion.cmd.slice(1).toLowerCase())
-    return matched ? { ...suggestion, keywords: matched } : suggestion
+    const matched = metadata.get(suggestion.cmd.slice(1).toLowerCase())
+    return { ...suggestion, tier: matched?.tier ?? fallbackTier, ...(matched?.keywords ? { keywords: matched.keywords } : {}) }
   })
 }
 

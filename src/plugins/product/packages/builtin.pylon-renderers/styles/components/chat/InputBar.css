@@ -33,6 +33,10 @@
 }
 .cmd-item:hover, .cmd-item.active { background:var(--bg-hover); }
 .cmd-item:focus-visible { outline:var(--line-width-2) solid var(--accent); outline-offset:calc(var(--line-width-2) * -1); background:var(--bg-hover); }
+/* #329：命令菜单的分层切换项（「显示全部命令」/「只看常用命令」）。带分隔线并弱化字重
+   ——它是面板控件，不是一条可执行命令。 */
+.cmd-toggle { border-top:1px solid var(--border); }
+.cmd-toggle .cmd-name { flex:0 0 auto; width:100%; color:var(--text-dim); font-weight:500; text-align:center; }
 .cmd-name { min-width:0; flex:1 1 auto; overflow:hidden; font-weight:600; color:var(--text); font-family:var(--mono); text-overflow:ellipsis; white-space:nowrap; }
 .cmd-info { min-width:0; flex:0 1 auto; overflow:hidden; color:var(--text-dim); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
 .input-history-hint { position:absolute; bottom:100%; left:0; margin-bottom:8px; padding:5px 10px; color:var(--text-dim); background:var(--bg-panel); border:1px solid var(--border); border-radius: 0; font-size:12px; z-index:9; box-shadow:0 4px 12px rgba(0,0,0,0.12); }

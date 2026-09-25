@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import {
-  attachPluginKeywords,
+  decorateSuggestions,
   filterCommandSuggestions,
   parseSlashCommand,
   resolveFallbackCommands,
@@ -43,16 +43,21 @@ describe('commandRegistry', () => {
     expect(filterCommandSuggestions('/', fallback)).toHaveLength(fallback.length)
   })
 
-  // agent 上报命令时输入栏只用上报项（不上报则用注册表 fallback），故检索词必须
-  // 按命令名并回，否则那条分支上中文又搜不到（#327）。
-  it('把宿主检索词按名并回建议项', () => {
-    const attached = attachPluginKeywords([
+  // agent 上报命令时输入栏只用上报项（不上报则用注册表 fallback），故检索词与分层档
+  // 必须按命令名并回，否则那条分支上中文搜不到（#327）、分层也落不了地（#329）。
+  it('把宿主检索词与可见性档按名并回建议项', () => {
+    const attached = decorateSuggestions([
       { cmd: '/new', args: '', info: '新会话' },
       { cmd: '/vendor-extra', args: '', info: '插件命令' },
-    ])
+    ], 'user')
     expect(attached[0]?.keywords).toEqual(['新会话', '新建', '新建会话'])
-    // 未注册命令不得凭空获得检索词
+    expect(attached[0]?.tier).toBe('user')
+    // 未注册命令不得凭空获得检索词，但按调用方给的兜底档位呈现
     expect(attached[1]?.keywords).toBeUndefined()
+    expect(attached[1]?.tier).toBe('user')
+    // 宿主注册表里的 internal 命令即便被 agent 上报，也仍归 internal
+    const internal = decorateSuggestions([{ cmd: '/browser.agent-click', args: '', info: 'x' }], 'user')
+    expect(internal[0]?.tier).toBe('internal')
     expect(filterCommandSuggestions('/新', attached).map(command => command.cmd)).toEqual(['/new'])
   })
 })

@@ -3,7 +3,7 @@ import {
   resolveFallbackCommands,
   filterCommandSuggestions,
   parseSlashCommand,
-  attachPluginKeywords,
+  decorateSuggestions,
   type CommandSuggestion,
 } from '../../../components/chat/commandRegistry.ts'
 import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
@@ -41,6 +41,11 @@ export interface SolidInputBarProps {
     submitLabel?: Accessor<string>
   } | undefined)
 }
+
+/** 命令面板的一行：命令项，或「全部/常用」分层切换项（切换项进环选，键盘可达）。 */
+type PaletteRow =
+  | { kind: 'command'; key: string; suggestion: CommandSuggestion }
+  | { kind: 'toggle'; key: string }
 
 export function SolidInputBar(props: SolidInputBarProps) {
   const workbench = useSolidWorkbench()
@@ -111,6 +116,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   onMount(() => queueMicrotask(resizeInput))
 
   const [commandRevision, setCommandRevision] = createSignal(0)
+  const [showAllCommands, setShowAllCommands] = createSignal(false)
   const suggestions = createMemo(() => {
     commandRevision()
     const sessionCommands = runtime().document?.session?.commands ?? []
@@ -119,7 +125,31 @@ export function SolidInputBar(props: SolidInputBarProps) {
       : resolveFallbackCommands()
     return filterCommandSuggestions(draft(), source)
   })
-  const suggestionList = () => suggestions() ?? []
+  const userSuggestions = createMemo(() => suggestions().filter(suggestion => suggestion.tier !== 'internal'))
+  /** #329 分层：默认只列 user 级；内部/开发者命令折叠在「全部」里。
+   *  但用户已经明确在敲某条内部命令时（user 层无命中而整体有命中）不挡路——默认层是为了
+   *  「别让内部命令淹没日常命令」，不是「搜到了也不给用」。 */
+  const suggestionList = createMemo(() => {
+    const all = suggestions()
+    if (showAllCommands()) return all
+    const user = userSuggestions()
+    return user.length > 0 ? user : all
+  })
+  const hiddenInternalCount = createMemo(() => suggestions().length - userSuggestions().length)
+  /** 面板行 = 命令项 + 一个「全部/常用」切换项（进环选，键盘可达）。 */
+  const paletteRows = createMemo<PaletteRow[]>(() => {
+    const rows: PaletteRow[] = suggestionList().map(suggestion => ({ kind: 'command', key: `cmd:${suggestion.cmd}`, suggestion }))
+    if (hiddenInternalCount() > 0 || showAllCommands()) rows.push({ kind: 'toggle', key: 'toggle-layer' })
+    return rows
+  })
+  const toggleCommandLayer = () => {
+    setShowAllCommands(current => !current)
+    setCommandIndex(0)
+  }
+  // 列表长度会随查询/分层切换变化：索引越界会让「回车」落到面板外（被当成普通消息发出）。
+  createEffect(() => {
+    if (commandIndex() >= paletteRows().length) setCommandIndex(0)
+  })
   const durableHistory = createMemo(() => {
     const document = runtime().document
     if (!document || document.sessionId !== sessionId()) return [] as readonly string[]
@@ -430,27 +460,32 @@ export function SolidInputBar(props: SolidInputBarProps) {
       void cancel()
       return
     }
-    if (suggestionList().length > 0) {
+    if (paletteRows().length > 0) {
       if (event.key === 'Enter' && !event.shiftKey && !composing) {
-        const suggestion = suggestionList()[commandIndex()]
+        const row = paletteRows()[commandIndex()]
+        if (row?.kind === 'toggle') {
+          event.preventDefault()
+          toggleCommandLayer()
+          return
+        }
         const parsed = parseSlashCommand(draft())
-        if (suggestion && parsed?.name.toLowerCase() !== suggestion.cmd.toLowerCase()) {
+        if (row && parsed?.name.toLowerCase() !== row.suggestion.cmd.toLowerCase()) {
           event.preventDefault()
           // 中文名（`/模型 deepseek`）永远走这条补全路径，必须把已输入参数带过去——
           // 否则用户敲的参数会被提示串顶掉，且不可撤销（#327）。
-          applySuggestion(suggestion, parsed?.args)
+          applySuggestion(row.suggestion, parsed?.args)
           return
         }
       }
       if (event.key === 'Tab') {
         event.preventDefault()
-        const suggestion = suggestionList()[commandIndex()]
-        if (suggestion) applySuggestion(suggestion)
+        const row = paletteRows()[commandIndex()]
+        if (row?.kind === 'command') applySuggestion(row.suggestion)
         return
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setCommandIndex(index => (index + 1) % suggestionList().length)
+        setCommandIndex(index => (index + 1) % paletteRows().length)
         return
       }
       if (event.key === 'ArrowUp') {
@@ -511,6 +546,11 @@ export function SolidInputBar(props: SolidInputBarProps) {
     textarea?.focus()
   }
 
+  /** 点选/键盘补全共用：把草稿里已输入的参数一并带过去。 */
+  const pickSuggestion = (suggestion: CommandSuggestion) => {
+    applySuggestion(suggestion, parseSlashCommand(draft())?.args)
+  }
+
   return (
     <div
       ref={inputBar}
@@ -521,19 +561,29 @@ export function SolidInputBar(props: SolidInputBarProps) {
           communicates the affordance, so keyboard-hint chrome would make the
           centered composer look like a second instruction panel. */}
       <Show when={sendError()}>{error => <div class="input-error" role="alert">{error()}</div>}</Show>
-      <Show when={!emptyState() && suggestionList().length > 0}>
+      <Show when={!emptyState() && paletteRows().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
-          <For each={suggestionList()}>{(suggestion, index) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={index() === commandIndex()}
-              class={`cmd-item${index() === commandIndex() ? ' active' : ''}`}
-              onClick={() => applySuggestion(suggestion)}
-            >
-              <span class="cmd-name">{suggestion.cmd}{suggestion.args}</span>
-              <span class="cmd-info">{suggestion.info}</span>
-            </button>
+          <For each={paletteRows()}>{(row, index) => (
+            row.kind === 'toggle'
+              ? <button
+                  type="button"
+                  role="option"
+                  aria-selected={index() === commandIndex()}
+                  class={`cmd-item cmd-toggle${index() === commandIndex() ? ' active' : ''}`}
+                  onClick={toggleCommandLayer}
+                >
+                  <span class="cmd-name">{showAllCommands() ? '只看常用命令' : `显示全部命令（含内部 ${hiddenInternalCount()} 条）`}</span>
+                </button>
+              : <button
+                  type="button"
+                  role="option"
+                  aria-selected={index() === commandIndex()}
+                  class={`cmd-item${index() === commandIndex() ? ' active' : ''}`}
+                  onClick={() => pickSuggestion(row.suggestion)}
+                >
+                  <span class="cmd-name">{row.suggestion.cmd}{row.suggestion.args}</span>
+                  <span class="cmd-info">{row.suggestion.info}</span>
+                </button>
           )}</For>
         </div>
       </Show>
@@ -613,16 +663,17 @@ export function SolidInputBar(props: SolidInputBarProps) {
   )
 }
 
-/** 会话上报命令 → 建议项。宿主注册表里声明的检索词按命令名并回：只靠上报字段，
- *  中文界面下 `/新` 搜不到英文命令名（#327）。 */
+/** 会话上报命令 → 建议项。宿主注册表里的元数据（检索词 + 可见性档）按命令名并回：
+ *  只靠上报字段，中文界面下 `/新` 搜不到英文命令名（#327）、分层也落不了地（#329）。
+ *  agent 主动宣告的命令默认按 user 级呈现——那是它要用户用的命令。 */
 function sessionCommandSuggestions(commands: readonly SessionCommand[]): readonly CommandSuggestion[] {
-  return attachPluginKeywords(commands
+  return decorateSuggestions(commands
     .filter(command => command.availability !== false && command.availability !== 'unavailable')
     .map(command => ({
       cmd: command.name.startsWith('/') ? command.name : `/${command.name}`,
       args: command.inputHint ?? '',
       info: command.description ?? command.capability ?? '会话命令',
-    })))
+    })), 'user')
 }
 
 function sameAttachments(left: readonly WorkbenchAttachment[], right: readonly WorkbenchAttachment[]): boolean {
