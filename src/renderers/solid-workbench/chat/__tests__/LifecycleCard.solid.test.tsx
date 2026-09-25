@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSignal } from 'solid-js'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from '../LifecycleCard.solid.tsx'
 import type { LifecycleState } from '../../../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { explainErrorCode } from '../../../../errorCodeExplanations.ts'
 
 afterEach(() => cleanup())
 
@@ -107,6 +108,25 @@ describe('SolidLifecycleCard (C13)', () => {
     }} />)
     expect(error.container.querySelector('.lifecycle-metadata .tool-object-inspector')).toHaveTextContent('solid')
     expect(error.container.querySelector('.lifecycle-metadata pre')).toBeNull()
+  })
+
+  // #325：技术详情区的裸码旁边要有人话解释；未知码保留原文、不渲染空元素。
+  it('技术详情给已知码配人话解释，未知码不渲染解释元素', () => {
+    const known = render(() => <SolidSystemErrorCard error={{
+      userSummary: 'Agent 起不来', code: 'agent_executable_missing', recoverability: 'none',
+      technicalMessage: 'spawn failed',
+    }} appearance={{ technicalDetailsExpanded: true }} />)
+    const meaning = known.container.querySelector('.lifecycle-code-meaning')
+    expect(meaning).not.toBeNull()
+    expect(meaning!.textContent).toContain(explainErrorCode('agent_executable_missing')!.summary)
+    // 含 hint 的码把「可以这样处理」一并带上
+    expect(meaning!.textContent).toContain(explainErrorCode('agent_executable_missing')!.hint!)
+    known.unmount()
+
+    const unknown = render(() => <SolidSystemErrorCard error={{
+      userSummary: '未知失败', code: 'brand_new_failure', recoverability: 'none',
+    }} appearance={{ technicalDetailsExpanded: true }} />)
+    expect(unknown.container.querySelector('.lifecycle-code-meaning')).toBeNull()
   })
 
   it('does not repeat notice title fields inside technical details', () => {

@@ -318,8 +318,10 @@ export function createAgentClient(transport: ClientTransport) {
     /** 施工文档 §4.5：隔离连接测试（不改 active/runtime）。 */
     testAgentConnection: (agentId: string): Promise<AgentConnectionTestResult> =>
       transport.invoke('test_agent_connection', { agentId }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
-    detectAgentRuntimes: (detectorIds: readonly string[]): Promise<AgentDetectionReport> =>
-      transport.invoke('detect_agent_runtimes', { detectorIds }).then(normalizeAgentDetectionReport),
+    /** `force` 绕过后端的三态 TTL 缓存（Success 600s / Unknown 60s / Failure 15s）——
+     *  「重新探测」必须真的重跑探测，否则用户点了没反应（#325）。 */
+    detectAgentRuntimes: (detectorIds: readonly string[], force = false): Promise<AgentDetectionReport> =>
+      transport.invoke('detect_agent_runtimes', { detectorIds, force }).then(normalizeAgentDetectionReport),
     testAgentCandidate: (agentId: string, agent: { name: string; provider: string; transport: string; exe: string; args: string[] }): Promise<AgentConnectionTestResult> =>
       transport.invoke('test_agent_candidate', { agentId, agent }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
     /** OBS-01/02 读取端：当前 active agent 的 ACP wire 记录快照（脱敏、有界）。 */

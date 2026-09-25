@@ -1512,7 +1512,8 @@ pub fn run() {
             }
         } else {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon has no configured Agent; start in disconnected mode");
+            // #326：零 Agent 是合法首跑状态（内嵌兜底即零 Agent），不是异常——故为中性提示。
+            eprintln!("Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)");
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);

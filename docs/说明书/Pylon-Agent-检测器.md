@@ -15,6 +15,23 @@ pylon-detect help | --help | --version
 - `--json` 输出稳定的 `{ "candidates": [...] }` 文档。
 - `--diagnose` 打印一份可直接复制上报的诊断报告：环境部分（含 PATH 注入差异等）来自 `agent_diagnostics`，per-provider 部分是 preflight 检查项与失败原因。
 
+## 诊断的失败可解释性（#325）
+
+探测失败以 `diagnostics[]` 上报，每条带 `code`（机器可读，如 `version_probe_spawn_failed`、
+`version_probe_timeout`）、`stage`、`message`（含系统级原文）与 `retryable`。**#325 起另有结构化归因**：
+
+- `candidateId`：该诊断属于哪个候选（对齐 `candidates[].candidateId`）。探测类诊断必定有值；
+  选择/预算类诊断（`unknown_detector_id`、`candidate_limit_reached`、扫描级
+  `detection_budget_exhausted`）没有候选上下文，为 `null`。
+- `executable`：被探测的可执行文件绝对路径。探测类诊断必定有值；预算耗尽这类「未真正探测」
+  的诊断即便发生在某个候选的探测包装里也不带路径——那是对全局预算的陈述，不是关于这个
+  可执行文件的事实。
+
+前端据此把失败原因挂到对应的 Agent 卡（此前只能从 `message` 里正则抠路径），并展示
+「码 + 一句话解释」（解释取自前端单源码表 `src/errorCodeExplanations.ts`）。设置页的
+「重新探测」与卡片上的「重试探测」都**强制刷新**（`force: true`）——否则可能命中 TTL 缓存，
+用户点了没有实际重探。
+
 配置证据只读取 catalog 明确列出的相对文件，单文件上限 256 KiB，不递归扫描。JSON/YAML 解析成功后仅输出命中的字段名（例如 `provider`、`model`），不输出字段值，因此 API key、token 和模型服务凭据不会进入 GUI、CLI 结果或诊断报告。
 
 开发环境运行：

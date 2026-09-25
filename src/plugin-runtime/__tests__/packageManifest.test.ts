@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   parsePylonPluginManifest,
   PluginManifestError,
+  PYLON_PLUGIN_API_LATEST,
+  PYLON_PLUGIN_API_MIN,
+  PYLON_PLUGIN_API_SUPPORTED,
   PYLON_PLUGIN_API_VERSION,
   PYLON_PLUGIN_CAPABILITIES,
 } from '../packageManifest.ts'
@@ -133,9 +136,24 @@ describe('api=1.2 package manifest (capabilities)', () => {
     expect(() => parsePylonPluginManifest({ ...valid, api: '1.4' })).toThrow(/仅支持/)
   })
 
+  // 结构性看守（逐版本验收断言只覆盖到「有写一条用例」的版本）：allowlist 必须两端都在、
+  // 无重复、且**每个历史 minor 都还在**——`PYLON_PLUGIN_API_SUPPORTED` 末尾写的是
+  // LATEST，升版时最容易把上一个 latest 顶掉（2.3→2.4 就踩过一次）。
+  it('allowlist 结构不变量：含最早/最新版、无重复、历史 minor 不丢', () => {
+    expect(PYLON_PLUGIN_API_SUPPORTED).toContain(PYLON_PLUGIN_API_MIN)
+    expect(PYLON_PLUGIN_API_SUPPORTED).toContain(PYLON_PLUGIN_API_LATEST)
+    expect(new Set(PYLON_PLUGIN_API_SUPPORTED).size).toBe(PYLON_PLUGIN_API_SUPPORTED.length)
+    for (const version of ['1.0', '1.1', '1.2', '1.3', '2.0', '2.1', '2.2', '2.3']) {
+      expect(PYLON_PLUGIN_API_SUPPORTED).toContain(version)
+    }
+    for (const version of PYLON_PLUGIN_API_SUPPORTED) {
+      expect(parsePylonPluginManifest({ ...valid, api: version }).api).toBe(version)
+    }
+  })
+
   it('accepts api=2.0（左栏贡献改按 region 注册的破坏性主轴）且仍拒绝未知更高版本', () => {
     expect(parsePylonPluginManifest({ ...valid, api: '2.0' }).api).toBe('2.0')
-    expect(() => parsePylonPluginManifest({ ...valid, api: '2.4' })).toThrow(/仅支持/)
+    expect(() => parsePylonPluginManifest({ ...valid, api: '2.5' })).toThrow(/仅支持/)
     // 1.x 清单继续合法：旧版本插件在新宿主继续激活（allowlist 只增不减）。
     expect(parsePylonPluginManifest({ ...valid, api: '1.0' }).api).toBe('1.0')
     // 破坏性主轴不改变 1.2 起合法的字段形状：2.0 清单同样可声明 capabilities。
@@ -156,7 +174,13 @@ describe('api=1.2 package manifest (capabilities)', () => {
 
   it('accepts api=2.3（会话置顶，纯加法）', () => {
     expect(parsePylonPluginManifest({ ...valid, api: '2.3' }).api).toBe('2.3')
-    expect(() => parsePylonPluginManifest({ ...valid, api: '2.4' })).toThrow(/仅支持/)
+  })
+
+  it('accepts api=2.4（命令描述符新增检索词 keywords，纯加法）且仍拒绝未知更高版本', () => {
+    expect(parsePylonPluginManifest({ ...valid, api: '2.4' }).api).toBe('2.4')
+    // allowlist 只增不减：升到 2.4 后 2.3 清单必须继续合法。
+    expect(parsePylonPluginManifest({ ...valid, api: '2.3' }).api).toBe('2.3')
+    expect(() => parsePylonPluginManifest({ ...valid, api: '2.5' })).toThrow(/仅支持/)
   })
 
   it('accepts and validates dangerous hook declarations', () => {

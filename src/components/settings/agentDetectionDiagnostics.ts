@@ -1,4 +1,5 @@
 import type { AgentDetectionDiagnostic } from '../../domains/agent/agentDetector.ts'
+import { explainErrorCode } from '../../errorCodeExplanations.ts'
 
 /**
  * #116 子项 10：Agent 探测诊断的**呈现口径**。
@@ -10,6 +11,9 @@ import type { AgentDetectionDiagnostic } from '../../domains/agent/agentDetector
  * 本模块只做呈现映射，**不改探测算法**（那是 Rust 域，见 issue 边界）：
  * - 用户可见：`哪条探测 · 哪个候选 · 本地化原因`；
  * - 内部码与系统级原文经 `raw` 交给运行日志 / Runtime sheet，UI 不再出现。
+ *
+ * 候选与原因都走**结构化字段**（`executable` / 共享码表）：正则与本地码表副本分别带来
+ * 「后端改文案即静默失效」与「两处各自漂移」两个问题（#325）。
  */
 
 /** 探测阶段 → 可读名。未知阶段一律落到泛称，避免内部 stage id 泄漏。 */
@@ -18,18 +22,17 @@ const STAGE_LABELS: Readonly<Record<string, string>> = {
 }
 const STAGE_FALLBACK = '运行时探测'
 
-/** 内部诊断码 → 本地化失败原因（与 pylon-core/src/agent_detection.rs 的产出码一一对应）。 */
-const CODE_REASONS: Readonly<Record<string, string>> = {
-  detection_budget_exhausted: '探测总预算已耗尽，未启动版本探测',
-  version_probe_spawn_failed: '系统拒绝执行该程序（不是有效的可执行文件）',
-  version_probe_timeout: '执行超时，未在预算内返回',
-  version_probe_wait_failed: '等待子进程结束时失败',
-  version_probe_non_zero: '程序返回了非零退出码',
-  version_probe_empty: '执行成功但没有输出版本文本',
-}
+/**
+ * 内部诊断码 → 本地化失败原因。
+ *
+ * 解释取自全站单源码表 `src/errorCodeExplanations.ts`（#325）——此前这里是该词表的
+ * 手抄副本，两处各自漂移无人看守。表里没有的码走泛称，绝不把内部码摆到 UI 上。
+ */
 const REASON_FALLBACK = '探测失败（完整原因见运行日志）'
+const reasonFor = (code: string) => explainErrorCode(code)?.summary ?? REASON_FALLBACK
 
-/** 后端 message 里的候选路径（`无法执行 <exe> 版本探针: …`）。 */
+/** 兜底：从后端 message 里抠候选路径（`无法执行 <exe> 版本探针: …`）。
+ *  首选 `diagnostic.executable`（#325 的结构化归因）——正则只在旧载荷缺该字段时兜底。 */
 const CANDIDATE_PATTERN = /(?:[A-Za-z]:[\\/]|\/)[^\s:：]+/
 
 /** 候选路径取不到时退回探测器的短名（`builtin.detector.hermes` → `hermes`）。 */
@@ -50,9 +53,10 @@ export function presentDetectionDiagnostic(
   diagnostic: AgentDetectionDiagnostic,
 ): DetectionDiagnosticPresentation {
   const stage = STAGE_LABELS[diagnostic.stage] ?? STAGE_FALLBACK
-  const candidate = CANDIDATE_PATTERN.exec(diagnostic.message)?.[0]
-    ?? detectorShortName(diagnostic.detectorId)
-  const reason = CODE_REASONS[diagnostic.code] ?? REASON_FALLBACK
+  const candidate = diagnostic.executable
+    ?? CANDIDATE_PATTERN.exec(diagnostic.message)?.[0]
+    ?? detectorShortName(diagnostic.detectorId ?? undefined)
+  const reason = reasonFor(diagnostic.code)
   const detail = diagnostic.retryable ? `${reason}（可重试）` : reason
   return {
     text: [stage, candidate, detail].filter((part): part is string => Boolean(part)).join(' · '),

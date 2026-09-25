@@ -1,11 +1,12 @@
 //! #155 T3 在途片段：独立于 canonical 历史的追加式暂存与恢复。
 //!
 //! 只保存已完成凭据脱敏的 raw。读取方不得把本表混入 evt_* 历史；正式 batch
-//! 追加与对应片段删除由 ingest 的同一 transaction 完成（ADR-0026）。
+//! 追加与对应片段删除由 ingest 的同一 transaction 完成（ADR-0027）。
 
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 use super::fold::{foldable_delta_base, raw_payload_bytes, MAX_FOLD_BYTES};
 use super::normalize::{normalize_kernel_event, now_millis};
@@ -31,7 +32,9 @@ pub struct DraftFragmentInput {
 
 #[derive(Debug, Clone)]
 pub struct DraftCommitChunk {
-    pub raw_payload: Value,
+    /// 与 #334 P2 的 payload Arc 共享一致：dispatcher 侧从在途批次零拷贝携带，
+    /// 提交事务内仍按原样脱敏/写入。
+    pub raw_payload: Arc<Value>,
     pub received_at: String,
 }
 
@@ -43,7 +46,8 @@ pub struct DraftCandidate {
 }
 
 /// 与正式写侧共用 normalize/fold 判据，避免 dispatcher 另写一套身份或预算规则。
-pub fn draft_candidate(owner: &DurableSessionOwner, raw: Value) -> Option<DraftCandidate> {
+/// 入参沿用 #334 P2 的 Arc 共享——调用方从在途批次零拷贝传入。
+pub fn draft_candidate(owner: &DurableSessionOwner, raw: Arc<Value>) -> Option<DraftCandidate> {
     let row = normalize_kernel_event(
         KernelEventInput {
             owner: owner.clone(),
@@ -174,7 +178,7 @@ pub(super) fn verify_draft_commit_prefix(
             };
             if fragment.client_generation != input.client_generation
                 || fragment.remote_session_id != input.remote_session_id
-                || redact_journal_credentials(input.raw_payload.clone(), false) != raw
+                || redact_journal_credentials((*input.raw_payload).clone(), false) != raw
             {
                 return Err(EventError::Invalid(format!(
                     "draft commit prefix diverges at chunk {offset}"
@@ -222,7 +226,7 @@ impl EventRepo {
                     remote_session_id: fragment.remote_session_id.clone(),
                     client_generation: fragment.client_generation,
                     received_at: fragment.first_received_at.clone(),
-                    raw_payload,
+                    raw_payload: Arc::new(raw_payload),
                     recovery_import: false,
                 });
             }
@@ -449,10 +453,10 @@ mod tests {
             remote_session_id: Some("remote-s".into()),
             client_generation: 2,
             received_at: "2026-09-25T00:00:00.000Z".into(),
-            raw_payload: serde_json::json!({
+            raw_payload: Arc::new(serde_json::json!({
                 "update": {"sessionUpdate":"agent_message_chunk", "content":{"text":text}},
                 "secret": "must-not-persist"
-            }),
+            })),
             recovery_import: false,
         }
     }

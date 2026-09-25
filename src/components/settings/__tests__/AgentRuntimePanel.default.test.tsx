@@ -6,6 +6,7 @@ import AgentRuntimePanel from '../AgentRuntimePanel'
 import { useIdentityStore } from '../../../identityStore'
 import { useWorkspaceStore } from '../../../workspaceStore'
 import { resetStores } from '../../../test/resetStores'
+import { explainErrorCode } from '../../../errorCodeExplanations.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
@@ -57,6 +58,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', {
       detectorIds: ['builtin.detector.claude-code', 'builtin.detector.codex', 'builtin.detector.hermes', 'builtin.detector.peri'],
+      // 自动扫描不强制（可吃 TTL 缓存）；用户点「重新探测」才 force=true。
+      force: false,
     }))
   })
 
@@ -247,6 +250,55 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     }))
   })
 
+  // #325：探测失败的真实原因必须落到**那张 Agent 卡**上——此前卡片只有「未激活」，
+  // 原因（version_probe_spawn_failed / os error 193）只进控制台。
+  it('探测失败的原因按候选归因显示在 Agent 卡上，且「重试探测」强制重跑', async () => {
+    fakeInvoke = new NullFallbackFakeInvoke()
+    invoke.mockReset()
+    invoke.mockImplementation((command: string, args?: Record<string, unknown>) => fakeInvoke.invoke(command, args))
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({
+        candidates: [{
+          candidateId: 'detected:peri',
+          detectorId: 'builtin.detector.peri',
+          provider: 'peri',
+          suggestedAgentId: 'peri',
+          name: 'Peri',
+          executable: 'C:\\broken\\peri.exe',
+          args: [],
+          evidence: [],
+          identityConfidence: 'medium',
+          protocolAvailability: 'not_tested',
+          alreadyImportedAgentId: 'peri',
+          warnings: [],
+        }],
+        diagnostics: [{
+          code: 'version_probe_spawn_failed',
+          stage: 'version_probe',
+          detectorId: 'builtin.detector.peri',
+          candidateId: 'detected:peri',
+          executable: 'C:\\broken\\peri.exe',
+          message: '无法执行 C:\\broken\\peri.exe 版本探针: os error 193',
+          retryable: false,
+        }],
+        elapsedMs: 12,
+        truncated: false,
+      }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+    })
+    render(<AgentRuntimePanel />)
+
+    const failure = await screen.findByText(/探测失败/)
+    const card = failure.closest('.agent-runtime-card') as HTMLElement
+    expect(card).not.toBeNull()
+    expect(within(card).getByText('version_probe_spawn_failed')).toBeInTheDocument()
+    expect(within(card).getByText(new RegExp(explainErrorCode('version_probe_spawn_failed')!.summary))).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole('button', { name: '重试探测' }))
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', expect.objectContaining({ force: true })))
+  })
+
   it('候选编辑后的参数数组在验证与导入之间保持一致', async () => {
     const candidate = {
       candidateId: 'detected:one',
@@ -281,7 +333,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     // #116 子项 10：诊断在 UI 上只呈现「哪条探测 · 哪个候选 · 本地化原因」；
     // 内部码与后端原文改由运行日志 / Runtime sheet 承载（见 agentDetectionDiagnostics 单测）。
     expect(screen.queryByText(/version_probe_timeout/)).not.toBeInTheDocument()
-    expect(screen.getByText('版本探测 · test · 执行超时，未在预算内返回（可重试）')).toBeInTheDocument()
+    expect(screen.getByText(`版本探测 · test · ${explainErrorCode('version_probe_timeout')!.summary}（可重试）`)).toBeInTheDocument()
     fireEvent.click(within(candidateCard).getByRole('button', { name: '添加参数' }))
     fireEvent.click(within(candidateCard).getByRole('button', { name: '添加参数' }))
     fireEvent.change(within(candidateCard).getByLabelText('Detected 参数 4'), { target: { value: 'a"b' } })

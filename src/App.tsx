@@ -176,7 +176,9 @@ export default function App() {
     }).length > 0
     : false
   const agents = useIdentityStore(s => s.agents)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  // #326：空串 = 没有 Agent（零 Agent 首跑）。不再回落硬编码 'peri'——那会凭空造出一个
+  // 不存在的 Agent（sheet 聚焦、权限切片、会话归属都按它算）。
+  const activeAgent = useIdentityStore(s => s.activeAgent)
   const prevActiveAgentRef = useRef<string>(activeAgent)
 
   useEffect(() => {
@@ -324,7 +326,7 @@ export default function App() {
       dispatch: action => useRuntimeStore.getState().setPermission(action),
       getState: () => useRuntimeStore.getState().permission,
       // P1-1：controller 只作用在当前 agent 的权限切片
-      getCurrentAgentId: () => useIdentityStore.getState().activeAgent || 'peri',
+      getCurrentAgentId: () => useIdentityStore.getState().activeAgent,
       listen: (event, handler) => listen(event, handler),
       invoke: tauriInvokeTransport,
     })

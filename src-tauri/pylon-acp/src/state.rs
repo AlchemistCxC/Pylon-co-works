@@ -124,7 +124,18 @@ impl AcpSessionState {
         else {
             return Vec::new();
         };
-        let Some(update) = params.get("update").and_then(serde_json::Value::as_object) else {
+        let Some(update) = params.get("update") else {
+            return Vec::new();
+        };
+        self.apply_session_update(update)
+    }
+
+    /// #334/P2：session/update reducer 的零拷贝入口——调用方已持有拆包后的
+    /// `update` 借用时直接施加，避免为喂 [`Self::apply`] 而按 `{"update": ..}`
+    /// 重包一份整树深拷贝（逐帧热路径成本）。与 `apply` 的 update 处理段共享
+    /// 同一实现；非对象 update 静默忽略（与原 `as_object` 失败路径一致）。
+    pub fn apply_session_update(&mut self, update: &serde_json::Value) -> Vec<AcpStateDelta> {
+        let Some(update) = update.as_object() else {
             return Vec::new();
         };
         let variant = update
@@ -157,17 +168,45 @@ impl AcpSessionState {
                     .or_else(|| update.get("raw_output"))
                     .cloned();
                 let mut next: serde_json::Value = update.clone().into();
-                if let Some(previous) = self.tools.get(&id) {
-                    let old = previous
-                        .get("rawOutput")
-                        .or_else(|| previous.get("raw_output"));
+                if let Some(previous) = self.tools.get_mut(&id) {
                     let key = if next.get("rawOutput").is_some() {
                         "rawOutput"
                     } else {
                         "raw_output"
                     };
-                    if let (Some(old), Some(new)) = (old, next.get_mut(key)) {
-                        append_output(old, new);
+                    // 与原读取路径同序：previous 先 rawOutput 后 raw_output（borrow
+                    // 校验下 or_else 闭包不可用，match 等价）。
+                    let previous_out = match previous.get_mut("rawOutput") {
+                        Some(slot) => Some(slot),
+                        None => previous.get_mut("raw_output"),
+                    };
+                    if let (Some(previous_out), Some(next_out)) = (previous_out, next.get_mut(key))
+                    {
+                        // P5（#334）：同型 String/Array 才拼接。已累积值先
+                        // `mem::take` 移出（零拷贝）、原地 push_str/extend 吃进
+                        // 增量后放回 `next`——不再克隆整份已累积串（每帧 O(K)
+                        // 克隆 → 摊销 O(增量)，O(K²) 实证见 frame_path_bench）。
+                        // 非同型保持原 `_ => {}` 行为：`next` 自带值原样生效。
+                        if matches!(
+                            (&*previous_out, &*next_out),
+                            (serde_json::Value::String(_), serde_json::Value::String(_))
+                                | (serde_json::Value::Array(_), serde_json::Value::Array(_))
+                        ) {
+                            let mut accumulated = std::mem::take(previous_out);
+                            match (&mut accumulated, std::mem::take(next_out)) {
+                                (
+                                    serde_json::Value::String(acc),
+                                    serde_json::Value::String(part),
+                                ) => {
+                                    acc.push_str(&part);
+                                }
+                                (serde_json::Value::Array(acc), serde_json::Value::Array(part)) => {
+                                    acc.extend(part);
+                                }
+                                _ => unreachable!("上方 matches! 已约束同型"),
+                            }
+                            *next_out = accumulated;
+                        }
                     }
                 }
                 self.tools.insert(id.clone(), next);
@@ -269,22 +308,6 @@ fn string(map: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Op
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     })
-}
-
-fn append_output(previous: &serde_json::Value, next: &mut serde_json::Value) {
-    match (previous, &*next) {
-        (serde_json::Value::Array(old), serde_json::Value::Array(new)) => {
-            let mut combined = old.clone();
-            combined.extend(new.iter().cloned());
-            *next = serde_json::Value::Array(combined);
-        }
-        (serde_json::Value::String(old), serde_json::Value::String(new)) => {
-            let mut combined = old.clone();
-            combined.push_str(new);
-            *next = serde_json::Value::String(combined);
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

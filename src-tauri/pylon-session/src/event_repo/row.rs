@@ -111,7 +111,10 @@ pub(super) struct KernelEventInput {
     pub(super) remote_session_id: Option<String>,
     pub(super) client_generation: i64,
     pub(super) received_at: String,
-    pub(super) raw_payload: serde_json::Value,
+    /// #334/P2：dispatcher 逐帧热路径把同一份 payload 以 `Arc<Value>` 共享给
+    /// ingest 与 publish（ingest 先行、publish 随后取回唯一引用），故此处共享
+    /// 传入而非消费式拥有；normalize 取 redact 所有权时才解包（计数非 1 再克隆）。
+    pub(super) raw_payload: std::sync::Arc<serde_json::Value>,
     pub(super) recovery_import: bool,
 }
 

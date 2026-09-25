@@ -220,6 +220,9 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const [reloading, setReloading] = useState(false)
   const [dictFeedback, setDictFeedback] = useState<string | null>(null)
   const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
+  // #326：零 Agent 是合法首跑状态。此前这里回落硬编码 'peri'——会在没有该 Agent 时
+  // 显示一个不存在的名字/ID（与「预置必然失败的占位 Agent」同一类病），改为如实空态。
+  const activeAgentEntry = agents.find(agent => agent.id === activeAgent)
 
   const reportSettingsError = (action: string, error: unknown, agentId?: string) => reportRuntimeError(action, error, agentId, {
     key: `settings:${action}:${agentId ?? 'app'}`,
@@ -650,13 +653,15 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
                 <span className={`agent-status-indicator is-${currentStatus.status}`} aria-hidden="true" />
                 <div>
                   <span className="agent-settings-kicker">当前 Agent</span>
-                  <strong>{agents.find(agent => agent.id === activeAgent)?.name || activeAgent || 'peri'}</strong>
-                  <span>{activeAgent || 'peri'}</span>
-                  <span className="agent-settings-status-copy">状态：{statusLabel(currentStatus.status)}</span>
+                  <strong>{activeAgentEntry?.name || activeAgent || '尚未配置 Agent'}</strong>
+                  {activeAgent
+                    ? <span>{activeAgent}</span>
+                    : <span>在下方「发现与管理 Agent」新建后即可连接</span>}
+                  <span className="agent-settings-status-copy">状态：{activeAgent ? statusLabel(currentStatus.status) : '未配置'}</span>
                 </div>
               </div>
               <div className="agent-settings-actions">
-                <button type="button" className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
+                <button type="button" className="ps-btn sm primary" disabled={reconnectPending || !activeAgent} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
                 <button type="button" className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
               </div>
               <dl className="agent-settings-facts">

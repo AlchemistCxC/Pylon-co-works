@@ -154,7 +154,7 @@ my-plugin/
 | `id` | 是 | 正则 `^[a-z0-9]+(?:[.-][a-z0-9]+)*$` |
 | `name` | 是 | 非空显示名称 |
 | `version` | 是 | 非空版本；Native Store 接受字母数字及 `.`、`+`、`-` 分段 |
-| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` |
+| `api` | 是 | 当前接受 `1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` / `2.4` |
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
@@ -363,6 +363,24 @@ commands.describe(id)
 
 `name` 不得以 `/` 开头；执行时可通过 id、name 或 alias 解析。
 
+命令描述符可选字段：`aliases`（**执行别名**——`commands.execute('/别名')` 与 CLI 面可直接命中）、
+`keywords`（**检索关键词**）、`tier`（**可见性档** `user` / `internal`。两者自 API 2.4 起为契约表面）、
+`inputHint`（输入建议里展示的参数提示）、`agentPromptSnippet`（注入 agent 的命令行文本，
+缺省由宿主按 name/description 生成）、`permission`（`read` / `edit` / `execute` / `gate`，仅声明用）。
+
+`tier` 决定命令进不进输入框 `/` 菜单的**默认层**：缺省 `internal`，内部/开发者命令（带原始 JSON
+参数签名的那类）折叠在菜单底部的「显示全部命令」里；`user` 级进默认层。**默认 internal 意味着
+插件贡献的命令默认不出现在默认菜单**——要让它被日常用户看到就显式声明 `tier: 'user'`。
+分层只作用于人看的菜单：`buildAgentCommandPrompt` 的注入面与执行面继续看到全部命令
+（**按 priority 截断，不按 tier 过滤**——预算内可能装不下全部，故「全量」只到预算边界）。
+
+`keywords` 只影响输入框 `/` 建议列表的过滤（大小写不敏感子串匹配），**不参与执行解析**。
+命令名是英文唯一键，中文界面下用户无法用母语检索；插件应声明母语检索词让命令可被搜到，
+例如 `keywords: ['诊断', 'health']`。`aliases` 与 `keywords` 是不同的两根轴：前者进执行命名空间
+（但输入框的 Enter 补全只会把它改写成规范命令名，`/别名` 回车不会直接执行），后者只进检索面。
+命令描述符是运行时注册的，不在 manifest 内，故宿主对这两个字段**不做 API 版本闸门**——
+`api` 声明低版本并不阻止使用它们，版本号只标注契约表面自哪个 minor 起存在。
+
 ### 6.2 Hooks
 
 ```js
@@ -498,6 +516,10 @@ launch: {
 ```
 
 `icon` 是由 Host 解释的稳定字符串，不是 React 组件。当前内置键包括 `activity`、`agent`、`boxes`、`clock`、`folder-tree`、`globe`、`history`、`layout-dashboard`、`messages`、`plus`、`search`、`settings`、`sliders`、`waypoints`；未知键安全降级为通用 Workspace 图标。**Agent 左栏模块的 `icon` 与 `headerActions[].icon` 消费同一张映射表**（见 §6.8）。`categoryOrder` 与 `order` 只控制 Launcher 排序，不是跨插件视觉 token。
+
+`keywords` 是 Launcher 的**检索词**（大小写不敏感子串匹配）。索引串 = 标题 + 描述 + 种类 + 分类标签 + `keywords`，
+所以中文 `description` 本身就可被搜到；`keywords` 用于补**描述里没出现的同义词与母语词**——
+界面是中文而 `title` 多为英文，插件应同时声明中英检索词（如 `['inspect', '诊断']`），否则中文用户只能靠描述里的字面词命中。
 
 注意：当前外置 UI 插件不共享宿主 React 组件契约。通用第三方 UI 优先使用隔离 UI Surface；第一方 Workspace React 类型属于当前主构建内部契约。
 
@@ -1023,7 +1045,7 @@ context.storage.clear()
 
 #### 6.11.3 API 版本策略
 
-- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3`（`PYLON_PLUGIN_API_SUPPORTED`）；
+- 宿主按 allowlist 接受 `api`：`1.0` / `1.1` / `1.2` / `1.3` / `2.0` / `2.1` / `2.2` / `2.3` / `2.4`（`PYLON_PLUGIN_API_SUPPORTED`）；
   旧版本插件在新宿主继续激活，未知更高版本拒绝并提示升级宿主。
 - minor 版本只做加法（新增可选 context 成员与 manifest 字段）；破坏性变更加 major 并要求重写。
 - `api` 低于 `1.2` 的插件不得引用高版本成员（如 1.1 的 `storage`、1.2 的 `capabilities`/`dangerousHooks`）——宿主仅在对应契约下保证其存在；1.0/1.1 manifest 出现 1.2 字段按已删除字段直接校验失败。1.3 仅扩充 Hook 锚点词表（§6.2），manifest 字段形状相对 1.2 不变。
@@ -1031,6 +1053,7 @@ context.storage.clear()
 - **2.1 只做加法**：标题栏贡献新增 `slot: 'app-menu'`——把一项数据化菜单项注册进标题栏的设置齿轮菜单（§6.8.1）。既有槽位、字段与校验不变，2.0 插件无需改动。
 - **2.2 只放宽**：右栏面板的 `workspaceKind` 从「可用性闸门」改为「默认选中的亲和」（§6.8，ADR-0012）。字段形状不变、清单无需改动，只是面板在更多 Sheet 上变得可选；`when` 仍是硬闸门。
 - **2.3 只做加法**：会话视图新增可选字段 `pinned`，左栏贡献 props 新增可选回调 `onToggleSessionPin`（§6.8）。既有插件无需改动。
+- **2.4 只做加法**：命令描述符（§6.1）新增两个可选字段——`keywords`（命令的母语/别名检索词，让中文界面下的输入框 `/` 建议列表能用母语搜到英文命令名）与 `tier`（可见性档，缺省 `internal`，`user` 级才进 `/` 菜单默认层）。字段形状只增不改，既有插件无需改动；不声明 `tier` 的插件命令行为变化仅为「不再出现在默认菜单」，仍可通过「显示全部命令」或直接输入命令名使用。
 
 #### 6.11.4 SDK 发行形态
 

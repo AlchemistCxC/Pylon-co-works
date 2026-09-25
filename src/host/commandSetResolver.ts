@@ -10,6 +10,7 @@ import {
   CORE_COMMAND_SET_PLUGIN_ID,
   COMMAND_PROMPT_BUDGET,
   type CommandSetDescriptor,
+  type CommandTier,
 } from '../contracts/agentCommandSet.ts'
 import { getCommandRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { BUILTIN_PYLON_TOOLS_ID } from '../plugins/product/productPluginIds.ts'
@@ -31,6 +32,10 @@ export interface CommandSetSuggestion {
   cmd: string
   args: string
   info: string
+  /** 检索关键词（人机侧过滤用）；缺省 = 只能按命令名检索。 */
+  keywords?: readonly string[]
+  /** 可见性档；缺省视作非 internal（见 input 侧分层）。 */
+  tier?: CommandTier
 }
 
 function dedupeAndSort(commands: readonly CommandSetDescriptor[]): CommandSetDescriptor[] {
@@ -58,6 +63,8 @@ export function resolvePluginCommands(enabledPluginIds?: readonly string[]): Com
   return dedupeAndSort(descriptors.map(command => ({
     name: command.name,
     ...(command.aliases ? { aliases: command.aliases } : {}),
+    ...(command.keywords ? { keywords: command.keywords } : {}),
+    tier: command.tier,
     description: command.description,
     ...(command.inputHint ? { inputHint: command.inputHint } : {}),
     ...(command.agentPromptSnippet ? { agentPromptSnippet: command.agentPromptSnippet } : {}),
@@ -103,6 +110,8 @@ export function resolveCommandSetSuggestions(
     cmd: `/${command.name}`,
     args: command.inputHint ? ` ${command.inputHint}` : '',
     info: command.description || '',
+    ...(command.keywords ? { keywords: command.keywords } : {}),
+    ...(command.tier ? { tier: command.tier } : {}),
   }))
 }
 

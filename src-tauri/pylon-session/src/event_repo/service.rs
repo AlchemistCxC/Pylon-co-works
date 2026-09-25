@@ -192,18 +192,21 @@ impl EventService {
 
     /// Kernel ingest boundary：sequence/revision 在 repository transaction 内分配，
     /// 返回 committed row，供 dispatcher 在 durable append 后发布 projection。
+    ///
+    /// #334/P2：payload 归一为 `Arc<Value>` 共享语义（`impl Into` 收口——dispatcher
+    /// 热路径传 `Arc` 与发布侧共享同一份，冷路径调用方传 `Value` 原地包装）。
     pub async fn ingest_event(
         &self,
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
         client_generation: u64,
-        raw_payload: serde_json::Value,
+        raw_payload: impl Into<std::sync::Arc<serde_json::Value>>,
     ) -> Result<EventAppendResult, EventError> {
         self.ingest_events(
             owner,
             remote_session_id,
             client_generation,
-            vec![raw_payload],
+            vec![raw_payload.into()],
         )
         .await
     }
@@ -217,7 +220,7 @@ impl EventService {
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
         client_generation: u64,
-        raw_payloads: Vec<serde_json::Value>,
+        raw_payloads: Vec<std::sync::Arc<serde_json::Value>>,
     ) -> Result<EventAppendResult, EventError> {
         let client_generation = i64::try_from(client_generation)
             .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
@@ -293,7 +296,8 @@ impl EventService {
                         remote_session_id: remote_session_id.clone(),
                         client_generation,
                         received_at: received_at.clone(),
-                        raw_payload,
+                        // 回放导入为冷路径，共享包装仅为对齐 KernelEventInput 契约。
+                        raw_payload: std::sync::Arc::new(raw_payload),
                         recovery_import: true,
                     },
                     i64::try_from(index + 1).map_err(|_| {

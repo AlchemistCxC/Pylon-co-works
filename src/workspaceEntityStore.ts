@@ -88,7 +88,10 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
     }
     let created: Workspace
     if (hasBackend()) {
-      const agentId = useIdentityStore.getState().activeAgent || ''
+      // #326：零 Agent 首跑时 activeAgent 是空串。空 owner 的 workspace 落库后没有归属，
+      // 故直接拒绝并让调用方给出「先配置 Agent」的可见提示，而不是发一个空串过去。
+      const agentId = useIdentityStore.getState().activeAgent
+      if (!agentId) throw new Error('还没有可用的 Agent：请先在 设置 → Agent 中配置一个')
       const raw = await invoke('workspace_create', { agentId, name, rootPath })
       const normalized = normalizeWorkspaceShape(raw)
       if (!normalized) throw new Error('workspace_create 返回无效形状')

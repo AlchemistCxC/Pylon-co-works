@@ -609,6 +609,8 @@
 .error-center-detail-list > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 6px; }
 .error-center-detail-list dt { color: var(--text-dim); }
 .error-center-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text); }
+/* #325：错误码旁的人话解释——与裸码同一行的次要文本，不抢码本身的机器可读性。 */
+.error-center-code-meaning { margin-left: 6px; color: var(--text-dim); }
 .error-center-technical { max-height: 150px; overflow: auto; margin: 5px 0 0; padding: 6px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: var(--ui-radius-sm, 4px); background: color-mix(in srgb, var(--surface-sunken, var(--bg-panel)) 74%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-size-2xs)/1.4 var(--mono); }
 .error-center-dismiss { align-self: flex-start; }
 @media (max-width:700px) {

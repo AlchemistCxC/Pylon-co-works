@@ -75,7 +75,9 @@ pub struct ConfigDocument {
 pub fn read_config_document() -> Result<ConfigDocument, ConfigError> {
     let (source, base_dir) = resolve_config_source();
     let content = match &source {
-        ConfigSource::Embedded => include_str!("../../../agents.example.yaml").to_string(),
+        // #326：内嵌兜底是**零 Agent 的注释样例**，不是仓库根的开发配置
+        // （`agents.example.yaml` 是开发模板 + 测试夹具，预置占位 exe 必然启动失败）。
+        ConfigSource::Embedded => include_str!("embedded_agents.yaml").to_string(),
         ConfigSource::Environment(path) | ConfigSource::ExecutableDirectory(path) => {
             std::fs::read_to_string(path).map_err(|error| {
                 ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
@@ -213,11 +215,9 @@ pub(crate) fn parse(content: &str) -> Result<HashMap<String, AgentDef>, ConfigEr
     // 类型错误）的报错带 agent id 上下文（风格对齐 route.rs reset 校验）。
     let config: AgentConfigFile = serde_yml::from_str(content)
         .map_err(|error| ConfigError::Parse(format!("failed to parse agents.yaml: {error}")))?;
-    if config.agents.is_empty() {
-        return Err(ConfigError::Invalid(
-            "agents.yaml contains no agents".to_string(),
-        ));
-    }
+    // #326：零 Agent 是合法状态（内嵌兜底即零 Agent，首跑干净空态 + 引导）。
+    // `agents` 键本身仍必需——缺键会在上面反序列化时报错，拼错的键名不会被静默
+    // 当成「零 Agent」。
     let mut agents = HashMap::with_capacity(config.agents.len());
     for (id, raw) in config.agents {
         if id.trim().is_empty() {

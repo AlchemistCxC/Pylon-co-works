@@ -11,6 +11,11 @@ use crate::session::{CanonicalEventRow, DurableSessionOwner, EventError, EventSe
 
 /// Ordered input to the Kernel routing seam.  `classification` is produced by
 /// ACP transport; callers must not infer replay from provider metadata.
+///
+/// #334/P2：`payload` 以 `Arc<Value>` 共享——ingest（需 `'static` 拥有跨
+/// spawn_blocking）与 publish（ingest 之后注入 source/canonicalEvent）两侧都要
+/// payload，深拷贝以引用计数取代；发布侧在 ingest 完成后 `Arc::try_unwrap`
+/// 取回唯一引用。
 #[derive(Debug, Clone)]
 pub(crate) struct RoutingInput {
     pub(crate) source: String,
@@ -20,7 +25,7 @@ pub(crate) struct RoutingInput {
     pub(crate) classification: ReplayClassification,
     pub(crate) variant: Option<SessionUpdateVariant>,
     pub(crate) replay_loading: bool,
-    pub(crate) payload: serde_json::Value,
+    pub(crate) payload: std::sync::Arc<serde_json::Value>,
     pub(crate) wire_ordinal: Option<u64>,
 }
 
@@ -146,7 +151,8 @@ pub(crate) async fn commit_live_event(
             owner,
             Some(input.remote_session_id.clone()),
             input.generation,
-            input.payload.clone(),
+            // P2（#334）：Arc 共享传递（原深拷贝拆除）；publish 侧稍后取回唯一引用。
+            Arc::clone(&input.payload),
         )
         .await
     {
@@ -185,7 +191,7 @@ mod tests {
             classification,
             variant,
             replay_loading,
-            payload: serde_json::json!({"sessionId":"peri-s1"}),
+            payload: std::sync::Arc::new(serde_json::json!({"sessionId":"peri-s1"})),
             wire_ordinal: None,
         }
     }

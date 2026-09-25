@@ -648,6 +648,25 @@ impl SessionInfo {
         Ok(Some(owner))
     }
 
+    /// #334（bench 读数三）：`durable_owner(..)? == expected` 的零分配形态——
+    /// 字段级借用比较，不构造 owned owner（原每帧三次 String 分配 + validate）。
+    /// 语义依据：`validate` 仅校验三字段非空，而 expected 恒经 validate（生产侧
+    /// 出自 `durable_owner`，基准侧为合法构造值），字段全等即校验结论等价。
+    /// profile 未绑定时返回 false（等价原 `Ok(None) != Some(expected)`）。
+    pub(crate) fn durable_owner_matches(
+        &self,
+        agent_id: &str,
+        source: &str,
+        expected: &DurableSessionOwner,
+    ) -> bool {
+        let Some(profile_id) = self.profile_id.as_deref() else {
+            return false;
+        };
+        profile_id == expected.profile_id
+            && agent_id == expected.agent_id
+            && source == expected.local_session_id
+    }
+
     /// B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
     /// 回合绑定：仅当 ① 收集标记回合 == 当前回合（标记未过期），且 ② chunk
     /// 的接收回合 == 当前回合（事件接收后回合未推进）才追加——Round N 迟到

@@ -70,8 +70,9 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   const identityActiveAgent = useIdentityStore(s => s.activeAgent)
   const sheetOwnerAgentId = activeSheet?.kind === 'agent' ? activeSheet.agentId : undefined
-  // 冷启动：激活 agent sheet 时，activeAgent 以恢复出的 sheet owner 为准，避免固定回退 peri。
-  const activeAgent = sheetOwnerAgentId ?? (identityActiveAgent || 'peri')
+  // 冷启动：激活 agent sheet 时，activeAgent 以恢复出的 sheet owner 为准。空串 = 没有 Agent
+  //（#326 零 Agent 首跑），不得回落硬编码 'peri' 造出一个不存在的 Agent。
+  const activeAgent = sheetOwnerAgentId ?? identityActiveAgent
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const sessions = useIdentityStore(s => s.sessions)
   const sheetAgentStates = useWorkspaceStore(s => s.sheetAgentStates)
@@ -97,6 +98,9 @@ export default function SheetLayout(props: SheetLayoutProps) {
   // 修复：hydrate 就绪后才恢复（子 effect 先于 bootstrap hydrate 执行会读到空记忆）
   useEffect(() => {
     if (!hydrationReady) return
+    // #326：空串 = 没有 Agent（零 Agent 首跑）。它不是实体：读写 sheetAgentStates[''] 会
+    // 把「没有 Agent」写进持久化记忆（重启后仍在），并喂给会话归属推断。
+    if (!activeAgent) return
     const memory = useWorkspaceStore.getState().sheetAgentStates[activeAgent]
     if (memory?.activeProfileId && memory.activeProfileId !== activeProfileId) {
       useIdentityStore.getState().setActiveProfile(memory.activeProfileId)
@@ -110,7 +114,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
   // W1-03 原样搬运：会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步）。
   // 修复：hydrate 就绪前跳过——否则用初始空 sheets 覆盖持久化（刷新丢 sheets → 启动页）
   useEffect(() => {
-    if (!hydrationReady) return
+    if (!hydrationReady || !activeAgent) return
     setSheetAgentState(activeAgent, { activeSessionId: props.activeSession || undefined })
   }, [hydrationReady, activeAgent, props.activeSession, setSheetAgentState])
 
@@ -235,8 +239,8 @@ function EmptySheetHost() {
       <div className="sheet-empty-kicker">WORKSPACE</div>
       <h2>没有打开的 Sheet</h2>
       <p>打开一个 Agent 工作现场，或从工具入口选择 Sheet。</p>
-      <button type="button" onClick={() => openSheet({ kind: 'agent', title: 'Peri', agentId: 'peri' })}>
-        打开 Peri
+      <button type="button" onClick={() => openSheet({ kind: 'overview', title: 'Overview' })}>
+        打开 Overview
       </button>
     </div>
   )

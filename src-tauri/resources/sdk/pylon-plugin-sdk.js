@@ -45,8 +45,8 @@ var HOOK_TIMEOUT_BUDGET_MS = Object.freeze(
 
 // src/plugin-runtime/packageManifest.ts
 var PYLON_PLUGIN_API_MIN = "1.0";
-var PYLON_PLUGIN_API_LATEST = "2.3";
-var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", "1.2", "1.3", "2.0", "2.1", "2.2", PYLON_PLUGIN_API_LATEST];
+var PYLON_PLUGIN_API_LATEST = "2.4";
+var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", "1.2", "1.3", "2.0", "2.1", "2.2", "2.3", PYLON_PLUGIN_API_LATEST];
 var PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN;
 var PYLON_PLUGIN_MANIFEST_FILE = "pylon-plugin.json";
 var PYLON_PLUGIN_CAPABILITIES = ["plugin.management"];
@@ -80,7 +80,7 @@ var HOT_SWAP_MODES = /* @__PURE__ */ new Set([
 ]);
 var API_SUPPORTED_SET = new Set(PYLON_PLUGIN_API_SUPPORTED);
 var CAPABILITY_SET = new Set(PYLON_PLUGIN_CAPABILITIES);
-var API_MINOR_ORDER = { "1.0": 0, "1.1": 1, "1.2": 2, "1.3": 3, "2.0": 4, "2.1": 5, "2.2": 6, "2.3": 7 };
+var API_MINOR_ORDER = { "1.0": 0, "1.1": 1, "1.2": 2, "1.3": 3, "2.0": 4, "2.1": 5, "2.2": 6, "2.3": 7, "2.4": 8 };
 function apiVersionAtLeast(api, minor) {
   const order = typeof api === "string" ? API_MINOR_ORDER[api] : void 0;
   return order !== void 0 && order >= API_MINOR_ORDER[minor];

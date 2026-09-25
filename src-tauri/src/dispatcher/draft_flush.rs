@@ -1,19 +1,18 @@
 //! #155 T3：dispatcher 跨窗口在途 run。只接收与 canonical fold 同判据的助手 delta。
 //! 片段落盘后才发布到专用 draft seam；消息边界把整段提交为正式历史。
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
 
 use super::canonical_flush::{
-    flush_committed_draft, flush_pending_canonical, PendingCanonicalPublish,
+    flush_committed_draft, flush_pending_canonical, CanonicalFlushContext, PendingCanonicalPublish,
 };
 use super::log_canonical_ingest_error;
-use crate::pet::PetState;
 use crate::session::{
     draft_candidate, DraftCandidate, DraftCommitChunk, DraftFragmentInput, DurableSessionOwner,
-    EventService, MessageService,
+    EventService,
 };
 
 const MAX_CHUNKS: usize = 2000;
@@ -70,19 +69,11 @@ impl DraftRun {
     }
 }
 
-pub(crate) struct DraftFlushContext<'a, R: tauri::Runtime> {
-    pub window: &'a tauri::Window<R>,
-    pub gateway: &'a crate::gateway::GatewayCore,
-    pub update_channels: &'a crate::runtime::UpdateChannelMap,
-    pub pet: &'a std::sync::Mutex<PetState>,
-    pub client_generation: &'a AtomicU64,
-    pub agent_id: &'a str,
-    pub event_service: Option<&'a Arc<EventService>>,
-    pub message_service: Option<&'a Arc<MessageService>>,
-}
-
+// #155 T3：draft 路径的 flush 环境上下文直接共用 `CanonicalFlushContext`
+// （字段面与原独立定义的 DraftFlushContext 完全一致，main #335/U1b 收敛后
+// 不再保留第二份同形结构）。装配唯一处为 `NotificationPump::flush_context`。
 fn publish_draft_update<R: tauri::Runtime>(
-    ctx: &DraftFlushContext<'_, R>,
+    ctx: &CanonicalFlushContext<'_, R>,
     run: &DraftRun,
     index: usize,
 ) {
@@ -129,7 +120,7 @@ fn publish_draft_update<R: tauri::Runtime>(
 }
 
 async fn persist_through<R: tauri::Runtime>(
-    ctx: &DraftFlushContext<'_, R>,
+    ctx: &CanonicalFlushContext<'_, R>,
     run: &mut DraftRun,
     target: usize,
     publish: bool,
@@ -160,7 +151,7 @@ async fn persist_through<R: tauri::Runtime>(
             identity: run.candidate.identity.clone(),
             raw_payload: run.chunks[start..end]
                 .iter()
-                .map(|chunk| chunk.raw_payload.clone())
+                .map(|chunk| (*chunk.raw_payload).clone())
                 .collect(),
             first_received_at: run.chunks[start].received_at.clone(),
         };
@@ -203,7 +194,7 @@ async fn persist_through<R: tauri::Runtime>(
 }
 
 pub(crate) async fn publish_due_draft<R: tauri::Runtime>(
-    ctx: &DraftFlushContext<'_, R>,
+    ctx: &CanonicalFlushContext<'_, R>,
     run: &mut Option<DraftRun>,
 ) -> bool {
     let Some(run) = run.as_mut() else {
@@ -214,7 +205,7 @@ pub(crate) async fn publish_due_draft<R: tauri::Runtime>(
 }
 
 pub(crate) async fn commit_open_draft<R: tauri::Runtime>(
-    ctx: &DraftFlushContext<'_, R>,
+    ctx: &CanonicalFlushContext<'_, R>,
     run: &mut Option<DraftRun>,
 ) -> bool {
     let Some(open) = run.as_mut() else {
@@ -226,14 +217,7 @@ pub(crate) async fn commit_open_draft<R: tauri::Runtime>(
     }
     let mut open = run.take().expect("checked open run");
     let committed = flush_committed_draft(
-        ctx.window,
-        ctx.gateway,
-        ctx.update_channels,
-        ctx.pet,
-        ctx.client_generation,
-        ctx.agent_id,
-        ctx.event_service,
-        ctx.message_service,
+        ctx,
         std::mem::take(&mut open.items),
         open.draft_id.clone(),
         std::mem::take(&mut open.chunks),
@@ -243,7 +227,7 @@ pub(crate) async fn commit_open_draft<R: tauri::Runtime>(
 }
 
 pub(crate) async fn absorb_window<R: tauri::Runtime>(
-    ctx: &DraftFlushContext<'_, R>,
+    ctx: &CanonicalFlushContext<'_, R>,
     run: &mut Option<DraftRun>,
     pending: Vec<PendingCanonicalPublish>,
 ) -> bool {
@@ -256,18 +240,7 @@ pub(crate) async fn absorb_window<R: tauri::Runtime>(
             .and_then(|owner| draft_candidate(owner, item.input.payload.clone()));
         if let Some(candidate) = candidate {
             if !ordinary.is_empty()
-                && !flush_pending_canonical(
-                    ctx.window,
-                    ctx.gateway,
-                    ctx.update_channels,
-                    ctx.pet,
-                    ctx.client_generation,
-                    ctx.agent_id,
-                    ctx.event_service,
-                    ctx.message_service,
-                    std::mem::take(&mut ordinary),
-                )
-                .await
+                && !flush_pending_canonical(ctx, std::mem::take(&mut ordinary)).await
             {
                 return false;
             }
@@ -325,18 +298,7 @@ pub(crate) async fn absorb_window<R: tauri::Runtime>(
         }
     }
     if !ordinary.is_empty() {
-        flush_pending_canonical(
-            ctx.window,
-            ctx.gateway,
-            ctx.update_channels,
-            ctx.pet,
-            ctx.client_generation,
-            ctx.agent_id,
-            ctx.event_service,
-            ctx.message_service,
-            ordinary,
-        )
-        .await
+        flush_pending_canonical(ctx, ordinary).await
     } else {
         true
     }

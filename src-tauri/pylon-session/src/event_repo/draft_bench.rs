@@ -1,6 +1,7 @@
 //! #155 T3: compare committed rows and cumulative WAL for equal 600-chunk input.
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use super::{DraftFragmentInput, EventRepo, KernelEventInput};
 use crate::owner::DurableSessionOwner;
@@ -39,7 +40,7 @@ fn input(owner: &DurableSessionOwner, raw_payload: serde_json::Value) -> KernelE
         remote_session_id: Some("remote-1".into()),
         client_generation: 5,
         received_at: "2026-09-25T00:00:00.000Z".into(),
-        raw_payload,
+        raw_payload: Arc::new(raw_payload),
         recovery_import: false,
     }
 }

@@ -1018,13 +1018,15 @@ impl TestHarness {
             .expect("active runtime for mapping");
         let mut recreated = None;
         let mapping = crate::session::ensure_session_mapping(
-            state.inner(),
-            &runtime,
-            source,
-            profile_id,
-            persona,
-            session_cwd,
-            &[],
+            &crate::session::SessionAssembly {
+                state: state.inner(),
+                runtime: &runtime,
+                source,
+                profile_id,
+                persona,
+                session_cwd,
+                wire_mcp_servers: &[],
+            },
             known_peri_id,
             &mut recreated,
         )

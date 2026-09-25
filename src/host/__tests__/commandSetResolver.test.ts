@@ -70,7 +70,10 @@ describe('commandSetResolver（v2 Command Registry）', () => {
       description: '运行时描述',
     }])
     const model = suggestions.find(item => item.cmd === '/model')
-    expect(model).toEqual({ cmd: '/model', args: ' <runtime-hint>', info: '运行时描述' })
+    // agent 覆盖展示字段，但宿主侧检索词与可见性档保留（同名命令仍是同一条命令）。
+    expect(model).toEqual({
+      cmd: '/model', args: ' <runtime-hint>', info: '运行时描述', keywords: ['模型', '切换模型'], tier: 'user',
+    })
     expect(resolveCommandSetDescriptors([{ name: 'model' }]).find(item => item.name === 'model')
       ?.agentPromptSnippet).toContain('/model')
 
@@ -78,6 +81,31 @@ describe('commandSetResolver（v2 Command Registry）', () => {
     expect(extra.find(item => item.cmd === '/vendor_extra')).toEqual({
       cmd: '/vendor_extra', args: '', info: '新命令',
     })
+  })
+
+  it('#329 可见性档默认 internal，core 6 条显式 user', () => {
+    const commands = resolvePluginCommands()
+    const userNames = commands.filter(command => command.tier === 'user').map(command => command.name).sort()
+    // 唯一默认进 `/` 菜单的一层：会话级日常命令。其余（browser 全家、skin、file/git、
+    // layout、theme/config…）多带原始 JSON 参数签名，不声明 tier 即 internal。
+    expect(userNames).toEqual(['clear', 'compact', 'export', 'mode', 'model', 'new'])
+    expect(commands.filter(command => command.tier === 'internal').length).toBeGreaterThan(userNames.length)
+  })
+
+  it('#329 分层只作用于人看的菜单：agent 提示词继续注入 internal 命令', () => {
+    const all = resolvePluginCommands()
+    const tiers = new Map(all.map(command => [command.name, command.tier]))
+    const prompt = buildAgentCommandPrompt()
+    const injectedNames = prompt
+      .split('\n')
+      .map(line => /^-\s+\/([a-z0-9.-]+)/.exec(line.trim())?.[1])
+      .filter((name): name is string => Boolean(name))
+
+    expect(injectedNames.length).toBeGreaterThan(6)
+    // 关键：注入面按 priority 截断，**不是**按 tier 过滤——注入序列必须正好是
+    // resolvePluginCommands()（按 priority/name 排序）的前缀，不多不少。
+    expect(injectedNames).toEqual(all.slice(0, injectedNames.length).map(command => command.name))
+    expect(injectedNames.filter(name => tiers.get(name) === 'internal').length).toBeGreaterThan(0)
   })
 
   it('同名命令跨插件去重（Registry 顺序靠前的贡献优先，确定性）', () => {
