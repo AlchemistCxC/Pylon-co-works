@@ -1757,13 +1757,15 @@ gateway:
         let state = state_without_active_runtime();
 
         let error = ensure_session_mapping(
-            &state,
-            &runtime,
-            "source-a",
-            None,
-            "persona",
-            ".",
-            &[],
+            &SessionAssembly {
+                state: &state,
+                runtime: &runtime,
+                source: "source-a",
+                profile_id: None,
+                persona: "persona",
+                session_cwd: ".",
+                wire_mcp_servers: &[],
+            },
             None,
             &mut None,
         )

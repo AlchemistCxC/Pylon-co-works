@@ -680,26 +680,50 @@ fn plan_initial_model(
     }
 }
 
+/// #335/U1b（期票兑现）：建会话装配参数的共享域——`apply_initial_session_options`
+/// / `create_session_slot` / `ensure_session_mapping` / `revive_session_slot` 四个
+/// 装配函数的公共参数面（state/runtime/source/profile/persona/cwd/mcp servers）
+/// 收敛于此，取代原 9/12/9 参的逐参手抄。`new_session` 是 Tauri command（参数即
+/// wire 面，契约不动），仅在命令体内装配本结构体后调用内部装配函数。
+pub(crate) struct SessionAssembly<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) runtime: &'a Arc<AgentRuntime>,
+    /// 本地会话源（sessions 映射键，runtime 内唯一）。
+    pub(crate) source: &'a str,
+    /// GUI profile 声明维（平台自动会话为 None）。
+    pub(crate) profile_id: Option<&'a str>,
+    pub(crate) persona: &'a str,
+    pub(crate) session_cwd: &'a str,
+    pub(crate) wire_mcp_servers: &'a [serde_json::Value],
+}
+
+/// 空态控制中心的初始可选值（model/reasoning/mode；全 None = 不下发任何选项）。
+#[derive(Debug, Clone, Copy, Default)]
+struct InitialSessionOptions<'a> {
+    model: Option<&'a str>,
+    reasoning: Option<&'a str>,
+    mode: Option<&'a str>,
+}
+
 /// Apply the optional values selected in the empty-state control center.  The
 /// operation is intentionally atomic from the caller's perspective: a failed
 /// setting RPC is returned so the newly-created remote session can be closed
 /// before any local mapping is published.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "装配函数：逐项应用空态控制中心的可选初始值（model/reasoning/mode）；初始选项收敛为结构体后可摘"
-)]
 async fn apply_initial_session_options(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
+    assembly: &SessionAssembly<'_>,
     peri_id: &str,
     generation: u64,
     response: &mut serde_json::Value,
-    initial_model: Option<&str>,
-    initial_reasoning: Option<&str>,
-    initial_mode: Option<&str>,
+    options: InitialSessionOptions<'_>,
 ) -> Result<(), PylonError> {
-    if let Some(model) = initial_model
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        ..
+    } = *assembly;
+    if let Some(model) = options
+        .model
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -785,7 +809,8 @@ async fn apply_initial_session_options(
         }
     }
 
-    if let Some(mode) = initial_mode
+    if let Some(mode) = options
+        .mode
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -807,7 +832,8 @@ async fn apply_initial_session_options(
         );
     }
 
-    if let Some(reasoning) = initial_reasoning
+    if let Some(reasoning) = options
+        .reasoning
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -874,24 +900,21 @@ async fn apply_initial_session_options(
 /// RPC + 插入"全程；tokio Mutex 不可重入，本函数内部不取锁）；RPC await 期间
 /// 不持 sessions 锁（V14），await 后 ensure_generation（RPC 后位置不变量）。
 /// "Session creation failed" 日志在本函数内发出（唯一出口）。
-#[allow(
-    clippy::too_many_arguments,
-    reason = "装配函数：建会话全流程（检查+RPC+插入+可选 close）显式参数；创建参数收敛为结构体后可摘"
-)]
 async fn create_session_slot(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
-    profile_id: Option<&str>,
-    persona: &str,
-    session_cwd: &str,
+    assembly: &SessionAssembly<'_>,
     workspace_id: Option<String>,
-    wire_mcp_servers: &[serde_json::Value],
-    initial_model: Option<&str>,
-    initial_reasoning: Option<&str>,
-    initial_mode: Option<&str>,
+    options: InitialSessionOptions<'_>,
     close_replaced: bool,
 ) -> Result<SessionMapping, PylonError> {
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
+        persona,
+        session_cwd,
+        wire_mcp_servers,
+    } = *assembly;
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         if sessions.len() >= crate::agent::runtime::SessionSlotPolicy::default().max_sessions {
@@ -937,19 +960,10 @@ async fn create_session_slot(
     };
     state.ensure_generation(runtime, generation)?;
     let peri_id = crate::acp::session_id_from(&response)?;
-    if initial_model.is_some() || initial_reasoning.is_some() || initial_mode.is_some() {
-        if let Err(error) = apply_initial_session_options(
-            state,
-            runtime,
-            source,
-            &peri_id,
-            generation,
-            &mut response,
-            initial_model,
-            initial_reasoning,
-            initial_mode,
-        )
-        .await
+    if options.model.is_some() || options.reasoning.is_some() || options.mode.is_some() {
+        if let Err(error) =
+            apply_initial_session_options(assembly, &peri_id, generation, &mut response, options)
+                .await
         {
             let _ = close_session_rpc(state, runtime, &peri_id, generation, false).await;
             return Err(error);
@@ -976,7 +990,7 @@ async fn create_session_slot(
             .agent_for_runtime(runtime)
             .and_then(|agent| agent.model)
             .as_deref(),
-        initial_model,
+        options.model,
         Some(response_model.as_str()),
     )
     .map(str::to_string);
@@ -1032,21 +1046,18 @@ async fn create_session_slot(
 /// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
 /// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
-#[allow(
-    clippy::too_many_arguments,
-    reason = "装配函数：复用/复活/新建三分支共用同一显式参数面；与 create_session_slot 一并收敛为结构体后可摘"
-)]
 pub(crate) async fn ensure_session_mapping(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
-    profile_id: Option<&str>,
-    persona: &str,
-    session_cwd: &str,
-    wire_mcp_servers: &[serde_json::Value],
+    assembly: &SessionAssembly<'_>,
     known_peri_id: Option<&str>,
     recreated_peri_id: &mut Option<String>,
 ) -> Result<SessionMapping, PylonError> {
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
+        ..
+    } = *assembly;
     let _creation_guard = runtime.session_creation.lock().await;
     if let Some(health) = runtime
         .binding_health
@@ -1091,17 +1102,7 @@ pub(crate) async fn ensure_session_mapping(
     // 原生 session/load 复活远端会话。复活成功则本消息续用原会话上下文，
     // provider 会话列表不再因每次重启膨胀。
     if let Some(peri_id) = known_peri_id.filter(|id| !id.is_empty()) {
-        if let Some(mapping) = revive_session_slot(
-            state,
-            runtime,
-            source,
-            peri_id,
-            profile_id,
-            session_cwd,
-            wire_mcp_servers,
-        )
-        .await?
-        {
+        if let Some(mapping) = revive_session_slot(assembly, peri_id).await? {
             // #98：revive 成功但远端 identity 变化（server 返回了不同的
             // sessionId）——不得静默复用旧映射。复用 recreated 事件通道显式
             // 广播新 id（前端回写持久化），runtime log 记录 rebind 细节。
@@ -1131,21 +1132,8 @@ pub(crate) async fn ensure_session_mapping(
             return Ok(mapping);
         }
     }
-    let mapping = create_session_slot(
-        state,
-        runtime,
-        source,
-        profile_id,
-        persona,
-        session_cwd,
-        None,
-        wire_mcp_servers,
-        None,
-        None,
-        None,
-        true,
-    )
-    .await?;
+    let mapping =
+        create_session_slot(assembly, None, InitialSessionOptions::default(), true).await?;
     // 上下文已断（远端会话死亡，本轮起是新会话）：前端需要知道新 peri_id
     // 才能持久化并让后续 load 复活这条新会话。
     *recreated_peri_id = Some(mapping.peri_id.clone());
@@ -1157,14 +1145,18 @@ pub(crate) async fn ensure_session_mapping(
 /// 返回 Ok(None) = 复活不可行/失败，调用方降级新建；不返回 Err（错误留给
 /// 新建路径统一报告，避免双重报错）。
 async fn revive_session_slot(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
+    assembly: &SessionAssembly<'_>,
     peri_id: &str,
-    profile_id: Option<&str>,
-    session_cwd: &str,
-    wire_mcp_servers: &[serde_json::Value],
 ) -> Result<Option<SessionMapping>, PylonError> {
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
+        session_cwd,
+        wire_mcp_servers,
+        ..
+    } = *assembly;
     let generation = state.current_generation(runtime);
     let params = crate::acp::load_params(
         peri_id,
@@ -1462,21 +1454,22 @@ pub(crate) async fn new_session(
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
     // G2-04：会话建立收敛——守卫/上限/RPC/构造/插入（notify 唯一出口）/
     // close 旧会话全部收敛进 create_session_slot（close_replaced=true，new_session 语义）。
-    let mapping = create_session_slot(
-        state.inner(),
-        &runtime,
-        &source,
-        Some(&profile_id),
-        &persona,
-        &session_cwd,
-        workspace_id,
-        &mcp_servers,
-        model.as_deref(),
-        reasoning_level.as_deref(),
-        mode.as_deref(),
-        true,
-    )
-    .await?;
+    // #335/U1b：命令 wire 签名不动，内部经装配结构体调用。
+    let assembly = SessionAssembly {
+        state: state.inner(),
+        runtime: &runtime,
+        source: &source,
+        profile_id: Some(&profile_id),
+        persona: &persona,
+        session_cwd: &session_cwd,
+        wire_mcp_servers: &mcp_servers,
+    };
+    let options = InitialSessionOptions {
+        model: model.as_deref(),
+        reasoning: reasoning_level.as_deref(),
+        mode: mode.as_deref(),
+    };
+    let mapping = create_session_slot(&assembly, workspace_id, options, true).await?;
     state.inner().log_runtime_summary(
         "info",
         "session",

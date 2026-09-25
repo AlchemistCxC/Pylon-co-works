@@ -35,7 +35,7 @@ mod interaction_route;
 mod permission_route;
 
 use canonical_flush::{
-    flush_pending_canonical, should_flush_batch, PendingCanonicalPublish,
+    flush_pending_canonical, should_flush_batch, CanonicalFlushContext, PendingCanonicalPublish,
     PENDING_CANONICAL_FLUSH_INTERVAL,
 };
 use crash_reconnect::CrashReconnectHandler;
@@ -1638,6 +1638,18 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 .await;
         }
         let wire_trace = acp.lock().await.wire_trace();
+        // #335/U1b：flush 环境上下文在任务启动处装配一次——主循环四个
+        // flush_pending_canonical 调用点共用同一份引用（原 8 项逐参手抄 ×4）。
+        let flush_context = CanonicalFlushContext {
+            window: &window,
+            gateway: &gateway,
+            update_channels: &runtime_for_reconnect.update_channels,
+            pet: &pet,
+            client_generation: &client_generation,
+            agent_id: &agent_id,
+            event_service: event_service.as_ref(),
+            message_service: message_service.as_ref(),
+        };
         let mut pending_batch: Vec<PendingCanonicalPublish> = Vec::new();
         loop {
             if client_generation.load(Ordering::Acquire) != generation {
@@ -1660,19 +1672,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 raw = notification_inbox.recv() => raw,
                 _ = tokio::time::sleep(PENDING_CANONICAL_FLUSH_INTERVAL), if !pending_batch.is_empty() => {
                     let batch = std::mem::take(&mut pending_batch);
-                    if !flush_pending_canonical(
-                        &window,
-                        &gateway,
-                        &runtime_for_reconnect.update_channels,
-                        &pet,
-                        &client_generation,
-                        &agent_id,
-                        event_service.as_ref(),
-                        message_service.as_ref(),
-                        batch,
-                    )
-                    .await
-                    {
+                    if !flush_pending_canonical(&flush_context, batch).await {
                         break;
                     }
                     continue;
@@ -1722,19 +1722,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             );
             if flush_batch && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
+                if !flush_pending_canonical(&flush_context, batch).await {
                     break;
                 }
             }
@@ -1858,37 +1846,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             }
             if terminal_boundary && !pending_batch.is_empty() {
                 let batch = std::mem::take(&mut pending_batch);
-                if !flush_pending_canonical(
-                    &window,
-                    &gateway,
-                    &runtime_for_reconnect.update_channels,
-                    &pet,
-                    &client_generation,
-                    &agent_id,
-                    event_service.as_ref(),
-                    message_service.as_ref(),
-                    batch,
-                )
-                .await
-                {
+                if !flush_pending_canonical(&flush_context, batch).await {
                     break;
                 }
             }
         }
         if !pending_batch.is_empty() {
             let batch = std::mem::take(&mut pending_batch);
-            let _ = flush_pending_canonical(
-                &window,
-                &gateway,
-                &runtime_for_reconnect.update_channels,
-                &pet,
-                &client_generation,
-                &agent_id,
-                event_service.as_ref(),
-                message_service.as_ref(),
-                batch,
-            )
-            .await;
+            let _ = flush_pending_canonical(&flush_context, batch).await;
         }
         // #99（评审 E6）：dispatcher 退出统一收口——循环后的单点清理覆盖全部
         // break 路径（代际失配 / inbox 关闭 / handle_session_update false）。
@@ -2220,20 +2185,22 @@ mod tests {
                 wire: Some(wire.clone()),
             })
             .collect();
-        assert!(
-            flush_pending_canonical(
-                &window.as_ref().window(),
-                &gateway,
-                &update_channels,
-                &std::sync::Mutex::new(crate::pet::PetState::default()),
-                &AtomicU64::new(1),
-                "agent",
-                Some(&event_service),
-                None,
-                pending,
-            )
-            .await
-        );
+        // #335/U1b：上下文结构体化后，测试侧的临时值需具名绑定（结构体字段
+        // 借用不能指向语句级临时）。
+        let flush_pet = std::sync::Mutex::new(crate::pet::PetState::default());
+        let flush_generation = AtomicU64::new(1);
+        let flush_window = window.as_ref().window();
+        let flush_context = CanonicalFlushContext {
+            window: &flush_window,
+            gateway: &gateway,
+            update_channels: &update_channels,
+            pet: &flush_pet,
+            client_generation: &flush_generation,
+            agent_id: "agent",
+            event_service: Some(&event_service),
+            message_service: None,
+        };
+        assert!(flush_pending_canonical(&flush_context, pending).await);
         assert_eq!(
             event_service.revision(owner.key().unwrap()).await.unwrap(),
             4

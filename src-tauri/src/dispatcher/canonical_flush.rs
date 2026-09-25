@@ -135,21 +135,34 @@ fn publish_committed_update<R: tauri::Runtime>(
     );
 }
 
-// clippy 2026-09-19：9 参沿用 R8 显式参数风格（window/gateway/channels/pet/
-// generation/agent_id + 可选 event/message service + 批次），与 handle_session_update
-// 同一调用点形态，结构体重构收益低。
-#[allow(clippy::too_many_arguments)]
+/// #335/U1b：flush 的环境上下文收敛——dispatcher 主循环四个 flush 调用点共用的
+/// 8 项服务/句柄引用（原逐参手抄 ×4，任何增删要同步 4 处）。上下文在任务启动处
+/// 装配一次、整循环共用；字段与原形参一一对应，锁语义/调用时序不变。
+pub(crate) struct CanonicalFlushContext<'a, R: tauri::Runtime> {
+    pub(crate) window: &'a tauri::Window<R>,
+    pub(crate) gateway: &'a crate::gateway::GatewayCore,
+    pub(crate) update_channels: &'a crate::runtime::UpdateChannelMap,
+    pub(crate) pet: &'a std::sync::Mutex<PetState>,
+    pub(crate) client_generation: &'a std::sync::atomic::AtomicU64,
+    pub(crate) agent_id: &'a str,
+    pub(crate) event_service: Option<&'a Arc<crate::session::EventService>>,
+    pub(crate) message_service: Option<&'a Arc<crate::session::MessageService>>,
+}
+
 pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
-    window: &tauri::Window<R>,
-    gateway: &crate::gateway::GatewayCore,
-    update_channels: &crate::runtime::UpdateChannelMap,
-    pet: &std::sync::Mutex<PetState>,
-    client_generation: &std::sync::atomic::AtomicU64,
-    agent_id: &str,
-    event_service: Option<&Arc<crate::session::EventService>>,
-    message_service: Option<&Arc<crate::session::MessageService>>,
+    context: &CanonicalFlushContext<'_, R>,
     pending: Vec<PendingCanonicalPublish>,
 ) -> bool {
+    let CanonicalFlushContext {
+        window,
+        gateway,
+        update_channels,
+        pet,
+        client_generation,
+        agent_id,
+        event_service,
+        message_service,
+    } = *context;
     if pending.is_empty() {
         return true;
     }

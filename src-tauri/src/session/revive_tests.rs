@@ -42,17 +42,17 @@ async fn generation_change_during_recovery_rejects_success_and_failure_without_f
                 .with_runtime("recovery-generation", runtime.clone())
                 .build();
             let mut recreated = None;
-            let recover = ensure_session_mapping(
-                &state,
-                &runtime,
-                "local:generation",
-                Some("profile"),
-                "",
-                ".",
-                &[],
-                Some("remote-original"),
-                &mut recreated,
-            );
+            let assembly = SessionAssembly {
+                state: &state,
+                runtime: &runtime,
+                source: "local:generation",
+                profile_id: Some("profile"),
+                persona: "",
+                session_cwd: ".",
+                wire_mcp_servers: &[],
+            };
+            let recover =
+                ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated);
             let change_generation = async {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     while !ready.exists() {
@@ -111,19 +111,18 @@ async fn ensure_session_mapping_revives_via_session_load_before_creating() {
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:revive",
-        Some("profile-r"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-original"),
-        &mut recreated,
-    )
-    .await
-    .expect("revive must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:revive",
+        profile_id: Some("profile-r"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-original"), &mut recreated)
+        .await
+        .expect("revive must succeed");
 
     assert_eq!(
         mapping.peri_id, "peri-original",
@@ -160,19 +159,18 @@ async fn ensure_session_mapping_resumes_without_replay_or_recreation() {
         .with_runtime("resume-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume",
-        Some("profile-r"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-resume"),
-        &mut recreated,
-    )
-    .await
-    .expect("resume must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume",
+        profile_id: Some("profile-r"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-resume"), &mut recreated)
+        .await
+        .expect("resume must succeed");
     assert_eq!(mapping.peri_id, "peri-resume");
     assert!(recreated.is_none());
 }
@@ -193,19 +191,18 @@ async fn ensure_session_mapping_resume_failure_falls_back_to_load() {
         .with_runtime("resume-load-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume-load",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("load fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume-load",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("load fallback must succeed");
     assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
@@ -231,19 +228,18 @@ async fn ensure_session_mapping_resume_and_load_failure_creates_new_session() {
         .with_runtime("resume-new-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume-new",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("new fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume-new",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("new fallback must succeed");
     assert_eq!(mapping.peri_id, "recreated-session");
     assert_eq!(recreated.as_deref(), Some("recreated-session"));
 }
@@ -264,19 +260,18 @@ async fn ensure_session_mapping_malformed_resume_capability_uses_load() {
         .with_runtime("malformed-resume-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:malformed",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("load fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:malformed",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("load fallback must succeed");
     assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
@@ -304,19 +299,18 @@ async fn ensure_session_mapping_falls_back_to_new_with_notice_when_load_fails() 
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:fallback",
-        Some("profile-f"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-dead"),
-        &mut recreated,
-    )
-    .await
-    .expect("fallback creation must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:fallback",
+        profile_id: Some("profile-f"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-dead"), &mut recreated)
+        .await
+        .expect("fallback creation must succeed");
 
     assert_eq!(mapping.peri_id, "fresh-session");
     assert_eq!(
@@ -344,19 +338,18 @@ async fn ensure_session_mapping_without_peri_id_creates_directly() {
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:direct",
-        None,
-        "",
-        ".",
-        &[],
-        None,
-        &mut recreated,
-    )
-    .await
-    .expect("direct creation must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:direct",
+        profile_id: None,
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, None, &mut recreated)
+        .await
+        .expect("direct creation must succeed");
 
     assert_eq!(mapping.peri_id, "direct-new");
     assert!(
@@ -384,19 +377,18 @@ async fn revive_with_changed_remote_identity_rebinds_explicitly() {
         .with_runtime("rebind-identity", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:rebind",
-        Some("profile"),
-        "",
-        ".",
-        &[],
-        Some("remote-original"),
-        &mut recreated,
-    )
-    .await
-    .expect("load 通道在交集内，revive 必成功");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:rebind",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated)
+        .await
+        .expect("load 通道在交集内，revive 必成功");
     assert_eq!(mapping.peri_id, "remote-rebound", "映射绑定远端返回的新 id");
     assert_eq!(
         recreated.as_deref(),
