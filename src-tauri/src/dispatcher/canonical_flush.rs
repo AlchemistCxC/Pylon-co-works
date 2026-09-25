@@ -89,9 +89,8 @@ pub(crate) fn should_flush_batch(
     flush_batch
 }
 
-// clippy 2026-08-03：8 参为 R8 显式参数风格（window/gateway/sessions/pet/
-// client_generation/generation/mapping_ready/payload），与调用点逐参对应，
-// 结构体重构收益低。
+// 显式参数风格（window/gateway/update_channels/source/payload/committed_event
+// 六参），与 flush 循环内逐参对应，结构体重构收益低。
 fn publish_committed_update<R: tauri::Runtime>(
     window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
@@ -273,30 +272,6 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
     true
 }
 
-/// 主循环 4 个 flush 调用点（select 定时臂 / 窗口边界 / 终态边界 / 循环后 drain）
-/// 共用的窗口 flush 包装：参数自 dispatcher setup 克隆固定，仅批次按值移交。
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn flush_canonical_window<R: tauri::Runtime>(
-    window: &tauri::Window<R>,
-    gateway: &crate::gateway::GatewayCore,
-    update_channels: &crate::runtime::UpdateChannelMap,
-    pet: &std::sync::Mutex<PetState>,
-    client_generation: &std::sync::atomic::AtomicU64,
-    agent_id: &str,
-    event_service: Option<&Arc<crate::session::EventService>>,
-    message_service: Option<&Arc<crate::session::MessageService>>,
-    batch: Vec<PendingCanonicalPublish>,
-) -> bool {
-    flush_pending_canonical(
-        window,
-        gateway,
-        update_channels,
-        pet,
-        client_generation,
-        agent_id,
-        event_service,
-        message_service,
-        batch,
-    )
-    .await
-}
+// 审查修正（#317 批次二 review）：曾有的 flush_canonical_window 纯透传包装
+// 已删除——调用点直接使用正身 flush_pending_canonical（dev-standards：
+// 无独立职责的单行代理不算模块化）。

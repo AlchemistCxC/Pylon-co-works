@@ -184,7 +184,7 @@ function structuredErrorParts(error: unknown): { code?: string; message: string 
       const shape = error as StructuredWireError
       if (typeof shape.message === 'string' && shape.message.trim().length > 0) {
         return {
-          code: errorCode(error) ?? undefined,
+          code: errorCode(error)?.trim() || undefined,
           message: shape.message.trim(),
         }
       }

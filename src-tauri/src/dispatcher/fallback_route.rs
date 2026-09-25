@@ -4,6 +4,7 @@
 //! 分支在主泵中为纯 `continue` 语义。
 
 use super::AcpLock;
+use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
 
 /// 未知通知兜底：A1（探查修复）——未知通知不再静默丢弃——记 method，接新 agent 时
 /// 从 runtime log 直接看到它发了哪些私有通道（如 peri/*），按需接入。
@@ -30,5 +31,3 @@ pub(crate) async fn route_unknown_notification(acp: &AcpLock, raw: &crate::acp::
             .await;
     }
 }
-
-use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
