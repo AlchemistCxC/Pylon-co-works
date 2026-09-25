@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { errorMessage } from '../tauri/errorPayload.ts'
 import { join, tempDir } from '@tauri-apps/api/path'
 import type { SkinCommandPorts } from '../../plugin-runtime/skin/skinCommandApi.ts'
 import type { CaptureOptions, CaptureResult, ComputedSkinInspection } from '../../plugin-runtime/skin/skinTypes.ts'
@@ -67,7 +68,9 @@ async function capture(runtime: SkinRuntime, previewId: string, options: Capture
       supported: true,
       status: 'error',
       previewId,
-      error: error instanceof Error ? error.message : String(error),
+      // #317 批次二：后端命令错误统一 {code,message}（PylonError）——经唯一解释点
+      // 提取 message，不再把对象吞成 "[object Object]"。
+      error: errorMessage(error),
     }
   }
 }

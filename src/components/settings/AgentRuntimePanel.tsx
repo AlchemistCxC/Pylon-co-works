@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
+import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
 import {
   createAgentClient,
   type AgentCreateConfig,
@@ -98,11 +99,6 @@ function executableIdentity(path: string): { id: string; name: string } {
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '') || 'agent'
   return { id, name: fileName || 'Agent' }
-}
-
-function wireErrorCode(error: unknown): string | undefined {
-  if (error && typeof error === 'object') return (error as { code?: unknown }).code as string | undefined
-  return undefined
 }
 
 function invocationError(executable: string, args: string[]): string | null {

@@ -12,6 +12,7 @@
  */
 
 import { IS_TAURI } from './infrastructure/tauri/env'
+import { wireErrorParts } from './infrastructure/tauri/errorPayload'
 import { invoke } from '@tauri-apps/api/core'
 import {
   DEFAULT_RETENTION_POLICY,
@@ -49,19 +50,13 @@ export class RetentionPolicyLoadError extends Error {
 }
 
 export function retentionErrorCode(error: unknown): string | undefined {
-  if (error && typeof error === 'object' && 'code' in error) {
-    return String((error as { code: unknown }).code)
-  }
-  return undefined
+  return wireErrorParts(error).code
 }
 
 /** Tauri invoke 拒绝值为 { code, message } 对象（非 Error）——提取 message 供展示（CR-001）。 */
 export function retentionErrorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message: unknown }).message
-    if (typeof message === 'string' && message.length > 0) return message
-  }
-  return String(error)
+  const parts = wireErrorParts(error)
+  return parts.message.length > 0 ? parts.message : String(error)
 }
 
 /** 读取策略快照：Tauri → 后端权威；browser → localStorage。后端不可用抛 LoadError。 */

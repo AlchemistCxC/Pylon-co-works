@@ -15,6 +15,7 @@
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
  */
 import { invoke } from '@tauri-apps/api/core'
+import { wireErrorParts } from '../tauri/errorPayload'
 import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
 import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
@@ -54,11 +55,8 @@ export class CanonicalEventRepositoryError extends Error {
 /** invoke 拒绝值（后端 {code,message}）→ CanonicalEventRepositoryError。 */
 export function asCanonicalEventRepositoryError(error: unknown): CanonicalEventRepositoryError {
   if (error instanceof CanonicalEventRepositoryError) return error
-  if (error && typeof error === 'object' && 'message' in error) {
-    const shape = error as { code?: string; message?: unknown }
-    return new CanonicalEventRepositoryError(shape.code, String(shape.message ?? error))
-  }
-  return new CanonicalEventRepositoryError(undefined, String(error))
+  const parts = wireErrorParts(error)
+  return new CanonicalEventRepositoryError(parts.code, parts.message)
 }
 
 /** invoke 失败必须以 reject 传播（不把失败变成功）。 */

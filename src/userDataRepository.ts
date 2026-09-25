@@ -17,6 +17,7 @@
  * browser 模式不经过本模块（identityStore 直接同步读写 localStorage，读路径不变）。
  */
 import { IS_TAURI } from './infrastructure/tauri/env'
+import { wireErrorParts } from './infrastructure/tauri/errorPayload'
 
 export type UserDataKey = 'profiles' | 'sessions'
 
@@ -45,11 +46,8 @@ export class UserDataRepositoryError extends Error {
 /** Tauri invoke 拒绝值（后端 {code,message} 结构化错误）→ UserDataRepositoryError。 */
 export function asUserDataRepositoryError(error: unknown): UserDataRepositoryError {
   if (error instanceof UserDataRepositoryError) return error
-  if (error && typeof error === 'object' && 'message' in error) {
-    const shape = error as { code?: string; message?: unknown }
-    return new UserDataRepositoryError(shape.code, String(shape.message ?? error))
-  }
-  return new UserDataRepositoryError(undefined, String(error))
+  const parts = wireErrorParts(error)
+  return new UserDataRepositoryError(parts.code, parts.message)
 }
 
 /** invoke 失败必须以 reject 传播（归一化，不得把失败变成功）。 */

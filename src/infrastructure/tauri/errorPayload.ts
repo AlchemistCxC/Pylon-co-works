@@ -28,3 +28,19 @@ export function errorCode(error: unknown): string | null {
   const code = (error as { code: unknown }).code
   return typeof code === 'string' && code ? code : null
 }
+
+/**
+ * #317 批次二：各 repository 的 typed Error 包装共用提取核心——结构化对象取
+ * `{ code, message }`；Error 实例/其余（含原裸 String 命令面）取 message。
+ * code 经字符串校验（后端 DTO 恒为字符串；校验替代各点的历史裸 cast）。
+ */
+export function wireErrorParts(error: unknown): { code: string | undefined; message: string } {
+  if (error && typeof error === 'object' && ('message' in error || 'code' in error)) {
+    const shape = error as { code?: unknown; message?: unknown }
+    return {
+      code: typeof shape.code === 'string' && shape.code ? shape.code : undefined,
+      message: String(shape.message ?? error),
+    }
+  }
+  return { code: undefined, message: String(error) }
+}
