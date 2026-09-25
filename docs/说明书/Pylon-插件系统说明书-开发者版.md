@@ -1,8 +1,8 @@
 ﻿# Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 0.2.2
+> 适用版本：Pylon 0.3.0-AUE
 >
-> 生产契约：Plugin API 1.0 / 1.1 / 1.2（最新 1.2），`pylon-plugin.json` schema 1
+> 生产契约：Plugin API 1.0 / 1.1 / 1.2 / 1.3 / 2.0 / 2.1 / 2.2 / 2.3 / 2.4（最新 2.4），`pylon-plugin.json` schema 1
 
 本文基于当前源码契约编写。旧 API 0.1 的 `trust`、`contributes`、`signature`、顶层 `entry`、CapabilityBroker、旧 Host/ExtensionPoint 均已删除，不得用于新插件。`capabilities` 与 `dangerousHooks` 自 API 1.2 起以新语义回归（见 §3.1）。API 1.3 定稿 Hook 锚点词表与事件 schema（见 §6.2）：新增 `permission.request`，移除 `agent.chunk`、`message.agent.committed`。
 
