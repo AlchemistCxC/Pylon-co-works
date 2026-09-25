@@ -2,6 +2,9 @@ use super::*;
 use std::collections::HashMap;
 use std::path::Path;
 
+// #317 批次二 ③：原子写原语正身已下沉 pylon-foundations（原经 atomic_write::* glob 重导出）。
+use pylon_foundations::atomic_write::{replace_file, sync_parent, write_synced_temp};
+
 /// 应用 agent 补丁（§5.3.A）：patch 为 agent 整块 YAML 字符串（前端 AgentConfigEditor
 /// 形态）；仅替换目标 agent，默认禁止创建不存在 agent（产品拍板项，默认禁止）。
 pub(crate) fn apply_agent_patch(

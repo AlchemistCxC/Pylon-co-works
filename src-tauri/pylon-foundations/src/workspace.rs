@@ -537,36 +537,15 @@ fn decode_text(bytes: &[u8]) -> Result<(String, &'static str), WorkspaceError> {
 // - 编码 round-trip：UTF-8 BOM 保留；GBK 文件按 GBK 重新编码写回（不悄悄转码）。
 // - > MAX_SAVE_BYTES 的文件/内容拒绝（TooLarge）——大文件本轮保持只读。
 
-/// 原子写：同目录临时文件 + rename。Windows rename 不覆盖已存在目标时先移除
-/// 再重命名（小窗口，基线冲突守卫已在前置）；失败清理临时文件。
+/// 原子写（#317 批次二 ③：改调本 crate 正身 [`atomic_write::write_file_atomically`]）。
+/// 此前本处是无 fsync 的弱实现（`.{name}.pylon-save-{pid}` 临时名 + rename 失败时
+/// remove+rename，有丢窗口），正身以 MoveFileExW(WRITE_THROUGH)/fsync 消除之；
+/// 档位取 best_effort_data_file（保留历史「不 fsync」语义，父目录 create_dir_all
+/// 对既有目标为 no-op）。
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), WorkspaceError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| WorkspaceError::Io("无法定位文件目录".into()))?;
-    let file_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = parent.join(format!(".{file_name}.pylon-save-{}", std::process::id()));
-    fs::write(&tmp, bytes).map_err(|e| WorkspaceError::Io(e.to_string()))?;
-    match fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(first)
-            if first.kind() == std::io::ErrorKind::AlreadyExists
-                || first.kind() == std::io::ErrorKind::PermissionDenied =>
-        {
-            fs::remove_file(path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
-            if let Err(e) = fs::rename(&tmp, path) {
-                let _ = fs::remove_file(&tmp);
-                return Err(WorkspaceError::Io(e.to_string()));
-            }
-            Ok(())
-        }
-        Err(first) => {
-            let _ = fs::remove_file(&tmp);
-            Err(WorkspaceError::Io(first.to_string()))
-        }
-    }
+    use crate::atomic_write::{write_file_atomically, AtomicWriteOptions};
+    write_file_atomically(path, bytes, AtomicWriteOptions::best_effort_data_file())
+        .map_err(|e| WorkspaceError::Io(e.to_string()))
 }
 
 pub fn write_text(
