@@ -107,13 +107,18 @@ pub(crate) struct DraftFlushRequest {
     pub reply: tokio::sync::oneshot::Sender<Result<(), String>>,
 }
 
+/// #155 T3：prompt 终态 draft 收口请求的发送端槽位（代际 + 发送端）。抽别名是
+/// clippy::type_complexity 的要求，同时给「代际不符即视为无 dispatcher」这条
+/// 语义一个可命名处。
+pub(crate) type DraftFlushSender =
+    Arc<Mutex<Option<(u64, tokio::sync::mpsc::UnboundedSender<DraftFlushRequest>)>>>;
+
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Prompt terminal writes ask the dispatcher to close the preceding
     /// cross-window draft before allocating the terminal sequence.
-    pub(crate) draft_flush_tx:
-        Arc<Mutex<Option<(u64, tokio::sync::mpsc::UnboundedSender<DraftFlushRequest>)>>>,
+    pub(crate) draft_flush_tx: DraftFlushSender,
     pub session_creation: Arc<tokio::sync::Mutex<()>>,
     pub agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
     pub client_generation: Arc<AtomicU64>,
