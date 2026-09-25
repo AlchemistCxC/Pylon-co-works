@@ -8,10 +8,10 @@ hero:
   actions:
     - theme: brand
       text: 从发布包开始
-      link: /说明书/Pylon-发行包清单
+      link: /manual/release-package
     - theme: alt
       text: 插件系统
-      link: /说明书/Pylon-插件系统说明书-用户版
+      link: /manual/plugin-system-user
     - theme: alt
       text: GitHub
       link: https://github.com/AlchemistCxC/Pylon-co-works
