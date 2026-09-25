@@ -6,9 +6,14 @@ Pylon 便携版（portable）
 请先运行本目录下 tools\install-webview2.bat（需要联网），完成后重新双击 pylon.exe。
 
 【配置 Agent】
-1. 把 agents.example.yaml 复制为 agents.yaml（与 pylon.exe 同目录）。
-2. 把 agents.yaml 中的 exe 占位路径改成你的 Agent 可执行文件绝对路径。
-3. 启动 Pylon 后，可在 设置 → Agent 中切换/测试/新建 Agent。
+首次启动是干净的「零 Agent」空态，不需要事先准备任何配置文件：
+1. 打开 设置 → Agent，点「新建 Agent」按分步引导创建：探测本机 → 选可执行文件 → 测试连接 → 创建。
+2. 探测不到可用 Agent 时，直接填 exe 绝对路径（或命令名）建立第一个 Agent。
+
+也可以用 YAML 预置（高级，可选）：
+把 agents.example.yaml 复制为 agents.yaml（与 pylon.exe 同目录），把其中的 exe 占位路径
+改成你的 Agent 可执行文件绝对路径，然后重启 Pylon。注意 Pylon 不会自动加载
+agents.example.yaml 本身，只有 agents.yaml 才会被读取。
 
 【插件 SDK（离线开发）】
 发行包内的 resources\sdk\ 是不依赖 Node 或源码的离线 SDK：

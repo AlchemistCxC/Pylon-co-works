@@ -40,7 +40,7 @@
 | `resources/runtime/README.txt` | 可选（`--with-runtime`） | 运行时用途、许可和准备方式说明 |
 | `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
 | `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema；与离线 SDK 一起发布 |
-| `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
+| `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板（**可选的预置方式**：#326 起裸启动是零 Agent 空态，启动不读本文件，只有复制成 `agents.yaml` 才生效） |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |
 | `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据 |
