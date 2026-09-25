@@ -48,10 +48,14 @@ interface LauncherItem {
  * SheetLauncher — Sheet 启动命令面板（#279 第 3 梯队 Solid 化实体）。
  *
  * 原实现基于 cmdk（React 生态）；本实体按其**可见行为契约**手写：
- * 过滤 = value 串大小写不敏感子串匹配（关键词随 value 参与）、不匹配项从 DOM 移除、
+ * 过滤 = 索引串大小写不敏感子串匹配、不匹配项从 DOM 移除、
  * 组内全隐藏则整组隐藏、全空显示 Empty；DOM 携带 App.css 消费的 cmdk 属性词汇
  * （[cmdk-input]/[cmdk-group-heading]/[cmdk-group-items]/[cmdk-item] + data-selected/
  * data-disabled）。键盘 ↑↓ 循环选区、Enter 选中、Esc/遮罩点击关闭。
+ *
+ * 索引串 = **所有可搜字段的并集**：条目标题 + 描述 + 注册处声明的 `keywords`。
+ * 描述是中文而条目标题多为英文，故必须并入索引，否则中文界面下搜索不可达
+ * （#327）；`keywords` 承载注册处声明的中英双语同义词。
  */
 export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
   const value = p.latest
@@ -133,11 +137,18 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
   const groupsVisible = createMemo(() => launchGroups()
     .map(group => ({
       ...group,
-      options: group.options.filter(tool => matches(`tool ${tool.title} ${tool.kind} ${tool.categoryLabel || ''} ${(tool.keywords || []).join(' ')}`)),
+      options: group.options.filter(tool => matches(`tool ${tool.title} ${tool.description} ${tool.kind} ${tool.categoryLabel || ''} ${(tool.keywords || []).join(' ')}`)),
     }))
     .filter(group => group.options.length > 0))
-  const settingsVisible = createMemo(() => matches('management settings theme agent'))
-  const profilesVisible = createMemo(() => matches('management profiles profile'))
+  // 管理入口是宿主自有卡片（非插件贡献），中英双语检索词直接写进索引串。
+  const settingsVisible = createMemo(() => matches('management settings theme agent 设置 主题 外观 偏好 配置'))
+  const profilesVisible = createMemo(() => matches('management profiles profile 档案 身份 用户 配置'))
+
+  // Agent 组的两套空态文案：真无 Agent（引导去设置新建）与查询无命中（提示换词）
+  // 语义不同，不能共用一句。
+  const agentsFallback = createMemo(() => value().agents.length === 0
+    ? { title: '还没有可用的 Agent', detail: '在设置中新建 Agent 后，可在这里直接打开' }
+    : { title: '没有匹配的 Agent', detail: '换个关键词试试' })
 
   // 扁平可见项（键盘环选顺序 = 渲染顺序）；查询变化后选区归首项
   const flatItems = createMemo<LauncherItem[]>(() => [
@@ -256,7 +267,10 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
                   <Show when={agentsVisible().length > 0} fallback={
                     <div class="sheet-launcher-item" cmdk-item="" role="option" aria-disabled="true" data-disabled="true">
                       <LaunchIcon icon="agent" />
-                      <span class="sheet-launcher-copy"><strong>没有可用 Agent</strong><small>等待 list_agents 返回</small></span>
+                      <span class="sheet-launcher-copy">
+                        <strong>{agentsFallback().title}</strong>
+                        <small>{agentsFallback().detail}</small>
+                      </span>
                     </div>
                   }>
                     <For each={agentsVisible()}>{agent => (
@@ -300,7 +314,7 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
                         <span class="sheet-launcher-card-title"><strong>{tool.title}</strong><em>{tool.kind}</em></span>
                         <small>{tool.description}</small>
                       </span>
-                      <Show when={!tool.launchable}><span class="sheet-launcher-badge">unavailable</span></Show>
+                      <Show when={!tool.launchable}><span class="sheet-launcher-badge">暂不可用</span></Show>
                     </div>
                   )}</For>
                 </div>
@@ -330,7 +344,7 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
           <div class="sheet-launcher-footer">
             <span><kbd>↑↓</kbd> 选择</span>
             <span><kbd>Enter</kbd> 打开</span>
-            <span>插件可贡献分类、图标与搜索关键词</span>
+            <span>中文与英文关键词均可搜索</span>
           </div>
         </div>
       </div>

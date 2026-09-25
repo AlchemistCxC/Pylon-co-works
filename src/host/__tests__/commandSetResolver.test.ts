@@ -70,7 +70,10 @@ describe('commandSetResolver（v2 Command Registry）', () => {
       description: '运行时描述',
     }])
     const model = suggestions.find(item => item.cmd === '/model')
-    expect(model).toEqual({ cmd: '/model', args: ' <runtime-hint>', info: '运行时描述' })
+    // agent 覆盖展示字段，但宿主侧检索关键词保留（同名命令仍是同一条命令）。
+    expect(model).toEqual({
+      cmd: '/model', args: ' <runtime-hint>', info: '运行时描述', keywords: ['模型', '切换模型'],
+    })
     expect(resolveCommandSetDescriptors([{ name: 'model' }]).find(item => item.name === 'model')
       ?.agentPromptSnippet).toContain('/model')
 

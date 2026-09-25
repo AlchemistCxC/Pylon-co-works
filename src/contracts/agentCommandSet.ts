@@ -13,7 +13,14 @@ export type CommandPermission = 'read' | 'edit' | 'execute' | 'gate'
 export interface CommandSetDescriptor {
   /** 命令名（不含斜杠），小写唯一键。 */
   name: string
+  /** 执行别名：`resolveEntry` 认它，输入 `/别名` 可直接命中该命令。 */
   aliases?: readonly string[]
+  /**
+   * 检索关键词（人机侧建议列表过滤用，**不参与执行解析**）。
+   * 命令名是英文唯一键，中文界面下用户无从按母语检索；本字段声明中英双语检索词
+   * （插件贡献命令同样适用）。匹配用子串，故「新会话」可被「会话」命中。
+   */
+  keywords?: readonly string[]
   description: string
   /** 输入提示（人机侧 args 展示）。 */
   inputHint?: string

@@ -31,6 +31,8 @@ export interface CommandSetSuggestion {
   cmd: string
   args: string
   info: string
+  /** 检索关键词（人机侧过滤用）；缺省 = 只能按命令名检索。 */
+  keywords?: readonly string[]
 }
 
 function dedupeAndSort(commands: readonly CommandSetDescriptor[]): CommandSetDescriptor[] {
@@ -58,6 +60,7 @@ export function resolvePluginCommands(enabledPluginIds?: readonly string[]): Com
   return dedupeAndSort(descriptors.map(command => ({
     name: command.name,
     ...(command.aliases ? { aliases: command.aliases } : {}),
+    ...(command.keywords ? { keywords: command.keywords } : {}),
     description: command.description,
     ...(command.inputHint ? { inputHint: command.inputHint } : {}),
     ...(command.agentPromptSnippet ? { agentPromptSnippet: command.agentPromptSnippet } : {}),
@@ -103,6 +106,7 @@ export function resolveCommandSetSuggestions(
     cmd: `/${command.name}`,
     args: command.inputHint ? ` ${command.inputHint}` : '',
     info: command.description || '',
+    ...(command.keywords ? { keywords: command.keywords } : {}),
   }))
 }
 

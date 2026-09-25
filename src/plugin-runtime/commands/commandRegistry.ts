@@ -28,6 +28,7 @@ export interface CommandDescriptor {
   ownerRuntimeInstanceId: string
   name: string
   aliases?: readonly string[]
+  keywords?: readonly string[]
   description: string
   inputHint?: string
   agentPromptSnippet?: string
@@ -129,6 +130,7 @@ export class CommandRegistry {
       ownerRuntimeInstanceId,
       name: command.name,
       ...(command.aliases ? { aliases: command.aliases } : {}),
+      ...(command.keywords ? { keywords: command.keywords } : {}),
       description: command.description,
       ...(command.inputHint ? { inputHint: command.inputHint } : {}),
       ...(command.agentPromptSnippet ? { agentPromptSnippet: command.agentPromptSnippet } : {}),

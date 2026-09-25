@@ -59,6 +59,46 @@ describe('SheetLauncher Registry 卡片', () => {
     expect(screen.queryByRole('option', { name: /Browser/ })).toBeNull()
   })
 
+  // #327：中文界面下英文条目标题不可搜——描述与中英关键词都必须进索引串。
+  it('中文关键词与中文描述均可命中条目', () => {
+    render(<SheetLauncher
+      open
+      agents={[]}
+      sheets={[]}
+      onOpenChange={vi.fn()}
+      onFocusSheet={vi.fn()}
+      onOpenSheet={vi.fn()}
+      onOpenSettings={vi.fn()}
+      onOpenProfiles={vi.fn()}
+    />)
+    const input = screen.getByPlaceholderText('搜索 Sheet、Agent 或管理入口...')
+
+    fireEvent.input(input, { target: { value: '设置' } })
+    expect(screen.getByRole('option', { name: /Settings/ })).toBeInTheDocument()
+
+    fireEvent.input(input, { target: { value: '运行日志' } })
+    expect(screen.getByRole('option', { name: /Runtime/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Browser/ })).toBeNull()
+
+    fireEvent.input(input, { target: { value: '网关' } })
+    expect(screen.getByRole('option', { name: /Gateway/ })).toBeInTheDocument()
+  })
+
+  it('无 Agent 时空态不露内部术语', () => {
+    render(<SheetLauncher
+      open
+      agents={[]}
+      sheets={[]}
+      onOpenChange={vi.fn()}
+      onFocusSheet={vi.fn()}
+      onOpenSheet={vi.fn()}
+      onOpenSettings={vi.fn()}
+      onOpenProfiles={vi.fn()}
+    />)
+    expect(screen.getByText('还没有可用的 Agent')).toBeInTheDocument()
+    expect(screen.queryByText(/list_agents/)).toBeNull()
+  })
+
   it('插件声明未知图标键时使用 host 通用图标，不加载插件 React 组件', () => {
     const registration = registerWorkspace(createPluginIdentity('test.launcher-card', 'unknown-icon'), {
       kind: 'test.unknown-icon',
