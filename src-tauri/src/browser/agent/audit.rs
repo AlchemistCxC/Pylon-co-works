@@ -63,11 +63,6 @@ impl AuditBuffer {
         self.entries.len()
     }
 
-    #[allow(dead_code)] // 测试用
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     pub(crate) fn to_payload(&self) -> Value {
         serde_json::json!({
             "version": AUDIT_ENVELOPE_VERSION,
