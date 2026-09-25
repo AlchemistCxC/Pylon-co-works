@@ -971,20 +971,26 @@ import {
 } from '@pylon/plugin-sdk'
 ```
 
-事实源为 `src/sdk/index.ts`；引用方式为路径别名（tsconfig `paths` 与 esbuild `--alias` 都指向 `src/sdk/index.ts`，见 §14）。SDK 的打包约束：
+事实源为 `src/sdk/`（分层：`contract.ts` 纯类型再出口按域分组、`runtime.ts` 常量与 helpers、`index.ts` 组合）；引用方式为路径别名（tsconfig `paths` 与 esbuild `--alias` 都指向 `src/sdk/index.ts`，见 §14）。SDK 的打包约束：
 
 - 类型一律 `export type` re-export（`PluginActivationContext`、`CommandDefinition`、`HookDefinition`、`PluginUiSurface`、`WorkspaceTypeDefinition`、renderer/settings/presentation/sessionCreation/process/scope 等），编译期消失；
 - 运行时值仅限常量表与纯函数，禁止 import 宿主运行时模块——SDK 可安全内联进插件 bundle，不会泄漏宿主代码。
+
+**契约类型出口覆盖 API 1.0–1.3 / 2.0–2.4 的全部 context 面**（application/workspace/renderer/commands/hooks/sessions/turns/process/ui/services/sidebar/fileWorkbench/contextPanel/presentation/settings/fonts/sessionCreation/interfaceModes/shellRecipes/titlebar/storage/ccWidget/presets/management），以及按域分组的贡献类型（2.0 region 左栏模块、2.1 `CommandTitlebarContribution` app-menu、cc-widget placement、preset 注册、1.2 管理面投影类型等）。**隔离面 wire 协议**也是 SDK 出口：左栏模块与右栏面板的 `renderKind: 'isolated-surface'` 形态，宿主经 `host:input` 推送的输入类型（`AgentSidebarSurfaceInput` / `ContextPanelSurfaceInput`）与可回传事件词表（`SIDEBAR_SURFACE_EVENTS` / `CONTEXT_PANEL_SURFACE_EVENTS`）——写隔离面插件不必再反推宿主桥接协议。
+
+有一道**防漂移门**看守这份出口：`sdkExports.test.ts` 的 parity 断言强制「activation context 每个成员 ↔ SDK 出口类型」一一对应，宿主新增 context 成员而未补出口时编译期变红。
 
 API：
 
 | 成员 | 用途 |
 |:--|:--|
 | `definePlugin(module)` | 生命周期定义的 checked 包装：缺 `activate` 或生命周期成员非函数立即报错 |
+| `defineManifest(manifest)` | 声明即校验：按宿主同一 parse 管道立即校验并冻结 manifest，安装期错误前移到开发期 |
 | `validatePluginManifest(value)` | 解析并校验 `pylon-plugin.json`（等价宿主 parse，含已删除字段拒绝） |
 | `createPluginLogger(pluginId)` | 统一 `[pluginId]` 前缀、琥珀标签的 console 封装 |
 | `createSettingsSurface(definition)` | 声明式设置页（见下） |
 | `VISUAL_SEMANTIC_TOKENS` / `VISUAL_SEMANTIC_ROLE_TOKENS` | 宿主视觉语义 token 名（§6.4.2 纪律的唯一真值） |
+| `SIDEBAR_SURFACE_EVENTS` / `CONTEXT_PANEL_SURFACE_EVENTS` | 隔离面可回传事件词表（宿主真源常量） |
 
 `createSettingsSurface` 把 §6.10 协议（`host:input` 进、`settings:set` 出）封装成字段清单，纯 DOM 渲染、样式消费语义 token，返回值直接交给 `context.settings.registerPage`：
 
@@ -1025,9 +1031,12 @@ await ctx.__scopeDispose()                                 // 真实 Scope 回�
 语义：`__commands.execute` / `__hooks.dispatch`（按 priority 排序的 pipeline 归约）/
 `__ui.mount`（挂载即派发 host:input，settings:set 回写 settings 存储，与
 PluginSettingsPageHost 同款）/ `__settings` / `__storage` / sessions·turns 为内存实现；
-其余 13 个 API 面为记录式 Proxy（调用被记录、返回 undefined）——覆盖不到的
-行为用真实宿主或集成测试验证。插件测试文件 import 此子路径，生产 bundle
-不会包含它。
+其余 API 面为记录式 Proxy（调用被记录、返回 undefined）——覆盖不到的
+行为用真实宿主或集成测试验证。`management`（API 1.2 capability 面）缺省**不装配**
+（对齐宿主 C3 门控语义：未声明/未授权时属性不存在）；`createMockContext({ management: true })`
+装配内存实现——只读投影返回空结构、管理操作记录进 `__recorded`，授权/守卫语义
+（self_locked / product_required / 现查 grant）属宿主职责，mock 不复刻。
+插件测试文件 import 此子路径，生产 bundle 不会包含它。
 
 #### 6.11.2 存储 API（API 1.1 新增）
 

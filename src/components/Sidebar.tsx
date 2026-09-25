@@ -8,6 +8,7 @@ import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import type {
   AgentSidebarContribution,
 } from '../plugin-runtime/sidebar/sidebarTypes.ts'
+import type { AgentSidebarSurfaceInput } from '../plugin-runtime/sidebar/sidebarSurfaceProtocol.ts'
 import {
   isBlockCollapsed,
   isBlockPageOpen,
@@ -267,7 +268,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       blockAction: streamedAction ? { actionId: streamedAction.actionId, nonce: streamedAction.nonce } : null,
       sessions: sharedProps.sessions.map(session => ({ id: session.id, name: session.name, workspaceId: session.workspaceId })),
       workspaces: sharedProps.workspaces.map(workspace => ({ id: workspace.id, name: workspace.name, rootPath: workspace.rootPath })),
-    }
+    } satisfies AgentSidebarSurfaceInput
 
     const body = isolated
       ? (
