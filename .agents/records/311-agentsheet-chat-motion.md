@@ -98,3 +98,4 @@
 - 测试调整：`MessageRow.solid.test.tsx` 验证终态补字推迟收束、一次性和历史静止；`StreamingIdentity.solid.test.tsx` 验证列表晋升、闭合围栏与既有稳定标题身份；`mountSolidWorkbench.solid.test.tsx` 验证工具首次结果回执及历史/减动效静止。未放宽或删除旧用例。第一次全量测试有 2 个 `issue55.streamingContainers` 用例因思考区收到新装饰标记而失败；将定稿限定到助手正文后，这两项沿原逐字节 HTML 断言通过。
 - 验证证据：定向复跑 4 文件 / 134 项通过，退出码 0；`bun run check:solid` 退出码 0，扫描 165 个源码文件，CSS 消费审计悬空引用 0；`bun run check:frontend` 退出码 0，Vitest 641 文件通过 / 1 跳过，4880 项通过 / 1 跳过 / 1 todo，Vite 生产构建转换 4637 模块，bundle、solid-smoke、docs、deps 与产物隔离检查通过；`git diff --check` 退出码 0。
 - 代码提交：`88f45ccc`。实机视觉验收按用户明确指示由用户自行进行，本次未执行 WebView2 验收。
+- 随后合入 `github/main@4a8fb576`，无冲突；最新基线上定向复跑 4 文件 / 134 项通过，`check:solid` 再次退出码 0。首次全量门禁在 4940 项通过后因工作树尚未安装主线新增的 `@codemirror/merge` 而停在 FileSheet 新用例；按锁文件执行 `bun install --frozen-lockfile` 后，`check:frontend` 退出码 0：Vitest 649 文件通过 / 1 跳过、4942 项通过 / 1 跳过 / 1 todo，Vite 生产构建转换 4640 模块，后续 bundle、solid-smoke、docs、deps 和产物隔离均通过。`git diff --check github/main...HEAD` 退出码 0。
