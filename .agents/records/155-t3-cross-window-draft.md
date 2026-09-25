@@ -48,6 +48,7 @@
 ## 证据
 
 - commit：功能本体 `c8b4ccbe`，合入 github/main 的合并提交 `48170945`（冲突融合细节见「并行交集」）。
+- clippy 基线门禁（CI `rust-clippy` job 同款：`cargo clippy --workspace --all-targets` + `scripts/check-clippy-baseline.mjs` 逐 crate）：修复 `runtime.rs` 的 `draft_flush_tx` 嵌套泛型 `clippy::type_complexity` 新增（抽 `DraftFlushSender` 别名）后，六个 crate 全部零新增。
 - `bun run check:all`：退出码 0——前端 vitest 652 个测试文件通过（1 skipped），cargo test --workspace --lib 各 crate 全绿（pylon 841、pylon-session 等均 0 failed），shadow parity、cargo fmt --check 与全部 solid/边界守卫通过。
 - `cargo test --manifest-path src-tauri/Cargo.toml -p pylon-session --lib cross_window_draft_storage_bench -- --nocapture`：退出码 0，1 passed，600 chunk 生产形态基准见上。
 - 手工验证：`bun run build` 后 `cargo build --manifest-path src-tauri/Cargo.toml`，将当前 `pylon.exe` 放到隔离 portable 目录（`data/pylon-data-v1.sqlite3` 空库），以 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9235 --remote-allow-origins=*` 与隔离的 `WEBVIEW2_USER_DATA_FOLDER` 启动。CDP `Runtime.evaluate` 确认 `typeof window.__TAURI_INTERNALS__.invoke === 'function'`，且 `evt_draft_list` 已注册。配置 `pylon-fake-agent --scenario stream-forever --chunk-interval-ms 50` 并通过真实 `send_message` 启动；运行期间临时表有 8 片段／112 chunk（正式历史仅用户输入），强制结束 Agent 后临时表为 25 片段／368 chunk、`interrupted=true`，正式历史末行仍为已提交 batch（sequence 401），没有 `turn.failed`。调用 `evt_draft_keep` 后返回 1 条正式 batch、revision 769，临时表 0 行。
