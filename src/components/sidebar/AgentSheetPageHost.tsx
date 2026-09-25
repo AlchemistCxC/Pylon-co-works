@@ -6,6 +6,7 @@ import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { normalizePageState, resolveOpenPage } from '../../plugin-runtime/sidebar/sidebarBlockState.ts'
 import type { AgentSidebarContribution } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
+import type { AgentSidebarSurfaceInput } from '../../plugin-runtime/sidebar/sidebarSurfaceProtocol.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import { FirstPartyContribution } from './FirstPartyContribution.tsx'
@@ -77,7 +78,7 @@ export default function AgentSheetPageHost({ page, ctx, sheet }: {
           blockAction: null,
           sessions: sharedProps.sessions.map(session => ({ id: session.id, name: session.name, workspaceId: session.workspaceId })),
           workspaces: sharedProps.workspaces.map(workspace => ({ id: workspace.id, name: workspace.name, rootPath: workspace.rootPath })),
-        }}
+        } satisfies AgentSidebarSurfaceInput}
         onEvent={(event, detail) => {
           if (event === 'host:select-session' && typeof detail === 'string') sharedProps.onSelectSession(detail)
           if (event === 'host:create-loose-session') sharedProps.onCreateLooseSession()

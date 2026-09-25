@@ -25,8 +25,45 @@ describe('formatRuntimeError（结构化错误展示）', () => {
       action: '删除会话记录',
       code: 'user_data_unavailable',
       message: '用户数据仓库不可用：user data db unavailable',
-      recovery: undefined,
+      // #338：码表未标注的码走「查看运行日志」诊断兜底，恢复按钮不再缺席。
+      recovery: { kind: 'open-runtime-log' },
     })
+  })
+
+  it('#338 恢复动作按码表派生：可执行文件缺失 → 选择可执行文件并携带 agentId', () => {
+    expect(formatRuntimeError('启动', { code: 'agent_executable_missing', message: 'exe 不存在' }, 'peri-1').recovery).toEqual({
+      kind: 'select-agent-executable',
+      agentId: 'peri-1',
+    })
+  })
+
+  it('#338 恢复动作按码表派生：配置写失败 → 打开 Agent 设置', () => {
+    expect(formatRuntimeError('保存', { code: 'config_write_error', message: '写入失败' }, 'peri-2').recovery).toEqual({
+      kind: 'open-agent-settings',
+      agentId: 'peri-2',
+    })
+  })
+
+  it('#338 无码错误走「查看运行日志」诊断兜底', () => {
+    expect(formatRuntimeError('工作台运行时', new Error('boom')).recovery).toEqual({ kind: 'open-runtime-log' })
+    expect(formatRuntimeError('工作台运行时', 'plain text failure').recovery).toEqual({ kind: 'open-runtime-log' })
+  })
+
+  it('#338 未显式覆盖时走码表；显式 recovery 才覆盖派生结果', () => {
+    const original = console.error
+    console.error = () => {}
+    try {
+      // 调用点不传 recovery → 派生结果生效（码表把可执行缺失路由到选择可执行文件）。
+      const derived = reportRuntimeError('启动', { code: 'agent_executable_missing', message: 'exe 不存在' }, 'peri-3')
+      expect(derived.recovery).toEqual({ kind: 'select-agent-executable', agentId: 'peri-3' })
+      // 调用点确实知道更准动作时，显式 recovery 覆盖派生。
+      const overridden = reportRuntimeError('启动', { code: 'agent_executable_missing', message: 'exe 不存在' }, 'peri-3', {
+        recovery: { kind: 'open-runtime-log' },
+      })
+      expect(overridden.recovery).toEqual({ kind: 'open-runtime-log' })
+    } finally {
+      console.error = original
+    }
   })
 
   it('message 已含 code 时保留原样并同时提取 code', () => {

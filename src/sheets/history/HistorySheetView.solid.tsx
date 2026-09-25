@@ -82,7 +82,6 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
         key: `history:${sheetId}:list`,
         scope: { kind: 'sheet', id: sheetId },
         source: 'history.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId },
       })
     })
     onCleanup(() => { disposed = true })
@@ -110,7 +109,6 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
         key: `history:${props.sheet.id}:export-dialog`,
         scope: { kind: 'sheet', id: props.sheet.id },
         source: 'history.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: props.sheet.id },
       })
       return
     }
@@ -127,7 +125,6 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
         key: `history:${props.sheet.id}:export:${periId}`,
         scope: { kind: 'sheet', id: props.sheet.id },
         source: 'history.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: props.sheet.id },
       })
     }
   }

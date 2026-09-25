@@ -228,7 +228,6 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     key: `settings:${action}:${agentId ?? 'app'}`,
     scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
     source: 'settings',
-    recovery: { kind: 'open-runtime-log', agentId },
   })
   const resolveSettingsError = (action: string, agentId?: string) => resolveRuntimeErrors({
     key: `settings:${action}:${agentId ?? 'app'}`,

@@ -43,7 +43,6 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
         key: runtimeErrorKey('读取启动诊断'),
         scope: { kind: 'sheet', id: _sheet.id },
         source: 'runtime.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
       })
     })
     createRuntimeClient({ invoke: tauriInvokeTransport }).listRuntimeLogs().then(raw => {
@@ -56,7 +55,6 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
         key: runtimeErrorKey('读取运行日志'),
         scope: { kind: 'sheet', id: _sheet.id },
         source: 'runtime.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
       })
     })
     // B2：挂载时开 live 推送、卸载时关（ringbuffer pull 兜底不受影响）
@@ -88,7 +86,6 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
         key: runtimeErrorKey('清空运行日志'),
         scope: { kind: 'sheet', id: _sheet.id },
         source: 'runtime.sheet',
-        recovery: { kind: 'open-runtime-log', sheetId: _sheet.id },
       })
     }
   }

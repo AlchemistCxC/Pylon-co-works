@@ -1,5 +1,6 @@
 import { addError, resolveRuntimeErrors as resolveStoredRuntimeErrors } from './errorCenter.ts'
 import { errorCode } from './infrastructure/tauri/errorPayload.ts'
+import { ERROR_CODE_EXPLANATIONS } from './errorCodeExplanations.ts'
 import type { RuntimeErrorMatcher } from './errorCenter.ts'
 
 export type RecoveryKind =
@@ -19,9 +20,6 @@ export interface RuntimeErrorScope {
 export interface RuntimeErrorRecovery {
   kind: RecoveryKind
   agentId?: string
-  sessionId?: string
-  sheetId?: string
-  suiteId?: string
 }
 
 /** Display-only action kept in memory; never serialized into wire/canonical data. */
@@ -40,6 +38,7 @@ export interface RuntimeErrorOptions {
   technicalMessage?: string
   metadata?: Readonly<Record<string, unknown>>
   source?: string
+  /** 显式覆盖码表派生的恢复入口；仅在调用点确实知道更准动作时使用（#338），不再无条件传。 */
   recovery?: RuntimeErrorRecovery
   recoveryAction?: RuntimeErrorRecoveryAction
 }
@@ -195,26 +194,18 @@ function structuredErrorParts(error: unknown): { code?: string; message: string 
   return null
 }
 
-/** 从部署错误码推导恢复入口（施工文档 §5.3 按钮映射）。 */
+/**
+ * 恢复入口由错误码表派生（#338 单源 `ERROR_CODE_EXPLANATIONS`：解释与动作同表）。
+ * 查表无果（含无码错误）兜底「查看运行日志」——纯诊断动作，不猜修复方式。
+ */
 export function recoveryForCode(code: string | undefined, agentId?: string): RuntimeErrorDetail['recovery'] {
-  switch (code) {
-    case 'agent_executable_missing':
-      return { kind: 'select-agent-executable', agentId }
-    case 'config_read_only':
-    case 'config_write_error':
-      return { kind: 'open-agent-settings', agentId }
-    case 'agent_spawn_failed':
-    case 'agent_initialize_failed':
-    case 'agent_connection_timeout':
-      return { kind: 'open-runtime-log' }
-    default:
-      return undefined
-  }
+  const kind = (code ? ERROR_CODE_EXPLANATIONS[code]?.recovery : undefined) ?? 'open-runtime-log'
+  return { kind, ...(agentId ? { agentId } : {}) }
 }
 
 export function formatRuntimeError(action: string, error: unknown, agentId?: string): RuntimeErrorDetail {
   if (error === null || error === undefined) {
-    return { action, message: '未知错误' }
+    return { action, message: '未知错误', recovery: recoveryForCode(undefined, agentId) }
   }
   if (error instanceof Error) {
     let rawMessage = ''
@@ -226,7 +217,8 @@ export function formatRuntimeError(action: string, error: unknown, agentId?: str
     return {
       action,
       message: redactText(message),
-      ...(code ? { code, recovery: recoveryForCode(code, agentId) } : {}),
+      ...(code ? { code } : {}),
+      recovery: recoveryForCode(code, agentId),
     }
   }
   const parts = structuredErrorParts(error)
@@ -243,7 +235,7 @@ export function formatRuntimeError(action: string, error: unknown, agentId?: str
   const message = raw && raw.trim().length > 0 && raw !== '[object Object]'
     ? redactText(safeUserSummary(raw))
     : '未知错误'
-  return { action, message }
+  return { action, message, recovery: recoveryForCode(undefined, agentId) }
 }
 
 export function reportRuntimeError(action: string, error: unknown, agentId?: string, options?: RuntimeErrorOptions): RuntimeErrorDetail {

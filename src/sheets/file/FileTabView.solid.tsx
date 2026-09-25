@@ -132,7 +132,6 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
           key: errorKey(),
           scope: { kind: 'sheet', id: `file-tab:${currentTargetKey ?? 'none'}` },
           source: 'file.tab',
-          recovery: { kind: 'open-runtime-log', sheetId: `file-tab:${currentTargetKey ?? 'none'}` },
         })
         return
       }
@@ -161,7 +160,6 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
           key: errorKey(),
           scope: { kind: 'sheet', id: `file-tab:${currentTargetKey ?? 'none'}` },
           source: 'file.tab',
-          recovery: { kind: 'open-runtime-log', sheetId: `file-tab:${currentTargetKey ?? 'none'}` },
         })
       }
     })

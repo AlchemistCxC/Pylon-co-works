@@ -224,7 +224,6 @@ export function createPermissionController(deps: PermissionControllerDeps): Perm
       key: 'acp:permission-listener',
       scope: { kind: 'app', id: 'permission' },
       source: 'acp.permission',
-      recovery: { kind: 'open-runtime-log' },
     })
   })
 

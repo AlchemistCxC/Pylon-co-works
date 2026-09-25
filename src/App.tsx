@@ -257,7 +257,6 @@ export default function App() {
         key: bootstrapKey(action),
         scope: bootstrapScope,
         source: 'application.bootstrap',
-        recovery: { kind: 'open-runtime-log' },
         recoveryAction: {
           label: '重试启动',
           run: () => setBootstrapRetry(value => value + 1),
@@ -285,7 +284,6 @@ export default function App() {
       key: approvalModeKey(action),
       scope: approvalModeScope,
       source: 'permission.approval-mode',
-      recovery: { kind: 'open-runtime-log' },
     })
     const persisted = readPersistedApprovalMode()
     if (persisted) {
@@ -408,7 +406,6 @@ export default function App() {
         key: 'app:browser-demo-bootstrap',
         scope: { kind: 'app', id: 'browser-demo' },
         source: 'app.browser-demo',
-        recovery: { kind: 'open-runtime-log' },
       })
     })
     return undefined
@@ -452,7 +449,6 @@ export default function App() {
     } catch (error) {
       reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
         key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
-        recovery: { kind: 'open-runtime-log' },
       })
       return
     }
@@ -469,7 +465,6 @@ export default function App() {
       } catch (error) {
         reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
           key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
-          recovery: { kind: 'open-runtime-log' },
         })
         return
       }

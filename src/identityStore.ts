@@ -234,7 +234,6 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       } catch (error) {
         reportRuntimeError('删除 Profile（后端事务）', error, undefined, {
           key: `identity:delete-profile:${id}`, scope: { kind: 'app', id: 'identity' }, source: 'identity',
-          recovery: { kind: 'open-runtime-log' },
         })
         return
       }
@@ -364,7 +363,6 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         key: 'identity:import',
         scope: { kind: 'app', id: 'identity' },
         source: 'identity',
-        recovery: { kind: 'open-runtime-log' },
       })
       return
     }
@@ -413,7 +411,6 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         key: `identity:create-session:${id}`,
         scope: { kind: 'operation', id: `session:${id}` },
         source: 'identity.session',
-        recovery: { kind: 'open-runtime-log', sessionId: id },
       })
       return ''
     }
@@ -485,7 +482,6 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         key: `identity:fork-session:${id}`,
         scope: { kind: 'operation', id: `session:${id}` },
         source: 'identity.session',
-        recovery: { kind: 'open-runtime-log', sessionId: id },
       })
       return ''
     }
@@ -638,7 +634,6 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       if (result.kind === 'transport') {
         reportRuntimeError('恢复遗留会话归属', result.cause ?? result.message, undefined, {
           key: `identity:resolve-session:${sessionId}`, scope: { kind: 'session', id: sessionId }, source: 'identity',
-          recovery: { kind: 'open-runtime-log', sessionId },
         })
       }
       return false

@@ -3,7 +3,7 @@
  * 校验：目录结构完整 → SDK bundle 可 import 且导出完整 → SDK 版本常量 →
  * 起步插件入口可解析 → 类型树关键声明存在。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -78,9 +78,19 @@ check('manager-demo manifest 合法', managerManifest.schema === 1
 check('manager-demo 入口 bundle 含激活导出',
   readFileSync(join(kitRoot, 'starter/manager-demo/dist/index.js'), 'utf8').includes('activate'))
 
-// 5. 类型树声明了 createSettingsSurface
-const indexDts = readFileSync(join(kitRoot, 'sdk', 'types', 'sdk', 'index.d.ts'), 'utf8')
-check('类型树含 createSettingsSurface', indexDts.includes('createSettingsSurface'))
+// 5. 类型树关键声明存在。SDK 分层后（contract/runtime 子声明文件 + index 的
+//    export * 组合），符号不再集中在 index.d.ts——搜类型树顶层全部声明文件，
+//    不绑定单一文件布局。
+const typeTreeDir = join(kitRoot, 'sdk', 'types', 'sdk')
+const typeTree = readdirSync(typeTreeDir)
+  .filter(name => name.endsWith('.d.ts'))
+  .map(name => readFileSync(join(typeTreeDir, name), 'utf8'))
+  .join('\n')
+check('类型树含 createSettingsSurface', typeTree.includes('createSettingsSurface'))
+check('类型树含 defineManifest', typeTree.includes('defineManifest'))
+check('类型树含隔离面协议类型 AgentSidebarSurfaceInput', typeTree.includes('AgentSidebarSurfaceInput'))
+check('类型树含 2.x 面类型 CommandTitlebarContribution 与 PresetContribution',
+  typeTree.includes('CommandTitlebarContribution') && typeTree.includes('PresetContribution'))
 const testingDts = readFileSync(join(kitRoot, 'sdk', 'types', 'sdk', 'testing.d.ts'), 'utf8')
 check('testing 类型树含 createMockContext', testingDts.includes('createMockContext'))
 
