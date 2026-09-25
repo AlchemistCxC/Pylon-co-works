@@ -21,7 +21,9 @@ use crate::runtime::AgentRuntime;
 use crate::time::Timestamp;
 use crate::AppState;
 
-/// ACP 官方 schema v1 尚无 session/fork typed 常量；wire 方法名为协议级拼写。
+/// 官方 typed 常量与 `ForkSessionRequest` 在 `unstable_session_fork` feature
+/// 之后（schema 1.9.1 仍默认关闭）；Pylon 未启用该 feature，故保持手写常量
+/// + bounded raw envelope（wire 方法名为协议级拼写）。
 pub(crate) const METHOD_SESSION_FORK: &str = "session/fork";
 
 /// bounded raw envelope：fork response 上限（session/new/load 响应量级）。

@@ -223,3 +223,234 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
     )
     .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acp::RawMessage;
+    use crate::private_interaction::PrivateInteractionOwner;
+    use crate::runtime::AgentRuntime;
+    use std::collections::HashMap;
+
+    /// mock 窗口 + INTERACTION/INTERACTION_REJECTED 事件捕获（与 test_harness
+    /// boot 同源监听形态），返回 (window, webview, 事件接收端)。webview 与 app
+    /// 必须在被调方存活期间留在作用域内。
+    fn mock_window_with_events() -> (
+        tauri::Window<tauri::test::MockRuntime>,
+        tauri::WebviewWindow<tauri::test::MockRuntime>,
+        tauri::App<tauri::test::MockRuntime>,
+        std::sync::mpsc::Receiver<serde_json::Value>,
+    ) {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let (tx, rx) = std::sync::mpsc::channel();
+        for event in [
+            crate::event_names::INTERACTION,
+            crate::event_names::INTERACTION_REJECTED,
+        ] {
+            let tx = tx.clone();
+            let _ = tauri::Listener::listen(&webview, event, move |e| {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                    let _ = tx.send(payload);
+                }
+            });
+        }
+        let window = webview.as_ref().window().clone();
+        (window, webview, app, rx)
+    }
+
+    fn elicitation_request(id: u64, params: serde_json::Value) -> RawMessage {
+        RawMessage {
+            id: Some(crate::acp::RequestId::Number(id)),
+            method: Some("elicitation/create".to_string()),
+            kind: crate::acp::AcpKind::from_method(Some("elicitation/create")),
+            result: None,
+            params: Some(params),
+            error: None,
+        }
+    }
+
+    fn raw_request(id: u64, method: &str, params: serde_json::Value) -> RawMessage {
+        RawMessage {
+            id: Some(crate::acp::RequestId::Number(id)),
+            method: Some(method.to_string()),
+            kind: crate::acp::AcpKind::from_method(Some(method)),
+            result: None,
+            params: Some(params),
+            error: None,
+        }
+    }
+
+    fn empty_agents() -> std::sync::Mutex<HashMap<String, crate::agent_config::AgentDef>> {
+        std::sync::Mutex::new(HashMap::new())
+    }
+
+    /// 回归（#349 B2 回退 / #356 前置）：elicitation 桥 + 空 sessionId 必须
+    /// 仍按 method_unsupported / -32601 拒绝——前端对空串 sessionId 的卡片
+    /// 既渲染不出也提交不了，且私有交互无超时回包，入队只会让 agent 挂等
+    /// 一个永不来的响应。完整修法见 issue #356。
+    #[tokio::test]
+    async fn elicitation_without_session_id_is_rejected_method_not_found() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = elicitation_request(
+            7,
+            serde_json::json!({
+                "mode": "form",
+                "message": "auth configuration needed",
+                "requestedSchema": {"type": "object"},
+                "requestId": 7
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
+        assert!(
+            private_interactions.snapshot().is_empty(),
+            "sessionless elicitation must not be enqueued"
+        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("rejection event must be emitted");
+        assert_eq!(event["reasonCode"], "method_unsupported");
+        assert_eq!(event["rpcCode"], -32601);
+    }
+
+    /// 回归（#349 B2 回退）：非 elicitation 桥（grok/pi/exit_plan）+ 空
+    /// sessionId 同样必须落 -32601——准入宽化曾让这些桥在 sessionId 缺失
+    /// 时也入队（规格未授权），回退后恢复既有守卫。
+    #[tokio::test]
+    async fn non_elicitation_bridge_without_session_id_is_rejected_method_not_found() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = raw_request(
+            11,
+            "_x.ai/ask_user_question",
+            serde_json::json!({
+                "questions": [{
+                    "question": "Pick",
+                    "header": "Choice",
+                    "options": [{"label": "A"}, {"label": "B"}]
+                }]
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
+        assert!(
+            private_interactions.snapshot().is_empty(),
+            "sessionless ask-user must not be enqueued"
+        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("rejection event must be emitted");
+        assert_eq!(event["reasonCode"], "method_unsupported");
+        assert_eq!(event["rpcCode"], -32601);
+    }
+
+    /// 回归守卫：session-scoped elicitation（带 sessionId）正常入桥入队。
+    #[tokio::test]
+    async fn session_scoped_elicitation_keeps_session_id_projection() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = elicitation_request(
+            8,
+            serde_json::json!({
+                "sessionId": "peri-s1",
+                "message": "pick one",
+                "requestedSchema": {"type": "object"}
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
+        let snapshot = private_interactions.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].1.session_id, "peri-s1");
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("interaction event must be emitted");
+        assert_eq!(event["sessionId"], "peri-s1");
+    }
+
+    /// #349 B2：未广告的 `mode:"url"` 必须按参数类错误拒绝
+    /// （invalid_private_payload / -32602），不伪造入队。
+    #[tokio::test]
+    async fn unadvertised_url_mode_is_rejected_as_invalid_params() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = elicitation_request(
+            9,
+            serde_json::json!({
+                "sessionId": "peri-s1",
+                "mode": "url",
+                "elicitationId": "el-1",
+                "url": "https://example.com/auth"
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
+        assert!(
+            private_interactions.snapshot().is_empty(),
+            "url-mode elicitation must not be enqueued"
+        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("rejection event must be emitted");
+        assert_eq!(event["reasonCode"], "invalid_private_payload");
+        assert_eq!(event["rpcCode"], -32602);
+    }
+}
