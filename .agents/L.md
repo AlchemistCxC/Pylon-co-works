@@ -11,3 +11,5 @@
   - 规格 `.agents/spec/348-acp-engine-core-defects.md`、`.agents/spec/349-host-session-lifecycle-defects.md`。
   - **两边都不碰**：`src-tauri/src/dispatcher/mod.rs`、`pylon-session/**`、前端、`docs/说明书/**` 之外的文档。
   - 明确留给后续 issue（本批不做）：fs/terminal 错误码细化（改 agent 侧 wire 码）、`-32000 AuthRequired` 语义消费、Windows `.cmd/.bat` + UNC cwd 绕行、cancel settle 窗口（待复核）。
+  - 返工轮（独立审查反馈）：触及 `src-tauri/src/acp/tests.rs`（A6 测试裁决改写）与大批原域内文件；**前端死词条清理（A1 摘除 `WriterTimeout` 后的 `errorCodeExplanations.ts` 等）不在本批**——那些路径属在途 #351（`e0538758` 已下沉 error 三件到 `src/app/`），改由 issue 跟进。
+  - 审查结论（独立 agent）：A1 误报审查通过、A6 裁决成立、#349 对规格的机制更正成立、B4 跳过理由成立；必修项为「B2 条件宽化」与「B2 端到端缺前端应答门（已回退准入，转 issue #356）」。
