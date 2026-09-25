@@ -860,6 +860,17 @@ impl TestHarness {
         .map_err(|error| error.to_string())
     }
 
+    /// 驱动 `cancel_prompt` 命令（#324 中性结算切片：停止按钮的真实产品路径）。
+    pub async fn cancel_prompt(&self, agent_id: &str, source: &str) -> Result<(), String> {
+        crate::session::cancel_prompt(
+            self.app.state::<crate::AppState>(),
+            agent_id.to_string(),
+            source.to_string(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
+
     /// 驱动 `new_session` 命令，返回会话创建响应 JSON。
     pub async fn new_session(
         &self,

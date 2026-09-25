@@ -597,6 +597,13 @@ async fn finalize_response<R: tauri::Runtime>(
     let prompt_generation = flow.generation;
     let is_first = flow.is_first;
     let message_round = flow.message_round;
+    // #324：用户主动停止的 wire 终态（stopReason=cancelled）不进错误呈现链。
+    // #316 闭式表（protocol.rs）仍拒绝 cancelled 作为成功完成；此处在其之前
+    // 拦截，改走 done 通道中性结算（账本侧 Cancelled 终因已由
+    // settle_turn_from_response 先行落定，#99）。
+    if is_cancelled_stop_response(&data) {
+        return finalize_cancelled_response(flow, data).await;
+    }
     // #316：stopReason 闭式判定表（typed-first）。max_tokens 转正为合法终态
     // （pet on_maxed + done 正常广播，UI 凭 stopReason 文案提示）；未知值在
     // 协议层已 warn 降级 end_turn；refusal/cancelled 维持 Err。
@@ -732,6 +739,88 @@ async fn finalize_response<R: tauri::Runtime>(
         serde_json::Map::from_iter([(
             "result".to_string(),
             serde_json::Value::String("success".to_string()),
+        )]),
+    );
+    Ok(flow.peri_id.clone())
+}
+
+/// #324：精确匹配 `stopReason: "cancelled"`（空白/大小写变体不享拦截，仍走
+/// #316 闭式表 fail-closed）。
+fn is_cancelled_stop_response(data: &serde_json::Value) -> bool {
+    data.get("stopReason").and_then(|value| value.as_str()) == Some("cancelled")
+}
+
+/// #324：cancelled 响应的中性结算——镜像 `finalize_response` 的收尾骨架
+/// （generation 复核 → 首轮标记 → canonical 提交 → done 广播），但：
+/// pet 不感知（非自然完成也非失败）、B11.2 persist 跳过（与
+/// CancelledAfterTimeout 臂口径一致：中断回合不落 Prism 摘要）。
+async fn finalize_cancelled_response<R: tauri::Runtime>(
+    flow: &mut PromptFlow<'_, R>,
+    data: serde_json::Value,
+) -> Result<String, PylonError> {
+    let state = flow.state;
+    let runtime = flow.runtime;
+    let window = flow.window;
+    let gateway = flow.gateway;
+    let source = &flow.ctx.source;
+    let peri_id = &flow.peri_id;
+    let prompt_generation = flow.generation;
+    let is_first = flow.is_first;
+    if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
+        let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
+        return Err(error.into());
+    }
+    if is_first {
+        state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
+    }
+    let mut done_payload = serde_json::json!({"source": source, "data": data});
+    let mut done_update = serde_json::json!({ "sessionUpdate": "done", "stopReason": "cancelled" });
+    if let Some(object) = data.as_object() {
+        for key in ["stopReason", "usage", "model"] {
+            if let Some(value) = object.get(key) {
+                done_update[key] = value.clone();
+            }
+        }
+    }
+    if let Some(committed_event) = ingest_prompt_event(
+        state,
+        runtime,
+        source,
+        Some(peri_id.clone()),
+        prompt_generation,
+        serde_json::json!({
+            "source": source,
+            "update": done_update,
+        }),
+    )
+    .await?
+    {
+        done_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+    }
+    if let Some(window) = window {
+        emit_event_all(
+            window,
+            gateway,
+            source,
+            crate::event_names::SESSION_DONE,
+            done_payload.clone(),
+        );
+    }
+    send_channel_terminal(
+        state,
+        runtime,
+        source,
+        crate::event_names::SESSION_DONE,
+        done_payload,
+    );
+    state.log_runtime_summary(
+        "info",
+        "prompt",
+        Some(source.to_string()),
+        "Prompt cancelled; settled via done channel (#324)",
+        serde_json::Map::from_iter([(
+            "result".to_string(),
+            serde_json::Value::String("cancelled".to_string()),
         )]),
     );
     Ok(flow.peri_id.clone())
@@ -1565,6 +1654,22 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #324：拦截谓词只认精确 `stopReason: "cancelled"`——空白/大小写变体与
+    /// 缺失字段不享中性结算（仍走 #316 闭式表 fail-closed）。
+    #[test]
+    fn is_cancelled_stop_response_matches_exact_spelling_only() {
+        assert!(is_cancelled_stop_response(&serde_json::json!({"stopReason": "cancelled"})));
+        assert!(is_cancelled_stop_response(&serde_json::json!({
+            "stopReason": "cancelled",
+            "usage": {"total": 3}
+        })));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": " cancelled"})));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": "Cancelled"})));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": ""})));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({"stopReason": 42})));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({})));
+    }
 
     /// #99（评审 E3 回归锁）：empty-turn 细分以账本活动标志为判定源——
     /// dispatcher 在处理 chunk/工具调用的同一临界区写入账本，settle 侧据此
