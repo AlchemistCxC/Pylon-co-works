@@ -52,10 +52,11 @@ export function parseElicitationFields(schema: unknown): ParsedElicitationSchema
     }
     const property = raw as Record<string, unknown>
     const type = typeof property.type === 'string' ? property.type : undefined
-    const enumValues = Array.isArray(property.enum)
-      ? property.enum.filter((value): value is string => typeof value === 'string')
+    const enumRaw = Array.isArray(property.enum) ? (property.enum as unknown[]) : undefined
+    const enumValues = enumRaw
+      ? enumRaw.filter((value): value is string => typeof value === 'string')
       : undefined
-    if (enumValues && enumValues.length !== property.enum.length) {
+    if (enumValues && enumRaw && enumValues.length !== enumRaw.length) {
       // 非全字符串 enum：静默降级成自由文本会丢约束语义 → 按不支持处理
       // （#316 审查 P2-3）。
       unsupported = true

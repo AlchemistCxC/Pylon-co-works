@@ -129,7 +129,11 @@ interface Harness {
   stopCalled: boolean
   state: () => PermissionState
   receive: (requestId?: number, options?: string[]) => void
-  emitResolved: (requestId: string, clientGeneration?: number) => void
+  emitResolved: (
+    requestId: string,
+    clientGeneration?: number,
+    eventType?: 'permission.resolved' | 'interaction.resolved',
+  ) => void
 }
 
 function setup(options: string[], invokeImpl?: (cmd: string, args: Record<string, unknown>) => Promise<unknown>): Harness {
@@ -153,7 +157,11 @@ function setup(options: string[], invokeImpl?: (cmd: string, args: Record<string
   }
   const controller = createPermissionController(deps)
   const receive = (requestId = 1, opts = options) => { expect(handler).not.toBeNull(); handler!({ payload: wirePayload(requestId, opts) }) }
-  const emitResolved = (requestId: string, clientGeneration?: number, eventType = 'permission.resolved') => { expect(handler).not.toBeNull(); handler!({ payload: resolvedEvent(requestId, clientGeneration, eventType) }) }
+  const emitResolved = (
+    requestId: string,
+    clientGeneration?: number,
+    eventType: 'permission.resolved' | 'interaction.resolved' = 'permission.resolved',
+  ) => { expect(handler).not.toBeNull(); handler!({ payload: resolvedEvent(requestId, clientGeneration, eventType) }) }
   return { controller, actions, invokeCalls, get stopCalled() { return stopCalled }, state: () => state, receive, emitResolved }
 }
 
