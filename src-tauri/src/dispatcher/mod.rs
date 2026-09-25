@@ -25,8 +25,11 @@ mod routing;
 
 // #317 批次二 ④：主泵六缝提取——决策归子模块、副作用适配归调用点（同 routing 惯例）。
 mod canonical_flush;
+// #331/U4：逐帧热路径基准（cfg(test)，--nocapture 读数）。
 mod crash_reconnect;
 mod fallback_route;
+#[cfg(test)]
+mod frame_path_bench;
 mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
