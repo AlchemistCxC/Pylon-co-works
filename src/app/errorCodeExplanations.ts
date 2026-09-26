@@ -54,6 +54,7 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   agent_spawn_failed: { summary: 'Agent 进程启动失败', hint: '确认该程序能独立运行，并检查运行日志里的系统错误', recovery: 'open-runtime-log' },
   agent_initialize_failed: { summary: 'Agent 启动了，但 ACP 握手没通过', hint: '确认这是支持 ACP 的 Agent，且版本不过旧', recovery: 'open-runtime-log' },
   agent_connection_timeout: { summary: '连接 Agent 超时，未在预算内完成握手', hint: '可能是首次启动较慢或进程卡住；查看运行日志后重试', recovery: 'open-runtime-log' },
+  agent_auth_required: { summary: '该 Agent 要求先登录（账号凭据缺失或已过期）', hint: '在该 Agent 自己的登录/认证流程完成登录后重试', recovery: 'open-runtime-log' },
   agent_crashed: { summary: 'Agent 进程意外退出', recovery: 'open-runtime-log' },
   agent_runtime_unavailable: { summary: '当前没有可用的 Agent 运行时', hint: '先在 设置 → Agent 中完成连接', recovery: 'open-agent-settings' },
   no_active_agent: { summary: '还没有选择要使用的 Agent', hint: '在 设置 → Agent 中新建或切换一个 Agent', recovery: 'open-agent-settings' },

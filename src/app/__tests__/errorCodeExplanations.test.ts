@@ -14,6 +14,7 @@ const EXPECTED_CODES = [
   'agent_spawn_failed',
   'agent_initialize_failed',
   'agent_connection_timeout',
+  'agent_auth_required',
   'agent_crashed',
   'agent_runtime_unavailable',
   'no_active_agent',

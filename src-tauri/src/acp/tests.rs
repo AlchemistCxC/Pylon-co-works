@@ -952,14 +952,28 @@ async fn malformed_capabilities_have_capability_stage() {
 
 #[test]
 fn rpc_failure_kind_distinguishes_missing_session_from_method_and_transient_errors() {
+    // #354 契约修正：文本/data 启发式的载体改用非保留码——-32000 已是协议级
+    // authRequired（按结构化 code 一票判定，见下方 AuthRequired 断言）。
     for raw in [
         r#"{"code":-32602,"message":"session not found: s-1"}"#,
-        r#"{"code":-32000,"message":"invalid session: s-1"}"#,
-        r#"{"code":-32000,"message":"request rejected","data":{"kind":"session_missing"}}"#,
+        r#"{"code":-32602,"message":"invalid session: s-1"}"#,
+        r#"{"code":-32602,"message":"request rejected","data":{"kind":"session_missing"}}"#,
     ] {
         assert_eq!(
             AcpError::Rpc(raw.into()).rpc_failure_kind(),
             Some(RpcFailureKind::SessionMissing),
+            "{raw}"
+        );
+    }
+    // #354：协议级 authRequired 先于文本启发式——即使 message 像 session 缺失，
+    // -32000 的协议语义（需要登录）优先。
+    for raw in [
+        r#"{"code":-32000,"message":"authentication required"}"#,
+        r#"{"code":-32000,"message":"invalid session: s-1"}"#,
+    ] {
+        assert_eq!(
+            AcpError::Rpc(raw.into()).rpc_failure_kind(),
+            Some(RpcFailureKind::AuthRequired),
             "{raw}"
         );
     }

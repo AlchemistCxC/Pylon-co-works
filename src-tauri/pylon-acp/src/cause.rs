@@ -112,6 +112,28 @@ mod tests {
         );
     }
 
+    /// #354：`agent_auth_required`（远端 `-32000`）是连接 cause 封闭词表的
+    /// 正式成员——code 原样透传，action 走诊断兜底（登录取向的 UI 指引后续跟进）。
+    #[test]
+    fn auth_required_failure_is_a_registered_connect_cause_code() {
+        let failure = AgentConnectFailure {
+            stage: crate::AgentConnectStage::Initialize,
+            code: "agent_auth_required".into(),
+            message: "initialize RPC error -32000: authentication required".into(),
+            exit_code: None,
+            stderr_excerpt: None,
+            retryable: false,
+            io_kind: None,
+            remote_code: Some(-32000),
+            remote_data_summary: None,
+        };
+        let cause = connect_failure_cause(&failure);
+        assert_eq!(cause.level, "fail");
+        assert_eq!(cause.code, "agent_auth_required");
+        assert_eq!(cause.action, Some("open-runtime-log"));
+        assert!(cause.summary.contains("authentication required"));
+    }
+
     /// 崩溃 cause 的 code 词表 = CrashReason 的封闭集，且全部 fail 级。
     /// #348 A1：`writer_timeout` 死变体已裁除（无写超时语义即无产生点）。
     #[test]
