@@ -143,7 +143,7 @@ cd <副本>/ && WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9
 - 分支：`kumo/prometheus`（共享工作树）
 - 提交：`97a09f38`（#376-a）→ `48dd08d2`（#376-b）→ `fc7473f2`（#375-a）→ `f0e9bc78`（#375-c/e）
   → `d3c7cef0`（memory 域）→ `91da068f`（rustfmt）→ `c1f8d475`·`6d7c1a6e`（记录与说明书）
-  → `1b6478f2`（#375-d 元数据快照复用）
+  → `1b6478f2`（#375-d 元数据快照复用）→ `62568e39`（补落 #375-a 长字符串收窄规则与 #375-c 接线）
 - 日期：2026-09-27
 
 ## 目标与范围
@@ -276,6 +276,14 @@ $ bun run test          → 654 files / 5030 tests passed（2 条既有红灯见
 
 **载荷分桶证据（收窄前的纯函数估算）**：同一语料折完后 `timeline` 123.0 MB / `activities` 23.1 MB /
 其余切片 <0.01 MB——「timeline 持有整份事件」是主凶，且收窄后 timeline 降到接近零。
+
+**补落与自检**：`62568e39` 补齐了两处**没有真正落地**的改动——#375-a 的收窄规则先前只提交了
+「深度 ≤2 保留标量」那版（对 `tool.rawOutput.text` 这种「对象里塞大字符串」的形状无效，memory 域
+实测 2.431× 不过阈值），真正生效的「超长字符串不进 `timeline.data`」那版留在工作树里没提交；
+#375-c 的 `withoutEnvelopeRaw` 只落了 import、没落调用点（一次失败的脚本编辑造成的半落状态，
+类型检查不报——有 import 使用点即可）。两处都补上，并加了一条**源码断言**用例（`fold.log.push(`
+有且仅有一处且必须包着 `withoutEnvelopeRaw(`）让同类静默失效无法通过测试——`fold.log` 是运行时
+内部状态、没有观测面，这是当时唯一可用的守卫形态。
 
 **共享工作树注意**：本批在 `kumo/prometheus` 共享树上施工，与他人在途域（#348/#349、#361-363、
 #356、#371/#372）交错。所有提交经**私有 index**（`GIT_INDEX_FILE`）落到历史，不触碰共享
