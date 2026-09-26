@@ -958,7 +958,7 @@ async fn local_journal_authority_never_imports_replay_or_snapshot() {
     assert_eq!(result.revision, 1);
 
     let page = service
-        .list_events(owner.key().expect("owner key"), None, 100)
+        .list_events(owner.key().expect("owner key"), None, 100, false)
         .await
         .expect("list local journal");
     assert_eq!(page.events.len(), 1);
@@ -1007,7 +1007,7 @@ async fn untrusted_existing_rows_never_trigger_snapshot_reconciliation() {
     assert!(result.events.is_empty());
 
     let page = service
-        .list_events(owner.key().expect("owner key"), None, 100)
+        .list_events(owner.key().expect("owner key"), None, 100, false)
         .await
         .expect("list journal");
     assert_eq!(page.events.len(), 1);
@@ -1987,4 +1987,197 @@ fn compact_read_cuts_run_at_fold_budget_without_losing_rows() {
         expected_start = row.sequence + 1;
     }
     assert_eq!(folded, total, "切断不丢行");
+}
+
+// ============================================================================
+// #376：读出口 typed 载荷收口（只在 service 层；repo 层与 turn_rollup 保持全文）
+// ============================================================================
+
+/// 400 KB 量级的工具载荷行——`typed.tool.rawOutput` 远超 64 KiB 线，标量面齐全。
+fn oversized_tool_payload() -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": "remote-1",
+        "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call-1",
+            "title": "Bash",
+            "kind": "execute",
+            "status": "in_progress",
+            "rawOutput": { "text": "x".repeat(400_000) },
+        }
+    })
+}
+
+fn typed_bytes(value: &serde_json::Value) -> usize {
+    value.to_string().len()
+}
+
+#[test]
+fn typed_payload_cap_is_byte_identical_within_budget() {
+    let typed = serde_json::json!({
+        "text": "small",
+        "tool": {
+            "title": "Bash",
+            "status": "completed",
+            "rawOutput": { "text": "ok" },
+        },
+    });
+    let encoded = typed.to_string();
+    assert!(encoded.len() <= redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed.clone());
+    assert_eq!(capped, typed, "预算内必须逐字节不变（含键序与标量）");
+    assert_eq!(capped.to_string(), encoded);
+}
+
+#[test]
+fn typed_payload_cap_lands_within_budget_keeping_structure_and_scalars() {
+    let typed = serde_json::json!({
+        "text": "y".repeat(200_000),
+        "count": 7,
+        "ratio": 1.5,
+        "flag": true,
+        "absent": null,
+        "tool": {
+            "title": "Bash",
+            "status": "in_progress",
+            "rawOutput": { "text": "z".repeat(300_000), "truncated": false },
+            "contentBlocks": [{ "type": "text", "text": "w".repeat(100_000) }],
+        },
+    });
+    let original = typed_bytes(&typed);
+    assert!(original > redaction::MAX_CANONICAL_RAW_BYTES);
+
+    let capped = redaction::retain_typed_payload(typed);
+    let retained = typed_bytes(&capped);
+    assert!(
+        retained <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "超预算必须落回 64 KiB 内，实测 {retained}"
+    );
+
+    // 结构与标量逐字节不动。
+    assert_eq!(capped["count"], serde_json::json!(7));
+    assert_eq!(capped["ratio"], serde_json::json!(1.5));
+    assert_eq!(capped["flag"], serde_json::json!(true));
+    assert!(capped["absent"].is_null());
+    assert_eq!(capped["tool"]["title"], "Bash");
+    assert_eq!(capped["tool"]["status"], "in_progress");
+    assert_eq!(capped["tool"]["rawOutput"]["truncated"], false);
+    assert_eq!(capped["tool"]["contentBlocks"][0]["type"], "text");
+    assert!(
+        capped["tool"]["contentBlocks"].as_array().unwrap().len() == 1,
+        "数组长度与元素数不变，只收缩叶子"
+    );
+
+    // 截断事实可见（与 raw 的 `_pylonTruncated` 同取证口径）。
+    let marker = &capped[redaction::TYPED_TRUNCATION_KEY];
+    assert_eq!(marker["payloadOriginalBytes"], original as i64);
+    assert_eq!(marker["reason"], "read-path-typed-cap");
+    assert!(
+        marker["trimmedStringLeaves"].as_i64().unwrap() >= 1,
+        "至少收缩了一个字符串叶子"
+    );
+    // 载荷字符串被收缩，标量级字符串不收缩（低于 floor 的标题/状态不在收缩面内）。
+    assert!(capped["text"].as_str().unwrap().len() < 200_000);
+}
+
+#[test]
+fn typed_payload_cap_keeps_utf8_boundaries() {
+    let typed = serde_json::json!({
+        "text": "中文载荷".repeat(60_000),
+        "tool": { "title": "标题", "rawOutput": { "text": "漢字かな".repeat(30_000) } },
+    });
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "多字节载荷同样必须落回预算内"
+    );
+    let retained = capped["text"].as_str().expect("retained text");
+    assert!(
+        retained
+            .chars()
+            .all(|character| "中文载荷".contains(character)),
+        "截断必须落在字符边界上，不得从多字节字符中间切开"
+    );
+    assert_eq!(capped["tool"]["title"], "标题", "短标量字符串不参与收缩");
+}
+
+#[tokio::test]
+async fn read_exit_cap_shrinks_tool_rows_but_exempts_turn_unit() {
+    let service = EventService::in_memory().expect("event service");
+    let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+    let owner_key = owner.key().expect("owner key");
+    let mut events = vec![
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": { "text": "hi" },
+            }
+        })),
+        Arc::new(oversized_tool_payload()),
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "done", "stopReason": "end_turn" },
+        })),
+    ];
+    events.insert(1, events[1].clone());
+    service
+        .ingest_events(owner, Some("remote-1".to_string()), 5, events)
+        .await
+        .expect("ingest");
+
+    let stored = service
+        .list_events(owner_key.clone(), None, 100, false)
+        .await
+        .expect("uncapped read")
+        .events;
+    let capped = service
+        .list_events(owner_key, None, 100, true)
+        .await
+        .expect("capped read")
+        .events;
+    assert_eq!(stored.len(), capped.len(), "收口不改行数与顺序");
+
+    let mut saw_tool = false;
+    let mut saw_unit = false;
+    for (before, after) in stored.iter().zip(capped.iter()) {
+        assert_eq!(before.sequence, after.sequence);
+        assert_eq!(before.event_type, after.event_type);
+        assert_eq!(
+            before.raw_payload, after.raw_payload,
+            "raw 一份都不动（收口只作用于 typed）"
+        );
+        if before.event_type == "tool.call.started" {
+            saw_tool = true;
+            assert!(
+                typed_bytes(before.typed_payload.as_ref().unwrap())
+                    > redaction::MAX_CANONICAL_RAW_BYTES
+            );
+            assert!(
+                typed_bytes(after.typed_payload.as_ref().unwrap())
+                    <= redaction::MAX_CANONICAL_RAW_BYTES
+            );
+        }
+        if before.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
+            saw_unit = true;
+            assert!(
+                typed_bytes(before.typed_payload.as_ref().unwrap())
+                    > redaction::MAX_CANONICAL_RAW_BYTES,
+                "单元行的载荷就是整段历史，必须超预算"
+            );
+            assert_eq!(
+                before.typed_payload, after.typed_payload,
+                "turn.unit 豁免：单元行是历史正文的唯一副本，收口即丢历史"
+            );
+        }
+        if before.event_type == "user.message" {
+            assert_eq!(
+                before.typed_payload, after.typed_payload,
+                "预算内行逐字节不变"
+            );
+        }
+    }
+    assert!(saw_tool && saw_unit, "语料必须同时含工具行与单元行");
 }

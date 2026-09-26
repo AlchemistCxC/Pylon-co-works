@@ -14,6 +14,18 @@ use super::row::{
 use super::EventError;
 use crate::owner::DurableSessionOwner;
 
+/// #376：读出口收口——IPC 边界专用。`turn.unit` **豁免**：单元行的载荷是整段历史
+/// 的**唯一**副本（入库 raw 只是占位对象），收口即丢正文；被它覆盖的行本就已不下发，
+/// 收口等于把这一回合从历史上抹掉。
+fn cap_typed_payload_row(row: &mut CanonicalEventRow, enabled: bool) {
+    if !enabled || row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
+        return;
+    }
+    if let Some(typed) = row.typed_payload.take() {
+        row.typed_payload = Some(super::redaction::retain_typed_payload(typed));
+    }
+}
+
 /// 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
 pub struct EventService {
     pub(super) repo: Arc<EventRepo>,
@@ -358,18 +370,27 @@ impl EventService {
     }
 
     /// 游标分页读取（最新页 before_seq=null；limit 缺省 100）。
+    ///
+    /// `cap_typed_payload` 为 #376 的读出口收口开关：true 时把 typed 载荷的字符串
+    /// 叶子按 `MAX_CANONICAL_RAW_BYTES` 同一条线收缩（IPC 边界专用）。宿主内部读
+    /// （证据回读、prompt 断言）传 false——它们要与入库行逐字段比对，且不经 IPC。
     pub async fn list_events(
         &self,
         owner_key: String,
         before_sequence: Option<i64>,
         limit: u32,
+        cap_typed_payload: bool,
     ) -> Result<EventPage, EventError> {
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.list_events(&owner_key, before_sequence, limit))
-            .await
-            .map_err(|error| {
-                EventError::Unavailable(format!("event repo list task failed: {error}"))
-            })?
+        tokio::task::spawn_blocking(move || {
+            let mut page = repo.list_events(&owner_key, before_sequence, limit)?;
+            for row in &mut page.events {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(page)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("event repo list task failed: {error}")))?
     }
 
     /// #51 收口：写入侧幂等判定的读支撑——owner journal 里最新一条指定类型事件。
@@ -387,16 +408,24 @@ impl EventService {
     }
 
     /// #81 L2：compact 读（单元 + 未覆盖行；文档投影/搜索的读取入口）。
+    /// `cap_typed_payload` 语义同 `list_events`。
     pub async fn load_events_compact(
         &self,
         owner_key: String,
+        cap_typed_payload: bool,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.load_events_compact(&owner_key))
-            .await
-            .map_err(|error| {
-                EventError::Unavailable(format!("event repo compact task failed: {error}"))
-            })?
+        tokio::task::spawn_blocking(move || {
+            let mut rows = repo.load_events_compact(&owner_key)?;
+            for row in &mut rows {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(rows)
+        })
+        .await
+        .map_err(|error| {
+            EventError::Unavailable(format!("event repo compact task failed: {error}"))
+        })?
     }
 
     /// #81 L3：裁剪迁移（应用关闭时调用；budget_ms 控制单次预算，可续跑）。

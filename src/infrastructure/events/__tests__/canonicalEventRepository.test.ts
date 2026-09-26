@@ -97,7 +97,7 @@ describe('tauriCanonicalEventRepository', () => {
     const page = await repo.list(OWNER_KEY, null, 100)
     expect(page.events[0].sequence).toBe(7)
     expect(page.nextBeforeSequence).toBe(7)
-    expect(invokeMock).toHaveBeenLastCalledWith('evt_list', { ownerKey: OWNER_KEY, beforeSequence: null, limit: 100 })
+    expect(invokeMock).toHaveBeenLastCalledWith('evt_list', { ownerKey: OWNER_KEY, beforeSequence: null, limit: 100, capTypedPayload: true })
   })
 
   it('loadAll 游标翻到底并按 sequence 升序返回', async () => {
@@ -109,14 +109,52 @@ describe('tauriCanonicalEventRepository', () => {
     const rows = await repo.loadAll(OWNER_KEY)
     expect(rows.map(row => row.sequence)).toEqual([1, 2, 3, 4])
     expect(invokeMock).toHaveBeenCalledTimes(3)
-    expect(invokeMock).toHaveBeenNthCalledWith(1, 'evt_list', { ownerKey: OWNER_KEY, beforeSequence: null, limit: 1000 })
-    expect(invokeMock).toHaveBeenNthCalledWith(2, 'evt_list', { ownerKey: OWNER_KEY, beforeSequence: 3, limit: 1000 })
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'evt_list', { ownerKey: OWNER_KEY, beforeSequence: null, limit: 1000, capTypedPayload: true })
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'evt_list', { ownerKey: OWNER_KEY, beforeSequence: 3, limit: 1000, capTypedPayload: true })
   })
 
   it('loadAll 空流返回 []', async () => {
     invokeMock.mockResolvedValueOnce({ events: [], nextBeforeSequence: null })
     const repo = tauriCanonicalEventRepository()
     expect(await repo.loadAll(OWNER_KEY)).toEqual([])
+  })
+
+  it('#376 loadAllPreferUnits 经 evt_load_compact 且带上 typed 载荷收口开关', async () => {
+    invokeMock.mockResolvedValueOnce([])
+    const repo = tauriCanonicalEventRepository()
+    await repo.loadAllPreferUnits(OWNER_KEY)
+    expect(invokeMock).toHaveBeenLastCalledWith('evt_load_compact', {
+      ownerKey: OWNER_KEY,
+      capTypedPayload: true,
+    })
+  })
+
+  it('#376 杀停开关：页面上出现 data-typed-payload-cap="off" 时读出口原样取回 typed', async () => {
+    // 读出口在挂载工作台 DOM 之前就被调用（冷装载），没有可用的祖先链——
+    // 故杀停开关按「页面上任意位置出现该属性」判定（本文件跑在 node 环境，
+    // 用 stubGlobal 顶替 document）。
+    const querySelector = vi.fn(() => ({}))
+    vi.stubGlobal('document', { querySelector })
+    try {
+      invokeMock.mockResolvedValueOnce([])
+      invokeMock.mockResolvedValueOnce({ events: [], nextBeforeSequence: null })
+      const repo = tauriCanonicalEventRepository()
+      await repo.loadAllPreferUnits(OWNER_KEY)
+      await repo.list(OWNER_KEY, null)
+      expect(querySelector).toHaveBeenCalledWith('[data-typed-payload-cap="off"]')
+      expect(invokeMock).toHaveBeenCalledWith('evt_load_compact', {
+        ownerKey: OWNER_KEY,
+        capTypedPayload: false,
+      })
+      expect(invokeMock).toHaveBeenCalledWith('evt_list', {
+        ownerKey: OWNER_KEY,
+        beforeSequence: null,
+        limit: 100,
+        capTypedPayload: false,
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('exportRaw bypasses canonical decoding for one forensic row', async () => {

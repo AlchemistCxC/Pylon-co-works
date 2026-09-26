@@ -735,15 +735,26 @@ pub(crate) async fn evt_revision(
 }
 
 /// 游标分页读取（最新页 before_seq=null；limit 缺省 100；升序返回）。
+///
+/// #376：`cap_typed_payload`（缺省 true）是读出口载荷收口的杀停开关——前端发现页面上
+/// 出现 `data-typed-payload-cap="off"` 即传 false，回到「原样下发 typed」。与
+/// `data-highlight-lifecycle="off"` / `data-row-virtualization="off"` 同惯例，
+/// 不需要回滚版本。
 #[tauri::command]
 pub(crate) async fn evt_list(
     state: tauri::State<'_, AppState>,
     owner_key: String,
     before_sequence: Option<i64>,
     limit: Option<u32>,
+    cap_typed_payload: Option<bool>,
 ) -> Result<EventPage, PylonError> {
     require_event_service(&state)?
-        .list_events(owner_key, before_sequence, limit.unwrap_or(100))
+        .list_events(
+            owner_key,
+            before_sequence,
+            limit.unwrap_or(100),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
         .map_err(PylonError::from)
 }
@@ -813,13 +824,15 @@ pub(crate) async fn evt_search(
 
 /// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
 /// 入口；被单元覆盖的行不再传输/解析，读放大随单元粒度下降）。
+/// #376：`cap_typed_payload` 语义同 `evt_list`（缺省 true）。
 #[tauri::command]
 pub(crate) async fn evt_load_compact(
     state: tauri::State<'_, AppState>,
     owner_key: String,
+    cap_typed_payload: Option<bool>,
 ) -> Result<Vec<CanonicalEventRow>, PylonError> {
     require_event_service(&state)?
-        .load_events_compact(owner_key)
+        .load_events_compact(owner_key, cap_typed_payload.unwrap_or(true))
         .await
         .map_err(PylonError::from)
 }

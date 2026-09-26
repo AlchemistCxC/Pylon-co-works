@@ -9,7 +9,9 @@
  * - evt_append(events, expected_revision)：owner_key 由后端从 event.owner 推导，
  *   批量必须同 owner；eventId 必须等于 owner_key#sequence；重复 event_id 幂等跳过。
  * - evt_revision(owner_key)：owner 当前 MAX(sequence)，空=0。
- * - evt_list(owner_key, before_sequence, limit)：升序页 + 下一页游标。
+ * - evt_list(owner_key, before_sequence, limit, cap_typed_payload)：升序页 + 下一页游标。
+ *   #376 起读出口对 `typed_payload` 的字符串叶子按 64 KiB 线收口（`cap_typed_payload`
+ *   缺省 true）；`turn.unit` 豁免（单元行是历史正文的唯一副本）。
  * - 结构化错误 { code, message }：event_revision_conflict / event_repo_corrupt /
  *   event_repo_constraint / event_repo_conflict / event_db_unavailable / event_invalid /
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
@@ -117,6 +119,25 @@ const DEFAULT_PAGE_LIMIT = 100
 const RANGE_PAGE_LIMIT = 1000
 
 /**
+ * #376 读出口载荷收口的杀停开关（回滚用，不需要回滚版本）：页面上任意位置出现
+ * `data-typed-payload-cap="off"` 即让读出口原样下发 `typed_payload`，回到改动前行为。
+ * 沿用 #221 `data-highlight-lifecycle="off"` / #243 `data-row-virtualization="off"`
+ * 的先例形态——运维在 devtools 里 `document.body.setAttribute('data-typed-payload-cap','off')`
+ * 后触发一次重载即生效。
+ *
+ * 这里是「全局出现即关」而不是先例的「最近祖先即关」：读出口在挂载任何工作台 DOM
+ * 之前就已被调用（冷装载），此时没有可用的祖先链。
+ */
+export function typedPayloadCapDisabled(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.querySelector('[data-typed-payload-cap="off"]') !== null
+}
+
+function typedPayloadCapEnabled(): boolean {
+  return !typedPayloadCapDisabled()
+}
+
+/**
  * Read one inclusive forward sequence range through the existing backward cursor.
  * No second cursor/authority is introduced: this is a bounded view over `evt_list`.
  * Missing/corrupt sequence detection is intentionally left to the consuming cursor.
@@ -188,6 +209,7 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
         ownerKey,
         beforeSequence,
         limit,
+        capTypedPayload: typedPayloadCapEnabled(),
       }).catch(rejectCanonicalEventRepositoryError)
       return {
         events: page.events.map(normalizeCanonicalEventRow),
@@ -206,8 +228,10 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       return rows
     },
     async loadAllPreferUnits(ownerKey) {
-      const rows = await invoke<CanonicalEventRow[]>('evt_load_compact', { ownerKey })
-        .catch(rejectCanonicalEventRepositoryError)
+      const rows = await invoke<CanonicalEventRow[]>('evt_load_compact', {
+        ownerKey,
+        capTypedPayload: typedPayloadCapEnabled(),
+      }).catch(rejectCanonicalEventRepositoryError)
       return rows.map(normalizeCanonicalEventRow)
     },
     async exportRaw(eventId) {
