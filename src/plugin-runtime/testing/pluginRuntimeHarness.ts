@@ -21,12 +21,6 @@ export function createTestPluginHostServices(): PluginHostServices {
   }
 }
 
-export function createTestPluginRuntime(
-  options: Omit<PluginRuntimeOptions, 'host'> = {},
-): PluginRuntime {
-  return new PluginRuntime({ host: createTestPluginHostServices(), ...options })
-}
-
 export class TestPluginRuntime extends PluginRuntime {
   constructor(options: Omit<PluginRuntimeOptions, 'host'> = {}) {
     super({ host: createTestPluginHostServices(), ...options })

@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from 'react'
-import { normalizeDiffPayload, wordDiff, type DiffLine, type DiffPayload } from './diffPresentation'
+import { normalizeDiffPayload, wordDiff, type DiffLine, type DiffPayload } from '../../domains/tool/diffPresentation.ts'
 import CollapsibleRegion from './CollapsibleRegion.tsx'
 
 // 样式绞杀（P92 地基后机械翻译）：原 DiffCard.css 的 utility 化（与 Solid 侧

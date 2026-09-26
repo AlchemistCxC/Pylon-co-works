@@ -6,7 +6,6 @@ import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
   type AppearanceCommand,
-  type WorkbenchAppearanceSnapshot,
   type WorkbenchAppearanceStore,
 } from './appearance.ts'
 
@@ -155,8 +154,4 @@ function settleCcInputBounds(theme: ThemeSettings, changedKey: string): ThemeSet
     }
   }
   return settleCcHeight(next)
-}
-
-export function snapshotRevision(snapshot: WorkbenchAppearanceSnapshot): number {
-  return snapshot.revision
 }
