@@ -198,6 +198,22 @@ function isOptimisticUserEvent(raw: unknown): boolean {
   return update.sessionUpdate === 'user_message_chunk' && meta?.pylonOptimisticUser === true
 }
 
+/**
+ * #375-c：fold.log 只留「回滚重折需要的部分」——剥掉 wire 原始 JSON（`raw` / `rawMetadata`）。
+ *
+ * `fold.log` 为「reject 回滚整页重折」保留整会话信封，是 `raw` 的**唯一**持有者：语义事件
+ * 已从这份 wire 归一出来，回滚重折只读 `event`/identity/sequence/coverage，没有任何路径再读
+ * `raw`（1440 个工具更新事件实测 envelope raw 44.82 MB）。剥掉后同一份载荷在文档里只剩
+ * `activities[]` 那一份（#375-e 起与这里的 `event` 共享同一批对象）。
+ *
+ * 注意：只影响**日志副本**——信封本身仍按 normalize 契约带 `raw`（那份在投影后即回收）。
+ */
+export function withoutEnvelopeRaw(envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope {
+  if (envelope.raw === undefined && envelope.rawMetadata === undefined) return envelope
+  const { raw: _raw, rawMetadata: _rawMetadata, ...rest } = envelope
+  return Object.freeze(rest) as WorkbenchEventEnvelope
+}
+
 export function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[] {
   const canonical = canonicalRowToWorkbench(value)
   if (canonical !== undefined) return canonical

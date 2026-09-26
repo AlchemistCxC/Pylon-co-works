@@ -52,6 +52,7 @@ import {
   runningTailStartTime,
   toWorkbenchEnvelopes,
   withJournalDiagnostic,
+  withoutEnvelopeRaw,
   type LocalSessionFact,
 } from './agentWorkbenchProjection.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'

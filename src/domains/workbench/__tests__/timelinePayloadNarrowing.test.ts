@@ -15,6 +15,7 @@ import {
   type WorkbenchDocument,
 } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
+import { withoutEnvelopeRaw } from '../../../sheets/agent-workbench/agentWorkbenchProjection.ts'
 
 const base = {
   provider: 'peri',
@@ -106,5 +107,45 @@ describe('#375-a timeline.data 收窄（tool / activity 族）', () => {
     } finally {
       setTimelinePayloadNarrowing(true)
     }
+  })
+})
+
+describe('#375-c / #375-e 载荷单一持有的另外两半', () => {
+  it('#375-e 载荷不再克隆：活动节点与信封事件共享同一批对象，且已冻结（写即抛）', () => {
+    const parts = [{ kind: 'text' as const, text: 'x'.repeat(64) }]
+    const env = envelope(1, { type: 'tool.started', tool: { name: 'Bash', parts } }, 'call-a')
+    const document = reduce([env])
+    const node = document.activities.find(item => item.kind === 'tool')!
+    // 同一批对象（引用同一性），不是 structuredClone 出来的第二份
+    expect(node.parts).toBe((env.event as unknown as { tool: { parts: unknown } }).tool.parts)
+    expect(Object.isFrozen(node.parts)).toBe(true)
+    expect(() => { (node.parts as unknown[]).push({ kind: 'text', text: 'y' }) }).toThrow()
+    // 输入的那份数组本身也被冻结（冻结发生在边界，不产生第七份副本）
+    expect(Object.isFrozen(parts)).toBe(true)
+  })
+
+  it('#375-c fold.log 副本剥掉 wire 原始 JSON，原信封契约不变', () => {
+    const env = createWorkbenchEnvelope({
+      ...base,
+      sequence: 1,
+      source: { provider: base.provider, sourceId: 'wire-1' },
+      identity: { toolCallId: 'call-a' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Bash' } },
+      raw: { update: { sessionUpdate: 'tool_call', toolCallId: 'call-a' } },
+    })
+    expect(env.raw).toBeDefined()
+    const logged = withoutEnvelopeRaw(env)
+    expect(logged.raw).toBeUndefined()
+    expect(logged.rawMetadata).toBeUndefined()
+    // 其余字段逐字段保留（回滚重折算的就是这些）
+    expect(logged.eventId).toBe(env.eventId)
+    expect(logged.event).toBe(env.event)
+    expect(logged.identity).toEqual(env.identity)
+    expect(logged.coverage).toEqual(env.coverage)
+    // 原信封未被改写
+    expect(env.raw).toBeDefined()
+    // 幂等：已剥过的再剥返回自身
+    expect(withoutEnvelopeRaw(logged)).toBe(logged)
   })
 })

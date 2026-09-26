@@ -1067,19 +1067,19 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
     ...(stringValue(tool.canonicalName) ? { canonicalName: stringValue(tool.canonicalName) } : previous?.canonicalName ? { canonicalName: previous.canonicalName } : {}),
     ...(stringValue(tool.kind) ? { toolKindWire: stringValue(tool.kind) } : previous?.toolKindWire ? { toolKindWire: previous.toolKindWire } : {}),
     ...(stringValue(tool.title) ? { displayName: stringValue(tool.title) } : previous?.displayName ? { displayName: previous.displayName } : {}),
-    ...(tool.input !== undefined ? { input: jsonSnapshot(tool.input) } : {}),
-    ...(Array.isArray(tool.locations) ? { locations: jsonSnapshot(tool.locations) } : {}),
-    ...(tool.progress !== undefined ? { progress: jsonSnapshot(tool.progress) } : {}),
+    ...(tool.input !== undefined ? { input: freezeDeepSnapshot(tool.input) } : {}),
+    ...(Array.isArray(tool.locations) ? { locations: freezeDeepSnapshot(tool.locations) } : {}),
+    ...(tool.progress !== undefined ? { progress: freezeDeepSnapshot(tool.progress) } : {}),
     ...(stringValue(tool.action) ? { action: stringValue(tool.action) } : {}),
-    ...(Array.isArray(tool.capabilities) ? { capabilities: jsonSnapshot(tool.capabilities) } : {}),
+    ...(Array.isArray(tool.capabilities) ? { capabilities: freezeDeepSnapshot(tool.capabilities) } : {}),
     ...(Number.isFinite(Number(tool.durationMs)) ? { durationMs: Number(tool.durationMs) } : {}),
     ...(normalizedToolError ? { error: normalizedToolError } : {}),
-    ...(Array.isArray(tool.parts) ? { parts: jsonSnapshot(tool.parts) } : {}),
-    ...(tool.rawOutput !== undefined ? { rawOutput: jsonSnapshot(tool.rawOutput) } : {}),
+    ...(Array.isArray(tool.parts) ? { parts: freezeDeepSnapshot(tool.parts) } : {}),
+    ...(tool.rawOutput !== undefined ? { rawOutput: freezeDeepSnapshot(tool.rawOutput) } : {}),
     ...(stringValue(tool.providerName) ? { providerName: stringValue(tool.providerName) }
       : stringValue(tool.name) ? { providerName: stringValue(tool.name) }
         : previous?.providerName ? { providerName: previous.providerName } : {}),
-    ...(tool.rawInput !== undefined ? { rawInput: jsonSnapshot(tool.rawInput) } : previous?.rawInput !== undefined ? { rawInput: previous.rawInput } : {}),
+    ...(tool.rawInput !== undefined ? { rawInput: freezeDeepSnapshot(tool.rawInput) } : previous?.rawInput !== undefined ? { rawInput: previous.rawInput } : {}),
     orphan: false,
     // C04 终态幂等：终态一旦写入，迟到的 progress 不回退状态
     // Activity placement is a creation-time fact. Progress/completion updates
@@ -1156,7 +1156,7 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
   const strictParts = typedPartsFamily || semanticKind === 'activity.process'
     ? narrowActivityParts(sourceParts, id, envelope, activityKind ?? semanticKind?.replace(/^activity\./, '') ?? 'activity')
     : undefined
-  const narrowedParts = strictParts ?? { parts: jsonSnapshot(sourceParts), diagnostics: [] }
+  const narrowedParts = strictParts ?? { parts: sourceParts === undefined ? undefined : freezeDeepSnapshot(sourceParts), diagnostics: [] }
   const parts = narrowedParts.parts ?? previous?.parts
   const output = isC09Activity || isC10Activity ? strictParts?.parts ?? previous?.output : previous?.output
   const error = event.error !== undefined
@@ -1189,13 +1189,13 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     ...(stringValue(activity.sessionId) ?? stringValue(patch.sessionId) ?? previous?.sessionId
       ? { sessionId: stringValue(activity.sessionId) ?? stringValue(patch.sessionId) ?? previous?.sessionId }
       : {}),
-    ...(patch.progress !== undefined ? { progress: jsonSnapshot(patch.progress) } : previous?.progress !== undefined ? { progress: previous.progress } : {}),
+    ...(patch.progress !== undefined ? { progress: freezeDeepSnapshot(patch.progress) } : previous?.progress !== undefined ? { progress: previous.progress } : {}),
     ...(parts !== undefined ? { parts } : {}),
     ...(output !== undefined ? { output } : {}),
     ...(event.result !== undefined
-      ? { result: jsonSnapshot(event.result) }
+      ? { result: freezeDeepSnapshot(event.result) }
       : patch.result !== undefined
-        ? { result: jsonSnapshot(patch.result) }
+        ? { result: freezeDeepSnapshot(patch.result) }
         : previous?.result !== undefined ? { result: previous.result } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(killed !== undefined ? { killed } : {}),
@@ -1216,8 +1216,8 @@ function reduceExtension(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const extension: WorkbenchExtensionNode = {
     id: envelope.eventId,
     kind: event.kind,
-    payload: jsonSnapshot(event.payload) as ExtensionEvent['payload'],
-    fallback: event.fallback.map(part => jsonSnapshot(part) as ContentPart),
+    payload: freezeDeepSnapshot(event.payload) as ExtensionEvent['payload'],
+    fallback: event.fallback.map(part => freezeDeepSnapshot(part) as ContentPart),
     identity: { ...envelope.identity },
     source: { ...envelope.source },
     provenance: { ...envelope.provenance },
@@ -1287,7 +1287,7 @@ function c09RichFields(
     return (typeof value === 'number' && Number.isFinite(value)) ? value : undefined
   }
   const pickValue = (key: string): unknown | undefined =>
-    jsonSnapshot(activity[key] ?? patch[key] ?? result?.[key])
+    freezeJsonValue(activity[key] ?? patch[key] ?? result?.[key])
     ?? (previous?.[key as keyof WorkbenchActivityNode] as unknown | undefined)
   const fields: Partial<Record<keyof WorkbenchActivityNode, unknown>> = {
     sourceAgentId: pickString('sourceAgentId'),
@@ -1809,17 +1809,20 @@ function findLastMessageIndex(
 }
 
 /** C04：把 normalized 字段冻结为可安全持有的 Json 快照（非 JSON 值降级为 undefined）。 */
-function jsonSnapshot<T>(value: T): T | undefined {
-  if (value === undefined) return undefined
-  try {
-    return structuredClone(value)
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value))
-    } catch {
-      return undefined
-    }
-  }
+/**
+ * #375-e/7：载荷字段**不再克隆**——只冻结后就地共享。
+ *
+ * 原实现（`jsonSnapshot` = `structuredClone`）对 `input/locations/progress/capabilities/
+ * parts/rawOutput/rawInput` 逐字段无条件克隆：终态前的每次克隆都在下一拍作废（纯 churn），
+ * 终态后还额外常驻一份。判据是这些字段**没有写入点**：`reduceTool` / `reduceActivity` /
+ * `reduceExtension` 全部是"替换新建"，`upsertActivity` 只做浅合并，没有任何下游就地改写。
+ * 冻结即把该判据变成运行时契约：一旦有人就地写就抛（开发期立刻暴露）。
+ *
+ * 收益不止省掉克隆：活动节点与（fold.log 持有的）信封语义事件**共享同一批载荷对象**，
+ * 同一份载荷在文档里只存在一份。
+ */
+function freezeJsonValue<T>(value: T): T | undefined {
+  return value === undefined ? undefined : freezeDeepSnapshot(value)
 }
 
 /** #204③ 解冻基线：文档项在**构造时**冻结（O(新项数)），运行时 freezeDocument 据此走
@@ -1830,10 +1833,22 @@ export function freezeDeepSnapshot<T>(value: T): T {
   return freezeDeepValue(value)
 }
 
+/**
+ * 就地深冻结（#375-e）：**不重建**树——`map`/`Object.fromEntries` 那种写法是「深克隆 + 冻结」，
+ * 与它要取代的 `structuredClone` 是同一笔分配账，白改。这里沿原引用递归递归冻结并原样返回，
+ * 于是活动节点与信封语义事件**共享同一批载荷对象**，同一份载荷在文档里只剩一份。
+ *
+ * 判据（#375-e）：这些载荷字段没有写入点——reduce 系列全是替换新建、`upsertActivity` 只做浅
+ * 合并；冻结把这个判据变成运行时契约，误写即抛。
+ */
 function freezeDeepValue<T>(value: T): T {
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue)) as T
+  if (Array.isArray(value)) {
+    for (const item of value) freezeDeepValue(item)
+    return Object.freeze(value) as T
+  }
   if (value && typeof value === 'object') {
-    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)]))) as T
+    for (const nested of Object.values(value)) freezeDeepValue(nested)
+    return Object.freeze(value) as T
   }
   return value
 }
