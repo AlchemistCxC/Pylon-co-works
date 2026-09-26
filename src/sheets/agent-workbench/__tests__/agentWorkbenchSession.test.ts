@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
+import { createCanonicalEvent } from '../../../domains/events/eventSchema.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
@@ -637,6 +638,41 @@ describe('Agent Workbench canonical session runtime', () => {
     service.applySessionResponse(response, active.id)
     service.applySessionResponse(response, active.id)
     expect(service.runtime.getSnapshot().document?.timeline.filter(item => item.kind === 'session')).toHaveLength(1)
+    service.destroy()
+  })
+
+  // #358：复活（load_persisted_session）响应对文档而言就是**本会话的协商事实**。此前只有建会话
+  // 路径把它投影成 `session.started`，复活路径只更新会话状态 ⇒ 文档缺前提，
+  // `WorkbenchDocumentSurface` 的守卫失配，回放出来的 model / mode 目录被渲染成会话下方
+  // 那份「配置 / 保存 / select」持久卡片（且每次重启由 journal 回放重建）。
+  it('#358 复活响应投影为 session.started 协商事实，并保留回放出来的目录', async () => {
+    const active = session('revived-config', 'local:revived-config')
+    const catalogue = [
+      { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      { id: 'mode', name: 'mode', category: 'mode', type: 'select', currentValue: 'default', options: [{ value: 'default' }] },
+    ]
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:revived-config' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: catalogue } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(active)
+    const negotiationEntry = () => service.runtime.getSnapshot().document?.timeline
+      .find(entry => entry.kind === 'session' && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')
+    expect(service.runtime.getSnapshot().document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    expect(negotiationEntry()).toBeUndefined()
+
+    service.applySessionResponse({ sessionId: 'remote-1', configOptions: catalogue }, active.id, { syntheticReason: 'session-load-response' })
+
+    expect(negotiationEntry()).toBeDefined()
+    expect((negotiationEntry()?.data as { options?: unknown[] }).options).toHaveLength(2)
+    expect(service.runtime.getSnapshot().document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    expect(service.runtime.getSnapshot().document?.session.status).toBe('ready')
     service.destroy()
   })
 

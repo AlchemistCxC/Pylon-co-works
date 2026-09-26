@@ -556,6 +556,12 @@ function ActiveAgentSessionLifecycle(props: {
     lifecycleRef.current.onCanonicalRefresh = (session, _canonicalRevision, turn) => {
       void props.sessionRuntime.refresh(session, turn)
     }
+    // #358：复活的协商目录投影成工作台文档的 `session.started`——与建会话路径同构。
+    // 没有这条事实，`WorkbenchDocumentSurface` 的守卫在复活会话上必然失配，model / mode
+    // 目录会以「配置 / 保存 / select」卡片常驻会话下方（且每次重启由 journal 回放重建）。
+    lifecycleRef.current.onSessionLoadResponse = (session, response) => {
+      props.sessionRuntime.applySessionResponse(response, session.id, { syntheticReason: 'session-load-response' })
+    }
   }
   const lifecycle = lifecycleRef.current
   const sessionRef = useRef(props.session)
