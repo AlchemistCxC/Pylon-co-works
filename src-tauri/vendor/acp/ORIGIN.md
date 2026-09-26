@@ -218,3 +218,28 @@ AgentDef schema、仅有 `PYLON_ACP_HOST_TOOLS` 环境变量入口」的缺口�
   不追加不裁剪）。
 - strict 沙箱根同时改为取自 Pylon 会话工作区（`SessionInfo.cwd`），不再信任
   agent 自报的请求参数。
+
+## §6 追记：Windows agent 启动特调——UNC cwd pushd 绕行与 spawn 期裸名解析（#353，2026-09-27）
+
+本节登记的是逐函数迁入的副本（含适配），来源锁定 commit 同 §1（Apache-2.0）：
+
+- codeg `src-tauri/src/acp/agent_process.rs`：`is_windows_unc_path` /
+  `is_windows_batch_file` / `is_absolute_windows_path` / `windows_pushd_cwd` /
+  `system_cmd_exe` / `append_windows_batch_arg` / `make_unc_batch_command_line`
+  及对应单测，迁入 `pylon-acp/src/windows_launch.rs`；判定与 quoting 语义逐字节
+  等价（含 `%` 展开阻断、`\?\UNC\` 还原、尾分隔符修剪、相对启动器拒绝绕行）。
+  适配差异：① 决策入口从 McpServer stdio 形状改为消费 Pylon `LaunchPlan`
+  （`agent_command(plan)`）——直启分支委托既有 `apply_launch_plan`，绕行分支只
+  应用 plan env（argv 与 cwd 都由批行承载，不得再 `current_dir(UNC)`）；
+  ② 批行构造失败（参数含 `\r`/`\n`/`\0`）不中止启动：warn 后回落直启（codeg
+  映射为 internal error）；③ 启动器路径已以 `String` 承载，去掉 `Path→str`
+  的 Unicode 错误臂。
+- codeg `src-tauri/src/process.rs` 的 `resolve_windows_program`：迁入同模块；
+  `which` crate 换成 std 的 `PATH` 切分 + `is_file` 探测（不为一个查找新增
+  依赖），扩展优先序（`.exe→.cmd→.bat`）与「只对裸名生效」闸门保持一致；裸名
+  判定提为跨平台纯函数 `is_bare_program_name` 以便单测。
+- 未迁入：codeg 的 `on_spawn`/`on_exit` 回调与 ChildGuard 语义（Pylon 进程树
+  清理由 `ManagedChild` 的 Job Object / taskkill / Drop 承担）。
+
+证据：`pylon-acp/src/windows_launch.rs` 内联单测（判定六项移植 + 裸名闸门 +
+Windows 实机 cmd.exe pushd 端到端；命令与计数见 `.agents/records/`）。
