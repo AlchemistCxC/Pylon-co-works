@@ -9,6 +9,7 @@ import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 export const LAUNCH_ICONS: Readonly<Record<string, string>> = {
   activity: 'Activity',
   agent: 'Bot',
+  'book-open': 'BookOpen',
   boxes: 'Boxes',
   clock: 'Clock',
   'folder-tree': 'FolderTree',
