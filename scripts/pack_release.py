@@ -17,12 +17,13 @@
       resources/sdk/pylon-plugin-manifest.schema.json
       tools/webview2-mcp/pylon-webview2-mcp.exe  # 自带的调试 MCP 服务器
       tools/webview2-mcp/README.md               # 接线与安全代价说明
+      resources/docs-site/index.html        # 离线文档站（#371，pylon-docs:// 数据源）
     release/pylon-<version>-win64.zip
     release/pylon-<version>-win64.zip.sha256
     release/pylon-<version>-win64.manifest.json
 
 脚本只负责收集、审计、压缩，不隐式执行构建；构建由 npm script 编排：
-    npm run release:portable  =  build + tauri build --no-bundle + pylon-detect + pack
+    npm run release:portable  =  build + plugin-sdk + docs:build:offline + tauri build --no-bundle + pylon-detect + pack
 """
 
 from __future__ import annotations
@@ -311,6 +312,23 @@ def resolve_webview2_loader() -> Path:
     )
 
 
+def require_docs_site() -> None:
+    """离线文档站（#371）显式存在性检查。
+
+    收集本身由下方对 resources 的泛化遍历自然覆盖（docs-site 不在跳过名单），
+    这里只钉「入口文件必须在」：缺产物说明构建链漏跑 `bun run docs:build:offline`
+    （或 tauri build 早于暂存），应用内 Docs Sheet 会整站 404——按 webview2-mcp
+    的既有规矩，构建期报错，不拖到用户打开文档时才暴露。
+    """
+    entry = RELEASE_DIR / "resources" / "docs-site" / "index.html"
+    if not entry.is_file():
+        raise PackError(
+            f"缺少离线文档站入口: {entry}。\n"
+            "请先运行 bun run docs:build:offline（release:portable 已内置该步），"
+            "再重新 tauri build --no-bundle。"
+        )
+
+
 def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple[Path, str]]:
     """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
     exe_path = RELEASE_DIR / EXE_NAME
@@ -340,6 +358,7 @@ def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple
         print("warn: 未找到 pylon-cli.exe，跳过该组件（不影响 GUI 启动）")
 
     files.extend(collect_mcp_tool())
+    require_docs_site()
 
     resources_dir = RELEASE_DIR / "resources"
     if not resources_dir.is_dir():
