@@ -355,5 +355,13 @@ pub(crate) async fn cancel_prompt(
             "stale session mapping for source: {source}"
         )));
     }
+    // #352：把「用户 cancel 已发出」登记为本会话的一等判死输入——prompt 等待
+    // 循环看到即直接进入 cancel-settle 窗口；不再依赖会被 agent 继续产出无限
+    // 续命的闲置判死。置于发送成功 + 复核之后：发送失败的 cancel 不判死。
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(&source) {
+            session.mark_cancel_requested(std::time::Instant::now());
+        }
+    }
     Ok(())
 }

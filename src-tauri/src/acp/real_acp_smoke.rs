@@ -126,6 +126,7 @@ async fn real_agent_prompt_round_trip() {
         std::time::Duration::from_secs(120),
         std::time::Duration::from_secs(120),
         || None,
+        || false,
         || async {
             client
                 .cancel_session(&session_id)
@@ -218,6 +219,7 @@ async fn hermes_configured_profile_real_prompt_round_trip() {
         std::time::Duration::from_secs(120),
         std::time::Duration::from_secs(120),
         || None,
+        || false,
         || async {
             client
                 .cancel_session(&session_id)

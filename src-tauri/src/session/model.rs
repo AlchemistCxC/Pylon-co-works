@@ -147,6 +147,13 @@ pub(crate) struct SessionInfo {
     /// 的单调时刻。dispatcher 每次处理 session/update 刷新；prompt 等待据此做
     /// "闲置超时"判定（活动即续命）。不落 wire / 不序列化。
     pub(crate) last_activity: Option<std::time::Instant>,
+    /// #352：用户已对本会话发出 cancel（cancel_prompt 发送 `session/cancel` 成功并
+    /// 通过 generation/session 复核后置位）。prompt 等待循环将其作为**一等判死
+    /// 输入**——直接进入 cancel-settle 窗口，不经闲置/首 token 评估（cancel 后
+    /// agent 继续产出会不断刷新 `last_activity`，闲置判死将被无限续命，回合可能
+    /// 永不收敛）。回合起点（`mark_turn_in_flight`）清除：新回合不继承旧 cancel。
+    /// 与 `last_activity` 同级：进程内事实，不落 wire、不序列化。
+    pub(crate) cancel_requested_at: Option<std::time::Instant>,
     /// CWD-03：Workspace 实体绑定（方案 C）。Some = Session 绑定 Workspace，
     /// root 解析以 Workspace.root_path 为单一来源（workspace_root_for_context 优先分支）；
     /// None = legacy 未绑定，root 解析回退 session.cwd（兼容分支）。
@@ -241,6 +248,7 @@ impl SessionInfo {
             context_size: 0,
             updated_at: Some(Timestamp::now()),
             last_activity: None,
+            cancel_requested_at: None,
             workspace_id: None,
             inject_round: 0,
             last_response_round: 0,
@@ -252,11 +260,19 @@ impl SessionInfo {
     }
 
     /// ADR-0017/#217：标记在途回合（出站 prompt 已派发）。同键重复置位幂等。
+    /// #352：新回合起点同步清除用户 cancel 判死输入——旧回合的 cancel 不继承。
     pub(crate) fn mark_turn_in_flight(&mut self, generation: u64, turn_id: u64) {
+        self.cancel_requested_at = None;
         self.turn_in_flight = Some(TurnInFlightMark {
             generation,
             turn_id,
         });
+    }
+
+    /// #352：登记「用户 cancel 已发出」——prompt 等待循环的一等判死输入。
+    /// 置位幂等（后到的时间戳覆盖先到的，语义不变）。
+    pub(crate) fn mark_cancel_requested(&mut self, at: std::time::Instant) {
+        self.cancel_requested_at = Some(at);
     }
 
     /// ADR-0017/#217：按键清理——只有 (generation, turn_id) 与标记一致才算本回合的

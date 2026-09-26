@@ -1315,6 +1315,17 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         .is_some_and(|agent| crate::hermes::runtime::should_apply(&agent));
     let runtime_for_recovery = runtime.clone();
     let expected_generation = flow.generation;
+    // #352：用户 cancel 一等判死输入——cancel_prompt 置位后，等待循环跳过
+    // 闲置/首 token 评估直接进入 cancel-settle 窗口；agent cancel 后继续产出
+    // 刷新 last_activity 不再能推迟收敛（flag 命中后完全绕开 liveness 评估）。
+    let runtime_for_cancel_flag = runtime.clone();
+    let source_for_cancel_flag = source.to_string();
+    let cancel_requested = move || match runtime_for_cancel_flag.sessions.lock() {
+        Ok(sessions) => sessions
+            .get(&source_for_cancel_flag)
+            .is_some_and(|session| session.cancel_requested_at.is_some()),
+        Err(_) => false,
+    };
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
     // 用作"闲置超时"判据：活动即续命，只有持续无输出才截。
     let source_for_liveness = source.to_string();
@@ -1330,6 +1341,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         Duration::from_secs(idle_timeout_secs),
         Duration::from_secs(first_token_timeout_secs),
         liveness_activity,
+        cancel_requested,
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
             acp_for_cancel
@@ -1633,6 +1645,8 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     let timeout_label = match timeout_kind {
         PromptTimeoutKind::FirstToken => "first-token",
         PromptTimeoutKind::Idle => "idle",
+        // #352：用户 cancel 判死——"超时"指的是 settle 窗口（等终态）超时。
+        PromptTimeoutKind::UserCancel => "user-cancel",
     };
     let timeout_secs = timeout_bound.as_secs().max(1);
     let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
@@ -2205,6 +2219,30 @@ mod tests {
                 .expect("session mapping")
                 .turn_in_flight(),
             "report_settle must clear the keyed in-flight mark"
+        );
+    }
+
+    /// #352：用户 cancel 判死输入的载体语义——置位可见；新回合起点
+    /// （mark_turn_in_flight）清除，旧回合的 cancel 不继承到新回合。
+    #[test]
+    fn cancel_requested_mark_is_set_and_cleared_on_new_turn() {
+        let mut session = crate::session::SessionInfo::new(
+            "local:cancel-flag".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        assert!(
+            session.cancel_requested_at.is_none(),
+            "新会话不得携带 cancel 判死输入"
+        );
+        session.mark_cancel_requested(std::time::Instant::now());
+        assert!(session.cancel_requested_at.is_some());
+        session.mark_turn_in_flight(1, 2);
+        assert!(
+            session.cancel_requested_at.is_none(),
+            "mark_turn_in_flight 必须清除旧回合的 cancel 判死输入"
         );
     }
 

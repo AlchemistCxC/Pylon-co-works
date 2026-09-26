@@ -1978,6 +1978,9 @@ impl PreparedRpc {
 pub enum PromptTimeoutKind {
     FirstToken,
     Idle,
+    /// #352：用户已发出 cancel（一等判死输入）——跳过闲置/首 token 评估，直接
+    /// 进入 cancel-settle 窗口；`bound` 记录 settle 窗口配置。
+    UserCancel,
 }
 
 impl PromptTimeoutKind {
@@ -1985,6 +1988,7 @@ impl PromptTimeoutKind {
         match self {
             Self::FirstToken => "first-token",
             Self::Idle => "idle",
+            Self::UserCancel => "user-cancel",
         }
     }
 }
@@ -2034,12 +2038,20 @@ pub enum CancelSettleResolution {
 /// 调用方一次进程树强清机会（Windows 上观察到的 Hermes/MSYS 死锁）；回调由
 /// 调用方显式传入，本层不感知 provider 进程策略——非 Hermes 调用方传 no-op
 /// `|| async {}`（原 `wait_prompt_with_cancel` 薄包装无独有语义，已并入本参数删除）。
+///
+/// #352：`cancel_requested` 是**一等判死输入**——置位（用户已对当前会话发出
+/// cancel）即跳过闲置/首 token 评估，直接进入 cancel + settle 路径。没有这一路
+/// 输入时，agent 在 cancel 后继续产出会不断刷新 `last_activity`，闲置判死被
+/// 无限续命，settle 窗口永远进不去，回合可能永不收敛。命中 flag 后活动刷新
+/// 自然失效（完全绕开 liveness 评估）。
+#[allow(clippy::too_many_arguments)]
 pub async fn wait_prompt_with_recovery<F, Fut, K, KF>(
     rx: &mut oneshot::Receiver<RawMessage>,
     cancel_settle_timeout: std::time::Duration,
     idle_timeout: std::time::Duration,
     first_token_timeout: std::time::Duration,
     last_activity: impl Fn() -> Option<std::time::Instant>,
+    cancel_requested: impl Fn() -> bool,
     cancel: F,
     force_kill: K,
 ) -> PromptWaitOutcome
@@ -2054,9 +2066,18 @@ where
     let poll = smallest_nonzero([idle_timeout, first_token_timeout, std::time::Duration::ZERO]) / 8;
     loop {
         // 先评估是否该判死（在 sleep 前，避免刚发完就等一个轮询周期的空档）。
-        if let Some(fire_reason) =
+        // #352：用户 cancel 置位优先于闲置/首 token 评估——判死边界记为 settle
+        // 窗口配置（判死本身无墙钟，flag 命中即触发）。
+        let fire_reason = if cancel_requested() {
+            Some(TruncationFire {
+                kind: PromptTimeoutKind::UserCancel,
+                bound: cancel_settle_timeout,
+                elapsed: start.elapsed(),
+            })
+        } else {
             evaluate_truncation(start, idle_timeout, first_token_timeout, last_activity())
-        {
+        };
+        if let Some(fire_reason) = fire_reason {
             let cancel_error = match tokio::time::timeout(
                 std::time::Duration::from_secs(DEFAULT_WRITE_TIMEOUT_SECS),
                 cancel(),
@@ -2113,7 +2134,7 @@ where
 
 /// 截断判据的触发结果。
 struct TruncationFire {
-    /// 触发的语义类别（首 token / 闲置）。
+    /// 触发的语义类别（首 token / 闲置 / 用户 cancel，#352）。
     kind: PromptTimeoutKind,
     /// 本次判定使用的配置边界。
     bound: std::time::Duration,
