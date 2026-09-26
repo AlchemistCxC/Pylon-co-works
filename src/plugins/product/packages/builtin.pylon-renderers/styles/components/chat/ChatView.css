@@ -346,13 +346,11 @@
 .term-assistant .term-h5 { font-size:0.95em; font-weight:600; margin:4px 0 2px; }
 .term-assistant .term-h6 { font-size:0.9em; font-weight:500; margin:4px 0 2px; color:var(--text-dim); }
 .term-li { margin:1px 0 1px 16px; }
-.term-li::before { content:'- '; color:var(--text-dim); }
-/* #370：markdown 列表的符号只画一套。UL 的符号由 ::before 提供（分级 •/◦/▪，见文末
-   「列表：嵌套感知的分级符号」），必须关掉原生 marker —— 否则 `display:list-item` 的
-   disc 与 ::before 同时出现，每个条目两个点。OL 反过来：序号由原生 marker 提供，
-   上面那条 ::before 的 `- ` 对 OL 条目只是多余符号。
-   `:has(> .term-li)` 把作用面限定在渲染器产出的 markdown 列表上，不波及其它 ul/ol。 */
-ul:has(> .term-li) { list-style:none; }
+/* #370：markdown 列表的符号**只由原生 marker 承担**——UL 走 UA 的 disc/circle/square
+   分级，OL 走序号。此前 ::before 又画一遍：既与 marker 叠加成双点，又把首行文字顶到
+   续行右侧 17px（实机实测：li 盒 313 / 首行文字 330 / 续行 313）。关掉 ::before 后
+   marker 回到它本来的列（正是双点里偏左那个的位置），首行与续行同列。 */
+ul:has(> .term-li) > .term-li::before,
 ol:has(> .term-li) > .term-li::before { content:none; }
 .term-p { margin:2px 0; }
 /* Markdown soft breaks are meaningful for assistant prose (poems, lists of
@@ -2477,10 +2475,10 @@ ol:has(> .term-li) > .term-li::before { content:none; }
 /* ── 段落呼吸 ── */
 .term-assistant .term-p { margin:5px 0; }
 
-/* ── 列表：嵌套感知子弹（•/◦/▪）+ 任务框对齐 ── */
-.term-assistant ul > .term-li::before { content:'•  '; color:var(--accent); }
-.term-assistant ul ul > .term-li::before { content:'◦  '; color:var(--text-dim); }
-.term-assistant ul ul ul > .term-li::before { content:'▪  '; color:var(--text-dim); }
+/* ── 列表：分级符号与配色（字形由 UA 的 disc/circle/square 提供，见 #370 注释）+ 任务框对齐 ── */
+.term-assistant ul > .term-li::marker { color:var(--accent); }
+.term-assistant ul ul > .term-li::marker,
+.term-assistant ul ul ul > .term-li::marker { color:var(--text-dim); }
 .term-assistant .term-li { margin:2px 0; }
 .term-assistant input[type='checkbox'] { margin:0 4px 0 0; vertical-align:middle; accent-color:var(--accent); }
 

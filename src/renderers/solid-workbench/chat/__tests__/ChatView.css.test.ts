@@ -127,16 +127,16 @@ describe('reasoning row geometry contract', () => {
     expect(css).toMatch(/\.term-md-skeleton\s*\{[^}]*min-height:\s*1em;/)
   })
 
-  // #370：markdown 列表每个条目只画一套符号。UL 的符号由 ::before 分级画（•/◦/▪），
-  // 故必须关掉原生 marker —— 否则 `display:list-item` 的 disc 与 ::before 叠加，每项两个点；
-  // OL 反过来：序号来自原生 marker，::before 的 `- ` 是多余符号。
-  it('#370：markdown 列表的原生 marker 与 ::before 二选一', () => {
-    expect(css).toMatch(/ul:has\(> \.term-li\)\s*\{\s*list-style:none;\s*\}/)
-    expect(css).toMatch(/ol:has\(> \.term-li\) > \.term-li::before\s*\{\s*content:none;\s*\}/)
-    // 分级符号本身仍在（回归护栏：别把 ::before 一起删掉，那会变成「一个符号都没有」）
-    expect(css).toMatch(/\.term-assistant ul > \.term-li::before\s*\{\s*content:'• {2}';\s*color:var\(--accent\);\s*\}/)
-    expect(css).toMatch(/\.term-assistant ul ul > \.term-li::before\s*\{\s*content:'◦ {2}';/)
-    expect(css).toMatch(/\.term-assistant ul ul ul > \.term-li::before\s*\{\s*content:'▪ {2}';/)
+  // #370：markdown 列表的符号**只由原生 marker 承担**（UL 走 UA 的 disc/circle/square 分级，
+  // OL 走序号）。::before 不再画列表符号——否则与 marker 叠加成双点，且把首行文字顶到续行
+  // 右侧 17px（实机实测：li 盒 313 / 首行文字 330 / 续行 313）。
+  it('#370：markdown 列表只用原生 marker，::before 不画符号', () => {
+    expect(css).toMatch(/ul:has\(> \.term-li\) > \.term-li::before,\s*\nol:has\(> \.term-li\) > \.term-li::before\s*\{\s*content:none;\s*\}/)
+    // 配色契约保留（一级 accent，二三级 dim）；字形交给 UA 分级，不再由 CSS 写死
+    expect(css).toMatch(/\.term-assistant ul > \.term-li::marker\s*\{\s*color:var\(--accent\);\s*\}/)
+    expect(css).toMatch(/\.term-assistant ul ul > \.term-li::marker,\s*\n\.term-assistant ul ul ul > \.term-li::marker\s*\{\s*color:var\(--text-dim\);\s*\}/)
+    // 老机构彻底退出：全文件不再有 `::before` 画列表符号（`content:none` 不算）
+    expect(css).not.toMatch(/\.term-li::before\s*\{[^}]*content:\s*['"]/)
   })
 })
 
