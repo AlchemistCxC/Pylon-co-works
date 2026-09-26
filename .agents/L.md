@@ -4,6 +4,13 @@
 
 > **只留在途。** 本文件的价值是「谁正在改哪些文件」；已完工的条目占用读取代价，并且**文件越长、两边各自追加就越容易冲突**（本文件历史上多次成为合并冲突点）。所以自己的 issue 合入后即可移除自己的条目。2026-09-16 及以前的条目（其 issue 均已有 `.agents/records/` 开发记录）已归档到仓外 `../Docs/Archive/L-archive-20260918.md`；2026-09-17 至 2026-09-25 的已完工条目（#110/#315/#316/#317 批次一/ADR 通审等）已归档到仓外 `../Docs/Archive/L-archive-20260925.md`；2026-09-26 撤下的已完工 [kumo] 条目（#324/#331/#334-336/#338/#339/#325-329，issue 均已 CLOSED 且改动已并入 main）已归档到 `../Docs/Archive/L-archive-20260926.md`；[Codex] #155 T3 已随 PR #347 并入 main 撤下。
 
+- [kumo] #361+#362+#363 单 PR 批次（三个 issue 逐项完成后各派子 agent 审查）：
+  - #361 → `src-tauri/src/main.rs`（crate 级 GUI 子系统属性）。**不碰**其他 `[[bin]]` 入口（`pylon-cli`/`pylon-detect`/`pylon-fake-agent` 仍为 console）。
+  - #362 → 新 `src-tauri/src/logging/**`、`src-tauri/src/runtime_log/mod.rs`（Layer 自反馈隔离）、`src-tauri/src/session/mod.rs`（仅 :406-434 lag warn 节流区段）、`src-tauri/src/paths.rs`（日志目录）、`src-tauri/Cargo.toml`（+`tracing-appender`）、`src-tauri/vendor/acp/ORIGIN.md`（出处登记）。
+  - #363 → `src-tauri/pylon-acp/src/{process,engine,terminal_runtime}.rs`（spawn 收口）、新 `src-tauri/pylon-core/src/node_path.rs`、`src-tauri/src/session/{expiry.rs,session_expiry_platform_tests.rs}`（空闲回收）。
+  - ⚠️ **`src-tauri/src/lib.rs` 与 #371 声明重叠**：我只改 `init_tracing()`（#362 落盘 sink）与 `run()` 启动首段的 node PATH 修复；#371 的 mod/AppState/scheme/命令/setup 注册不在此批，两边改动点不相邻，可直接并存。
+  - 规格 `.agents/spec/361-release-gui-subsystem.md`、`362-crash-forensics-logging.md`、`363-acp-subprocess-lifecycle.md`。
+  - **不碰**：前端 `src/**`、`docs/说明书/**`、`src-tauri/src/lifecycle/mod.rs`（只调用既有 `stop_agent_runtime`，不改其实现）、#353/#330/#372/#371 域。
 - [kumo] #351 前端根目录归类（#245 前端对应件）：`src/` 根 22 文件按域下沉（identity→`domains/identity/`、IPC 件→`infrastructure/{persistence,skin}/`、workspace/runtime/cc→各自 domains、error 三件→`app/`、其余就近）+ **全仓 import 路径重写**（触及 src 广泛文件的 import 行，语义零变更）+ 断 `identityStore→workspace/runtime`（新增 `src/app/bootstrap/identityCrossDomainSync.ts` 端口）+ `scripts/check-runtime-boundaries.mts` allowlist ×3 路径随迁 + `scripts/audit-maintenance.test.mts` 断言随迁 + 说明书文件链接同步。规格 `.agents/spec/351-frontend-root-file-relocation.md`。**不碰** `store.ts`/主题预设集群与 `presets//zones/`（#266 域）、`src-tauri/**`（#348/#349 在途）、入口四件。
 - [kumo] #348+#349 ACP 连接缺陷批次（单 PR，两个施工 agent 按文件域互斥并行）：
   - #348 → `src-tauri/pylon-acp/**`（**不含 `src/adapter/`**）、`src-tauri/pylon-acp/Cargo.toml`、`src-tauri/Cargo.toml`、`src-tauri/vendor/acp/ORIGIN.md`：写侧崩溃终因词表一致性 / 版本声明对齐 / spawn 补 CREATE_NO_WINDOW / reducer 补 available_commands_update 臂 / `is_method_not_found` 兜底收窄 / protocol_version 接受集合 fail-closed。
