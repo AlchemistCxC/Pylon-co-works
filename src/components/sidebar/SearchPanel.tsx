@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
-import { formatTime } from '../../utils'
+import { formatTime } from '../../utils/relativeTime'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 

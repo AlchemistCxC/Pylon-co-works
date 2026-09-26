@@ -2,7 +2,7 @@ import type {
   ContextPanelContributionContext,
   ContextPanelRegistryEntry,
 } from './contextPanelTypes.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 const reportedWhenFailures = new WeakSet<NonNullable<ContextPanelRegistryEntry['value']['when']>>()
 

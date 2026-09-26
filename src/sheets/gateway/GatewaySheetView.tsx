@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import { createGatewayClient, type AdapterCatalogItem, type AdapterInstance, type GatewayInstanceInput } from '../../infrastructure/tauri/gatewayClient'
 import { migrateLegacyRouteBindings, saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
 import { GATEWAY_ROUTE_RESETS, type GatewayRouteReset, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**

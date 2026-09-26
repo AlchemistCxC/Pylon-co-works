@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { archivedOwnerResultToTransaction, resolveArchivedSessionOwner } from '../archiveOwnerResolver'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../../domains/identity/identityStore'
 
 function session(id: string, agentId: string, source: string, periId?: string): Session {
   return { id, agentId, source, periId, name: id, profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }

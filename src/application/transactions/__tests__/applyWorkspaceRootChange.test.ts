@@ -14,10 +14,10 @@ vi.mock('@tauri-apps/api/core', async () => {
 ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = { invoke: invokeMock }
 
 const { applyWorkspaceRootChange } = await import('../applyWorkspaceRootChange')
-const { useIdentityStore } = await import('../../../identityStore')
-const { useWorkspaceEntityStore } = await import('../../../workspaceEntityStore')
-const { useRuntimeStore } = await import('../../../runtimeStore')
-const { toAgentContextKey } = await import('../../../agentContext')
+const { useIdentityStore } = await import('../../../domains/identity/identityStore')
+const { useWorkspaceEntityStore } = await import('../../../infrastructure/persistence/workspaceEntityStore')
+const { useRuntimeStore } = await import('../../../domains/runtime/runtimeStore')
+const { toAgentContextKey } = await import('../../../domains/agent/agentContext')
 
 const CONTEXT = { agentId: 'peri', source: 'local:s1' }
 const RELOAD_KEY = toAgentContextKey(CONTEXT)

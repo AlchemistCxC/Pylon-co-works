@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { presentDetectionDiagnostic } from '../agentDetectionDiagnostics.ts'
-import { explainErrorCode } from '../../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../../app/errorCodeExplanations.ts'
 import type { AgentDetectionDiagnostic } from '../../../domains/agent/agentDetector.ts'
 
 /**

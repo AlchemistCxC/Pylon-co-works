@@ -1,12 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { CommandDefinition } from '../../../plugin-runtime/commands/commandRegistry.ts'
 import { CORE_BUILTIN_COMMANDS } from './builtinCommands.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
+import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
 import { setSessionModel } from '../../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../../components/chat/sessionMode.ts'
 import { createSessionClient } from '../../../infrastructure/acp/sessionClient.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
-import { useWorkspaceStore } from '../../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
 import { record, text } from '../../../utils/wireGuards.ts'
 
 function positional(args: Record<string, unknown>, index: number): unknown {

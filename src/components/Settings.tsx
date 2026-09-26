@@ -3,19 +3,19 @@ import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
-import { useIdentityStore } from '../identityStore'
-import { useRuntimeStore } from '../runtimeStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
 import { isCustomZonePresetEntry, resolveZonePresetEntryTheme, zonePresetsFor, type ZonePresetEntry } from '../zones/index.ts'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { reloadAgentsTransaction } from '../application/transactions/reloadAgentsTransaction.ts'
@@ -43,10 +43,10 @@ import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
-import { useRightRailStore } from '../rightRailStore.ts'
+import { useRightRailStore } from './right-panel/rightRailStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from './settings/settingsDomains'
 import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import { useSettingsContributionCatalog } from './settings/useSettingsContributionCatalog.ts'
@@ -459,7 +459,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     void settingsContributionCatalog.revision
     return settingsContributionCatalog.searchItems
   }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
-  const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+  const navigateToField = (item: import('./settings/settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
       navigate({ domain: 'appearance', section: 'right', pluginPageId: null })
       useRightRailStore.getState().setActivePanel(item.contextPanelId)

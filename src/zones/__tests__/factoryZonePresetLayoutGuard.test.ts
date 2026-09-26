@@ -18,7 +18,7 @@
  *   **没有任何条目被允许声明与定义表不同的排布** —— 谁要这么做，先在这里写明理由。
  */
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CC_LAYOUT, type CcLayoutWidgetId } from '../../ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT, type CcLayoutWidgetId } from '../../domains/cc/ccLayoutState.ts'
 import { CC_REGISTERED_SLOT_IDS, CC_WIDGET_IDS, ccWidgetLanding } from '../../domains/cc/widgetDefinitions.ts'
 import { FACTORY_ZONE_PRESET_ENTRIES, type ZonePresetEntry } from '../index.ts'
 

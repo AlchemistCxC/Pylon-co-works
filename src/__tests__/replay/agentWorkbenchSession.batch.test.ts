@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch'
 import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 

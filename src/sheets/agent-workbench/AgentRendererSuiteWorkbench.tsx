@@ -1,9 +1,9 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { Session } from '../../identityStore.ts'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { RendererSuiteHost } from '../../host/renderer-suite/rendererSuiteHost.ts'
 import { resolveRendererActivation } from '../../plugin-runtime/renderers/rendererActivationResolver.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
@@ -32,14 +32,14 @@ export interface WorkbenchFatalFailure {
   readonly retained?: boolean
 }
 
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 

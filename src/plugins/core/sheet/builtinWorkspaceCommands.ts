@@ -1,6 +1,6 @@
 import type { CommandDefinition } from '../../../plugin-runtime/commands/commandRegistry.ts'
-import { useWorkspaceStore } from '../../../workspaceStore.ts'
-import { useRightRailStore } from '../../../rightRailStore.ts'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
+import { useRightRailStore } from '../../../components/right-panel/rightRailStore.ts'
 import { applyWorkspaceLayoutChange } from '../../../application/transactions/applyWorkspaceLayoutChange.ts'
 import { sidebarBlockCollapseStore } from '../../../domains/workbench/sidebarBlockCollapse.ts'
 import { record } from '../../../utils/wireGuards.ts'

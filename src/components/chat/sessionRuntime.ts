@@ -1,7 +1,7 @@
 import type { Session, SessionConfig } from '../../store'
 import type { AvailableCommand } from '../../infrastructure/acp/chatContracts'
-import type { AgentContext, AgentContextKey } from '../../agentContext.ts'
-import { toAgentContextKey } from '../../agentContext.ts'
+import type { AgentContext, AgentContextKey } from '../../domains/agent/agentContext.ts'
+import { toAgentContextKey } from '../../domains/agent/agentContext.ts'
 import { assembleSessionPrompt } from '../../host/commandSetResolver.ts'
 import { collectFirstMessagePromptPrelude } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 

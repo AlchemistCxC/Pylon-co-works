@@ -10,11 +10,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, screen, fireEvent } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
-import { useWorkspaceStore } from '../../../workspaceStore'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import { createSheetState } from '../../../workspace-sheets/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import { useIdentityStore } from '../../../identityStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {

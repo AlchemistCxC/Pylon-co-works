@@ -4,7 +4,7 @@ import {
   SECTION_OWNERS,
   SETTINGS_SECTION_LABELS,
   type SettingsSectionId,
-} from '../../settingsDomains.ts'
+} from './settingsDomains.ts'
 import Select from '../ui/Select.tsx'
 import type { SettingsDensity } from './settingsChromeState.ts'
 

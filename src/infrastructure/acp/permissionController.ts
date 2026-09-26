@@ -12,7 +12,7 @@
  * 宣称 agent 已收到 response）。
  */
 
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { activeForAgent, type PermissionAction, type PermissionState } from '../../domains/permission/permissionState.ts'
 import type { PermissionOption, PermissionRequest } from '../../domains/permission/permissionTypes.ts'
 import { normalizeInteractionEnvelope } from '../../domains/activity/interaction.ts'

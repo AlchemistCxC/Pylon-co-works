@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import '../../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { useIdentityStore } from '../../../../identityStore.ts'
+import { useIdentityStore } from '../../../../domains/identity/identityStore.ts'
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
 import { getSessionCreationRegistry } from '../../../../plugin-runtime/runtimeServices.ts'
 import { resetStores } from '../../../../test/resetStores.ts'

@@ -2,7 +2,7 @@ import SolidMount from '../sheets/SolidMount'
 import type { SheetRecord } from './sheetTypes'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
-import type { SettingsDomainId } from '../settingsDomains.ts'
+import type { SettingsDomainId } from '../components/settings/settingsDomains.ts'
 
 /**
  * WorkspaceTitlebar — 标题栏（#279 第 3 梯队 Solid 化）。

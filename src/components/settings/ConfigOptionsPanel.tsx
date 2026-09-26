@@ -1,12 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import type { AgentContext } from '../../agentContext'
-import { toAgentContextKey } from '../../agentContext'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
+import type { AgentContext } from '../../domains/agent/agentContext'
+import { toAgentContextKey } from '../../domains/agent/agentContext'
 
 export default function ConfigOptionsPanel({ context }: { context?: AgentContext }) {
   const config = useRuntimeStore(state => context ? state.sessionConfig[toAgentContextKey(context)] : undefined)

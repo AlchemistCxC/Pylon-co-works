@@ -12,7 +12,7 @@ import type { InstalledPluginPackage } from '../../infrastructure/plugins/plugin
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.tsx'
 
 const LOG_LIMIT = 12

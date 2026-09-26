@@ -1,7 +1,7 @@
-import type { ProfilePersistenceState } from '../../profilePersistence.ts'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import type { ProfilePersistenceState } from '../../domains/identity/profilePersistence.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { markLegacyMigrationComplete } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 import { pruneOrphanMessageSnapshots } from '../../components/chat/messagePersistence.ts'
 

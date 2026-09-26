@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { resetStores } from '../../test/resetStores.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: ({ initialAgentId }: { initialAgentId?: string }) => <div data-testid="agent-runtime-panel" data-agent-id={initialAgentId}>runtime onboarding</div>,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import {
   agentAdvertisedModelEntries,
   markProbeUnavailable,

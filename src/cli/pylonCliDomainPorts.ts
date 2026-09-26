@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore, type Session } from '../identityStore.ts'
+import { useIdentityStore, type Session } from '../domains/identity/identityStore.ts'
 import { errorCode as wireErrorCode } from '../infrastructure/tauri/errorPayload.ts'
-import { useRuntimeStore } from '../runtimeStore.ts'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore.ts'
 import {
   createAgentClient,
   type AgentCreateConfig,

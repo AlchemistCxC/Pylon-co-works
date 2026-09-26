@@ -1,6 +1,6 @@
 // 迁移自 scripts/test-apply-custom-preset.mts（P91 A1）；源码正则结构守卫段不迁（行为已由下列断言证实）。
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
 import { ZONE_FIELDS } from '../../../themeFieldDefs.ts'

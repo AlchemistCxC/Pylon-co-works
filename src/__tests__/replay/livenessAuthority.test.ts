@@ -18,7 +18,7 @@ import { createWorkbenchEnvelope } from '../../domains/workbench/events/workbenc
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 
 function session(id: string, source: string): Session {

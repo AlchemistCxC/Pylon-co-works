@@ -5,9 +5,9 @@ import type { GitOperationResult, GitStatusWithBranch } from '../../../infrastru
 import type { GitProvider } from '../../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { WorkspaceTarget } from '../../../domains/workspace/workspaceTarget.ts'
 import GitPanel from '../GitPanel.tsx'
-import { reportRuntimeError } from '../../../runtimeError.ts'
+import { reportRuntimeError } from '../../../app/runtimeError.ts'
 
-vi.mock('../../../runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
+vi.mock('../../../app/runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
 
 const target: WorkspaceTarget = {
   sessionId: 'session-a',

@@ -358,6 +358,162 @@ async fn ensure_session_mapping_without_peri_id_creates_directly() {
     );
 }
 
+// ── #349 B1：revive 的 session/load 走 replay capture 治理 ──────────────────
+
+/// #349 B1（机制断言）：revive load 在飞期间（barrier 阻塞 agent 响应）
+/// ① loading 槽已预插入（回放帧可立即解析映射，不再逐条 100ms 未知会话等待）；
+/// ② replay capture 已登记（同 owner 二次 capture 被 ReplayLoadInProgress
+/// 确定性拒绝——回放帧将在传输边界被分类为 Replay 而非 Live）；
+/// ③ 成功后临时槽位替换为最终槽位（replay_loading 清位）。
+#[tokio::test]
+async fn revive_load_registers_replay_capture_and_preinserts_loading_slot() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let ready = std::env::temp_dir().join(format!(
+        "pylon-revive-capture-{}-{unique}.ready",
+        std::process::id()
+    ));
+    let release = ready.with_extension("release");
+    let agent = crate::test_utils::fake_acp_agent(
+        "revive-capture-agent",
+        &[
+            "--scenario",
+            "recovery-generation",
+            "--barrier-ready",
+            &ready.to_string_lossy(),
+            "--barrier-release",
+            &release.to_string_lossy(),
+            "--wait-method",
+            "session/load",
+            "--outcome",
+            "success",
+        ],
+    );
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .unwrap();
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("revive-capture-agent")
+        .with_agent(agent)
+        .with_runtime("revive-capture-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:generation",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let recover = ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated);
+    let observe_and_release = async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !ready.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("agent must receive session/load");
+        {
+            let sessions = runtime.sessions.lock().unwrap();
+            let slot = sessions
+                .get("local:generation")
+                .expect("loading slot must be pre-inserted before the load RPC");
+            assert_eq!(slot.peri_id, "remote-original");
+            assert!(
+                slot.replay_loading,
+                "pre-inserted slot must carry replay_loading for the load window"
+            );
+        }
+        // 同 owner 二次 capture 必须被拒绝 = revive 的 load 已持有登记。
+        let second = runtime
+            .acp
+            .lock()
+            .await
+            .begin_replay_capture("remote-original");
+        assert!(
+            matches!(second, Err(crate::acp::AcpError::ReplayLoadInProgress)),
+            "revive load must hold the replay capture registration"
+        );
+        drop(second);
+        std::fs::write(&release, b"release").unwrap();
+    };
+    let (result, ()) = tokio::join!(recover, observe_and_release);
+    let mapping = result.expect("revive must succeed after release");
+    assert_eq!(mapping.peri_id, "remote-original");
+    assert!(recreated.is_none());
+    {
+        let sessions = runtime.sessions.lock().unwrap();
+        let slot = sessions.get("local:generation").expect("final slot");
+        assert_eq!(slot.peri_id, "remote-original");
+        assert!(!slot.replay_loading, "final slot clears replay_loading");
+    }
+    std::fs::remove_file(&ready).unwrap();
+    std::fs::remove_file(&release).unwrap();
+}
+
+/// #349 B1（journal 断言）：scenario `new_load` 对 session/load 先发两条回放
+/// chunk（history-1/history-2）再响应——经真实 dispatcher 泵处理后，canonical
+/// journal 不得出现回放帧产生的 durable 事件（journal 是唯一 durable 权威，
+/// revive 对回放内容只丢弃不导入）。
+#[tokio::test]
+async fn revive_replay_frames_never_reach_canonical_journal() {
+    let agent =
+        crate::test_utils::fake_acp_agent("journal-revive-agent", &["--scenario", "new_load"]);
+    let harness = crate::test_harness::TestHarness::boot(
+        crate::test_harness::HarnessConfig::new().with_agent(agent),
+    )
+    .await;
+    let state = harness.state();
+    let runtime = harness
+        .runtime("journal-revive-agent")
+        .expect("harness boots an active runtime");
+    let mut recreated = None;
+    let assembly = SessionAssembly {
+        state: state.inner(),
+        runtime: &runtime,
+        source: "local:journal",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-journal"), &mut recreated)
+        .await
+        .expect("revive via load channel must succeed");
+    assert_eq!(mapping.peri_id, "peri-journal");
+    // 给 dispatcher 泵留出处理回放帧的窗口（分类已固定为 Replay，与处理时机无关）。
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let owner = crate::session::DurableSessionOwner::new(
+        "profile",
+        "journal-revive-agent",
+        "local:journal",
+    );
+    let page = crate::session::event_service_of(state.inner())
+        .expect("harness installs an in-memory event service")
+        .list_events(owner.key().unwrap(), None, 100)
+        .await
+        .expect("journal read");
+    let leaked: Vec<String> = page
+        .events
+        .iter()
+        .filter_map(|row| {
+            let text = row.raw_payload.to_string();
+            (text.contains("history-1") || text.contains("history-2")).then_some(text)
+        })
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "replay frames must not be durable-ingested as canonical events: {leaked:?} ({} events total)",
+        page.events.len()
+    );
+}
+
 // ── #98（P1-2 评审修复）：revive 成功但远端 identity 变化 ⇒ 显式 rebind——
 // 复用 recreated_peri_id 出参通道广播（pylon:session-recreated），映射绑定新 id，
 // 不静默复用旧映射。fixture 仅标准嵌套 `sessionCapabilities.loadSession: {}`，

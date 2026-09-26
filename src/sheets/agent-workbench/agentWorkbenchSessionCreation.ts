@@ -1,7 +1,7 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import type { SessionCreateInput } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
@@ -9,7 +9,7 @@ import { applySessionStateResponse } from '../../domains/sessionState/sessionSta
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface AgentWorkbenchSessionCreationContext {
   readonly agentId: string

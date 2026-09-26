@@ -5,7 +5,7 @@ import {
   clampLeftRailWidth,
   LEFT_RAIL_MAX_WIDTH,
   LEFT_RAIL_MIN_WIDTH,
-} from '../rightRailStore.ts'
+} from '../components/right-panel/rightRailStore.ts'
 
 /**
  * LeftRailResizeHandle — 左栏拖拽实时调宽（#154，#279 第 3 梯队 Solid 化实体；与

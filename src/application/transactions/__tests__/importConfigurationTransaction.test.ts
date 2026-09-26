@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { importConfigurationTransaction } from '../importConfigurationTransaction'
-import { preflightImportPayload } from '../../../configExportImport'
+import { preflightImportPayload } from '../../configExportImport'
 import { MemoryStorage } from '../../../test/memoryStorage'
 
 const PROFILES_KEY = 'pylon-profiles'

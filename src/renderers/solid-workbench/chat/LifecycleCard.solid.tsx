@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal } from 'solid-js'
 import type { LifecycleState, NormalizedError } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
-import { explainErrorCode } from '../../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../../app/errorCodeExplanations.ts'
 import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 
 export interface SolidLifecycleAppearance {

@@ -13,13 +13,13 @@ const sessionsRef = vi.hoisted(() => ({
 const workspacesRef = vi.hoisted(() => ({ current: [] as Array<{ id: string; rootPath: string }> }))
 const recordTouchedFileMock = vi.hoisted(() => vi.fn())
 
-vi.mock('../../../identityStore.ts', () => ({
+vi.mock('../../../domains/identity/identityStore.ts', () => ({
   useIdentityStore: { getState: () => ({ sessions: sessionsRef.current }) },
 }))
-vi.mock('../../../workspaceEntityStore.ts', () => ({
+vi.mock('../../../infrastructure/persistence/workspaceEntityStore.ts', () => ({
   useWorkspaceEntityStore: { getState: () => ({ workspaces: workspacesRef.current }) },
 }))
-vi.mock('../../../workspaceStore.ts', () => ({
+vi.mock('../../../domains/workspace/workspaceStore.ts', () => ({
   useWorkspaceStore: { getState: () => ({ recordTouchedFile: recordTouchedFileMock }) },
 }))
 vi.mock('../../../infrastructure/events/pluginEventBus.ts', () => ({

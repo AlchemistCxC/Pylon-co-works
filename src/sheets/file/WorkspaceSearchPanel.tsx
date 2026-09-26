@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
-import { reportRuntimeError } from '../../runtimeError'
+import { reportRuntimeError } from '../../app/runtimeError'
 import { classifyWorkspaceSearchError, normalizeWorkspaceSearchResults, type WorkspaceSearchResult, type WorkspaceSearchSaveStatus } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'

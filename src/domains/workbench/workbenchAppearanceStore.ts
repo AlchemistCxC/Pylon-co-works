@@ -1,6 +1,6 @@
-import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../../ccLayoutState.ts'
+import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
-import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
+import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../cc/ccHeightState.ts'
 import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import {
   areWorkbenchAppearancesEqual,

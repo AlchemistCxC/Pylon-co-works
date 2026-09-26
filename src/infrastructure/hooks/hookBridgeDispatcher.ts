@@ -17,7 +17,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../tauri/env.ts'
-import { useIdentityStore } from '../../identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { HOOK_NAMES, type HookInvocationResult, type HookName } from '../../plugin-runtime/hooks/hookTypes.ts'
 

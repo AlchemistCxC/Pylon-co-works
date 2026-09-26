@@ -361,9 +361,11 @@ impl From<AcpError> for String {
 
 impl AcpError {
     /// H14 类型化：close 降级判定（session.rs:1619 错误串 contains 的声明式替代，
-    /// G2-03 消费点）。JSON-RPC error 信封的 `code` 字段解析优先（-32601 =
-    /// MethodNotFound），字符串兜底（"-32601" / "Method not found"，保留现状
-    /// 大小写敏感语义）。
+    /// G2-03 消费点）。JSON-RPC error 信封**只看顶层字段**：`code` == -32601
+    /// 命中；无 code 时退看顶层 `message` 含 "Method not found"（保留现状
+    /// 大小写敏感语义）。#348 A5：不再对整信封序列化值做 "-32601" 扫描——
+    /// `data` 里恰好含同名字样会被误判为 method-not-found。非 JSON 纯文本
+    /// 保留原字符串兜底。
     /// G2（W2 链 E）消费：`if error.is_method_not_found() { 降级本地清理 }`。
     pub fn is_method_not_found(&self) -> bool {
         let AcpError::Rpc(message) = self else {
@@ -373,8 +375,10 @@ impl AcpError {
             if value.get("code").and_then(|code| code.as_i64()) == Some(-32601) {
                 return true;
             }
-            let text = value.to_string();
-            return text.contains("-32601") || text.contains("Method not found");
+            return value
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains("Method not found"));
         }
         message.contains("-32601") || message.contains("Method not found")
     }
@@ -454,5 +458,34 @@ mod wire_code_tests {
             AcpError::Child("spawn failed".into()).code(),
             "transport_error"
         );
+    }
+
+    /// #348 A5：close 降级判定只看信封顶层（code / message），不做整信封
+    /// "-32601" 扫描——`data` 内同名字样不得误判。非 JSON 纯文本保留原兜底。
+    #[test]
+    fn method_not_found_reads_envelope_top_level_only() {
+        // 顶层 code 命中（含/不含 message 均可）。
+        assert!(
+            AcpError::Rpc(r#"{"code":-32601,"message":"Method not found"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(AcpError::Rpc(r#"{"code":-32601}"#.into()).is_method_not_found());
+        // 无 code 信封：退看顶层 message。
+        assert!(AcpError::Rpc(r#"{"message":"Method not found"}"#.into()).is_method_not_found());
+        // 非 JSON 纯文本：原字符串兜底。
+        assert!(AcpError::Rpc("RPC error: Method not found".into()).is_method_not_found());
+        assert!(AcpError::Rpc("RPC error: -32601".into()).is_method_not_found());
+        // data 内同名 "-32601" 字样不得误判（整值扫描已移除）。
+        assert!(!AcpError::Rpc(
+            r#"{"code":-32000,"message":"boom","data":{"hint":"see -32601 elsewhere"}}"#.into()
+        )
+        .is_method_not_found());
+        // 其它 code / 无记号文本 → false。
+        assert!(
+            !AcpError::Rpc(r#"{"code":-32602,"message":"Invalid params"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(!AcpError::Rpc("RPC error: connection closed".into()).is_method_not_found());
+        assert!(!AcpError::ConnectionClosed.is_method_not_found());
     }
 }

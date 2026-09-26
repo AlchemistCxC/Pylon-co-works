@@ -3,7 +3,7 @@ import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import type { AdapterInstance } from '../../infrastructure/tauri/gatewayClient'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 
 // FE-AUD-008：typed client 收口 gateway 域 command literal
 const gatewayClient = createGatewayClient({ invoke: tauriInvokeTransport })

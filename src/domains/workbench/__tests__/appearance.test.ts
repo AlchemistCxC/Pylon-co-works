@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cloneCcLayout } from '../../../ccLayoutState.ts'
+import { cloneCcLayout } from '../../cc/ccLayoutState.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'

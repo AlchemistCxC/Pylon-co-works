@@ -6,7 +6,7 @@
  * `connected` 早 ~2.4s，恢复必然失败并留下错误条；叠加 F4 即 #56 的完整现场。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const store = vi.hoisted(() => {
   const listeners = new Set<() => void>()
@@ -56,10 +56,10 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
-vi.mock('../../../runtimeStore.ts', () => ({
+vi.mock('../../../domains/runtime/runtimeStore.ts', () => ({
   useRuntimeStore: { getState: store.getState, subscribe: store.subscribe },
 }))
-vi.mock('../../../runtimeError.ts', () => ({
+vi.mock('../../../app/runtimeError.ts', () => ({
   reportRuntimeError: mocks.reportError,
   reportRuntimeDiagnostic: mocks.reportDiagnostic,
   resolveRuntimeErrors: mocks.resolveErrors,
@@ -87,7 +87,7 @@ vi.mock('../../../components/chat/chatReplayTrace.ts', () => ({
   replayErrorCode: () => 'replay-error',
   safeContentEvidence: () => ({}),
 }))
-vi.mock('../../../identityStore.ts', () => ({
+vi.mock('../../../domains/identity/identityStore.ts', () => ({
   useIdentityStore: {
     getState: () => ({
       profiles: [{ id: 'profile', name: 'profile', persona: 'persona', model: 'profile-model' }],

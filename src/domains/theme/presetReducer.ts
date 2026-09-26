@@ -12,8 +12,8 @@
 /** 参与预设路由的 zone：layout 无字段（实证 zone:'layout'=0）排除 */
 export const PRESET_ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as const
 export type PresetZone = (typeof PRESET_ZONES)[number]
-import type { CcLayoutV3 } from '../../ccLayoutState.ts'
-import { normalizeCcLayout } from '../../ccLayoutState.ts'
+import type { CcLayoutV3 } from '../cc/ccLayoutState.ts'
+import { normalizeCcLayout } from '../cc/ccLayoutState.ts'
 import {
   clampCcHeight,
   clampInputTypography,
@@ -22,7 +22,7 @@ import {
   type CcHintMode,
   type CcInputMode,
   type CcOverflowMode,
-} from '../../ccHeightState.ts'
+} from '../cc/ccHeightState.ts'
 import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
 import {
   pickCustomPresetTheme,

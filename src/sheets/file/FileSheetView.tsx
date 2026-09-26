@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ComponentType } from 'react'
-import { useIdentityStore } from '../../identityStore'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { createFileSheetState, fileSheetReducer, fileTabKey, fileTabViewType, parseFileTabs, serializeFileTabs, type FileTabRecord } from './fileSheetState.ts'
 import FileSheetSidebar from './FileSheetSidebar'
 import FileTabBar from './FileTabBar'

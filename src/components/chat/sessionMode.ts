@@ -1,9 +1,9 @@
 import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { applySessionModeChange, normalizeSessionMode } from './sessionModeState'
-import type { AgentContext } from '../../agentContext'
-import { toAgentContextKey } from '../../agentContext'
+import type { AgentContext } from '../../domains/agent/agentContext'
+import { toAgentContextKey } from '../../domains/agent/agentContext'
 
 export function setSessionMode(context: AgentContext, nextMode: string): Promise<void> {
   const normalizedMode = normalizeSessionMode(nextMode)

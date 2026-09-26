@@ -1,5 +1,5 @@
-import { useRuntimeStore } from '../runtimeStore'
-import { useIdentityStore } from '../identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useModalOverlayVeil } from '../app/modalOverlayStore'
 import { getPermissionController } from '../infrastructure/acp/permissionController'
 import { activeForAgent } from '../domains/permission/permissionState.ts'

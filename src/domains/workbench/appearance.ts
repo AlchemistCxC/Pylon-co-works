@@ -1,8 +1,8 @@
-import { cloneCcLayout, type CcLayoutV3 } from '../../ccLayoutState.ts'
+import { cloneCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import { getSpinnerAssetPreset, getSpinnerVerbPreset, type SpinnerAssetId } from '../../components/chat/spinnerAssets.ts'
 import { resolveSpinnerFrames, type SpinnerMarkerMode } from '../../components/chat/spinnerFrames.ts'
 import type { ThemeSettings } from '../../store.ts'
-import type { CcWidgetPlacement } from '../../ccLayoutState.ts'
+import type { CcWidgetPlacement } from '../cc/ccLayoutState.ts'
 import type { CcEditablePropertyKey, CcPropertyCommand } from '../cc/widgetDefinitions.ts'
 
 export interface SpinnerAppearanceSnapshot {

@@ -67,18 +67,12 @@ pub enum TurnTerminalCause {
     IdleTimeout,
     /// cancel 已发出但 settle 窗口内未收到终态。
     CancelSettleTimeout,
-    /// stdin 写超时（agent 存活但不读 stdin）。
-    ///
-    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
-    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
-    /// 收敛裁除时摘除。
-    #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
-    WriterTimeout,
     /// stdin 写失败（EPIPE 等）。
     ///
-    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
-    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
-    /// 收敛裁除时摘除。
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败现经
+    /// `CrashReason::WriterFailed` + ConnectionLost 收敛，未映射到账本终因；
+    /// 接线或词表收敛裁除时摘除。`WriterTimeout` 已随 #348 A1 词表收敛裁除
+    /// （无写超时语义即无产生点）。
     #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
     WriterFailed,
     /// 连接关闭 / EOF / 引擎任务消失。
@@ -106,7 +100,6 @@ impl TurnTerminalCause {
             Self::FirstTokenTimeout => "first_token_timeout",
             Self::IdleTimeout => "idle_timeout",
             Self::CancelSettleTimeout => "cancel_settle_timeout",
-            Self::WriterTimeout => "writer_timeout",
             Self::WriterFailed => "writer_failed",
             Self::ConnectionLost => "connection_lost",
             Self::ProtocolError => "protocol_error",

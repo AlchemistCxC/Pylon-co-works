@@ -69,8 +69,10 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/plugins/core/browser/builtinBrowserCommands.ts',
   'src/plugins/core/commandSet/builtinCommandExecutors.ts',
   'src/plugins/core/file/builtinFileWorkbench.ts',
-  'src/retentionPolicyRepository.ts',
-  'src/sheets/agent-workbench/agentWorkbenchCommands.ts',
+  // #351 根目录归类：三件随代码迁移自 src 根（原条目路径见 git 历史），直发面不变。
+  'src/infrastructure/persistence/retentionPolicyRepository.ts',
+  'src/infrastructure/persistence/userDataRepository.ts',
+  'src/infrastructure/persistence/workspaceEntityStore.ts',  'src/sheets/agent-workbench/agentWorkbenchCommands.ts',
   // #177 选择器空态探测：一次性 session client 读 Agent 广告的 configOptions 后即弃，
   // 与 agentWorkbenchSessionCreation.ts 同形态（UI 侧装配 session client 直发）。
   'src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx',
@@ -82,8 +84,6 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/sheets/history/HistorySheetView.solid.tsx',
   'src/sheets/OverviewSheetView.tsx',
   'src/sheets/RuntimeSheetView.tsx',
-  'src/userDataRepository.ts',
-  'src/workspaceEntityStore.ts',
   'src/workspace-sheets/activateAgentSheet.ts',
   // #317 内联 invoke 适配器收口：共享 transport（26 文件的内联适配器替换为同一
   // 引用，收窄而非扩大直发面）——与 hookBridgeDispatcher 同形态的基础设施级

@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
 import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, PET_POSITION_KEY, PET_STORAGE_KEY } from './petPersistence'
-import { useRuntimeStore } from '../runtimeStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { resolvePetVisualPose, type PetVisualPose } from './petVisualPose'
 
 import {

@@ -7,11 +7,11 @@ import {
   type AgentCreateConfig,
   type AgentsConfigDocument,
 } from '../../infrastructure/acp/agentClient'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
-import { explainErrorCode } from '../../errorCodeExplanations.ts'
-import { useIdentityStore, type AgentEntry } from '../../identityStore'
-import { useRuntimeStore } from '../../runtimeStore'
+import { explainErrorCode } from '../../app/errorCodeExplanations.ts'
+import { useIdentityStore, type AgentEntry } from '../../domains/identity/identityStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { selectAgentStatus, statusLabel } from './agentTypes'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { selectAcpRuntimeDetectorIds, type AgentDetectionDiagnostic, type AgentRuntimeCandidate, type AgentRuntimeDetectorMetadata, type AgentStartability } from '../../domains/agent/agentDetector.ts'
@@ -36,7 +36,7 @@ import {
 } from '../../domains/agent/customProfileRules.ts'
 import { provisionAgentTransaction } from '../../application/transactions/provisionAgentTransaction.ts'
 import { activateAgentSheet } from '../../workspace-sheets/activateAgentSheet.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 
 interface Draft {
   name: string

@@ -6,7 +6,7 @@ import {
   type GitErrorDetail,
   type GitStatusEntry,
 } from '../../infrastructure/tauri/gitContracts.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import type { GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import { workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'

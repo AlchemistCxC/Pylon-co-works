@@ -9,17 +9,17 @@
  * ④ sheets（agent 先开聚焦）⑤ setActiveSession（SheetLayout 子 effect 先跑，
  * 写回 effect 随其持久化）⑥ 每次补 runtime 状态灯/模式/权限。
  */
-import { useIdentityStore } from '../identityStore.ts'
-import { useWorkspaceStore } from '../workspaceStore.ts'
-import { useRuntimeStore } from '../runtimeStore.ts'
-import { persistSessions } from '../sessionPersistence.ts'
+import { useIdentityStore } from '../domains/identity/identityStore.ts'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore.ts'
+import { persistSessions } from '../domains/identity/sessionPersistence.ts'
 import { messageStorageKey, persistMessageSnapshot } from '../components/chat/messagePersistence.ts'
 import { buildDemoAgents, buildDemoMessages, buildDemoPermissionRequest, buildDemoSessions } from './demoData.ts'
 import { buildVisualQaMessages, buildVisualQaSessions, buildVisualQaWorkspaces } from './visualQaData.ts'
 import { createSheetState } from '../workspace-sheets/sheetState.ts'
 import type { AgentStatus } from '../components/settings/agentTypes.ts'
-import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
-import { serializeWorkspaces, WORKSPACE_STORAGE_KEY } from '../workspaceEntities.ts'
+import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
+import { serializeWorkspaces, WORKSPACE_STORAGE_KEY } from '../domains/workspace/workspaceEntities.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 
 export interface DemoSeedOptions {

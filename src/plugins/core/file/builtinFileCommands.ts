@@ -1,5 +1,5 @@
 import type { CommandDefinition } from '../../../plugin-runtime/commands/commandRegistry.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
+import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
 import { workspaceTargetFromSession } from '../../../domains/workspace/workspaceTarget.ts'
 import { builtinFileProvider, builtinGitProvider } from './builtinFileWorkbench.ts'
 import { record } from '../../../utils/wireGuards.ts'

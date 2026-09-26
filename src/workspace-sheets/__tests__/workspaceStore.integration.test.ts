@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { resetStores } from '../../test/resetStores'
 import { MemoryStorage } from '../../test/memoryStorage'
 import { SHEET_STORAGE_KEY, type PersistedSheetState, type SheetLayoutState } from '../sheetPersistence'

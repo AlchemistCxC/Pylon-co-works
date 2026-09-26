@@ -6,7 +6,7 @@ import {
   type MarkdownModelNode,
   type MarkdownModelRoot,
 } from '../../infrastructure/compute/markdownCompute.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 // hast 语义属性名（camelCase）→ Solid 属性名：aria/data 家族需连字符小写化；
 // className 数组拍平为 class；checked/value 原样（Solid 无受控告警概念，非受控投影

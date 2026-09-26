@@ -8,8 +8,8 @@
  * browser 模式回退本地快照扫描（snapshotSearch）。
  */
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
-import { useIdentityStore, type Session } from '../../identityStore.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { useIdentityStore, type Session } from '../identity/identityStore.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 import { getMessageSearchText } from '../../components/chat/messageSearchIndex.ts'
 import { toCanonicalOwnerKey, type CanonicalEventOwner } from '../events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../events/messageProjection.ts'

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { useWorkspaceStore } from '../workspaceStore'
-import { useIdentityStore } from '../identityStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { useStore } from '../store'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
 import { resolveSessionSource } from '../components/chat/sessionCommandState'
@@ -15,8 +15,8 @@ import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
-import { useRightRailStore } from '../rightRailStore.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError.ts'
+import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。

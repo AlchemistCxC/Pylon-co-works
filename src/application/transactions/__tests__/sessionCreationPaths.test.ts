@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../../test/fakeInvoke'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSession } from '../../../sheets/agent-workbench/agentWorkbenchSessionCreation.ts'
 import { AgentWorkbenchLifecycle } from '../../../sheets/agent-workbench/agentWorkbenchLifecycle.ts'
 import { createCliSessionControlPort } from '../../../cli/pylonCliDomainPorts.ts'
@@ -26,14 +26,14 @@ class TolerantFakeInvoke extends FakeInvoke {
     })
   }
 }
-vi.mock('../../../identityStore.ts', () => ({ useIdentityStore: { getState: mocks.identity } }))
-vi.mock('../../../runtimeStore.ts', () => ({ useRuntimeStore: { getState: mocks.runtime } }))
-vi.mock('../../../workspaceEntityStore.ts', () => ({ useWorkspaceEntityStore: { getState: () => ({ workspaces: [] }) } }))
+vi.mock('../../../domains/identity/identityStore.ts', () => ({ useIdentityStore: { getState: mocks.identity } }))
+vi.mock('../../../domains/runtime/runtimeStore.ts', () => ({ useRuntimeStore: { getState: mocks.runtime } }))
+vi.mock('../../../infrastructure/persistence/workspaceEntityStore.ts', () => ({ useWorkspaceEntityStore: { getState: () => ({ workspaces: [] }) } }))
 vi.mock('../../../plugins/core/sessionCreation/sessionPreflight.ts', () => ({ runSessionPreflight: mocks.preflight }))
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({ getHookRuntime: () => ({ invoke: mocks.hook }) }))
 vi.mock('../../../application/transactions/sessionHookTransactions.ts', () => ({ runSessionBoundaryHook: mocks.boundary }))
 vi.mock('../../../domains/sessionState/sessionStateSync.ts', () => ({ applySessionStateResponse: mocks.apply }))
-vi.mock('../../../runtimeError.ts', () => ({ reportRuntimeError: mocks.report, resolveRuntimeErrors: vi.fn() }))
+vi.mock('../../../app/runtimeError.ts', () => ({ reportRuntimeError: mocks.report, resolveRuntimeErrors: vi.fn() }))
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
 
 function deferred<T>() {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Download, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Upload } from 'lucide-react'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { useGitStatus } from './useGitStatus'
 import { advanceSourceContext, type SourceRequestContext } from './sourceRequestGuard'
 import { classifyGitError, normalizeGitHistory, normalizeGitOperationResult, type GitCommit, type GitErrorDetail, type GitOperationResult, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'

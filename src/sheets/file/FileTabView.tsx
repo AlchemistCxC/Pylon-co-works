@@ -1,5 +1,5 @@
 import SolidMount from '../SolidMount'
-import type { AgentContext } from '../../agentContext'
+import type { AgentContext } from '../../domains/agent/agentContext'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { FileCodeEditorApi, KernelSummary } from './FileCodeEditor.tsx'

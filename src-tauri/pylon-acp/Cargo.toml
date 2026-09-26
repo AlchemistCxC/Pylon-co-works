@@ -11,12 +11,13 @@ futures-util = "0.3"
 thiserror = "2"
 base64 = "0.23"
 tokio-util = { version = "0.7", features = ["compat"] }
-agent-client-protocol-schema = "1.7"
+# #348 A2：声明与 Cargo.lock 实际解析一致（schema 1.9.1 / acp 2.2.0；caret 约束策略不变）
+agent-client-protocol-schema = "1.9.1"
 regex = "1"
 ringbuffer = "0.16"
 infer = "0.22"
 tracing = "0.1"
-agent-client-protocol = "2.1.0"
+agent-client-protocol = "2.2.0"
 pylon-core = { path = "../pylon-core" }
 pylon-foundations = { path = "../pylon-foundations" }
 

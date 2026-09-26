@@ -15,7 +15,7 @@ import {
   type BindingState,
 } from '../bindingState'
 import type { AgentStatus } from '../../../components/settings/agentTypes'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../identity/identityStore'
 
 const SESSION: Session = {
   id: 's1', agentId: 'peri', name: 'Demo', source: 'local:demo', profileId: 'profile-a',

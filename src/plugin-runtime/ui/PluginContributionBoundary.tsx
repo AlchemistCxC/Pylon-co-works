@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export class PluginContributionBoundary extends Component<{
   contributionId: string

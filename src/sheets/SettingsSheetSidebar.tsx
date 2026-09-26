@@ -10,10 +10,10 @@ import {
   sectionZone,
   type SettingsDomainId,
   type SettingsSectionId,
-} from '../settingsDomains.ts'
+} from '../components/settings/settingsDomains.ts'
 import { GROUP_ORDER } from '../themeFieldDefs'
 import { useStore } from '../store'
-import { useWorkspaceStore } from '../workspaceStore.ts'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
 import { readPinned, writePinned, PINNED_LIMIT, safeStorage } from '../components/settings/settingsChromeState.ts'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useSettingsContributionCatalog } from '../components/settings/useSettingsContributionCatalog.ts'

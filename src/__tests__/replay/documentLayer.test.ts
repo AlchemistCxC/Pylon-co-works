@@ -13,7 +13,7 @@
  * 那条路；live 路径需要另建 harness，见 spec 的 F2/F3。
  */
 import { describe, expect, it } from 'vitest'
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'

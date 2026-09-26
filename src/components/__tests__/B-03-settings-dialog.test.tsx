@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
   default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,

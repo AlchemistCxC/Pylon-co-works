@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { act, render, waitFor } from '@testing-library/react'
 import FileTabView, { type FileCodeEditorApi, type KernelSummary } from '../FileTabView'
-import { useWorkspaceStore, touchedFileVersionKey } from '../../../workspaceStore'
+import { useWorkspaceStore, touchedFileVersionKey } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import { fileEditorEditable, fileEditorView, replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
 

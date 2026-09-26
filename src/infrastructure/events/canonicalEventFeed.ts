@@ -17,7 +17,7 @@
  */
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../tauri/env.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 import { CanonicalEventCursor } from './canonicalEventCursor.ts'
 import {
   createCanonicalEventSink,

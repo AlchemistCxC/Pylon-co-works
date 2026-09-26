@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSPro
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
-import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from '../../rightRailStore.ts'
+import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from './rightRailStore.ts'
 import ContextPanelHost from './ContextPanelHost.tsx'
 import { useStore } from '../../store.ts'
-import { createBackgroundPresentation } from '../../backgroundImage.ts'
+import { createBackgroundPresentation } from '../../infrastructure/skin/backgroundImage.ts'
 
 const registry = getContextPanelRegistry()
 const subscribe = (listener: () => void) => registry.subscribe(listener)

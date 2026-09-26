@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { resetStores } from '../../test/resetStores.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { closeWorkspace } from '../workspaceController.ts'
 import { registerWorkspaceLiveCloseGuard } from '../workspaceLiveCloseGuards.ts'
 

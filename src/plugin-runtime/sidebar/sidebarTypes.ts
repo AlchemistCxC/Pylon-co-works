@@ -1,6 +1,6 @@
 import type { RegistryEntry } from '../registry/types.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
-import type { Workspace } from '../../workspaceEntities.ts'
+import type { Workspace } from '../../domains/workspace/workspaceEntities.ts'
 
 /**
  * 左栏是**一个有序的模块栈**。

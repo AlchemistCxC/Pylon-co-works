@@ -1,5 +1,5 @@
 import type { ThemeSettings } from './store'
-import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from './domains/cc/ccHeightState.ts'
 import { CC_WIDGET_GROUPS, resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
 import type { FontRole } from './plugin-runtime/fonts/fontContributionTypes.ts'
 import type { VisualSemanticRole } from './domains/theme/visualSemantics.ts'

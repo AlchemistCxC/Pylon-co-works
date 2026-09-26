@@ -5,7 +5,7 @@ import FileViewHost from '../FileViewHost'
 import type { FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
 import { fileEditorEditable, fileEditorView, replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
-import { useWorkspaceStore, touchedFileVersionKey } from '../../../workspaceStore'
+import { useWorkspaceStore, touchedFileVersionKey } from '../../../domains/workspace/workspaceStore'
 
 // 0-A3 写冲突锁：冷却窗口（3s）内 touchVersion ≥2 次递增 = agent 正在写盘 →
 // 内核只读 + 状态条提示 + 保存禁用；静默满冷却 → 解锁并 probeDisk 确认稳定；

@@ -41,11 +41,21 @@ pub fn validate_request(method: &str, params: &Value) -> Result<(), String> {
 }
 
 /// `elicitation/create` 参数校验：message 必须是 string（可缺省）、
-/// requestedSchema 缺省或 object。其它形状 fail-closed（返回 Err → 调用方
-/// 按协议错误应答，不伪造 option）。
+/// requestedSchema 缺省或 object、`mode` 显式给出时只能是 `"form"`。
+/// #349 B2：Pylon 仅广告 form 模式（initialize_plan 只注入
+/// `elicitation:{form:{}}`），官方语义「未广告的 mode 视为不支持，agent
+/// 不得发起」——url 等其它 mode 在此 fail-closed（调用方按 -32602 拒绝），
+/// 不再静默放行；缺省 `mode` 视为旧式隐式 form，保持兼容。
 pub fn parse_elicitation(params: &Value) -> Result<(), String> {
     if !params.is_object() {
         return Err("elicitation/create params must be an object".into());
+    }
+    if let Some(mode) = params.get("mode").and_then(Value::as_str) {
+        if mode != "form" {
+            return Err(format!(
+                "elicitation/create mode `{mode}` is not advertised (only form is supported)"
+            ));
+        }
     }
     if let Some(message) = params.get("message") {
         if !message.is_string() {
@@ -219,6 +229,24 @@ mod tests {
             serde_json::json!({"action": "cancel"})
         );
         assert!(build_elicitation_response("invent", None).is_err());
+    }
+
+    /// #349 B2：未广告的 mode fail-closed（url 显式拒绝；缺省 mode 视为旧式
+    /// 隐式 form 保持兼容）。
+    #[test]
+    fn elicitation_mode_gate_rejects_unadvertised_modes() {
+        assert!(parse_elicitation(&serde_json::json!({
+            "mode": "form", "message": "m", "requestedSchema": {"type": "object"}
+        }))
+        .is_ok());
+        // 缺省 mode = 旧式隐式 form，兼容放行。
+        assert!(parse_elicitation(&serde_json::json!({"message": "m"})).is_ok());
+        // url / 自定义 mode 未广告，显式拒绝。
+        assert!(parse_elicitation(&serde_json::json!({
+            "mode": "url", "elicitationId": "e", "url": "https://x"
+        }))
+        .is_err());
+        assert!(parse_elicitation(&serde_json::json!({"mode": "_vendor.custom"})).is_err());
     }
 
     #[test]

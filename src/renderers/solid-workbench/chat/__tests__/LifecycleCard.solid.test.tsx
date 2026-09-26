@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSignal } from 'solid-js'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from '../LifecycleCard.solid.tsx'
 import type { LifecycleState } from '../../../../domains/workbench/lifecycle/lifecycleModel.ts'
-import { explainErrorCode } from '../../../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../../../app/errorCodeExplanations.ts'
 
 afterEach(() => cleanup())
 

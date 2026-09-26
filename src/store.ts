@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './ccLayoutState.ts'
-import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './domains/cc/ccLayoutState.ts'
+import type { CcLayoutV3, CcWidgetPlacement } from './domains/cc/ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { ZONE_FIELDS } from './themeFieldDefs.ts'
@@ -14,7 +14,7 @@ import {
   removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from './domains/cc/ccHeightState.ts'
 import { resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
@@ -35,15 +35,15 @@ import {
   type AssembleGlobalPresetOptions,
   type GlobalPresetZoneSlice,
 } from './domains/theme/presetReducer.ts'
-import type { Profile } from './identityStore.ts'
+import type { Profile } from './domains/identity/identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, PresetProviderTransactionError, recordPayload, type PresentationPresetPayload, type PresetApplyResult, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
-export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
-export type { SessionConfig } from './runtimeStore'
+export type { Profile, Session, UserMapping, AgentEntry } from './domains/identity/identityStore'
+export type { SessionConfig } from './domains/runtime/runtimeStore'
 
 export interface ThemeSettings {
   /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
@@ -585,6 +585,6 @@ function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts')
 }
 
 // ── 组合出口：按域导入点 ──
-export { useIdentityStore } from './identityStore'
-export { useRuntimeStore } from './runtimeStore'
-export { useWorkspaceStore } from './workspaceStore'
+export { useIdentityStore } from './domains/identity/identityStore'
+export { useRuntimeStore } from './domains/runtime/runtimeStore'
+export { useWorkspaceStore } from './domains/workspace/workspaceStore'

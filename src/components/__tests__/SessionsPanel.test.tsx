@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SessionsPanel from '../sidebar/SessionsPanel'
 import { resetStores } from '../../test/resetStores'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
 const { invoke, open } = vi.hoisted(() => ({

@@ -1,7 +1,7 @@
 // W1-01（F1-A 方案 A）：9 kind 原地替换——删 diff/changes/git-history（FileSheet 分区化，
 // 从未有内容），增 overview/search/history/browser/gateway；旧 kind 由 schema v2 normalize 清洗。
 // #154 阶段 4：增 settings（设置由固定覆盖层迁入 sheet 体系），10 kind。
-import type { Session } from '../identityStore'
+import type { Session } from '../domains/identity/identityStore'
 import { resolveWorkspace } from './workspaceRegistry.ts'
 
 /** 内置 workspace 种子；动态 kind 的有效性以 Workspace Registry 为准。 */

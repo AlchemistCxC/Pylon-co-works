@@ -8,7 +8,7 @@
 import {
   type SessionStateSyncProvider,
 } from '../../../contracts/sessionStateSync.ts'
-import { useRuntimeStore } from '../../../runtimeStore.ts'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import {
   extractConfigOptionId,
   extractConfigOptionValue,
@@ -21,7 +21,7 @@ import {
   type SessionResponseObject,
   type SessionUpdate,
 } from '../../../infrastructure/acp/chatContracts.ts'
-import type { AgentContext } from '../../../agentContext.ts'
+import type { AgentContext } from '../../../domains/agent/agentContext.ts'
 
 export const CORE_SESSION_STATE_SYNC_PLUGIN_ID = 'core.sessionState.runtimeStore'
 

@@ -25,8 +25,8 @@ import {
   CC_LAYOUT_SCHEMA_VERSION,
   DEFAULT_CC_LAYOUT,
   type CcLayoutWidgetId,
-} from '../../../ccLayoutState.ts'
-import { resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
+} from '../ccLayoutState.ts'
+import { resolveVisibleStatusWidgetCount } from '../ccHeightState.ts'
 import { ZONE_FIELDS, CC_MEMBER_FIELDS, type ThemeFieldKey } from '../../../themeFieldDefs.ts'
 
 /**

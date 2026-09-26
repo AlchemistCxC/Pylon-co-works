@@ -16,9 +16,9 @@
  * 只表达「工具宣称触碰」，不区分是否真的写盘——消费端 probeDisk 才是磁盘真值判定）。
  */
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { EDIT_TOOL_NAMES, extractTouchedPath, relativizePath } from '../../infrastructure/acp/touchedFiles.ts'
 import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
 

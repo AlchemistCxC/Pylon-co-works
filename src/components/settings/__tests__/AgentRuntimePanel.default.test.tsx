@@ -3,10 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import AgentRuntimePanel from '../AgentRuntimePanel'
-import { useIdentityStore } from '../../../identityStore'
-import { useWorkspaceStore } from '../../../workspaceStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
-import { explainErrorCode } from '../../../errorCodeExplanations.ts'
+import { explainErrorCode } from '../../../app/errorCodeExplanations.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 

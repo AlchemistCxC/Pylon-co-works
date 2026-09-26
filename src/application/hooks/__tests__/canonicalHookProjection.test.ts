@@ -9,7 +9,7 @@ const invokeMock = vi.hoisted(() => vi.fn(async () => ({ action: 'continue', eve
 const subscribeSpy = vi.hoisted(() => vi.fn(() => () => undefined))
 const sessionsRef = vi.hoisted(() => ({ current: [] as Array<{ id: string; agentId: string; source: string; hooks: string[] }> }))
 
-vi.mock('../../../identityStore.ts', () => ({
+vi.mock('../../../domains/identity/identityStore.ts', () => ({
   useIdentityStore: { getState: () => ({ sessions: sessionsRef.current }) },
 }))
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({

@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MessageRepositoryError } from '../components/chat/messagePersistence'
 import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
-import type { Session } from '../identityStore'
+import type { Session } from '../domains/identity/identityStore'
 
 const SESSION: Session = {
   id: 's1', agentId: 'peri', name: '会话一', source: 'local:x', profileId: 'p', createdAt: 0,

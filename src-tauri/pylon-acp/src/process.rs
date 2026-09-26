@@ -9,6 +9,24 @@ use std::process::Child;
 
 use super::AcpError;
 
+/// #348 A3：Windows spawn 统一收口——隐藏子进程控制台窗口（CREATE_NO_WINDOW）。
+///
+/// pylon-acp 内所有生产 spawn（agent 本体、taskkill 兜底、agent 侧 terminal
+/// shell）都必须经本函数，避免只在一处补、其余路径在用户桌面闪窗。
+/// 非 Windows 为 no-op。
+pub(crate) fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // 0x0800_0000 = CREATE_NO_WINDOW
+        command.creation_flags(0x0800_0000);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 /// Windows：内核级进程树清理句柄。关闭句柄即终止 job 内全部进程（含子进程
 /// 后续派生的整棵进程树，成员资格自动继承）。
 #[cfg(windows)]
@@ -205,8 +223,10 @@ impl ManagedChild {
     /// false，由调用方回退普通 kill 路径。
     #[cfg(windows)]
     fn kill_process_tree(pid: u32) -> bool {
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
+        let mut command = std::process::Command::new("taskkill");
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        hide_console_window(&mut command);
+        command
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)

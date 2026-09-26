@@ -6,7 +6,7 @@ import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot 
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
 import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { errorCode, errorMessage } from '../../infrastructure/tauri/errorPayload.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'

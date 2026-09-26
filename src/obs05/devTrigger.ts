@@ -17,9 +17,9 @@
  */
 
 import { IS_TAURI } from '../infrastructure/tauri/env'
-import { useIdentityStore } from '../identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
-import { useRuntimeStore } from '../runtimeStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import {
   buildColdStartArtifact,
   createIpcTrace,

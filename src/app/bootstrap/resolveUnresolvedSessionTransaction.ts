@@ -1,5 +1,5 @@
-import type { LegacySession } from '../../sessionPersistence'
-import type { AgentEntry } from '../../identityStore'
+import type { LegacySession } from '../../domains/identity/sessionPersistence'
+import type { AgentEntry } from '../../domains/identity/identityStore'
 import type { TransactionResult } from '../../application/transactions/transactionResult'
 
 export interface UnresolvedOwnerResolutionDeps {
