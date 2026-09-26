@@ -237,9 +237,13 @@ AgentDef schema、仅有 `PYLON_ACP_HOST_TOOLS` 环境变量入口」的缺口�
 - codeg `src-tauri/src/process.rs` 的 `resolve_windows_program`：迁入同模块；
   `which` crate 换成 std 的 `PATH` 切分 + `is_file` 探测（不为一个查找新增
   依赖），扩展优先序（`.exe→.cmd→.bat`）与「只对裸名生效」闸门保持一致；裸名
-  判定提为跨平台纯函数 `is_bare_program_name` 以便单测。
+  判定提为跨平台纯函数 `is_bare_program_name` 以便单测。语义偏差两处（登记
+  备查）：① 返回**构造期冻结的绝对路径**（codeg 返回「裸名+扩展名」交由
+  spawn 期再解析）；② 有意仅搜 PATH、不搜子进程 cwd（`cmd.exe` 搜索序从当前
+  目录开始，绕行后当前目录即工作区）。解析结果同时作为绕行判定的输入
+  （先解析后决策，「裸名 ∧ UNC cwd」才被窄条件覆盖）。
 - 未迁入：codeg 的 `on_spawn`/`on_exit` 回调与 ChildGuard 语义（Pylon 进程树
   清理由 `ManagedChild` 的 Job Object / taskkill / Drop 承担）。
 
-证据：`pylon-acp/src/windows_launch.rs` 内联单测（判定六项移植 + 裸名闸门 +
+证据：`pylon-acp/src/windows_launch.rs` 内联单测（判定七项移植 + 裸名闸门 +
 Windows 实机 cmd.exe pushd 端到端；命令与计数见 `.agents/records/`）。

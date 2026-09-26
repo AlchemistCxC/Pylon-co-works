@@ -4,7 +4,7 @@
 
 - issue：[#353](https://github.com/AlchemistCxC/Pylon-co-works/issues/353)
 - 分支：`kumo/353-unc-cwd`（独立 worktree `G:/Project/prism-team-workdir/pylon-353`，避让共享树 #363 在途脏文件）
-- 提交范围：`0838dc6e..c9ebcb88`（PR #378）
+- 提交范围：`0838dc6e..HEAD`（PR #378；代码主体 c9ebcb88，审查返工见「审查返工」节）
 - 日期：2026-09-27
 
 ## 目标与范围
@@ -17,7 +17,7 @@
 
 | 文件 | 大致范围 | 性质 |
 | --- | --- | --- |
-| `src-tauri/pylon-acp/src/windows_launch.rs` | 全文件：UNC/批处理/绝对性判定、`windows_pushd_cwd` 决策、`append_windows_batch_arg`/`make_unc_batch_command_line` 防注入 quoting、`system_cmd_exe`、`resolve_windows_program` + `is_bare_program_name`、`agent_command` 构造口 + 10 项内联单测 | 新增 |
+| `src-tauri/pylon-acp/src/windows_launch.rs` | 全文件：UNC/批处理/绝对性判定、`windows_pushd_cwd` 决策、`append_windows_batch_arg`/`make_unc_batch_command_line` 防注入 quoting、`system_cmd_exe`、`resolve_windows_program` + `is_bare_program_name`、`agent_command` 构造口（先解析后决策）+ 13 项内联单测 | 新增 |
 | `src-tauri/pylon-acp/src/engine.rs` | `spawn_agent_child` 的 Command 构造段：`Command::new(&plan.executable)` + `apply_launch_plan` 两处改经 `windows_launch::agent_command(&plan)` | 修改 |
 | `src-tauri/pylon-acp/src/lib.rs` | `mod windows_launch;` 一行 | 修改 |
 | `src-tauri/vendor/acp/ORIGIN.md` | §6 追加 #353 出处登记（Codeg 逐函数迁入 + 适配差异） | 修改 |
@@ -30,6 +30,7 @@
 - **防注入 quoting**：`append_windows_batch_arg` 逐字符规则与 Rust std 启动批处理文件同族（cmd 元字符引号包裹、`%`→`%%cd:~,` 阻断环境展开、反斜杠在引号/尾随时的倍增、含 `\r`/`\n`/`\0` 直接拒绝）。
 - **绕行分支的 env/cwd**：argv 与 cwd 由批行承载，`current_dir(UNC)` 绝不再设（那正是 cmd.exe 拒绝并静默回落 `C:\Windows` 的形状）；plan env 照常应用。`cmd.exe` 取 `%SystemRoot%\System32`（防工作区/用户 PATH 劫持），batch 行构造失败（参数含控制字符）时 warn 后回落直启——可观测的旧行为，不把连接打成失败。
 - **裸名解析**：仅「单组件且无扩展名」的裸名参与，按 `.exe`→`.cmd`→`.bat` 扩展优先序（任何目录的 `.exe` 赢过任何目录的 `.cmd`，与 CreateProcess 只补 `.exe` 的既有优先级一致）搜 PATH、不搜子进程 cwd（cmd 搜索序从当前目录开始，绕行后当前目录就是工作区，搜 cwd 等于允许仓库内同名 shim 抢启动）；`which` 依赖用 std `PATH` 切分 + `is_file` 替代。
+- **先解析后决策**（审查返工引入）：绕行判定消费 PATH 补全**之后**的程序名。否则「裸名 ∧ UNC cwd」解析成绝对 `.cmd` 后落进直启分支、`current_dir(UNC)` 照设——原 bug 在该形状下原样存活。
 - **接缝最小化**：`spawn_agent_child` 只换构造两行，`hide_console_window`、hermes 运行时适配、`ManagedChild`（Job Object 树清理）全部原位不动——#363 的 spawn 收口（`configure_agent_child`/`spawn_retrying_exec_busy`）合入时与本接缝正交可叠加。
 
 ## 验收标准与结果
@@ -49,7 +50,12 @@
 
 ## 测试处置
 
-新增：`windows_launch.rs` 内联 10 项（6 项自 Codeg 移植，4 项新增：裸名闸门、非绕行等价、绕行目标程序、实机 pushd 端到端）。修改/删除既有测试：无。
+新增：`windows_launch.rs` 内联 13 项（7 项自 Codeg 移植；6 项新增：裸名闸门、决策消费解析后程序名、PATH 扩展优先序、非绕行等价、绕行目标程序、实机 pushd 端到端）。修改/删除既有测试：无。
+
+## 审查返工（2026-09-27，双轴子 agent 审查）
+
+- **必修（Spec 轴）**：裸名解析与绕行决策未复合——绕行判定原用 `plan.executable`（解析前）。「裸名 ∧ UNC cwd」形状下解析产物为绝对 `.cmd` 但走直启分支，cwd 静默回落 `C:\Windows` 的原 bug 存活。返工：`agent_command` 先 `direct_program` 解析、后以解析产物做绕行判定；`unc_batch_detour` 改收 `&OsStr`，非 Unicode 产物 warn 后回落直启。新增 2 测试钉死（决策消费解析后程序名；PATH 扩展优先序）。
+- **修订（Standards 轴）**：测试计数失实（原记 10 项/6 移植，实为 11 项/7 移植，本节订正为最终 13 项/7 移植）；维护地图「spawn 期 Windows 特调唯一口」措辞收窄为「plan→Command 构造唯一口」（`hide_console_window` 仍在 `process.rs` 且在构造之外应用）；ORIGIN.md 对 `resolve_windows_program` 补登记两处语义偏差（返回构造期冻结的绝对路径 vs Codeg 交由 spawn 再解析；有意仅搜 PATH）。
 
 ## 证据
 

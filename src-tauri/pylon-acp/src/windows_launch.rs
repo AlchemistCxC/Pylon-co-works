@@ -16,21 +16,27 @@
 //!   补全（Codeg `normalized_program` 语义）。纯增量：已是路径或解析不到时与
 //!   现状一致。
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use pylon_core::agent_launch_plan::LaunchPlan;
 
 /// agent 子进程 `Command` 的唯一构造口（`spawn_agent_child` 专用）。
 ///
+/// **先解析后决策**：绕行判定消费的是 PATH 补全**之后**的程序名——否则
+/// 「裸名 ∧ UNC cwd」会解析成绝对 `.cmd` 后落进直启分支，`current_dir(UNC)`
+/// 照设，cwd 静默回落 `C:\Windows` 的原 bug 原样存活（审查返工修的正是这个
+/// 复合缺口）。
+///
 /// 绕行条件不满足时走直启：`apply_launch_plan` 仍一次应用 argv/cwd/env，
 /// 与既有行为零差异。绕行路径下 argv 与 cwd 都由批行承载（`pushd` 即 cwd），
 /// **不得**再 `current_dir(UNC)`——把 UNC 交给 `CreateProcess` 正是 `cmd.exe`
 /// 拒绝并回落 `C:\Windows` 的形状；env 仍从 plan 通道应用。
 pub(crate) fn agent_command(plan: &LaunchPlan) -> std::process::Command {
+    let program = direct_program(&plan.executable);
     #[cfg(windows)]
     {
-        if let Some(detour) = unc_batch_detour(&plan.executable, plan.cwd.as_deref(), &plan.args) {
+        if let Some(detour) = unc_batch_detour(&program, plan.cwd.as_deref(), &plan.args) {
             use std::os::windows::process::CommandExt;
             let mut command = std::process::Command::new(detour.program);
             for (name, value) in &plan.env {
@@ -42,7 +48,7 @@ pub(crate) fn agent_command(plan: &LaunchPlan) -> std::process::Command {
             return command;
         }
     }
-    let mut command = std::process::Command::new(direct_program(&plan.executable));
+    let mut command = std::process::Command::new(program);
     super::launch_plan::apply_launch_plan(&mut command, plan);
     command
 }
@@ -73,12 +79,18 @@ fn is_bare_program_name(program: &str) -> bool {
 /// cwd 恰好指向工作区，搜索 cwd 等于允许仓库里同名的不可信 shim 抢启动。
 #[cfg(windows)]
 fn resolve_windows_program(program: &str) -> Option<OsString> {
+    let path_var = std::env::var_os("PATH")?;
+    resolve_windows_program_in(program, &path_var)
+}
+
+/// [`resolve_windows_program`] 的可注入形态：PATH 由调用方给，纯函数可测。
+#[cfg(windows)]
+fn resolve_windows_program_in(program: &str, path_var: &std::ffi::OsStr) -> Option<OsString> {
     if !is_bare_program_name(program) {
         return None;
     }
-    let path_var = std::env::var_os("PATH")?;
     for ext in ["exe", "cmd", "bat"] {
-        for dir in std::env::split_paths(&path_var) {
+        for dir in std::env::split_paths(path_var) {
             let candidate = dir.join(format!("{program}.{ext}"));
             if candidate.is_file() {
                 return Some(candidate.into_os_string());
@@ -97,17 +109,20 @@ struct UncBatchDetour {
 
 /// Windows 唯一绕行决策点：批处理启动器 ∧ 绝对路径 ∧ UNC cwd。
 ///
-/// 命令行与「是否设 current_dir」都从这一处读，两边不可能漂移。批行构造失败
-/// （参数含 `\r`/`\n`/`\0`）时回落直启并留日志：这类参数本身已不可运行，不把
-/// 连接整个打成失败，但 cwd 回落 `C:\Windows` 的旧行为必须可观测。
+/// 入参是**解析后**的程序名（见 [`agent_command`]），命令行与「是否设
+/// current_dir」都从这一处读，两边不可能漂移。批行构造失败（参数含
+/// `\r`/`\n`/`\0`、解析产物非 Unicode）时回落直启并留日志：这类启动本身已
+/// 不可靠，不把连接整个打成失败，但 cwd 回落 `C:\Windows` 的旧行为必须可观测。
 #[cfg(windows)]
-fn unc_batch_detour(
-    executable: &str,
-    cwd: Option<&str>,
-    args: &[String],
-) -> Option<UncBatchDetour> {
-    let pushd_cwd = windows_pushd_cwd(cwd, Path::new(executable))?;
-    match make_unc_batch_command_line(&pushd_cwd, executable, args) {
+fn unc_batch_detour(program: &OsStr, cwd: Option<&str>, args: &[String]) -> Option<UncBatchDetour> {
+    let Some(command) = program.to_str() else {
+        tracing::warn!(
+            "UNC workspace batch launch: resolved program is not valid Unicode; direct spawn"
+        );
+        return None;
+    };
+    let pushd_cwd = windows_pushd_cwd(cwd, Path::new(command))?;
+    match make_unc_batch_command_line(&pushd_cwd, command, args) {
         Ok(command_line) => Some(UncBatchDetour {
             program: system_cmd_exe(),
             command_line,
@@ -408,6 +423,48 @@ mod tests {
         assert!(!is_bare_program_name(r"C:\npm\hermes.cmd"));
         assert!(!is_bare_program_name(r"./hermes"));
         assert!(!is_bare_program_name(r"node_modules\.bin\hermes"));
+    }
+
+    /// 审查返工钉死的复合缺口：绕行决策消费的是**解析后**的程序名——裸名
+    /// 解析成绝对 `.cmd` 后必须能触发绕行；解析前的裸名即便配 UNC 也绝不
+    /// 绕行（相对/裸名形状会让 cmd 从工作区把它解析出来）。
+    #[cfg(windows)]
+    #[test]
+    fn the_detour_decision_consumes_the_resolved_program() {
+        let unc = Some(r"\\wsl.localhost\Ubuntu\home\user\repo");
+        assert!(
+            unc_batch_detour(std::ffi::OsStr::new(r"C:\npm\hermes.cmd"), unc, &[]).is_some(),
+            "解析产物为绝对批处理时必须绕行"
+        );
+        assert!(unc_batch_detour(std::ffi::OsStr::new("hermes"), unc, &[]).is_none());
+        assert!(unc_batch_detour(std::ffi::OsStr::new(r"C:\npm\uvx.exe"), unc, &[]).is_none());
+    }
+
+    /// PATH 解析的扩展优先序：`.exe` 一出现即赢过任何 `.cmd`/`.bat`；
+    /// 闸门先于查找——带扩展名的输入不做增补。
+    #[cfg(windows)]
+    #[test]
+    fn path_resolution_prefers_exe_then_cmd_then_bat() {
+        let dir = std::env::temp_dir().join("pylon-353-resolve-probe");
+        std::fs::create_dir_all(&dir).expect("create probe dir");
+        let path_var = std::ffi::OsString::from(&dir);
+        assert_eq!(
+            resolve_windows_program_in(r"C:\npm\hermes.cmd", &path_var),
+            None,
+            "带路径与扩展名的输入不增补"
+        );
+        std::fs::write(dir.join("tool.cmd"), b"@echo off").expect("write probe cmd");
+        assert_eq!(
+            resolve_windows_program_in("tool", &path_var).as_deref(),
+            Some(dir.join("tool.cmd").as_os_str())
+        );
+        std::fs::write(dir.join("tool.exe"), b"MZ").expect("write probe exe");
+        assert_eq!(
+            resolve_windows_program_in("tool", &path_var).as_deref(),
+            Some(dir.join("tool.exe").as_os_str()),
+            ".exe 必须赢过先落盘的 .cmd"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 非 Windows 也可判定：绕行条件不满足时构造结果与直启逐字段一致——
