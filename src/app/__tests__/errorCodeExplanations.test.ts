@@ -19,7 +19,6 @@ const EXPECTED_CODES = [
   'no_active_agent',
   'agent_spawn_io_failed',
   'writer_failed',
-  'writer_timeout',
   'stdout_closed',
   'pending_lock_poisoned',
   'overloaded',
