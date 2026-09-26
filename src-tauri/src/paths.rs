@@ -138,6 +138,73 @@ pub(crate) fn message_db_path(dirs: &DataDirs) -> PathBuf {
     dirs.data_root.join("pylon-data-v1.sqlite3")
 }
 
+/// Tauri bundle identifier，与 `tauri.conf.json::identifier` 同源。
+///
+/// #362：日志目录必须在 `main()` 里（`setup()` 之前）就能解析——`init_tracing()`
+/// 要先于一切可观测工作装上 subscriber。所以这里复现 Tauri `app_data_dir()` 的
+/// 拼法（`<平台数据根>/<identifier>`），而不是等 `DataDirs`。`paths` 的单测断言本
+/// 常量与 `tauri.conf.json` 一致，防止两处漂移。
+pub(crate) const APP_IDENTIFIER: &str = "com.prism.desktop";
+
+/// 平台数据根目录（Tauri `dirs::data_dir()` 的等价物），不依赖 Tauri 运行时。
+///
+/// Windows = `%APPDATA%`（Roaming）；macOS = `~/Library/Application Support`；
+/// 其他 = `$XDG_DATA_HOME` 或 `~/.local/share`。
+pub(crate) fn platform_data_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+            })
+    }
+}
+
+/// 非 portable 情况下的应用数据根目录。
+pub(crate) fn app_data_root() -> Option<PathBuf> {
+    platform_data_root().map(|root| root.join(APP_IDENTIFIER))
+}
+
+/// 日志根目录的候选顺序：portable 命中时 `<exe_dir>/data/logs` 打头，其余情况
+/// 以 AppData 收尾。**纯解析、不触盘**（可写性由调用方逐个探测）。
+pub(crate) fn log_dir_candidates(exe_dir: &Path, app_data_dir: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if portable_requested(exe_dir) {
+        candidates.push(exe_dir.join("data").join("logs"));
+    }
+    if let Some(app_data_dir) = app_data_dir {
+        candidates.push(app_data_dir.join("logs"));
+    }
+    candidates
+}
+
+/// 逐个候选真探可写性，返回第一个可写者（都不行则 `None`）。
+///
+/// portable 介质（只读 U 盘 / Program Files）上第一个候选必然失败，回退 AppData——
+/// 与 [`resolve_data_dirs_for`] 的决策顺序一致。
+pub(crate) fn first_writable_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(|candidate| probe_writable(candidate).is_ok())
+        .cloned()
+}
+
+/// 日志根目录：`main()` 的 `init_tracing()` 用，等价于 [`resolve_data_dirs`] 会选中的
+/// `data_root` 再加 `logs/`，但不依赖 Tauri。
+pub(crate) fn resolve_log_root() -> Option<PathBuf> {
+    let exe_dir = exe_dir().ok()?;
+    first_writable_dir(&log_dir_candidates(&exe_dir, app_data_root()))
+}
+
 pub(crate) fn gateway_instances_path(dirs: &DataDirs) -> PathBuf {
     dirs.data_root.join("pylon-gateway-instances.json")
 }
@@ -505,6 +572,62 @@ mod tests {
         let entries = std::fs::read_dir(&root).unwrap().count();
         assert_eq!(entries, 0, "探针文件必须清理");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// #362：日志目录走的是 `main()` 早期（`DataDirs` 还不存在），所以标识符在这里
+    /// 复现了一份。与 `tauri.conf.json` 漂移会让日志落到另一个目录（用户按
+    /// 说明书找不到），必须由测试钉住。
+    #[test]
+    fn app_identifier_matches_the_tauri_bundle_config() {
+        let config = include_str!("../tauri.conf.json");
+        let expected = format!("\"identifier\": \"{APP_IDENTIFIER}\"");
+        assert!(
+            config.contains(&expected),
+            "paths::APP_IDENTIFIER 与 tauri.conf.json 不一致：期望配置里出现 {expected}"
+        );
+    }
+
+    #[test]
+    fn log_dir_candidates_prefer_portable_then_fall_back_to_appdata() {
+        let exe = temp_root("logs-portable");
+        let app_data = temp_root("logs-appdata");
+        std::fs::create_dir_all(&exe).unwrap();
+        // 未请求 portable：只有 AppData 一个候选
+        assert_eq!(
+            log_dir_candidates(&exe, Some(app_data.clone())),
+            vec![app_data.join("logs")]
+        );
+        // 请求 portable：portable 打头、AppData 兜底（顺序即优先级）
+        std::fs::create_dir_all(exe.join("data")).unwrap();
+        assert_eq!(
+            log_dir_candidates(&exe, Some(app_data.clone())),
+            vec![exe.join("data").join("logs"), app_data.join("logs")]
+        );
+        // 连 AppData 都解析不出来时也至少给出 portable 候选
+        assert_eq!(
+            log_dir_candidates(&exe, None),
+            vec![exe.join("data").join("logs")]
+        );
+        std::fs::remove_dir_all(&exe).ok();
+    }
+
+    #[test]
+    fn first_writable_dir_picks_the_earlier_candidate_and_creates_it() {
+        let root = temp_root("writable-first");
+        let first = root.join("logs");
+        let second = root.join("fallback");
+        let picked = first_writable_dir(&[first.clone(), second.clone()]).expect("candidate");
+        assert_eq!(picked, first);
+        assert!(first.is_dir(), "选中的目录必须真的建好");
+        assert!(!second.exists(), "落选候选不该被创建");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn app_data_root_joins_the_bundle_identifier() {
+        if let Some(root) = app_data_root() {
+            assert!(root.ends_with(APP_IDENTIFIER), "{}", root.display());
+        }
     }
 
     #[test]

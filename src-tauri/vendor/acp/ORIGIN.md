@@ -218,3 +218,41 @@ AgentDef schema、仅有 `PYLON_ACP_HOST_TOOLS` 环境变量入口」的缺口�
   不追加不裁剪）。
 - strict 沙箱根同时改为取自 Pylon 会话工作区（`SessionInfo.cwd`），不再信任
   agent 自报的请求参数。
+
+## §6 追记：崩溃取证日志链与子进程启动卫生（#362/#363，2026-09-27）
+
+本节登记的是**按上游设计自行实现**的拍档，不是逐文件迁入的副本——`vendor/` 下没有新增
+文件，Pylon 侧代码也不从本目录编译。登记目的在于履约署名与记录参数出处。
+
+- 来源：codeg `src-tauri/src/logging/{init,budget,panic_hook,throttle}.rs` 与
+  `src-tauri/src/process.rs`（锁定 commit 同 §1；Apache-2.0）。
+- 目标与适配差异：
+  - `src-tauri/src/logging/{budget,file_sink,panic_hook,throttle}.rs`（#362）：参数
+    照搬（每日轮转、保留 30 个文件、每日 512 MiB 上限、**从当日既有文件尺寸 resume
+    计数**、panic 记录同步写盘、前缘节流窗口 10 秒）。适配差异：① 轮转与命名由 Pylon
+    自己实现（`budget::daily_file_name`），只复用 `tracing-appender` 的
+    `non_blocking`（channel + worker 线程）——文件名必须与 panic hook 共用一份计算，
+    不能依赖上游 crate 的命名格式；② 文件 sink 用纯文本行而非 JSON（与既有 stderr
+    fmt 层同族，且不引入 `tracing-subscriber` 的 `json` feature）；③ 上游的
+    credential-target 结构过滤未迁（Pylon 无对应 target）。
+  - `pylon-acp/src/process.rs`（#363）：`set_utf8_env` 四项键值与上游一致
+    （`PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8` / `LANG=C.UTF-8` / `LC_ALL=C.UTF-8`）；
+    `spawn_retrying_exec_busy` 的预算与退避照搬（deadline 1 秒、1ms 起指数退避、
+    上限 25ms、仅 `ETXTBSY` 重试；非 busy 错误一次即返且原始错误不被重新归类）。
+    适配差异：① `ETXTBSY` 的 errno 写字面量而非引 `libc`（不为一个常量新增依赖，
+    主判定走 `ErrorKind::ExecutableFileBusy`）；② 时基用 `tokio::time::Instant`。
+  - `pylon-core/src/node_path.rs`（#363-3）：管理器清单与搜索顺序照搬（9 种，含 nvm
+    `default` alias 的数值前缀解析、semver 数值降序、volta 的「只有 shim 无镜像则
+    不前插」）。适配差异：① 候选目录计算不做平台 cfg 门（由「该目录下真有 node
+    二进制」做唯一筛选），使纯函数在任何平台可单测；仅绝对路径默认值（`/usr/local`
+    下的 n、Homebrew）保留平台门；② 不迁 `ensure_user_npm_prefix_in_path`。
+  - 空闲回收（#363-4）**不是**上游实现：Codeg 是连接级 sweep + 前端 30 秒 keepalive，
+    Pylon 复用既有 `check_session_expiry` watcher，只把「按来源放行」换成「按活跃信号
+    豁免」，并新增「零会话且闲置超时的连接走既有 stop 路径」。默认超时也不同
+    （1440 分钟 vs 上游 180 秒），理由见 `src-tauri/src/session/expiry.rs` 的
+    `DEFAULT_GUI_IDLE_TIMEOUT_SECS` 注释。
+- 未迁入：codeg 的 `logging.level` 持久化设置链、Logs viewer UI、`logging/hub.rs` 的
+  5000 条 / 4 MiB 双上限（Pylon 既有 2000 条环形缓冲不变）、安装动作与
+  `prewarm_uvx_agent`。
+- 证据：`src-tauri/src/logging/**`、`pylon-acp/src/process.rs`、
+  `pylon-core/src/node_path.rs` 的模块内单测（命令与计数见 `.agents/records/`）。

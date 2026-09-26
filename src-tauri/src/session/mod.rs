@@ -407,6 +407,14 @@ impl AppState {
         let mut events = self.runtime_logs.subscribe();
         let hub = Arc::clone(&self.runtime_logs);
         tokio::spawn(async move {
+            // #362：lag 告警的前缘节流。这条 warn 会经 RuntimeLogLayer 回到**同一个**
+            // hub，再由 hub 广播出去——消费者持续慢于生产者时，不节流就等于每 lag 一次
+            // 就往刚排空一点的 channel 里再塞一条，channel 永不排空（RuntimeSheet 打开
+            // 且窗口繁忙时触发）。前缘立即放行保证第一次一定看得见，窗口内的命中折叠成
+            // 计数搭下一条的车，不静默丢弃。
+            let mut lag_throttle = crate::logging::throttle::LeadingEdgeThrottle::new(
+                crate::logging::throttle::LAG_LOG_WINDOW,
+            );
             loop {
                 match events.recv().await {
                     Ok(entry) => {
@@ -425,7 +433,14 @@ impl AppState {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        tracing::warn!("runtime log event dispatcher lagged by {count} entries");
+                        if let Some(summary) = lag_throttle.record(count) {
+                            tracing::warn!(
+                                "runtime log event dispatcher lagged: skipped {} entries across {} occurrence(s) in the last {}s",
+                                summary.dropped,
+                                summary.occurrences,
+                                crate::logging::throttle::LAG_LOG_WINDOW.as_secs()
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -1695,12 +1710,17 @@ gateway:
 
     /// S3：prompt 错误"会话不存在"语义匹配——宽松子串匹配覆盖 agent 实际错误形态
     /// （JSON-RPC 错误对象序列化串 / 纯字符串），网络与临时/方法级错误不命中。
+    ///
+    /// #354 契约更新（清理陈旧样本）：`code == -32000` 现在**一票**判为
+    /// `RpcFailureKind::AuthRequired`（协议已定义该码语义，agent 误用它表别的含义属
+    /// 协议违规，不做文本竞猜，见 `pylon-acp/src/error.rs::rpc_failure_details`）。
+    /// 因此原先挂在这里的 `{"code":-32000,"message":"session missing"}` 不再、也不应
+    /// 命中 SessionMissing —— 它移到下面单独钉住「协议码优先于文本」这条。
     #[test]
     fn prompt_error_indicates_missing_session_matching() {
         let missing = [
             r#"{"code":-32602,"message":"session not found: session-42"}"#,
             r#"{"code":-32602,"message":"Invalid params: unknown session: session-42"}"#,
-            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in missing {
             assert!(
@@ -1712,6 +1732,8 @@ gateway:
             r#"{"code":-32601,"message":"Method not found"}"#,
             r#"{"code":-32602,"message":"invalid params: missing content"}"#,
             r#"{"code":-32000,"message":"rate limited"}"#,
+            // #354：-32000 是协议级 authRequired，文本里写着 session missing 也不改判
+            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in transient {
             assert!(

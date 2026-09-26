@@ -1,13 +1,84 @@
 //! 会话过期域：过期判定与后台 expiry watcher。
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
+//!
+//! #363-4：**回收范围从「平台来源」推广到全部连接**。原实现的
+//! `is_platform_source` 守卫让 GUI local（`local:<id>`）会话永不回收，注释写的是
+//! 「GUI local 会话由前端/用户管理」——但被遗弃的 GUI 会话会一直挂着映射、prompt
+//! 锁与 agent 侧会话状态。现在改成**按活跃信号豁免**（在途回合 / 在场交互 /
+//! prompt 闸门 / prompt 锁），而不再按来源放行。
+//!
+//! 两条回收路径：
+//!
+//! | 对象 | 判据 | 动作 |
+//! | --- | --- | --- |
+//! | 会话 | 空闲超时 且 无活跃信号 | 删映射 + close ACP session（`remove_if_current_expired`）|
+//! | 连接 | **零会话** 且闲置超时 且 无活跃信号 | `lifecycle::stop_agent_runtime`（杀子进程树）|
+//!
+//! 会话回收**不碰** journal 与前端 identity store（用户历史不丢，前端会话列表才是
+//! 权威）；下次发消息走 `known_peri_id` → `session/load` 自愈。连接回收才真正释放
+//! agent 子进程/文件句柄/内存——这是 issue 点名「一直挂着 agent 子进程」的落点。
+//!
+//! ⚠️ **两条路径的自愈能力不同**：会话回收后下一次发送会自愈（revive），而**连接
+//! 回收不会**——Pylon 的 GUI prompt 路径没有断线自动重连（`session/prompt.rs` 只判
+//! `Crashed`；`AcpClient` 对已停止的连接直接 `ConnectionClosed`），用户需要手动
+//! 重连/切一次 agent 才能继续。这正是连接回收必须保守的原因：只在**零会话**且闲置
+//! 超过 24 小时默认值时才动它，且 `PYLON_SESSION_IDLE_TIMEOUT_SECS=0` 可整体关闭。
+//! 「GUI 断线懒重连」是独立议题，不在本项范围。
 
 use super::*;
 
-pub(crate) fn session_expired(
+/// #363-4：GUI 本地（无 gateway binding）会话与连接的回收超时（秒）。
+///
+/// `0` 关闭本项；非法值回退默认。命名与语义对齐 Codeg `CODEG_ACP_IDLE_TIMEOUT_SECS`
+/// （同样是「秒 + 0 关闭」），但**默认值不同**，理由见 [`DEFAULT_GUI_IDLE_TIMEOUT_SECS`]。
+pub(crate) const GUI_IDLE_TIMEOUT_ENV: &str = "PYLON_SESSION_IDLE_TIMEOUT_SECS";
+
+/// 默认 24 小时。
+///
+/// Codeg 默认 180 秒，前提是它的前端每 30 秒给连接发一次 keepalive、并且断线有自动
+/// 重连。Pylon 两者都没有：GUI 的 prompt 路径只判 `Crashed`（`session/prompt.rs`），
+/// 打到已断开的连接上是硬错误。若照搬 180 秒，用户离开三分钟后回来发消息就会直接
+/// 拿到失败。所以默认取「与无 binding 会话原本就已生效的隐式默认」一致的 1440 分钟
+/// （即原 `idle_minutes` 缺省值），把「更快回收」留给配置。
+pub(crate) const DEFAULT_GUI_IDLE_TIMEOUT_SECS: u64 = 1440 * 60;
+
+/// 读 GUI 回收超时：env 覆盖 → 默认；`0` = 关闭（返回 `None`）。
+fn gui_idle_timeout() -> Option<std::time::Duration> {
+    gui_idle_timeout_from(std::env::var(GUI_IDLE_TIMEOUT_ENV).ok().as_deref())
+}
+
+/// [`gui_idle_timeout`] 的纯函数内核（可单测，不经进程 env）。
+pub(crate) fn gui_idle_timeout_from(raw: Option<&str>) -> Option<std::time::Duration> {
+    let seconds = match raw {
+        Some(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(DEFAULT_GUI_IDLE_TIMEOUT_SECS),
+        None => DEFAULT_GUI_IDLE_TIMEOUT_SECS,
+    };
+    (seconds > 0).then(|| std::time::Duration::from_secs(seconds))
+}
+
+/// 空闲判据的毫秒形态（session_expired 的分钟口径是它的展示包装）。
+fn idle_expired_reason(
+    updated_at: Option<Timestamp>,
+    now: Timestamp,
+    idle_ms: u64,
+) -> Option<String> {
+    let updated = updated_at?;
+    if now.elapsed_since(updated) > idle_ms {
+        Some(format!("超过 {} 分钟无活动", (idle_ms / 60_000).max(1)))
+    } else {
+        None
+    }
+}
+
+/// 统一的过期判定：`reset` 策略 + 空闲毫秒（空转口径的唯一实现）。
+fn expired_reason(
     updated_at: Option<Timestamp>,
     now: Timestamp,
     reset: &str,
-    idle_minutes: u64,
+    idle_ms: u64,
 ) -> Option<String> {
     match reset {
         "off" => None,
@@ -15,36 +86,107 @@ pub(crate) fn session_expired(
             Some(updated_day) if updated_day != now.day_number() => Some("每日重置".to_string()),
             _ => None,
         },
-        _ => {
-            let idle_ms = idle_minutes.saturating_mul(60_000);
-            let updated = updated_at?;
-            if now.elapsed_since(updated) > idle_ms {
-                Some(format!("超过 {idle_minutes} 分钟无活动"))
-            } else {
-                None
-            }
-        }
+        _ => idle_expired_reason(updated_at, now, idle_ms),
     }
 }
+
+/// 分钟口径的薄包装。生产只走 [`expired_reason`]（毫秒），本包装的消费者是既有
+/// 单测（含 `session_info_tests`），所以按 `cfg(test)` 门控——否则非测试构建里它是
+/// 死代码，会撞上 clippy「相对基线零新增」门禁。
+#[cfg(test)]
+pub(crate) fn session_expired(
+    updated_at: Option<Timestamp>,
+    now: Timestamp,
+    reset: &str,
+    idle_minutes: u64,
+) -> Option<String> {
+    expired_reason(updated_at, now, reset, idle_minutes.saturating_mul(60_000))
+}
+
+/// 一条会话的回收判定输入（快照；后续的删除复核仍在锁内重做，见 TOCTOU 纪律）。
+struct SessionSnapshot {
+    source: String,
+    peri_id: String,
+    updated_at: Option<Timestamp>,
+    turn_in_flight: bool,
+}
+
+/// 交互队列里在场的条目所对应的 ACP session id 集合（settle 即出队，所以任何在场
+/// 条目都是 Active 或 Waiting，没有终态残留）。
+fn sessions_with_pending_interaction(runtime: &Arc<crate::runtime::AgentRuntime>) -> Vec<String> {
+    runtime
+        .interactions
+        .snapshot()
+        .map(|entries| entries.into_iter().map(|entry| entry.session_id).collect())
+        .unwrap_or_default()
+}
+
 pub(crate) async fn check_session_expiry(state: &AppState) {
+    check_session_expiry_with(state, gui_idle_timeout()).await
+}
+
+/// [`check_session_expiry`] 的超时可注入形态（测试直接喂值，避免改进程 env 的竞态）。
+pub(crate) async fn check_session_expiry_with(
+    state: &AppState,
+    gui_timeout: Option<std::time::Duration>,
+) {
     let now = Timestamp::now();
-    // 核验修复：平台 source 判定（适配器前缀或静态绑定命中）。GUI local 会话
-    // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
-    // G4 §3-9（C1）：统一入口 is_platform_source（注册适配器前缀命中 OR 绑定命中，
-    // E14 语义与 deliver_all 出站白名单前置条件等价——原 adapter_keys 前缀闭包删除）。
-    for runtime in state.runtimes.all() {
-        let sessions: Vec<(String, String, Option<Timestamp>)> = runtime
+    for (agent_id, runtime) in state.runtimes.all_with_ids() {
+        // 连接级活跃信号之一：per-runtime 的 prompt 闸门被占用（B3 §4.4：同一实例同一
+        // 时刻至多一个 prompt），说明连接正忙——它的全部会话本轮都跳过。
+        // `try_lock_owned` 不阻塞：拿不到就是「忙」，与 prompt.rs 的判定同形。
+        let prompt_gate_held = runtime.prompt_gate.clone().try_lock_owned().is_err();
+        // 连接级活跃信号之二：交互队列在场条目（等用户应答的权限/elicitation/提问卡）。
+        let pending_interaction_sessions = sessions_with_pending_interaction(&runtime);
+        let sessions: Vec<SessionSnapshot> = runtime
             .sessions
             .lock()
             .map(|sessions| {
                 sessions
                     .iter()
-                    .map(|(source, info)| (source.clone(), info.peri_id.clone(), info.updated_at))
+                    .map(|(source, info)| SessionSnapshot {
+                        source: source.clone(),
+                        peri_id: info.peri_id.clone(),
+                        updated_at: info.updated_at,
+                        turn_in_flight: info.turn_in_flight(),
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        for (source, peri_id, updated_at) in sessions {
-            if !state.gateway.is_platform_source(&source) {
+        for snapshot in sessions {
+            let SessionSnapshot {
+                source,
+                peri_id,
+                updated_at,
+                turn_in_flight,
+            } = snapshot;
+            // 策略：平台来源走 gateway binding（reset/idle_minutes），GUI local 走
+            // 全局可配的超时。两者都可能给出「不回收」。
+            let (reset, idle_ms) = if state.gateway.is_platform_source(&source) {
+                let binding = state.gateway.binding(&source);
+                let reset = binding
+                    .as_ref()
+                    .and_then(|b| b.reset.clone())
+                    .unwrap_or_else(|| "idle".to_string());
+                let idle_minutes = binding
+                    .as_ref()
+                    .and_then(|b| b.idle_minutes)
+                    .unwrap_or(1440);
+                (reset, idle_minutes.saturating_mul(60_000))
+            } else {
+                let Some(timeout) = gui_timeout else {
+                    continue;
+                };
+                (
+                    "idle".to_string(),
+                    u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                )
+            };
+            // #363-4：活跃信号豁免（取代原来的「非平台来源一律跳过」）。
+            if prompt_gate_held || turn_in_flight {
+                continue;
+            }
+            if pending_interaction_sessions.contains(&peri_id) {
                 continue;
             }
             // 活跃豁免：生成中（prompt 锁被占用）永不视为过期
@@ -65,16 +207,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             if generating {
                 continue;
             }
-            let binding = state.gateway.binding(&source);
-            let reset = binding
-                .as_ref()
-                .and_then(|b| b.reset.as_deref())
-                .unwrap_or("idle");
-            let idle_minutes = binding
-                .as_ref()
-                .and_then(|b| b.idle_minutes)
-                .unwrap_or(1440);
-            let Some(reason) = session_expired(updated_at, now, reset, idle_minutes) else {
+            let Some(reason) = expired_reason(updated_at, now, &reset, idle_ms) else {
                 continue;
             };
             tracing::info!("会话过期 ({source}): {reason}");
@@ -89,11 +222,9 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 &source,
                 &peri_id,
                 generation,
-                |current| {
-                    // 锁内用最新 updated_at 复核——快照值与删除时点之间新消息到达
-                    // 会刷新 updated_at，不得误杀刚活跃的会话。
-                    session_expired(current.updated_at, now, reset, idle_minutes).is_some()
-                },
+                // 锁内用最新 updated_at 复核——快照值与删除时点之间新消息到达会刷新
+                // updated_at，不得误杀刚活跃的会话。
+                |current| expired_reason(current.updated_at, now, &reset, idle_ms).is_some(),
             )
             .map_err(|e| {
                 tracing::warn!("会话过期删除失败 ({source}): {e}");
@@ -123,7 +254,85 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 serde_json::Map::new(),
             );
         }
+        // 连接级回收：只有**零会话**且闲置超时的连接才收。
+        //
+        // 收到会话为止：连接上的子进程（`AgentRuntime.acp` 的 `ManagedChild`）不会因
+        // 会话回收而释放，它属于连接。一个没有任何会话的连接，按定义不在给用户看任何
+        // 对话，闲置超时后杀掉它的进程树才是 issue 点名的「回收子进程/句柄/内存」。
+        // 保守边界：有会话的连接不走这条路径（那会让 GUI 下一次发消息打到死连接上，
+        // 而 Pylon 的 GUI prompt 路径没有断线自动重连）。
+        reclaim_idle_connection(
+            &agent_id,
+            &runtime,
+            state,
+            gui_timeout,
+            now,
+            prompt_gate_held,
+            &pending_interaction_sessions,
+        )
+        .await;
     }
+}
+
+/// 零会话且闲置超时的连接 → 走既有 stop 路径释放进程树。
+async fn reclaim_idle_connection(
+    agent_id: &str,
+    runtime: &Arc<crate::runtime::AgentRuntime>,
+    state: &AppState,
+    gui_timeout: Option<std::time::Duration>,
+    now: Timestamp,
+    prompt_gate_held: bool,
+    pending_interaction_sessions: &[String],
+) {
+    let Some(timeout) = gui_timeout else {
+        return;
+    };
+    if prompt_gate_held || !pending_interaction_sessions.is_empty() {
+        return;
+    }
+    let session_count = runtime
+        .sessions
+        .lock()
+        .map(|sessions| sessions.len())
+        .unwrap_or(usize::MAX);
+    if session_count != 0 {
+        return;
+    }
+    let reclaimable = {
+        let Ok(agent_state) = runtime.agent_runtime.lock() else {
+            // 锁中毒：跟随 panic 会让下一次 lock 直接炸；这里的正确处置是保守跳过
+            // （与 prompt_locks 的 fail-closed 同精神）。
+            return;
+        };
+        // 只收 Connected：其余状态要么本来就没进程，要么正在重连（不该被打断）。
+        agent_state.status == crate::agent::runtime::AgentLifecycleStatus::Connected
+            && agent_state
+                .last_connected_at
+                .map(|connected_at| {
+                    now.elapsed_since(connected_at)
+                        > u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
+                })
+                .unwrap_or(false)
+    };
+    if !reclaimable {
+        return;
+    }
+    tracing::info!(
+        agent_id,
+        "空闲连接回收：零会话且闲置超过 {} 秒，停止 agent 子进程",
+        timeout.as_secs()
+    );
+    crate::lifecycle::stop_agent_runtime(agent_id, state).await;
+    state.log_runtime_summary(
+        "warn",
+        "session",
+        None,
+        &format!(
+            "Idle connection reclaimed ({agent_id}, no sessions, idle > {}s)",
+            timeout.as_secs()
+        ),
+        serde_json::Map::new(),
+    );
 }
 
 #[cfg(test)]

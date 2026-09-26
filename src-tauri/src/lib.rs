@@ -17,6 +17,7 @@ pub mod browser;
 pub(crate) use pylon_core::correlation;
 mod cwd;
 mod dispatcher;
+mod docs_sheet;
 mod error;
 mod export;
 mod gateway;
@@ -24,6 +25,9 @@ pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
 mod lifecycle;
+/// #362：崩溃取证的落盘日志链（每日轮转 + 每日预算 + 同步 panic hook）。
+/// 对 crate 内可见即可；`is_self_target` 供 `runtime_log` 的自反馈隔离复用。
+pub(crate) mod logging;
 mod mcp;
 mod paths;
 mod permission;
@@ -168,6 +172,8 @@ pub(crate) struct AppState {
     pub(crate) config_write_lock: tokio::sync::Mutex<()>,
     /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
     pub(crate) browser: Arc<browser::BrowserManager>,
+    /// #371：文档 Sheet 管理（离线文档站子 WebView；setup() 注入主窗口）。
+    pub(crate) docs_sheet: Arc<docs_sheet::DocsSheetManager>,
     /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
     /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
     /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
@@ -632,18 +638,76 @@ pub(crate) fn prompt_lock_for(
 
 // ── B10.4 平台链路集成测试（fake QQ 事件 → ingest → 注入 → fake ACP → deliver 回发） ──
 
-/// R18：初始化 tracing subscriber——fmt（stderr，INFO 上限）+ RuntimeLogLayer
-/// （tracing event → RuntimeLogHub 转发，level/source/message/fields 形状保持）。
-/// main.rs 在 run() 之前调用；hub 本身由 run() 创建后经 register_hub 注册，
-/// Layer 按事件惰性读取，注册前的 event 直接丢弃（此前 log 宏本就无 sink）。
-pub fn init_tracing() {
+/// R18 + #362：初始化 tracing subscriber。
+///
+/// 三个 sink 共享一条订阅：
+/// - **stderr**：`fmt` 层，INFO 上限（行为不变）。
+/// - **落盘文件**（#362）：每日轮转 `<data_root>/logs/pylon.<date>.log`、保留 30 个、
+///   每日 512 MiB 上限且**从当日既有文件尺寸续算**；debug 构建下这是多余的一份，
+///   但 release 是 GUI 子系统（#361）——stderr 不可见，落盘是唯一活口。
+/// - **RuntimeLogLayer**：tracing event → RuntimeLogHub（level/source/message/fields 形状不变）。
+///
+/// 另外安装 panic hook（同步写盘），见 [`logging::panic_hook`]。
+///
+/// 返回值必须由调用方（`main()`）绑定到进程生命周期：`WorkerGuard` 一 drop，
+/// non_blocking 的 worker 线程就收摊，缓冲里的尾巴会丢。`main.rs` 里写成
+/// `let _log_guard = ...`。
+///
+/// hub 由 `run()` 创建后经 `register_hub` 注册，Layer 按事件惰性读取，注册前的
+/// event 直接丢弃（此前 log 宏本就无 sink）。
+pub fn init_tracing() -> LogGuard {
     use tracing_subscriber::layer::Layer;
+
     let base = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_writer(std::io::stderr)
         .finish();
-    let subscriber = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    let base = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
+
+    let guard = match crate::paths::resolve_log_root() {
+        Some(root) => {
+            let spec = logging::file_sink::LogFileSpec::new(root);
+            match logging::file_sink::build_file_sink(spec) {
+                Some((writer, worker_guard)) => {
+                    // 文件 sink 也限 INFO：debug/trace 只留在 stderr，不写盘也不冲 ring。
+                    // panic 记录由 hook 同步写过同一个文件（且带完整 backtrace），这里按
+                    // target 等值去重，避免每个 panic 在文件里出现两遍。
+                    let file_layer = tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_writer(writer)
+                        .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                            metadata.target() != logging::PANIC_TARGET
+                        }))
+                        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+                    let _ =
+                        tracing::subscriber::set_global_default(file_layer.with_subscriber(base));
+                    LogGuard {
+                        _worker: Some(worker_guard),
+                    }
+                }
+                None => {
+                    let _ = tracing::subscriber::set_global_default(base);
+                    LogGuard { _worker: None }
+                }
+            }
+        }
+        None => {
+            // 没有任何可写目录：退回 stderr + hub，日志链降级但应用照常启动。
+            let _ = tracing::subscriber::set_global_default(base);
+            LogGuard { _worker: None }
+        }
+    };
+    logging::panic_hook::install();
+    guard
+}
+
+/// #362：落盘 sink 的存活守卫。
+///
+/// 只有绑定到进程生命周期才有意义（drop = 关闭 worker 线程并 flush），所以带
+/// `#[must_use]`：漏绑会静默丢掉每一次缓冲未刷的日志，不会有编译错误提醒。
+#[must_use = "绑定到进程生命周期（main 里 let _log_guard = ...），drop 会关掉落盘 worker"]
+pub struct LogGuard {
+    _worker: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
 /// #269：进程侧启动相位打点（main.rs 在 t0 处调用；供 lib 外的入口 facade 使用）。
@@ -734,6 +798,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         mcp_write_lock: tokio::sync::Mutex::new(()),
         config_write_lock: tokio::sync::Mutex::new(()),
         browser: Arc::new(browser::BrowserManager::new()),
+        docs_sheet: Arc::new(docs_sheet::DocsSheetManager::new()),
         // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
         // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
         mcp_wire: Mutex::new(None),
@@ -773,6 +838,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     setup_hydrate_workspaces(app)?; // 〔致命〕workspace 注册表恢复失败
     setup_install_storage_diagnostics(app, &dirs)?; // 〔致命〕诊断锁中毒 / 路径解析失败
     setup_register_browser_host(app, &window, &dirs); // 无失败路径
+    setup_register_docs_sheet_host(app, &window); // 无失败路径
     setup_ensure_plugin_dirs(app); // 〔静默〕插件目录树创建失败仅 warn
     setup_restore_pet(app, &dirs); // 〔静默〕宠物存档缺失/损坏保持新宠物
     setup_restore_mcp_config(app, &dirs); // 〔静默〕MCP 配置缺失/损坏/非法保持空配置
@@ -818,6 +884,19 @@ fn setup_install_data_dirs(
     // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
     // 时按需 clone（PathBuf 拷贝成本可忽略）。
     let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    // #362：日志目录在 `main()`（`init_tracing`）就已解析，早于这里的 DataDirs。
+    // 两边应当落在同一个 data_root 下；不一致说明路径推理漂移了（用户会按说明书
+    // 去错地方找日志），所以显式说出来而不是静默分叉。
+    if let Some(log_root) = crate::logging::active_log_root() {
+        let expected = dirs.data_root.join("logs");
+        if log_root != expected {
+            tracing::warn!(
+                "日志目录与 data_root 不一致：日志在 {}，data_root 下的位置是 {}",
+                log_root.display(),
+                expected.display()
+            );
+        }
+    }
     crate::startup_timing::mark("data_dirs_resolved");
     Ok(dirs)
 }
@@ -914,6 +993,13 @@ fn setup_register_browser_host(
                 registry.invalidate_tab(tab_id);
             }
         }));
+}
+
+/// 阶段 6b（#371）：文档 Sheet 管理器注入主窗口（子 WebView add_child 需要）。
+fn setup_register_docs_sheet_host(app: &tauri::App, window: &tauri::WebviewWindow) {
+    app.state::<AppState>()
+        .docs_sheet
+        .register_host(window.as_ref().window(), app.handle().clone());
 }
 
 /// 阶段 7：插件基建 v2——启动即创建用户插件目录树（installed/staging），
@@ -1429,6 +1515,11 @@ pub fn run() {
     }
     crate::startup_timing::mark("run_entry");
     install_process_registrations();
+    // #363-3：node 版本管理器 PATH 修复。位置有两条硬约束：① `set_var` 会改**进程级**
+    // PATH，非线程安全，必须在任何多线程工作之前；② 必须早于 agent 探测/preflight
+    // （它们按 PATH 找 CLI，看不到版本管理器的目录就会报「未检测到该 Agent」）。
+    // node 已在 PATH 上时本调用立即返回，不动用户自己配好的环境。
+    pylon_core::node_path::ensure_node_in_path();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
     let loaded = agent_config::load_app_config();
@@ -1440,7 +1531,7 @@ pub fn run() {
         Ok(agents) => agents,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             HashMap::new()
         }
     };
@@ -1449,7 +1540,7 @@ pub fn run() {
         Ok(None) => String::new(),
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             String::new()
         }
     };
@@ -1461,7 +1552,7 @@ pub fn run() {
         Ok(client) => client,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon Prism client unavailable: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon Prism client unavailable: {error}"));
             PrismClient::unavailable(error)
         }
     };
@@ -1480,7 +1571,9 @@ pub fn run() {
         Ok(rt) => rt,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon runtime initialization failed: {error}");
+            crate::logging::note_to_stderr(&format!(
+                "Pylon runtime initialization failed: {error}"
+            ));
             return;
         }
     };
@@ -1494,7 +1587,7 @@ pub fn run() {
             Ok(config) => GatewayCore::from_config(config),
             Err(error) => {
                 // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                eprintln!("Pylon gateway configuration error: {error}");
+                crate::logging::note_to_stderr(&format!("Pylon gateway configuration error: {error}"));
                 GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
             }
         });
@@ -1513,7 +1606,9 @@ pub fn run() {
         } else {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             // #326：零 Agent 是合法首跑状态（内嵌兜底即零 Agent），不是异常——故为中性提示。
-            eprintln!("Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)");
+            crate::logging::note_to_stderr(
+                    "Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)",
+                );
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
@@ -1525,6 +1620,10 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .register_uri_scheme_protocol("pylon-plugin", |context, request| {
                 crate::plugin_cmds::plugin_resource_response(context.app_handle(), request)
+            })
+            // #371：离线文档站（VitePress dist 随包分发，root = bundle 资源目录）。
+            .register_uri_scheme_protocol("pylon-docs", |context, request| {
+                crate::docs_sheet::resource::docs_resource_response(context.app_handle(), request)
             })
             .manage(build_app_state(AppStateParts {
                 runtimes,
@@ -1729,6 +1828,15 @@ pub fn run() {
                 crate::browser::cmds::browser_set_visible,
                 crate::browser::cmds::browser_set_zoom,
                 crate::browser::cmds::browser_close,
+                crate::docs_sheet::cmds::docs_sheet_status,
+                crate::docs_sheet::cmds::docs_sheet_start,
+                crate::docs_sheet::cmds::docs_sheet_set_bounds,
+                crate::docs_sheet::cmds::docs_sheet_set_visible,
+                crate::docs_sheet::cmds::docs_sheet_back,
+                crate::docs_sheet::cmds::docs_sheet_forward,
+                crate::docs_sheet::cmds::docs_sheet_reload,
+                crate::docs_sheet::cmds::docs_sheet_home,
+                crate::docs_sheet::cmds::docs_sheet_close,
                 crate::browser::agent_cmds::browser_agent_get_settings,
                 crate::browser::agent_cmds::browser_agent_set_settings,
                 crate::browser::agent_cmds::browser_agent_resolve_access,

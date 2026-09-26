@@ -6,6 +6,7 @@
 //! `Drop` 兜底 `kill_and_wait`，保证任何错误路径不遗留进程树。
 
 use std::process::Child;
+use std::time::Duration;
 
 use super::AcpError;
 
@@ -14,16 +15,111 @@ use super::AcpError;
 /// pylon-acp 内所有生产 spawn（agent 本体、taskkill 兜底、agent 侧 terminal
 /// shell）都必须经本函数，避免只在一处补、其余路径在用户桌面闪窗。
 /// 非 Windows 为 no-op。
+///
+/// 实现委托 [`pylon_foundations::child_command::HideConsoleWindow`]：#361 改发行
+/// 构建为 GUI 子系统后，闪窗问题**不限于 pylon-acp**（git / reg.exe / npm 探针 /
+/// 插件进程同样会弹黑框），单一实现放地基 crate 才能全仓收口。
 pub(crate) fn hide_console_window(command: &mut std::process::Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // 0x0800_0000 = CREATE_NO_WINDOW
-        command.creation_flags(0x0800_0000);
+    use pylon_foundations::child_command::HideConsoleWindow;
+    command.hide_console_window();
+}
+
+/// #363-1：给 agent 侧子进程钉死 UTF-8 输出环境。
+///
+/// 四项与 Codeg `process.rs:56-63` 一致：Python 两件（`PYTHONUTF8` 让 Python 的
+/// stdio 走 UTF-8 而不看系统代码页；`PYTHONIOENCODING` 兜住更老的解释器）与 POSIX
+/// locale 两件（`LANG`/`LC_ALL` = `C.UTF-8`，被 git、coreutils、MSYS2/Git-for-Windows
+/// 尊重）。没有这一层时，非英文 locale 的宿主机上 agent 及其派生的 git/node/python
+/// 会输出本地化文本，`stderr.rs` 的英文标记分级与错误子串匹配**静默失效**。
+///
+/// 与 `pylon-foundations::git` 的 `LC_ALL=C` 不矛盾：`C.UTF-8` 仍是英语 locale
+/// （沿 `C` 语义），只是码集固定为 UTF-8；git 那处是给 git 单独钉英语以便子串匹配，
+/// 两边目标一致、取值相容。git 路径**不调本函数**，以免覆盖它自己的钉法。
+///
+/// 用 `.env()` 逐个覆盖（而非 `env_clear`）：其余环境照常继承，只把这几项钉死。
+/// 调用点把它们放在 `apply_launch_plan` **之前**，于是用户在 agents.yaml 里显式写的
+/// 同名 env 仍然赢——这里是默认值，不是不可覆盖的强制值。
+pub(crate) fn set_utf8_env(command: &mut std::process::Command) {
+    command
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8");
+}
+
+/// agent 侧子进程的统一启动收口：隐藏控制台窗口 + UTF-8 环境。
+///
+/// 两个关注点各自独立（`hide_console_window` 还要给 taskkill 这类不经本函数的
+/// spawn 用），这里只是把「agent 子进程」这一类调用点的两件一次做齐。
+pub(crate) fn configure_agent_child(command: &mut std::process::Command) {
+    set_utf8_env(command);
+    hide_console_window(command);
+}
+
+/// #363-2：`ETXTBSY` 重试预算（1 秒）与退避上限（25 ms）。
+///
+/// 要覆盖的窗口是**另一个线程的 fork→exec 间隙**：Rust 以 `O_CLOEXEC` 打开文件，
+/// 但 CLOEXEC 只在 exec 时生效；另一线程 `fork()` 会复制 fd 表，此时写 fd 仍然开着，
+/// 于是这个窗口内 exec 同一文件会拿到 `ETXTBSY`。窗口自闭合（微秒级，机器繁忙时变宽），
+/// 所以正确的处置是**在预算内重试**，而不是把这类瞬时失败当成结论。
+const EXEC_BUSY_RETRY_BUDGET: Duration = Duration::from_secs(1);
+const EXEC_BUSY_MAX_BACKOFF: Duration = Duration::from_millis(25);
+
+/// Unix 的 `ETXTBSY`。写常量而不引 `libc`：本 crate 不为一个 errno 新增依赖；
+/// 值来自 Linux/glibc 的 `include/uapi/asm-generic/errno.h`（26）。判定同时看
+/// `ErrorKind`，所以即使某平台的 std 把它映到别的 code，主路径仍然命中。
+#[cfg(unix)]
+const ETXTBSY: i32 = 26;
+
+/// 这个 `io::Error` 是否表示「可执行文件被写者占住」。
+fn is_exec_busy(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::ExecutableFileBusy {
+        return true;
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let _ = command;
+        if error.raw_os_error() == Some(ETXTBSY) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 在预算内对 `ETXTBSY` 做指数退避重试；**非 busy 错误一次都不重试**。
+///
+/// 「非 busy 不重试」不是省事：`NotFound` / `InvalidFilename` 是调用方决定回退路径的
+/// 依据（`.cmd`/`.bat` 的 shell 绕行，见 #353），把它们也塞进重试只会让调用方自己的
+/// 兜底迟到一秒。预算耗尽时返回**原始** `io::Error`，不重新归类。
+pub(crate) async fn spawn_retrying_exec_busy<T, F>(attempt: F) -> std::io::Result<T>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    spawn_retrying_exec_busy_within(EXEC_BUSY_RETRY_BUDGET, attempt).await
+}
+
+async fn spawn_retrying_exec_busy_within<T, F>(
+    budget: Duration,
+    mut attempt: F,
+) -> std::io::Result<T>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    // `tokio::time::Instant` 而非 `std::time::Instant`：暂停时钟的测试推进 deadline
+    // 时必须同时推进 sleep。
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut backoff = Duration::from_millis(1);
+    loop {
+        match attempt() {
+            Err(error) if is_exec_busy(&error) => {
+                let now = tokio::time::Instant::now();
+                if now >= deadline {
+                    return Err(error);
+                }
+                tokio::time::sleep(backoff.min(deadline - now)).await;
+                backoff = (backoff * 2).min(EXEC_BUSY_MAX_BACKOFF);
+            }
+            outcome => return outcome,
+        }
     }
 }
 
@@ -301,6 +397,137 @@ impl Drop for ManagedChild {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #363-1：四项 UTF-8 环境必须都钉上（`get_envs` 是唯一可离线断言的视图）。
+    #[test]
+    fn utf8_env_pins_all_four_variables() {
+        let mut command = std::process::Command::new("agent");
+        set_utf8_env(&mut command);
+        let rendered: std::collections::HashMap<String, String> = command
+            .get_envs()
+            .filter_map(|(key, value)| {
+                value.map(|value| {
+                    (
+                        key.to_string_lossy().to_string(),
+                        value.to_string_lossy().to_string(),
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(rendered.get("PYTHONUTF8").map(String::as_str), Some("1"));
+        assert_eq!(
+            rendered.get("PYTHONIOENCODING").map(String::as_str),
+            Some("utf-8")
+        );
+        assert_eq!(rendered.get("LANG").map(String::as_str), Some("C.UTF-8"));
+        assert_eq!(rendered.get("LC_ALL").map(String::as_str), Some("C.UTF-8"));
+    }
+
+    /// 收口后用户显式声明的同名 env 仍然赢：本函数只提供默认值。
+    #[test]
+    fn explicit_launch_env_overrides_the_utf8_default() {
+        let mut command = std::process::Command::new("agent");
+        configure_agent_child(&mut command);
+        command.env("LANG", "zh_CN.UTF-8");
+        let lang = command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("LANG"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().to_string());
+        assert_eq!(lang.as_deref(), Some("zh_CN.UTF-8"));
+    }
+
+    fn busy_error() -> std::io::Error {
+        std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy)
+    }
+
+    /// #363-2：busy 错误在预算内重试到成功（1ms + 2ms 退避，实测毫秒级）。
+    #[tokio::test]
+    async fn busy_spawn_retries_until_it_succeeds() {
+        let mut attempts = 0;
+        let result = spawn_retrying_exec_busy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(busy_error())
+            } else {
+                Ok(attempts)
+            }
+        })
+        .await;
+        assert_eq!(result.expect("第三次必须成功"), 3);
+        assert_eq!(attempts, 3);
+    }
+
+    /// 非 busy 错误**不重试**：调用方要用它立刻决定回退路径，不该被我们的预算拖住。
+    #[tokio::test]
+    async fn non_busy_errors_are_returned_on_the_first_attempt() {
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::InvalidFilename,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let mut attempts = 0;
+            let result: std::io::Result<()> = spawn_retrying_exec_busy(|| {
+                attempts += 1;
+                Err(std::io::Error::from(kind))
+            })
+            .await;
+            let error = result.expect_err("必须返回原始错误");
+            assert_eq!(error.kind(), kind, "错误必须原样返回");
+            assert_eq!(attempts, 1, "{kind:?} 不得重试");
+        }
+    }
+
+    /// 预算耗尽返回**原始** busy 错误（不重新归类、不换成超时错误）。
+    /// 用 40ms 预算而非默认 1s，避免测试白等。
+    #[tokio::test]
+    async fn retry_budget_exhaustion_returns_the_original_busy_error() {
+        let mut attempts = 0;
+        let result: std::io::Result<()> =
+            spawn_retrying_exec_busy_within(Duration::from_millis(40), || {
+                attempts += 1;
+                Err(busy_error())
+            })
+            .await;
+        let error = result.expect_err("预算耗尽必须报错");
+        assert_eq!(error.kind(), std::io::ErrorKind::ExecutableFileBusy);
+        assert!(attempts > 1, "必须真的重试过（实际 {attempts} 次）");
+    }
+
+    /// 退避有上界：整个预算内的等待不超过预算 + 一次退避——退避不得无界增长。
+    #[tokio::test]
+    async fn backoff_stays_within_the_budget() {
+        let budget = Duration::from_millis(40);
+        let start = std::time::Instant::now();
+        let mut attempts = 0;
+        let _: std::io::Result<()> = spawn_retrying_exec_busy_within(budget, || {
+            attempts += 1;
+            Err(busy_error())
+        })
+        .await;
+        let elapsed = start.elapsed();
+        assert!(attempts > 1, "必须真的重试过（实际 {attempts} 次）");
+        // 上界给得宽松：tokio 定时器在负载下会超时到达，卡在 budget+25ms 这种紧
+        // 贴边值上会变成 CI flake。真正要钉的是「退避不会无界增长」——数量级即可。
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "退避必须被 deadline 与上限夹住（量级判断），实际 {elapsed:?}"
+        );
+    }
+
+    /// 非 Unix 平台没有 ETXTBSY 这个概念：errno 判定必须不误伤。
+    #[test]
+    fn only_busy_errors_are_classified_as_busy() {
+        assert!(is_exec_busy(&busy_error()));
+        assert!(!is_exec_busy(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+        #[cfg(unix)]
+        {
+            assert!(is_exec_busy(&std::io::Error::from_raw_os_error(ETXTBSY)));
+            assert!(!is_exec_busy(&std::io::Error::from_raw_os_error(2)));
+        }
+    }
 
     /// A1a 步骤 8：子进程退出监听必须触发（SDK 后端的权威崩溃信号）。
     #[test]
