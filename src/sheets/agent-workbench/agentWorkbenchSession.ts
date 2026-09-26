@@ -233,6 +233,51 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     return next
   }
 
+  /**
+   * #358：复活会话的协商事实**不能只等 load 响应**——首屏 journal 回放先于响应到达，
+   * load 失败/重试期间它更不会来，于是 `WorkbenchDocumentSurface` 的守卫前提一直为假，
+   * model / mode 目录常驻会话下方（用户报的「怎么也消不掉」）。
+   *
+   * 已持久化会话（有 remote id ⇒ 历史来自 journal 回放，而非本进程新建）回放出来的
+   * 目录，就是该会话的协商事实。这里补一条合成 `session.started`：**不带 `status`**，
+   * 只交出守卫与中控需要的目录，不碰会话状态机（`status` 由 replayed/内核事实决定）。
+   * 时间线已有该事实（建会话路径或 load 响应写过）时不重复投影。
+   */
+  const withReplayNegotiationFact = (document: WorkbenchDocument): WorkbenchDocument => {
+    const source = binding.source
+    if (!source || !binding.boundSession?.periId) return document
+    const options = document.session.options
+    if (options.length === 0) return document
+    if (document.timeline.some(entry => entry.kind === 'session'
+      && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')) return document
+    const sequence = Math.max(document.revision, transientSequenceBySource.get(source) ?? 0) + 1
+    transientSequenceBySource.set(source, sequence)
+    const envelope = createWorkbenchEnvelope({
+      eventId: `session-replay-negotiation:${source}:${sequence}`,
+      sessionId: source,
+      sequence,
+      recordedAt: new Date().toISOString(),
+      source: { provider: binding.boundProvider || 'acp', sourceId: `session-replay-negotiation:${sequence}` },
+      identity: { runId: `session-replay-negotiation:${sequence}` },
+      provenance: {
+        origin: 'local-observed',
+        trust: 'authoritative',
+        provider: binding.boundProvider || 'acp',
+        orderConfidence: 'observed',
+        synthetic: { reason: 'session-replay-negotiation' },
+      },
+      event: {
+        type: 'session.started',
+        ...(document.session.model ? { model: document.session.model } : {}),
+        ...(document.session.mode ? { mode: document.session.mode } : {}),
+        // 展开成匿名对象类型：SessionConfigOption 是 interface（无 index signature），
+        // 直接放进 `readonly JsonValue[]` 过不了 tsc；语义逐字段保持。
+        options: options.map(option => ({ ...option })),
+      },
+    })
+    return foldPage([envelope], document)
+  }
+
   const clock = createAgentWorkbenchTurnClock({
     runtime,
     updateRuntimeState,
@@ -610,7 +655,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const readEnvelopes = input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead]
     const projected = foldPage(readEnvelopes, input.base)
     const reconciled = echo.withPending(input.readSource, projected)
-    const document = withInterruptedDraftMarker(input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled, readEnvelopes)
+    const document = withReplayNegotiationFact(withInterruptedDraftMarker(input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled, readEnvelopes))
     binding.buffered = []
     binding.loading = false
     const readLiveness = clock.effectiveLiveness(input.readSource)

@@ -676,6 +676,62 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  // #358 遗留：**已持久化**会话（有 remote id，历史来自 journal 回放）的目录本身就是协商事实。
+  // 现场：冷启动两次 session/load 都 `connection_closed`，load 响应永远不来 —— 若只把 load
+  // 响应当唯一来源，卡片就会常驻。这条合成事实不带 status，不改写会话状态机。
+  it('#358 已持久化会话的 bind 回放补出协商事实（不等 load 响应）', async () => {
+    const persisted = { ...session('revived-fact', 'local:revived-fact'), periId: 'peri-1' }
+    const catalogue = [
+      { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      { id: 'mode', name: 'mode', category: 'mode', type: 'select', currentValue: 'default', options: [{ value: 'default' }] },
+    ]
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:revived-fact' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: catalogue } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(persisted)
+
+    const document = service.runtime.getSnapshot().document
+    const negotiation = document?.timeline.find(entry => entry.kind === 'session'
+      && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')
+    expect(negotiation).toBeDefined()
+    expect((negotiation?.data as { status?: unknown }).status).toBeUndefined()
+    expect((negotiation?.data as { options?: unknown[] }).options).toHaveLength(2)
+    expect(document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    service.destroy()
+  })
+
+  // 反面对照：本进程新建（尚无 remote id）的文档不补事实——「没有启动协商时普通
+  // session.config-updated 保留其编辑器」这条既有契约（mountSolidWorkbench :2156）不动。
+  it('#358 未持久化会话不补协商事实', async () => {
+    const fresh = session('fresh-fact', 'local:fresh-fact')
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:fresh-fact' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: [
+        { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      ] } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(fresh)
+
+    const document = service.runtime.getSnapshot().document
+    expect(document?.timeline.some(entry => entry.kind === 'session'
+      && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')).toBe(false)
+    expect(document?.session.options.map(option => option.id)).toEqual(['model'])
+    service.destroy()
+  })
+
   // #97：catalog 不被压成单项——空成功响应/空 configOptions 回声只能结束传输，
   // 不能把已投影的两项 selector catalog 替换成单项合成列表。
   it('#97 空回声响应保留已投影的 selector catalog', async () => {
