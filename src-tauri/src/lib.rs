@@ -87,6 +87,7 @@ use session::SessionInfo;
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::load_mcp_persisted;
 use crate::permission::check_pending_permission_timeouts;
+use crate::permission::check_pending_private_interaction_timeouts;
 use crate::pet::cmds::persist_pet_if_possible;
 use crate::session::{check_session_expiry, send_prompt_core};
 
@@ -1476,6 +1477,8 @@ fn setup_spawn_journal_maintenance_watcher(app: &tauri::App) {
 /// 阶段 18：权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
 /// permission.resolved terminal 事件——后端唯一计时/应答来源，前端
 /// 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
+/// #356：同一 watcher 附带私有交互（elicitation/ask-user/exit-plan）对等的
+/// deadline drain + 向 agent 回包，并广播 interaction.resolved(timed_out)。
 fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
     let app_for_watcher = app.handle().clone();
     tokio::spawn(async move {
@@ -1483,7 +1486,9 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let state = app_for_watcher.state::<AppState>();
             let outcomes = check_pending_permission_timeouts(state.inner()).await;
-            if outcomes.is_empty() {
+            // #356：私有交互超时 sweep（死亡 runtime 已由权限 sweep 的死亡分支清理）。
+            let private_outcomes = check_pending_private_interaction_timeouts(state.inner()).await;
+            if outcomes.is_empty() && private_outcomes.is_empty() {
                 continue;
             }
             let Some(window) = app_for_watcher.get_webview_window("main") else {
@@ -1500,6 +1505,23 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                         "requestId": outcome.request_id.to_string(),
                         "clientGeneration": outcome.client_generation,
                         "optionId": outcome.option_id,
+                        "reason": "timed_out",
+                    }),
+                );
+            }
+            // #356：形状与断线 drain 的 interaction.resolved 同构（kind + reason），
+            // workbench 交互条目与权限弹卡据此收敛。
+            for outcome in private_outcomes {
+                emit_event(
+                    &window,
+                    crate::event_names::INTERACTION,
+                    serde_json::json!({
+                        "eventType": "interaction.resolved",
+                        "agentId": outcome.agent_id,
+                        "sessionId": outcome.session_id,
+                        "requestId": outcome.request_id.to_string(),
+                        "clientGeneration": outcome.client_generation,
+                        "kind": outcome.kind,
                         "reason": "timed_out",
                     }),
                 );
