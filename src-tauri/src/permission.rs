@@ -698,8 +698,8 @@ pub(crate) async fn get_approval_mode(
 /// CLI 侧透传，不自行硬编码（#36：`permission` 是漂移词项，会被门禁拒绝）。
 /// #230：同时投影私有交互（elicitation / ask-user / exit-plan）——identity
 /// 取 private_interactions store（respond 复核真源），options 为应答动作
-/// 虚拟投影（fail-closed 白名单见 respond_interaction）；私有交互不参与
-/// 超时结算，deadlineMs 以 0 标注。
+/// 虚拟投影（fail-closed 白名单见 respond_interaction）。#356：私有交互与
+/// pending_permissions 对等参与超时结算，deadlineMs 为真实 deadline。
 #[tauri::command]
 pub(crate) async fn interaction_list(
     state: tauri::State<'_, AppState>,
@@ -829,8 +829,8 @@ fn private_interaction_item(
             "optionId": option_id,
         })).collect::<Vec<_>>(),
         "requestedAt": pending.enqueued_at.to_string(),
-        // 私有交互无后端超时结算——0 = 不适用（区别于权限请求的真实 deadline）。
-        "deadlineMs": 0,
+        // #356：私有交互对等参与超时结算——deadline 与权限请求同源同值。
+        "deadlineMs": permission_deadline_ms(pending.enqueued_at),
     })
 }
 
@@ -973,6 +973,136 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
     outcomes
 }
 
+/// #356：私有交互超时结算的 outcome（watcher 据此广播
+/// `interaction.resolved{reason:"timed_out"}`）。session_id 对 request-scoped
+/// elicitation 为空串（前端 settle 按 agentId+requestId+clientGeneration 关卡，
+/// 与 session 无关）。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PrivateInteractionTimeoutOutcome {
+    pub agent_id: String,
+    pub session_id: String,
+    pub request_id: RequestId,
+    pub client_generation: u64,
+    pub kind: String,
+}
+
+/// #356：私有交互超时的默认回包（产品裁决落在这一处）。
+/// 语义基准：**超时 = 用户未应答**，回包必须取各桥的**非承诺值**——
+/// - elicitation → `cancel`（用户未作答；`decline` 会断言用户明确拒绝，不成立）；
+/// - grok/pi 问题桥 → 既有 declined 映射（`skip_interview` / `cancelled:true`）；
+/// - exit_plan → `keep_planning`（超时绝不批准，也不代替用户放弃计划）。
+/// 与 `pending_permissions` 的超时默认拒绝（pick_option prefer_reject）同一
+/// 「不悬挂、不批准」取向。
+fn private_interaction_timeout_response(
+    pending: &crate::private_interaction::PendingPrivateInteraction,
+) -> Result<serde_json::Value, PylonError> {
+    use crate::acp::adapter::private_ext::PrivateBridge;
+    match pending.bridge {
+        PrivateBridge::Elicitation => {
+            crate::acp::adapter::private_ext::build_elicitation_response("cancel", None)
+        }
+        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
+            let questions = pending.question_specs.clone().ok_or_else(|| {
+                PylonError::Protocol("private question request lost validated specs".into())
+            })?;
+            crate::acp::adapter::private_ext::build_question_response(
+                pending.bridge,
+                &questions,
+                &crate::acp::question_policy::QuestionAnswer {
+                    answers: Vec::new(),
+                    declined: true,
+                },
+            )
+        }
+        PrivateBridge::GrokExitPlan => Ok(crate::acp::plan_policy::approval_response(
+            "keep_planning",
+            "",
+        )),
+    }
+    .map_err(PylonError::Protocol)
+}
+
+/// #356：挂起私有交互的超时检查——与 `check_pending_permission_timeouts`
+/// 对等的 deadline drain + 向 agent 回包（超时前 agent 会挂等一个永不来的
+/// 响应，可能阻塞其 auth/config 流程）。同一 watcher 每轮先跑权限 sweep，
+/// 死亡 runtime 的 store 残留已由其死亡分支 `cancel_all` 清理，此处跳过
+/// dead runtime 即可。claim 顺序与并发用户应答竞态的裁决：**take() 原子
+/// 抢先**——用户应答先到则本 sweep 拿 None 跳过；本 sweep 先 take 则用户
+/// 侧拿到 not found 由前端 settle（与 route_elicitation_complete 的 P2-2
+/// 语义一致）。发送失败回插 pending，下轮 watcher 重试。
+pub(crate) async fn check_pending_private_interaction_timeouts(
+    state: &AppState,
+) -> Vec<PrivateInteractionTimeoutOutcome> {
+    let now = Timestamp::now();
+    let mut outcomes = Vec::new();
+    for (agent_id, runtime) in state.runtimes.all_with_ids() {
+        let dead = runtime
+            .acp
+            .try_lock()
+            .map(|acp| acp.is_dead())
+            .unwrap_or(false);
+        if dead {
+            continue;
+        }
+        let expired: Vec<(
+            RequestId,
+            crate::private_interaction::PendingPrivateInteraction,
+        )> = runtime
+            .private_interactions
+            .snapshot()
+            .into_iter()
+            .filter(|(_, pending)| {
+                now.elapsed_since(pending.enqueued_at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
+            })
+            .collect();
+        for (request_id, pending) in expired {
+            // take() 即原子 claim：None = 用户应答已抢先收口，跳过。
+            let Some(claimed) = runtime
+                .private_interactions
+                .take(&request_id)
+                .ok()
+                .flatten()
+            else {
+                continue;
+            };
+            let kind = claimed.queue_kind().to_string();
+            let response = match private_interaction_timeout_response(&claimed) {
+                Ok(response) => response,
+                Err(error) => {
+                    tracing::error!("私有交互 {request_id} 超时应答构造失败：{error}；回插重试");
+                    let _ = runtime
+                        .private_interactions
+                        .insert(request_id.clone(), claimed);
+                    continue;
+                }
+            };
+            let responder = { runtime.acp.lock().await.responder() };
+            if !responder.respond(request_id.clone(), response).await {
+                tracing::warn!("私有交互 {request_id} 超时回包发送失败；回插 pending 下轮重试");
+                let _ = runtime.private_interactions.insert(request_id, claimed);
+                continue;
+            }
+            // #98：队列 TimedOut 终结——超时事实与回包一并成立，waiter 不悬挂。
+            let _ = runtime.interactions.settle(
+                &request_id.to_string(),
+                crate::acp::interaction_queue::InteractionTerminalReason::TimedOut,
+            );
+            tracing::warn!(
+                "私有交互 {request_id}（{kind}）超时，已按默认动作回包（session={}）",
+                claimed.session_id
+            );
+            outcomes.push(PrivateInteractionTimeoutOutcome {
+                agent_id: agent_id.clone(),
+                session_id: claimed.session_id,
+                request_id,
+                client_generation: claimed.client_generation,
+                kind,
+            });
+        }
+    }
+    outcomes
+}
+
 #[cfg(test)]
 mod tests {
     use crate::private_interaction::PendingPrivateInteraction;
@@ -1074,7 +1204,7 @@ mod tests {
 
     /// #230：私有交互（elicitation / exit-plan）投影进 interaction_list——
     /// kind 沿队列 canonical 值、identity 取 store 真源、options 为应答动作
-    /// 虚拟白名单、deadlineMs=0（无后端超时）。
+    /// 虚拟白名单。#356：deadlineMs 为真实 deadline（对等权限请求）。
     #[test]
     fn interaction_list_projects_private_interactions_for_cli() {
         use crate::acp::adapter::private_ext::PrivateBridge;
@@ -1124,7 +1254,11 @@ mod tests {
                     // store provider 缺省时回退配置反查值。
                     assert_eq!(item["provider"], "peri-fallback");
                     assert_eq!(option_ids(), vec!["accept", "declined", "cancel"]);
-                    assert_eq!(item["deadlineMs"], 0);
+                    // #356：deadline = enqueued_at + 300s（对等权限请求）。
+                    assert_eq!(
+                        item["deadlineMs"],
+                        serde_json::json!(permission_deadline_ms(pending.enqueued_at))
+                    );
                     assert_eq!(item["clientGeneration"], 4);
                 }
                 PrivateBridge::GrokExitPlan => {
@@ -1471,5 +1605,169 @@ mod tests {
             permission_deadline_ms(requested_at),
             1_722_500_000_000 + 300 * 1000
         );
+    }
+
+    /// #356：私有交互超时默认回包 = 各桥的非承诺值（超时 = 用户未应答）。
+    /// 产品裁决集中在本函数——改语义只动一处。
+    #[test]
+    fn private_timeout_response_picks_the_non_committal_value_per_bridge() {
+        use crate::acp::adapter::private_ext::PrivateBridge;
+        let mut elicitation = private_elicitation_pending();
+        assert_eq!(
+            private_interaction_timeout_response(&elicitation).unwrap(),
+            serde_json::json!({"action": "cancel"}),
+            "elicitation 超时 = cancel（未作答），不得伪造 decline"
+        );
+
+        elicitation.bridge = PrivateBridge::GrokExitPlan;
+        assert_eq!(
+            private_interaction_timeout_response(&elicitation).unwrap(),
+            serde_json::json!({"outcome": "keep_planning", "feedback": ""}),
+            "exit_plan 超时 = keep_planning（不批准也不代弃）"
+        );
+
+        let mut grok = elicitation.clone();
+        grok.bridge = PrivateBridge::GrokExtQuestions;
+        grok.question_specs = Some(
+            crate::acp::question_policy::parse_questions(&serde_json::json!({"questions": [{
+                "question": "Pick", "header": "Choice",
+                "options": [{"label": "A"}, {"label": "B"}]
+            }]}))
+            .unwrap(),
+        );
+        assert_eq!(
+            private_interaction_timeout_response(&grok).unwrap(),
+            serde_json::json!({"outcome": "skip_interview"}),
+            "grok 问题桥超时 = 既有 declined 映射"
+        );
+
+        let mut pi = grok.clone();
+        pi.bridge = PrivateBridge::PiSelectAsk;
+        assert_eq!(
+            private_interaction_timeout_response(&pi).unwrap(),
+            serde_json::json!({"cancelled": true}),
+            "pi 问题桥超时 = cancelled:true"
+        );
+
+        // 问题桥丢 specs 的防御分支：报错而非伪造应答。
+        pi.question_specs = None;
+        assert!(private_interaction_timeout_response(&pi).is_err());
+    }
+
+    /// #356：到期私有交互经真实 SDK responder 回包（fake agent 发 id=71 的
+    /// 请求，引擎登记 Responder）——store 清空、队列 TimedOut、outcome 收集。
+    #[tokio::test]
+    async fn private_interaction_timeout_sends_cancel_and_settles_with_live_responder() {
+        let agent = crate::test_utils::fake_acp_agent(
+            "fake-acp-private-timeout",
+            &[
+                "--scenario",
+                "permission-proactive",
+                "--permission-id",
+                "71",
+                "--post-init-respond",
+                "--permission-params",
+                r#"{"sessionId":"s1","toolCallId":"tc-1","options":[{"optionId":"allow_once"}]}"#,
+            ],
+        );
+        let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if acp
+                .backend
+                .pending_requests
+                .lock()
+                .unwrap()
+                .contains_key(&RequestId::Number(71))
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "engine must register the private interaction responder"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = acp;
+        let agent_id = "private-timeout-agent";
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_runtime(agent_id, runtime.clone())
+            .build();
+        // enqueued_at 早于 300s——超时命中。
+        let mut pending = private_elicitation_pending();
+        pending.enqueued_at = Timestamp::new(Timestamp::now().as_u64().saturating_sub(301_000));
+        runtime
+            .private_interactions
+            .insert(RequestId::Number(71), pending.clone())
+            .unwrap();
+        let _ = runtime
+            .interactions
+            .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                request_id: "71".into(),
+                method: "elicitation/create".into(),
+                kind: "elicitation".into(),
+                session_id: pending.session_id.clone(),
+                agent_id: agent_id.into(),
+                client_generation: 1,
+                enqueued_at: pending.enqueued_at,
+                event: serde_json::json!({}),
+                state: crate::acp::interaction_queue::InteractionEntryState::Active,
+            });
+
+        let outcomes = check_pending_private_interaction_timeouts(&state).await;
+
+        assert_eq!(outcomes.len(), 1, "到期私有交互必须结算并报告 outcome");
+        let outcome = &outcomes[0];
+        assert_eq!(outcome.agent_id, agent_id);
+        assert_eq!(outcome.session_id, "peri-s1");
+        assert_eq!(outcome.request_id, RequestId::Number(71));
+        assert_eq!(outcome.kind, "elicitation");
+        assert!(
+            runtime.private_interactions.snapshot().is_empty(),
+            "回包送达后 store 必须清空"
+        );
+        let entries = runtime.interactions.snapshot().expect("queue snapshot");
+        assert!(
+            entries.is_empty(),
+            "队列条目必须被 settle 收敛（settle = 移除 + 终态返回），不残留悬挂 waiter"
+        );
+        let _ = runtime.acp.lock().await.kill();
+    }
+
+    /// #356：未到期不动；到期但发送失败（disconnected client）→ 条目回插
+    /// 供下轮重试，队列不终结、不产出 outcome。
+    #[tokio::test]
+    async fn private_interaction_timeout_retains_entry_when_send_fails() {
+        let runtime = AgentRuntime::new_disconnected();
+        let agent_id = "private-timeout-retry-agent";
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_runtime(agent_id, runtime.clone())
+            .build();
+        let fresh = private_elicitation_pending();
+        let mut expired = private_elicitation_pending();
+        expired.enqueued_at = Timestamp::new(Timestamp::now().as_u64().saturating_sub(301_000));
+        runtime
+            .private_interactions
+            .insert(RequestId::Number(81), expired)
+            .unwrap();
+        runtime
+            .private_interactions
+            .insert(RequestId::Number(82), fresh)
+            .unwrap();
+
+        let outcomes = check_pending_private_interaction_timeouts(&state).await;
+
+        assert!(outcomes.is_empty(), "发送失败不得产出 outcome");
+        let snapshot = runtime.private_interactions.snapshot();
+        assert_eq!(
+            snapshot.len(),
+            2,
+            "未到期保留；发送失败回插重试——两条都不丢"
+        );
+        assert!(snapshot.iter().any(|(id, _)| *id == RequestId::Number(81)));
+        assert!(snapshot.iter().any(|(id, _)| *id == RequestId::Number(82)));
     }
 }

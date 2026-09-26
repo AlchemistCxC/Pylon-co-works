@@ -1,5 +1,6 @@
 //! Closed provider-specific parser/builder boundary.
 use crate::{plan_policy, question_policy};
+use agent_client_protocol_schema::v1::{CreateElicitationRequest, ElicitationScope};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +69,42 @@ pub fn parse_elicitation(params: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// #356：request-scoped elicitation 的 scope 投影结论。`Session` 携带投影出的
+/// 非空 sessionId（与既有会话内路径同构）；`Request` 是会话外（auth/config
+/// 阶段）elicitation——wire 上没有 sessionId，宿主以空串入队、身份由
+/// requestId+agentId 收口。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElicitationScopeProjection {
+    Session { session_id: String },
+    Request,
+}
+
+/// #356：空 `sessionId` 的 elicitation/create 走官方 typed
+/// `CreateElicitationRequest` 解析并按 scope 投影。解析失败（mode/message/
+/// requestedSchema/scope 任一不符合官方形状）回 Err，调用方按参数类错误
+/// （-32602）拒绝；`Session` scope 的 id 为显式空串时同样 Err——空串在前后端
+/// 三道门均当缺失，入队只会让 agent 挂等一个永不来的响应。未广告的
+/// `mode:"url"` 在 [`parse_elicitation`] 已 fail-closed，不会到达本函数。
+pub fn project_elicitation_scope(params: &Value) -> Result<ElicitationScopeProjection, String> {
+    let request: CreateElicitationRequest =
+        serde_json::from_value(params.clone()).map_err(|error| {
+            format!("elicitation/create params do not match the official shape: {error}")
+        })?;
+    match request.scope() {
+        ElicitationScope::Session(session) => {
+            let session_id = session.session_id.0.to_string();
+            if session_id.is_empty() {
+                return Err("elicitation/create session scope carries an empty sessionId".into());
+            }
+            Ok(ElicitationScopeProjection::Session { session_id })
+        }
+        ElicitationScope::Request(_) => Ok(ElicitationScopeProjection::Request),
+        // #[non_exhaustive]：schema 未来可能新增 scope 变体——fail-closed 拒绝
+        // （issue 措辞「未知变体 fail-closed 拒绝」）。
+        _ => Err("elicitation/create scope variant is not supported by this host".into()),
+    }
 }
 
 /// elicitation 应答形状：action ∈ accept/decline/cancel；accept 携带 content
@@ -247,6 +284,54 @@ mod tests {
         }))
         .is_err());
         assert!(parse_elicitation(&serde_json::json!({"mode": "_vendor.custom"})).is_err());
+    }
+
+    /// #356：typed scope 投影——Request scope（无 sessionId、带 requestId）
+    /// 放行为 request-scoped；Session scope 取回非空 sessionId；显式空
+    /// sessionId 与官方形状缺失（message/requestedSchema/scope）fail-closed。
+    #[test]
+    fn elicitation_scope_projection_matches_official_shapes() {
+        use ElicitationScopeProjection as P;
+        // request-scoped：官方 auth/config 阶段形状。
+        assert_eq!(
+            project_elicitation_scope(&serde_json::json!({
+                "mode": "form",
+                "requestId": 7,
+                "message": "auth configuration needed",
+                "requestedSchema": {"type": "object", "properties": {}, "required": []}
+            }))
+            .unwrap(),
+            P::Request
+        );
+        // session-scoped（经 typed 路径）取回投影 id。
+        assert_eq!(
+            project_elicitation_scope(&serde_json::json!({
+                "mode": "form",
+                "sessionId": "peri-s1",
+                "message": "m",
+                "requestedSchema": {"type": "object"}
+            }))
+            .unwrap(),
+            P::Session {
+                session_id: "peri-s1".into()
+            }
+        );
+        // 显式空 sessionId：Session scope 形状成立但 id 为空——fail-closed。
+        assert!(project_elicitation_scope(&serde_json::json!({
+            "mode": "form", "sessionId": "", "message": "m",
+            "requestedSchema": {"type": "object"}
+        }))
+        .is_err());
+        // 无任何 scope：官方形状缺失。
+        assert!(project_elicitation_scope(
+            &serde_json::json!({"mode": "form", "message": "m", "requestedSchema": {"type": "object"}})
+        )
+        .is_err());
+        // message 官方必填。
+        assert!(project_elicitation_scope(
+            &serde_json::json!({"mode": "form", "requestId": 1, "requestedSchema": {"type": "object"}})
+        )
+        .is_err());
     }
 
     #[test]
