@@ -6,6 +6,7 @@
  * 未知 patch 字段保留为 metadata（不丢弃），但 renderer 分支只依赖已收窄字段。
  */
 import { isJsonValue, type ContentTruncation, type JsonValue, type TextPosition, type TextRange } from './content/contentPartSchema.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 export interface DiffHunk {
   oldStart?: number
@@ -38,9 +39,6 @@ export interface DiffSnapshot {
   rawPatch?: JsonValue
   unknownFields?: readonly string[]
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const toTrimmedText = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined

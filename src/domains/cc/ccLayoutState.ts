@@ -72,7 +72,8 @@ export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   placements: DEFAULT_PLACEMENTS,
 }
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : 0))
+// 非有限值落 0（persist 域语言：坏数值不抛，回中位安全值）——与 legacyKeyMigration 的 clampRound（先 round）语义不同，勿混用。
+const clampFinite = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : 0))
 
 export function cloneCcLayout(layout: CcLayoutV3): CcLayoutV3 {
   return {
@@ -110,9 +111,9 @@ export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined
       ?? (id === 'cc-send-button' ? legacyPlacements.send : undefined)
     if (!candidate) continue
     placements[id] = {
-      order: Math.round(clamp(candidate.order as number, 0, 99)),
-      offsetX: clamp(candidate.offsetX as number, -48, 48),
-      offsetY: clamp(candidate.offsetY as number, -16, 16),
+      order: Math.round(clampFinite(candidate.order as number, 0, 99)),
+      offsetX: clampFinite(candidate.offsetX as number, -48, 48),
+      offsetY: clampFinite(candidate.offsetY as number, -16, 16),
     }
   }
   return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
@@ -126,9 +127,9 @@ export function updateCcPlacementState(
   const current = layout.placements[id as CcLayoutWidgetId]
   if (!current) return layout
   const next: CcWidgetPlacement = {
-    order: partial.order == null || !Number.isFinite(partial.order) ? current.order : Math.round(clamp(partial.order, 0, 99)),
-    offsetX: partial.offsetX == null || !Number.isFinite(partial.offsetX) ? current.offsetX : clamp(partial.offsetX, -48, 48),
-    offsetY: partial.offsetY == null || !Number.isFinite(partial.offsetY) ? current.offsetY : clamp(partial.offsetY, -16, 16),
+    order: partial.order == null || !Number.isFinite(partial.order) ? current.order : Math.round(clampFinite(partial.order, 0, 99)),
+    offsetX: partial.offsetX == null || !Number.isFinite(partial.offsetX) ? current.offsetX : clampFinite(partial.offsetX, -48, 48),
+    offsetY: partial.offsetY == null || !Number.isFinite(partial.offsetY) ? current.offsetY : clampFinite(partial.offsetY, -16, 16),
   }
   return {
     version: CC_LAYOUT_SCHEMA_VERSION,

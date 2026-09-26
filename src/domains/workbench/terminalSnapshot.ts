@@ -4,6 +4,7 @@ import {
   type TerminalOutputTruncation,
   type TerminalStreamEntry,
 } from './content/contentPartSchema.ts'
+import { isRecord } from '../../utils/wireGuards.ts'
 
 /**
  * C07：content.terminal 结构化快照收窄。
@@ -31,9 +32,6 @@ export interface TerminalSnapshot {
   truncation?: TerminalOutputTruncation
   error?: TerminalContentPart['error']
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /**
  * 从 content.terminal part 收窄出 typed snapshot。

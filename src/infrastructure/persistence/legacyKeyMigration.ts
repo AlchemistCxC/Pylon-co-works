@@ -23,7 +23,8 @@ const RIGHT_MAX = 560
 const LEFT_MIN = 160
 const LEFT_MAX = 520
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(value)))
+// 先 round 再夹取（legacy 迁移域：旧值可能是小数宽度）——与 ccLayoutState 的 clampFinite（非有限落 0）语义不同，勿混用。
+const clampRound = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(value)))
 
 function readJson(storage: Pick<Storage, 'getItem'>, key: string): unknown {
   try {
@@ -52,14 +53,14 @@ export function readLegacyLayoutSnapshot(storage: Pick<Storage, 'getItem'> | nul
   const workspaceLayout = workspaceValue?.layout
   const themeState = themeValue?.state
   const rightWidth = finite(railState?.width)
-    ? clamp(railState.width, RIGHT_MIN, RIGHT_MAX)
+    ? clampRound(railState.width, RIGHT_MIN, RIGHT_MAX)
     : finite(themeState?.rightWidth)
-      ? clamp(themeState.rightWidth, RIGHT_MIN, RIGHT_MAX)
+      ? clampRound(themeState.rightWidth, RIGHT_MIN, RIGHT_MAX)
       : undefined
   const leftWidth = finite(workspaceLayout?.sidebarWidth)
-    ? clamp(workspaceLayout.sidebarWidth, LEFT_MIN, LEFT_MAX)
+    ? clampRound(workspaceLayout.sidebarWidth, LEFT_MIN, LEFT_MAX)
     : finite(themeState?.sidebarWidth)
-      ? clamp(themeState.sidebarWidth, LEFT_MIN, LEFT_MAX)
+      ? clampRound(themeState.sidebarWidth, LEFT_MIN, LEFT_MAX)
       : undefined
   return {
     ...(rightWidth === undefined ? {} : { rightWidth }),

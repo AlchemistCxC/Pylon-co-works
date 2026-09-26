@@ -13,8 +13,9 @@
  */
 import { Channel } from '@tauri-apps/api/core'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
+import type { PylonStreamWireEvent } from '../../infrastructure/events/pylonStreamWireEvents.ts'
 
-export type StreamFrameEvent = 'pylon:update' | 'pylon:done' | 'pylon:error' | 'pylon:user'
+export type StreamFrameEvent = PylonStreamWireEvent
 
 export interface StreamFrame {
   event: StreamFrameEvent
