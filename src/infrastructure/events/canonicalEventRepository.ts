@@ -12,6 +12,8 @@
  * - evt_list(owner_key, before_sequence, limit, cap_typed_payload)：升序页 + 下一页游标。
  *   #376 起读出口对 `typed_payload` 的字符串叶子按 64 KiB 线收口（`cap_typed_payload`
  *   缺省 true）；`turn.unit` 豁免（单元行是历史正文的唯一副本）。
+ * - evt_load_compact(owner_key, after_sequence, limit, cap_typed_payload)：compact 读的
+ *   **一页**（升序、前向游标；#376-b 起不再一次取回整库）。
  * - 结构化错误 { code, message }：event_revision_conflict / event_repo_corrupt /
  *   event_repo_constraint / event_repo_conflict / event_db_unavailable / event_invalid /
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
@@ -32,6 +34,15 @@ export interface CanonicalEventAppendResult {
 export interface CanonicalEventPage {
   events: CanonicalEventRow[]
   nextBeforeSequence: number | null
+}
+
+/**
+ * #376-b：`evt_load_compact` 的一页（升序；`nextAfterSequence` 为**前向**游标，
+ * null = 已到最新）。冷装载按「由旧到新」续折，所以游标方向与 `evt_list` 相反。
+ */
+export interface CanonicalCompactPage {
+  events: CanonicalEventRow[]
+  nextAfterSequence: number | null
 }
 
 export interface CanonicalEventRawExport {
@@ -109,6 +120,9 @@ export interface CanonicalEventRepository {
   /** #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（投影/搜索入口；
    * 被单元覆盖的行不传输不解析，读放大随单元粒度下降）。 */
   loadAllPreferUnits(ownerKey: string): Promise<CanonicalEventRow[]>
+  /** #376-b：compact 读**分页**（升序、前向游标）。冷装载据此逐页续折，
+   * 装载期不再「整库行 + 整库信封 + 文档」三份并存。 */
+  listCompact(ownerKey: string, afterSequence: number | null, limit?: number): Promise<CanonicalCompactPage>
   /** 单行取证导出：不解析损坏 JSON，返回数据库中的原始文本。 */
   exportRaw(eventId: string): Promise<CanonicalEventRawExport | null>
   /** B6：跨 owner 内容搜索候选 owner（payload/eventType LIKE）；前端再做消息级过滤。 */
@@ -117,6 +131,12 @@ export interface CanonicalEventRepository {
 
 const DEFAULT_PAGE_LIMIT = 100
 const RANGE_PAGE_LIMIT = 1000
+/**
+ * #376-b：compact 读单页行数。比 `evt_list` 的 1000 小一档——页内行数直接决定一次
+ * invoke 的载荷上界（最坏 = 页行数 × 单行 64 KiB），冷装载按页折完即回收，页越小
+ * 装载期峰值越低；代价只是多几次 invoke。
+ */
+const COMPACT_PAGE_LIMIT = 256
 
 /**
  * #376 读出口载荷收口的杀停开关（回滚用，不需要回滚版本）：页面上任意位置出现
@@ -228,11 +248,26 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       return rows
     },
     async loadAllPreferUnits(ownerKey) {
-      const rows = await invoke<CanonicalEventRow[]>('evt_load_compact', {
+      const rows: CanonicalEventRow[] = []
+      let afterSequence: number | null = null
+      do {
+        const page = await this.listCompact(ownerKey, afterSequence, COMPACT_PAGE_LIMIT)
+        rows.push(...page.events)
+        afterSequence = page.nextAfterSequence
+      } while (afterSequence !== null)
+      return rows
+    },
+    async listCompact(ownerKey, afterSequence, limit = COMPACT_PAGE_LIMIT) {
+      const page = await invoke<CanonicalCompactPage>('evt_load_compact', {
         ownerKey,
+        afterSequence,
+        limit,
         capTypedPayload: typedPayloadCapEnabled(),
       }).catch(rejectCanonicalEventRepositoryError)
-      return rows.map(normalizeCanonicalEventRow)
+      return {
+        events: page.events.map(normalizeCanonicalEventRow),
+        nextAfterSequence: page.nextAfterSequence,
+      }
     },
     async exportRaw(eventId) {
       return invoke<CanonicalEventRawExport | null>('evt_export_raw', { eventId })

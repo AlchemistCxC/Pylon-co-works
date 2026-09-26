@@ -2181,3 +2181,165 @@ async fn read_exit_cap_shrinks_tool_rows_but_exempts_turn_unit() {
     }
     assert!(saw_tool && saw_unit, "语料必须同时含工具行与单元行");
 }
+
+// ============================================================================
+// #376-b：compact 读分页（升序前向游标；页边界落在 delta run 边界上）
+// ============================================================================
+
+/// 语料：一个已终结回合（含 10 条 delta run + 工具行）+ 一个进行中回合的尾部 delta run。
+fn paged_compact_fixture(repo: &EventRepo, delta: impl Fn(&str) -> serde_json::Value) -> String {
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    for index in 0..10 {
+        repo.ingest_kernel_event(kernel_input(delta(&format!("a{index}"))))
+            .unwrap();
+    }
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "tool_call", "toolCallId": "tool-1", "title": "Read", "kind": "read" }
+    })))
+    .unwrap();
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "done", "stopReason": "end_turn" }
+    })))
+    .unwrap();
+    for index in 0..7 {
+        repo.ingest_kernel_event(kernel_input(delta(&format!("b{index}"))))
+            .unwrap();
+    }
+    owner_key
+}
+
+fn compact_delta(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": text } }
+    })
+}
+
+/// 逐页走完整库，行集合（事件类型 + sequence + 折叠跨度）与一次性读逐位相同。
+#[test]
+fn compact_page_walk_equals_one_shot_read() {
+    let repo = repo();
+    let owner_key = paged_compact_fixture(&repo, compact_delta);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+
+    for limit in [1u32, 2, 3, 4, 7] {
+        let mut paged: Vec<CanonicalEventRow> = Vec::new();
+        let mut cursor: Option<i64> = None;
+        let mut pages = 0usize;
+        loop {
+            let page = repo
+                .load_events_compact_page(&owner_key, cursor, limit)
+                .expect("page");
+            pages += 1;
+            assert!(
+                page.events.len() <= usize::try_from(limit).unwrap_or(1).max(1),
+                "页不得超过 limit（limit={limit}, got={}）",
+                page.events.len()
+            );
+            paged.extend(page.events);
+            match page.next_after_sequence {
+                Some(next) => {
+                    assert!(cursor.is_none_or(|current| next > current), "游标必须前进");
+                    cursor = Some(next)
+                }
+                None => break,
+            }
+            assert!(pages < 200, "limit={limit} 时游标不收敛");
+        }
+        let shape = |rows: &[CanonicalEventRow]| {
+            rows.iter()
+                .map(|row| (row.event_type.clone(), row.sequence, row.rollup_seq_start, row.rollup_seq_end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shape(&paged),
+            shape(&one_shot),
+            "limit={limit} 时逐页装载必须与一次性读逐位等价"
+        );
+    }
+}
+
+/// 页边界不得切进 delta run 中间：未被单元覆盖的 run 折叠出的跨度必须与一次性读相同
+/// （切进 run 中间会让读侧折叠的切点随页边界漂移）。
+#[test]
+fn compact_page_keeps_delta_runs_whole_across_page_boundaries() {
+    let repo = repo();
+    let owner_key = paged_compact_fixture(&repo, compact_delta);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    let span_of = |row: &CanonicalEventRow| -> Option<(i64, i64)> {
+        let typed = row.typed_payload.as_ref()?;
+        let span = typed.get("seqSpan")?.as_array()?;
+        Some((span.first()?.as_i64()?, span.get(1)?.as_i64()?))
+    };
+    let one_shot_spans: Vec<_> = one_shot.iter().filter_map(span_of).collect();
+    assert_eq!(one_shot_spans.len(), 1, "语料只有一个未覆盖 delta run");
+    assert_eq!(one_shot_spans[0], (14, 20), "run span 覆盖 7 条尾部 delta（终态单元占 seq 13）");
+
+    // limit=3 必然落在 run 内部；折叠切点仍须与一次性读一致。
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 3)
+            .expect("page");
+        spans.extend(page.events.iter().filter_map(span_of));
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(spans, one_shot_spans, "页边界不得把 run 切碎");
+}
+
+/// 分页读同样只在 service 层收口 typed 载荷（单元行仍豁免）。
+#[tokio::test]
+async fn compact_page_caps_tool_rows_and_exempts_unit_rows() {
+    let service = EventService::in_memory().expect("event service");
+    let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+    let owner_key = owner.key().unwrap();
+    let mut events = vec![
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "user_message_chunk", "content": { "text": "hi" } },
+        })),
+        Arc::new(oversized_tool_payload()),
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "done", "stopReason": "end_turn" },
+        })),
+    ];
+    events.insert(1, events[1].clone());
+    service
+        .ingest_events(owner, Some("remote-1".to_string()), 5, events)
+        .await
+        .expect("ingest");
+
+    let mut capped: Vec<CanonicalEventRow> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = service
+            .load_events_compact_page(owner_key.clone(), cursor, 1, true)
+            .await
+            .expect("capped page");
+        capped.extend(page.events);
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    let unit = capped
+        .iter()
+        .find(|row| row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE)
+        .expect("turn.unit row");
+    assert!(
+        typed_bytes(unit.typed_payload.as_ref().unwrap()) > redaction::MAX_CANONICAL_RAW_BYTES,
+        "单元行是历史正文的唯一副本，分页收口同样必须豁免它"
+    );
+    assert!(
+        capped
+            .iter()
+            .filter(|row| row.event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE)
+            .all(|row| typed_bytes(row.typed_payload.as_ref().unwrap_or(&serde_json::Value::Null))
+                <= redaction::MAX_CANONICAL_RAW_BYTES),
+        "非单元行必须落回 64 KiB 内（limit=1 逐行走完每一页）"
+    );
+}

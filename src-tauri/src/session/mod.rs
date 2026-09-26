@@ -839,15 +839,26 @@ pub(crate) async fn evt_search(
 
 /// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
 /// 入口；被单元覆盖的行不再传输/解析，读放大随单元粒度下降）。
-/// #376：`cap_typed_payload` 语义同 `evt_list`（缺省 true）。
+///
+/// #376-b：一次一页（前向游标 `after_sequence`；`next_after_sequence` 为 None 即到底）。
+/// 冷装载据此逐页续折，装载期不再「整库行 + 整库信封 + 文档」三份并存；页边界落在
+/// delta run 边界上，分页折叠与一次性折叠的切点因此逐位相同。
+/// `cap_typed_payload` 语义同 `evt_list`（缺省 true）。
 #[tauri::command]
 pub(crate) async fn evt_load_compact(
     state: tauri::State<'_, AppState>,
     owner_key: String,
+    after_sequence: Option<i64>,
+    limit: Option<u32>,
     cap_typed_payload: Option<bool>,
-) -> Result<Vec<CanonicalEventRow>, PylonError> {
+) -> Result<CompactEventPage, PylonError> {
     require_event_service(&state)?
-        .load_events_compact(owner_key, cap_typed_payload.unwrap_or(true))
+        .load_events_compact_page(
+            owner_key,
+            after_sequence,
+            limit.unwrap_or(1000),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
         .map_err(PylonError::from)
 }

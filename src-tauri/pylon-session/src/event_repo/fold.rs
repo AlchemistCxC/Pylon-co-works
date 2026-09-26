@@ -128,6 +128,79 @@ pub(super) fn flush_delta_run(
     out.push(row);
 }
 
+/// run 累积器：相邻同类 delta（类型同类 + identity 四键全等 + sequence 连续 + 预算未用尽）
+/// 的判定单点。读侧折叠、写侧折叠与 **#376-b 的分页守卫**共用同一份规则——不另起第二份。
+///
+/// identity 与 run **首行**比较即可：相等关系在四键上传递，累积器逐行都要求与前任相等，
+/// 故与首行相等 ⟺ 与前任相等。
+struct DeltaRun {
+    base: &'static str,
+    len: usize,
+    bytes: usize,
+    last_sequence: i64,
+    first_identity: Option<serde_json::Value>,
+}
+
+impl DeltaRun {
+    /// 新 run 起点；单条自身就超预算的 delta 不成批（返回 None，与写侧一致：不截断原样保留）。
+    fn start(row: &CanonicalEventRow) -> Option<Self> {
+        let base = foldable_delta_base(row)?;
+        let bytes = raw_payload_bytes(row);
+        if bytes > MAX_FOLD_BYTES {
+            return None;
+        }
+        Some(Self {
+            base,
+            len: 1,
+            bytes,
+            last_sequence: row.sequence,
+            first_identity: row.identity.clone(),
+        })
+    }
+
+    fn accepts(&self, row: &CanonicalEventRow) -> bool {
+        foldable_delta_base(row) == Some(self.base)
+            && row.sequence == self.last_sequence + 1
+            && identity_keys_equal(&self.first_identity, &row.identity)
+            && self.len < MAX_FOLDED_CHUNKS
+            && self.bytes + raw_payload_bytes(row) <= MAX_FOLD_BYTES
+    }
+
+    fn push(&mut self, row: &CanonicalEventRow) {
+        self.len += 1;
+        self.bytes += raw_payload_bytes(row);
+        self.last_sequence = row.sequence;
+    }
+}
+
+/// 行 `next` 是否延续以 `previous` 起始的 run（与折叠同一判定；供分页前瞻用）。
+pub(super) fn continues_run(previous: &CanonicalEventRow, next: &CanonicalEventRow) -> bool {
+    DeltaRun::start(previous).is_some_and(|run| run.accepts(next))
+}
+
+/// 依次走 `rows`，返回「窗口内最后一个 run 末行索引」（`None` = 整个窗口是一个 run，
+/// 或没有可折叠的 run）。与折叠用同一个累加器，故切点判定与折叠结果必然一致。
+pub(super) fn last_run_boundary_index(rows: &[CanonicalEventRow]) -> Option<usize> {
+    let mut run: Option<DeltaRun> = None;
+    let mut boundary: Option<usize> = None;
+    for (index, row) in rows.iter().enumerate() {
+        if run.as_ref().is_some_and(|current| current.accepts(row)) {
+            // 预算/长度用尽时 accepts 为假 → 走下面的「run 收口」分支，切点如实记录。
+            if let Some(current) = run.as_mut() {
+                current.push(row);
+            }
+            continue;
+        }
+        if run.take().is_some() {
+            // 上一个 run 在 index-1 处收口（末行为 index-1）。
+            boundary = Some(index.saturating_sub(1));
+        }
+        run = DeltaRun::start(row);
+    }
+    // 窗口末尾仍在累积中的 run 尚未收口，不算边界（调用方按前瞻行判断它是否继续）。
+    boundary
+}
+
 /// 相邻同类 delta 的行聚合（**读写两侧共用**；ADR-0016）：把 identity 全等、sequence 连续的
 /// delta run 折成一条 `*.delta.batch` 行——span 占位，幸存行挪到跨度末位并带 `seqSpan`，
 /// span 中间的裸行不再存在。形状与前端 `canonicalEventBatch.mergeAdjacentDeltaChunks` 同一契约，
@@ -140,38 +213,25 @@ pub(super) fn flush_delta_run(
 /// 两侧共用同一实现与同一预算（48 KiB / 2000 chunk），不存在第二份规则。`evt_list` 分页读不折叠。
 pub(super) fn fold_adjacent_delta_runs(rows: Vec<CanonicalEventRow>) -> Vec<CanonicalEventRow> {
     let mut out: Vec<CanonicalEventRow> = Vec::with_capacity(rows.len());
-    let mut run: Vec<CanonicalEventRow> = Vec::new();
-    let mut run_base: Option<&'static str> = None;
-    let mut run_bytes: usize = 0;
+    let mut run_rows: Vec<CanonicalEventRow> = Vec::new();
+    let mut run: Option<DeltaRun> = None;
     for row in rows {
-        let base = foldable_delta_base(&row);
-        let extend = match (base, run.last(), run_base) {
-            (Some(base), Some(last), Some(current)) => {
-                current == base
-                    && row.sequence == last.sequence + 1
-                    && identity_keys_equal(&last.identity, &row.identity)
-                    && run.len() < MAX_FOLDED_CHUNKS
-                    && run_bytes + raw_payload_bytes(&row) <= MAX_FOLD_BYTES
+        if run.as_ref().is_some_and(|current| current.accepts(&row)) {
+            if let Some(current) = run.as_mut() {
+                current.push(&row);
             }
-            _ => false,
-        };
-        if extend {
-            run_bytes += raw_payload_bytes(&row);
-            run.push(row);
+            run_rows.push(row);
             continue;
         }
-        flush_delta_run(&mut out, std::mem::take(&mut run), run_base.take());
-        run_bytes = 0;
-        match base {
-            // 单条自身就超预算的 delta 不成批（与写侧一致：不截断，原样保留）。
-            Some(base) if raw_payload_bytes(&row) <= MAX_FOLD_BYTES => {
-                run_bytes = raw_payload_bytes(&row);
-                run_base = Some(base);
-                run.push(row);
-            }
-            _ => out.push(row),
+        let base = run.take().map(|current| current.base);
+        flush_delta_run(&mut out, std::mem::take(&mut run_rows), base);
+        run = DeltaRun::start(&row);
+        match run {
+            Some(_) => run_rows.push(row),
+            None => out.push(row),
         }
     }
-    flush_delta_run(&mut out, run, run_base);
+    let base = run.map(|current| current.base);
+    flush_delta_run(&mut out, run_rows, base);
     out
 }

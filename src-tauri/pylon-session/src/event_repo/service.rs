@@ -8,8 +8,8 @@ use super::draft::{DraftCommitChunk, DraftFragment, DraftFragmentInput};
 use super::normalize::{mark_replay_import, normalize_kernel_event, parse_canonical_event};
 use super::repo::{EventRepo, RollupTrimReport};
 use super::row::{
-    CanonicalEventRawExport, CanonicalEventRow, EventAppendResult, EventPage, EventSearchOwner,
-    KernelEventInput, ReplayJournalIngestResult,
+    CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult, EventPage,
+    EventSearchOwner, KernelEventInput, ReplayJournalIngestResult,
 };
 use super::EventError;
 use crate::owner::DurableSessionOwner;
@@ -407,7 +407,30 @@ impl EventService {
             })?
     }
 
-    /// #81 L2：compact 读（单元 + 未覆盖行；文档投影/搜索的读取入口）。
+    /// #81 L2 / #376-b：compact 读**分页**（单元 + 未覆盖行；升序、前向游标）。
+    /// `cap_typed_payload` 语义同 `list_events`。
+    pub async fn load_events_compact_page(
+        &self,
+        owner_key: String,
+        after_sequence: Option<i64>,
+        limit: u32,
+        cap_typed_payload: bool,
+    ) -> Result<CompactEventPage, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut page = repo.load_events_compact_page(&owner_key, after_sequence, limit)?;
+            for row in &mut page.events {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(page)
+        })
+        .await
+        .map_err(|error| {
+            EventError::Unavailable(format!("event repo compact task failed: {error}"))
+        })?
+    }
+
+    /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
     /// `cap_typed_payload` 语义同 `list_events`。
     pub async fn load_events_compact(
         &self,

@@ -119,12 +119,37 @@ describe('tauriCanonicalEventRepository', () => {
     expect(await repo.loadAll(OWNER_KEY)).toEqual([])
   })
 
-  it('#376 loadAllPreferUnits 经 evt_load_compact 且带上 typed 载荷收口开关', async () => {
-    invokeMock.mockResolvedValueOnce([])
+  it('#376 loadAllPreferUnits 逐页走 evt_load_compact 直到游标收尾，并带上收口开关', async () => {
+    invokeMock
+      .mockResolvedValueOnce({ events: [event(1), event(2)], nextAfterSequence: 2 })
+      .mockResolvedValueOnce({ events: [event(3)], nextAfterSequence: null })
     const repo = tauriCanonicalEventRepository()
-    await repo.loadAllPreferUnits(OWNER_KEY)
+    const rows = await repo.loadAllPreferUnits(OWNER_KEY)
+    expect(rows.map(row => row.sequence)).toEqual([1, 2, 3])
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'evt_load_compact', {
+      ownerKey: OWNER_KEY,
+      afterSequence: null,
+      limit: 256,
+      capTypedPayload: true,
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'evt_load_compact', {
+      ownerKey: OWNER_KEY,
+      afterSequence: 2,
+      limit: 256,
+      capTypedPayload: true,
+    })
+  })
+
+  it('#376 listCompact 单页：前向游标原样透出（null = 已到最新）', async () => {
+    invokeMock.mockResolvedValueOnce({ events: [event(9)], nextAfterSequence: 9 })
+    const repo = tauriCanonicalEventRepository()
+    const page = await repo.listCompact(OWNER_KEY, 4, 8)
+    expect(page.nextAfterSequence).toBe(9)
+    expect(page.events.map(row => row.sequence)).toEqual([9])
     expect(invokeMock).toHaveBeenLastCalledWith('evt_load_compact', {
       ownerKey: OWNER_KEY,
+      afterSequence: 4,
+      limit: 8,
       capTypedPayload: true,
     })
   })
@@ -136,7 +161,7 @@ describe('tauriCanonicalEventRepository', () => {
     const querySelector = vi.fn(() => ({}))
     vi.stubGlobal('document', { querySelector })
     try {
-      invokeMock.mockResolvedValueOnce([])
+      invokeMock.mockResolvedValueOnce({ events: [], nextAfterSequence: null })
       invokeMock.mockResolvedValueOnce({ events: [], nextBeforeSequence: null })
       const repo = tauriCanonicalEventRepository()
       await repo.loadAllPreferUnits(OWNER_KEY)
@@ -144,6 +169,8 @@ describe('tauriCanonicalEventRepository', () => {
       expect(querySelector).toHaveBeenCalledWith('[data-typed-payload-cap="off"]')
       expect(invokeMock).toHaveBeenCalledWith('evt_load_compact', {
         ownerKey: OWNER_KEY,
+        afterSequence: null,
+        limit: 256,
         capTypedPayload: false,
       })
       expect(invokeMock).toHaveBeenCalledWith('evt_list', {
