@@ -93,6 +93,14 @@ pub(crate) struct TurnInFlightMark {
     pub(crate) turn_id: u64,
 }
 
+/// #352：用户 cancel 判死输入的载体标记。键化为 generation（镜像 TurnInFlightMark
+/// 的 ADR-0017 纪律）：客户端替换后旧代际的 cancel 置位不得被新代际等待循环看到。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CancelRequestedMark {
+    pub(crate) generation: u64,
+    pub(crate) at: std::time::Instant,
+}
+
 #[derive(Clone)]
 pub(crate) struct SessionInfo {
     /// ACP typed live state. This is an ingest-side projection only; canonical
@@ -147,6 +155,14 @@ pub(crate) struct SessionInfo {
     /// 的单调时刻。dispatcher 每次处理 session/update 刷新；prompt 等待据此做
     /// "闲置超时"判定（活动即续命）。不落 wire / 不序列化。
     pub(crate) last_activity: Option<std::time::Instant>,
+    /// #352：用户已对本会话发出 cancel（cancel_prompt 发送 `session/cancel` 成功并
+    /// 通过 generation/session 复核后置位）。prompt 等待循环将其作为**一等判死
+    /// 输入**——直接进入 cancel-settle 窗口，不经闲置/首 token 评估（cancel 后
+    /// agent 继续产出会不断刷新 `last_activity`，闲置判死将被无限续命，回合可能
+    /// 永不收敛）。与 `turn_in_flight` 同级键化 generation：只对同代际等待循环
+    /// 可见。回合起点（`mark_turn_in_flight`）清除：新回合不继承旧 cancel。
+    /// 与 `last_activity` 同级：进程内事实，不落 wire、不序列化。
+    pub(crate) cancel_requested: Option<CancelRequestedMark>,
     /// CWD-03：Workspace 实体绑定（方案 C）。Some = Session 绑定 Workspace，
     /// root 解析以 Workspace.root_path 为单一来源（workspace_root_for_context 优先分支）；
     /// None = legacy 未绑定，root 解析回退 session.cwd（兼容分支）。
@@ -241,6 +257,7 @@ impl SessionInfo {
             context_size: 0,
             updated_at: Some(Timestamp::now()),
             last_activity: None,
+            cancel_requested: None,
             workspace_id: None,
             inject_round: 0,
             last_response_round: 0,
@@ -252,11 +269,20 @@ impl SessionInfo {
     }
 
     /// ADR-0017/#217：标记在途回合（出站 prompt 已派发）。同键重复置位幂等。
+    /// #352：新回合起点同步清除用户 cancel 判死输入——旧回合的 cancel 不继承。
     pub(crate) fn mark_turn_in_flight(&mut self, generation: u64, turn_id: u64) {
+        self.cancel_requested = None;
         self.turn_in_flight = Some(TurnInFlightMark {
             generation,
             turn_id,
         });
+    }
+
+    /// #352：登记「用户 cancel 已发出」——prompt 等待循环的一等判死输入。
+    /// generation 取置位时的会话代际（调用方已复核）；置位幂等（后到覆盖先到，
+    /// 语义不变）。
+    pub(crate) fn mark_cancel_requested(&mut self, generation: u64, at: std::time::Instant) {
+        self.cancel_requested = Some(CancelRequestedMark { generation, at });
     }
 
     /// ADR-0017/#217：按键清理——只有 (generation, turn_id) 与标记一致才算本回合的
