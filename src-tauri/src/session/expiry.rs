@@ -274,6 +274,42 @@ pub(crate) async fn check_session_expiry_with(
     }
 }
 
+/// 平台消息**可能**落到该 agent 时不得回收它的连接（#363-4 修正）。
+///
+/// 连接回收把 runtime 置为 `Disconnected`，而这是**不会自愈**的状态：自动重连只管
+/// `Crashed`/`Error`，平台 ingest 对非 Connected 实例直接拒绝且无 fallback
+/// （`route.rs` 的 `IngestReject::InstanceNotConnected`）。所以只要平台有任何路径能
+/// 路由到该 agent，就必须保留它的连接——否则一个挂机 24 小时、期间没有会话的网关
+/// agent 会被静默杀掉，之后所有入站平台消息被拒到有人手动重连为止。
+///
+/// 两条路径：
+/// 1. **显式路由绑定**：`gateway.routes()` 里 `agent_id` 命中该 agent。
+/// 2. **未绑定消息的 active-agent 回退**：`unbound_policy` 缺省就是 `active-agent`，
+///    未绑定来源的平台消息会落到 active agent —— 即使该 agent 没有显式路由。这一条只在
+///    真有适配器注册（`adapter_keys()` 非空）时才成立：没有任何平台接入就谈不上平台流量。
+///
+/// 反向含义：**没有**平台路径能到该 agent 时回收是安全的——用户切到它或打开它的会话
+/// 都会经 `switch_agent` / `do_connect_and_replace` 重新连上，不存在静默不可恢复。
+fn platform_may_route_to(state: &AppState, agent_id: &str) -> bool {
+    if state
+        .gateway
+        .routes()
+        .iter()
+        .any(|binding| binding.agent_id == agent_id)
+    {
+        return true;
+    }
+    // 锁中毒保守视为「就是 active」——宁可不回收，也不误杀平台连接。
+    let is_active = state
+        .active_agent
+        .lock()
+        .map(|active| active.as_str() == agent_id)
+        .unwrap_or(true);
+    is_active
+        && !state.gateway.adapter_keys().is_empty()
+        && state.gateway.unbound_policy() == crate::gateway::route::UnboundPolicy::ActiveAgent
+}
+
 /// 零会话且闲置超时的连接 → 走既有 stop 路径释放进程树。
 async fn reclaim_idle_connection(
     agent_id: &str,
@@ -290,6 +326,11 @@ async fn reclaim_idle_connection(
     if prompt_gate_held || !pending_interaction_sessions.is_empty() {
         return;
     }
+    if platform_may_route_to(state, agent_id) {
+        // 每轮都命中，所以只在 debug：这是保活决定，不是异常。
+        tracing::debug!(agent_id, "空闲连接回收跳过：平台可能路由到该 agent");
+        return;
+    }
     let session_count = runtime
         .sessions
         .lock()
@@ -298,6 +339,9 @@ async fn reclaim_idle_connection(
     if session_count != 0 {
         return;
     }
+    // 注意闲置时钟是 `last_connected_at`（连接建立时刻）而不是「最后一次活动时刻」：
+    // 对零会话的 runtime 两者等价（没有会话就没有会话级活动，连接级活动只有 prompt 与
+    // 交互，二者都已在上面豁免），所以这里不需要再引入一个 runtime 级活动时间戳。
     let reclaimable = {
         let Ok(agent_state) = runtime.agent_runtime.lock() else {
             // 锁中毒：跟随 panic 会让下一次 lock 直接炸；这里的正确处置是保守跳过
@@ -319,7 +363,7 @@ async fn reclaim_idle_connection(
     }
     tracing::info!(
         agent_id,
-        "空闲连接回收：零会话且闲置超过 {} 秒，停止 agent 子进程",
+        "空闲连接回收：零会话且自连接起已超过 {} 秒，停止 agent 子进程",
         timeout.as_secs()
     );
     crate::lifecycle::stop_agent_runtime(agent_id, state).await;
@@ -328,7 +372,7 @@ async fn reclaim_idle_connection(
         "session",
         None,
         &format!(
-            "Idle connection reclaimed ({agent_id}, no sessions, idle > {}s)",
+            "Idle connection reclaimed ({agent_id}, no sessions for > {}s since connect)",
             timeout.as_secs()
         ),
         serde_json::Map::new(),

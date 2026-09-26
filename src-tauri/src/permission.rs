@@ -991,6 +991,7 @@ pub(crate) struct PrivateInteractionTimeoutOutcome {
 /// - elicitation → `cancel`（用户未作答；`decline` 会断言用户明确拒绝，不成立）；
 /// - grok/pi 问题桥 → 既有 declined 映射（`skip_interview` / `cancelled:true`）；
 /// - exit_plan → `keep_planning`（超时绝不批准，也不代替用户放弃计划）。
+///
 /// 与 `pending_permissions` 的超时默认拒绝（pick_option prefer_reject）同一
 /// 「不悬挂、不批准」取向。
 fn private_interaction_timeout_response(
@@ -1055,7 +1056,9 @@ pub(crate) async fn check_pending_private_interaction_timeouts(
                 now.elapsed_since(pending.enqueued_at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
             })
             .collect();
-        for (request_id, pending) in expired {
+        // 只需要 request_id：超时判据已在 collect 的 filter 里用掉快照值，真正的
+        // claim 是下面的 `take()`（它拿到的 `claimed` 才是权威值）。
+        for (request_id, _) in expired {
             // take() 即原子 claim：None = 用户应答已抢先收口，跳过。
             let Some(claimed) = runtime
                 .private_interactions

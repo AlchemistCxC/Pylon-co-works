@@ -200,6 +200,78 @@ async fn sessions_of_a_busy_prompt_gate_are_exempt() {
     );
 }
 
+/// 与 [`state_with_initial_acp`] 同形，但 gateway 路由指向指定的 agent id
+/// （用于验证「平台可能路由到该 agent 时不得回收连接」）。
+async fn state_with_route_to(route_agent: &str) -> AppState {
+    let agent = echo_agent();
+    let initial_acp = AcpClient::connect_with_logs(&agent, None)
+        .await
+        .expect("fake ACP must initialize");
+    let gateway = Arc::new(gateway::GatewayCore::from_config(
+        gateway::route::parse_config(&format!(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: {route_agent}
+      profile: trpg
+      session: 战役1
+"#
+        ))
+        .expect("合法配置"),
+    ));
+    crate::test_utils::test_state_with_acp(
+        agent,
+        initial_acp,
+        gateway,
+        prism::PrismClient::unavailable("test".to_string()),
+    )
+    .await
+}
+
+/// #363-4 修正：**平台可能路由到该 agent 时，连接一律不回收**。
+///
+/// 连接回收把 runtime 置为 `Disconnected`，而该状态不会自愈（自动重连只管
+/// `Crashed`；平台 ingest 对非 Connected 实例直接拒绝且无 fallback）。所以哪怕
+/// 「零会话 + 闲置超时」全部命中，只要路由指向它就必须保活。
+#[tokio::test]
+async fn connection_routed_by_the_gateway_is_never_reclaimed() {
+    use crate::agent::runtime::AgentLifecycleStatus;
+    // 路由的 agent id 必须与 runtime 的键一致，才构成「平台能路由到它」。
+    let probe = state_with_initial_acp().await;
+    let (agent_id, _) = probe
+        .runtimes
+        .all_with_ids()
+        .into_iter()
+        .next()
+        .expect("至少一个 runtime");
+
+    let state = state_with_route_to(&agent_id).await;
+    let (_, runtime) = state
+        .runtimes
+        .all_with_ids()
+        .into_iter()
+        .next()
+        .expect("至少一个 runtime");
+    runtime.sessions.lock().unwrap().clear();
+    {
+        let mut agent_state = runtime.agent_runtime.lock().unwrap();
+        agent_state.status = AgentLifecycleStatus::Connected;
+        agent_state.last_connected_at = Some(Timestamp::new(1));
+    }
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+
+    assert!(
+        !runtime.acp.lock().await.is_dead(),
+        "gateway 路由指向该 agent 时不得回收连接（{agent_id}）"
+    );
+    assert_eq!(
+        runtime.agent_runtime.lock().unwrap().status,
+        AgentLifecycleStatus::Connected
+    );
+}
+
 /// #363-4 连接级回收：**零会话**且闲置超时的 Connected runtime 必须走既有 stop
 /// 路径释放 agent 子进程（issue 点名「一直挂着 agent 子进程」的落点）。
 #[tokio::test]

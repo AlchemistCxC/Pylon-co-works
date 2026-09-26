@@ -13,7 +13,6 @@ pub(crate) mod resource;
 
 use serde::Serialize;
 use std::sync::Mutex;
-use tauri::Manager;
 
 pub(crate) const DOCS_WEBVIEW_LABEL: &str = "pylon-docs";
 /// 文档站入口。`scheme://localhost` 形态照 `pylon-plugin://` 前端先例；
