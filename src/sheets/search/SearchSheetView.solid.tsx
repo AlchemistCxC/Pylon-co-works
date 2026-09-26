@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
-import { createZustandSignal } from '../solidStoreBridge.ts'
+import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'

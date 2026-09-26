@@ -1,4 +1,4 @@
-import SolidMount from '../sheets/SolidMount'
+import SolidMount from '../host/SolidMount'
 import type { SheetRecord } from './sheetTypes'
 import type { InterfaceMode } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeChromeStyle } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'

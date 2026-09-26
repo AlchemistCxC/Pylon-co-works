@@ -5,7 +5,7 @@ import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
 import { activateAgentSheet } from './activateAgentSheet'
-import { createZustandSignal } from '../sheets/solidStoreBridge.ts'
+import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import type { SheetRecord, SheetKind } from './sheetTypes'
 import type { WorkspaceLaunchOption } from './workspaceTypes'
 

@@ -1,4 +1,4 @@
-import SolidMount from '../sheets/SolidMount'
+import SolidMount from '../host/SolidMount'
 import type { SheetRecord } from './sheetTypes'
 import type { AgentStatus } from '../components/settings/agentTypes'
 

@@ -1,4 +1,4 @@
-import SolidMount from '../sheets/SolidMount'
+import SolidMount from '../host/SolidMount'
 
 /**
  * SheetLauncher — Sheet 启动命令面板（#279 第 3 梯队 Solid 化）。

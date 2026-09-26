@@ -1,4 +1,4 @@
-import SolidMount from '../SolidMount'
+import SolidMount from '../../host/SolidMount'
 
 /**
  * FileTabView markdown 文件预览（#279 第 2 梯队 Solid 化）。

@@ -1,4 +1,4 @@
-import SolidMount from '../SolidMount'
+import SolidMount from '../../host/SolidMount'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
