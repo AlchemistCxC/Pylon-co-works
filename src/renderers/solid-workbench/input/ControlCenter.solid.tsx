@@ -98,7 +98,7 @@ export function SolidControlCenter() {
   const sendButtonMode = () => {
     // 04b：空态隐藏发送按钮 —— 与其余控件共用 hiddenWidgetIds() 这一个入口。
     // 注册轨的发送按钮不经 isWidgetVisible（没有 !edit 短路），故编辑态豁免在此显式保留（丁）。
-    if (hiddenWidgetIds().includes('cc-send-button') && !appearance().ccEditMode) return undefined
+    if (sendButtonHidden() && !appearance().ccEditMode) return undefined
     return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
   }
   createEffect(() => {
@@ -274,6 +274,9 @@ export function SolidControlCenter() {
       : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])],
     cliHintMode: appearance().cliHintMode,
   })
+  // ★ CC-02：「发送按钮该不该算在隐藏名单里」只留这一个具名入口 —— `sendButtonMode()`
+  //   与渲染处的 `hidden` prop 共用它，不再各写一遍裸名单（那正是本 bug 的形状）。
+  const sendButtonHidden = () => hiddenWidgetIds().includes('cc-send-button')
   // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）+ 编辑态豁免」——元件的行上不再有显隐申明，
   //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
   const visibilityContext = () => ({
@@ -398,7 +401,7 @@ export function SolidControlCenter() {
     const body = renderBody(id)
     if (body === null) return null
     return <div
-      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${appearance().ccHidden.includes(id) ? ' cc-hidden' : ''}${selected() === id ? ' cc-selected' : ''}`}
+      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${hiddenWidgetIds().includes(id) ? ' cc-hidden' : ''}${selected() === id ? ' cc-selected' : ''}`}
       data-widget-id={id}
       data-widget-anchor={resolveCcWidgetGroup(id)?.layout?.y.anchor}
       style={placementStyle(placement())}
@@ -647,7 +650,7 @@ export function SolidControlCenter() {
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
     <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
-    <Show when={ccSendButtonRegistered() && sendButtonMode() && !appearance().ccHidden.includes('cc-send-button')}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
+    <Show when={ccSendButtonRegistered() && sendButtonMode()}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} hidden={sendButtonHidden()} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
