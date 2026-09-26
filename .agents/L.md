@@ -17,6 +17,7 @@
   - 遗留转 issue：**#379**（GUI 断线缺懒重连）——连接级回收的保守默认值（24h、仅零会话）就是为它让路的，见 #363 记录「未解问题」。
   - ⚠️ 本批两处文档改动被他人提交连带带入库（`docs/说明书/Pylon-发行包清单.md` → `7a713bc2`；`Pylon-模块维护地图.md` → #354 记账提交），故本批 PR diff 看不到它们，内容已在库。
   - ⚠️ 收工前 `cargo fmt --all` 曾在共享树上跑过（会触及其他 agent 未格式化的工作树文件，仅格式无语义）。
+  - **完工判据**：`Closes #361` / `Closes #362`（彻底解决，PE 与落盘链各有实测与单测证据）；**#363 不关闭**（四项均交付，但默认超时 1440 分钟与「有会话但全闲置是否也收连接」两处保守取值需仓库主裁断，遗留转 #379，留作决策口）。PR 沿用共享分支既有 PR **#374**（该分支先于本批已开 PR；本批处置见其评论区与 `.agents/records/36{1,2,3}-*.md`）。
 - [kumo] #351 前端根目录归类（#245 前端对应件）：`src/` 根 22 文件按域下沉（identity→`domains/identity/`、IPC 件→`infrastructure/{persistence,skin}/`、workspace/runtime/cc→各自 domains、error 三件→`app/`、其余就近）+ **全仓 import 路径重写**（触及 src 广泛文件的 import 行，语义零变更）+ 断 `identityStore→workspace/runtime`（新增 `src/app/bootstrap/identityCrossDomainSync.ts` 端口）+ `scripts/check-runtime-boundaries.mts` allowlist ×3 路径随迁 + `scripts/audit-maintenance.test.mts` 断言随迁 + 说明书文件链接同步。规格 `.agents/spec/351-frontend-root-file-relocation.md`。**不碰** `store.ts`/主题预设集群与 `presets//zones/`（#266 域）、`src-tauri/**`（#348/#349 在途）、入口四件。
 - [kumo] #348+#349 ACP 连接缺陷批次（单 PR，两个施工 agent 按文件域互斥并行）：
   - #348 → `src-tauri/pylon-acp/**`（**不含 `src/adapter/`**）、`src-tauri/pylon-acp/Cargo.toml`、`src-tauri/Cargo.toml`、`src-tauri/vendor/acp/ORIGIN.md`：写侧崩溃终因词表一致性 / 版本声明对齐 / spawn 补 CREATE_NO_WINDOW / reducer 补 available_commands_update 臂 / `is_method_not_found` 兜底收窄 / protocol_version 接受集合 fail-closed。
