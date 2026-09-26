@@ -169,8 +169,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
   /** Responses from the atomic empty-state create transaction can arrive
    * before React has rebound the Workbench to the newly-added local Session.
-   * Keep them keyed by local Session.id until that bind completes. */
-  const pendingSessionResponses = new Map<string, SessionResponseObject[]>()
+   * Keep them keyed by local Session.id until that bind completes. 排队项连同
+   * 溯源标注一起暂存——排队路径丢掉标注会让 load 响应事后长得像 new 响应。 */
+  const pendingSessionResponses = new Map<string, Array<{ response: SessionResponseObject; syntheticReason?: string }>>()
   const appliedSessionResponseKeys = new Map<string, { key: string; session: WorkbenchDocument['session'] | undefined }>()
   const transientSequenceBySource = new Map<string, number>()
 
@@ -284,7 +285,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     },
   })
 
-  const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string): void => {
+  const enqueueSessionResponse = (response: SessionResponseObject, targetSessionId: string, syntheticReason?: string): void => {
     if (binding.destroyed || !binding.boundSessionId || !binding.source || targetSessionId !== binding.boundSessionId) return
     const key = sessionResponseProjectionKey(response)
     const last = appliedSessionResponseKeys.get(targetSessionId)
@@ -295,7 +296,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const previousTransient = transientSequenceBySource.get(binding.source) ?? 0
     const sequence = Math.max(current.revision, bufferedMax, previousTransient) + 1
     transientSequenceBySource.set(binding.source, sequence)
-    const envelope = createSessionResponseEnvelope(binding.source, binding.boundProvider, response, sequence)
+    const envelope = createSessionResponseEnvelope(binding.source, binding.boundProvider, response, sequence, 'session.started', syntheticReason)
     if (binding.loading) {
       binding.buffered.push(envelope)
       appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
@@ -305,17 +306,22 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     appliedSessionResponseKeys.set(targetSessionId, { key, session: runtime.getSnapshot().document?.session })
   }
 
-  const applySessionResponse = (response: unknown, targetSessionId?: string): void => {
+  /**
+   * 会话响应进文档。`options.syntheticReason` 只影响信封的溯源标注：建会话留空
+   * （默认 `session-new-response`），复活（`load_persisted_session`）传
+   * `session-load-response`，好让事后取证分得清协商事实来自哪条路径（#358）。
+   */
+  const applySessionResponse = (response: unknown, targetSessionId?: string, options?: { syntheticReason?: string }): void => {
     if (binding.destroyed) return
     const normalized = sessionResponseObject(response)
     const target = targetSessionId?.trim() || binding.boundSessionId
     if (!target) return
     if (binding.boundSessionId && (target === binding.boundSessionId || target === binding.source)) {
-      enqueueSessionResponse(normalized, binding.boundSessionId)
+      enqueueSessionResponse(normalized, binding.boundSessionId, options?.syntheticReason)
       return
     }
     const pending = pendingSessionResponses.get(target) ?? []
-    pending.push(normalized)
+    pending.push({ response: normalized, syntheticReason: options?.syntheticReason })
     pendingSessionResponses.set(target, pending)
   }
 
@@ -881,7 +887,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         ]
         pendingSessionResponses.delete(session.id)
         pendingSessionResponses.delete(session.source)
-        for (const response of pendingResponses) enqueueSessionResponse(response, session.id)
+        for (const item of pendingResponses) enqueueSessionResponse(item.response, session.id, item.syntheticReason)
       }
       // P52 D3：bind 重置读 TurnClock——时钟按 source 隔离，切回同 source 的
       // 活动回合恢复（reconcileTurnClock 在 journal 读完成后执行）。

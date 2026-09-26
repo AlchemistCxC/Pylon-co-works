@@ -310,6 +310,11 @@ export class AgentWorkbenchLifecycle {
       resolveRuntimeErrors({ key: `session-placeholder:${session.id}`, source: 'chat.session-placeholder' })
       this.recoveryAttempts.delete(session.source)
       applySessionStateResponse(sessionContext(session), res)
+      // #358：复活的协商目录也必须作为**协商事实**进文档面。建会话路径把 new_session 响应
+      // 同时交给 session-state 与工作台文档（投影成 `session.started`，`sessionResponseProjection.ts`），
+      // 而 `WorkbenchDocumentSurface` 的守卫正是靠这条事实才不把 model / mode 目录渲染成会话下方的
+      // 第二份配置表单；load 路径此前只同步前者，于是复活会话的目录卡片消不掉。
+      this.onSessionLoadResponse?.(session, res)
       // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
       // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
       useRuntimeStore.getState().setBindingGeneration(sessionContext(session), useRuntimeStore.getState().agentStatuses[session.agentId]?.generation)
@@ -377,4 +382,6 @@ export class AgentWorkbenchLifecycle {
 
   /** load 完成信号（宿主接 sessionRuntime.refresh）。 */
   onCanonicalRefresh?: (session: Session, canonicalRevision: number, turn?: ColdMountTurnSnapshot) => void
+  /** #358：load 成功后的会话响应（协商目录）交宿主投影进工作台文档；未接线时静默跳过。 */
+  onSessionLoadResponse?: (session: Session, response: unknown) => void
 }

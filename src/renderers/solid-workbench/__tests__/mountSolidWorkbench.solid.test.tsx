@@ -5,6 +5,7 @@ import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSo
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
+import { createSessionResponseEnvelope } from '../../../sheets/agent-workbench/sessionResponseProjection.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
@@ -1587,6 +1588,33 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelector('.solid-workbench-chat-shell')).not.toBeNull())
     expect(screen.queryByRole('listbox', { name: '模型列表' })).toBeNull()
     expect(host.querySelector('.solid-workbench-config')).toBeNull()
+  })
+
+  // #358：复活会话的时间线里只有回放出来的 `session.config-updated`（journal 不会存建会话那条
+  // `session.started`）。load 响应被投影成协商事实后，守卫必须认账——model / mode 不再落到
+  // 会话下方那份配置卡（这正是用户报的「怎么也消不掉」）。
+  it('#358：复活文档补上 load 响应的协商事实后，会话配置卡消失', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'revived-session', preview: true })
+    const catalogue = [
+      { id: 'model', label: 'model', valueType: 'select', value: 'fable', editable: true, schema: { options: [{ id: 'fable', label: 'fable' }] } },
+      { id: 'mode', label: 'mode', valueType: 'select', value: 'default', editable: true, schema: { options: [{ id: 'default', label: 'default' }] } },
+    ]
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']): WorkbenchEventEnvelope => createWorkbenchEnvelope({
+      eventId: `revived-${sequence}`, sessionId: 'revived-session', sequence,
+      recordedAt: `2026-09-26T00:00:0${sequence}.000Z`, source: { provider: 'hermes', sourceId: `revived-${sequence}` },
+      identity: { runId: `revived-${sequence}` },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const replayed = envelope(1, { type: 'session.config-updated', options: catalogue })
+    const replayedDocument = projectWorkbench([replayed]).document
+    services.runtime.replaceDocument(replayedDocument, { ownerKey: 'owner-preview', generation: 1, sessionId: 'revived-session' })
+    await waitFor(() => expect(host.querySelector('.solid-workbench-config')?.getAttribute('data-config-count')).toBe('2'))
+
+    const negotiation = createSessionResponseEnvelope('revived-session', 'hermes', { sessionId: 'remote-1', configOptions: catalogue }, 2, 'session.started', 'session-load-response')
+    services.runtime.replaceDocument(projectWorkbench([replayed, negotiation]).document, { ownerKey: 'owner-preview', generation: 1, sessionId: 'revived-session' })
+
+    await waitFor(() => expect(host.querySelector('.solid-workbench-config')).toBeNull())
   })
 
   it('空态创建失败后保留草稿，并把焦点交还输入框', async () => {

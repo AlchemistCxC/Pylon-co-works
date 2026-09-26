@@ -195,6 +195,28 @@ describe('#110 F1 恢复等待 owner runtime 就绪', () => {
     expect(calls.filter(cmd => cmd === 'load_persisted_session')).toHaveLength(1)
   })
 
+  // #358：复活路径的协商目录必须交宿主投影进工作台文档（否则文档缺 `session.started`，
+  // 会话下方的持久配置卡在复活会话上消不掉）。未接线时（默认）静默跳过——其余用例即覆盖。
+  it('#358：load 成功把协商响应交给 onSessionLoadResponse', async () => {
+    store.setStatus('owner', { status: 'connected' })
+    loadResults.push(async () => ({
+      ...(await validLoadResult()),
+      response: { sessionId: 'peri-1', configOptions: [{ id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable' }] },
+    }))
+    const { AgentWorkbenchLifecycle } = await importLifecycle()
+    const lifecycle = new AgentWorkbenchLifecycle()
+    const onSessionLoadResponse = vi.fn()
+    lifecycle.onSessionLoadResponse = onSessionLoadResponse
+
+    await lifecycle.activate(session, { isCurrent: () => true })
+
+    expect(mocks.applyResponse).toHaveBeenCalledTimes(1)
+    expect(onSessionLoadResponse).toHaveBeenCalledTimes(1)
+    expect(onSessionLoadResponse).toHaveBeenCalledWith(session, expect.objectContaining({
+      configOptions: [expect.objectContaining({ id: 'model' })],
+    }))
+  })
+
   it('会话切换（isCurrent 转假）时放弃等待，不发恢复请求也不报错', async () => {
     store.setStatus('owner', { status: 'disconnected' })
     const { AgentWorkbenchLifecycle } = await importLifecycle()

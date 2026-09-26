@@ -140,12 +140,20 @@ function shortHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
+/**
+ * 一份会话响应（`new_session` / `load_persisted_session`）→ 工作台信封。
+ *
+ * `kind` 决定事件语义：建会话与复活都用 `session.started`（协商 + 就绪），中控写回执
+ * 用 `session.config-updated`。`syntheticReason` 是给事后取证看的**如实标注**——同一形状
+ * 的信封来自两条路径，混用一个理由会让溯源认错来源（#358）。
+ */
 export function createSessionResponseEnvelope(
   sessionId: string,
   provider: string,
   response: SessionResponseObject,
   sequence: number,
   kind: 'session.started' | 'session.config-updated' = 'session.started',
+  syntheticReason = 'session-new-response',
 ): WorkbenchEventEnvelope {
   const model = extractModelConfig(response.configOptions, response).model
   const mode = extractModeConfig(response).mode
@@ -163,7 +171,7 @@ export function createSessionResponseEnvelope(
       trust: 'authoritative',
       provider: provider || 'acp',
       orderConfidence: 'observed',
-      synthetic: { reason: 'session-new-response' },
+      synthetic: { reason: syntheticReason },
     },
     event: {
       type: kind,
