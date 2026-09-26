@@ -782,6 +782,7 @@ async fn user_cancel_flag_converges_sustained_turn_after_late_set() {
         other => panic!("unexpected outcome: {other:?}"),
     }
 }
+
 #[tokio::test]
 async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
     let agent = crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", "alive"]);
