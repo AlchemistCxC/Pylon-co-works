@@ -12,7 +12,11 @@ export type { InteractionResponseAnswer, InteractionResponseIdentity }
 
 /** identity 完整校验：缺任一必填字段禁止提交（防把未知请求误当可提交事务）。
  * #356：sessionId 显式空串（request-scoped elicitation）是合法身份——会话外
- * 请求以 requestId+agentId 收口；字段缺失（undefined/null）仍拒绝。 */
+ * 请求以 requestId+agentId 收口；字段缺失（undefined/null）仍拒绝。
+ * 纵深依赖（审查 P2）：空串放行是全 kind 的——elicitation 应答在 transport 层
+ * kind 同样是 'approval'，无法在此按 kind 收窄；「permission + 空 sessionId 仍拒」
+ * 由上游 normalizePermissionRequest 把守，未来新增 transport 消费入口必须
+ * 施加同等门禁，不得直传未归一化的 request。 */
 function requireIdentity(identity: InteractionResponseIdentity): InteractionResponseIdentity {
   if (
     !identity.provider

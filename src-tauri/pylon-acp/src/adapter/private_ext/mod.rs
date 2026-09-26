@@ -332,6 +332,28 @@ mod tests {
             &serde_json::json!({"mode": "form", "requestId": 1, "requestedSchema": {"type": "object"}})
         )
         .is_err());
+        // 审查 P2：string 形态 requestId（RequestId untagged Number/Str）同样
+        // 成立——schema 将来收窄 RequestId 时此处先红。
+        assert_eq!(
+            project_elicitation_scope(&serde_json::json!({
+                "mode": "form", "requestId": "req-1",
+                "message": "m", "requestedSchema": {"type": "object"}
+            }))
+            .unwrap(),
+            P::Request
+        );
+        // 审查 P2：sessionId 与 requestId 并存时 untagged 按序 Session 胜出
+        // （Request scope 只在 Session 形状不成立时兜底）。
+        assert_eq!(
+            project_elicitation_scope(&serde_json::json!({
+                "mode": "form", "sessionId": "peri-s1", "requestId": 7,
+                "message": "m", "requestedSchema": {"type": "object"}
+            }))
+            .unwrap(),
+            P::Session {
+                session_id: "peri-s1".into()
+            }
+        );
     }
 
     #[test]
