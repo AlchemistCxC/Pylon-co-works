@@ -19,6 +19,12 @@
   - ⚠️ 收工前 `cargo fmt --all` 曾在共享树上跑过（会触及其他 agent 未格式化的工作树文件，仅格式无语义）。
   - ⚠️ **共享 index 的后遗症已修复（其他 agent 请留意）**：本批用私有 index 提交（`commit-tree` + `update-ref`），代价是**共享 index 一度停留在旧 HEAD**——当时 `git status` 会把本批新增文件显示为 `D`（index 认为删了）+ `??`（worktree 里还在），此时任何 `git commit`（不带 pathspec）都会把本批新文件从 HEAD 删掉、`git checkout -- .` 会真删盘上文件。已于 `01:34` 用 `git read-tree HEAD`（**只写 index、不碰工作树**）修复，现 `git diff --cached` 为空、本批文件 tracked & clean。
     - 连带影响：该修复会**清空当时共享 index 里的暂存**（不丢任何文件内容，工作树未动）。若你在 `01:34` 前后刚 `git add` 过，请重新 stage；按 §2.5 一律用 `git commit -- <paths>` 的话不受影响。
+  - **整 PR 审查轮（2026-09-27 02:xx，用户要求）**：1 个独立子 agent 审了整个 PR（47+ 提交 / 多批次）。裁决赛：**不可直接合并（CI 5/6 红）**，并给出一条落在本批的 CONCERN。修正见提交 `088a5096` 与记录 `.agents/records/pr374-whole-pr-review.md`：
+    - **本批自身**：#363 连接级回收补「平台可能路由到该 agent 则不回收」——连接回收把 runtime 置为 `Disconnected`，而该状态**不自愈**（自动重连只管 `Crashed`，平台 ingest 拒非 Connected 实例且无 fallback），挂机 24h 无会话的网关 agent 会被静默杀掉。两条平台路径都挡住（显式路由 / `unbound_policy=active-agent` 且有适配器）。
+    - **跨批次代修**：#371 的 `SHEET_KINDS` 漏第 11 个 kind `docs`（注册表已加、词表单源未加）+ 两处硬编码 10 的计数 pin + `docs_sheet/**` 的 10 条 clippy 新增；#356 的 `permission.rs` 3 条 clippy 新增。#376/#375/#356 的 TS 阻塞项在同轮由各自作者独立修掉（同一处修正被两人同时做，先提交者入库）。
+    - ⚠️ **#356 交接点**：`session/expiry.rs` 的豁免只认 `runtime.interactions`；#356 的私有交互队列（`PrivateInteractionOwner`）是另一个队列，**落地时需同步纳入**，否则私有交互等待期间会被空闲回收/过期误杀。
+    - ⚠️ **共享 index 复位**：观测到 11 个文件处于 stale 状态（他人用私有 index 提交导致 HEAD 前移而 index 不动；不带 pathspec 的 `git commit` 会把这些改动回退）。逐条核对为纯 stale（形态全是「index 比 HEAD 旧」）后用 `git read-tree HEAD`（只写 index、不碰工作树）复位，`git diff --cached` 归零。
+    - ⚠️ **提交信息含反引号**：`git commit -m "…"` 双引号下反引号会被 shell 命令替换（`088a5096` 丢了一个词）。请用 `-F`/单引号。
   - **完工判据**：`Closes #361` / `Closes #362`（彻底解决，PE 与落盘链各有实测与单测证据）；**#363 不关闭**（四项均交付，但默认超时 1440 分钟与「有会话但全闲置是否也收连接」两处保守取值需仓库主裁断，遗留转 #379，留作决策口）。PR 沿用共享分支既有 PR **#374**（该分支先于本批已开 PR；本批处置见其评论区与 `.agents/records/36{1,2,3}-*.md`）。
 - [kumo] #351 前端根目录归类（#245 前端对应件）：`src/` 根 22 文件按域下沉（identity→`domains/identity/`、IPC 件→`infrastructure/{persistence,skin}/`、workspace/runtime/cc→各自 domains、error 三件→`app/`、其余就近）+ **全仓 import 路径重写**（触及 src 广泛文件的 import 行，语义零变更）+ 断 `identityStore→workspace/runtime`（新增 `src/app/bootstrap/identityCrossDomainSync.ts` 端口）+ `scripts/check-runtime-boundaries.mts` allowlist ×3 路径随迁 + `scripts/audit-maintenance.test.mts` 断言随迁 + 说明书文件链接同步。规格 `.agents/spec/351-frontend-root-file-relocation.md`。**不碰** `store.ts`/主题预设集群与 `presets//zones/`（#266 域）、`src-tauri/**`（#348/#349 在途）、入口四件。
 - [kumo] #348+#349 ACP 连接缺陷批次（单 PR，两个施工 agent 按文件域互斥并行）：

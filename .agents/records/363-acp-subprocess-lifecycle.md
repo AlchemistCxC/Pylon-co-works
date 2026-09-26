@@ -142,6 +142,35 @@ volta 的「只有 shim 没有镜像」是 issue 点名的行为：此时**不**
 4. **spec 的「未决问题 1/2」保留**（默认超时与「有会话时是否也收连接」），并把「GUI 断线懒重连」转成独立 issue。
 5. spec 未预见：`session/mod.rs` 里 #354 留下的陈旧测试样本（见「测试处置」3）。
 
+## 整 PR 审查后的追加修正（提交 `088a5096`）
+
+整 PR 审查（1 个独立子 agent，覆盖全部批次）提了一条落在这块的 CONCERN，已修：
+
+**问题**：连接级回收只判「零会话 + 闲置超时 + Connected」，但回收把 runtime 置为
+`Disconnected`，而**这个状态不会自愈**——自动重连只管 `Crashed`/`Error`，平台 ingest
+对非 Connected 实例直接拒绝（`route.rs` 的 `IngestReject::InstanceNotConnected`）且无
+fallback。于是「挂机 24 小时、期间没有任何会话」的网关 agent 会被静默杀掉，之后所有
+入站平台消息被拒到有人手动重连为止——一次性、不可恢复、且没有任何用户可见的错误。
+
+**修法**：新增 `platform_may_route_to(state, agent_id)`，命中即跳过连接回收：
+1. `gateway.routes()` 里有 `agent_id` 命中该 agent 的显式路由；
+2. `unbound_policy == ActiveAgent`（缺省值）**且**确有适配器注册（`adapter_keys()` 非空）
+   —— 未绑定来源的平台消息会回退到 active agent，即便它没有显式路由。
+
+反向保证不变：没有平台路径能到该 agent 时回收照常生效，且不构成静默不可恢复——用户
+切到它（`switch_agent` 会连接 Disconnected 目标）或打开它的会话都会重连。
+
+顺带修正两处措辞（审查指出）：闲置时钟实际是 `last_connected_at`（连接建立时刻），
+原日志「闲置超过 N 秒」不准确，改为「自连接起已超过 N 秒」；并在 `reclaimable` 前补注释
+说明「对零会话 runtime，连接建立时刻与最后活动时刻等价」（连接级活动只有 prompt 与
+交互，两者都已被豁免）。
+
+新增测试 `connection_routed_by_the_gateway_is_never_reclaimed`（路由指向运行时键 →
+断言 `acp` 未死且状态仍为 Connected）。`cargo test --lib session_expiry` → 13 passed。
+
+**仍然未解**：`#356` 落地后需把其私有交互队列纳入豁免（本批只认 `runtime.interactions`），
+已记入 `L.md` 交接点。
+
 ## 未解问题
 
 1. **GUI 断线懒重连缺失（新登记 issue）**：连接级回收后，用户下一次发送会直接失败直到手动重连/切 agent——因为 `session/prompt.rs` 只判 `Crashed`，`AcpClient` 对已停止连接返回 `ConnectionClosed`。本批用「只对零会话 + 默认 24 小时」把触发面压到最小，并把默认值做成可配；真正的修法是给 GUI prompt 路径补与平台侧 `ensure_runtime_ready` 同形的懒重连。**已另行登记**（见本批 PR 的新 issue 号）。
