@@ -2247,7 +2247,14 @@ fn compact_page_walk_equals_one_shot_read() {
         }
         let shape = |rows: &[CanonicalEventRow]| {
             rows.iter()
-                .map(|row| (row.event_type.clone(), row.sequence, row.rollup_seq_start, row.rollup_seq_end))
+                .map(|row| {
+                    (
+                        row.event_type.clone(),
+                        row.sequence,
+                        row.rollup_seq_start,
+                        row.rollup_seq_end,
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         assert_eq!(
@@ -2272,7 +2279,11 @@ fn compact_page_keeps_delta_runs_whole_across_page_boundaries() {
     };
     let one_shot_spans: Vec<_> = one_shot.iter().filter_map(span_of).collect();
     assert_eq!(one_shot_spans.len(), 1, "语料只有一个未覆盖 delta run");
-    assert_eq!(one_shot_spans[0], (14, 20), "run span 覆盖 7 条尾部 delta（终态单元占 seq 13）");
+    assert_eq!(
+        one_shot_spans[0],
+        (14, 20),
+        "run span 覆盖 7 条尾部 delta（终态单元占 seq 13）"
+    );
 
     // limit=3 必然落在 run 内部；折叠切点仍须与一次性读一致。
     let mut spans: Vec<(i64, i64)> = Vec::new();
@@ -2338,8 +2349,11 @@ async fn compact_page_caps_tool_rows_and_exempts_unit_rows() {
         capped
             .iter()
             .filter(|row| row.event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE)
-            .all(|row| typed_bytes(row.typed_payload.as_ref().unwrap_or(&serde_json::Value::Null))
-                <= redaction::MAX_CANONICAL_RAW_BYTES),
+            .all(|row| typed_bytes(
+                row.typed_payload
+                    .as_ref()
+                    .unwrap_or(&serde_json::Value::Null)
+            ) <= redaction::MAX_CANONICAL_RAW_BYTES),
         "非单元行必须落回 64 KiB 内（limit=1 逐行走完每一页）"
     );
 }

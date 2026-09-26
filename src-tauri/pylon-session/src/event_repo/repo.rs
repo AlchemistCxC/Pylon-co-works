@@ -13,8 +13,8 @@ use super::fold::{
 use super::normalize::{normalize_kernel_event, now_millis};
 use super::provenance::{owner_triple, provenance_code};
 use super::row::{
-    map_event_row, CanonicalEventRawExport, CanonicalEventRow, CompactEventPage,
-    EventAppendResult, EventPage, EventSearchOwner, KernelEventInput,
+    map_event_row, CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult,
+    EventPage, EventSearchOwner, KernelEventInput,
 };
 use super::EventError;
 
@@ -109,7 +109,10 @@ fn query_events_by_sequence(
     if sequences.is_empty() {
         return Ok(Vec::new());
     }
-    let placeholders = (0..sequences.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = (0..sequences.len())
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT {EVENT_COLUMNS} FROM canonical_events
          WHERE owner_key = ?1 AND sequence IN ({placeholders})
@@ -690,52 +693,51 @@ impl EventRepo {
         // 把候选行补到 `target` 行为止（或扫描到 journal 末尾）。返回时 `cursor` 指向
         // 最后一个**被扫描过**的 sequence（含被覆盖行），`scan_exhausted` 表示到头。
         let mut rows: Vec<CanonicalEventRow> = Vec::new();
-        let mut collect_until =
-            |target: usize,
-             rows: &mut Vec<CanonicalEventRow>,
-             cursor: &mut Option<i64>,
-             pointer: &mut usize,
-             scan_budget: &mut usize,
-             scan_exhausted: &mut bool|
-             -> Result<(), EventError> {
-                while rows.len() < target && !*scan_exhausted && *scan_budget > 0 {
-                    let window = i64::try_from(target.saturating_sub(rows.len()) + 1).unwrap_or(1);
-                    let batch: Vec<(i64, String)> = stmt
-                        .query_map(params![owner_key, *cursor, window], |row| {
-                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                        })
-                        .map_err(EventError::from)?
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(EventError::from)?;
-                    if batch.is_empty() {
-                        *scan_exhausted = true;
-                        break;
+        let mut collect_until = |target: usize,
+                                 rows: &mut Vec<CanonicalEventRow>,
+                                 cursor: &mut Option<i64>,
+                                 pointer: &mut usize,
+                                 scan_budget: &mut usize,
+                                 scan_exhausted: &mut bool|
+         -> Result<(), EventError> {
+            while rows.len() < target && !*scan_exhausted && *scan_budget > 0 {
+                let window = i64::try_from(target.saturating_sub(rows.len()) + 1).unwrap_or(1);
+                let batch: Vec<(i64, String)> = stmt
+                    .query_map(params![owner_key, *cursor, window], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(EventError::from)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(EventError::from)?;
+                if batch.is_empty() {
+                    *scan_exhausted = true;
+                    break;
+                }
+                let short_window = batch.len() < usize::try_from(window).unwrap_or(1);
+                *scan_budget = scan_budget.saturating_sub(batch.len());
+                let mut wanted: Vec<i64> = Vec::new();
+                for (sequence, event_type) in batch {
+                    *cursor = Some(sequence);
+                    while *pointer < ranges.len() && ranges[*pointer].1 < sequence {
+                        *pointer += 1;
                     }
-                    let short_window = batch.len() < usize::try_from(window).unwrap_or(1);
-                    *scan_budget = scan_budget.saturating_sub(batch.len());
-                    let mut wanted: Vec<i64> = Vec::new();
-                    for (sequence, event_type) in batch {
-                        *cursor = Some(sequence);
-                        while *pointer < ranges.len() && ranges[*pointer].1 < sequence {
-                            *pointer += 1;
-                        }
-                        let covered = event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE
-                            && *pointer < ranges.len()
-                            && ranges[*pointer].0 <= sequence;
-                        if !covered {
-                            wanted.push(sequence);
-                        }
-                    }
-                    if !wanted.is_empty() {
-                        rows.extend(query_events_by_sequence(&conn, owner_key, &wanted)?);
-                    }
-                    if short_window {
-                        *scan_exhausted = true;
-                        break;
+                    let covered = event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE
+                        && *pointer < ranges.len()
+                        && ranges[*pointer].0 <= sequence;
+                    if !covered {
+                        wanted.push(sequence);
                     }
                 }
-                Ok(())
-            };
+                if !wanted.is_empty() {
+                    rows.extend(query_events_by_sequence(&conn, owner_key, &wanted)?);
+                }
+                if short_window {
+                    *scan_exhausted = true;
+                    break;
+                }
+            }
+            Ok(())
+        };
 
         collect_until(
             limit + 1,
@@ -747,7 +749,9 @@ impl EventRepo {
         )?;
         // 3) 页尾 run 未闭合（页内前瞻行仍在同一 run）⇒ 延长本页直到它闭合。
         //    折叠预算保证 run 在 `MAX_FOLDED_CHUNKS` 行内必然闭合，故这里只需一次延长。
-        if !scan_exhausted && rows.len() > limit && fold::continues_run(&rows[limit - 1], &rows[limit])
+        if !scan_exhausted
+            && rows.len() > limit
+            && fold::continues_run(&rows[limit - 1], &rows[limit])
         {
             collect_until(
                 limit + 1 + MAX_FOLDED_CHUNKS + 2,
@@ -778,7 +782,7 @@ impl EventRepo {
         })
     }
 
-/// #376-b：按 sequence 清单取整行（compact 分页的第二步；只取要的，一次取完）。
+    /// #376-b：按 sequence 清单取整行（compact 分页的第二步；只取要的，一次取完）。
     /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
     pub fn load_events_compact(
         &self,
