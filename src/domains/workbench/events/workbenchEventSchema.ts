@@ -239,6 +239,37 @@ export interface MigrationIssue extends SchemaIssue {
 const CURRENT_SCHEMA_VERSION = 1 as const
 const DEFAULT_RAW_MAX_BYTES = 64 * 1024
 
+/**
+ * #375-d：同内容元数据快照复用。
+ *
+ * `session.commands-updated`（实测单条 16 132 B、每回合 1–2 次，claude-code 会话里**连续 5 行
+ * 内容完全相同**）与 `session.config-updated`（13–14 KB × 1–2 次）是每回合重发的目录快照——
+ * 内容相同就是同一份事实，没必要在文档里留 N 份。按内容复用**同一个事件对象**，于是
+ * `timeline[].data` 与 `fold.log` 的信封 `event` 都指向它：500 回合下这类快照的驻留从
+ * O(行数) 降到 O(不同内容数)。放在本函数（live 与 journal 两条路的**唯一**信封出口），
+ * 不存在第二份规则。
+ *
+ * 缓存有界（只留最近若干份），且只对这两种事件类型生效——其余事件的语义各异，不做内容 intern。
+ */
+const METADATA_SNAPSHOT_EVENT_TYPES: readonly string[] = ['session.commands-updated', 'session.config-updated']
+const METADATA_SNAPSHOT_INTERN_LIMIT = 8
+const metadataSnapshotIntern = new Map<string, WorkbenchSemanticEvent>()
+
+function internMetadataSnapshotEvent(event: WorkbenchSemanticEvent): WorkbenchSemanticEvent {
+  if (!METADATA_SNAPSHOT_EVENT_TYPES.includes(event.type)) return event
+  let key: string
+  try {
+    key = `${event.type} ${JSON.stringify(event)}`
+  } catch {
+    return event
+  }
+  const cached = metadataSnapshotIntern.get(key)
+  if (cached !== undefined) return cached
+  if (metadataSnapshotIntern.size >= METADATA_SNAPSHOT_INTERN_LIMIT) metadataSnapshotIntern.clear()
+  metadataSnapshotIntern.set(key, event)
+  return event
+}
+
 export function createWorkbenchEnvelope(input: WorkbenchEnvelopeInput): WorkbenchEventEnvelope {
   const identity = input.identity ?? {}
   const rawInfo = input.raw === undefined ? undefined : createUnknownContentPart('__envelope_raw__', input.raw, { maxRawBytes: input.rawMaxBytes ?? DEFAULT_RAW_MAX_BYTES })
@@ -264,7 +295,7 @@ export function createWorkbenchEnvelope(input: WorkbenchEnvelopeInput): Workbenc
     source: { ...input.source },
     identity: { ...identity },
     provenance: { ...input.provenance },
-    event: input.event,
+    event: internMetadataSnapshotEvent(input.event),
     ...(input.coverage ? { coverage: Object.freeze([...input.coverage]) as readonly [number, number] } : {}),
     ...(raw !== undefined ? { raw } : {}),
     ...(rawMetadata ? { rawMetadata } : {}),

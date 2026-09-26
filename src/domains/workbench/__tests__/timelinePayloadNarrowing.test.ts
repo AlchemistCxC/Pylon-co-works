@@ -71,11 +71,11 @@ describe('#375-a timeline.data 收窄（tool / activity 族）', () => {
     expect(tool.name).toBe('Bash')
     expect(tool.title).toBe('跑构建')
     expect(tool.status).toBe('running')
-    // 载荷载体（input / rawInput / parts）被省略，键名如实列出
+    // 载荷载体（第三层对象 / 数组）被省略，键名以点分路径如实列出
     expect(tool.input).toBeUndefined()
     expect(tool.parts).toBeUndefined()
     expect(tool.rawInput).toBeUndefined()
-    expect(tool.payloadKeys).toEqual(['input', 'rawInput', 'parts'])
+    expect(data.payloadKeys).toEqual(['tool.input', 'tool.rawInput', 'tool.parts'])
   })
 
   it('载荷仍完整归 activities[]，且 toolInvocationSnapshot 照旧读得到', () => {
@@ -147,5 +147,47 @@ describe('#375-c / #375-e 载荷单一持有的另外两半', () => {
     expect(env.raw).toBeDefined()
     // 幂等：已剥过的再剥返回自身
     expect(withoutEnvelopeRaw(logged)).toBe(logged)
+  })
+})
+
+  it('#375-a 长正文（rawOutput.text 这类）不进 timeline.data，短身份标量照留', () => {
+    const document = reduce([
+      envelope(1, {
+        type: 'tool.completed',
+        tool: { name: 'Bash', status: 'completed', rawOutput: { type: 'text', text: 'x'.repeat(4096) } },
+      }, 'call-a'),
+    ])
+    const data = document.timeline.find(item => item.kind === 'tool')!.data as Record<string, unknown>
+    const tool = data.tool as Record<string, unknown>
+    expect(tool.name).toBe('Bash')
+    expect(tool.status).toBe('completed')
+    expect(tool.rawOutput).toBeUndefined()
+    expect(data.payloadKeys).toEqual(['tool.rawOutput'])
+  })
+
+describe('#375-d 同内容元数据快照复用', () => {
+  const commands = Array.from({ length: 40 }, (_, index) => ({ name: `cmd-${index}`, description: 'x'.repeat(200) }))
+  const commandsEnvelope = (sequence: number, payload: unknown) => createWorkbenchEnvelope({
+    ...base,
+    sequence,
+    source: { provider: base.provider, sourceId: `wire-${sequence}` },
+    identity: {},
+    provenance: { origin: 'local-observed', trust: 'authoritative' },
+    event: { type: 'session.commands-updated', commands: payload } as unknown as WorkbenchSemanticEvent,
+  })
+
+  it('内容相同的 commands-updated 复用同一事件对象（N 行 → 一份，timeline 与信封共享）', () => {
+    const envelopes = [1, 2, 3, 4, 5].map(sequence => commandsEnvelope(sequence, commands))
+    for (const envelope of envelopes) expect(envelope.event).toBe(envelopes[0].event)
+    const document = envelopes.reduce(reduceWorkbenchEvent, createWorkbenchDocument('s'))
+    const entries = document.timeline.filter(item => item.kind === 'session')
+    expect(entries).toHaveLength(5)
+    for (const entry of entries) expect(entry.data).toBe(envelopes[0].event)
+  })
+
+  it('内容不同不合并（同一类型、不同快照各留一份）', () => {
+    const first = commandsEnvelope(1, commands)
+    const second = commandsEnvelope(2, commands.slice(0, 3))
+    expect(second.event).not.toBe(first.event)
   })
 })

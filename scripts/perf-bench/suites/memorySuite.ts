@@ -13,9 +13,9 @@
  * 故本域只从**文档**取根，不把行数组算进驻留。
  */
 import { toWorkbenchEnvelopes } from '../../../src/sheets/agent-workbench/agentWorkbenchProjection.ts'
-import { createWorkbenchDocument, projectWorkbench, setTimelinePayloadNarrowing } from '../../../src/domains/workbench/workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, setTimelinePayloadNarrowing } from '../../../src/domains/workbench/workbenchProjector.ts'
 import { measureRetainedBytes, type RetainedBytesReport } from '../retainedHeap.ts'
-import { buildMemoryCorpus, type MemoryCorpusOptions } from '../fixtures/memoryCorpus.ts'
+import { buildMemoryCorpus, buildMetadataSnapshotEnvelopes, type MemoryCorpusOptions } from '../fixtures/memoryCorpus.ts'
 
 export interface MemoryCaseResult {
   readonly name: string
@@ -28,8 +28,19 @@ export interface MemoryCaseResult {
   readonly note: string
 }
 
+export interface MetadataSnapshotCase {
+  readonly rows: number
+  readonly singleBytes: number
+  readonly retainedBytes: number
+  /** 判据：同类快照在文档里的驻留 / 单份大小（#375-d 要求 ≤ 2×）。 */
+  readonly ratio: number
+  readonly threshold: number
+  readonly pass: boolean
+}
+
 export interface MemorySuiteResult {
   readonly cases: readonly MemoryCaseResult[]
+  readonly metadataSnapshot: MetadataSnapshotCase
   /**
    * 拍数敏感性：**同一终值内容**下拍数 5 → 40 的**绝对**驻留增长。这里必须用绝对字节，
    * 不能用「驻留/Σ载荷」——Σ载荷本身就随拍数变（累计式回传下 5 拍的 Σ 是 40 拍的一半），
@@ -101,11 +112,33 @@ function buildMemorySuiteInner(): MemorySuiteResult {
   )
   const low = residencyCase('beat-sensitivity-low', { calls: 8, beats: 5 }, Number.POSITIVE_INFINITY, '终值相同、拍数 5')
   const high = residencyCase('beat-sensitivity-high', { calls: 8, beats: 40 }, Number.POSITIVE_INFINITY, '终值相同、拍数 40')
+  // #375-d 判据：500 回合 × 2 份**同内容**目录快照（真机单份 16 132 B / 13–14 KB），折完后
+  // 文档里这类快照的**快照字节**必须 ≈ 单份（而不是 O(行数)）。量的对象是事件本身——
+  // `timeline[].data` 与 `fold.log` 信封的 `event` 都指向它，唯一对象记账下就是这一份。
+  // 计时行外壳（每条目一个 timeline entry）不在此判据内：事件条数是真实事实，不该"去重"。
+  const metadata = buildMetadataSnapshotEnvelopes(500)
+  const metadataDocument = metadata.envelopes.reduce(reduceWorkbenchEvent, createWorkbenchDocument('metadata'))
+  const metadataRetained = measureRetainedBytes([
+    ...metadata.envelopes.map(envelope => envelope.event),
+    metadataDocument.timeline.map(entry => entry.data),
+  ]).bytes
+  // 单份大小用**同一把尺子**量（估算口径），不能拿 JSON 长度比——两者差 ~2.8×（对象头/属性槽
+  // 的固定开销在短字符串上占比很大），拿 JSON 长度当分母会把 1.0× 的完美结果读成 3.1×。
+  const singleBytes = measureRetainedBytes([metadata.envelopes[0]!.event]).bytes
+  const metadataRatio = singleBytes === 0 ? 0 : metadataRetained / singleBytes
   const lowBytes = low.result.retained.bytes
   const highBytes = high.result.retained.bytes
   const growth = lowBytes === 0 ? 1 : highBytes / lowBytes
   return {
     cases: [cold.result, low.result, high.result],
+    metadataSnapshot: {
+      rows: metadata.envelopes.length,
+      singleBytes,
+      retainedBytes: metadataRetained,
+      ratio: metadataRatio,
+      threshold: 2,
+      pass: metadataRatio <= 2,
+    },
     beatSensitivity: {
       lowBeats: 5,
       highBeats: 40,

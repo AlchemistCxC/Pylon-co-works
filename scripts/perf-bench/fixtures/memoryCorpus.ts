@@ -12,6 +12,7 @@
  */
 import { normalizeRawEvent } from '../../../src/domains/events/canonicalNormalizer.ts'
 import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../../src/domains/events/eventSchema.ts'
+import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../../../src/domains/workbench/events/workbenchEventSchema.ts'
 
 export interface MemoryCorpusOptions {
   readonly calls?: number
@@ -75,4 +76,32 @@ export function buildMemoryCorpus(options: MemoryCorpusOptions = {}): MemoryCorp
   }).event)
 
   return { owner, rows, logicalPayloadBytes, calls, beats }
+}
+
+/**
+ * #375-d 的语料：`count` 个**内容完全相同**的目录快照信封（真机单份 16 132 B），走
+ * `createWorkbenchEnvelope`——live 与 journal 两条路的唯一信封出口，正是 intern 生效的那一处。
+ */
+export function buildMetadataSnapshotEnvelopes(count = 500): {
+  readonly envelopes: readonly WorkbenchEventEnvelope[]
+  readonly singleBytes: number
+} {
+  const commands = Array.from({ length: 60 }, (_, index) => ({
+    name: `cmd-${index}`,
+    description: `第 ${index} 条目录项，用于把单份快照撑到真机量级（16 KB 上下）`,
+    input: { hint: 'x'.repeat(120) },
+  }))
+  const event = { type: 'session.commands-updated', commands } as unknown as WorkbenchSemanticEvent
+  const envelopes = Array.from({ length: count }, (_, index) => createWorkbenchEnvelope({
+    provider: 'peri',
+    sourceId: `wire-${index}`,
+    sessionId: 'metadata',
+    sequence: index + 1,
+    recordedAt: new Date(Date.UTC(2026, 8, 14, 0, 0, 0) + index * 10).toISOString(),
+    source: { provider: 'peri', sourceId: `wire-${index}` },
+    identity: {},
+    provenance: { origin: 'local-observed', trust: 'authoritative' },
+    event,
+  }))
+  return { envelopes, singleBytes: JSON.stringify(event).length }
 }

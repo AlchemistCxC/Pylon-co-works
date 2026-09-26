@@ -31,6 +31,13 @@ function main(): void {
       + `| ${item.ratio.toFixed(3)}× | ${threshold} | ${verdict} |`,
     )
   }
+  const snapshots = suite.metadataSnapshot
+  lines.push('')
+  lines.push(
+    `同内容元数据快照（#375-d）：${snapshots.rows} 行 / 单份 ${(snapshots.singleBytes / 1024).toFixed(1)} KB → `
+    + `文档驻留 ${(snapshots.retainedBytes / 1024).toFixed(1)} KB = 单份 × ${snapshots.ratio.toFixed(2)}`
+    + `（阈值 ≤ ${snapshots.threshold}×）→ ${snapshots.pass ? 'PASS' : 'FAIL'}`,
+  )
   const beats = suite.beatSensitivity
   lines.push('')
   lines.push(
@@ -44,7 +51,7 @@ function main(): void {
   lines.push('')
   for (const line of lines) console.log(line)
 
-  const failed = suite.cases.filter(item => !item.pass).length + (beats.pass ? 0 : 1)
+  const failed = suite.cases.filter(item => !item.pass).length + (beats.pass ? 0 : 1) + (snapshots.pass ? 0 : 1)
   if (failed > 0) {
     console.error(`memory 域判据未过：${failed} 项`)
     process.exitCode = 1
