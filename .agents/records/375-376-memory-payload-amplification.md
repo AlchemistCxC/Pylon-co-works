@@ -297,9 +297,21 @@ hunk）。中途观测到共享 index 被外部操作置为陈旧（一度把我
    标量 + 一层内嵌对象的短标量」定档，并给出 `data-timeline-payload="full"` 逃生口。渲染引擎那条
    唯一入口台账（`CONTEXT.md` 指向仓外 `Docs/Archive/渲染引擎施工/00-唯一入口台账.md`）里
    `timeline.data` 只被登记为**剥敏面**，没有字段白名单，故本批按「保留标量身份面」保守处理。
-4. **页签保活上限（未做，spec 未决问题 3，§8 的产品裁决项）**：未改 `SheetLayout` 的 keep-alive。
-   非活动页签仍各持一套 runtime/文档/DOM，「按页签数成倍放大」的性质**未变**，只是每个页签的
-   基线降下来了。`#234` 实测冷挂载首行 15 ms / 结算 731 ms 是「卸得起」的依据。
+4. **页签保活（未做——与既有契约冲突，需仓库主裁决）**：任务书 §1 把「非活动 agent 页签卸
+   runtime 与 DOM、只留 sheet 记录与 UI 状态」列为已定决策，但**代码里这条行为是被测试钉住的**：
+
+   - `src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.test.tsx:19` 的用例名就是
+     「切离 Agent Sheet 只 pause，切回 resume，**renderer 不重建**」，并断言
+     `expect(destroy).not.toHaveBeenCalled()`、`expect(mount).toHaveBeenCalledOnce()`；
+   - 规格自己把它列进「不做什么」（"不做页签保活策略变更（产品裁决，见「未决问题」）"），
+     并在未决问题 3 里作为待裁决项。
+
+   即：这不是「顺手改一行」，而是**推翻一条被钉住的 UX 契约**——代价是每次切页签都要付一次
+   冷挂载（`#234` 实测首行 15 ms / 结算 731 ms），并把那条集成测试的语义反转。按 AGENTS §4
+   「不猜」与任务书「已定决策除非与代码事实冲突」的口径，本批**不动它**，在此登记冲突证据
+   供仓库主裁决。要改的落点：`src/workspace-sheets/SheetLayout.tsx:184-192`（现为
+   `display: none` + 常驻 `SheetHost`）→ 只渲染活动页签、非活动页渲染轻量占位；并反转
+   `agentSuiteKeepAlive.integration.test.tsx` 的两条断言（记录在案）。
 5. **`fold.log` 只留 eventId + 回滚按需重读（未做）**：本批只剥掉了 `raw`，`event` 仍留着
    （回滚重折是同步路径）。要走到底需把 reject 回滚改成异步按需重读并复核乐观行剔除的时序
    （spec 未决问题 4）。
