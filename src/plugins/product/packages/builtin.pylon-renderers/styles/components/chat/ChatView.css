@@ -347,6 +347,13 @@
 .term-assistant .term-h6 { font-size:0.9em; font-weight:500; margin:4px 0 2px; color:var(--text-dim); }
 .term-li { margin:1px 0 1px 16px; }
 .term-li::before { content:'- '; color:var(--text-dim); }
+/* #370：markdown 列表的符号只画一套。UL 的符号由 ::before 提供（分级 •/◦/▪，见文末
+   「列表：嵌套感知的分级符号」），必须关掉原生 marker —— 否则 `display:list-item` 的
+   disc 与 ::before 同时出现，每个条目两个点。OL 反过来：序号由原生 marker 提供，
+   上面那条 ::before 的 `- ` 对 OL 条目只是多余符号。
+   `:has(> .term-li)` 把作用面限定在渲染器产出的 markdown 列表上，不波及其它 ul/ol。 */
+ul:has(> .term-li) { list-style:none; }
+ol:has(> .term-li) > .term-li::before { content:none; }
 .term-p { margin:2px 0; }
 /* Markdown soft breaks are meaningful for assistant prose (poems, lists of
    steps, and provider text that is not fenced code).  The streaming fast path

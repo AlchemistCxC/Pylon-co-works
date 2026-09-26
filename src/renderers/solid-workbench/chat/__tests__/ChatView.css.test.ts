@@ -126,6 +126,18 @@ describe('reasoning row geometry contract', () => {
   it('P57 S3-R8：.term-md-skeleton 解析骨架 min-height:1em 规则存在', () => {
     expect(css).toMatch(/\.term-md-skeleton\s*\{[^}]*min-height:\s*1em;/)
   })
+
+  // #370：markdown 列表每个条目只画一套符号。UL 的符号由 ::before 分级画（•/◦/▪），
+  // 故必须关掉原生 marker —— 否则 `display:list-item` 的 disc 与 ::before 叠加，每项两个点；
+  // OL 反过来：序号来自原生 marker，::before 的 `- ` 是多余符号。
+  it('#370：markdown 列表的原生 marker 与 ::before 二选一', () => {
+    expect(css).toMatch(/ul:has\(> \.term-li\)\s*\{\s*list-style:none;\s*\}/)
+    expect(css).toMatch(/ol:has\(> \.term-li\) > \.term-li::before\s*\{\s*content:none;\s*\}/)
+    // 分级符号本身仍在（回归护栏：别把 ::before 一起删掉，那会变成「一个符号都没有」）
+    expect(css).toMatch(/\.term-assistant ul > \.term-li::before\s*\{\s*content:'• {2}';\s*color:var\(--accent\);\s*\}/)
+    expect(css).toMatch(/\.term-assistant ul ul > \.term-li::before\s*\{\s*content:'◦ {2}';/)
+    expect(css).toMatch(/\.term-assistant ul ul ul > \.term-li::before\s*\{\s*content:'▪ {2}';/)
+  })
 })
 
 // 真浏览器实测（Chrome headless 1280px，直接加载本文件；探针与数据见台账 P85）：
