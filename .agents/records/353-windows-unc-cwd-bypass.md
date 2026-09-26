@@ -4,7 +4,7 @@
 
 - issue：[#353](https://github.com/AlchemistCxC/Pylon-co-works/issues/353)
 - 分支：`kumo/353-unc-cwd`（独立 worktree `G:/Project/prism-team-workdir/pylon-353`，避让共享树 #363 在途脏文件）
-- 提交范围：`0838dc6e..<head>`
+- 提交范围：`0838dc6e..c9ebcb88`（PR #378）
 - 日期：2026-09-27
 
 ## 目标与范围
@@ -53,7 +53,7 @@
 
 ## 证据
 
-- commit：见 PR（分支 `kumo/353-unc-cwd`，基线 `0838dc6e`）。
+- commit：c9ebcb88（PR [#378](https://github.com/AlchemistCxC/Pylon-co-works/pull/378)，分支 `kumo/353-unc-cwd`，基线 `0838dc6e`）。
 - 测试：`CARGO_TARGET_DIR=D:/pylon-tmp/pylon-353-target PYLON_FAKE_AGENT_BIN=<共享树既有 fake-agent> cargo test -p pylon-acp --lib` → **170 passed; 0 failed**（含新增 10 项）；`cargo fmt -p pylon-acp -- --check` 通过；`cargo clippy -p pylon-acp --lib --tests` 0 警告。
 - 手工验证：实机端到端用例即真 spawn（`cmd.exe /d /s /c "pushd <dir> && echo_cwd.cmd"`），断言 `%CD%` 输出等于 pushd 目录；真实 UNC 共享（`\\wsl.localhost\…`）需运行期环境，判定逻辑已由纯函数用例覆盖。
 
