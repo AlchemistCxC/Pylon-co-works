@@ -496,7 +496,7 @@ async fn revive_replay_frames_never_reach_canonical_journal() {
     );
     let page = crate::session::event_service_of(state.inner())
         .expect("harness installs an in-memory event service")
-        .list_events(owner.key().unwrap(), None, 100)
+        .list_events(owner.key().unwrap(), None, 100, false)
         .await
         .expect("journal read");
     let leaked: Vec<String> = page

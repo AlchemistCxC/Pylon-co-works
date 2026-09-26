@@ -7,14 +7,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::draft::verify_draft_commit_prefix;
 use super::fold::{
-    flush_delta_run, fold_adjacent_delta_runs, foldable_delta_base, identity_keys_equal,
-    raw_payload_bytes, MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES,
+    self, flush_delta_run, foldable_delta_base, identity_keys_equal, raw_payload_bytes,
+    MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES,
 };
 use super::normalize::{normalize_kernel_event, now_millis};
 use super::provenance::{owner_triple, provenance_code};
 use super::row::{
-    map_event_row, CanonicalEventRawExport, CanonicalEventRow, EventAppendResult, EventPage,
-    EventSearchOwner, KernelEventInput,
+    map_event_row, CanonicalEventRawExport, CanonicalEventRow, CompactEventPage,
+    EventAppendResult, EventPage, EventSearchOwner, KernelEventInput,
 };
 use super::EventError;
 
@@ -101,9 +101,38 @@ fn execute_insert_event(
     }
 }
 
-/// #205：覆盖跨度进入 compact 读的 SQL 谓词（每跨度 2 个绑定参数）。超过此数退回整读
-/// 后内存过滤——SQLite 对表达式深度/参数个数有上限，宁可慢也不要查询失败。
-const MAX_COMPACT_SQL_RANGES: usize = 500;
+fn query_events_by_sequence(
+    conn: &Connection,
+    owner_key: &str,
+    sequences: &[i64],
+) -> Result<Vec<CanonicalEventRow>, EventError> {
+    if sequences.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (0..sequences.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT {EVENT_COLUMNS} FROM canonical_events
+         WHERE owner_key = ?1 AND sequence IN ({placeholders})
+         ORDER BY sequence ASC"
+    );
+    let mut stmt = conn.prepare_cached(&sql).map_err(EventError::from)?;
+    let mut bind: Vec<&dyn rusqlite::ToSql> = vec![&owner_key];
+    for sequence in sequences {
+        bind.push(sequence);
+    }
+    let mut rows = Vec::with_capacity(sequences.len());
+    for row in stmt
+        .query_map(rusqlite::params_from_iter(bind.iter()), map_event_row)
+        .map_err(EventError::from)?
+    {
+        rows.push(row.map_err(EventError::from)?.decode()?);
+    }
+    Ok(rows)
+}
+
+/// #376-b：compact 读单页行数上限。页内行数与单行体积共同决定一次 invoke 的载荷上界
+/// （最坏 = 上限 × 单行 64 KiB），也是 `sequence IN (...)` 的绑定参数个数上限。
+const MAX_COMPACT_PAGE_LIMIT: u32 = 2000;
 
 /// 读取升序行集 [start, end]（含端点；ingest 单元构建与 trim 校验共用）。
 fn query_event_rows(
@@ -601,117 +630,171 @@ impl EventRepo {
     /// #81 L2：compact 读——返回「单元 + 未覆盖行」（升序）。被 turn.unit 覆盖的
     /// 行不再读取（L3 裁剪后这些行已删除），前端读/解析行数随单元粒度下降。
     ///
-    /// #205：过滤下推到 SQL（两段查询）——原实现先把**整表**读成 `Vec<CanonicalEventRow>`
-    /// （每行三个 payload 列都要解成 `serde_json::Value` 树）再在内存里过滤。实测生产库
-    /// （单 owner 13.6 万行）一次 compact 读 `1188ms`、峰值数百 MB，而结果只有 12 行。
-    /// 现在先只读单元行拿覆盖跨度，再按跨度在 WHERE 里剪掉被覆盖行 ⇒ 只读取真正要下发的行。
+    /// #205：过滤**不**下推成按跨度内联的 SQL 谓词（跨度过千时表达式深度/参数个数越线），
+    /// 而是先用一条只取 `sequence/event_type` 两列的元数据扫描判定「这一行要不要」，再按
+    /// 要的 sequence 取整行——被覆盖的行**不被解码成 `serde_json::Value` 树**（那一步才是
+    /// 内存与耗时的大头：生产库单 owner 13.6 万行时整读解析峰值数百 MB）。
+    ///
+    /// #376-b：一次一页（升序、前向游标）。冷装载据此逐页续折，装载期不再出现「整库行 +
+    /// 整库信封 + 文档」三份并存。
+    ///
+    /// **页边界落在 delta run 边界上**：页尾那个 run 若还在继续（页内前瞻行仍在同一 run），
+    /// 本页延长到它闭合为止——否则读侧折叠的切点会随页边界漂移，分页折叠与一次性折叠就
+    /// 不再逐位等价。延长量有界：`accepts` 自带 48 KiB / 2000 chunk 预算，run 在折叠口径下
+    /// 本就有界，故至多再多取一个预算长度的候选行。
+    pub fn load_events_compact_page(
+        &self,
+        owner_key: &str,
+        after_sequence: Option<i64>,
+        limit: u32,
+    ) -> Result<CompactEventPage, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let limit = usize::try_from(limit.clamp(1, MAX_COMPACT_PAGE_LIMIT)).unwrap_or(1);
+        // 1) 覆盖跨度（只取两列，不碰任何载荷）。
+        let mut ranges: Vec<(i64, i64)> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT rollup_seq_start, rollup_seq_end FROM canonical_events
+                     WHERE owner_key = ?1 AND event_type = ?2
+                       AND rollup_seq_start IS NOT NULL AND rollup_seq_end IS NOT NULL
+                     ORDER BY sequence ASC",
+                )
+                .map_err(EventError::from)?;
+            for row in stmt
+                .query_map(
+                    params![owner_key, crate::turn_rollup::TURN_UNIT_EVENT_TYPE],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .map_err(EventError::from)?
+            {
+                ranges.push(row.map_err(EventError::from)?);
+            }
+        }
+        // 2) 元数据扫描状态：只读 (sequence, event_type)，按跨度指针剪掉被覆盖行。
+        let mut cursor = after_sequence;
+        let mut pointer = 0usize;
+        let mut scan_budget: usize = limit * 8 + 1024;
+        let mut scan_exhausted = false;
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT sequence, event_type FROM canonical_events
+                 WHERE owner_key = ?1 AND (?2 IS NULL OR sequence > ?2)
+                 ORDER BY sequence ASC LIMIT ?3",
+            )
+            .map_err(EventError::from)?;
+
+        // 把候选行补到 `target` 行为止（或扫描到 journal 末尾）。返回时 `cursor` 指向
+        // 最后一个**被扫描过**的 sequence（含被覆盖行），`scan_exhausted` 表示到头。
+        let mut rows: Vec<CanonicalEventRow> = Vec::new();
+        let mut collect_until =
+            |target: usize,
+             rows: &mut Vec<CanonicalEventRow>,
+             cursor: &mut Option<i64>,
+             pointer: &mut usize,
+             scan_budget: &mut usize,
+             scan_exhausted: &mut bool|
+             -> Result<(), EventError> {
+                while rows.len() < target && !*scan_exhausted && *scan_budget > 0 {
+                    let window = i64::try_from(target.saturating_sub(rows.len()) + 1).unwrap_or(1);
+                    let batch: Vec<(i64, String)> = stmt
+                        .query_map(params![owner_key, *cursor, window], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })
+                        .map_err(EventError::from)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(EventError::from)?;
+                    if batch.is_empty() {
+                        *scan_exhausted = true;
+                        break;
+                    }
+                    let short_window = batch.len() < usize::try_from(window).unwrap_or(1);
+                    *scan_budget = scan_budget.saturating_sub(batch.len());
+                    let mut wanted: Vec<i64> = Vec::new();
+                    for (sequence, event_type) in batch {
+                        *cursor = Some(sequence);
+                        while *pointer < ranges.len() && ranges[*pointer].1 < sequence {
+                            *pointer += 1;
+                        }
+                        let covered = event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE
+                            && *pointer < ranges.len()
+                            && ranges[*pointer].0 <= sequence;
+                        if !covered {
+                            wanted.push(sequence);
+                        }
+                    }
+                    if !wanted.is_empty() {
+                        rows.extend(query_events_by_sequence(&conn, owner_key, &wanted)?);
+                    }
+                    if short_window {
+                        *scan_exhausted = true;
+                        break;
+                    }
+                }
+                Ok(())
+            };
+
+        collect_until(
+            limit + 1,
+            &mut rows,
+            &mut cursor,
+            &mut pointer,
+            &mut scan_budget,
+            &mut scan_exhausted,
+        )?;
+        // 3) 页尾 run 未闭合（页内前瞻行仍在同一 run）⇒ 延长本页直到它闭合。
+        //    折叠预算保证 run 在 `MAX_FOLDED_CHUNKS` 行内必然闭合，故这里只需一次延长。
+        if !scan_exhausted && rows.len() > limit && fold::continues_run(&rows[limit - 1], &rows[limit])
+        {
+            collect_until(
+                limit + 1 + MAX_FOLDED_CHUNKS + 2,
+                &mut rows,
+                &mut cursor,
+                &mut pointer,
+                &mut scan_budget,
+                &mut scan_exhausted,
+            )?;
+        }
+        // 4) 定页长：到头 → 整份交付（无游标）；否则取窗口内最后一个已闭合 run 的末行
+        //    （闭合点落在本页起点之前时退回 limit —— 形状异常下的防御，游标必须前进）。
+        let mut page_len = rows.len();
+        let mut next_after_sequence = None;
+        if !scan_exhausted {
+            page_len = match fold::last_run_boundary_index(&rows) {
+                Some(boundary) if boundary + 1 >= limit => boundary + 1,
+                _ => limit,
+            };
+        }
+        rows.truncate(page_len);
+        if !scan_exhausted {
+            next_after_sequence = rows.last().map(|row| row.sequence);
+        }
+        Ok(CompactEventPage {
+            events: fold::fold_adjacent_delta_runs(rows),
+            next_after_sequence,
+        })
+    }
+
+/// #376-b：按 sequence 清单取整行（compact 分页的第二步；只取要的，一次取完）。
+    /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
     pub fn load_events_compact(
         &self,
         owner_key: &str,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
-        // 1) 单元行：既是返回内容，也是覆盖跨度的唯一来源。
-        let unit_sql = format!(
-            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 AND event_type = ?2 ORDER BY sequence ASC"
-        );
-        let mut unit_stmt = conn.prepare_cached(&unit_sql).map_err(EventError::from)?;
-        let mut units: Vec<CanonicalEventRow> = Vec::new();
-        for row in unit_stmt
-            .query_map(
-                params![owner_key, crate::turn_rollup::TURN_UNIT_EVENT_TYPE],
-                map_event_row,
-            )
-            .map_err(EventError::from)?
-        {
-            units.push(row.map_err(EventError::from)?.decode()?);
-        }
-        let ranges: Vec<(i64, i64)> = units
-            .iter()
-            .filter_map(|row| row.rollup_seq_start.zip(row.rollup_seq_end))
-            .collect();
-        // 跨度数量进入 SQL 谓词，超阈值退回「整读后内存过滤」：SQLite 对表达式深度与
-        // 绑定参数个数都有上限，宁可慢也不要在极端 journal 上查询失败。
-        if ranges.len() > MAX_COMPACT_SQL_RANGES {
-            return self.load_events_compact_scan_then_filter(owner_key);
-        }
-        let mut uncovered_sql = format!(
-            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 AND event_type <> ?2"
-        );
-        for (index, _) in ranges.iter().enumerate() {
-            uncovered_sql.push_str(&format!(
-                " AND NOT (sequence BETWEEN ?{} AND ?{})",
-                2 * index + 3,
-                2 * index + 4
-            ));
-        }
-        uncovered_sql.push_str(" ORDER BY sequence ASC");
-        let mut bind: Vec<&dyn rusqlite::ToSql> =
-            vec![&owner_key, &crate::turn_rollup::TURN_UNIT_EVENT_TYPE];
-        for (start, end) in &ranges {
-            bind.push(start);
-            bind.push(end);
-        }
-        let mut uncovered_stmt = conn
-            .prepare_cached(&uncovered_sql)
-            .map_err(EventError::from)?;
-        let mut rows: Vec<CanonicalEventRow> = units;
-        for row in uncovered_stmt
-            .query_map(rusqlite::params_from_iter(bind.iter()), map_event_row)
-            .map_err(EventError::from)?
-        {
-            rows.push(row.map_err(EventError::from)?.decode()?);
-        }
-        // 两段各自有序，合并后按 sequence 复原全序（单元行与其覆盖区间交错）。
-        rows.sort_by_key(|row| row.sequence);
-        // #205：未覆盖的尾部 delta run 在读侧折成 batch 行——回合进行中（其 turn.unit
-        // 尚未产生）这些行占未覆盖集合的全部，不折叠就要把整段 chunk 逐行下发并逐行
-        // 投影（实测单回合 79,682 行 ⇒ 前端空白数分钟、内核峰值数百 MB）。
-        Ok(fold_adjacent_delta_runs(rows))
-    }
-
-    /// compact 读的回退路径：整读该 owner 全部行后在内存里过滤（覆盖跨度过多时的兜底）。
-    fn load_events_compact_scan_then_filter(
-        &self,
-        owner_key: &str,
-    ) -> Result<Vec<CanonicalEventRow>, EventError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
-        let sql = format!(
-            "SELECT {EVENT_COLUMNS} FROM canonical_events WHERE owner_key = ?1 ORDER BY sequence ASC"
-        );
-        let mut stmt = conn.prepare_cached(&sql).map_err(EventError::from)?;
-        let mut all: Vec<CanonicalEventRow> = Vec::new();
-        for row in stmt
-            .query_map(params![owner_key], map_event_row)
-            .map_err(EventError::from)?
-        {
-            all.push(row.map_err(EventError::from)?.decode()?);
-        }
-        let mut ranges: Vec<(i64, i64)> = Vec::new();
-        for row in &all {
-            if row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
-                if let (Some(start), Some(end)) = (row.rollup_seq_start, row.rollup_seq_end) {
-                    ranges.push((start, end));
-                }
+        let mut out: Vec<CanonicalEventRow> = Vec::new();
+        let mut cursor: Option<i64> = None;
+        loop {
+            let page = self.load_events_compact_page(owner_key, cursor, MAX_COMPACT_PAGE_LIMIT)?;
+            out.extend(page.events);
+            match page.next_after_sequence {
+                Some(next) => cursor = Some(next),
+                None => break,
             }
         }
-        let covered = |sequence: i64| {
-            ranges
-                .iter()
-                .any(|(start, end)| sequence >= *start && sequence <= *end)
-        };
-        let filtered: Vec<CanonicalEventRow> = all
-            .into_iter()
-            .filter(|row| {
-                row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE || !covered(row.sequence)
-            })
-            .collect();
-        Ok(fold_adjacent_delta_runs(filtered))
+        Ok(out)
     }
 
     /// #81 L3：破坏性裁剪迁移（可暂停 / 续跑；sha256 校验通过才删行）。

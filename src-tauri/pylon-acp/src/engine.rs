@@ -632,14 +632,16 @@ pub async fn spawn_agent_child(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // #348 A3：Windows 上隐藏 agent 控制台窗口（与 preflight 探针同纪律）。
-    super::process::hide_console_window(&mut cmd);
+    // #363-1：UTF-8 环境先钉（默认值），再让 plan/用户 env 覆盖——显式声明优先。
+    // 同处隐藏控制台窗口（#348 A3，Windows 上 agent 不该在桌面闪黑框）。
+    super::process::configure_agent_child(&mut cmd);
     super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
         pylon_core::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
     }
-    let child = cmd
-        .spawn()
+    // #363-2：另线程 fork→exec 窗口内的 ETXTBSY 在预算内重试；其余错误一次即返。
+    let child = super::process::spawn_retrying_exec_busy(|| cmd.spawn())
+        .await
         .map_err(|error| super::error::AgentConnectFailure::spawn(&agent.exe, error))?;
     Ok(super::ManagedChild::new(child))
 }

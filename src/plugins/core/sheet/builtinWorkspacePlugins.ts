@@ -18,6 +18,7 @@ const OverviewSheetView = lazy(() => import('../../../sheets/OverviewSheetView.t
 const SearchSheetView = lazy(() => import('../../../sheets/search/SearchSheetView.tsx'))
 const HistorySheetView = lazy(() => import('../../../sheets/history/HistorySheetView.tsx'))
 const BrowserSheetView = lazy(() => import('../../../sheets/browser/BrowserSheetView.tsx'))
+const DocsSheetView = lazy(() => import('../../../sheets/docs/DocsSheetView.tsx'))
 const Sidebar = lazy(() => import('../../../components/Sidebar.tsx'))
 const SettingsSheetView = lazy(() => import('../../../sheets/SettingsSheetView.tsx'))
 const SettingsSheetSidebar = lazy(() => import('../../../sheets/SettingsSheetSidebar.tsx'))
@@ -80,6 +81,8 @@ export const BUILTIN_WORKSPACE_TYPES: readonly WorkspaceTypeDefinition<unknown>[
   defineWorkspace({ kind: 'search', label: 'Search', singleton: true, getSingletonKey: singleton('search'), sidebarMode: 'sheet', component: lazyWorkspace(SearchSheetView), launch: { kind: 'search', title: 'Search', description: '跨会话快照搜索', launchable: true, icon: 'search', category: 'work', categoryLabel: '工作台', categoryOrder: 10, order: 30, keywords: ['find', 'snapshot', '搜索', '查找', '快照'] } }),
   defineWorkspace({ kind: 'history', label: 'History', singleton: true, getSingletonKey: singleton('history'), sidebarMode: 'sheet', component: lazyWorkspace(HistorySheetView), launch: { kind: 'history', title: 'History', description: '存档会话列表与导出', launchable: true, icon: 'history', category: 'observe', categoryLabel: '观察与诊断', categoryOrder: 20, order: 20, keywords: ['archive', 'export', '历史', '存档', '导出'] } }),
   defineWorkspace({ kind: 'browser', label: 'Browser', singleton: true, getSingletonKey: singleton('browser'), sidebarMode: 'sheet', component: lazyWorkspace(BrowserSheetView), launch: { kind: 'browser', title: 'Browser', description: '多标签网页工作区', launchable: true, icon: 'globe', category: 'work', categoryLabel: '工作台', categoryOrder: 10, order: 20, keywords: ['web', 'url', '浏览器', '网页', '标签页'] } }),
+  // #371：离线文档站——pylon-docs:// scheme + 专用 Sheet，不占 Browser 的 http/https 语义。
+  defineWorkspace({ kind: 'docs', label: 'Docs', singleton: true, getSingletonKey: singleton('docs'), sidebarMode: 'sheet', component: lazyWorkspace(DocsSheetView), launch: { kind: 'docs', title: '文档', description: '离线文档站（应用内查看）', launchable: true, icon: 'book-open', category: 'reference', categoryLabel: '参考与帮助', categoryOrder: 40, order: 10, keywords: ['docs', 'documentation', 'manual', '帮助', '文档', '说明书'] } }),
   defineWorkspace({
     kind: 'settings', label: '设置', singleton: true, getSingletonKey: singleton('settings'), sidebarMode: 'sheet',
     // #154 阶段 4：设置由固定覆盖层迁入 sheet 体系——一二级导航走注册表 sidebar，

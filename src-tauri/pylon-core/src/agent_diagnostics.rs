@@ -159,8 +159,10 @@ fn persisted_path_entries() -> Option<Vec<String>> {
 /// One `reg.exe query <hive>\<key> /v Path` read, returning the raw value.
 #[cfg(windows)]
 fn read_persisted_path(hive: &str, key: &str) -> Option<String> {
+    use pylon_foundations::child_command::HideConsoleWindow;
     let output = std::process::Command::new("reg.exe")
         .args(["query", &format!(r"{hive}\{key}"), "/v", "Path"])
+        .hide_console_window()
         .output()
         .ok()?;
     if !output.status.success() {

@@ -1903,7 +1903,7 @@ mod tests {
         );
 
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         assert_eq!(
@@ -2040,7 +2040,7 @@ mod tests {
         ])
         .expect("owner key");
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         let user_rows: Vec<_> = page
@@ -2367,7 +2367,7 @@ mod tests {
             serde_json::to_string(&["profile-hook", "hook-dual-agent", "local:hook-dual"])
                 .expect("owner key");
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         let user_row = page

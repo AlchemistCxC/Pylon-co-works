@@ -407,6 +407,14 @@ impl AppState {
         let mut events = self.runtime_logs.subscribe();
         let hub = Arc::clone(&self.runtime_logs);
         tokio::spawn(async move {
+            // #362：lag 告警的前缘节流。这条 warn 会经 RuntimeLogLayer 回到**同一个**
+            // hub，再由 hub 广播出去——消费者持续慢于生产者时，不节流就等于每 lag 一次
+            // 就往刚排空一点的 channel 里再塞一条，channel 永不排空（RuntimeSheet 打开
+            // 且窗口繁忙时触发）。前缘立即放行保证第一次一定看得见，窗口内的命中折叠成
+            // 计数搭下一条的车，不静默丢弃。
+            let mut lag_throttle = crate::logging::throttle::LeadingEdgeThrottle::new(
+                crate::logging::throttle::LAG_LOG_WINDOW,
+            );
             loop {
                 match events.recv().await {
                     Ok(entry) => {
@@ -425,7 +433,14 @@ impl AppState {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        tracing::warn!("runtime log event dispatcher lagged by {count} entries");
+                        if let Some(summary) = lag_throttle.record(count) {
+                            tracing::warn!(
+                                "runtime log event dispatcher lagged: skipped {} entries across {} occurrence(s) in the last {}s",
+                                summary.dropped,
+                                summary.occurrences,
+                                crate::logging::throttle::LAG_LOG_WINDOW.as_secs()
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -735,15 +750,26 @@ pub(crate) async fn evt_revision(
 }
 
 /// 游标分页读取（最新页 before_seq=null；limit 缺省 100；升序返回）。
+///
+/// #376：`cap_typed_payload`（缺省 true）是读出口载荷收口的杀停开关——前端发现页面上
+/// 出现 `data-typed-payload-cap="off"` 即传 false，回到「原样下发 typed」。与
+/// `data-highlight-lifecycle="off"` / `data-row-virtualization="off"` 同惯例，
+/// 不需要回滚版本。
 #[tauri::command]
 pub(crate) async fn evt_list(
     state: tauri::State<'_, AppState>,
     owner_key: String,
     before_sequence: Option<i64>,
     limit: Option<u32>,
+    cap_typed_payload: Option<bool>,
 ) -> Result<EventPage, PylonError> {
     require_event_service(&state)?
-        .list_events(owner_key, before_sequence, limit.unwrap_or(100))
+        .list_events(
+            owner_key,
+            before_sequence,
+            limit.unwrap_or(100),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
         .map_err(PylonError::from)
 }
@@ -813,13 +839,26 @@ pub(crate) async fn evt_search(
 
 /// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
 /// 入口；被单元覆盖的行不再传输/解析，读放大随单元粒度下降）。
+///
+/// #376-b：一次一页（前向游标 `after_sequence`；`next_after_sequence` 为 None 即到底）。
+/// 冷装载据此逐页续折，装载期不再「整库行 + 整库信封 + 文档」三份并存；页边界落在
+/// delta run 边界上，分页折叠与一次性折叠的切点因此逐位相同。
+/// `cap_typed_payload` 语义同 `evt_list`（缺省 true）。
 #[tauri::command]
 pub(crate) async fn evt_load_compact(
     state: tauri::State<'_, AppState>,
     owner_key: String,
-) -> Result<Vec<CanonicalEventRow>, PylonError> {
+    after_sequence: Option<i64>,
+    limit: Option<u32>,
+    cap_typed_payload: Option<bool>,
+) -> Result<CompactEventPage, PylonError> {
     require_event_service(&state)?
-        .load_events_compact(owner_key)
+        .load_events_compact_page(
+            owner_key,
+            after_sequence,
+            limit.unwrap_or(1000),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
         .map_err(PylonError::from)
 }
@@ -1682,12 +1721,17 @@ gateway:
 
     /// S3：prompt 错误"会话不存在"语义匹配——宽松子串匹配覆盖 agent 实际错误形态
     /// （JSON-RPC 错误对象序列化串 / 纯字符串），网络与临时/方法级错误不命中。
+    ///
+    /// #354 契约更新（清理陈旧样本）：`code == -32000` 现在**一票**判为
+    /// `RpcFailureKind::AuthRequired`（协议已定义该码语义，agent 误用它表别的含义属
+    /// 协议违规，不做文本竞猜，见 `pylon-acp/src/error.rs::rpc_failure_details`）。
+    /// 因此原先挂在这里的 `{"code":-32000,"message":"session missing"}` 不再、也不应
+    /// 命中 SessionMissing —— 它移到下面单独钉住「协议码优先于文本」这条。
     #[test]
     fn prompt_error_indicates_missing_session_matching() {
         let missing = [
             r#"{"code":-32602,"message":"session not found: session-42"}"#,
             r#"{"code":-32602,"message":"Invalid params: unknown session: session-42"}"#,
-            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in missing {
             assert!(
@@ -1699,6 +1743,8 @@ gateway:
             r#"{"code":-32601,"message":"Method not found"}"#,
             r#"{"code":-32602,"message":"invalid params: missing content"}"#,
             r#"{"code":-32000,"message":"rate limited"}"#,
+            // #354：-32000 是协议级 authRequired，文本里写着 session missing 也不改判
+            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in transient {
             assert!(

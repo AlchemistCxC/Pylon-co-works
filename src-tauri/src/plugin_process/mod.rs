@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
+use pylon_foundations::child_command::HideConsoleWindow;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -610,6 +611,8 @@ fn command_for(record: &ProcessRecord) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // #361：发行构建是 GUI 子系统，插件进程不加 CREATE_NO_WINDOW 会各弹一个控制台。
+    command.hide_console_window();
     command
 }
 

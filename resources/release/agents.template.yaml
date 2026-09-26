@@ -1,0 +1,19 @@
+# Pylon Agent 配置模板（随发行包分发：本文件在包内名为 agents.yaml，与 pylon.exe 同目录）
+#
+# Pylon 启动时会读取本文件。保持下面的 `agents: {}` 不变即为「零 Agent」空态：
+# 首次启动是干净空态，由 设置 → Agent 的分步引导（探测本机 → 选 exe → 测试连接 → 创建）
+# 建立第一个 Agent，新建的 Agent 保存在应用数据目录中，不写回本文件。
+#
+# 要用 YAML 预置 Agent（高级，可选）：直接在本文件的 `agents:` 段下按注释与
+# docs/说明书/Pylon-项目架构参考.md 的字段说明填写，exe 需绝对路径，保存后重启 Pylon。
+# 不要预置占位路径的 Agent——它必然启动失败，首屏会变成报错而非引导（#326）。
+# 也可以完全不使用本文件：删除它不影响启动。
+#
+# 模板源：仓库 resources/release/agents.template.yaml（打包时改名为 agents.yaml）。
+#
+# `agents` 键必须存在：缺键按配置错误报出（避免把拼错的键名静默当成「零 Agent」），
+# 而显式的空映射是合法的「零 Agent」状态。
+agents: {}
+
+# 可选：外置工具归一化字典（provider → tools）。缺省为空表，前端继续用内置 fallback。
+# tool_dictionary: {}

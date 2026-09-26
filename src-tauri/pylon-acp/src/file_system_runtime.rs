@@ -8,13 +8,27 @@ use std::time::Instant;
 use tokio::sync::Semaphore;
 
 use super::fs_policy::{
-    FsAccessPolicy, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_READ_RESPONSE_BYTES, SLOW_OPERATION_MS,
+    FsAccessPolicy, FsFailure, IO_TIMEOUT, MAX_CONCURRENT_OPS, MAX_READ_RESPONSE_BYTES,
+    SLOW_OPERATION_MS,
 };
 
 #[derive(Clone)]
 pub struct FileSystemRuntime {
     policy: Arc<FsAccessPolicy>,
     operations: Arc<Semaphore>,
+}
+
+/// IO 层失败分类（#354）：NotFound 单列（官方 `resource_not_found` 语义），
+/// 其余归 `Other`（wire 维持既有 `-32602` 裸消息）。沙箱拒绝已在 policy 检查
+/// 处分类，不经过这里。
+fn io_failure(path: &Path, error: std::io::Error) -> FsFailure {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        FsFailure::NotFound {
+            uri: path.to_string_lossy().into_owned(),
+        }
+    } else {
+        FsFailure::Other(error.to_string())
+    }
 }
 
 impl FileSystemRuntime {
@@ -38,7 +52,7 @@ impl FileSystemRuntime {
         })
     }
 
-    pub async fn read_text_file(&self, path: &Path) -> Result<String, String> {
+    pub async fn read_text_file(&self, path: &Path) -> Result<String, FsFailure> {
         self.policy.check_read(path)?;
         let started = Instant::now();
         let permit = self
@@ -46,21 +60,23 @@ impl FileSystemRuntime {
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| "filesystem runtime is closed".to_string())?;
+            .map_err(|_| FsFailure::Other("filesystem runtime is closed".to_string()))?;
         let metadata = tokio::time::timeout(IO_TIMEOUT, tokio::fs::metadata(path))
             .await
-            .map_err(|_| "filesystem metadata timed out".to_string())?
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| FsFailure::Other("filesystem metadata timed out".to_string()))?
+            .map_err(|e| io_failure(path, e))?;
         if !super::fs_policy::read_size_allowed(metadata.len()) {
-            return Err("file exceeds maximum size".to_string());
+            return Err(FsFailure::Other("file exceeds maximum size".to_string()));
         }
         let content = tokio::time::timeout(IO_TIMEOUT, tokio::fs::read_to_string(path))
             .await
-            .map_err(|_| "filesystem read timed out".to_string())?
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| FsFailure::Other("filesystem read timed out".to_string()))?
+            .map_err(|e| io_failure(path, e))?;
         drop(permit);
         if content.len() > MAX_READ_RESPONSE_BYTES {
-            return Err("read response exceeds maximum size".to_string());
+            return Err(FsFailure::Other(
+                "read response exceeds maximum size".to_string(),
+            ));
         }
         if started.elapsed().as_millis() > SLOW_OPERATION_MS {
             tracing::debug!(path = %path.display(), "slow ACP filesystem read");
@@ -68,22 +84,24 @@ impl FileSystemRuntime {
         Ok(content)
     }
 
-    pub async fn write_text_file(&self, path: &Path, content: &str) -> Result<(), String> {
+    pub async fn write_text_file(&self, path: &Path, content: &str) -> Result<(), FsFailure> {
         self.policy.check_write(path)?;
         let started = Instant::now();
         if !super::fs_policy::write_size_allowed(content.len()) {
-            return Err("write content exceeds maximum size".to_string());
+            return Err(FsFailure::Other(
+                "write content exceeds maximum size".to_string(),
+            ));
         }
         let permit = self
             .operations
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| "filesystem runtime is closed".to_string())?;
+            .map_err(|_| FsFailure::Other("filesystem runtime is closed".to_string()))?;
         tokio::time::timeout(IO_TIMEOUT, tokio::fs::write(path, content))
             .await
-            .map_err(|_| "filesystem write timed out".to_string())?
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| FsFailure::Other("filesystem write timed out".to_string()))?
+            .map_err(|e| io_failure(path, e))?;
         drop(permit);
         if started.elapsed().as_millis() > SLOW_OPERATION_MS {
             tracing::debug!(path = %path.display(), "slow ACP filesystem write");
@@ -157,5 +175,42 @@ mod tests {
             .await
             .is_err());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// #354：运行时负路径分类——缺失文件/缺失父目录 → NotFound（带请求 uri），
+    /// roots 之外 → SandboxDenied。even unrestricted 模式下 IO NotFound 也成立。
+    #[tokio::test]
+    async fn runtime_classifies_missing_as_not_found_and_outside_as_denied() {
+        let root = root();
+        let runtime = FileSystemRuntime::new(vec![std::fs::canonicalize(&root).unwrap()]);
+        let missing = root.join("no-such-file.txt");
+        match runtime.read_text_file(&missing).await {
+            Err(FsFailure::NotFound { uri }) => {
+                assert_eq!(uri, missing.to_string_lossy())
+            }
+            other => panic!("expected not-found, got {other:?}"),
+        }
+        let orphan_write = root.join("no-such-dir").join("new.txt");
+        assert!(matches!(
+            runtime.write_text_file(&orphan_write, "x").await,
+            Err(FsFailure::NotFound { .. })
+        ));
+        let outside = root.with_file_name(format!(
+            "{}-outside",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&outside).unwrap();
+        assert!(matches!(
+            runtime.read_text_file(&outside.join("x.txt")).await,
+            Err(FsFailure::SandboxDenied { .. })
+        ));
+        // unrestricted 模式（无 roots）下 IO NotFound 仍成立。
+        let unrestricted = FileSystemRuntime::new(Vec::new());
+        match unrestricted.read_text_file(&missing).await {
+            Err(FsFailure::NotFound { .. }) => {}
+            other => panic!("expected not-found, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 }

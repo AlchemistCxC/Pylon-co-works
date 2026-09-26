@@ -87,6 +87,51 @@ function parseTimestamp(value: string | undefined): number | undefined {
 }
 
 /**
+ * #376-b：分页装载的终态判据累积——把行投影成「推导只需要的那几个标量」。
+ *
+ * **不得**保留行引用或整份 `typedPayload`：unit 行的载荷是整段回合正文，留下它等于没分页。
+ * 投影的形状与 `embeddedUserAnchorAt` 的读点一一对应，故二者同处一个文件，改读点即改这里。
+ */
+export function canonicalBoundaryProjection(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
+  const projected: CanonicalTurnBoundaryEvent[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const candidate = row as {
+      sequence?: unknown
+      eventType?: unknown
+      occurredAt?: unknown
+      receivedAt?: unknown
+      typedPayload?: unknown
+    }
+    if (typeof candidate.sequence !== 'number' || typeof candidate.eventType !== 'string') continue
+    projected.push({
+      sequence: candidate.sequence,
+      eventType: candidate.eventType as CanonicalTurnBoundaryEvent['eventType'],
+      ...(typeof candidate.occurredAt === 'string' ? { occurredAt: candidate.occurredAt } : {}),
+      ...(typeof candidate.receivedAt === 'string' ? { receivedAt: candidate.receivedAt } : {}),
+      ...(candidate.eventType === 'turn.unit' ? { typedPayload: userAnchorOnly(candidate.typedPayload) } : {}),
+    })
+  }
+  return projected
+}
+
+/** 只留 `embeddedUserAnchorAt` 会读的字段（内嵌 event 段里的 user.message 时间戳）。 */
+function userAnchorOnly(typedPayload: unknown): { segments: readonly unknown[] } | undefined {
+  if (!typedPayload || typeof typedPayload !== 'object') return undefined
+  const segments = (typedPayload as { segments?: unknown }).segments
+  if (!Array.isArray(segments)) return undefined
+  const anchors = segments.flatMap(segment => {
+    if (!segment || typeof segment !== 'object') return []
+    const holder = segment as { kind?: unknown; event?: unknown }
+    if (holder.kind !== 'event' || !holder.event || typeof holder.event !== 'object') return []
+    const event = holder.event as { eventType?: unknown; occurredAt?: unknown }
+    if (event.eventType !== 'user.message' || typeof event.occurredAt !== 'string') return []
+    return [{ kind: 'event' as const, event: { eventType: 'user.message', occurredAt: event.occurredAt } }]
+  })
+  return { segments: anchors }
+}
+
+/**
  * #199：unit 行内嵌 segments 里的 user.message 锚点（首个有效 occurredAt）。
  * 形状与 `turn.unit` 的 segment 契约一致（`{kind:'event', event}`）；任何形状
  * 异常都返回 undefined——推导宁可「不可测」也不猜。

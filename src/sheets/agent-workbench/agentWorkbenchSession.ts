@@ -11,6 +11,7 @@ import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './s
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
+import { canonicalBoundaryProjection } from '../../domains/events/canonicalTurnDuration.ts'
 import { resolveGenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {
   createWorkbenchEnvelope,
@@ -26,7 +27,7 @@ import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
-import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
+import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment, type CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
@@ -60,6 +61,17 @@ export type { LocalSessionFact } from './agentWorkbenchProjection.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
+  /**
+   * #376-b：分页 compact 读（可选的第二条装载缝）。给了它，冷装载就**按页折**——每页的
+   * 行与信封在折进文档之后立刻可回收，装载期不再「整库行 + 整库信封 + 文档」三份并存。
+   * 没给就退回 `loadAll` 一次性读（既有测试与浏览器快照轨走的正是这条，语义不变）。
+   *
+   * `onPage` 必须**按序**逐页 await：续折依赖上一页已入账的文档。
+   */
+  listJournalPages?(
+    ownerKey: string,
+    onPage: (rows: readonly CanonicalEventRow[], lastPage: boolean) => Promise<void>,
+  ): Promise<void>
   loadDrafts?(ownerKey: string): Promise<readonly CanonicalDraftFragment[]>
   subscribe(listener: (event: unknown) => void): () => void
   /**
@@ -102,6 +114,21 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
       // bind() adds that compatibility source once it has the concrete Session.
       return Promise.resolve([])
     },
+    // #376-b：生产冷装载走分页读；失败不静默回落（与 repository 的既有纪律一致，
+    // 由 bind 的 catch 把错误变成 status:'error'）。
+    listJournalPages: async (ownerKey, onPage) => {
+      if (!IS_TAURI || isBrowserMockRuntime()) {
+        await onPage([], true)
+        return
+      }
+      const repository = tauriCanonicalEventRepository()
+      let afterSequence: number | null = null
+      do {
+        const page = await repository.listCompact(ownerKey, afterSequence)
+        afterSequence = page.nextAfterSequence
+        await onPage(page.events, afterSequence === null)
+      } while (afterSequence !== null)
+    },
     subscribe: listener => subscribePluginEvents(listener),
     listenTerminalFallback: defaultTerminalFallbackListener,
   }
@@ -110,6 +137,11 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
 export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
+  // 分页缝的优先级：显式给了 `listJournalPages` 就用它；只给了 `loadAll`（既有测试与
+  // 嵌入式宿主的注入形态）时**不**启用默认分页读——那等于用空页盖掉注入的行源。
+  // 两者都没给（生产）才走默认分页读。
+  const listJournalPages = dependencies.listJournalPages
+    ?? (dependencies.loadAll ? undefined : defaults.listJournalPages)
   const loadDrafts = dependencies.loadDrafts ?? (ownerKey => IS_TAURI && !isBrowserMockRuntime()
     ? loadCanonicalDraftFragments(ownerKey) : Promise.resolve([]))
   const subscribe = dependencies.subscribe ?? defaults.subscribe
@@ -639,6 +671,26 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * journal 终态**行**置内核表态，内核事实只来自冷挂载快照的 turnInFlight/账本、
    * 终帧与本地生命周期）。
    */
+  /**
+   * 行 → 信封（#205：按序直接收集，不先 concat 再 flatMap）；不可迁移的行计入 malformed。
+   * #376-b：分页装载下这个数组只活一页，折完即回收。
+   */
+  const collectRowsInto = (target: WorkbenchEventEnvelope[], rows: readonly unknown[]): void => {
+    for (const row of rows) {
+      const migrated = toWorkbenchEnvelopes(row)
+      if (migrated.length === 0) {
+        binding.malformedCount += 1
+        continue
+      }
+      for (const envelope of migrated) target.push(envelope)
+    }
+  }
+
+  const maxRowSequence = (rows: readonly unknown[]): number => rows.reduce<number>((max, row) => {
+    const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+    return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
+  }, 0)
+
   const publishCanonicalRead = (input: {
     readSource: string
     readOwnerKey: string
@@ -654,7 +706,28 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }): void => {
     const readEnvelopes = input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead]
     const projected = foldPage(readEnvelopes, input.base)
-    const reconciled = echo.withPending(input.readSource, projected)
+    publishFoldedDocument({ ...input, projected, readEnvelopes })
+  }
+
+  /**
+   * 发布**已折好**的文档：`publishCanonicalRead` 的成功尾巴。抽出来是为了让 #376-b 的
+   * 分页冷装载能在最后一页一次发布（前面各页只折不发，避免中途把 status 打成 ready、
+   * 拿半份 journal 去封存时钟）。语义与原来逐字相同。
+   */
+  const publishFoldedDocument = (input: {
+    readSource: string
+    readOwnerKey: string
+    readGeneration: number
+    readSessionId: string
+    projected: WorkbenchDocument
+    readEnvelopes: readonly WorkbenchEventEnvelope[]
+    malformedCount: number
+    canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
+    canonicalHasTerminal: boolean
+    withLedgerEvidence: boolean
+  }): void => {
+    const readEnvelopes = input.readEnvelopes
+    const reconciled = echo.withPending(input.readSource, input.projected)
     const document = withReplayNegotiationFact(withInterruptedDraftMarker(input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled, readEnvelopes))
     binding.buffered = []
     binding.loading = false
@@ -947,63 +1020,92 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       if (!session || !binding.ownerKey) return
       const loadingOwnerKey = binding.ownerKey
       const bindReadEpoch = binding.canonicalReadEpoch
-      // loadAll 必须**同步**调用：hanging-load 测试在 bind() 返回的同步窗口内拿 release 句柄。
-      await loadAll(loadingOwnerKey).then(async rows => {
-        const fragments = await loadDrafts(loadingOwnerKey)
-        if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
-          || binding.canonicalReadEpoch !== bindReadEpoch) return
-        const canonicalDuration = canonicalDurationFromRows(rows)
-        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
-        const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
-          ? (() => {
-            // Session snapshots historically used both the stable Session.id
-            // and the provider source as keys. Prefer the stable id, then
-            // recover a source-keyed snapshot left by older browser builds.
-            const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
-            const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
-            return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
-          })()
-          : []
-        // #205：不再先 concat 再 flatMap——直接按序收集（冷重放这份数组与行数同阶，
-        // 少一次整集合拷贝与中间数组）。浏览器快照轨照旧排在 journal 行之后。
-        const envelopes: WorkbenchEventEnvelope[] = []
-        const collect = (source: readonly unknown[]): void => {
-          for (const row of source) {
-            const migrated = toWorkbenchEnvelopes(row)
-            if (migrated.length === 0) {
-              binding.malformedCount += 1
-              continue
-            }
-            for (const envelope of migrated) envelopes.push(envelope)
-          }
+      const staleBindRead = (): boolean => (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
+        || binding.canonicalReadEpoch !== bindReadEpoch)
+      // #376-b：分页冷装载——逐页折进同一份文档，页内行与信封折完即可回收。发布（status
+      // 收敛、时钟封存、账本证据）只做一次，在最后一页。装载失败仍走同一条 catch。
+      await (async () => {
+        if (!listJournalPages) {
+          // 一次性装载（既有测试与浏览器快照轨）：收集全部行与信封后折一页。
+          const rows = await loadAll(loadingOwnerKey)
+          if (staleBindRead()) return
+          const fragments = await loadDrafts(loadingOwnerKey)
+          if (staleBindRead()) return
+          const envelopes: WorkbenchEventEnvelope[] = []
+          collectRowsInto(envelopes, rows)
+          envelopes.push(...projectRecoveredDrafts(fragments, maxRowSequence(rows)))
+          const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
+            ? (() => {
+              const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
+              const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
+              return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
+            })()
+            : []
+          collectRowsInto(envelopes, browserSnapshot)
+          if (binding.malformedCount > 0) fold.journalDiagnosticCount = binding.malformedCount
+          publishCanonicalRead({
+            readSource: session.source,
+            readOwnerKey: loadingOwnerKey,
+            readGeneration: nextGeneration,
+            readSessionId: session.id,
+            envelopes,
+            bufferedAtRead: binding.buffered,
+            base: createWorkbenchDocument(session.source),
+            malformedCount: binding.malformedCount,
+            canonicalDuration: canonicalDurationFromRows(rows),
+            canonicalHasTerminal: canonicalHasTerminalFromRows(rows),
+            withLedgerEvidence: false,
+          })
+          return
         }
-        collect(rows)
-        envelopes.push(...projectRecoveredDrafts(fragments, rows.reduce<number>((max, row) => {
-          const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
-          return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
-        }, 0)))
-        collect(browserSnapshot)
-        // buffered 为空是冷切会话的常态：入参已是有序数组，整页一帧过界
-        //（回放按页合批，边界穿越 2 次，与页内事件数无关）。
+        // 分页：行/信封只在页内存在。终态判据与首屏事实都必须**跨页累积**——
+        // 只按末页算会把早先页里的终态行判丢（summary / 时钟封存随之错）。
+        const boundaryRows: ReturnType<typeof canonicalBoundaryProjection> = []
+        let maxSequence = 0
+        let document = createWorkbenchDocument(session.source)
+        let lastPageEnvelopes: WorkbenchEventEnvelope[] = []
+        let fragments: readonly CanonicalDraftFragment[] = []
+        await listJournalPages(loadingOwnerKey, async (rows, lastPage) => {
+          if (staleBindRead()) return
+          if (lastPage) fragments = await loadDrafts(loadingOwnerKey)
+          if (staleBindRead()) return
+          const envelopes: WorkbenchEventEnvelope[] = []
+          collectRowsInto(envelopes, rows)
+          for (const row of rows) {
+            const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+            if (Number.isSafeInteger(sequence)) maxSequence = Math.max(maxSequence, sequence)
+          }
+          boundaryRows.push(...canonicalBoundaryProjection(rows))
+          if (lastPage) {
+            envelopes.push(...projectRecoveredDrafts(fragments, maxSequence))
+            const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
+              ? (() => {
+                const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
+                const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
+                return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
+              })()
+              : []
+            collectRowsInto(envelopes, browserSnapshot)
+          }
+          lastPageEnvelopes = envelopes
+          document = foldPage(envelopes, document)
+        })
+        if (staleBindRead()) return
         if (binding.malformedCount > 0) fold.journalDiagnosticCount = binding.malformedCount
-        // 冷装载 = 重建：显式以空文档为基座（不是续折当前文档）。
-        // #213：本进程的回合时钟（turnClocks）是活性的权威来源，随文档一并申报——
-        // 否则重放出的 `running` 尾行会让 generating 复活成永久「生成中」。
-        // #217：权威升级为内核在途事实优先（kernel > clock，见 effectiveLiveness）。
-        publishCanonicalRead({
+        const finalEnvelopes = binding.buffered.length === 0 ? lastPageEnvelopes : [...lastPageEnvelopes, ...binding.buffered]
+        publishFoldedDocument({
           readSource: session.source,
           readOwnerKey: loadingOwnerKey,
           readGeneration: nextGeneration,
           readSessionId: session.id,
-          envelopes,
-          bufferedAtRead: binding.buffered,
-          base: createWorkbenchDocument(session.source),
+          projected: finalEnvelopes === lastPageEnvelopes ? document : foldPage(binding.buffered, document),
+          readEnvelopes: finalEnvelopes,
           malformedCount: binding.malformedCount,
-          canonicalDuration,
-          canonicalHasTerminal,
+          canonicalDuration: canonicalDurationFromRows(boundaryRows),
+          canonicalHasTerminal: canonicalHasTerminalFromRows(boundaryRows),
           withLedgerEvidence: false,
         })
-      }).catch(error => {
+      })().catch(error => {
         if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
           || binding.canonicalReadEpoch !== bindReadEpoch) return
         binding.loading = false

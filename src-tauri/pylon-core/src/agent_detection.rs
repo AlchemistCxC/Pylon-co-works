@@ -5,6 +5,7 @@ use crate::agent_catalog::{
 use crate::agent_preflight::ToolVersion;
 
 use futures_util::StreamExt;
+use pylon_foundations::child_command::HideConsoleWindow;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -273,6 +274,7 @@ fn app_path_candidates(invocation: &CatalogInvocation) -> Vec<(PathBuf, String)>
         );
         let Ok(output) = std::process::Command::new("reg.exe")
             .args(["query", &key, "/ve"])
+            .hide_console_window()
             .output()
         else {
             continue;
@@ -1077,10 +1079,11 @@ impl ManagedProbeChild {
         }
         #[cfg(windows)]
         if let Some(pid) = self.pid {
-            let _ = tokio::process::Command::new("taskkill")
+            let mut command = tokio::process::Command::new("taskkill");
+            command
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .output()
-                .await;
+                .hide_console_window();
+            let _ = command.output().await;
         }
         #[cfg(unix)]
         if let Some(pid) = self.pid {
@@ -1229,6 +1232,7 @@ async fn probe_version_uncached(
     budget: Duration,
 ) -> VersionProbeOutcome {
     let mut command = tokio::process::Command::new(executable);
+    command.hide_console_window();
     // Catalog's empty argument list selects the standard version probe.
     // Invocation args (e.g. `acp`) belong to session launch, never discovery.
     if version_args.is_empty() {
@@ -1393,6 +1397,7 @@ async fn npm_global_package_version(rule: &AgentDetectionProfile) -> Option<Stri
 
 async fn npm_global_version(package: &str) -> Option<String> {
     let mut command = tokio::process::Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    command.hide_console_window();
     command
         .args(["list", "-g", package, "--json", "--depth=0"])
         .stdin(Stdio::null())

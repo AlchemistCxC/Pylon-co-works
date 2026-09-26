@@ -602,7 +602,11 @@ async fn remove_stale_runtimes(inner: &AppState, removed: Vec<String>) {
 /// C7：停掉旧 runtime 的进程——先 abort notification_task（防 kill 触发的崩溃
 /// 通知被旧 dispatcher 处理并调度自动重连）再 kill acp，状态置 Disconnected。
 /// switch 换目标 / reload 删除 agent 共用。
-async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
+///
+/// #363-4：`pub(crate)` 开放给空闲回收 watcher（`session/expiry.rs`）——回收零会话的
+/// 闲置连接必须走**同一条** kill 路径（Job Object 杀进程树 + 归还实例预算槽），
+/// 不在回收侧另写一份清理。
+pub(crate) async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
     if let Some(old) = inner.runtimes.get(agent_id) {
         if let Ok(mut task) = old.notification_task.lock() {
             if let Some(handle) = task.take() {

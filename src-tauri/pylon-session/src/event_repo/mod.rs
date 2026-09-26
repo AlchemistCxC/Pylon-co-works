@@ -56,7 +56,8 @@ pub use normalize::{canonical_event_wire, parse_canonical_event};
 pub use repo::EventRepo;
 pub use repo::RollupTrimReport;
 pub use row::{
-    CanonicalEventRawExport, CanonicalEventRow, EventAppendResult, EventPage, EventSearchOwner,
+    CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult, EventPage,
+    EventSearchOwner,
 };
 pub use service::EventService;
 

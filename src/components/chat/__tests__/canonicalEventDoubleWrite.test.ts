@@ -115,7 +115,13 @@ describe('canonical 双写（A1-c P2，P52 D4 feed 宿主）', () => {
     await feed.acceptFrame({ event: 'pylon:user', payload: { source: SOURCE, content: 'question', canonicalEvent: userEvent } })
     await feed.acceptFrame({ event: 'pylon:done', payload: { source: SOURCE, canonicalEvent: current } })
 
-    expect(invokeMock).toHaveBeenCalledWith('evt_list', { ownerKey: `["p1","peri","${SOURCE}"]`, beforeSequence: 4, limit: 2 })
+    expect(invokeMock).toHaveBeenCalledWith('evt_list', {
+      ownerKey: `["p1","peri","${SOURCE}"]`,
+      beforeSequence: 4,
+      limit: 2,
+      // #376：读出口默认对 typed 载荷收口（杀停开关见 canonicalEventRepository）。
+      capTypedPayload: true,
+    })
     expect(sink.offers).toHaveLength(0)
   })
 })

@@ -1,5 +1,8 @@
 // #245：文件自 crate 根迁入本目录；crate 根 glob 与原 `use super::*` 同名集。
 use crate::*;
+// `crate::*` 只给到 crate 根的绑定；#363-4 新增的超时可注入形态没有根绑定，
+// 显式引入（`crate::session` 的 `pub(crate) use expiry::*` 会带出来）。
+use crate::session::check_session_expiry_with;
 
 fn echo_agent() -> AgentDef {
     crate::test_utils::fake_acp_agent(
@@ -8,8 +11,7 @@ fn echo_agent() -> AgentDef {
     )
 }
 
-#[tokio::test]
-async fn expiry_watcher_skips_local_sessions_and_resets_platform_sessions() {
+async fn state_with_initial_acp() -> AppState {
     let agent = echo_agent();
     let initial_acp = AcpClient::connect_with_logs(&agent, None)
         .await
@@ -27,14 +29,23 @@ gateway:
         )
         .expect("合法配置"),
     ));
-    let state = crate::test_utils::test_state_with_acp(
+    crate::test_utils::test_state_with_acp(
         agent,
         initial_acp,
         gateway,
         prism::PrismClient::unavailable("test".to_string()),
     )
-    .await;
+    .await
+}
 
+/// #363-4 契约变更：GUI local 会话不再**无条件**豁免后台回收。
+///
+/// 旧行为（`is_platform_source` 守卫）下 `local` 键永远不动；新行为下它按可配的空闲
+/// 超时参与回收，豁免改由「活跃信号」承担（在途回合 / 在场交互 / prompt 闸门 / prompt
+/// 锁）。本条钉住「超时 + 无活跃信号 → 回收」，平台来源路径不变。
+#[tokio::test]
+async fn expiry_watcher_reclaims_idle_local_source_and_resets_platform_sources() {
+    let state = state_with_initial_acp().await;
     let runtime = state.active_runtime().expect("active runtime");
     {
         let mut sessions = runtime.sessions.lock().unwrap();
@@ -49,12 +60,12 @@ gateway:
         sessions.insert("qq:group:123".to_string(), platform);
     }
 
-    check_session_expiry(&state).await;
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
 
     let sessions = runtime.sessions.lock().unwrap();
     assert!(
-        sessions.contains_key("local"),
-        "GUI local 会话必须豁免过期重置"
+        !sessions.contains_key("local"),
+        "GUI local 会话空闲超时后必须被回收（#363-4 收窄了原来的无条件豁免）"
     );
     assert!(
         !sessions.contains_key("qq:group:123"),
@@ -62,36 +73,237 @@ gateway:
     );
 }
 
+/// #363-4：超时关闭（`PYLON_SESSION_IDLE_TIMEOUT_SECS=0` 的语义）时一个会话都不动。
+/// 走可注入形态而不是改进程 env：env 是进程级的，测试里改它会与并行的其它用例竞态。
+#[tokio::test]
+async fn disabled_gui_timeout_reclaims_nothing() {
+    let state = state_with_initial_acp().await;
+    let runtime = state.active_runtime().expect("active runtime");
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        sessions.clear();
+        let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
+        local.updated_at = Some(Timestamp::new(1));
+        sessions.insert("local".to_string(), local);
+    }
+
+    check_session_expiry_with(&state, None).await;
+    assert!(
+        runtime.sessions.lock().unwrap().contains_key("local"),
+        "超时关闭时不得回收任何 GUI 会话"
+    );
+}
+
+/// 超时解析是纯函数：缺省 / 0 关闭 / 显式值 / 非法值回退。
+#[test]
+fn gui_idle_timeout_parsing() {
+    use crate::session::expiry::{gui_idle_timeout_from, DEFAULT_GUI_IDLE_TIMEOUT_SECS};
+    assert_eq!(
+        gui_idle_timeout_from(None),
+        Some(std::time::Duration::from_secs(
+            DEFAULT_GUI_IDLE_TIMEOUT_SECS
+        ))
+    );
+    assert_eq!(gui_idle_timeout_from(Some("0")), None, "0 关闭");
+    assert_eq!(
+        gui_idle_timeout_from(Some("300")),
+        Some(std::time::Duration::from_secs(300))
+    );
+    assert_eq!(
+        gui_idle_timeout_from(Some("  60  ")),
+        Some(std::time::Duration::from_secs(60)),
+        "两侧空白应被容忍"
+    );
+    assert_eq!(
+        gui_idle_timeout_from(Some("不是数字")),
+        Some(std::time::Duration::from_secs(
+            DEFAULT_GUI_IDLE_TIMEOUT_SECS
+        )),
+        "非法值回退默认"
+    );
+}
+
+/// #363-4：在途回合标记是豁免信号——超时也不得回收。
+#[tokio::test]
+async fn session_with_an_in_flight_turn_is_exempt() {
+    let state = state_with_initial_acp().await;
+    let runtime = state.active_runtime().expect("active runtime");
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        sessions.clear();
+        let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
+        local.updated_at = Some(Timestamp::new(1)); // 早已超时
+        local.mark_turn_in_flight(0, 1);
+        sessions.insert("local".to_string(), local);
+    }
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+    assert!(
+        runtime.sessions.lock().unwrap().contains_key("local"),
+        "有在途回合的会话必须豁免（ADR-0017 的进程内标记）"
+    );
+}
+
+/// #363-4：交互队列有在场条目时豁免——等用户点权限卡不算沉默。
+#[tokio::test]
+async fn session_with_a_pending_interaction_is_exempt() {
+    let state = state_with_initial_acp().await;
+    let runtime = state.active_runtime().expect("active runtime");
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        sessions.clear();
+        let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
+        local.updated_at = Some(Timestamp::new(1));
+        sessions.insert("local".to_string(), local);
+    }
+    runtime
+        .interactions
+        .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+            request_id: "req-1".into(),
+            method: "session/request_permission".into(),
+            kind: "approval".into(),
+            session_id: "local-peri".into(),
+            agent_id: String::new(),
+            client_generation: 0,
+            enqueued_at: Timestamp::now(),
+            event: serde_json::json!({}),
+            state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+        })
+        .expect("admit");
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+    assert!(
+        runtime.sessions.lock().unwrap().contains_key("local"),
+        "交互队列里有该会话的在场条目时必须豁免"
+    );
+}
+
+/// #363-4：prompt 闸门被占用时，该连接的全部会话本轮跳过。
+#[tokio::test]
+async fn sessions_of_a_busy_prompt_gate_are_exempt() {
+    let state = state_with_initial_acp().await;
+    let runtime = state.active_runtime().expect("active runtime");
+    {
+        let mut sessions = runtime.sessions.lock().unwrap();
+        sessions.clear();
+        let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
+        local.updated_at = Some(Timestamp::new(1));
+        sessions.insert("local".to_string(), local);
+    }
+    // 持有闸门（模拟在途 prompt）
+    let _gate = runtime.prompt_gate.clone().lock_owned().await;
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+    assert!(
+        runtime.sessions.lock().unwrap().contains_key("local"),
+        "prompt 闸门被占用时该连接的会话必须豁免"
+    );
+}
+
+/// #363-4 连接级回收：**零会话**且闲置超时的 Connected runtime 必须走既有 stop
+/// 路径释放 agent 子进程（issue 点名「一直挂着 agent 子进程」的落点）。
+#[tokio::test]
+async fn idle_connection_without_sessions_is_reclaimed() {
+    use crate::agent::runtime::AgentLifecycleStatus;
+    let state = state_with_initial_acp().await;
+    let (agent_id, runtime) = state
+        .runtimes
+        .all_with_ids()
+        .into_iter()
+        .next()
+        .expect("至少一个 runtime");
+    runtime.sessions.lock().unwrap().clear();
+    {
+        let mut agent_state = runtime.agent_runtime.lock().unwrap();
+        agent_state.status = AgentLifecycleStatus::Connected;
+        // 1970 年 → 任何超时都算闲置
+        agent_state.last_connected_at = Some(Timestamp::new(1));
+    }
+    assert!(!runtime.acp.lock().await.is_dead(), "前置：连接本来是活的");
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+
+    assert!(
+        runtime.acp.lock().await.is_dead(),
+        "零会话的闲置连接必须被回收（agent 子进程释放）"
+    );
+    assert_eq!(
+        runtime.agent_runtime.lock().unwrap().status,
+        AgentLifecycleStatus::Disconnected,
+        "回收后状态必须回落 Disconnected（也因此下一轮不会再重复收）"
+    );
+    let _ = agent_id;
+}
+
+/// 连接级回收的豁免：交互队列有在场条目时不得收（用户在等着应答，不是闲置）。
+#[tokio::test]
+async fn idle_connection_with_a_pending_interaction_is_exempt() {
+    use crate::agent::runtime::AgentLifecycleStatus;
+    let state = state_with_initial_acp().await;
+    let (_, runtime) = state
+        .runtimes
+        .all_with_ids()
+        .into_iter()
+        .next()
+        .expect("至少一个 runtime");
+    runtime.sessions.lock().unwrap().clear();
+    {
+        let mut agent_state = runtime.agent_runtime.lock().unwrap();
+        agent_state.status = AgentLifecycleStatus::Connected;
+        agent_state.last_connected_at = Some(Timestamp::new(1));
+    }
+    runtime
+        .interactions
+        .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+            request_id: "conn-req".into(),
+            method: "session/request_permission".into(),
+            kind: "approval".into(),
+            session_id: "any-peri".into(),
+            agent_id: String::new(),
+            client_generation: 0,
+            enqueued_at: Timestamp::now(),
+            event: serde_json::json!({}),
+            state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+        })
+        .expect("admit");
+
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+    assert!(
+        !runtime.acp.lock().await.is_dead(),
+        "有在场交互的连接不得被回收"
+    );
+}
+
+/// 连接级回收只作用于 **Connected**：Disconnected 的 runtime 没有进程可收，
+/// 重复调用不得产生噪音或副作用。
+#[tokio::test]
+async fn disconnected_connection_is_not_reclaimed_again() {
+    use crate::agent::runtime::AgentLifecycleStatus;
+    let state = state_with_initial_acp().await;
+    let (_, runtime) = state
+        .runtimes
+        .all_with_ids()
+        .into_iter()
+        .next()
+        .expect("至少一个 runtime");
+    runtime.sessions.lock().unwrap().clear();
+    {
+        let mut agent_state = runtime.agent_runtime.lock().unwrap();
+        agent_state.status = AgentLifecycleStatus::Disconnected;
+        agent_state.last_connected_at = Some(Timestamp::new(1));
+    }
+    check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
+    assert_eq!(
+        runtime.agent_runtime.lock().unwrap().status,
+        AgentLifecycleStatus::Disconnected
+    );
+}
+
 /// A4 TOCTOU 回归：快照（过期）与删除复核之间 updated_at 被新消息刷新
 /// → watcher 不得误杀该会话（旧实现复核只查 peri_id/generation，会误删）。
 #[tokio::test]
 async fn expiry_watcher_keeps_session_refreshed_after_snapshot() {
-    let agent = echo_agent();
-    let initial_acp = AcpClient::connect_with_logs(&agent, None)
-        .await
-        .expect("fake ACP must initialize");
-    let gateway = Arc::new(gateway::GatewayCore::from_config(
-        gateway::route::parse_config(
-            r#"
-gateway:
-  routes:
-    - source: qq:group:123
-      agent: peri
-      profile: trpg
-      session: 战役1
-"#,
-        )
-        .expect("合法配置"),
-    ));
-    let state = Arc::new(
-        crate::test_utils::test_state_with_acp(
-            agent,
-            initial_acp,
-            gateway,
-            prism::PrismClient::unavailable("test".to_string()),
-        )
-        .await,
-    );
+    let state = Arc::new(state_with_initial_acp().await);
     let runtime = state.active_runtime().expect("active runtime");
     {
         let mut sessions = runtime.sessions.lock().unwrap();
@@ -100,7 +312,10 @@ gateway:
             SessionInfo::new("platform-peri".into(), String::new(), ".".into(), true, 0);
         platform.updated_at = Some(Timestamp::new(1)); // 1970 年，快照视角必然过期
         sessions.insert("qq:group:123".to_string(), platform);
-        // 大量非平台填充会话：拉长快照持锁窗口，主线程才能稳定观察到快照阶段。
+        // 大量填充会话：拉长快照持锁窗口，主线程才能稳定观察到快照阶段。
+        //
+        // #363-4：填充会话的 updated_at 必须是**当下**——旧契约下非平台键天然豁免，
+        // 新契约下它们按同一超时参与回收；给过期时间会让这一条同时测到无关的回收。
         for i in 0..50_000 {
             let mut filler = SessionInfo::new(
                 format!("local-fill-{i}"),
@@ -109,7 +324,7 @@ gateway:
                 true,
                 0,
             );
-            filler.updated_at = Some(Timestamp::new(1));
+            filler.updated_at = Some(Timestamp::now());
             sessions.insert(format!("local-fill-{i}"), filler);
         }
     }
@@ -123,7 +338,10 @@ gateway:
             .enable_all()
             .build()
             .expect("watcher runtime")
-            .block_on(check_session_expiry(&state_for_thread));
+            .block_on(check_session_expiry_with(
+                &state_for_thread,
+                Some(std::time::Duration::from_secs(60)),
+            ));
     });
 
     // 握手 1：等待 watcher 进入快照（短暂占用 sessions 锁，50k 填充使窗口足够长）

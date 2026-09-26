@@ -29,22 +29,38 @@ export interface ErrorCodeExplanation {
   readonly recovery?: RecoveryKind
 }
 
+/**
+ * Agent 崩溃原因（pylon-acp `CrashReason` wire 词表）的子表。
+ *
+ * 与 Rust 侧 `engine.rs::CrashReason::as_str` 的封闭集**双向精确对齐**，由
+ * `scripts/acp-vocabulary.test.mts` 静态比对看守：Rust 增删变体而本表不同步、
+ * 或本表残留死码（先例：#348 A1 摘除 `WriterTimeout` 后 `writer_timeout` 词条
+ * 滞留，#357），门禁都红灯。`pending_lock_poisoned` 属 #348 返工裁定的一对
+ * 豁免保留（Rust 变体无产生点但因本词条而暂留），摘除须两侧同轮。
+ */
+const ACP_CRASH_CAUSE_EXPLANATIONS = {
+  writer_failed: { summary: 'Agent 进程管道通信失败（stdin 写 / stdout 读物理 IO 错误），连接已按崩溃收敛', hint: '在运行日志里查看该进程的最后输出' },
+  stdout_closed: { summary: 'Agent 进程已退出（标准输出关闭）' },
+  pending_lock_poisoned: { summary: '内部状态锁中毒，连接已按崩溃收敛', hint: '重启 Pylon 后重试；持续出现请反馈' },
+  overloaded: { summary: 'Agent 入站事件速率超过背压上限，连接按过载收敛（事件有缺口）' },
+} satisfies Record<string, ErrorCodeExplanation>
+
+/** `CrashReason` wire 码的前端镜像（门禁比对面，见上）。 */
+export const ACP_CRASH_CAUSE_CODES: readonly string[] = Object.keys(ACP_CRASH_CAUSE_EXPLANATIONS)
+
 export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanation>> = Object.freeze({
   // ── Agent 启动与连接（宿主 agent 域）──
   agent_executable_missing: { summary: '配置里那个可执行文件不存在或不可执行', hint: '在 设置 → Agent 里重新选择 exe 路径', recovery: 'select-agent-executable' },
   agent_spawn_failed: { summary: 'Agent 进程启动失败', hint: '确认该程序能独立运行，并检查运行日志里的系统错误', recovery: 'open-runtime-log' },
   agent_initialize_failed: { summary: 'Agent 启动了，但 ACP 握手没通过', hint: '确认这是支持 ACP 的 Agent，且版本不过旧', recovery: 'open-runtime-log' },
   agent_connection_timeout: { summary: '连接 Agent 超时，未在预算内完成握手', hint: '可能是首次启动较慢或进程卡住；查看运行日志后重试', recovery: 'open-runtime-log' },
+  agent_auth_required: { summary: '该 Agent 要求先登录（账号凭据缺失或已过期）', hint: '在该 Agent 自己的登录/认证流程完成登录后重试', recovery: 'open-runtime-log' },
   agent_crashed: { summary: 'Agent 进程意外退出', recovery: 'open-runtime-log' },
   agent_runtime_unavailable: { summary: '当前没有可用的 Agent 运行时', hint: '先在 设置 → Agent 中完成连接', recovery: 'open-agent-settings' },
   no_active_agent: { summary: '还没有选择要使用的 Agent', hint: '在 设置 → Agent 中新建或切换一个 Agent', recovery: 'open-agent-settings' },
   agent_spawn_io_failed: { summary: '启动 Agent 进程时发生 IO 错误', hint: '确认该程序存在且当前用户有权执行', recovery: 'open-runtime-log' },
-  // Agent 崩溃的具体原因（pylon-acp cause 词表，会作为 cause.code 出现在错误卡里）
-  writer_failed: { summary: '向 Agent 进程写入失败，连接已按崩溃收敛', hint: '在运行日志里查看该进程的最后输出' },
-  writer_timeout: { summary: 'Agent 进程长时间不读取输入（写超时），连接已按崩溃收敛' },
-  stdout_closed: { summary: 'Agent 进程已退出（标准输出关闭）' },
-  pending_lock_poisoned: { summary: '内部状态锁中毒，连接已按崩溃收敛', hint: '重启 Pylon 后重试；持续出现请反馈' },
-  overloaded: { summary: 'Agent 入站事件速率超过背压上限，连接按过载收敛（事件有缺口）' },
+  // Agent 崩溃的具体原因（子表见 ACP_CRASH_CAUSE_EXPLANATIONS，词表由门禁对齐）
+  ...ACP_CRASH_CAUSE_EXPLANATIONS,
 
   // ── Agent 探测（pylon-core 诊断码）──
   version_probe_spawn_failed: { summary: '无法执行该程序（不存在、无权限，或不是有效的可执行文件）', hint: '在 设置 → Agent 里重新选择 exe 路径', recovery: 'select-agent-executable' },

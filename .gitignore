@@ -44,6 +44,9 @@ pylon-*win64.zip
 # Hermes Windows runtime is fetched and verified at release-build time; the
 # binary tree is distributed in the portable archive, not committed to source.
 /src-tauri/resources/runtime/git/
+# #371：离线文档站产物构建期暂存进 Tauri 资源树（bundle.resources 带进发行包），
+# 不入库——先例同上 runtime/git；否则数百个 dist 文件会污染共享 git status。
+/src-tauri/resources/docs-site/
 /.cache/pylon/
 
 # tauri 生成 schema（构建时自动再生成，不入库）

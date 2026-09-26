@@ -5,6 +5,10 @@ edition = "2021"
 description = "Pylon standalone library — agent catalog/detection and CLI client (no Tauri/GUI dependencies)"
 
 [dependencies]
+# #361：子进程 spawn 的 Windows 控制台收口（`HideConsoleWindow`）住 pylon-foundations。
+# 新边方向为向下（foundations 不依赖任何本仓 crate，不存在环）：探测/诊断类 spawn
+# 同样会弹黑框，若只在 pylon-acp 收口就会漏掉 agent 探测与 reg.exe 这些路径。
+pylon-foundations = { path = "../pylon-foundations" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yml = "0.0.13"

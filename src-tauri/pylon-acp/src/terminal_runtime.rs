@@ -203,12 +203,17 @@ impl TerminalRegistry {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        // #348 A3：terminal 输出走管道，不在用户桌面开控制台窗口。
-        super::process::hide_console_window(&mut command);
+        // #348 A3 + #363-1：terminal 输出走管道、不在用户桌面开控制台窗口；
+        // agent 侧 terminal 与 agent 本体同属「agent 子进程」，同享 UTF-8 环境钉死。
+        super::process::configure_agent_child(&mut command);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
-        let mut child = ManagedChild::new(command.spawn().map_err(|e| e.to_string())?);
+        // #363-2：与 agent 本体同一处置——fork→exec 窗口的 ETXTBSY 在预算内重试。
+        let child = super::process::spawn_retrying_exec_busy(|| command.spawn())
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut child = ManagedChild::new(child);
         let stdout = child.take_stdout().map_err(|e| e.to_string())?;
         let stderr = child.take_stderr().map_err(|e| e.to_string())?;
         let limit = resolve_output_limit(output_limit);

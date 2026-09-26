@@ -20,6 +20,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::process::Command;
 
+use crate::child_command::HideConsoleWindow;
+
 /// diff 输出上限（字节）。
 pub const MAX_DIFF_BYTES: usize = 256 * 1024;
 /// 0-C2：git_show_file 输出上限（两版本文本数据面）。// 1MB
@@ -141,6 +143,9 @@ async fn run_git_with_timeout_env(
     // 超时后 git 会滞留并占用 index 锁）。
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(cwd);
+    // #361：发行构建是 GUI 子系统，git 这类 console 子进程不加 CREATE_NO_WINDOW
+    // 会各自弹出一个可见控制台窗口（本函数在 workbench 里是热路径）。
+    cmd.hide_console_window();
     if let Some(host_env) = host_env {
         for (key, value) in host_env {
             cmd.env(key, value);
