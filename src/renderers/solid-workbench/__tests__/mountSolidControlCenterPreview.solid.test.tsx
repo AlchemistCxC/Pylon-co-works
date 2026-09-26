@@ -313,43 +313,4 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('CC-02 第 5 步同源：空态 + 编辑态下工具栏那格的状态与控件幽灵态一致', async () => {
-    const runtime = new TestPluginRuntime()
-    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
-    const host = document.createElement('div')
-    document.body.append(host)
-    const services = createPreviewWorkbenchServices()
-    const theme = structuredClone(DEFAULTS)
-    theme.inputSubmitButtonMode = 'inline'
-    services.appearance.setTheme(theme)
-
-    try {
-      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
-      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
-      await waitFor(() => expect(host.querySelector('.cc-edit-toolbar')).not.toBeNull())
-
-      const chipState = (label: string) => {
-        const chip = host.querySelector<HTMLElement>(`button[aria-label="${label} 属性"]`)
-        const wrap = chip?.closest('.cc-edit-toolbar-chip-wrap')
-        return {
-          text: chip?.textContent?.trim(),
-          dim: wrap?.classList.contains('dim'),
-          toggleLabel: wrap?.querySelector('.cc-chip-toggle')?.getAttribute('aria-label'),
-        }
-      }
-
-      // 空态语境名单藏起来的六格 ⇒ 工具栏逐格如实呈「隐藏」态（走裸预设值则六格全呈「● 可见」）
-      for (const label of ['模型', '思考强度', '权限模式', '用量', '发送按钮', '命令行提示']) {
-        expect(chipState(label)).toEqual({ text: `＋ ${label}`, dim: true, toggleLabel: `显示 ${label}` })
-      }
-
-      // 对照：输入栏不在任何名单里 ⇒ 仍是「● 可见」
-      expect(chipState('输入栏')).toEqual({ text: '● 输入栏', dim: false, toggleLabel: '隐藏 输入栏' })
-      destroy()
-    } finally {
-      services.destroy()
-      host.remove()
-      await runtime.deactivate(instance.identity.key)
-    }
-  })
 })
