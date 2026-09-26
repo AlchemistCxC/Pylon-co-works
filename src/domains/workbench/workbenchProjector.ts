@@ -1528,32 +1528,50 @@ export function setTimelinePayloadNarrowing(enabled: boolean): void {
 }
 
 /**
- * 收窄深度 = 2：顶层与**一层**内嵌对象只留标量（tool 族的 name/title/status/kind/action
- * 都在 `event.tool` 这一层），再往下或数组一律视为载荷载体。
+ * 收窄规则（#375-a）：标量**字符串**只有短于该上限才留下，再往深（第三层）或数组一律视为
+ * 载荷载体。取 512 而不是按键名白名单，是因为「载荷藏在哪」不稳定——`rawOutput` 是对象、
+ * 但真正的大字符串在 `rawOutput.text`；`input` 有时只有 `{command}`、有时是整个文件正文。
+ * 按长度判定对两种形状都成立：name/title/status/kind/toolCallId 这类身份标量全都远短于此。
  */
+const NARROWED_SCALAR_STRING_LIMIT = 512
+
 function narrowTimelineData(event: unknown): unknown {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return event
-  const narrowed: Record<string, unknown> = {}
   const omitted: string[] = []
-  for (const [key, value] of Object.entries(event as Record<string, unknown>)) {
-    if (value === null || typeof value !== 'object') {
-      narrowed[key] = value
-      continue
+  const narrowed: Record<string, unknown> = {}
+  const keepScalar = (
+    target: Record<string, unknown>,
+    key: string,
+    value: unknown,
+    path: string,
+  ): boolean => {
+    if (typeof value === 'string') {
+      if (value.length <= NARROWED_SCALAR_STRING_LIMIT) {
+        target[key] = value
+        return true
+      }
+      omitted.push(path)
+      return true
     }
+    if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+      target[key] = value
+      return true
+    }
+    return false
+  }
+  for (const [key, value] of Object.entries(event as Record<string, unknown>)) {
+    if (keepScalar(narrowed, key, value, key)) continue
     if (Array.isArray(value)) {
       omitted.push(key)
       continue
     }
     const nested: Record<string, unknown> = {}
-    const nestedOmitted: string[] = []
     for (const [innerKey, innerValue] of Object.entries(value as Record<string, unknown>)) {
-      if (innerValue === null || typeof innerValue !== 'object') {
-        nested[innerKey] = innerValue
-        continue
+      // 只再进一层：`tool` 的身份标量在这一层，再深的复合值一律算载荷。
+      if (!keepScalar(nested, innerKey, innerValue, `${key}.${innerKey}`)) {
+        omitted.push(`${key}.${innerKey}`)
       }
-      nestedOmitted.push(innerKey)
     }
-    if (nestedOmitted.length > 0) nested.payloadKeys = Object.freeze(nestedOmitted)
     narrowed[key] = Object.freeze(nested)
   }
   if (omitted.length > 0) narrowed.payloadKeys = Object.freeze(omitted)

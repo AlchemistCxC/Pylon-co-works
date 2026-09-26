@@ -305,6 +305,9 @@ describe('loadCanonicalEventsIncremental（#81 L1 双读修复）', () => {
       },
       loadAll: vi.fn(async () => rows),
       async loadAllPreferUnits() { return rows },
+      // #376-b：接口新增 listCompact。本双件不测分页，但既然它代表「库里有 rows」，
+      // 就如实返回单页全量（不是空页），避免双件语义自相矛盾。
+      async listCompact() { return { events: rows, nextAfterSequence: null } },
       async exportRaw() { return null },
       async searchOwners() { return [] },
     }

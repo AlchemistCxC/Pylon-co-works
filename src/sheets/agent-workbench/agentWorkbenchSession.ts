@@ -246,7 +246,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     for (const envelope of envelopes) {
       if (fold.ids.has(envelope.eventId)) continue
       fold.ids.add(envelope.eventId)
-      fold.log.push(envelope)
+      // #375-c：入日志前剥掉 wire 原始副本（本日志是它唯一的持有者，回滚重折只读 event）。
+      fold.log.push(withoutEnvelopeRaw(envelope))
     }
     return fold.journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, fold.journalDiagnosticCount) : projected
   }

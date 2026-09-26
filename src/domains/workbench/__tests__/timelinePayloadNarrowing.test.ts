@@ -6,6 +6,8 @@
  * 钉住：tool / activity 两族的 `timeline.data` 只留标量面 + 被省略的键名清单，载荷仍完整
  * 归 `activities[]`；逃生口（`setTimelinePayloadNarrowing(false)`）能回到整份事件。
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createWorkbenchDocument,
@@ -189,5 +191,20 @@ describe('#375-d 同内容元数据快照复用', () => {
     const first = commandsEnvelope(1, commands)
     const second = commandsEnvelope(2, commands.slice(0, 3))
     expect(second.event).not.toBe(first.event)
+  })
+})
+
+describe('#375-c 接线守卫（这条曾经静默失效过）', () => {
+  it('foldPage 入日志走 withoutEnvelopeRaw，而不是直接 push 原信封', () => {
+    // 为什么用源码断言：`fold.log` 是运行时内部状态，没有观测面；而「helper 写了但没接线」
+    // 恰恰是本批真实发生过的一次错误（一次失败的脚本编辑只落了 import、没落调用点，
+    // 类型检查也不报错——import 有使用点即可）。这条守卫让那种静默失效无法通过测试。
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../sheets/agent-workbench/agentWorkbenchSession.ts', import.meta.url)),
+      'utf8',
+    )
+    const pushLines = source.split('\n').filter(line => line.includes('fold.log.push('))
+    expect(pushLines).toHaveLength(1)
+    expect(pushLines[0]).toContain('withoutEnvelopeRaw(')
   })
 })
