@@ -128,3 +128,180 @@ cd <副本>/ && WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9
 
 - #376：`src-tauri/pylon-session/src/event_repo/{redaction,mod}.rs`、`src-tauri/src/session/mod.rs`（读出口）、`src/infrastructure/events/canonicalEventRepository.ts`。**避让** #348/#349（`pylon-acp/**`、`src/session/{create,fork}.rs`）与 #361-363（`src-tauri/src/logging/**`、`pylon-core/**`）。
 - #375：`src/domains/workbench/workbenchProjector.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`src-tauri/pylon-session/src/turn_rollup.rs`、`src/renderers/solid-workbench/**`。**避让** #351（`src/` 根件下沉）、#358/#370（renderer 与样式）。
+
+---
+
+# 施工记录（同一 case 的落地：目标/范围/方案/验收结论）
+
+> 上文是第一阶段的**调查报告**（未改代码）。本节承接施工：把四条乘数收敛到有界，
+> 并把规格 `.agents/spec/375-376-memory-payload-amplification.md` 的目标/范围/方案/验收
+> 结论并入本记录（spec 不入库、不保留）。
+
+## 元信息
+
+- issue：#376（读路径载荷双份 + 冷装载全量下发）、#375（投影层载荷三重持有 + 工具拍不折叠）
+- 分支：`kumo/prometheus`（共享工作树）
+- 提交：`97a09f38`（#376-a）→ `48dd08d2`（#376-b）→ `fc7473f2`（#375-a）→ `f0e9bc78`（#375-c/e）
+  → `d3c7cef0`（memory 域）→ `91da068f`（rustfmt）
+- 日期：2026-09-27
+
+## 目标与范围
+
+**做到**：读路径只发一份载荷、冷装载分页续折、投影层载荷单一持有、拍数敏感性去二次化，
+并把这些判据做成**一条命令可复跑**的门禁件。
+
+**不做**（与规格一致）：不改 canonical 事件契约与持久化格式、不动 `turn.unit` 的 wire 形状、
+不动 `evt_export_raw` 语义、不改渲染视觉与交互（相邻工具卡折成组徽标是既有设计）、
+不动高亮/markdown 缓存、不引入新事件类型（跨度语义沿用 ADR-0016）。
+
+## 改动清单
+
+| 文件 | 区段 | 性质 |
+| --- | --- | --- |
+| `pylon-session/src/event_repo/redaction.rs` | 新增 `retain_typed_payload` 与收口常量/标记 | 修改 |
+| `pylon-session/src/event_repo/service.rs` | `list_events` / `load_events_compact*` 收口 + `cap_typed_payload_row` | 修改 |
+| `pylon-session/src/event_repo/repo.rs` | 新增 `load_events_compact_page`、删 `MAX_COMPACT_SQL_RANGES` 与整读回退路径 | 修改 |
+| `pylon-session/src/event_repo/fold.rs` | 折叠规则抽成 `DeltaRun` 累加器 + `continues_run` / `last_run_boundary_index` | 修改 |
+| `pylon-session/src/event_repo/row.rs`·`mod.rs` | `CompactEventPage` | 修改 |
+| `pylon-session/src/event_repo/tests.rs` | 收口 4 例 + 分页 3 例 | 修改 |
+| `src-tauri/src/session/mod.rs` | `evt_list` / `evt_load_compact` 签名（各加读出口开关/游标参数） | 修改 |
+| `src-tauri/src/session/prompt.rs`·`revive_tests.rs`·`src-tauri/src/test_harness.rs` | 宿主内部读传 `false`（保逐字节语义） | 修改 |
+| `src/infrastructure/events/canonicalEventRepository.ts` | `listCompact` + `loadAllPreferUnits` 分页循环 + 收口开关入参 | 修改 |
+| `src/infrastructure/events/readPathSwitches.ts` | 两处读路径杀停开关单点 | 新增 |
+| `src/infrastructure/events/__tests__/canonicalEventRepository.test.ts` | 分页/开关用例 | 修改 |
+| `src/domains/events/canonicalTurnDuration.ts` | `canonicalBoundaryProjection`（分页终态判据累积，只留标量） | 修改 |
+| `src/domains/workbench/workbenchProjector.ts` | `timeline.data` 收窄 + 就地深冻结（删 `jsonSnapshot`） | 修改 |
+| `src/sheets/agent-workbench/agentWorkbenchProjection.ts` | `withoutEnvelopeRaw` | 修改 |
+| `src/sheets/agent-workbench/agentWorkbenchSession.ts` | `listJournalPages` 分页冷装载 + `publishFoldedDocument` 抽出 + fold.log 剥 raw | 修改 |
+| `recoveryRace.test.ts`·`canonicalEventDoubleWrite.test.ts` | 契约变更随之修正 | 修改 |
+| `src/__tests__/replay/agentWorkbenchSession.pagedLoad.test.ts` | 分页 vs 一次性等价 | 新增 |
+| `src/domains/workbench/__tests__/timelinePayloadNarrowing.test.ts` | 收窄/共享/剥 raw | 新增 |
+| `scripts/perf-bench/{retainedHeap.ts,suites/memorySuite.ts,memory-probe.mts,proc-tree.ps1,fixtures/memoryCorpus.ts,README.md}` | memory 域 | 新增/修改 |
+| `package.json` | `perf-bench` / `perf-bench:memory` | 修改 |
+| `vitest.setup.ts` | 新测试文件登记进既定 B 类（feed 注册噪音） | 修改 |
+
+## 方案要点
+
+**#376-a 读出口收口（service 层）**：`retain_typed_payload` 与 `retain_raw_payload` 同模块同常量。
+预算内**逐字节不变**；超预算按同一比例收缩字符串叶子（`keep_i = len_i × allowed / target`，
+整数除法保证 `Σkeep ≤ allowed`，故必落回线内），键与非字符串标量逐字节不动，UTF-8 边界安全，
+截断事实以 `_pylonTypedTruncated` 保留键可见（口径同 raw 的 `_pylonTruncated`）。
+`turn.unit` **豁免**（单元行是整段正文的唯一副本，raw 只是占位对象）。收口只在 service 层：
+repo 层与 `turn_rollup` 的 trim 重折校验必须保持全文，否则 #81 L3 的 sha256 会静默失配。
+
+**#376-b 冷装载分页续折**：`load_events_compact_page(owner_key, after_sequence, limit)` 一次一页
+（升序、**前向**游标）。过滤不再把覆盖跨度内联进 SQL（跨度过千会撞表达式深度/参数上限），
+改为只读 `(sequence, event_type)` 两列的元数据扫描 + 跨度指针，被覆盖行**不解码成 `Value` 树**。
+关键约束：**页边界必须落在 delta run 边界上**，否则读侧折叠的切点随页边界漂移、分页折与一次性折
+不再等价——为此把折叠规则抽成 `DeltaRun` 累加器，折叠与分页守卫共用同一份判定；页尾 run 若仍在
+继续，本页延长到它闭合（`accepts` 自带 48 KiB / 2000 chunk 预算 ⇒ run 有界 ⇒ 延长有界）。
+前端 `agentWorkbenchSession` 新增可选装载缝 `listJournalPages`：逐页折进同一份文档，页内行与信封
+折完即回收；终态判据跨页累积时只留标量（`canonicalBoundaryProjection`），发布仍只有一次
+（`publishCanonicalRead` 的成功尾巴抽成 `publishFoldedDocument`，语义逐字不变）。
+装载缝优先级：显式 `listJournalPages` >（注入了 `loadAll` 则退回一次性读 ⇒ 既有测试与嵌入式宿主
+行为不变）> 默认分页读。
+
+**#375-a `timeline.data` 收窄**：只收 tool / activity 两族（其他族逐字不变）。规则按**长度**而非
+键名白名单——`rawOutput` 是对象但大字符串在 `rawOutput.text`，`input` 有时只有 `{command}` 有时是
+整份文件正文，按长度判定对两种形状都成立：短标量（≤512）与一层内嵌对象的短标量留下，数组、第三层
+复合值、超长字符串一律不进 `data`，被省略的键名以点分路径记进 `payloadKeys` 供插件迁移定位。
+逃生口 `data-timeline-payload="full"`（`timeline.data` 是 renderer/插件可见面，见「遗留」）。
+
+**#375-c/#375-e 载荷单一持有**：`freezeDeepValue` 原实现是 `map`+`Object.fromEntries` **重建整棵树**
+（= 深克隆 + 冻结，与被它取代的 `structuredClone` 同一笔分配账）——改为**沿原引用递归冻结**，
+于是活动节点与信封语义事件共享同一批对象，同一份载荷在文档里只剩一份；`jsonSnapshot` 就此删除。
+`fold.log`（reject 回滚整页重折用）是信封 `raw` 的唯一持有者而无人读它，入日志前用
+`withoutEnvelopeRaw` 剥掉（信封本身的 normalize 契约不变）。
+
+## 验收标准与结果
+
+**比值判据（同一合成语料 2203 行 / Σ逻辑载荷 60.1 MB，`bun run perf-bench:memory`）**：
+
+| 验收项 | 阈值 | 改前（同尺对照） | 改后 | 判 |
+| --- | --- | --- | --- | --- |
+| 冷装载文档驻留 / Σ逻辑载荷 | ≤ 1.2× | 4.051× | **0.432×** | PASS |
+| 拍数敏感性（同终值内容，绝对驻留）5→40 拍 | ≤ 1.5× | 6.82× | **1.20×** | PASS |
+
+对照档的 6.82× 与调查报告的实机 6.3× 吻合，说明这把尺子对得上当时的读数。
+
+| 验收项 | 结果 |
+| --- | --- |
+| 读出口 typed 载荷 ≤ 64 KiB 且标量逐字节不变 / 多字节安全 / `turn.unit` 豁免 | Rust 4 例绿（`redaction`/`service` 路径） |
+| 分页装载终态文档与一次性装载逐字段等价 | Rust 3 例（逐页 vs 一次性逐位等价，limit 1/2/3/4/7）+ 前端 4 例（文档逐字段等价） |
+| 页边界不切碎 delta run | Rust 1 例绿（span 与一次性读相同） |
+| 既有行为测试 | `bun run test` 654 files / 5030 passed（仅余 2 条既有红灯，见「测试处置」） |
+| `cargo test -p pylon-session --lib` | **167 passed** |
+| `check:solid` / `check:ipc` | 通过（IPC 后端 228 命令 ↔ 前端 159 invoke 双向一致） |
+| 未新增白名单豁免 | `check:solid` 报告「33 条遗留白名单仅报告；无新增越界」；`vitest.setup.ts` 新增一条**测试文件**登记（既定 B 类 feed 注册噪音，与 9 个同族文件一致） |
+
+## 测试处置
+
+**修改的既有用例（逐个点名 + 理由）**：
+
+| 用例 | 改动 | 理由 |
+| --- | --- | --- |
+| `canonicalEventRepository.test.ts`（`evt_list` 参数断言 ×3） | 加 `capTypedPayload: true` | #376-a 给读出口加了收口开关参数 |
+| 同上（`loadAllPreferUnits` 相关） | 改为逐页形态断言 | #376-b 把 `evt_load_compact` 改成「一页」返回 |
+| `canonicalEventDoubleWrite.test.ts`（`evt_list` 参数断言） | 加 `capTypedPayload: true` | 同上 |
+| `agentWorkbenchLifecycle.recoveryRace.test.ts`（`evt_load_compact` mock） | 返回 `{ events, nextAfterSequence }` | 同上（旧 mock 返回裸数组，会静默走成空页） |
+
+**未修改**：`agentWorkbenchSession.batch.test.ts` 等 30 余处注入 `loadAll` 的行为测试**逐字未动**
+（装载缝优先级保证它们仍走一次性读）。
+
+**两条既有红灯（与本批无关，供核）**：`scripts/sheetRegistry.compat.test.mts` 与
+`scripts/sheetState.compat.test.mts` 断言 sheet 注册表为 10 类，实际 11 类——第 11 类是
+`f959b48c`（#371 Docs Sheet）新增的 `docs`，两处断言未随迁。
+
+## 证据
+
+```
+$ cargo test -p pylon-session --lib
+test result: ok. 167 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ bun run perf-bench:memory
+| cold-load-residency | 60.1 MB | 25.9 MB | 0.432× | 1.2× | PASS |
+拍数敏感性（同一终值内容，绝对驻留）：5 拍 1.9 MB → 40 拍 2.3 MB，增长 1.20×（阈值 ≤ 1.5×）→ PASS
+memory 域判据全过（268ms）
+
+$ PERF_MEMORY_LEGACY=1 bun run perf-bench:memory      # 同一把尺子量改动前
+| cold-load-residency | 60.1 MB | 243.4 MB | 4.051× | 1.2× | FAIL |
+拍数敏感性：5 拍 5.6 MB → 40 拍 38.0 MB，增长 6.82×（阈值 ≤ 1.5×）→ FAIL
+
+$ bun run check:solid   → 全绿（含「无新增 invoke/store/CustomEvent 越界」）
+$ bun run check:ipc     → check:ipc ok — 后端注册 228 个命令，前端 invoke 159 个，双向一致（豁免 52）
+$ bun run test          → 654 files / 5030 tests passed（2 条既有红灯见上）
+```
+
+**载荷分桶证据（收窄前的纯函数估算）**：同一语料折完后 `timeline` 123.0 MB / `activities` 23.1 MB /
+其余切片 <0.01 MB——「timeline 持有整份事件」是主凶，且收窄后 timeline 降到接近零。
+
+**共享工作树注意**：本批在 `kumo/prometheus` 共享树上施工，与他人在途域（#348/#349、#361-363、
+#356、#371/#372）交错。所有提交经**私有 index**（`GIT_INDEX_FILE`）落到历史，不触碰共享
+`.git/index`；`session/mod.rs` 与 #361-363 改同一文件，提交时按 hunk 分账（只取含 `#376` 标记的
+hunk）。中途观测到共享 index 被外部操作置为陈旧（一度把我的文件显示成 staged 删除），已按路径
+修复为与 HEAD 一致，未触碰他人 staged 内容。
+
+## 遗留（未做 / 需裁决）
+
+1. **#375-b 工具拍折叠（未做）**：要动 `turn.unit` 的 segment 形状或新增一种 batch 行展开路径，
+   落进「不动 `turn.unit` wire 形状」与「不新增事件类型」的禁区夹缝里；而它要治的**驻留**问题
+   已由本批的 #375-a/c/e 解决（拍数敏感性 6.82× → 1.20×），剩下的收益是 IPC 行数与折叠耗时。
+   已按 AGENTS §2.5 在 PR 描述里登记为后续 issue，不关闭 #375。
+2. **#375-d 同内容元数据快照去重（未做）**：`session.commands-updated`（实测单条 16 KB、
+   每回合 1–2 次、claude-code 会话里有连续 5 行完全相同）与 `session.config-updated` 仍是每回合
+   各存一份。按 500 回合估 ≈16 MB，量级远小于本批已治的项；要做需要事件对象级的内容哈希 intern，
+   属独立改动。
+3. **`timeline.data` 收窄的白名单范围需仓库主裁决**（spec 未决问题 2）：本批先按「长度 ≤512 的
+   标量 + 一层内嵌对象的短标量」定档，并给出 `data-timeline-payload="full"` 逃生口。渲染引擎那条
+   唯一入口台账（`CONTEXT.md` 指向仓外 `Docs/Archive/渲染引擎施工/00-唯一入口台账.md`）里
+   `timeline.data` 只被登记为**剥敏面**，没有字段白名单，故本批按「保留标量身份面」保守处理。
+4. **页签保活上限（未做，spec 未决问题 3，§8 的产品裁决项）**：未改 `SheetLayout` 的 keep-alive。
+   非活动页签仍各持一套 runtime/文档/DOM，「按页签数成倍放大」的性质**未变**，只是每个页签的
+   基线降下来了。`#234` 实测冷挂载首行 15 ms / 结算 731 ms 是「卸得起」的依据。
+5. **`fold.log` 只留 eventId + 回滚按需重读（未做）**：本批只剥掉了 `raw`，`event` 仍留着
+   （回滚重折是同步路径）。要走到底需把 reject 回滚改成异步按需重读并复核乐观行剔除的时序
+   （spec 未决问题 4）。
+6. **绝对 MB 级验收未做**：本批仍是比值口径（记录 §7 的如实标注不变——2 GB 峰值只在
+   「工具输出经 `tool_call_update` 流式回传」的 provider 上出现，本机 provider 不在其中）。
+   实机复跑用 `scripts/perf-bench/proc-tree.ps1` + README 的隔离副本/注入配方。
+7. **V8 支配树归因未补**：本批给出的是纯函数分桶（见「证据」），仍不是 V8 支配树证据。
