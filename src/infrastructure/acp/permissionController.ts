@@ -75,7 +75,11 @@ export function normalizePermissionRequest(payload: unknown): PermissionRequest 
   // #316：elicitation.request 走同一 normalize 链（eventType 分派渲染层）。
   const isElicitation = envelope?.eventType === 'elicitation.request'
   if (!envelope || (envelope.eventType !== 'permission.request' && !isElicitation) || !isPlainObject(envelope.payload)) return null
-  if (!envelope.agentId || !envelope.sessionId || !envelope.requestId || envelope.clientGeneration === undefined) return null
+  if (!envelope.agentId || !envelope.requestId || envelope.clientGeneration === undefined) return null
+  // #356：request-scoped elicitation（会话外 auth/config 阶段）的 sessionId 是
+  // 显式空串——identity 以 requestId+agentId 收口，放行；字段缺失仍拒绝。
+  const requestScoped = isElicitation && envelope.sessionId === ''
+  if (!requestScoped && !envelope.sessionId) return null
   const body = envelope.payload
   // ACP-01：requestId 是 wire 原值字符串回显（数字 id 也以 "7" 传输）——保留原样，
   // 不再 Number() 收窄（string id "perm-1" 曾因 isFinite(NaN) 被整单丢弃）。

@@ -10,13 +10,15 @@ export interface InteractionTransportDeps {
 
 export type { InteractionResponseAnswer, InteractionResponseIdentity }
 
-/** identity 完整校验：缺任一必填字段禁止提交（防把未知请求误当可提交事务）。 */
+/** identity 完整校验：缺任一必填字段禁止提交（防把未知请求误当可提交事务）。
+ * #356：sessionId 显式空串（request-scoped elicitation）是合法身份——会话外
+ * 请求以 requestId+agentId 收口；字段缺失（undefined/null）仍拒绝。 */
 function requireIdentity(identity: InteractionResponseIdentity): InteractionResponseIdentity {
   if (
     !identity.provider
     || !identity.agentId
     || !identity.requestId
-    || !identity.sessionId
+    || identity.sessionId == null
     || identity.clientGeneration === null
   ) {
     throw new Error('Interaction identity 不完整，禁止提交')

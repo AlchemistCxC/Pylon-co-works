@@ -38,6 +38,22 @@ describe('Interaction transaction key（P1-1）', () => {
 })
 
 describe('InteractionRequest 规范化', () => {
+  // #356：sessionId 区分「字段缺失」与「显式空串」——request-scoped elicitation
+  // 的 wire 事件携带 sessionId: ""，是合法身份，不得折叠成 undefined。
+  it('envelope 显式空串 sessionId 保留为 ""，缺失/非串仍为 undefined', () => {
+    const explicitEmpty = normalizeInteractionEnvelope({
+      provider: 'peri', agentId: 'peri-a', sessionId: '', eventType: 'elicitation.request',
+      requestId: 'e-42', clientGeneration: 2,
+      payload: { message: 'auth configuration needed' },
+    })
+    expect(explicitEmpty).not.toBeNull()
+    expect(explicitEmpty?.sessionId).toBe('')
+
+    const missing = { provider: 'peri', agentId: 'peri-a', eventType: 'elicitation.request', requestId: 'e-42', clientGeneration: 2, payload: {} }
+    expect(normalizeInteractionEnvelope(missing)?.sessionId).toBeUndefined()
+    expect(normalizeInteractionEnvelope({ ...missing, sessionId: 42 })?.sessionId).toBeUndefined()
+  })
+
   it('统一 envelope 保留 provider/agent/generation identity', () => {
     const envelope = normalizeInteractionEnvelope({
       provider: 'peri', agentId: 'peri-a', sessionId: 's1', eventType: 'permission.request',
