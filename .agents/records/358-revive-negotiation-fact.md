@@ -85,11 +85,40 @@
 
 ## 未解问题
 
-1. **冷启动 load 双败时卡片仍在**：本轮实机第一轮（12:57:39 起）两次 `session/load` 都因 `connection_closed` 失败（agent 12:57:46.5 才 connected，退避重试额度 1 次已用尽），文档始终拿不到 load 响应 ⇒ 卡片保留。这是 #110 F1 已知竞态的余波，但**对用户可见**：猜测式修复会让「文档在拿到 load 响应前就假设已协商」。要彻底消除需要给文档加一等「已装载/已协商」事实或让恢复链在 agent 就绪后必达——建议另立 issue。
-2. 占位窗口（journal 回放先于 load 响应）内卡片短暂可见，语义上诚实（此刻文档确实不知道协商事实）。
+1. ~~**冷启动 load 双败时卡片仍在**~~ → **已修**，见文末「追加：遗留修复」。
+2. 占位窗口（journal 回放先于 load 响应）内卡片短暂可见 → **已修**（同一追加）。
 3. 反向对照用的旧包是 F: 的 12:05 release 构建；若要与 main 基线更严格对照，可在 `git stash` 修复后用同配置 debug 包再跑一次。
 
 ## 并行交集
 
 - 共享文件：`src/sheets/agent-workbench/**`、`src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx`、`docs/说明书/Pylon-项目架构参考.md`、`.agents/L.md`（施工声明已随 `ace7a013` 入库）。
 - 与在途 #351（`src/` 根件下沉 + 全仓 import 路径重写）可能在 import 行相交；本批未改任何根件与 `presets/`、`zones/`。
+
+## 追加：遗留修复（`3d977d9a`）
+
+### 动机与做法
+
+遗留的根是「协商事实只来自 load 响应」：首屏 journal 回放先于它到达，冷启动两次 `session/load` 都失败时它更是永远不来。做法是把事实的来源下移到**回放本身**：
+
+- `agentWorkbenchSession.ts` 新增 `withReplayNegotiationFact(document)`，在**共享发布口** `publishCanonicalRead`（bind 与 refresh 共用）里调用：已持久化会话（`session.periId` 存在 ⇒ 历史来自 journal 回放，非本进程新建）且文档已有目录、且时间线尚无协商事实时，补一条**不带 `status`** 的合成 `session.started`（`provenance.synthetic.reason = 'session-replay-negotiation'`，`trust: authoritative`）。
+- 不带 `status` 是刻意的：只交出守卫与中控需要的目录，**不碰会话状态机**（状态仍由 replayed/内核事实决定，避免把在途会话误标 ready）。
+- 反面对照（用例）：无 remote id 的新建会话不补事实 —— `mountSolidWorkbench.solid.test.tsx:2156` 那条「没有启动协商时普通 `session.config-updated` 保留编辑器」的既有契约原样有效。
+
+### 验收与证据
+
+| 验收项 | 结果 |
+| --- | --- |
+| 已持久化会话 bind 回放补出协商事实（不等 load 响应） | 达成（新用例；反向验证：去掉包裹后红 `expected undefined to be defined`） |
+| 未持久化会话不补事实（契约不动） | 达成（新用例 + 既有 2156 用例原样绿） |
+| 本轮回归 | `112 files / 1419 passed | 1 skipped | 1 todo`；`check:solid`、`build`、`lint`（0 errors）全绿 |
+| 发行包 | `bun run release:portable` 成功，`release/pylon-0.3.0-AUE-win64.zip` 37,674,492 B，sha256 `8ad6f6da…845f`，248 项 `verify OK` |
+| 部署到本体实例 | `F:\A-I\Platform\Pylon` 仅覆盖程序侧文件（robocopy `/XD data`，248 文件/242 复制/0 失败）；部署后 `pylon.exe` 与包内**哈希逐字节一致**（`0D7C9390…4994`）；`data/`、`agents.yaml` 未动；旧件备份在 `F:\A-I\Platform\Pylon\backup-358-20260926\` |
+
+**首屏窗口 A/B**（同会话 `smuhyyhy7`、同流程：CDP `Page.addScriptToEvaluateOnNewDocument` 注入 50ms 采样器 → `webview_navigate action=reload` → 读回样点）：
+
+| 二进制 | 采样 | 卡片 |
+| --- | --- | --- |
+| 修复前（备份 exe，12:05 包） | 113 次 / 5.8 s | **有**：`pageAge=312ms` 首次出现 `data-config-count=2`，直到最后一个样点仍在（109/113 命中） |
+| 修复后（已部署包） | 180 次 / 9.2 s | **从未出现**（0 命中）；中控 widgets `input/model/reasoning/mode/tokens/cc-command-hint` 均在 |
+
+这直接覆盖了原来的两条遗留：占位窗口不再闪卡，且 load 失败/未达时也不再长卡（事实来自回放，不依赖响应）。
