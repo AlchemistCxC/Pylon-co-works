@@ -298,7 +298,9 @@ flowchart TB
 **零 Agent 是合法的读取状态**（`agents: {}`）；但 `agents` 键本身必需，缺键按配置错误报出，
 拼错的键名不会被静默当成空表。写入路径相反：配置**变更**不得把 agents 表清空
 （`validate_candidate` 拒绝删到零 Agent——删到空表是操作失误而非意图）。仓库根的 `agents.example.yaml` 是**开发模板与测试夹具**，
-不再参与嵌入（此前被 `include_str!` 预加载，导致首屏出现两个占位 exe 必然启动失败的 Agent）。
+不再参与嵌入（此前被 `include_str!` 预加载，导致首屏出现两个占位 exe 必然启动失败的 Agent）。发行包自带零 Agent 的
+`agents.yaml`（#372 起随包：模板源 `resources/release/agents.template.yaml`，打包时改名），因此发行包首跑的配置来源是
+第 2 档而非第 3 档，效果同为零 Agent 空态，用户在包内即有可编辑的预置入口。
 
 当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 

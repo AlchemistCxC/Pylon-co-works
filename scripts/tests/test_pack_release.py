@@ -66,7 +66,7 @@ class AuditTests(unittest.TestCase):
             pack.scan_text_file("agents.yaml", "exe: F:\\Agent\\peri.exe")
 
     def test_scan_allows_placeholder_path(self) -> None:
-        pack.scan_text_file("agents.example.yaml", "exe: C:\\path\\to\\your-agent.exe")
+        pack.scan_text_file("agents.template.yaml", "exe: C:\\path\\to\\your-agent.exe")
 
     def test_scan_rejects_sensitive_value(self) -> None:
         with self.assertRaises(pack.PackError):
@@ -76,7 +76,9 @@ class AuditTests(unittest.TestCase):
         pack.scan_text_file("config.example.yaml", "api_key: your-key")
 
     def test_reject_forbidden_names_and_suffixes(self) -> None:
-        for bad in ["agents.yaml", "x.pdb", "a.rlib", "b.d", ".env", "x.env"]:
+        # agents.yaml 按位置区分（见 AgentsTemplatePackagingTests）；其余名字与
+        # 后缀在任何位置都拒绝。
+        for bad in ["resources/agents.yaml", "x.pdb", "a.rlib", "b.d", ".env", "x.env"]:
             with self.assertRaises(pack.PackError, msg=bad):
                 pack.reject_forbidden(bad)
 
@@ -261,6 +263,48 @@ class ManualPackagingTests(unittest.TestCase):
                 sorted(rel for _src, rel in files),
                 [f"{self.MANUAL_REL}/a.md", f"{self.MANUAL_REL}/sub/b.md"],
             )
+
+
+class AgentsTemplatePackagingTests(unittest.TestCase):
+    """发行包自带零 Agent 的 agents.yaml（#372，模板源 agents.template.yaml）。
+
+    禁止名语义：`agents.yaml` 的禁令是防泄漏——不许把工作树的真实配置带进包。
+    唯一放行点是包根 agents.yaml（打包器从 release 模板改名收取），任意子目录的
+    同名文件仍拒绝；.env 没有放行点。模板内容必须零 Agent：#326 裁决占位 Agent
+    必然启动失败，裸启动是空态 + 引导——模板若含 `exe:` 占位行等于把必然失败的
+    Agent 重新带回首屏。
+    """
+
+    def test_agents_yaml_allowed_only_as_packaged_template_location(self) -> None:
+        pack.reject_forbidden("agents.yaml")
+        for bad in ["resources/agents.yaml", "tools/agents.yaml", "sub/dir/agents.yaml"]:
+            with self.assertRaises(pack.PackError, msg=bad):
+                pack.reject_forbidden(bad)
+        for env_bad in [".env", "sub/.env", "agents.yaml/.env"]:
+            with self.assertRaises(pack.PackError, msg=env_bad):
+                pack.reject_forbidden(env_bad)
+
+    def test_template_is_collected_under_packaged_name(self) -> None:
+        # 仓库侧模板不占用被禁的名字，映射关系钉死：agents.template.yaml → 包根 agents.yaml。
+        self.assertEqual(pack.AGENTS_TEMPLATE_SOURCE_NAME, "agents.template.yaml")
+        self.assertEqual(pack.AGENTS_TEMPLATE_PACKAGED_NAME, "agents.yaml")
+
+    def test_template_exists_is_zero_agent_and_replaces_example(self) -> None:
+        template = pack.TEMPLATE_DIR / pack.AGENTS_TEMPLATE_SOURCE_NAME
+        self.assertTrue(template.is_file(), "发行模板 agents.template.yaml 必须存在")
+        self.assertFalse(
+            (pack.TEMPLATE_DIR / "agents.example.yaml").exists(),
+            "旧 agents.example.yaml 模板已由 agents.template.yaml 取代，不得回潜",
+        )
+        text = template.read_text(encoding="utf-8")
+        self.assertIn("agents: {}", text)
+        self.assertNotIn("exe:", text, "模板不得预置任何 Agent（#326：占位 exe 必然启动失败）")
+
+    def test_template_passes_release_audit_under_packaged_name(self) -> None:
+        template = pack.TEMPLATE_DIR / pack.AGENTS_TEMPLATE_SOURCE_NAME
+        rel = pack.AGENTS_TEMPLATE_PACKAGED_NAME
+        pack.reject_forbidden(rel)
+        pack.scan_text_file(rel, template.read_text(encoding="utf-8"))
 
 
 class WebView2BootstrapperTests(unittest.TestCase):

@@ -13,7 +13,7 @@
 - Agent 检测器；
 - 自带的调试 MCP 服务器（`tools/webview2-mcp/`，2026-09-17 起随包分发）；
 - 前端资源（字体等）；
-- `agents.example.yaml` 和便携模式启动说明；
+- 零 Agent 的 `agents.yaml` 配置模板（#372 起随包：打包时由 `resources/release/agents.template.yaml` 改名收取）和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
 - 插件开发分发包 `resources/sdk/`（`dist-plugin-sdk/normal` 全量：单文件 ESM runtime + testing harness + `types/` 类型声明 + manifest schema + package.json，2026-09-01 起随包）；
 - WebView2 兜底安装引导脚本（运行时按 Windows 自带处理，不再内置安装器——2026-09-19 决定）；
@@ -43,8 +43,7 @@
 | `resources/sdk/testing.js`、`types/**`、`package.json` | 必须 | 插件开发分发包全量其余部分（2026-09-01 起，打包器从 `dist-plugin-sdk/normal` 收集；缺 `pylon-plugin-sdk.js`/`testing.js`/schema 时打包失败） |
 | `README.md` | 必须 | 项目说明（仓库根 README，2026-09-01 起随包） |
 | `docs/说明书/**` | 必须 | 全量用户说明书（2026-09-01 起随包） |
-| `tools/repair-hermes-acp.bat` / `tools/repair-hermes-acp.ps1` | 必须 | Hermes ACP stdin 修复助手（菜单式 check/repair/restore，不自动执行） |
-| `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板（**可选的预置方式**：#326 起裸启动是零 Agent 空态，启动不读本文件，只有复制成 `agents.yaml` 才生效） |
+| `agents.yaml` | 必须 | 零 Agent 配置模板（#372 起随包：仓库侧 `resources/release/agents.template.yaml` 打包时改名；包内可直接编辑预置 Agent，#326 的裸启动零 Agent 口径不变——模板不含占位 Agent） |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |
 | `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据 |
@@ -124,7 +123,7 @@ WebView2 时联网下载安装器，发布说明无需再区分常规/降级包�
       `portable-git.json` 的 URL、版本和 SHA-256 与本次树一致。
 - [ ] `resources/sdk/` 开发分发包齐全：`pylon-plugin-sdk.js`、`testing.js`、manifest schema、`types/`、`package.json`。
 - [ ] 离线 SDK bundle 不超过 64 KiB；正常版 package（含 `./testing` 类型入口）在插件开发套件中可独立导入。
-- [ ] `agents.yaml`、`.env`、密钥和本机绝对路径没有被放入待打包目录。
+- [ ] 真实 `agents.yaml`（任何非包根位置）、`.env`、密钥和本机绝对路径没有被放入待打包目录；包根 `agents.yaml` 只能来自 release 模板改名（#372）。
 
 ### 打包后
 
@@ -144,7 +143,7 @@ WebView2 时联网下载安装器，发布说明无需再区分常规/降级包�
 
 打包脚本会拒绝或应人工清除以下内容：
 
-- `agents.yaml`、`.env`、API key、token、密码和真实本机路径；
+- 真实 `agents.yaml`、`.env`、API key、token、密码和真实本机路径（#372 起唯一例外：包根 `agents.yaml`——由打包器从 `resources/release/agents.template.yaml` 改名收取的零 Agent 模板；其他位置的 `agents.yaml` 一律拒绝）；
 - 源码目录 `src/`、`src-tauri/src/`、`.git/`、`node_modules/`；
 - `*.pdb`、`*.rlib`、`*.d`、开发期 target 中间文件；
 - `--with-runtime` 包中未经校验的残缺 PortableGit 目录（默认包则根本不携带该树）。

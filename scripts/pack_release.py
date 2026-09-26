@@ -7,13 +7,12 @@
       pylon-cli.exe            # CLI 工具（若存在）
       WebView2Loader.dll       # Tauri 启动必需（缺失 → 0xC0000135）
       resources/...            # 来自 src-tauri/target/release/resources
-      agents.example.yaml      # 占位配置，绝不含真实 agents.yaml
+      agents.yaml              # 零 Agent 配置模板（仓库侧 agents.template.yaml，包内改名）
       README.txt
       portable.flag
       data/                    # 空目录，触发 portable 模式
       tools/install-webview2.bat             # 缺 WebView2 Runtime 时的联网兜底安装
-      tools/repair-hermes-acp.bat/.ps1  # optional Hermes ACP stdin repair
-      resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时）
+      resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时，仅 --with-runtime）
       resources/sdk/pylon-plugin-sdk.js     # 离线插件 SDK（纯浏览器 ESM）
       resources/sdk/pylon-plugin-manifest.schema.json
       tools/webview2-mcp/pylon-webview2-mcp.exe  # 自带的调试 MCP 服务器
@@ -72,10 +71,19 @@ MCP_EXE_NAME = "pylon-webview2-mcp.exe"
 MCP_PACKAGE_DIR = "tools/webview2-mcp"
 TOP_DIR_PATTERN = re.compile(r"^pylon-[^/\\]+-win64/?$")
 
+# agents.yaml 的禁令是防泄漏：不许把开发者/工作树的真实配置带进包。#372 起唯一例外
+# 是包根的 agents.yaml——它只能由打包器从 release 模板（agents.template.yaml）改名
+# 收取，内容是零 Agent 空表；任何其他位置（任意子目录）出现的 agents.yaml 仍视为
+# 泄漏，一律拒绝。.env 没有例外。
 FORBIDDEN_NAMES = {
     "agents.yaml",
     ".env",
 }
+# 发行模板在仓库侧不占用被禁的名字，打包时改名为包根 agents.yaml：用户拿到包即可
+# 直接编辑预置 Agent，无需先复制改名。内容必须是零 Agent 空表——占位 Agent 必然
+# 启动失败，首屏会变成报错而非引导（#326 裁决，#372 落地）。
+AGENTS_TEMPLATE_SOURCE_NAME = "agents.template.yaml"
+AGENTS_TEMPLATE_PACKAGED_NAME = "agents.yaml"
 FORBIDDEN_SUFFIXES = (".pdb", ".rlib", ".d", ".key")
 SENSITIVE_KEY_RE = re.compile(
     r"(?i)\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)\b\s*[:=]"
@@ -173,7 +181,11 @@ def scan_text_file(rel_path: str, text: str) -> None:
 def reject_forbidden(rel_path: str) -> None:
     name = Path(rel_path).name
     posix = rel_path.replace("\\", "/")
-    if name in FORBIDDEN_NAMES or name.endswith(FORBIDDEN_SUFFIXES):
+    if name.endswith(FORBIDDEN_SUFFIXES):
+        raise PackError(f"包内出现禁止文件: {rel_path}")
+    # 唯一放行点是包根的 agents.yaml（= AGENTS_TEMPLATE_PACKAGED_NAME，由打包器从
+    # release 模板改名收取）；其余位置的 agents.yaml 与任何位置的 .env 都拒绝。
+    if name in FORBIDDEN_NAMES and posix != AGENTS_TEMPLATE_PACKAGED_NAME:
         raise PackError(f"包内出现禁止文件: {rel_path}")
     if name.endswith(".env"):
         raise PackError(f"包内出现禁止文件: {rel_path}")
@@ -385,11 +397,14 @@ def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple
             ]
             append_tree_files(files, runtime_source, "resources/runtime/git")
 
-    for template_name in ["agents.example.yaml", "README.txt"]:
-        src = TEMPLATE_DIR / template_name
+    for source_name, packaged_name in [
+        (AGENTS_TEMPLATE_SOURCE_NAME, AGENTS_TEMPLATE_PACKAGED_NAME),
+        ("README.txt", "README.txt"),
+    ]:
+        src = TEMPLATE_DIR / source_name
         if not src.is_file():
             raise PackError(f"缺少 release 模板: {src}")
-        files.append((src, template_name))
+        files.append((src, packaged_name))
 
     # 发行包附带用户文档（2026-09-01 规则）：仓库根 README.md + docs/说明书/ 全量进入包内。
     readme_src = REPO_DIR / "README.md"
@@ -405,15 +420,6 @@ def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple
     if not bat_src.is_file():
         raise PackError(f"缺少 release 模板: {bat_src}")
     files.append((bat_src, "tools/install-webview2.bat"))
-
-    # Optional user repair helper for older source-based Hermes installs.  It
-    # is deliberately shipped as a script (never auto-executed): users choose
-    # check/repair/restore from the menu, and every edit receives a backup.
-    for repair_name in ("repair-hermes-acp.bat", "repair-hermes-acp.ps1"):
-        repair_src = TEMPLATE_DIR / "tools" / repair_name
-        if not repair_src.is_file():
-            raise PackError(f"缺少 release 模板: {repair_src}")
-        files.append((repair_src, f"tools/{repair_name}"))
 
     # WebView2 bootstrapper 不再随包分发（2026-09-19 ADR-0014）：运行时按 Windows
     # 自带处理，缺 Runtime 的机器由 tools/install-webview2.bat 联网兜底安装。

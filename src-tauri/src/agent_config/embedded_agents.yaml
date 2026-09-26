@@ -7,8 +7,9 @@
 # 为什么不再预置 Agent：占位 exe（如 <PERI_EXE_PATH>）必然启动失败，首屏会变成
 # 「两个必然失败的 Agent」而不是引导，与发行说明的口径也相互矛盾（#326）。
 #
-# 要预置 Agent，请在 exe 同目录（或 PYLON_AGENTS_CONFIG 指向的位置）建 agents.yaml，
-# 字段说明见发行包内 agents.example.yaml 与 docs/说明书/Pylon-项目架构参考.md。
+# 要预置 Agent，请在 exe 同目录（或 PYLON_AGENTS_CONFIG 指向的位置）放置 agents.yaml
+# （#372 起发行包已自带零 Agent 的 agents.yaml，直接编辑即可；模板源
+# resources/release/agents.template.yaml），字段说明见 docs/说明书/Pylon-项目架构参考.md。
 #
 # `agents` 键必须存在：缺键按配置错误报出（避免把拼错的键名静默当成「零 Agent」），
 # 而显式的空映射是合法的「零 Agent」状态。
