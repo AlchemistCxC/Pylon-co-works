@@ -44,7 +44,9 @@
     "check:first-party-styles": "bun scripts/check-first-party-style-ownership.mts",
     "check:tailwind-tokens": "bun scripts/check-tailwind-token-purity.mts",
     "lint": "eslint src/",
-    "build:release": "bun node_modules/@tauri-apps/cli/tauri.js build"
+    "build:release": "bun node_modules/@tauri-apps/cli/tauri.js build",
+    "perf-bench": "bun scripts/perf-bench.mts",
+    "perf-bench:memory": "bun scripts/perf-bench/memory-probe.mts"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",

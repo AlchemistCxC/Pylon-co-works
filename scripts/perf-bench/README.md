@@ -94,3 +94,91 @@ PERF_SCALE=s bun scripts/perf-bench.mts
   （切分扫描本身很便宜，代价在下游的整段重解析）。
 - **切分成本 ∝ 稳定块数，不 ∝ 字符数**：`list-block-m` 与 `blocks-m` 的每字符成本相差一个
   数量级，前者便宜正因为它几乎不产出稳定块。读表时别把「便宜」当「更优」。
+
+---
+
+## memory 域（#376 / #375）
+
+上面那一套量的是**耗时**；memory 域量的是**折完之后文档还留着多少**。判据全用比值，
+因为绝对 MB 依赖 provider 形状（工具输出是否经 `tool_call_update` 流式回传决定量级，
+Hermes 根本不回传——见开发记录 `.agents/records/375-376-memory-payload-amplification.md`）。
+
+### 跑法
+
+```bash
+bun run perf-bench:memory              # 出表 + 按判据给退出码（0=全过，1=有未过项）
+PERF_MEMORY_LEGACY=1 bun run perf-bench:memory   # 对照档：关掉 timeline 收窄，用同一把尺子量改动前
+```
+
+一条命令、无外部依赖、无浏览器、毫秒级（~270ms）。
+
+### 读数与阈值
+
+| 列 / 判据 | 口径 | 阈值 |
+|---|---|---|
+| `Σ逻辑载荷` | 语料里各拍**累计 content 字符数之和**（与开发记录 61.5 MB 同一口径） | — |
+| `文档驻留(估)` | 从**文档**根出发遍历对象图、**每个唯一对象只记一次**的估算字节（`retainedHeap.ts`） | — |
+| `驻留/Σ载荷` | `cold-load-residency`：整份 compact 读折完后的驻留比 | **≤ 1.2×** |
+| 拍数敏感性 | **同一终值内容**下 5 拍 → 40 拍的**绝对**驻留增长 | **≤ 1.5×** |
+
+两点别读错：
+
+1. **这是估算，不是 V8 实测。** 字符串按 UTF-16 两字节 + 头，对象按头 + 每属性一个槽位。
+   用途是**比值**与回归对照——同一把尺子前后比是可靠的，当绝对 MB 用则不可靠。
+2. **拍数敏感性必须用绝对字节。** 累计式回传下 Σ载荷 本身随拍数增长（5 拍的 Σ 约为 40 拍的一半），
+   用「驻留/Σ载荷」比值会把要量的效应约掉：本域早期版本正是这么写的，于是对照档也「PASS」——
+   实测对照档 5 拍 5.6 MB → 40 拍 38.0 MB（**6.82×**，与开发记录实机测得的 6.3× 吻合），
+   改后 1.9 MB → 2.3 MB（**1.20×**）。
+
+实测对照（同一尺子）：
+
+| 档 | 驻留/Σ载荷 | 拍数敏感性 |
+|---|---|---|
+| `PERF_MEMORY_LEGACY=1`（关 timeline 收窄） | 4.051× | 6.82× |
+| 默认（#375-a/c/e 生效） | **0.432×** | **1.20×** |
+
+### 语料
+
+`fixtures/memoryCorpus.ts`：一个完整回合 `user_message_chunk` → 100 ×（`tool_call` +
+20 × `tool_call_update`，content **逐拍累计**至 60 KB）→ `usage_update` → `done` = **2203 行**
+（与开发记录 §复现方法同一配方）。走生产归一化器 `normalizeRawEvent`，且**不含 turn.unit 行**
+（单元只由 kernel ingest 追加，而记录的注入走前端 append 轨）——正是「compact 读全量下发」的形状。
+
+### 实机口径（绝对 MB 与进程峰值）
+
+纯函数口径量不到进程峰值（renderer 的非 JS 堆、宿主序列化峰值都不在里面）。实机读数走两步：
+
+**1) 进程树采样**（宿主 + WebView2 进程组，按 `ParentProcessId` 展开）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/perf-bench/proc-tree.ps1 -RootName pylon.exe -Seconds 60 -IntervalMs 500 -OutCsv mem.csv
+```
+
+末行给出 `steady` / `peak` / `peak/steady`（验收判据是**比值**：宿主与 renderer 组各 ≤ 2×）。
+
+**2) 页面内读数**（V8 堆 / GC 后驻留）：devtools console 里
+
+```js
+// 冷挂载前后各取一次；GC 后再取驻留
+const gc = async () => { await new Promise(r => setTimeout(r, 1500)); return performance.memory }
+console.table({ before: (await gc()).usedJSHeapSize })
+```
+
+CDP 路径（更准，需要常驻连接）：
+
+```bash
+# 端口由 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 开；采样与取快照必须在同一条 CDP 连接内
+# （分次 MCP 调用会报 "not sampled"——见开发记录）
+node -e "const ws=require('ws');/* HeapProfiler.startSampling → 操作 → stopSampling/takeHeapSnapshot */"
+```
+
+### 隔离副本（否则与真机共用 profile，无法并行）
+
+```bash
+cd <副本>/ && WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223 --remote-allow-origins=*"   WEBVIEW2_USER_DATA_FOLDER="<副本>/webview" ./pylon.exe
+# 核验：Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | % CommandLine 里能看到 --user-data-dir
+```
+
+注入合成回合走应用自己的写路径：`__TAURI_INTERNALS__.invoke('evt_append', { events, expectedRevision: null })`。
+两个坑（照抄开发记录，别重新踩）：① 缺 user 起始帧时工具事件被终态栅栏判为 late-event 整批丢弃；
+② 事件类型由 `rawPayload.update.sessionUpdate` 推导，不由入参 `eventType` 决定。
