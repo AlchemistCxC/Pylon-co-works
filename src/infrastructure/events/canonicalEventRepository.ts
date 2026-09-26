@@ -20,6 +20,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { wireErrorParts } from '../tauri/errorPayload'
+import { typedPayloadCapDisabled } from './readPathSwitches'
 import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
 import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
@@ -137,21 +138,6 @@ const RANGE_PAGE_LIMIT = 1000
  * 装载期峰值越低；代价只是多几次 invoke。
  */
 const COMPACT_PAGE_LIMIT = 256
-
-/**
- * #376 读出口载荷收口的杀停开关（回滚用，不需要回滚版本）：页面上任意位置出现
- * `data-typed-payload-cap="off"` 即让读出口原样下发 `typed_payload`，回到改动前行为。
- * 沿用 #221 `data-highlight-lifecycle="off"` / #243 `data-row-virtualization="off"`
- * 的先例形态——运维在 devtools 里 `document.body.setAttribute('data-typed-payload-cap','off')`
- * 后触发一次重载即生效。
- *
- * 这里是「全局出现即关」而不是先例的「最近祖先即关」：读出口在挂载任何工作台 DOM
- * 之前就已被调用（冷装载），此时没有可用的祖先链。
- */
-export function typedPayloadCapDisabled(): boolean {
-  if (typeof document === 'undefined') return false
-  return document.querySelector('[data-typed-payload-cap="off"]') !== null
-}
 
 function typedPayloadCapEnabled(): boolean {
   return !typedPayloadCapDisabled()

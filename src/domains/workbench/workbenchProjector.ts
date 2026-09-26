@@ -1508,6 +1508,58 @@ function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<s
   return { ...document, activities }
 }
 
+/**
+ * #375-a：`timeline.data` 收窄的事件族。实测载荷全部集中在 tool / activity 两族
+ * （`tool.parts` / `rawOutput` / `rawInput` / `input` / `locations` …），而生产代码里
+ * `timeline[].data` 的读者**只读 session 族**（终态判定与协商守卫读 `type`/`status`/`options`）。
+ * 载荷的消费者是 `toolInvocationSnapshot`（读 `activities[]`），与 timeline 无关。
+ *
+ * 收窄方式按**形状**而不是键名白名单：标量（string/number/bool/null）逐字节保留，复合值
+ * （数组/对象）即载荷载体、不进 `data`；被省略的键名记在 `payloadKeys` 里，便于插件迁移
+ * 定位。需要整份事件的现场可用 `data-timeline-payload="full"` 逃生口（见 readPathSwitches）。
+ */
+const NARROWED_TIMELINE_KINDS: readonly WorkbenchTimelineKind[] = ['tool', 'activity']
+
+/** #375-a 的全局开关：默认收窄；宿主在 bind 时按逃生口置位（投影核本身保持纯函数）。 */
+let narrowTimelinePayload = true
+
+export function setTimelinePayloadNarrowing(enabled: boolean): void {
+  narrowTimelinePayload = enabled
+}
+
+/**
+ * 收窄深度 = 2：顶层与**一层**内嵌对象只留标量（tool 族的 name/title/status/kind/action
+ * 都在 `event.tool` 这一层），再往下或数组一律视为载荷载体。
+ */
+function narrowTimelineData(event: unknown): unknown {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return event
+  const narrowed: Record<string, unknown> = {}
+  const omitted: string[] = []
+  for (const [key, value] of Object.entries(event as Record<string, unknown>)) {
+    if (value === null || typeof value !== 'object') {
+      narrowed[key] = value
+      continue
+    }
+    if (Array.isArray(value)) {
+      omitted.push(key)
+      continue
+    }
+    const nested: Record<string, unknown> = {}
+    const nestedOmitted: string[] = []
+    for (const [innerKey, innerValue] of Object.entries(value as Record<string, unknown>)) {
+      if (innerValue === null || typeof innerValue !== 'object') {
+        nested[innerKey] = innerValue
+        continue
+      }
+      nestedOmitted.push(innerKey)
+    }
+    if (nestedOmitted.length > 0) nested.payloadKeys = Object.freeze(nestedOmitted)
+    narrowed[key] = Object.freeze(nested)
+  }
+  if (omitted.length > 0) narrowed.payloadKeys = Object.freeze(omitted)
+  return freezeDeepSnapshot(narrowed)
+}
+
 function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {
   const event = envelope.event
   const kind: WorkbenchTimelineKind = event.type.startsWith('message.') ? 'message'
@@ -1522,7 +1574,8 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
                   // C08/C13：plan/goal 同属 plan family；lifecycle 独立 kind（不再误判 assist）
                   : event.type.startsWith('plan.') || event.type.startsWith('goal.') ? 'plan'
                     : event.type.startsWith('lifecycle.') ? 'lifecycle' : 'assist'
-  return { id: envelope.eventId, sequence: envelope.sequence, eventId: envelope.eventId, kind, data: event }
+  const data = narrowTimelinePayload && NARROWED_TIMELINE_KINDS.includes(kind) ? narrowTimelineData(event) : event
+  return { id: envelope.eventId, sequence: envelope.sequence, eventId: envelope.eventId, kind, data }
 }
 
 function insertBySequence<T extends { sequence: number }>(items: readonly T[], item: T): T[] {

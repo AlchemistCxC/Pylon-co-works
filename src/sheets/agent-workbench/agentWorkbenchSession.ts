@@ -12,6 +12,8 @@ import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection
 import type { Session } from '../../domains/identity/identityStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { canonicalBoundaryProjection } from '../../domains/events/canonicalTurnDuration.ts'
+import { setTimelinePayloadNarrowing } from '../../domains/workbench/workbenchProjector.ts'
+import { timelinePayloadNarrowingDisabled } from '../../infrastructure/events/readPathSwitches.ts'
 import { resolveGenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {
   createWorkbenchEnvelope,
@@ -967,6 +969,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       binding.canonicalReadEpoch += 1
       binding.refreshInFlight = null
       const nextGeneration = ++binding.generation
+      // #375-a：按逃生口置位 timeline.data 收窄（投影核保持纯函数，DOM 判决留在宿主）。
+      setTimelinePayloadNarrowing(!timelinePayloadNarrowingDisabled())
       // #204 ②：`turnEpoch` 是 runtime 局部的**单调**围栏（`workbenchRuntime.acceptDocument`
       // 对 live 帧执行 `options.turnEpoch < snapshot.turnEpoch` 即拒收）。绑定重建不得把它
       // 回落为 0——切回时 snapshot 的 epoch 仍停在切走前那一轮，回落会让切回后到达的思考帧
