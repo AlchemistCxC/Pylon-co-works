@@ -218,7 +218,7 @@ impl Config {
          \x20 interact-proactive      initialize 后主动发任意 client request（#230：--proactive-method，id/params 复用 permission 旗标）\n\
          \x20 set-config-option      #97 session/set_config_option 应答矩阵（--mode）\n\
          \x20 empty | session-capable | revive-echo | revive-load | resume-only\n\
-         \x20 fork | rebind             #98 fork 执行链 / revive 后 identity 变化的 rebind\n\
+         \x20 fork | delete-session | rebind   #98 fork 执行链 / #398 session/delete / revive 后 identity 变化的 rebind\n\
          \x20 echo-empty | close-unsupported | trace-all | id-kinds | caps | probe\n\
          \x20 recovery-generation | plugin-fixture | hang | exit-immediately\n\
          \x20 error-echo | bad-caps | env-probe | argv-probe | init-params-probe | silent\n\
@@ -892,6 +892,58 @@ impl FakeAgent {
                         Self::write_frame(out, &response);
                     }
                     // 其余方法沿用旧脚本的 parent 回显（load 等路径原样）。
+                    _ => {
+                        Self::write_frame(
+                            out,
+                            &Self::response(&id, Some(json!({"sessionId": "remote-parent"})), None),
+                        );
+                    }
+                }
+                Flow::Continue
+            }
+            // delete 执行链（#398）：initialize 宣告 delete（object 形状，官方
+            // SessionDeleteCapabilities）；session/delete 成功回空 object（官方
+            // DeleteSessionResponse 仅 _meta）；`--outcome error` 回 -32000
+            // （命令层失败上抛用例）；`--outcome not-found` 回 -32601（广告了
+            // 能力但未实现的降级用例）。其余方法沿用 fork 场景的 parent 回显。
+            "delete-session" => {
+                match method {
+                    "initialize" => {
+                        Self::write_frame(
+                            out,
+                            &Self::response(
+                                &id,
+                                Some(
+                                    json!({"agentCapabilities": {"sessionCapabilities": {"delete": {}, "loadSession": {}}}}),
+                                ),
+                                None,
+                            ),
+                        );
+                    }
+                    "session/delete" => {
+                        let response = if config.outcome.as_deref() == Some("error") {
+                            Self::response(
+                                &id,
+                                None,
+                                Some(json!({
+                                    "code": config.error_code.unwrap_or(-32000),
+                                    "message": config
+                                        .error_message
+                                        .as_deref()
+                                        .unwrap_or("delete unavailable"),
+                                })),
+                            )
+                        } else if config.outcome.as_deref() == Some("not-found") {
+                            Self::response(
+                                &id,
+                                None,
+                                Some(json!({"code": -32601, "message": "Method not found"})),
+                            )
+                        } else {
+                            Self::response(&id, Some(json!({})), None)
+                        };
+                        Self::write_frame(out, &response);
+                    }
                     _ => {
                         Self::write_frame(
                             out,

@@ -8,6 +8,7 @@ pub const METHOD_INITIALIZE: &str = AGENT_METHOD_NAMES.initialize;
 pub const METHOD_SESSION_NEW: &str = AGENT_METHOD_NAMES.session_new;
 pub const METHOD_SESSION_PROMPT: &str = AGENT_METHOD_NAMES.session_prompt;
 pub const METHOD_SESSION_CLOSE: &str = AGENT_METHOD_NAMES.session_close;
+pub const METHOD_SESSION_DELETE: &str = AGENT_METHOD_NAMES.session_delete;
 pub const METHOD_SESSION_LOAD: &str = AGENT_METHOD_NAMES.session_load;
 pub const METHOD_SESSION_RESUME: &str = AGENT_METHOD_NAMES.session_resume;
 pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;

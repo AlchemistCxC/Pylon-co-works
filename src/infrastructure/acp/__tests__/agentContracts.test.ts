@@ -176,6 +176,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: false,
       sessionClose: true,
+      sessionDelete: false,
       sessionList: true,
       mcpHttp: false,
       mcpSse: false,
@@ -200,6 +201,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: false,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: true,
       mcpHttp: false,
       mcpSse: false,
@@ -222,6 +224,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: false,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: false,
       mcpHttp: false,
       mcpSse: false,
@@ -238,6 +241,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: false,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: false,
       mcpHttp: false,
       mcpSse: false,
@@ -254,6 +258,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: false,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: false,
       mcpHttp: false,
       mcpSse: false,
@@ -275,6 +280,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: true,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: false,
       mcpHttp: false,
       mcpSse: true,
@@ -297,6 +303,7 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       sessionFork: false,
       sessionResume: true,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: true,
       mcpHttp: false,
       mcpSse: false,
@@ -311,6 +318,21 @@ describe('resolveCapabilitySnapshot — 实测样本完整快照（迁移自 scr
       }))
       expect(snapshot.sessionList, `list=${String(wrong)}`).toBe(false)
       expect(snapshot.sessionClose, `close=${String(wrong)}`).toBe(false)
+    }
+  })
+
+  it('#398：delete raw 兜底双形状——object / 显式 true 均算可用，缺失 fail-closed', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: { sessionCapabilities: { delete: {} } },
+    })).sessionDelete).toBe(true)
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: { sessionCapabilities: { delete: true } },
+    })).sessionDelete).toBe(true)
+    for (const wrong of [false, 1, 'yes', null]) {
+      const snapshot = resolveCapabilitySnapshot(status({
+        capabilities: { sessionCapabilities: { delete: wrong } },
+      }))
+      expect(snapshot.sessionDelete, `delete=${String(wrong)}`).toBe(false)
     }
   })
 })
@@ -358,6 +380,7 @@ describe('resolveCapabilitySnapshot — 结构化 capabilitySnapshot（#98 AC6/A
       sessionFork: false,
       sessionResume: true,
       sessionClose: false,
+      sessionDelete: false,
       sessionList: false,
       mcpHttp: true,
       mcpSse: false,
@@ -406,5 +429,20 @@ describe('resolveCapabilitySnapshot — 结构化 capabilitySnapshot（#98 AC6/A
       capabilities: null,
       capabilitySnapshot: 42 as unknown,
     })).sessionFork).toBe(false)
+  })
+
+  it('#398：delete 结构化快照权威路径——usable=true 投影 true；仅广告未注册消费者恒 false', () => {
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: { sessionCapabilities: { delete: {} } },
+      capabilitySnapshot: wireSnapshot({
+        delete: { fact: 'usable', source: 'canonical', advertised: true, negotiated: true, usable: true, diagnostics: [] },
+      }),
+    })).sessionDelete).toBe(true)
+    expect(resolveCapabilitySnapshot(status({
+      capabilities: { sessionCapabilities: { delete: {} } },
+      capabilitySnapshot: wireSnapshot({
+        delete: { fact: 'advertised', source: 'canonical', advertised: true, negotiated: true, usable: false, diagnostics: ['capability \'delete\': 已广告但消费者未注册，不可 usable'] },
+      }),
+    })).sessionDelete).toBe(false)
   })
 })
