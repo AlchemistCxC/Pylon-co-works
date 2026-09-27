@@ -173,3 +173,50 @@
 - `vitest.setup.ts`、`docs/说明书/Pylon-模块维护地图.md`：与 #375/#376 的声明域重叠，
   仅改本批相关行。
 - `.agents/L.md`：本批声明条目随该文件单独提交（`6d1feb24`）；**合入后须撤条**。
+
+## 真机复验（2026-09-27 17:4x–18:0x）：链路通，但**未能复现「在途回合」场景**
+
+按用户裁定「先落代码，再由我构建实例复验」执行。**结论：构建与接入链路验证通过，场景复现被环境挡住。**
+
+做了什么：
+
+- `bun run build`（`build:wasm && tsc -b && vite build`）→ 新 `dist`；
+  `cd src-tauri && cargo build` → `target/debug/pylon.exe`（17:48，2m50s，exit 0）。
+- 启动并确认 `--remote-debugging-port=9222` 可用，webview2 MCP 成功 attach
+  （`reachable: true`，页面目标 `http://tauri.localhost/`）。
+- 应用在本修复的构建上正常启动：startup timeline `ready` 533ms / `persistence_ready` 520ms；
+  Overview sheet、Workspace shell、Session 列表均正常渲染（7 个真实会话可见）。
+- 为了在真实进程里造出「在途回合」，用 `PYLON_AGENTS_CONFIG`（临时配置，**不改** tracked `agents.yaml`）
+  指向内置 `pylon-fake-agent.exe`，并开便携数据目录（`portable.flag`）隔离用户库。
+
+结果：
+
+| 目标 | 结果 |
+| --- | --- |
+| 应用在本修复构建上启动、渲染 | **通过**（无本次改动引入的控制台错误） |
+| 打开/生成真实会话（造在途回合） | **未达成**：本机 `0 个运行时`——`agents.yaml` 的 peri 指向 `F:\A-I\Agent\Peri\target\release\peri.exe`、hermes 走 PATH，二者均不可用；点会话报「切换 Agent 失败」 |
+| 用 fake agent 造在途回合 | **未达成**：`--scenario prompt-hang` 在**握手阶段**就挂住（RPC timeout after 30s），拿不到「已应答 initialize/session-new、仅在 prompt 上挂住」的状态 |
+
+过程中排除的两个 fake-agent 误配置（供后来者省事）：`args` 里**不能**带 `acp`（那是 peri/hermes 的子命令，
+fake agent 会报 `unknown flag acp`）；agent 配置里**不要**写 `model`（Pylon 会自动追加 `--model <value>`，
+fake agent 报 `unknown flag --model`）。
+
+清理：`src-tauri/target/debug/portable.flag` 与 `src-tauri/target/debug/data/` 已删除
+（后者存在会让后续 debug 运行**自动进入便携模式**，是坑）；`pylon.exe` 已终止。
+用户库未被写入（`%APPDATA%\com.prism.desktop\pylon-data-v1.sqlite3` mtime 保持 Sep 26）。
+
+遗留：要在实机上复现本 issue 的用户场景，需要一个「应答握手后仅在 prompt 上停住」的 fake agent 场景
+（或用 `--prompt-delay-ms` 配合 `stream`/`prompt` 场景），并需要可用的 ACP Agent 运行时。
+
+## 跨批次代修：#389 遗留的 8 处 TS2554
+
+`3ed125bd`（#389）新增用例按两参调用其测试自带的 `envelope(sequence, event, toolCallId)` ⇒ 8 处 `TS2554`
+⇒ `bun run build`（`tsc -b`）在 HEAD 上红 ⇒ `check:frontend` 与 CI 的 build 作业红。
+其本地门禁漏检原因：`check:solid` 走 `tsconfig.solid.json`，**不含** `src/domains/workbench/__tests__/**`。
+
+`dc252512` 代修，**只改该文件的测试辅助函数**（`toolCallId` 可选，缺省不写 `identity`——该字段在
+envelope 契约里本就是可选的 `WorkbenchEnvelopeInput.identity?:`），不碰 #389 产品代码；
+`bunx tsc -b` 回 exit 0，该文件 14 例全绿。**#389 不关闭**（本批不涉及其功能验收）。
+
+**门禁覆盖面缺口（本批第二次踩到，建议单独立项）**：`check:solid` 的 tsc 面 ≠ `bun run build` 的 tsc 面，
+测试目录只在后者被检查。本批 #390 自己的测试辅助函数类型错误（`b168b4d1` 修）同样只被 `tsc -b` 抓到。
