@@ -68,7 +68,18 @@ if (indexHtml.includes(PAGES_PREFIX)) {
   process.exit(1)
 }
 
-rmSync(stagedDir, { recursive: true, force: true })
+// 共享工作树上其他进程（并行 agent 的 shell、索引器）可能把 stagedDir 持为 CWD/句柄，
+// Windows 下目录本体删不掉但目录内条目仍可增删（0.3.1-FMF 发行时实测 EBUSY）。
+// 此时退化为「清空内容 + 原地重铺」，结果与 rm + cp 等价；删得掉时仍走原路径。
+try {
+  rmSync(stagedDir, { recursive: true, force: true })
+} catch (err) {
+  if (err?.code !== 'EBUSY' && err?.code !== 'EPERM') throw err
+  console.warn(`[stage-docs-site] stagedDir 目录本体被占用删不掉，退化为清空重铺: ${stagedDir}`)
+  for (const entry of readdirSync(stagedDir)) {
+    rmSync(join(stagedDir, entry.name), { recursive: true, force: true })
+  }
+}
 cpSync(distDir, stagedDir, { recursive: true })
 
 console.log(`[stage-docs-site] offline dist: ${distDir}`)
