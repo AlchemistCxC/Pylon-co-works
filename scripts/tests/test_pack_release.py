@@ -68,6 +68,21 @@ class AuditTests(unittest.TestCase):
     def test_scan_allows_placeholder_path(self) -> None:
         pack.scan_text_file("agents.template.yaml", "exe: C:\\path\\to\\your-agent.exe")
 
+    def test_scan_allows_universal_system_path(self) -> None:
+        # C:\Windows 不携带构建机信息（每台 Windows 都有）；#353 起说明书需如实
+        # 描述 UNC cwd 绕行行为。大小写与子路径都豁免。
+        pack.scan_text_file("docs/说明书/x.md", "UNC cwd 会被静默换成 C:\\Windows")
+        pack.scan_text_file("docs/说明书/x.md", "改走 c:\\windows\\system32\\cmd.exe")
+
+    def test_scan_still_rejects_non_system_drive_path(self) -> None:
+        # 豁免只限 C:\Windows 字面前缀：其他盘符、伪装后缀、混合行都照旧拒绝。
+        with self.assertRaises(pack.PackError):
+            pack.scan_text_file("docs/说明书/x.md", "落在 C:\\Users\\me\\notes")
+        with self.assertRaises(pack.PackError):
+            pack.scan_text_file("docs/说明书/x.md", "C:\\WindowsxDE 拼写不算豁免")
+        with self.assertRaises(pack.PackError):
+            pack.scan_text_file("docs/说明书/x.md", "C:\\Windows 旁边还有 F:\\Agent\\peri.exe")
+
     def test_scan_rejects_sensitive_value(self) -> None:
         with self.assertRaises(pack.PackError):
             pack.scan_text_file("config.yaml", "api_key: sk-123456")
