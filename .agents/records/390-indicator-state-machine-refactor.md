@@ -220,3 +220,16 @@ envelope 契约里本就是可选的 `WorkbenchEnvelopeInput.identity?:`），�
 
 **门禁覆盖面缺口（本批第二次踩到，建议单独立项）**：`check:solid` 的 tsc 面 ≠ `bun run build` 的 tsc 面，
 测试目录只在后者被检查。本批 #390 自己的测试辅助函数类型错误（`b168b4d1` 修）同样只被 `tsc -b` 抓到。
+
+## 关闭说明（2026-09-27）
+
+本 issue 于 2026-09-27 关闭（根因已修、护栏反证成立、门禁全绿）。
+「未解问题 1」（真机复验待办 + 「生成中态 spinner 与秒数同停」机制未定位）已另立
+[#392](https://github.com/AlchemistCxC/Pylon-co-works/issues/392) 承接，不在本 issue 里悬空。
+
+同批关闭的 #389 的遗留（hermes 不发 `tool_call_update`）另立
+[#391](https://github.com/AlchemistCxC/Pylon-co-works/issues/391)。
+
+`## 未解问题` 一节的第 2、3 项（`lastTokenAt` 进门禁的发布代价未实测；
+`latestTurnBoundary` 依赖「`turn.unit` 只在回合收敛时落盘」这一内核契约）仍为开放观察项，
+未另立 issue——前者等 `perf-bench` 取证，后者已在 `canonicalUnit.ts` 与判据函数处双向标注。

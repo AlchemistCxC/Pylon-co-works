@@ -76,3 +76,21 @@ journal 取自 F 盘实机 `pylon-data-v1.sqlite3`（profile `riccati` / agent `
 ## 并行交集
 
 `src/domains/workbench/workbenchProjector.ts`（`reduceSession` 区段 + 常量区新函数）、`src/domains/tool/status.ts`（追加导出）、`src/renderers/solid-workbench/chat/tool/ToolBody.solid.tsx`（头部 import + ProgressSection 条件）、两个测试文件。未触碰他人 L.md 在途声明的文件域。
+
+## 关闭说明（2026-09-27，由 #390 批次代记）
+
+本 issue 于 2026-09-27 关闭。补记三件本记录撰写时未知/未做的事项：
+
+1. **本记录「证据」一节的「存量失败」更正**：`thirdPartySolidRenderer.integration.test.ts` 的 7 例失败
+   **不是存量测试缺陷**，而是 `examples/plugins/example.solid-renderer/dist/entry.js` 与
+   presentation profile token 注册表不同步（构建产物陈旧）。跑 `bun run build:example-plugin`
+   重建后 **7/7 全绿**。`check:frontend` 本就在测试前先建该产物，单独跑 `bun run test` 才会踩到。
+2. **当时漏跑的门禁**：本记录只列了 `check:solid`，而本批新增用例在该测试文件自带的
+   `envelope(sequence, event, toolCallId)` 上按两参调用，造成 **8 处 `TS2554`**，
+   `bun run build`（`tsc -b`）在 HEAD 上红 ⇒ `check:frontend` 与 CI 的 build 作业红。
+   根因是 `check:solid` 走 `tsconfig.solid.json`，**不含** `src/domains/workbench/__tests__/**`。
+   已在 `dc252512` 代修（只改该测试辅助函数，`toolCallId` 改为可选、缺省不写 `identity`；
+   `identity` 在 envelope 契约里本就是可选字段），不碰产品代码；`bunx tsc -b` 现 exit 0。
+3. **未解问题 1、2 已另立 [#391](https://github.com/AlchemistCxC/Pylon-co-works/issues/391)**
+   （hermes `read`/`patch`/`write` 不发 `tool_call_update`）——本 issue 的修只是 GUI 防御收敛，
+   根因在上游/适配层，故不在本 issue 范围内收尾。
