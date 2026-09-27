@@ -17,6 +17,7 @@ import {
   isValidMediaMime,
   type MediaSourceKind,
 } from './mediaContentValidation.ts'
+import { isRecord } from '../../../utils/wireGuards.ts'
 
 // 校验辅助：undefined 视为通过；仅接受非空字符串（保持原单行三连访问的语义）
 function isMissingOrNonEmptyString(v: unknown): boolean {
@@ -894,10 +895,6 @@ function safeJsonStringify(value: JsonValue): string {
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function isJsonValue(value: unknown): value is JsonValue {

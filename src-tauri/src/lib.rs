@@ -17,6 +17,7 @@ pub mod browser;
 pub(crate) use pylon_core::correlation;
 mod cwd;
 mod dispatcher;
+mod docs_sheet;
 mod error;
 mod export;
 mod gateway;
@@ -24,6 +25,9 @@ pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
 mod lifecycle;
+/// #362：崩溃取证的落盘日志链（每日轮转 + 每日预算 + 同步 panic hook）。
+/// 对 crate 内可见即可；`is_self_target` 供 `runtime_log` 的自反馈隔离复用。
+pub(crate) mod logging;
 mod mcp;
 mod paths;
 mod permission;
@@ -83,6 +87,7 @@ use session::SessionInfo;
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::load_mcp_persisted;
 use crate::permission::check_pending_permission_timeouts;
+use crate::permission::check_pending_private_interaction_timeouts;
 use crate::pet::cmds::persist_pet_if_possible;
 use crate::session::{check_session_expiry, send_prompt_core};
 
@@ -168,6 +173,8 @@ pub(crate) struct AppState {
     pub(crate) config_write_lock: tokio::sync::Mutex<()>,
     /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
     pub(crate) browser: Arc<browser::BrowserManager>,
+    /// #371：文档 Sheet 管理（离线文档站子 WebView；setup() 注入主窗口）。
+    pub(crate) docs_sheet: Arc<docs_sheet::DocsSheetManager>,
     /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
     /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
     /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
@@ -632,18 +639,95 @@ pub(crate) fn prompt_lock_for(
 
 // ── B10.4 平台链路集成测试（fake QQ 事件 → ingest → 注入 → fake ACP → deliver 回发） ──
 
-/// R18：初始化 tracing subscriber——fmt（stderr，INFO 上限）+ RuntimeLogLayer
-/// （tracing event → RuntimeLogHub 转发，level/source/message/fields 形状保持）。
-/// main.rs 在 run() 之前调用；hub 本身由 run() 创建后经 register_hub 注册，
-/// Layer 按事件惰性读取，注册前的 event 直接丢弃（此前 log 宏本就无 sink）。
-pub fn init_tracing() {
-    use tracing_subscriber::layer::Layer;
-    let base = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(std::io::stderr)
-        .finish();
-    let subscriber = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
+/// R18 + #362：初始化 tracing subscriber。
+///
+/// 三个 sink 共享一条订阅：
+/// - **stderr**：`fmt` 层，INFO 上限（行为不变）。
+/// - **落盘文件**（#362）：每日轮转 `<data_root>/logs/pylon.<date>.log`、保留 30 个、
+///   每日 512 MiB 上限且**从当日既有文件尺寸续算**；debug 构建下这是多余的一份，
+///   但 release 是 GUI 子系统（#361）——stderr 不可见，落盘是唯一活口。
+/// - **RuntimeLogLayer**：tracing event → RuntimeLogHub（level/source/message/fields 形状不变）。
+///
+/// 另外安装 panic hook（同步写盘），见 [`logging::panic_hook`]。
+///
+/// 返回值必须由调用方（`main()`）绑定到进程生命周期：`WorkerGuard` 一 drop，
+/// non_blocking 的 worker 线程就收摊，缓冲里的尾巴会丢。`main.rs` 里写成
+/// `let _log_guard = ...`。
+///
+/// hub 由 `run()` 创建后经 `register_hub` 注册，Layer 按事件惰性读取，注册前的
+/// event 直接丢弃（此前 log 宏本就无 sink）。
+pub fn init_tracing() -> LogGuard {
+    let file_sink = crate::paths::resolve_log_root().and_then(|root| {
+        logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(root))
+    });
+    let (subscriber, worker) = build_subscriber(runtime_log::RuntimeLogLayer::new(), file_sink);
+    // `set_global_default` 失败（例如同一进程里已装过 subscriber）不致命：日志链降级，
+    // 应用照常启动。
     let _ = tracing::subscriber::set_global_default(subscriber);
+    logging::panic_hook::install();
+    LogGuard { _worker: worker }
+}
+
+/// #383：构造三个 sink 的 subscriber——**基底必须是 `Registry`**。
+///
+/// 曾经的写法把带 `.with_filter(...)` 的落盘层挂到 `fmt::Subscriber` 上
+/// （`file_layer.with_subscriber(base)`）。`tracing-subscriber` 给 `fmt::Subscriber`
+/// 实现的 `LookupSpan::register_filter` 是**默认实现、直接 panic**
+/// （`registry/mod.rs`：`"{type} does not currently support filters"`），于是这条分支
+/// 一被走到进程就启动即崩——触发条件只是「日志根可写」，portable 与 AppData 两条路
+/// 都满足，**与 debug/release 无关**，于是从源码构建的发行包 100% 起不来。`Registry`
+/// 支持 per-layer filtering，三个 sink 平铺挂上去即可（各层的级别/目标过滤语义不变）。
+///
+/// 抽成独立函数是为了能被测试直接驱动：`set_global_default` 每进程只成功一次，而
+/// 「构造这条订阅栈不 panic」正是 #383 的回归点。
+fn build_subscriber(
+    hub_layer: runtime_log::RuntimeLogLayer,
+    file_sink: Option<(
+        tracing_appender::non_blocking::NonBlocking,
+        tracing_appender::non_blocking::WorkerGuard,
+    )>,
+) -> (
+    Box<dyn tracing::Subscriber + Send + Sync>,
+    Option<tracing_appender::non_blocking::WorkerGuard>,
+) {
+    use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+    // #383 的一处**已知语义差异**（评审实测，接受）：修前 stderr 是 `fmt::Subscriber` 自带的
+    // 订阅者级 `LevelFilter::INFO`，全局 max level hint = INFO；换 registry 后各层各自过滤，
+    // 全局 hint 落到 TRACE（`LevelFilter::current()` 实测 TRACE）。**可记录的可见输出不变**
+    // （hub 层内部仍有 `level > INFO` 守卫、落盘层有 INFO 过滤、stderr 层也有），差别只是
+    // debug!/trace! 调用不再被全局短路、每次多一次 enabled 走查（全仓 20 处、均在罕见错误分支）。
+    // 若将来要把 hint 收紧回 INFO，在 registry 上再加一层 `LevelFilter::INFO` 即可。
+    let base = tracing_subscriber::registry().with(hub_layer).with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+    );
+    match file_sink {
+        Some((writer, worker_guard)) => {
+            // 文件 sink 也限 INFO：debug/trace 只留在 stderr，不写盘也不冲 ring。
+            // panic 记录由 hook 同步写过同一个文件（且带完整 backtrace），这里按
+            // target 等值去重，避免每个 panic 在文件里出现两遍。
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer)
+                .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                    metadata.target() != logging::PANIC_TARGET
+                }))
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+            (Box::new(base.with(file_layer)), Some(worker_guard))
+        }
+        None => (Box::new(base), None),
+    }
+}
+
+/// #362：落盘 sink 的存活守卫。
+///
+/// 只有绑定到进程生命周期才有意义（drop = 关闭 worker 线程并 flush），所以带
+/// `#[must_use]`：漏绑会静默丢掉每一次缓冲未刷的日志，不会有编译错误提醒。
+#[must_use = "绑定到进程生命周期（main 里 let _log_guard = ...），drop 会关掉落盘 worker"]
+pub struct LogGuard {
+    _worker: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
 /// #269：进程侧启动相位打点（main.rs 在 t0 处调用；供 lib 外的入口 facade 使用）。
@@ -734,6 +818,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         mcp_write_lock: tokio::sync::Mutex::new(()),
         config_write_lock: tokio::sync::Mutex::new(()),
         browser: Arc::new(browser::BrowserManager::new()),
+        docs_sheet: Arc::new(docs_sheet::DocsSheetManager::new()),
         // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
         // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
         mcp_wire: Mutex::new(None),
@@ -773,6 +858,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     setup_hydrate_workspaces(app)?; // 〔致命〕workspace 注册表恢复失败
     setup_install_storage_diagnostics(app, &dirs)?; // 〔致命〕诊断锁中毒 / 路径解析失败
     setup_register_browser_host(app, &window, &dirs); // 无失败路径
+    setup_register_docs_sheet_host(app, &window); // 无失败路径
     setup_ensure_plugin_dirs(app); // 〔静默〕插件目录树创建失败仅 warn
     setup_restore_pet(app, &dirs); // 〔静默〕宠物存档缺失/损坏保持新宠物
     setup_restore_mcp_config(app, &dirs); // 〔静默〕MCP 配置缺失/损坏/非法保持空配置
@@ -818,6 +904,19 @@ fn setup_install_data_dirs(
     // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
     // 时按需 clone（PathBuf 拷贝成本可忽略）。
     let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    // #362：日志目录在 `main()`（`init_tracing`）就已解析，早于这里的 DataDirs。
+    // 两边应当落在同一个 data_root 下；不一致说明路径推理漂移了（用户会按说明书
+    // 去错地方找日志），所以显式说出来而不是静默分叉。
+    if let Some(log_root) = crate::logging::active_log_root() {
+        let expected = dirs.data_root.join("logs");
+        if log_root != expected {
+            tracing::warn!(
+                "日志目录与 data_root 不一致：日志在 {}，data_root 下的位置是 {}",
+                log_root.display(),
+                expected.display()
+            );
+        }
+    }
     crate::startup_timing::mark("data_dirs_resolved");
     Ok(dirs)
 }
@@ -914,6 +1013,13 @@ fn setup_register_browser_host(
                 registry.invalidate_tab(tab_id);
             }
         }));
+}
+
+/// 阶段 6b（#371）：文档 Sheet 管理器注入主窗口（子 WebView add_child 需要）。
+fn setup_register_docs_sheet_host(app: &tauri::App, window: &tauri::WebviewWindow) {
+    app.state::<AppState>()
+        .docs_sheet
+        .register_host(window.as_ref().window(), app.handle().clone());
 }
 
 /// 阶段 7：插件基建 v2——启动即创建用户插件目录树（installed/staging），
@@ -1390,6 +1496,8 @@ fn setup_spawn_journal_maintenance_watcher(app: &tauri::App) {
 /// 阶段 18：权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
 /// permission.resolved terminal 事件——后端唯一计时/应答来源，前端
 /// 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
+/// #356：同一 watcher 附带私有交互（elicitation/ask-user/exit-plan）对等的
+/// deadline drain + 向 agent 回包，并广播 interaction.resolved(timed_out)。
 fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
     let app_for_watcher = app.handle().clone();
     tokio::spawn(async move {
@@ -1397,7 +1505,9 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let state = app_for_watcher.state::<AppState>();
             let outcomes = check_pending_permission_timeouts(state.inner()).await;
-            if outcomes.is_empty() {
+            // #356：私有交互超时 sweep（死亡 runtime 已由权限 sweep 的死亡分支清理）。
+            let private_outcomes = check_pending_private_interaction_timeouts(state.inner()).await;
+            if outcomes.is_empty() && private_outcomes.is_empty() {
                 continue;
             }
             let Some(window) = app_for_watcher.get_webview_window("main") else {
@@ -1418,6 +1528,23 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                     }),
                 );
             }
+            // #356：形状与断线 drain 的 interaction.resolved 同构（kind + reason），
+            // workbench 交互条目与权限弹卡据此收敛。
+            for outcome in private_outcomes {
+                emit_event(
+                    &window,
+                    crate::event_names::INTERACTION,
+                    serde_json::json!({
+                        "eventType": "interaction.resolved",
+                        "agentId": outcome.agent_id,
+                        "sessionId": outcome.session_id,
+                        "requestId": outcome.request_id.to_string(),
+                        "clientGeneration": outcome.client_generation,
+                        "kind": outcome.kind,
+                        "reason": "timed_out",
+                    }),
+                );
+            }
         }
     });
 }
@@ -1429,6 +1556,11 @@ pub fn run() {
     }
     crate::startup_timing::mark("run_entry");
     install_process_registrations();
+    // #363-3：node 版本管理器 PATH 修复。位置有两条硬约束：① `set_var` 会改**进程级**
+    // PATH，非线程安全，必须在任何多线程工作之前；② 必须早于 agent 探测/preflight
+    // （它们按 PATH 找 CLI，看不到版本管理器的目录就会报「未检测到该 Agent」）。
+    // node 已在 PATH 上时本调用立即返回，不动用户自己配好的环境。
+    pylon_core::node_path::ensure_node_in_path();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
     let loaded = agent_config::load_app_config();
@@ -1440,7 +1572,7 @@ pub fn run() {
         Ok(agents) => agents,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             HashMap::new()
         }
     };
@@ -1449,7 +1581,7 @@ pub fn run() {
         Ok(None) => String::new(),
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             String::new()
         }
     };
@@ -1461,7 +1593,7 @@ pub fn run() {
         Ok(client) => client,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon Prism client unavailable: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon Prism client unavailable: {error}"));
             PrismClient::unavailable(error)
         }
     };
@@ -1480,7 +1612,9 @@ pub fn run() {
         Ok(rt) => rt,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon runtime initialization failed: {error}");
+            crate::logging::note_to_stderr(&format!(
+                "Pylon runtime initialization failed: {error}"
+            ));
             return;
         }
     };
@@ -1494,7 +1628,7 @@ pub fn run() {
             Ok(config) => GatewayCore::from_config(config),
             Err(error) => {
                 // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                eprintln!("Pylon gateway configuration error: {error}");
+                crate::logging::note_to_stderr(&format!("Pylon gateway configuration error: {error}"));
                 GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
             }
         });
@@ -1513,7 +1647,9 @@ pub fn run() {
         } else {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
             // #326：零 Agent 是合法首跑状态（内嵌兜底即零 Agent），不是异常——故为中性提示。
-            eprintln!("Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)");
+            crate::logging::note_to_stderr(
+                    "Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)",
+                );
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
@@ -1525,6 +1661,10 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .register_uri_scheme_protocol("pylon-plugin", |context, request| {
                 crate::plugin_cmds::plugin_resource_response(context.app_handle(), request)
+            })
+            // #371：离线文档站（VitePress dist 随包分发，root = bundle 资源目录）。
+            .register_uri_scheme_protocol("pylon-docs", |context, request| {
+                crate::docs_sheet::resource::docs_resource_response(context.app_handle(), request)
             })
             .manage(build_app_state(AppStateParts {
                 runtimes,
@@ -1729,6 +1869,15 @@ pub fn run() {
                 crate::browser::cmds::browser_set_visible,
                 crate::browser::cmds::browser_set_zoom,
                 crate::browser::cmds::browser_close,
+                crate::docs_sheet::cmds::docs_sheet_status,
+                crate::docs_sheet::cmds::docs_sheet_start,
+                crate::docs_sheet::cmds::docs_sheet_set_bounds,
+                crate::docs_sheet::cmds::docs_sheet_set_visible,
+                crate::docs_sheet::cmds::docs_sheet_back,
+                crate::docs_sheet::cmds::docs_sheet_forward,
+                crate::docs_sheet::cmds::docs_sheet_reload,
+                crate::docs_sheet::cmds::docs_sheet_home,
+                crate::docs_sheet::cmds::docs_sheet_close,
                 crate::browser::agent_cmds::browser_agent_get_settings,
                 crate::browser::agent_cmds::browser_agent_set_settings,
                 crate::browser::agent_cmds::browser_agent_resolve_access,
@@ -1777,4 +1926,142 @@ pub fn run() {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod init_tracing_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_log_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("pylon-init-tracing-{tag}-{}", std::process::id()))
+    }
+
+    fn read_dir_text(dir: &std::path::Path) -> String {
+        let mut text = String::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    text.push_str(&content);
+                }
+            }
+        }
+        text
+    }
+
+    fn messages(hub: &runtime_log::RuntimeLogHub) -> Vec<String> {
+        hub.list(&runtime_log::RuntimeLogQuery {
+            level: None,
+            source: None,
+            session: None,
+            search: None,
+            limit: None,
+        })
+        .into_iter()
+        .map(|entry| entry.message)
+        .collect()
+    }
+
+    /// #383 回归锁：带过滤层的落盘 sink 挂在新基底上必须**构造成功且可用**。
+    /// 修前该断言以 panic 结束（`fmt::Subscriber does not currently support filters`）。
+    #[test]
+    fn file_sink_subscriber_builds_and_routes_without_panicking() {
+        let dir = temp_log_dir("file");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink =
+            logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+                .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) = build_subscriber(
+            runtime_log::RuntimeLogLayer::with_hub(hub.clone()),
+            Some(sink),
+        );
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", session = "s1", "hello-383");
+        });
+        // 不 drop worker 就读不到盘上内容：non_blocking 的 flush 在 guard drop 里。
+        drop(worker);
+
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages
+                .iter()
+                .any(|message| message.contains("hello-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+        let text = read_dir_text(&dir);
+        assert!(text.contains("hello-383"), "落盘文件缺少 INFO 事件：{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 同一栈的级别去重语义：#383 的修复不能把「panic 记录只由 hook 同步落盘」改掉。
+    #[test]
+    fn panic_target_events_stay_out_of_the_file_sink() {
+        let dir = temp_log_dir("panic-target");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink =
+            logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+                .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) = build_subscriber(
+            runtime_log::RuntimeLogLayer::with_hub(hub.clone()),
+            Some(sink),
+        );
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "kept-383");
+            tracing::warn!(target: logging::PANIC_TARGET, "panic-echo-383");
+        });
+        drop(worker);
+
+        let text = read_dir_text(&dir);
+        assert!(text.contains("kept-383"), "落盘文件缺少 INFO 事件：{text}");
+        assert!(
+            !text.contains("panic-echo-383"),
+            "PANIC_TARGET 事件不该进落盘文件（panic hook 是它唯一的落盘者）：{text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 无落盘 sink（日志根不可写）时仍要能起：只挂 hub + stderr，且不交 WorkerGuard。
+    #[test]
+    fn subscriber_without_file_sink_keeps_hub_and_stderr() {
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let (subscriber, guard) =
+            build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub.clone()), None);
+        assert!(guard.is_none(), "无落盘 sink 时不应交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "no-file-383");
+        });
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages
+                .iter()
+                .any(|message| message.contains("no-file-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+    }
+
+    /// 负向对照（#383 的**病因**锁）：把带 `.with_filter(...)` 的层挂到 `fmt::Subscriber`
+    /// 基底上，`tracing-subscriber` 会**在运行时 panic**——这正是修复前 `init_tracing`
+    /// 在「日志根可写」时的行为。这条用例存在是为了让病因本身留在 CI 里：谁若把
+    /// 基底改回 `fmt::Subscriber`，上一条用例会红，而这一条解释了为什么。
+    #[test]
+    #[should_panic(expected = "does not currently support filters")]
+    fn fmt_subscriber_base_panics_on_filtered_layer() {
+        use tracing_subscriber::layer::Layer;
+
+        let base = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::io::stderr)
+            .finish();
+        let filtered = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+        let _ = filtered.with_subscriber(base);
+    }
 }

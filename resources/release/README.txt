@@ -12,10 +12,9 @@ Pylon 便携版（portable）
 2. 自己填：点「新建 Agent」填 id / 名称 / exe 绝对路径（或命令名）创建，
    创建后用卡片上的「测试连接」验证是否能真正启动。
 
-也可以用 YAML 预置（高级，可选）：
-把 agents.example.yaml 复制为 agents.yaml（与 pylon.exe 同目录），把其中的 exe 占位路径
-改成你的 Agent 可执行文件绝对路径，然后重启 Pylon。注意 Pylon 不会自动加载
-agents.example.yaml 本身，只有 agents.yaml 才会被读取。
+也可以用 YAML 预置（高级，可选）：包内自带 agents.yaml（与 pylon.exe 同目录），
+默认是零 Agent 的空模板。直接用文本编辑器打开它，按其中注释填写你的 Agent
+（exe 用绝对路径），保存后重启 Pylon 生效；不需要复制改名，删除它也不影响启动。
 
 【插件 SDK（离线开发）】
 发行包内的 resources\sdk\ 是不依赖 Node 或源码的离线 SDK：
@@ -26,26 +25,26 @@ agents.example.yaml 本身，只有 agents.yaml 才会被读取。
 createMockContext 测试基建时，请使用插件开发套件中的 sdk\ 正常版包。
 
 【Hermes（Windows）】
-便携包自带完整的 Git for Windows PortableGit，仅在 provider=hermes 的 ACP
-子进程中使用；不需要另装 Git、修改 PATH 或手动配置 Bash。Pylon 启动 Hermes
-前会自动检查运行时，遇到 Bash/环境卡死时会在短时间内取消并重启该 Hermes
-进程，不会影响其他 Agent。
-运行时位于 resources\runtime\git\，请勿从发行包中删除或只保留 bash.exe；
-它依赖同目录的 MSYS/DLL、命令和配置文件。源码构建时由
-scripts\prepare_hermes_runtime.py 按固定 SHA-256 准备。
+默认发行包不携带 Git 运行时：Hermes 依赖本机探测校验过的系统 Git Bash。
+Pylon 按以下顺序解析 Bash：
+1. 环境变量 PYLON_HERMES_RUNTIME_DIR（开发/覆盖用）；
+2. 包内 resources\runtime\git\（仅 --with-runtime 构建的包存在，普通包没有此目录；
+   该运行时由源码侧 scripts\prepare_hermes_runtime.py 按固定 SHA-256 准备）；
+3. 环境变量 HERMES_GIT_BASH_PATH（可在 agents.yaml 该 Agent 的 env 中设置）；
+4. 本机系统 Git Bash（自动探测并校验完整性：不盲信 PATH，会拒绝 WSL 的
+   bash.exe 与残缺安装）。
+本机未安装 Git for Windows 时，Hermes 无法解析 Bash；请先安装 Git for Windows
+（标准路径即可，Pylon 不会改写系统 PATH，也不影响其他 Agent）。
+Pylon 启动 Hermes 前会自动检查运行时，遇到 Bash/环境卡死时会在短时间内取消并重启
+该 Hermes 进程，不会影响其他 Agent。
+
 如需调整 Hermes 内部并发工具批次的兜底秒数，可在该 Agent 的 `env` 中设置
 `HERMES_CONCURRENT_TOOL_TIMEOUT_S`；未设置时为 30，且只作用于 Hermes 子进程。
-
-如果使用的 Hermes 版本尚未包含 ACP Bash 探针修复，可运行
-`tools\repair-hermes-acp.bat`，按菜单选择“检查”或“修复”。修复只针对可访问的
-Hermes 源码 `tools\environments\local.py`，会先生成时间戳备份；编译版 hermes.exe
-无法由该脚本直接修改，请升级到包含 Hermes 提交 `8f956812c` 的版本。脚本也支持
-命令行 `-Check`、`-Repair`、`-Restore` 以及 `-HermesRoot <源码目录>`。
 
 【数据目录】
 本包为便携模式：所有数据（会话、插件、MCP、宠物等）保存在本目录 data\ 下。
 删除 portable.flag 并移走 data\ 目录后启动，将回到系统 AppData 目录。
 
 【安装包】
-如果你需要安装版（NSIS/MSI），请使用 `npx tauri build --bundles nsis,msi`，
+如果你需要安装版（NSIS/MSI），请使用 `bun run tauri -- build --bundles nsis,msi`，
 WebView2 会由安装器自动下载引导。

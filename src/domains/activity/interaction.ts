@@ -138,10 +138,14 @@ export function normalizeInteractionEnvelope(value: unknown): InteractionEventEn
   const provider = stringValue(envelope.provider)
   const eventType = stringValue(envelope.eventType ?? envelope.event_type)
   if (!provider || !eventType || !('payload' in envelope)) return null
+  // #356：sessionId 区分「字段缺失」与「显式空串」——request-scoped elicitation
+  // （会话外 auth/config 阶段）的 wire 事件携带 sessionId: ""，是合法身份
+  // （以 requestId+agentId 收口），不得像缺失一样折叠成 undefined。
+  const rawSessionId = envelope.sessionId ?? envelope.session_id
   return {
     provider,
     agentId: stringValue(envelope.agentId ?? envelope.agent_id),
-    sessionId: stringValue(envelope.sessionId ?? envelope.session_id),
+    sessionId: typeof rawSessionId === 'string' ? rawSessionId : undefined,
     eventType,
     requestId: firstString(envelope.requestId, envelope.request_id),
     toolCallId: stringValue(envelope.toolCallId ?? envelope.tool_call_id),

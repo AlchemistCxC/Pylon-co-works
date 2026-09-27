@@ -8,7 +8,7 @@ import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type 
 import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
-import { createZustandSignal } from '../solidStoreBridge.ts'
+import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import FileCodeEditor from './FileCodeEditor.solid'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 

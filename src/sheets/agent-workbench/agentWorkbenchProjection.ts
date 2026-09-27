@@ -160,6 +160,32 @@ function expandCanonicalUnitRow(event: CanonicalConversationEvent, ownerKey: str
         [segment.event.sequence, segment.event.sequence],
       )
     }
+    if (segment.kind === 'tool-run') {
+      // #380-b：压缩段展开成**末拍那一行**（中间拍在投影语义上被末拍取代，正文无损——写侧的
+      // 前缀判据保证了这点）。两处必须与逐拍路径对齐：
+      // 1. 信封序取 `seqStart`：活动节点的 placement 是「创建时刻」事实（投影器取信封 sequence，
+      //    见 workbenchProjector 的 `sequence: previous?.sequence ?? envelope.sequence`），用末拍序
+      //    会让卡片在刷新后的消息流里跳位；
+      // 2. coverage 取整个 run 跨度：appliedRanges 幂等据此与逐拍行互斥（同 delta-run 段）。
+      const runEnvelopes = normalizeCanonicalRowToEnvelopes(
+        segment.event,
+        segment.event.rawPayload,
+        segment.seqStart,
+        segment.event.eventId,
+        [segment.seqStart, segment.seqEnd],
+      )
+      if (runEnvelopes.length > 0) return runEnvelopes
+      // 段级隔离（与 `event` 段同策）：该段不可读时退化为单行归一，不让一个坏段吞掉整轮。
+      const fallback = canonicalRowToWorkbench(segment.event)
+      if (fallback !== undefined && fallback.length > 0) return fallback
+      return normalizeCanonicalRowToEnvelopes(
+        segment.event,
+        segment.event.rawPayload,
+        segment.seqStart,
+        `${event.eventId}#segment-${index}`,
+        [segment.seqStart, segment.seqEnd],
+      )
+    }
     const seqEnd = segment.seqEnd
     const part: { kind: 'text' | 'markdown'; text: string } = { kind: segment.markdown ? 'markdown' : 'text', text: segment.text }
     return [Object.freeze(createWorkbenchEnvelope({

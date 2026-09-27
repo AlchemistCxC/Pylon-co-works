@@ -42,6 +42,9 @@ function fakeRepository(): FakeRepo {
     revision: (...args) => revision(...args),
     async list() { return { events: [], nextBeforeSequence: null } },
     async loadAll() { return [] },
+    // #376-b：接口新增 listCompact（compact 读分页）。本双件的被测路径不读它，
+    // 返回空页即可；缺了这个成员会整块不满足 CanonicalEventRepository（TS2741）。
+    async listCompact() { return { events: [], nextAfterSequence: null } },
     async exportRaw() { return null },
     async loadAllPreferUnits() { return [] },
     async searchOwners() { return [] },

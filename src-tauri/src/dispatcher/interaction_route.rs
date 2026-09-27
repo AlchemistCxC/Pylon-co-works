@@ -130,14 +130,60 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            if !session_id.is_empty() {
+            // #356：官方 CreateElicitationRequest 不含 sessionId——scope 可为
+            // Request（会话外 auth/config 阶段 elicitation 合法）。空 sessionId
+            // 时不再一律 fallthrough 到 -32601：elicitation 桥走 typed scope
+            // 投影（Request → 空串入队；Session → 取回投影 id；解析失败 /
+            // 显式空 sessionId → 参数类错误 fail-closed）。非 elicitation 桥
+            // 维持 -32601（规格未授权其无会话形态）。
+            enum Admission {
+                /// 会话内（含投影出非空 id 的 Session scope）。
+                Session(String),
+                /// request-scoped elicitation（session_id 空串入队）。
+                RequestScoped,
+            }
+            let admission = if !session_id.is_empty() {
+                Some(Admission::Session(session_id))
+            } else if bridge == crate::acp::adapter::private_ext::PrivateBridge::Elicitation {
+                match crate::acp::adapter::private_ext::project_elicitation_scope(&params) {
+                    Ok(crate::acp::adapter::private_ext::ElicitationScopeProjection::Session {
+                        session_id,
+                    }) => Some(Admission::Session(session_id)),
+                    Ok(crate::acp::adapter::private_ext::ElicitationScopeProjection::Request) => {
+                        Some(Admission::RequestScoped)
+                    }
+                    Err(error) => {
+                        reject_interaction_request(
+                            window,
+                            acp,
+                            &provider,
+                            agent_id,
+                            raw.method.as_deref(),
+                            raw.id,
+                            raw.params.as_ref(),
+                            "invalid_private_payload",
+                            WireErrorCode::InvalidParams,
+                            &error,
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            if let Some(admission) = admission {
+                let admitted_session_id = match admission {
+                    Admission::Session(session_id) => session_id,
+                    Admission::RequestScoped => String::new(),
+                };
                 let arrived_at = crate::time::Timestamp::now();
                 let _ = private_interactions.insert(
                     request_id.clone(),
                     crate::private_interaction::PendingPrivateInteraction {
                         provider: provider.clone(),
                         agent_id: agent_id.to_string(),
-                        session_id: session_id.clone(),
+                        session_id: admitted_session_id.clone(),
                         method: method.to_string(),
                         bridge,
                         params: params.clone(),
@@ -147,7 +193,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                     },
                 );
                 let interaction_event = serde_json::json!({
-                    "provider": provider, "agentId": agent_id, "sessionId": session_id,
+                    "provider": provider, "agentId": agent_id, "sessionId": admitted_session_id,
                     "eventType": match bridge {
                         crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
                         crate::acp::adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
@@ -163,7 +209,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                             request_id: request_id.to_string(),
                             method: method.to_string(),
                             kind: bridge.queue_kind().to_string(),
-                            session_id,
+                            session_id: admitted_session_id,
                             agent_id: agent_id.to_string(),
                             client_generation: generation,
                             enqueued_at: arrived_at,
@@ -293,12 +339,12 @@ mod tests {
         std::sync::Mutex::new(HashMap::new())
     }
 
-    /// 回归（#349 B2 回退 / #356 前置）：elicitation 桥 + 空 sessionId 必须
-    /// 仍按 method_unsupported / -32601 拒绝——前端对空串 sessionId 的卡片
-    /// 既渲染不出也提交不了，且私有交互无超时回包，入队只会让 agent 挂等
-    /// 一个永不来的响应。完整修法见 issue #356。
+    /// #356：request-scoped elicitation（无 sessionId、官方 scope 为
+    /// `ElicitationRequestScope{requestId}`）必须入桥入队——store 条目
+    /// session_id 为空串、事件 sessionId 为显式空串、eventType elicitation.request。
+    /// （#349 B2 回退期本用例断言 -32601 拒绝，是该回归注释预告的完整修法。）
     #[tokio::test]
-    async fn elicitation_without_session_id_is_rejected_method_not_found() {
+    async fn request_scoped_elicitation_is_admitted_with_empty_session() {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
@@ -324,15 +370,102 @@ mod tests {
             raw,
         )
         .await;
+        let snapshot = private_interactions.snapshot();
+        assert_eq!(
+            snapshot.len(),
+            1,
+            "request-scoped elicitation must be enqueued"
+        );
+        assert_eq!(
+            snapshot[0].1.session_id, "",
+            "request-scoped elicitation carries an empty session_id"
+        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("interaction event must be emitted");
+        assert_eq!(event["eventType"], "elicitation.request");
+        assert_eq!(event["sessionId"], "");
+        assert_eq!(event["requestId"], "7");
+    }
+
+    /// #356：无 sessionId 且官方 scope 也无法解析（既无 sessionId 也无
+    /// requestId 等）= 参数缺失，按 invalid_private_payload / -32602 拒绝，
+    /// 不入队。
+    #[tokio::test]
+    async fn elicitation_without_any_scope_is_rejected_invalid_params() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = elicitation_request(
+            7,
+            serde_json::json!({
+                "mode": "form",
+                "message": "auth configuration needed",
+                "requestedSchema": {"type": "object"}
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
         assert!(
             private_interactions.snapshot().is_empty(),
-            "sessionless elicitation must not be enqueued"
+            "scope-less elicitation must not be enqueued"
         );
         let event = rx
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("rejection event must be emitted");
-        assert_eq!(event["reasonCode"], "method_unsupported");
-        assert_eq!(event["rpcCode"], -32601);
+        assert_eq!(event["reasonCode"], "invalid_private_payload");
+        assert_eq!(event["rpcCode"], -32602);
+    }
+
+    /// #356：显式 `"sessionId": ""` 的 Session scope 不得入队（fail-closed）——
+    /// 空串在前后端三道门均当缺失，入队只会让 agent 挂等一个永不来的响应。
+    #[tokio::test]
+    async fn elicitation_with_explicit_empty_session_id_is_rejected_invalid_params() {
+        let (window, _webview, _app, rx) = mock_window_with_events();
+        let runtime = AgentRuntime::new_disconnected();
+        let agents = empty_agents();
+        let private_interactions = PrivateInteractionOwner::default();
+        let runtimes = crate::runtime::AgentRuntimeManager::new();
+        let raw = elicitation_request(
+            7,
+            serde_json::json!({
+                "mode": "form",
+                "sessionId": "",
+                "message": "auth configuration needed",
+                "requestedSchema": {"type": "object"}
+            }),
+        );
+        route_private_interaction(
+            &window,
+            &runtime.acp,
+            &agents,
+            &private_interactions,
+            &runtimes,
+            "a1",
+            3,
+            raw,
+        )
+        .await;
+        assert!(
+            private_interactions.snapshot().is_empty(),
+            "empty-string session scope must not be enqueued"
+        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("rejection event must be emitted");
+        assert_eq!(event["reasonCode"], "invalid_private_payload");
+        assert_eq!(event["rpcCode"], -32602);
     }
 
     /// 回归（#349 B2 回退）：非 elicitation 桥（grok/pi/exit_plan）+ 空

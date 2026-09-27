@@ -126,6 +126,15 @@ pub struct EventPage {
     pub next_before_sequence: Option<i64>,
 }
 
+/// #376-b：compact 读的一页（升序）。游标是**前向**的（`after_sequence`），因为冷装载按
+/// 「由旧到新」续折；`None` = 已到最新，装载可以收尾。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactEventPage {
+    pub events: Vec<CanonicalEventRow>,
+    pub next_after_sequence: Option<i64>,
+}
+
 /// evt_search 候选 owner（B6）：内容命中 canonical_events 的 owner 三元组 +
 /// remote_session_id（前端据此 loadAll 后做消息级精确过滤）。
 #[derive(Debug, Clone, PartialEq, Serialize)]

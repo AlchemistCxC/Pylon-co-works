@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveGenerationLedgerTerminalReason, resolveKernelLiveness } from '../generationLedgerSummary.ts'
+import { LEDGER_FAILURE_CAUSES, resolveGenerationLedgerTerminalReason, resolveKernelLiveness } from '../generationLedgerSummary.ts'
 
 /**
  * #99 账本终态 → 摘要 reason 的呈现映射。
@@ -32,10 +32,9 @@ describe('resolveGenerationLedgerTerminalReason', () => {
   })
 
   it('maps the transport and protocol failure causes to error', () => {
-    for (const cause of [
-      'refusal', 'maxTurn', 'firstTokenTimeout', 'idleTimeout', 'cancelSettleTimeout',
-      'writerTimeout', 'writerFailed', 'connectionLost', 'protocolError', 'overloaded',
-    ]) {
+    // 迭代生产表本身（不再手工抄一份会腐烂的副本）；集合与 Rust 词表的
+    // 对齐由 scripts/acp-vocabulary.test.mts 看守。
+    for (const cause of LEDGER_FAILURE_CAUSES) {
       expect(resolveGenerationLedgerTerminalReason({
         turn: { phase: 'terminal', terminal: { cause, settledAtMs: 10 } },
       }), cause).toBe('error')

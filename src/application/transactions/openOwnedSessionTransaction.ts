@@ -21,7 +21,7 @@ import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { switchAgentTransaction } from './switchAgentTransaction'
 import type { TransactionResult } from './transactionResult'
 import { resumePersistedSessionTransaction } from './resumePersistedSessionTransaction'
-import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
+import { ARCHIVED_OWNER_CONFLICT_MESSAGE, resolveArchivedSessionOwner } from './archiveOwnerResolver'
 
 /**
  * 标准 owner 切换实现：复用 switchAgentTransaction 完整流程（invoke → reset runtime →
@@ -86,10 +86,10 @@ export async function openOwnedSessionTransaction(
     if (!target) return { ok: false, kind: 'validation', message: '会话不存在' }
     ownerAgentId = target.agentId
   } else {
-    // 存档恢复：预查与实际恢复共用同一 resolver，避免 either-match 与 conflict 语义漂移。
+    // 存档恢复：预查与实际恢复共用同一 resolver；conflict 文案由 ARCHIVED_OWNER_CONFLICT_MESSAGE 单源，杜绝语义漂移。
     const resolution = resolveArchivedSessionOwner(input, deps.getSessions())
     if (resolution.kind === 'conflict') {
-      return { ok: false, kind: 'conflict', message: '存档会话归属冲突：source/periId 指向多个本地会话' }
+      return { ok: false, kind: 'conflict', message: ARCHIVED_OWNER_CONFLICT_MESSAGE }
     }
     ownerAgentId = input.ownerAgentId ?? (resolution.kind === 'resolved' ? resolution.agentId : undefined)
     if (!ownerAgentId) {

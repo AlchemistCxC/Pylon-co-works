@@ -21,21 +21,6 @@ export const WORKBENCH_DATA_ATTRIBUTES = [
   'data-cli-overflow-mode',
 ] as const
 
-export const WORKBENCH_DOM_CLASSES = [
-  'chat-view',
-  'term',
-  'term-row',
-  'term-user',
-  'term-assistant',
-  'term-reasoning',
-  'term-tool',
-  'term-code-block',
-  'term-spinner',
-  'control-center',
-  'input-bar',
-  'pet-companion',
-] as const
-
 const WORKBENCH_THEME_KEYS = new Set<ThemeFieldKey>([
   ...THEME_SETTING_KEYS.filter(key => ['chat', 'cc'].includes(THEME_FIELD_DEFS[key].zone)),
   'accent',

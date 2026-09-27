@@ -24,19 +24,19 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost",
-        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http:",
-        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost",
-        "script-src": "'self' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost",
-        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost data:"
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost",
+        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost blob: data: https: http:",
+        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost",
+        "script-src": "'self' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost",
+        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost data:"
       },
       "devCsp": {
         "default-src": "'self' asset: http://localhost:5173",
-        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost ws://localhost:5173 http://localhost:5173",
-        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http: http://localhost:5173",
-        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",
-        "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",
-        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost data: http://localhost:5173"
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost ws://localhost:5173 http://localhost:5173",
+        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost blob: data: https: http: http://localhost:5173",
+        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost http://localhost:5173",
+        "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost http://localhost:5173",
+        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost pylon-docs: http://pylon-docs.localhost data: http://localhost:5173"
       },
       "dangerousDisableAssetCspModification": false,
       "assetProtocol": {
@@ -55,7 +55,8 @@
     "resources": [
       "resources/fonts/*",
       "resources/runtime",
-      "resources/sdk/*"
+      "resources/sdk/*",
+      "resources/docs-site"
     ],
     "windows": {
       "webviewInstallMode": {

@@ -1,4 +1,4 @@
-import SolidMount from '../sheets/SolidMount'
+import SolidMount from '../host/SolidMount'
 
 /**
  * LeftRailResizeHandle — 左栏拖拽实时调宽（#154，#279 第 3 梯队 Solid 化）。

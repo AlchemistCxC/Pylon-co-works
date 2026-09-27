@@ -1,7 +1,7 @@
 // 迁移自 scripts/test-session-context-mode.mts 与 scripts/test-session-mode.mts（P91 A1，
 // 施工书处置：两脚本同被测 sessionModeState.ts，合入本文件分别 describe）。
 import { describe, expect, it } from 'vitest'
-import { extractMode, extractUsage, sessionResponseObject } from '../acpTypes.ts'
+import { extractMode, extractUsage, sessionResponseObject } from '../../../infrastructure/acp/chatContracts.ts'
 import { applySessionModeChange, normalizeSessionMode, resolvePreviousSessionMode } from '../sessionModeState.ts'
 
 describe('会话 mode 状态与 ACP usage 提取（原 test-session-context-mode.mts）', () => {

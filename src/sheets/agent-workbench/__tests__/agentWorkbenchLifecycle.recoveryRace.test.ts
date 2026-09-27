@@ -112,7 +112,8 @@ let loadResults: Array<() => Promise<unknown>>
 function makeInvoke(): Invoke {
   return async (cmd) => {
     calls.push(cmd)
-    if (cmd === 'evt_load_compact') return []
+    // #376-b：evt_load_compact 改成「一页」形态（前向游标；null = 已到最新）。
+    if (cmd === 'evt_load_compact') return { events: [], nextAfterSequence: null }
     if (cmd === 'evt_revision') return 0
     if (cmd === 'load_persisted_session') {
       const next = loadResults.shift()

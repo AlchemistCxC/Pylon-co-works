@@ -5,6 +5,7 @@ import { getCanonicalEventFeed, type CanonicalEventFeed } from '../../infrastruc
 import { closeStreamChannel, openStreamChannel, type StreamFrame, type StreamFrameHandler } from './streamChannel.ts'
 import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 import { presentPromptFailure } from '../../domains/workbench/promptFailurePresentation.ts'
+import { PYLON_STREAM_WIRE_EVENTS } from '../../infrastructure/events/pylonStreamWireEvents.ts'
 
 export interface StreamingSendDependencies {
   invoke(command: string, args?: unknown): Promise<unknown>
@@ -53,7 +54,7 @@ export function sendMessageWithStream(
   const source = payload.source
   let terminalFailure: { message?: string; failure?: PromptFailureMetadata } | undefined
   const channel = dependencies.open(source, frame => {
-    if (frame.event === 'pylon:error' && frame.payload && typeof frame.payload === 'object' && !Array.isArray(frame.payload)) {
+    if (frame.event === PYLON_STREAM_WIRE_EVENTS.error && frame.payload && typeof frame.payload === 'object' && !Array.isArray(frame.payload)) {
       const value = frame.payload as { error?: unknown; failure?: unknown }
       terminalFailure = {
         ...(typeof value.error === 'string' ? { message: value.error } : {}),
@@ -65,7 +66,7 @@ export function sendMessageWithStream(
     // P52 D2：帧统一投 canonicalEventFeed——cursor/publish 在此发生，
     // legacy controller 经 feed.onForward 消费（kernelCommitted 随帧传递）。
     void dependencies.feed().acceptFrame(frame)
-    if (frame.event === 'pylon:done' || frame.event === 'pylon:error') dependencies.close(source)
+    if (frame.event === PYLON_STREAM_WIRE_EVENTS.done || frame.event === PYLON_STREAM_WIRE_EVENTS.error) dependencies.close(source)
   })
   const client = createChatClient({ invoke: dependencies.invoke })
   if (!channel) return client.sendMessage(payload)

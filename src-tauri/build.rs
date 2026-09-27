@@ -1,4 +1,11 @@
 fn main() {
+    // #371：`resources/docs-site` 是 gitignore 的构建产物（docs:build:offline
+    // 暂存，release 链先行生成）。tauri-build 对 bundle.resources 缺失路径直接
+    // panic——全新检出/CI 没有该目录时构建必炸。这里兜底创建空目录：无产物时
+    // 打包面为零资源，行为对齐「未构建离线文档站」；真实产物仍由发行链的
+    // staging 守卫负责（缺失内容不会被伪造）。
+    let _ = std::fs::create_dir_all("resources/docs-site");
+
     // tauri-build 默认 manifest 与 icons/manifest.rc 相同（均为 comctl32 v6 声明）。
     // 关闭默认 manifest，manifest 全 PE 统一只此一份——避免双 manifest
     // 冲突（".rsrc merge failure: multiple non-default manifests"）。

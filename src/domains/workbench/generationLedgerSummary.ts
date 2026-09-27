@@ -30,14 +30,22 @@ export interface GenerationLedgerSnapshot {
   readonly turn?: GenerationLedgerTurn | null
 }
 
-/** 后端 `TurnTerminalCause` 的失败侧词表（成功/取消另有分支）。 */
-const LEDGER_FAILURE_CAUSES: ReadonlySet<string> = new Set([
+/**
+ * 后端 `TurnTerminalCause` 的失败侧词表（成功/取消另有分支）。
+ *
+ * 与 Rust 侧 `turn_ledger.rs::TurnTerminalCause` 的 serde camelCase 标签
+ * **双向精确对齐**（全集减去 completed/cancelled/emptyTurn 三个由专门分支
+ * 处理的非失败标签），由 `scripts/acp-vocabulary.test.mts` 静态比对看守：
+ * Rust 增删变体而本表不同步（漏认 → 该失败不再呈现为 error）、或本表残留
+ * 死码（先例：#348 A1 裁除 `WriterTimeout` 后 `writerTimeout` 滞留，#357），
+ * 门禁都红灯。预留变体（`#[allow(dead_code)]`）仍在封闭集内，保留映射。
+ */
+export const LEDGER_FAILURE_CAUSES: ReadonlySet<string> = new Set([
   'refusal',
   'maxTurn',
   'firstTokenTimeout',
   'idleTimeout',
   'cancelSettleTimeout',
-  'writerTimeout',
   'writerFailed',
   'connectionLost',
   'protocolError',

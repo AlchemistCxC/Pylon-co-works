@@ -7,6 +7,7 @@ describe('maintenance module classification', () => {
     expect(moduleFor('src/sheets/file/FileSheet.tsx')).toBe('workspace-ui')
     expect(moduleFor('src-tauri/src/session/prompt.rs')).toBe('rust-session')
     expect(moduleFor('src-tauri/src/terminal.rs')).toBe('rust-host')
+    expect(moduleFor('src-tauri/pylon-fake-agent/src/main.rs')).toBe('rust-fake-agent')
   })
   it('does not hide a new frontend directory behind the legacy root group', () => {
     // #351 前端根目录归类：下沉文件受所属模块桶约束（domain），根桶仅存入口与

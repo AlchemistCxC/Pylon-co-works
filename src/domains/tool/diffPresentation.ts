@@ -2,7 +2,8 @@
  * diffPresentation — diff 纯解析（P1-10 迁入 domains/tool）。
  *
  * DiffPayload 统一模型 + 解析（JSON 对象 / unified diff / 内容块对象，camel/snake 兼容）；
- * wordDiff 词级 diff。原实现自 components/chat/diffPresentation 迁入，文件保留兼容 re-export。
+ * wordDiff 词级 diff。原实现自 components/chat/diffPresentation 迁入，兼容 re-export 已随
+ * #381 清理删除，此处为唯一定义。
  */
 
 export interface DiffLine {

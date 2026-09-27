@@ -2,7 +2,7 @@
  * chatContracts — ACP wire 类型与 extract 收边界（P1-09，归一化层归属 infrastructure/acp）。
  *
  * 从 components/chat/acpTypes 迁入（§5.2/§7 收拢）：wire 类型 + 宽容提取函数只在此处
- * 真实定义；components/chat/acpTypes 保留兼容 re-export。归一化只搬运不翻译。
+ * 真实定义；兼容 re-export 已随 #381 清理删除。归一化只搬运不翻译。
  */
 
 export interface ConfigOptionChoice {

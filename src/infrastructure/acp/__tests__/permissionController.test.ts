@@ -338,6 +338,79 @@ describe('normalizePermissionRequest elicitation（#316）', () => {
   })
 })
 
+// ── #356 request-scoped elicitation：显式空串 sessionId 放行 ──
+
+describe('normalizePermissionRequest request-scoped elicitation（#356）', () => {
+  const requestScopedEvent = (payload: Record<string, unknown>): unknown => ({
+    provider: 'peri',
+    agentId: 'peri-a',
+    sessionId: '',
+    eventType: 'elicitation.request',
+    requestId: 'e-42',
+    clientGeneration: 2,
+    payload,
+  })
+
+  it('elicitation + 显式空串 sessionId 放行，identity.sessionId 保留空串', () => {
+    const request = normalizePermissionRequest(requestScopedEvent({
+      mode: 'form',
+      message: 'auth configuration needed',
+      requestedSchema: { type: 'object', properties: {} },
+    }))
+    expect(request).not.toBeNull()
+    expect(request?.interactionKind).toBe('elicitation')
+    expect(request?.sessionId).toBe('')
+    expect(request?.requestId).toBe('e-42')
+  })
+
+  it('elicitation + sessionId 字段缺失仍拒绝（区分缺失与显式空串）', () => {
+    const event = requestScopedEvent({ message: 'm' }) as Record<string, unknown>
+    delete event.sessionId
+    expect(normalizePermissionRequest(event)).toBeNull()
+  })
+
+  it('permission.request + 空 sessionId 仍拒绝（放宽仅限 elicitation）', () => {
+    const event = eventWith('perm-9') as Record<string, unknown>
+    event.sessionId = ''
+    expect(normalizePermissionRequest(event)).toBeNull()
+  })
+
+  it('request-scoped 卡冷挂载 seed 后可完整 choose（identity 空串 sessionId 透传后端）', async () => {
+    const invokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> = []
+    const h = setup(['allow_once'], async (cmd, args) => {
+      invokeCalls.push({ cmd, args })
+      return null
+    })
+    h.controller.seedFromSnapshot({
+      pendingInteractions: [
+        {
+          requestId: 'e-42',
+          kind: 'elicitation',
+          state: 'active',
+          payload: {
+            provider: 'peri',
+            eventType: 'elicitation.request',
+            requestId: 'e-42',
+            agentId: 'peri',
+            sessionId: '',
+            clientGeneration: 2,
+            payload: { mode: 'form', message: 'auth configuration needed' },
+          },
+        },
+      ],
+    })
+    const slice = sliceForAgent(h.state(), 'peri')
+    expect(slice.active?.request.requestId).toBe('e-42')
+    await h.controller.choose('e-42', 'cancel')
+    const call = invokeCalls.find(entry => entry.cmd === 'respond_interaction')
+    expect(call).toBeDefined()
+    const identity = call?.args.identity as Record<string, unknown>
+    expect(identity.sessionId).toBe('')
+    expect(identity.requestId).toBe('e-42')
+    expect(identity.agentId).toBe('peri')
+  })
+})
+
 describe('choose elicitation（#316 values 透传）', () => {
   it('accept 携带 values 原样进 respond_interaction answer', async () => {
     const invokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> = []

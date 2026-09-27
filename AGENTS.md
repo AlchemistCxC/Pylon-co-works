@@ -50,10 +50,11 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 
 ### 2.4 任务结束
 - 测试检查：本项目有大量测试，优先进行对应单测，联动面积较广，改动范围大是跑全测，若测试红灯，须同时检查测试是否过时及你代码的逻辑错误，测试需修正时（契约变更/方法转变），修正测试并在最后向用户说明，提交时也附加说明。
+- **clippy 是独立门禁，测试绿 ≠ clippy 绿**：`cargo test`、`check:rust` 都不跑 clippy；clippy 按 crate 与 `artifacts/clippy-baseline.json` 比对，**只判「基线外的新增诊断」**（历史诊断常驻基线）。本地一条命令 `bun run check:clippy`（已并入 `check:all`），提交前必跑——尤其新增/移动模块之后：`clippy::items_after_test_module` 这类布局 lint 只有 clippy 会报（#384）。新增或改动 crate 时，同步 `.github/workflows/ci.yml` 的 crate 循环与 `scripts/check-clippy.mjs` 的 `CRATES`。
 - review：审查时优先派发子agent，派前需询问用户，退而求其次做法是自己重新审核一遍。若你的开发环境包含 rust 工具链，可构建二进制，并利用 `tools/webview2-mcp/`（或发行包下同目录）的 MCP 工具做**实时运行验收**——前置、步骤与本仓特有的坑见 skill [`.agents/skills/webview2-acceptance/SKILL.md`](.agents/skills/webview2-acceptance/SKILL.md)，工具参考见该目录 Readme；是否需要走到这一步由你判断。
 - 若改动涉及 `docs/说明书/` 中的内容，为防漂移，**及时变更对应说明文件的相关表述**。
 - 留下结构化的开发记录文档（模板 `.agents/templates/dev-record.md` → `.agents/records/`）。
-- **完工判据**（缺一不算完；且一律附**证据**，不是结论）：相关单测／门禁**绿并附输出或计数**；开发记录已落 `.agents/records/`；受影响的 `docs/说明书/` 表述已同步；**结论回写 issue 评论区**（含验证证据与遗留）；PR 已开并说明最终行为、权衡与验证限制。
+- **完工判据**（缺一不算完；且一律附**证据**，不是结论）：相关单测／门禁（**含 `bun run check:clippy`**）**绿并附输出或计数**；开发记录已落 `.agents/records/`；受影响的 `docs/说明书/` 表述已同步；**结论回写 issue 评论区**（含验证证据与遗留）；PR 已开并说明最终行为、权衡与验证限制。
 
 ### 2.5 提交与 PR
 

@@ -25,6 +25,10 @@ members = [
     "pylon-canonical-types",
     "pylon-compute",
     "pylon-markdown",
+    # #382：测试夹具独立成 crate——依赖只有 serde_json。留在主 crate 里当 [[bin]]
+    # 会被 Cargo 的「包内 bin 隐式链接本包 lib」规则拖去编译整棵 Tauri 依赖树
+    # （CI 实测 405 crate / 5m26s，而夹具源码只 use serde_json + std）。
+    "pylon-fake-agent",
 ]
 resolver = "2"
 
@@ -76,6 +80,10 @@ tokio-util = { version = "0.7.19", features = ["rt", "compat"] }
 ringbuffer = "0.16.0"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+# #362：落盘 sink 的异步 writer（non_blocking 的 channel + worker 线程）。轮转与
+# 每日预算由 src/logging/ 自己实现——文件名必须与 panic hook 共用一份计算，不能
+# 依赖本 crate 的命名格式。
+tracing-appender = "0.2"
 serde_yml = "0.0.13"
 sha2 = "0.10"
 pylon-acp = { path = "pylon-acp" }
@@ -112,18 +120,13 @@ tauri = { version = "2", features = ["test", "unstable"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
-# #106 P1：测试专用假 ACP agent（Rust 替代全部内嵌 Python 脚本）。
-# 默认不开：cargo build / 打包不编译不发行该 bin（验收：默认产物不含 pylon-fake-agent）。
-# test-agent 联动 tauri/test：P5 门面（test_harness）在 feature 构建下也要用
-# mock runtime——普通依赖的 feature 才能进 lib 的非 dev 编译（dev-dependencies
-# 只覆盖 cfg(test) 与 tests/ 目标本体）。
+# #106 P1：测试专用假 ACP agent 见 `pylon-fake-agent` member crate（#382 迁出：
+# 同包 bin 会隐式链接本 crate 的 lib，编一个 2100 行夹具要连带整棵 Tauri 依赖树）。
+# 本 feature 仍留主 crate：test-agent 联动 tauri/test——P5 门面（test_harness）
+# 在 feature 构建下也要用 mock runtime，普通依赖的 feature 才能进 lib 的非 dev
+# 编译（dev-dependencies 只覆盖 cfg(test) 与 tests/ 目标本体）。
 [features]
 test-agent = ["tauri/test"]
-
-[[bin]]
-name = "pylon-fake-agent"
-path = "src/bin/pylon-fake-agent.rs"
-required-features = ["test-agent"]
 
 # #106 P5：集成测试单 target（harness 即门面，见 src/test_harness.rs 模块文档）。
 [[test]]

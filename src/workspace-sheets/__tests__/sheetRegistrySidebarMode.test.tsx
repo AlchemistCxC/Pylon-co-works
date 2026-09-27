@@ -19,7 +19,8 @@ const SIDEBAR_MODES = ['workspace', 'sheet', 'none'] as const
 
 describe('I09-A-FE-01 registry sidebar mode/capability 完整性', () => {
   it('全部 SheetKind 均显式声明合法 sidebarMode（禁止隐式缺失）', () => {
-    expect(SHEET_KINDS).toHaveLength(10)
+    // W1-01 9 kind → #154 增 settings → #371 增 docs（离线文档站）= 11
+    expect(SHEET_KINDS).toHaveLength(11)
     for (const kind of SHEET_KINDS) {
       const entry = resolveSheetRender(kind)
       expect(entry, `${kind} 缺少 render registry 条目`).toBeDefined()

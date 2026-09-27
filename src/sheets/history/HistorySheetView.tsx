@@ -1,4 +1,4 @@
-import SolidMount from '../SolidMount'
+import SolidMount from '../../host/SolidMount'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**

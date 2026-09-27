@@ -11,6 +11,9 @@ import { createSessionResponseEnvelope, sessionResponseProjectionKey } from './s
 import { messageSnapshotToWorkbenchEnvelopes } from './messageSnapshotProjection.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
+import { canonicalBoundaryProjection } from '../../domains/events/canonicalTurnDuration.ts'
+import { setTimelinePayloadNarrowing } from '../../domains/workbench/workbenchProjector.ts'
+import { timelinePayloadNarrowingDisabled } from '../../infrastructure/events/readPathSwitches.ts'
 import { resolveGenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import {
   createWorkbenchEnvelope,
@@ -26,7 +29,7 @@ import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
-import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
+import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment, type CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
@@ -60,6 +63,22 @@ export type { LocalSessionFact } from './agentWorkbenchProjection.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
+  /**
+   * #376-b：分页 compact 读（可选的第二条装载缝）。给了它，冷装载就**按页折**——每页的
+   * 行与信封在折进文档之后立刻可回收，装载期不再「整库行 + 整库信封 + 文档」三份并存。
+   * 没给就退回 `loadAll` 一次性读（既有测试与浏览器快照轨走的正是这条，语义不变）。
+   *
+   * `onPage` 必须**按序**逐页 await：续折依赖上一页已入账的文档。
+   */
+  listJournalPages?(
+    ownerKey: string,
+    /**
+     * 必须**按序**逐页 await，且**恰好在最后一页**传 `lastPage: true`——终态判据收尾、草稿与
+     * 浏览器快照都挂在那一次调用上（漏掉它等于静默丢草稿并把半份文档发布成 ready）。
+     * 页为空也要调用（空 journal 也要有 `lastPage: true` 的那一次）。
+     */
+    onPage: (rows: readonly CanonicalEventRow[], lastPage: boolean) => Promise<void>,
+  ): Promise<void>
   loadDrafts?(ownerKey: string): Promise<readonly CanonicalDraftFragment[]>
   subscribe(listener: (event: unknown) => void): () => void
   /**
@@ -102,6 +121,21 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
       // bind() adds that compatibility source once it has the concrete Session.
       return Promise.resolve([])
     },
+    // #376-b：生产冷装载走分页读；失败不静默回落（与 repository 的既有纪律一致，
+    // 由 bind 的 catch 把错误变成 status:'error'）。
+    listJournalPages: async (ownerKey, onPage) => {
+      if (!IS_TAURI || isBrowserMockRuntime()) {
+        await onPage([], true)
+        return
+      }
+      const repository = tauriCanonicalEventRepository()
+      let afterSequence: number | null = null
+      do {
+        const page = await repository.listCompact(ownerKey, afterSequence)
+        afterSequence = page.nextAfterSequence
+        await onPage(page.events, afterSequence === null)
+      } while (afterSequence !== null)
+    },
     subscribe: listener => subscribePluginEvents(listener),
     listenTerminalFallback: defaultTerminalFallbackListener,
   }
@@ -110,6 +144,11 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
 export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
+  // 分页缝的优先级：显式给了 `listJournalPages` 就用它；只给了 `loadAll`（既有测试与
+  // 嵌入式宿主的注入形态）时**不**启用默认分页读——那等于用空页盖掉注入的行源。
+  // 两者都没给（生产）才走默认分页读。
+  const listJournalPages = dependencies.listJournalPages
+    ?? (dependencies.loadAll ? undefined : defaults.listJournalPages)
   const loadDrafts = dependencies.loadDrafts ?? (ownerKey => IS_TAURI && !isBrowserMockRuntime()
     ? loadCanonicalDraftFragments(ownerKey) : Promise.resolve([]))
   const subscribe = dependencies.subscribe ?? defaults.subscribe
@@ -150,12 +189,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     selectorRequestInFlight: false,
   }
   // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
-  // 是其产出的物化视图。foldLog 保留全部已折信封（到达序、按 eventId 去重，与投影
-  // 核幂等判据同口径——refresh 全量重折的 journal 行不会重复入日志），供 reject 回滚
-  // 时「整页重折、剔除被拒乐观信封」重建投影核——wasm 侧没有就地删除已入账事件的出口。
+  // 是其产出的物化视图。
+  //
+  // #380：这里曾有一个 `fold.log`（整会话已折信封，供 reject 回滚整页重折）+ `fold.ids`
+  // （入日志去重集）。它是**载荷的第二份常驻持有**（合成语料 2237 事件 / Σ载荷 61.5 MB 下
+  // ≈Σ载荷，也是会话级驻留与拍数敏感性的唯一来源），而 journal 本就是权威源——reject 改为
+  // 按需 canonical 重读（`reloadFromJournal` → `refresh`）后整份日志不再需要，只剩下面这个
+  // 宿主侧 overlay 计数。
   const fold = {
-    log: [] as WorkbenchEventEnvelope[],
-    ids: new Set<string>(),
     // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
     // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
     journalDiagnosticCount: 0,
@@ -206,13 +247,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     envelopes: readonly WorkbenchEventEnvelope[],
     base?: WorkbenchDocument,
   ): WorkbenchDocument => {
+    // #375-a：逃生口按**每次折页**求值（不是在 bind 时求一次）——工作台内部的皮肤/插件在
+    // 挂载后挂上的属性才算「现场抢救」；只在 bind 求值会让它对会话中途挂上的属性不可达。
+    // 一次 querySelector 相对整页投影可忽略。
+    setTimelinePayloadNarrowing(!timelinePayloadNarrowingDisabled())
     const initial = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source ?? '')
     const projected = projectWorkbench(envelopes, { initialDocument: initial }).document
-    for (const envelope of envelopes) {
-      if (fold.ids.has(envelope.eventId)) continue
-      fold.ids.add(envelope.eventId)
-      fold.log.push(envelope)
-    }
     return fold.journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, fold.journalDiagnosticCount) : projected
   }
 
@@ -286,11 +326,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const echo = createAgentWorkbenchOptimisticEcho({
     runtime,
     binding,
-    fold,
     clock,
     updateRuntimeState,
     foldPage,
     foldEvent,
+    // #380：被拒回滚的权威源是 journal（不再是常驻信封日志）——复用 bind/refresh 同一条
+    // 发布路径（epoch/generation 守卫、`binding.buffered` 覆盖读期间到达的 live 行、
+    // `withPending` 补折仍 pending 的乐观行都在那边）。
+    reloadFromJournal: () => refresh(binding.boundSession, undefined, { rebuild: true }),
   })
 
   const commands = createAgentWorkbenchCommandFacade({
@@ -639,6 +682,26 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * journal 终态**行**置内核表态，内核事实只来自冷挂载快照的 turnInFlight/账本、
    * 终帧与本地生命周期）。
    */
+  /**
+   * 行 → 信封（#205：按序直接收集，不先 concat 再 flatMap）；不可迁移的行计入 malformed。
+   * #376-b：分页装载下这个数组只活一页，折完即回收。
+   */
+  const collectRowsInto = (target: WorkbenchEventEnvelope[], rows: readonly unknown[]): void => {
+    for (const row of rows) {
+      const migrated = toWorkbenchEnvelopes(row)
+      if (migrated.length === 0) {
+        binding.malformedCount += 1
+        continue
+      }
+      for (const envelope of migrated) target.push(envelope)
+    }
+  }
+
+  const maxRowSequence = (rows: readonly unknown[]): number => rows.reduce<number>((max, row) => {
+    const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+    return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
+  }, 0)
+
   const publishCanonicalRead = (input: {
     readSource: string
     readOwnerKey: string
@@ -654,7 +717,28 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }): void => {
     const readEnvelopes = input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead]
     const projected = foldPage(readEnvelopes, input.base)
-    const reconciled = echo.withPending(input.readSource, projected)
+    publishFoldedDocument({ ...input, projected, readEnvelopes })
+  }
+
+  /**
+   * 发布**已折好**的文档：`publishCanonicalRead` 的成功尾巴。抽出来是为了让 #376-b 的
+   * 分页冷装载能在最后一页一次发布（前面各页只折不发，避免中途把 status 打成 ready、
+   * 拿半份 journal 去封存时钟）。语义与原来逐字相同。
+   */
+  const publishFoldedDocument = (input: {
+    readSource: string
+    readOwnerKey: string
+    readGeneration: number
+    readSessionId: string
+    projected: WorkbenchDocument
+    readEnvelopes: readonly WorkbenchEventEnvelope[]
+    malformedCount: number
+    canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
+    canonicalHasTerminal: boolean
+    withLedgerEvidence: boolean
+  }): void => {
+    const readEnvelopes = input.readEnvelopes
+    const reconciled = echo.withPending(input.readSource, input.projected)
     const document = withReplayNegotiationFact(withInterruptedDraftMarker(input.malformedCount > 0 ? withJournalDiagnostic(reconciled, input.malformedCount) : reconciled, readEnvelopes))
     binding.buffered = []
     binding.loading = false
@@ -720,7 +804,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * 合成、不依赖一次性 event。因此「本回合是否已收敛」= journal 读到终态行
    * **或** 账本说已收敛——只认前者会让一次早于终态行落盘的读把摘要判成不存在。
    */
-  const refresh = async (session: Session | undefined, ledgerTurn?: unknown): Promise<void> => {
+  /**
+   * `rebuild`（#380）：以**空文档**为 base 整页重建，而不是续折当前文档。bind（冷装载）与
+   * **被拒回滚**要的是重建语义——「重建视角里那条乐观行从未发生」；续折会把当前文档原样带过来，
+   * 乐观行也就删不掉（这正是回滚不能直接复用缺省 refresh 的原因）。其余语义（epoch/generation
+   * 守卫、`buffered` 覆盖读期间到达的 live 行、`withPending` 补折剩余乐观行）两条路径共用。
+   */
+  const refresh = async (session: Session | undefined, ledgerTurn?: unknown, options: { rebuild?: boolean } = {}): Promise<void> => {
     if (binding.destroyed || !session || !binding.ownerKey || !binding.boundSessionId || !binding.source) return
     const bindingKey = workbenchSessionBindingKey(session)
     const refreshOwnerKey = binding.ownerKey
@@ -728,7 +818,18 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const refreshSessionId = binding.boundSessionId
     const refreshGeneration = binding.generation
     if (bindingKey !== binding.boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
-    if (binding.refreshInFlight) return binding.refreshInFlight
+    if (binding.refreshInFlight) {
+      // #380：**rebuild 请求不能被在途读合并掉**。合并返回的是先前那次读的 promise，而它的 base
+      // 是含乐观行的 current 文档（续折）——被拒乐观行会因此留在屏幕上，「send 返回时已撤销」的
+      // 时序保证在这个窗口里失效（评审发现的合并竞态）。故 rebuild 请求排队：等在途读落地后
+      // 再跑一次（那时 `refreshInFlight` 已被清空，递归调用走新读）。
+      if (!options.rebuild) return binding.refreshInFlight
+      const inFlight = binding.refreshInFlight
+      return inFlight.then(
+        () => refresh(session, ledgerTurn, options),
+        () => refresh(session, ledgerTurn, options),
+      )
+    }
     const refreshEpoch = ++binding.canonicalReadEpoch
     // 账本终态按 source 归档；本次调用的账本可能被去重丢掉，但归档会留下。
     const ledgerTerminalReason = resolveGenerationLedgerTerminalReason(ledgerTurn)
@@ -775,13 +876,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
         // 行同判幂等，整页重折即收敛。
         if (refreshMalformedCount > 0) fold.journalDiagnosticCount = refreshMalformedCount
-        // #204③：foldLog 以本次 journal 权威集**整体替换**。此前 log 永远保留 bind 时代
-        // 的旧信封实例——refresh 重建文档后它们不再与文档共享事件对象，等于把一整份
-        // 旧事件图钉在内存里（大会话的主要留存浪费之一）。替换后 log 的信封与文档
-        // timeline 共享同一语义事件对象（仅余信封壳），且被拒回滚的整页重折源恰好
-        // 就是这份 journal 权威集（未提交的乐观行由 withPendingOptimistic 随后补入）。
-        fold.log = []
-        fold.ids.clear()
+        // #380：此处原有一份「以 journal 权威集整体替换 foldLog」的记账（#204③）——日志本身
+        // 已整份删除，回滚改走 canonical 重读，这里不再需要任何替换动作。
         publishCanonicalRead({
           readSource: refreshSource,
           readOwnerKey: refreshOwnerKey,
@@ -789,7 +885,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           readSessionId: refreshSessionId,
           envelopes,
           bufferedAtRead: bufferedAtRefresh,
-          base: draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
+          base: options.rebuild || draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
           malformedCount: refreshMalformedCount,
           canonicalDuration,
           canonicalHasTerminal,
@@ -894,6 +990,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       binding.canonicalReadEpoch += 1
       binding.refreshInFlight = null
       const nextGeneration = ++binding.generation
+      // #375-a：按逃生口置位 timeline.data 收窄（投影核保持纯函数，DOM 判决留在宿主）。
+      setTimelinePayloadNarrowing(!timelinePayloadNarrowingDisabled())
       // #204 ②：`turnEpoch` 是 runtime 局部的**单调**围栏（`workbenchRuntime.acceptDocument`
       // 对 live 帧执行 `options.turnEpoch < snapshot.turnEpoch` 即拒收）。绑定重建不得把它
       // 回落为 0——切回时 snapshot 的 epoch 仍停在切走前那一轮，回落会让切回后到达的思考帧
@@ -910,9 +1008,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       draft.reconcilePending = false; draft.liveDuringReconcile = []
       binding.malformedCount = 0
       fold.journalDiagnosticCount = 0
-      // 绑定重建：折叠日志清空（journal 重放会重新入日志），文档由下面的整页折从空文档起。
-      fold.log = []
-      fold.ids.clear()
+      // 绑定重建：文档由下面的整页折从空文档起（#380 起不再需要清「折叠日志」——它已删除）。
       binding.loading = Boolean(session)
       // #217：空文档的活性申报走有效权威（内核表态随 source 的 map 跨 rebind 保留；
       // 无表态回退时钟，语义与 #213 一致）。
@@ -947,63 +1043,96 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       if (!session || !binding.ownerKey) return
       const loadingOwnerKey = binding.ownerKey
       const bindReadEpoch = binding.canonicalReadEpoch
-      // loadAll 必须**同步**调用：hanging-load 测试在 bind() 返回的同步窗口内拿 release 句柄。
-      await loadAll(loadingOwnerKey).then(async rows => {
-        const fragments = await loadDrafts(loadingOwnerKey)
-        if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
-          || binding.canonicalReadEpoch !== bindReadEpoch) return
-        const canonicalDuration = canonicalDurationFromRows(rows)
-        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
-        const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
-          ? (() => {
-            // Session snapshots historically used both the stable Session.id
-            // and the provider source as keys. Prefer the stable id, then
-            // recover a source-keyed snapshot left by older browser builds.
-            const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
-            const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
-            return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
-          })()
-          : []
-        // #205：不再先 concat 再 flatMap——直接按序收集（冷重放这份数组与行数同阶，
-        // 少一次整集合拷贝与中间数组）。浏览器快照轨照旧排在 journal 行之后。
-        const envelopes: WorkbenchEventEnvelope[] = []
-        const collect = (source: readonly unknown[]): void => {
-          for (const row of source) {
-            const migrated = toWorkbenchEnvelopes(row)
-            if (migrated.length === 0) {
-              binding.malformedCount += 1
-              continue
-            }
-            for (const envelope of migrated) envelopes.push(envelope)
-          }
+      const staleBindRead = (): boolean => (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
+        || binding.canonicalReadEpoch !== bindReadEpoch)
+      // #376-b：分页冷装载——逐页折进同一份文档，页内行与信封折完即可回收。发布（status
+      // 收敛、时钟封存、账本证据）只做一次，在最后一页。装载失败仍走同一条 catch。
+      await (async () => {
+        if (!listJournalPages) {
+          // 一次性装载（既有测试与浏览器快照轨）：收集全部行与信封后折一页。
+          const rows = await loadAll(loadingOwnerKey)
+          if (staleBindRead()) return
+          const fragments = await loadDrafts(loadingOwnerKey)
+          if (staleBindRead()) return
+          const envelopes: WorkbenchEventEnvelope[] = []
+          collectRowsInto(envelopes, rows)
+          envelopes.push(...projectRecoveredDrafts(fragments, maxRowSequence(rows)))
+          const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
+            ? (() => {
+              const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
+              const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
+              return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
+            })()
+            : []
+          collectRowsInto(envelopes, browserSnapshot)
+          if (binding.malformedCount > 0) fold.journalDiagnosticCount = binding.malformedCount
+          publishCanonicalRead({
+            readSource: session.source,
+            readOwnerKey: loadingOwnerKey,
+            readGeneration: nextGeneration,
+            readSessionId: session.id,
+            envelopes,
+            bufferedAtRead: binding.buffered,
+            base: createWorkbenchDocument(session.source),
+            malformedCount: binding.malformedCount,
+            canonicalDuration: canonicalDurationFromRows(rows),
+            canonicalHasTerminal: canonicalHasTerminalFromRows(rows),
+            withLedgerEvidence: false,
+          })
+          return
         }
-        collect(rows)
-        envelopes.push(...projectRecoveredDrafts(fragments, rows.reduce<number>((max, row) => {
-          const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
-          return Math.max(max, Number.isSafeInteger(sequence) ? sequence : 0)
-        }, 0)))
-        collect(browserSnapshot)
-        // buffered 为空是冷切会话的常态：入参已是有序数组，整页一帧过界
-        //（回放按页合批，边界穿越 2 次，与页内事件数无关）。
+        // 分页：行/信封只在页内存在。终态判据与首屏事实都必须**跨页累积**——
+        // 与一次性路径的唯一已知差异：`binding.buffered`（装载期间到达的实时帧）在这里走
+        // 第二次 foldPage，按到达序折；一次性路径把它们并进同一个批次按 sequence 排序折。
+        // 两者只在「缓冲帧的 sequence 低于尚未读到的后续页」这种乱序角落里分叉，而缓冲帧
+        // 恒为瞬态/会话响应（sequence > revision），故实际等价（评审 R2 已核）。
+        // 只按末页算会把早先页里的终态行判丢（summary / 时钟封存随之错）。
+        const boundaryRows: ReturnType<typeof canonicalBoundaryProjection> = []
+        let maxSequence = 0
+        let document = createWorkbenchDocument(session.source)
+        let lastPageEnvelopes: WorkbenchEventEnvelope[] = []
+        let fragments: readonly CanonicalDraftFragment[] = []
+        await listJournalPages(loadingOwnerKey, async (rows, lastPage) => {
+          if (staleBindRead()) return
+          if (lastPage) fragments = await loadDrafts(loadingOwnerKey)
+          if (staleBindRead()) return
+          const envelopes: WorkbenchEventEnvelope[] = []
+          collectRowsInto(envelopes, rows)
+          for (const row of rows) {
+            const sequence = row && typeof row === 'object' && 'sequence' in row ? Number(row.sequence) : 0
+            if (Number.isSafeInteger(sequence)) maxSequence = Math.max(maxSequence, sequence)
+          }
+          boundaryRows.push(...canonicalBoundaryProjection(rows))
+          if (lastPage) {
+            envelopes.push(...projectRecoveredDrafts(fragments, maxSequence))
+            const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
+              ? (() => {
+                const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
+                const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
+                return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
+              })()
+              : []
+            collectRowsInto(envelopes, browserSnapshot)
+          }
+          lastPageEnvelopes = envelopes
+          document = foldPage(envelopes, document)
+        })
+        if (staleBindRead()) return
         if (binding.malformedCount > 0) fold.journalDiagnosticCount = binding.malformedCount
-        // 冷装载 = 重建：显式以空文档为基座（不是续折当前文档）。
-        // #213：本进程的回合时钟（turnClocks）是活性的权威来源，随文档一并申报——
-        // 否则重放出的 `running` 尾行会让 generating 复活成永久「生成中」。
-        // #217：权威升级为内核在途事实优先（kernel > clock，见 effectiveLiveness）。
-        publishCanonicalRead({
+        const finalEnvelopes = binding.buffered.length === 0 ? lastPageEnvelopes : [...lastPageEnvelopes, ...binding.buffered]
+        publishFoldedDocument({
           readSource: session.source,
           readOwnerKey: loadingOwnerKey,
           readGeneration: nextGeneration,
           readSessionId: session.id,
-          envelopes,
-          bufferedAtRead: binding.buffered,
-          base: createWorkbenchDocument(session.source),
+          projected: finalEnvelopes === lastPageEnvelopes ? document : foldPage(binding.buffered, document),
+          readEnvelopes: finalEnvelopes,
           malformedCount: binding.malformedCount,
-          canonicalDuration,
-          canonicalHasTerminal,
+          canonicalDuration: canonicalDurationFromRows(boundaryRows),
+          canonicalHasTerminal: canonicalHasTerminalFromRows(boundaryRows),
           withLedgerEvidence: false,
         })
-      }).catch(error => {
+      })().catch(error => {
         if (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
           || binding.canonicalReadEpoch !== bindReadEpoch) return
         binding.loading = false
@@ -1019,7 +1148,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
       clock.clearAll(); echo.clear()
-      fold.log = []; fold.ids.clear()
     },
   }
 }

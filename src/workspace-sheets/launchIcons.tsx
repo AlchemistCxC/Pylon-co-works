@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   Bot,
   Boxes,
   Clock,
@@ -25,6 +26,7 @@ import {
  */
 export const LAUNCH_ICONS: Readonly<Record<string, LucideIcon>> = {
   activity: Activity,
+  'book-open': BookOpen,
   agent: Bot,
   boxes: Boxes,
   clock: Clock,

@@ -4,9 +4,10 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # configure-pages 的 enablement: true 需要 administration:write 才能在
-  # Pages 未启用时自动创建（build_type=workflow），免手动开设置
-  administration: write
+  # 注：此前这里写过 `administration: write`（configure-pages enablement 的
+  # 讹传）——它不在 workflow permissions 词表内，整个文件解析失败，任何分支
+  # 的 push 都会得到一个 workflow-file 级红 X。Pages 已在仓库设置启用，
+  # enablement: true 此时是 no-op，无需额外权限。
 
 concurrency:
   group: pages
