@@ -115,3 +115,4 @@
   - W4 → `src-tauri/pylon-core/src/**` + `src-tauri/src/{lifecycle/**,agent/**,agent_config/**,runtime.rs}`（detection 七模块化 + lifecycle 拆四块 + 预算常量归口 + FNV 收编）。
   - 全部施工 agent **不碰**：`src-tauri/src/lib.rs`、`src-tauri/src/acp/**`、各 `Cargo.toml`、`docs/说明书/**`、`.agents/**`、前端 `src/**`（#410 在途）、`_research/`、`_refactor-recon/`、`_*.py`。docs 同步、dev-standards、开发记录、全部 git 提交由主会话串行处理。
   - 全程零行为变化（约束与禁区见 #416 正文）；行为变更项在 #417 不施工。施工规格＝`_refactor-recon/W{1..4}-*.md` 的「复核结论」章节。
+  - **wave2 域变更（2026-09-28，wave1 已收工后）**：W2 wave2 agent 增授权 `src-tauri/src/lib.rs`（仅 R2.4 步7 注册表接线 + W1 R.4 PR-2 Q3 双入口抽辅助）、`src-tauri/src/test_utils.rs`（步7 依赖随迁）、`src-tauri/src/acp/**`（Q3）、`src-tauri/src/session/prompt/**`（分位点接线 + Prism hooks，W3 已收工）、`src-tauri/pylon-acp/src/{adapter/**,interaction_queue.rs}`（步5/6 下沉落点）。`adapter/private_ext` 本批冻结不搬（R1 裁决）。docs/说明书、records、git 仍归主会话。
