@@ -84,3 +84,6 @@
   - ⚠️ **与 #389 重叠点**：`src/domains/workbench/workbenchProjector.ts` 是 #389 在途脏文件，**本批不碰该文件**；若最终确需改它，提交前按 hunk 分账。（#390 是会话级生成指示器，#389 是工具行指示器，两条链路。）
   - ⚠️ **与 #375/#376 重叠点**：其声明域含 `src/domains/workbench/**` 与 `src/sheets/agent-workbench/**`（已入库待合并）。本批只改上列具名文件，提交一律 `git commit -- <paths>` 并先核 `git diff` 不带入他人 hunk。
   - **不碰**：`src-tauri/**`、`workbenchProjector.ts`、`src/workspace-sheets/**`、主题预设集群。
+- [kumo] **#399 `.cargo/config.toml` 上移仓库根**（cwd 决定的构建指纹分叉 → CI shadow job 重复全量编译）：`git mv src-tauri/.cargo/config.toml → .cargo/config.toml`（内容不变，补「位置约定」注释）、`docs/说明书/Pylon-模块维护地图.md`（「验证」节 #193 那句补一句 config 可见性）。**不改任何 cargo 调用点**——shadow/clippy 脚本的 cwd 与参数原样保留。验证：双 cwd 指纹探针（同 target 交替调用重编数 9→0）+ 实跑 `bun run check:acp-shadow` 分段耗时对照 + `tools/webview2-mcp` release 构建。
+  - ⚠️ 触 `docs/说明书/Pylon-模块维护地图.md` 与 #375/#376/#380 声明域重叠——本批只改「验证」节一句，提交按 hunk 分账、提交前核 `git diff`。
+  - **不碰**：`.github/workflows/**`、`scripts/**`、任何 Rust 源码（含 `src-tauri/**`）、`tools/**` 源码、前端 `src/**`。规格 `.agents/spec/399-cargo-config-root-relocation.md`。
