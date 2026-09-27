@@ -244,8 +244,10 @@
 }
 .cc-widget.cc-edit:hover { box-shadow:inset 0 0 0 2px var(--accent,#D77757); }
 .cc-widget.cc-selected { outline:2px solid var(--accent) !important; outline-offset:2px; }
-.cc-widget.cc-hidden { opacity:0.18; }
-.cc-widget.cc-hidden:hover { opacity:0.5; }
+/* ★ CC-02：发送按钮是**独立组件**（不挂 `.cc-widget`，`.cc-widget` 那一族布局会改它的形），
+   故幽灵态**只补选择器、不借壳** —— 两边共用同一组透明度值。 */
+.cc-widget.cc-hidden, .cc-send-button.cc-hidden { opacity:0.18; }
+.cc-widget.cc-hidden:hover, .cc-send-button.cc-hidden:hover { opacity:0.5; }
 
 /* ── Property panel ── */
 .cc-prop-panel { position:fixed; left:0; top:32px; bottom:0; width:250px; background:var(--bg-panel); border-right:1px solid var(--border); z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15); display:flex; flex-direction:column; }
