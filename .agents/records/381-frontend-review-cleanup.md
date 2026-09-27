@@ -54,10 +54,10 @@
 
 ## 方案要点
 
-- **isRecord 收敛边界**：只收敛本有 import 的文件（3 处）+ 共享出口 re-export（1 处）。三个**零 import 纯模型文件**（`fileContentValidation`/`lifecycleModel`/`goalModel`）保留私有副本——为 3 行样板引入对外依赖违背其零依赖姿态；`sessionSurface.ts` 谓词是 `Record<string, JsonValue>`（类型不同）；`markdownRenderModel.ts` 实现缺数组排除（语义不同）；`workbenchProjector.ts`/`workbenchEventSchema.ts` 在途。收敛后全仓 11 份 → 单一真值 + 6 份有理由本地副本。
+- **isRecord 收敛边界**（勘误后）：本批只收敛本有 import 的文件（3 处）+ 共享出口 re-export（1 处）。**全仓独立盘点实为 13 份非 wireGuards 副本**（初稿误记 11 份，审查 M1 勘误），除已收敛 4 份外保留 9 份，各有理由：零 import 纯模型文件×3（`fileContentValidation`/`lifecycleModel`/`goalModel`——为 3 行样板引入对外依赖违背零依赖姿态）；谓词不同×1（`sessionSurface.ts` 为 `Record<string, JsonValue>`）；语义不同×1（`markdownRenderModel.ts` 缺数组排除）；**初稿漏盘点×2**（`sheets/agent-workbench/agentWorkbenchProjection.ts:267`、`sessionResponseProjection.ts:9`——与 wireGuards 同款，属可收敛项，因所在域有他人在途改动本轮不动，待其落地后随批收敛）；在途×2（`workbenchProjector.ts`/`workbenchEventSchema.ts`）。
 - **clamp 改名而非合并**：两份同名不同义（`clampFinite` 非有限落 0 vs `clampRound` 先 round），改名消除复制粘贴时的选型陷阱，不合并保语义。
 - **pylon 流式事件常量化**：新建 `infrastructure/events/pylonStreamWireEvents.ts` 作单一来源，`chatClient`/`streamChannel` 的 union 类型从常量派生，`canonicalEventFeed`/`streamingSend` 的运行时判定改引常量。window CustomEvent 类事件已有 `domains/events/pylonCustomEvents.ts` 注册表，不在本次范围。
-- **SolidMount 迁 host/**：机制件原住 `sheets/` 导致 `workspace-sheets` 反向依赖 `sheets`（壳层→内容层逆流）。迁 `src/host/`（宿主接缝语义）后 workspace-sheets→sheets import 清零。solid 编译面按 `.solid.tsx` 后缀 glob（vite/vitest/tsconfig 三处均目录无关），迁移零配置变更；vitest 分组按文件内容判定，`SolidMount.test.tsx` 随迁不受影响。
+- **SolidMount 迁 host/**：机制件原住 `sheets/` 导致 `workspace-sheets` 反向依赖 `sheets`（壳层→内容层逆流）。迁 `src/host/`（宿主接缝语义）后 workspace-sheets→sheets import 清零。**solid 编译面实为「目录枚举 × `.solid.tsx` 后缀」双条件**（`vite.config.ts:10`/`vitest.config.ts:9` 正则枚举 renderers\/solid-workbench|sheets|workspace-sheets|components 四目录；tsconfig 两处 include 同构）——`src/host/` 不在枚举内，**未来往 host/ 放 `.solid.tsx` 文件会被静默排除出 solid 编译面**（审查 M2 勘误；vite.config.ts:8 既有注释「凡 .solid.tsx 后缀即 solid 编译」的说法不准确）。本批三文件均不带 `.solid` 后缀，迁移前后都不在 solid 编译面内，「零配置变更」对本批成立。vitest 分组按文件内容判定，`SolidMount.test.tsx` 随迁不受影响。
 - **main.tsx 收敛**：数组表保留每钩子 id 语义；安装顺序 = 表序（mock-tauri 首位）；补 `.catch` 上报（原先 rejection 未处理，取证钩子故障会以 unhandled rejection 冒烟）。
 
 ## 验收标准与结果
@@ -82,8 +82,18 @@
 - `npm run test`（vitest 全量）：**Test Files 656 passed | 1 skipped (657)；Tests 5041 passed | 1 skipped | 1 todo (5043)**，Duration 109s，exit 0。1 skipped 为既有 `sessionScale.probe` 探针。
 - `npm run check:solid`：solid 编译面 tsc + 8 项门禁全过（运行时边界「32 条遗留白名单仅报告；无新增 invoke/store/CustomEvent 越界」、CSS 消费审计 0 死注入 0 悬空、ZONE_FIELDS 187 字段一致、plugin manifests、context panel 接线、hook anchor parity 23 锚点全等）。
 - `grep -rn "from '../sheets" src/workspace-sheets`：空。
+- **N3 复验**（审查后追加）：`npx vite build` ✓ built in 34s；dist 全量 grep 取证钩子特征串（`__pylonExportThreeSources`/`installMockTauri`/`pylonColdStartSnapshot`/`pylonDeleteForensics`/`__pylonStderrSamples`）**零命中**——表驱动收敛后生产 bundle 仍不携带 DEV 钩子，「零暴露」声明成立。
 
 ## 遗留
 
 - #381 转发项：redact 单入口化（待 #375 落地）、repository raw 读出口与取证收敛、domains→components 逆流 26 处、命名方言收敛（双代事件模型、resolveToolSemantic/Type、三 renderer 注册面）、`renderers/` 冗余层、coverage/ 目录归位、obs 工单号目录命名、双引擎镜像常量机制化。
 - `fnv1a` 两份近似拷贝：权威份在 `workbenchEventSchema.ts`（在途），待其落地后随批收敛。
+- isRecord 剩余两份可收敛副本（`agentWorkbenchProjection.ts`/`sessionResponseProjection.ts`，在途域），待 #375 落地后随批收敛。
+
+## 独立审查勘误（2026-09-27，审查员 agent）
+
+独立审查结论「可合并，0 blocker / 0 major」。三处记录与表述勘误已回写本文：
+1. **M1**：isRecord 全仓盘点初稿记 11 份，实为 13 份，漏 `agentWorkbenchProjection.ts`/`sessionResponseProjection.ts` 两份同款副本（上文已更正）。
+2. **M2**：「solid 编译面目录无关」说法不实，实为目录枚举 × 后缀双条件，`src/host/` 不在白名单（上文已更正）；建议后续单独修配置或纠正 `vite.config.ts:8` 的既有注释。
+3. **N2**：批1 commit message「零引用导出×12」计数不准，实删导出符号 15 个（6+3+2+1+1+1+1）；历史不改，以本节为准。
+4. **N3**：main.tsx 表驱动后 tree-shake 依赖顶层常量剪除，已跑 `vite build` 复验生产 bundle 不携带 demo/mockTauri 与 obs 取证钩子（证据见下）。
