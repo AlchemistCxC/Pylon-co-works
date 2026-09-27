@@ -233,3 +233,24 @@ envelope 契约里本就是可选的 `WorkbenchEnvelopeInput.identity?:`），�
 `## 未解问题` 一节的第 2、3 项（`lastTokenAt` 进门禁的发布代价未实测；
 `latestTurnBoundary` 依赖「`turn.unit` 只在回合收敛时落盘」这一内核契约）仍为开放观察项，
 未另立 issue——前者等 `perf-bench` 取证，后者已在 `canonicalUnit.ts` 与判据函数处双向标注。
+
+## 同版本重打包发布（2026-09-27 18:4x–18:5x，仓库主指示）
+
+`bun run release:portable`（build + plugin-sdk + docs:build:offline + `tauri build --no-bundle` +
+`pylon-detect --release` + `webview2-mcp --release` + `pack:portable`）→ 上传到既有 release
+**`v0.3.1-FMF`（同 tag 重打包，附件替换）**。
+
+| 项 | 读数 |
+| --- | --- |
+| 构建来源 | `kumo/prometheus` @ `4ec15ea1`（在上一版 `f06fd787` 之上并入 #390、#389 与 #389 的 TS2554 代修） |
+| 打包 verify | 302 项 ZIP 条目与 manifest 一致（`verify OK` ×2） |
+| 产物 exe 版本资源 | `0.3.1-FMF` |
+| 便携包实机冒烟 | 通过：解压后启动、`portable.flag` 生效、数据目录自 AppData 播种（**复制**，AppData 原件未动）、`persistence_ready` 545ms / `setup_complete` 547ms、界面正常渲染为 Overview |
+| 上传 | `pylon-0.3.1-FMF-win64.{zip,zip.sha256,manifest.json}` 三件 `--clobber` 替换 |
+| release notes | 「本版要点」新增一条「指示器状态机（本次重打包新增）」；「校验」段更新为 `4ec15ea1` + 本次 verify/冒烟读数 |
+
+过程记录：
+
+- 打包前删了 `src-tauri/target/debug/incremental`（1.2 GB，可再生）腾空间——release 构建净耗约 3 GB，
+  峰值从 7.7 GB 可用降到 4.5 GB。
+- 冒烟用的解压目录与进程已清理；无残留 `pylon.exe`。
