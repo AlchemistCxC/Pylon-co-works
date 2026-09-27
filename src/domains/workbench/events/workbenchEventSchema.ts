@@ -106,11 +106,15 @@ export interface UsageEvent {
 }
 
 export interface SessionEvent {
-  readonly type: 'session.started' | 'session.commands-updated' | 'session.config-updated' | 'session.model-updated' | 'session.mode-updated' | 'session.status-updated' | 'session.completed'
+  readonly type: 'session.started' | 'session.commands-updated' | 'session.config-updated' | 'session.model-updated' | 'session.mode-updated' | 'session.status-updated' | 'session.title-updated' | 'session.completed'
   readonly cwd?: string
   readonly model?: string
   readonly mode?: string
   readonly status?: string
+  /** ACP `SessionInfoUpdate.title`（`MaybeUndefined`）三态在这里收敛成两态：
+   *  「缺席 = 不修改」由**事件不存在**表达（规范器不产出该 fact），所以本字段
+   *  一旦存在就是明确表态——`null` = 清空、字符串 = 设置。 */
+  readonly title?: string | null
   readonly commands?: readonly JsonValue[]
   /** #315：peri skillNames cap 载荷（AvailableCommandsUpdate._meta.skillNames）。 */
   readonly skillNames?: readonly JsonValue[]
@@ -259,7 +263,7 @@ function internMetadataSnapshotEvent(event: WorkbenchSemanticEvent): WorkbenchSe
   if (!METADATA_SNAPSHOT_EVENT_TYPES.includes(event.type)) return event
   let key: string
   try {
-    key = `${event.type} ${JSON.stringify(event)}`
+    key = `${event.type}\u0000${JSON.stringify(event)}`
   } catch {
     return event
   }
@@ -566,7 +570,7 @@ export const WORKBENCH_SEMANTIC_EVENT_TYPES = Object.freeze([
   'activity.started', 'activity.progress', 'activity.completed', 'activity.failed', 'activity.cancelled',
   'interaction.requested', 'interaction.resolved', 'interaction.expired',
   'usage.updated', 'budget.warning',
-  'session.started', 'session.commands-updated', 'session.config-updated', 'session.model-updated', 'session.mode-updated', 'session.status-updated', 'session.completed',
+  'session.started', 'session.commands-updated', 'session.config-updated', 'session.model-updated', 'session.mode-updated', 'session.status-updated', 'session.title-updated', 'session.completed',
   'lifecycle.retrying', 'lifecycle.compact-started', 'lifecycle.compact-completed', 'lifecycle.rewind-preview', 'lifecycle.rewind-completed', 'lifecycle.suspended', 'lifecycle.recovered',
   'assist.prediction', 'assist.file-suggestions', 'assist.queued-command',
   'diagnostic.updated', 'diagnostic.notice',

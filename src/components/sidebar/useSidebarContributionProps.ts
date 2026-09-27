@@ -134,7 +134,9 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
       if (!target) return
       updateSession(id, { pinned: !target.pinned })
     },
-    onRenameSession: (id: string, name: string) => updateSession(id, { name, lastActiveAt: Date.now() }),
+    // #393：改名是用户意图，置 `renamedByUser` 后显示恒以 `name` 为准——
+    // Agent 后续推的标题只更新 `autoName`（存储以 Agent 为准，显示以用户为准）。
+    onRenameSession: (id: string, name: string) => updateSession(id, { name, renamedByUser: true, lastActiveAt: Date.now() }),
     onCreateLooseSession: () => { window.dispatchEvent(new CustomEvent('pylon:new-session')); onSelectSession(null) },
     onCreateWorkspace: async (name: string, rootPath: string) => { await createWorkspace(name, rootPath) },
     onCreateWorkspaceSession: createSessionUnderCwd,

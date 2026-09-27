@@ -185,3 +185,31 @@ describe('中控字段与配置项的值必须一致（两个值来源）', () =
     expect(document.session.model).toBe('fable')
   })
 })
+
+/** #393：Agent 标题（ACP `session_info_update.title`）落在文档的 `session.title`，
+ *  侧栏/搜索经 identity 行的 `autoName` 取它。清空（`title: null`）必须**删键**，
+ *  否则 Agent 收回名字后界面还挂着旧标题。 */
+describe('#393 Agent 标题投影', () => {
+  const withTitle = (document: ReturnType<typeof createWorkbenchDocument>, sequence: number, title: string | null) =>
+    reduceWorkbenchEvent(document, envelope(sequence, { type: 'session.title-updated', title }))
+
+  it('设置 → 覆盖 → 清空删键', () => {
+    let document = createWorkbenchDocument('session-title')
+    document = withTitle(document, 1, 'Riccati 助手介绍')
+    expect(selectSessionSurface(document).title).toBe('Riccati 助手介绍')
+    document = withTitle(document, 2, '第二个标题')
+    expect(selectSessionSurface(document).title).toBe('第二个标题')
+    document = withTitle(document, 3, null)
+    expect(selectSessionSurface(document).title).toBeUndefined()
+  })
+
+  it('标题事实不污染其它会话字段（model/mode/status 保持原值）', () => {
+    let document = reduceWorkbenchEvent(createWorkbenchDocument('session-title'), envelope(1, {
+      type: 'session.model-updated',
+      model: 'deepseek-v4-flash',
+    }))
+    document = withTitle(document, 2, '标题')
+    expect(document.session.model).toBe('deepseek-v4-flash')
+    expect(document.session.status).toBe('idle')
+  })
+})

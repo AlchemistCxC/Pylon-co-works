@@ -11,10 +11,10 @@
  *   产出的语义事件类型集合——parity 测试（normalizers/__tests__）双向钉住：
  *   一侧改动不同步即红。
  *
- * 口径裁决：`session_info_update` 包是 mode/status/model 三个独立事实的载体，
+ * 口径裁决：`session_info_update` 包是 mode/status/model/title 四个独立事实的载体，
  * canonical 侧曾整包映射 `session.model-updated`（漂移源）；现按 workbench 语义
- * 收敛为 `session.mode-updated`（mode 是包内必有事实，model/status 由 workbench
- * 侧拆分产出，canonical 侧 typedPayload 仍保留原始字段不丢）。
+ * 收敛为 `session.mode-updated`（mode 是包内必有事实，model/status/title 由
+ * workbench 侧拆分产出，canonical 侧 typedPayload 仍保留原始字段不丢）。
  * `current_mode_update`（旧 ACP 变体）与 `cancelled`（legacy 终态）仅 canonical
  * 侧映射；workbench 侧分别落 unknown 兜底——对应表中显式声明，不是缺口。
  */
@@ -75,9 +75,9 @@ export const WORKBENCH_TYPE_FOR_WIRE: Readonly<Record<StandardWireSessionUpdateK
   usage_update: ['usage.updated'],
   available_commands_update: ['session.commands-updated'],
   config_option_update: ['session.config-updated'],
-  // session_info_update 包按事实拆分（mode/status/model 各自独立事件）；
+  // session_info_update 包按事实拆分（mode/status/model/title 各自独立事件）；
   // 空包兜底产出 mode:undefined 的 mode-updated（见 acpNormalizer）。
-  session_info_update: ['session.mode-updated', 'session.status-updated', 'session.model-updated'],
+  session_info_update: ['session.mode-updated', 'session.status-updated', 'session.model-updated', 'session.title-updated'],
   done: ['session.completed'],
   error: ['diagnostic.notice'],
   // legacy 变体：canonical 侧收敛 turn.failed，workbench 侧落 unknown 兜底
