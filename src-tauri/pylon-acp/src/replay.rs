@@ -93,7 +93,6 @@ impl AcpClient {
             return Err(AcpError::ConnectionClosed);
         }
         // Keep receiver creation under the same mutex as registration.
-        // Keep receiver creation under the same mutex as registration.
         let sdk = &self.backend;
         let mut requests = sdk
             .active_replay_requests

@@ -35,6 +35,20 @@ impl From<pylon_acp::AcpError> for crate::error::PylonError {
     }
 }
 
+/// Q3 共享辅助（W1 R.4 PR-2，#416 W2 wave2 步骤 8）：negotiated 快照的
+/// declared+consumers 收集与 `from_parts` 拼装单点化。双构造入口各自保留锁
+/// 形态与 generation 装载位——`capture_negotiated_snapshot`（await 持锁）与
+/// lib.rs agent_status 快照（try_lock 同步）——拼装面收敛本函数防漂移；
+/// 四参输入与两入口原拼写逐点等值。
+pub(crate) fn negotiated_snapshot_from_client(
+    acp: &AcpClient,
+    generation: u64,
+) -> NegotiatedCapabilitySnapshot {
+    let declared: Vec<String> = acp.establishment_order().to_vec();
+    let consumers = negotiated::registered_capability_consumers();
+    NegotiatedCapabilitySnapshot::from_parts(acp.capabilities(), &declared, generation, &consumers)
+}
+
 /// 从运行时现场捕获能力协商快照（#247 自 pylon-acp::negotiated 迁入——
 /// 它持有 &AgentRuntime 的锁序约定，属宿主编排面）。
 pub async fn capture_negotiated_snapshot(
@@ -44,12 +58,5 @@ pub async fn capture_negotiated_snapshot(
         .client_generation
         .load(std::sync::atomic::Ordering::Acquire);
     let acp = runtime.acp.lock().await;
-    let declared: Vec<String> = acp.establishment_order().to_vec();
-    let consumers = negotiated::registered_capability_consumers();
-    Ok(NegotiatedCapabilitySnapshot::from_parts(
-        acp.capabilities(),
-        &declared,
-        generation,
-        &consumers,
-    ))
+    Ok(negotiated_snapshot_from_client(&acp, generation))
 }

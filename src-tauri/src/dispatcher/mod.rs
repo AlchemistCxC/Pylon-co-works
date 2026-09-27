@@ -6,98 +6,14 @@ use std::sync::Arc;
 
 use crate::acp::AcpClient;
 use crate::agent::runtime::{session_mapping_matches, source_for_peri_id_in_generation};
-use crate::permission::{
-    permission_response, pick_allow_option, pick_option, pick_reject_option, PendingPermission,
-};
-use crate::pet::PetState;
+use crate::permission::PendingPermission;
 use crate::runtime::AgentRuntime;
-use crate::session::{
-    config_option_key_matches, extract_tool_file_name, value_as_string, SessionInfo,
-};
+use crate::session::SessionInfo;
 // #317 批次二 ④：flush 正身迁 canonical_flush.rs。
+use crate::emit_event;
 #[cfg(test)]
 use crate::session::DurableSessionOwner;
 use crate::AppStateHandles;
-use crate::{emit_event, emit_event_all};
-use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
-use pylon_acp::fs_policy::FsFailure;
-
-/// #354：fs 请求错误面——runtime 分类错误（NotFound/Denied/Other）与参数/
-/// 序列化错误分开承载，wire 映射见 `host_fs_error_response`。
-enum FsToolError {
-    Runtime(FsFailure),
-    Message(String),
-    UnsupportedMethod,
-}
-
-/// #354：fs 负路径 → wire 三元组（code, data, message）。`NotFound` → 官方
-/// `resource_not_found`（-32002）+ `data:{uri}`；沙箱拒绝 → 保持 `-32602` 但
-/// message 加 `sandbox:` 稳定前缀（agent 可区分「参数本身坏」与「沙箱拒绝」）；
-/// 参数缺失/序列化失败维持 `-32602` 裸消息（wire 逐字不变）；不支持的方法按
-/// 官方基线回 `-32601`（host 工具门按前缀放行，未知子方法会到达该臂）。
-fn host_fs_error_response(
-    error: &FsToolError,
-) -> (WireErrorCode, Option<serde_json::Value>, String) {
-    match error {
-        FsToolError::Runtime(FsFailure::NotFound { uri }) => (
-            WireErrorCode::ResourceNotFound,
-            Some(serde_json::json!({ "uri": uri })),
-            format!("resource not found: {uri}"),
-        ),
-        FsToolError::Runtime(FsFailure::SandboxDenied { message }) => (
-            WireErrorCode::InvalidParams,
-            None,
-            format!("sandbox: {message}"),
-        ),
-        FsToolError::Runtime(FsFailure::Other(message)) => {
-            (WireErrorCode::InvalidParams, None, message.clone())
-        }
-        FsToolError::Message(message) => (WireErrorCode::InvalidParams, None, message.clone()),
-        FsToolError::UnsupportedMethod => (
-            WireErrorCode::MethodNotFound,
-            None,
-            "unsupported filesystem method".to_string(),
-        ),
-    }
-}
-
-/// #354：terminal 负路径 → wire 三元组。registry（`pylon-acp`，#363 在途域）
-/// 返回裸 `String`，这里按其稳定文案做最小分类：`terminal {id} not found` →
-/// `-32002`（终端是资源，无 uri 载荷）；不支持的方法 → `-32601`；其余（如
-/// `does not belong to session`）维持 `-32602` 裸消息。
-fn host_terminal_error_response(error: &str) -> (WireErrorCode, Option<serde_json::Value>, String) {
-    if error.contains(" not found") {
-        (WireErrorCode::ResourceNotFound, None, error.to_string())
-    } else if error == "unsupported terminal method" {
-        (WireErrorCode::MethodNotFound, None, error.to_string())
-    } else {
-        (WireErrorCode::InvalidParams, None, error.to_string())
-    }
-}
-
-/// #354：带 `data` 的 wire 错误应答（官方 `resource_not_found` 携带 `data:{uri}`）。
-/// `ResponderHandle::respond_error` 不携带 data；经 pub 的 `pending_requests`
-/// 取官方 SDK `Responder` 直发，不为单个调用点扩 pylon-acp 引擎面（#363 在途，
-/// engine.rs 避让）。
-async fn respond_tool_error(
-    acp: &AcpLock,
-    request_id: crate::acp::RequestId,
-    (code, data, message): (WireErrorCode, Option<serde_json::Value>, String),
-) {
-    let responder = { acp.lock().await.responder() };
-    let pending = responder
-        .pending_requests
-        .lock()
-        .ok()
-        .and_then(|mut pending| pending.remove(&request_id));
-    let mut wire_error = agent_client_protocol::Error::new(i32::from(code), message);
-    if let Some(data) = data {
-        wire_error = wire_error.data(data);
-    }
-    if let Some(pending) = pending {
-        let _ = pending.respond_with_error(wire_error);
-    }
-}
 
 mod routing;
 
@@ -112,6 +28,10 @@ mod frame_path_bench;
 mod host_tools_gate;
 mod interaction_route;
 mod permission_route;
+mod publish_route;
+// #416 W2 步骤③：产品反应订阅缝（PetEvent/derive + KernelReactionSink）。
+// pub(crate)：session/prompt 收尾分位点（wave2 步骤 3-余）经本模块消费 sink。
+pub(crate) mod reactions;
 
 #[cfg(test)]
 use canonical_flush::flush_pending_canonical;
@@ -127,6 +47,7 @@ use fallback_route::route_unknown_notification;
 use host_tools_gate::{route_fs_request, route_terminal_request};
 use interaction_route::{route_elicitation_complete, route_private_interaction};
 use permission_route::route_permission_request;
+use reactions::{derive_session_reactions, KernelReactionSink, PetEvent, PetReactionSink};
 
 /// Canonical ingest failure policy for a live ACP update.
 ///
@@ -156,972 +77,13 @@ fn log_canonical_ingest_error(error: &crate::session::EventError, agent_id: &str
     }
 }
 
-/// C11/O7：一条 session/update 事件需要施加到宠物的感知事件。
-/// 按收集顺序产出，调用方在 sessions 锁外逐条应用——收集顺序 = 应用顺序。
-/// G3 §2.2.1：agent_message_chunk 的 FirstChunk/CodeSeen 与 apply_update_event 产出
-/// 统一走收集路径（原 :366/:374 语句级独立锁 → 同锁收集、锁外按序应用，E12 接受）。
-/// C11：回放（is_replay）事件仅同步 session 状态，不产生宠物感知
-/// （回放不刷 xp/bond/掉落）。
-#[derive(Debug)]
-enum PetEvent {
-    /// 原 agent_message_chunk 分支 on_first_chunk（每 !replay chunk 一次）。
-    FirstChunk,
-    /// 原 on_code_seen（text.contains("```")）。
-    CodeSeen,
-    UsageUpdate(u64),
-    ToolStarted(crate::pet::ToolKind),
-    CodeFile(String),
-    ToolSucceeded,
-    ToolFailed,
-    ToolCancelled,
-    ModelChanged(String),
-    ModeChanged(String),
-}
-
-impl PetEvent {
-    fn apply(self, state: &mut crate::pet::PetState) {
-        match self {
-            PetEvent::FirstChunk => crate::pet::on_first_chunk(state),
-            PetEvent::CodeSeen => crate::pet::on_code_seen(state),
-            PetEvent::UsageUpdate(total) => crate::pet::on_usage_update(state, total),
-            PetEvent::ToolStarted(kind) => crate::pet::on_tool_started_kind(state, kind),
-            PetEvent::CodeFile(file) => crate::pet::record_code_file(state, &file),
-            PetEvent::ToolSucceeded => crate::pet::on_tool_success(state),
-            PetEvent::ToolFailed => crate::pet::on_tool_failure(state),
-            PetEvent::ToolCancelled => crate::pet::on_tool_cancelled(state),
-            PetEvent::ModelChanged(model) => crate::pet::on_model_changed(state, &model),
-            PetEvent::ModeChanged(mode) => crate::pet::on_mode_changed(state, &mode),
-        }
-    }
-}
-
-/// O7：对一条 session/update 事件施加 session 状态变更，并返回需施加到宠物的
-/// 感知事件（按收集顺序）。调用方持有 sessions 锁时调用、锁外逐条应用。
-/// C11：回放（is_replay）事件仅同步 session 状态（tokens/title/model/mode），
-/// 不产出任何宠物感知事件。
-/// 生产路径已由 38dad290 全量改走 apply_update_event_routed（typed kernel seam）；
-/// 本布尔包装仅剩 C11 宠物策略 characterization 测试消费，故 cfg(test)。
-#[cfg(test)]
-fn apply_update_event(
-    session: &mut crate::session::SessionInfo,
-    update: &serde_json::Value,
-    variant: Option<crate::acp::SessionUpdateVariant>,
-    is_replay: bool,
-) -> Vec<PetEvent> {
-    apply_update_event_with_pet_policy(session, update, variant, !is_replay)
-}
-
-/// Kernel-routed variant of [`apply_update_event`].  The typed decision is the
-/// only source of live/replay Pet policy on the dispatcher path; the boolean
-/// wrapper above remains for focused characterization tests and legacy callers.
-fn apply_update_event_routed(
-    session: &mut crate::session::SessionInfo,
-    update: &serde_json::Value,
-    variant: Option<crate::acp::SessionUpdateVariant>,
-    decision: routing::RoutingDecision,
-) -> Vec<PetEvent> {
-    apply_update_event_with_pet_policy(session, update, variant, decision.apply_pet)
-}
-
-fn apply_update_event_with_pet_policy(
-    session: &mut crate::session::SessionInfo,
-    update: &serde_json::Value,
-    variant: Option<crate::acp::SessionUpdateVariant>,
-    apply_pet: bool,
-) -> Vec<PetEvent> {
-    // Keep the ACP reducer alongside the legacy SessionInfo fields during the
-    // migration. It emits no UI events; canonical commit/publication remains
-    // governed by the existing routing transaction below.
-    // P2（#334）：零拷贝直喂——原实现按 `{"update": update}` 重包一份整树深拷贝
-    // 喂 `apply`，逐帧成本随 payload 体量放大（frame_path_bench 读数一）。
-    let deltas = session.acp_state.apply_session_update(update);
-    // Typed reducer output is consumed here at the kernel boundary. Existing
-    // canonical/session updates below remain the publication authority; this
-    // adapter only mirrors reducer-owned scalar domains into the live session.
-    for delta in deltas {
-        match delta {
-            crate::acp::AcpStateDelta::Usage {
-                used,
-                size,
-                input,
-                output,
-            } => {
-                session.tokens_total = used;
-                session.context_size = size.unwrap_or(0);
-                if let Some(input) = input {
-                    session.tokens_in = input;
-                }
-                if let Some(output) = output {
-                    session.tokens_out = output;
-                }
-            }
-            // Mode/model remain handled by the existing event transaction below;
-            // consuming them here would suppress its change detection.
-            crate::acp::AcpStateDelta::Mode { .. }
-            | crate::acp::AcpStateDelta::Model { .. }
-            | crate::acp::AcpStateDelta::PermissionQueueDepth { .. }
-            | crate::acp::AcpStateDelta::PermissionRequested { .. }
-            | crate::acp::AcpStateDelta::Text { .. }
-            | crate::acp::AcpStateDelta::Reasoning { .. }
-            | crate::acp::AcpStateDelta::UserText { .. }
-            | crate::acp::AcpStateDelta::ToolStarted { .. }
-            | crate::acp::AcpStateDelta::ToolUpdated { .. }
-            | crate::acp::AcpStateDelta::Plan { .. }
-            | crate::acp::AcpStateDelta::Unknown { .. } => {}
-        }
-    }
-    let mut pet_events: Vec<PetEvent> = Vec::new();
-    match variant {
-        Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-            if let Some(meta) = update.get("_meta") {
-                if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
-                    session.model = model.to_string();
-                    // #97/D97-3（评审修正）：usage _meta.model 是权威 current 通道，
-                    // 与单值 config_option_update 分支同契约——清除客户端 requested
-                    // 未确认态，三态收敛不留漏口。
-                    session.model_pending = None;
-                }
-            }
-            if apply_pet {
-                pet_events.push(PetEvent::UsageUpdate(session.tokens_total));
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::ToolCall) => {
-            if apply_pet {
-                // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
-                let title = update.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                let kind = crate::pet::ToolKind::classify(title);
-                pet_events.push(PetEvent::ToolStarted(kind));
-                // rawInput 仅提取文件名白名单形态（"path":"..."），原文绝不下沉
-                if let Some(raw) = update.get("rawInput").and_then(|v| v.as_str()) {
-                    if let Some(file) = extract_tool_file_name(raw) {
-                        pet_events.push(PetEvent::CodeFile(file));
-                    }
-                }
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
-            if apply_pet {
-                match update.get("status").and_then(|v| v.as_str()) {
-                    Some("completed") => pet_events.push(PetEvent::ToolSucceeded),
-                    Some("failed") => pet_events.push(PetEvent::ToolFailed),
-                    Some("cancelled") => pet_events.push(PetEvent::ToolCancelled),
-                    _ => {}
-                }
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate) => {
-            if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
-                session.title = title.to_string();
-            }
-            // P56/D2.3 + #97/D97-3：payload 带 models 状态（camelCase/snake_case）时
-            // 全量消费——current 提取 + 模型面/choices 完整刷新（不再只更新当前值），
-            // 并清除客户端 requested 未确认态（Agent 推送的完整状态是权威）。
-            // apply_models_state 内置 fingerprint 幂等（#97/D97-4）：完全相同的
-            // models push 重复到达只提交一次，丢弃计数留在 session 诊断字段。
-            if let Some(models) = update.get("models") {
-                session.apply_models_state(models);
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
-            if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
-                // #97/D97-4：有界替换——超限 envelope 拒绝入库（已知 selector 状态
-                // 保持不变 + 计数），未知 option kind 随原样数组保留。
-                // N1（第二轮评审）：数组携带可提取 model currentValue（权威回显的
-                // model 维度）时清除 requested 未确认态，pending 生命周期无漏口。
-                session.apply_config_options_push(options);
-            } else {
-                // P56/D2.2：option_key 读取补官方 configId/config_id 键；与 "model"/
-                // "mode" 比较前按 find_config_option 同款归一化规则精确匹配（不做
-                // 子串包含猜测）。
-                let option_key = update
-                    .get("configId")
-                    .or_else(|| update.get("config_id"))
-                    .or_else(|| update.get("id"))
-                    .or_else(|| update.get("key"))
-                    .and_then(|v| v.as_str());
-                let is_model_key =
-                    option_key.is_some_and(|key| config_option_key_matches(key, "model"));
-                let is_mode_key =
-                    option_key.is_some_and(|key| config_option_key_matches(key, "mode"));
-                // N4（第二轮评审）：model 值走 machine-id-only 提取（显示名不当 id，
-                // 与 models-state 通道同一不变量）；mode 等其余语义保持宽容提取。
-                let current = update
-                    .get("currentValue")
-                    .or_else(|| update.get("value"))
-                    .and_then(|value| {
-                        if is_model_key {
-                            crate::session::value_as_machine_id(value)
-                        } else {
-                            value_as_string(value)
-                        }
-                    });
-                if is_model_key {
-                    if let Some(model) = current {
-                        // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
-                        // model 为空必误判 changed（对齐 usage/tool 全部门控）。
-                        // #97/D97-3：Agent 推送的 current 是权威值——清除客户端
-                        // requested 未确认态。
-                        let changed = session.model != model;
-                        session.model = model.clone();
-                        session.model_pending = None;
-                        if changed && apply_pet {
-                            pet_events.push(PetEvent::ModelChanged(model));
-                        }
-                    }
-                } else if is_mode_key {
-                    if let Some(mode) = current {
-                        let changed = session.mode.as_deref() != Some(mode.as_str());
-                        session.mode = Some(mode.clone());
-                        if changed && apply_pet {
-                            // M5 感知：工作模式切换（C11：回放不推送）
-                            pet_events.push(PetEvent::ModeChanged(mode));
-                        }
-                    }
-                }
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::AvailableCommandsUpdate) => {
-            if let Some(commands) = update
-                .get("availableCommands")
-                .or_else(|| update.get("commands"))
-            {
-                session.commands_snapshot = Some(commands.clone());
-            }
-        }
-        Some(crate::acp::SessionUpdateVariant::CurrentModeUpdate) => {
-            let mode = update
-                .get("currentModeId")
-                .or_else(|| update.get("modeId"))
-                .or_else(|| update.get("mode"))
-                .and_then(value_as_string);
-            if let Some(mode) = mode {
-                let changed = session.mode.as_deref() != Some(mode.as_str());
-                // Keep the asynchronously advertised mode in the durable snapshot as
-                // well as the typed field; session/load restores snapshots before the
-                // response is rebuilt, so this survives agents that only emit updates
-                // after session/new or session/load.
-                session.mode = Some(mode.clone());
-                if changed && apply_pet {
-                    pet_events.push(PetEvent::ModeChanged(mode));
-                }
-            }
-        }
-        _ => {}
-    }
-    pet_events
-}
-
 // R8：拆 handler 后共享状态经显式参数传递（闭包捕获收敛）——别名收敛复杂签名。
 type AcpLock = tokio::sync::Mutex<AcpClient>;
 type SessionsLock = std::sync::Mutex<std::collections::HashMap<String, SessionInfo>>;
-type PermissionLock =
-    std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>;
 
-/// Reject an interaction request at the protocol boundary.  Every rejection is both
-/// observable (a redacted Tauri event/runtime log) and, when the wire supplied an id,
-/// answered with a JSON-RPC error so the provider cannot wait until its own timeout.
-/// The helper intentionally accepts only summary fields; params are never emitted back
-/// to the UI because interaction payloads may contain commands, paths, or credentials.
-// clippy 2026-09-22：10 参均为独立拒绝摘要入参（window/acp/provider/agent_id/method/
-// request_id/params/reason_code/rpc_code/message），语义互不分组，结构体重构收益低。
-#[allow(clippy::too_many_arguments)]
-async fn reject_interaction_request<R: tauri::Runtime>(
-    window: &tauri::Window<R>,
-    acp: &AcpLock,
-    provider: &str,
-    agent_id: &str,
-    method: Option<&str>,
-    request_id: Option<crate::acp::RequestId>,
-    params: Option<&serde_json::Value>,
-    reason_code: &str,
-    rpc_code: WireErrorCode,
-    message: &str,
-) {
-    let request_id_text = request_id.as_ref().map(ToString::to_string);
-    let response_sent = if let Some(id) = request_id {
-        let responder = {
-            let acp = acp.lock().await;
-            acp.responder()
-        };
-        responder.respond_error(id, rpc_code, message).await
-    } else {
-        false
-    };
-    let session_id = params.and_then(|value| {
-        value.as_object().and_then(|object| {
-            object
-                .get("sessionId")
-                .or_else(|| object.get("session_id"))
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        })
-    });
-    tracing::warn!(
-        provider,
-        agent_id,
-        method = ?method,
-        request_id = ?request_id_text,
-        reason_code,
-        response_sent,
-        "ACP interaction request rejected: {message}"
-    );
-    emit_event(
-        window,
-        crate::event_names::INTERACTION_REJECTED,
-        serde_json::json!({
-            "provider": provider,
-            "agentId": agent_id,
-            "sessionId": session_id,
-            "requestId": request_id_text,
-            "method": method,
-            "reasonCode": reason_code,
-            "message": message,
-            "rpcCode": rpc_code,
-            "responseSent": response_sent,
-        }),
-    );
-}
-
-/// #316：strict fs 沙箱根解析——按 periId+generation 查会话工作区
-/// （`SessionInfo.cwd`），不信任 agent 自报参数。查无映射/代际不符/cwd 为空
-/// → None（调用方以 -32602 拒绝）。
-fn session_workspace_root(
-    sessions: &SessionsLock,
-    peri_session: &str,
-    generation: u64,
-) -> Option<std::path::PathBuf> {
-    sessions.lock().ok().and_then(|items| {
-        items
-            .values()
-            .find(|session| session.peri_id == peri_session && session.generation == generation)
-            .map(|session| std::path::PathBuf::from(&session.cwd))
-            .filter(|cwd| !cwd.as_os_str().is_empty())
-    })
-}
-
-/// #316：在私有交互快照中按 elicitationId 匹配挂起的 URL elicitation
-/// （method 必须是 elicitation/create 且 params.elicitationId 相等）。纯函数
-/// 便于测试（官方契约：未知/已完成 id 忽略）。
-fn match_pending_elicitation(
-    snapshot: &[(
-        crate::acp::RequestId,
-        crate::private_interaction::PendingPrivateInteraction,
-    )],
-    elicitation_id: &str,
-) -> Option<(
-    crate::acp::RequestId,
-    crate::private_interaction::PendingPrivateInteraction,
-)> {
-    snapshot
-        .iter()
-        .find(|(_, pending)| {
-            pending.method == "elicitation/create"
-                && pending.params.get("elicitationId").and_then(|v| v.as_str())
-                    == Some(elicitation_id)
-        })
-        .map(|(id, pending)| (id.clone(), pending.clone()))
-}
-
-async fn handle_terminal_request(
-    acp: &AcpLock,
-    registry: &crate::acp::terminal_runtime::TerminalRegistry,
-    method: &str,
-    request_id: crate::acp::RequestId,
-    params: Option<&serde_json::Value>,
-) {
-    let object = params.and_then(serde_json::Value::as_object);
-    let session_id = object
-        .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let result = match method {
-        "terminal/create" => {
-            let command = match object
-                .and_then(|p| p.get("command"))
-                .and_then(serde_json::Value::as_str)
-            {
-                Some(command) => command,
-                None => {
-                    return {
-                        let responder = { acp.lock().await.responder() };
-                        let _ = responder
-                            .respond_error(
-                                request_id,
-                                WireErrorCode::InvalidParams,
-                                "terminal/create requires command",
-                            )
-                            .await;
-                    }
-                }
-            };
-            let args = object
-                .and_then(|p| p.get("args"))
-                .and_then(serde_json::Value::as_array)
-                .map(|args| {
-                    args.iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let line = shell_words::join(std::iter::once(command.to_owned()).chain(args));
-            let cwd = object
-                .and_then(|p| p.get("cwd"))
-                .and_then(serde_json::Value::as_str)
-                .map(std::path::Path::new);
-            let limit = object
-                .and_then(|p| p.get("outputByteLimit"))
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|value| usize::try_from(value).ok());
-            registry
-                .create_shell(session_id.to_owned(), None, &line, cwd, limit)
-                .await
-                .and_then(|terminal_id| {
-                    // #316：响应由官方 Response 类型构造（wire 与手写 json!
-                    // 逐字节一致）。序列化失败显式入 Err 走 -32602 应答路径，
-                    // 不静默回 null（#316 审查 P2-1）。
-                    serde_json::to_value(
-                        agent_client_protocol_schema::v1::CreateTerminalResponse::new(terminal_id),
-                    )
-                    .map_err(|error| format!("serialize terminal/create response: {error}"))
-                })
-        }
-        "terminal/output" => registry
-            .snapshot(
-                object
-                    .and_then(|p| p.get("terminalId"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-                session_id,
-            )
-            .await
-            .and_then(|snapshot| {
-                serde_json::to_value(
-                    agent_client_protocol_schema::v1::TerminalOutputResponse::new(
-                        snapshot.output,
-                        snapshot.truncated,
-                    ),
-                )
-                .map_err(|error| format!("serialize terminal/output response: {error}"))
-            }),
-        "terminal/wait_for_exit" | "terminal/waitForExit" => registry
-            .wait_for_exit(
-                object
-                    .and_then(|p| p.get("terminalId"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-                session_id,
-            )
-            .await
-            .map(|status| serde_json::json!({"exitStatus": status})),
-        "terminal/kill" => registry
-            .kill(
-                object
-                    .and_then(|p| p.get("terminalId"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-                session_id,
-            )
-            .await
-            .and_then(|_| {
-                serde_json::to_value(agent_client_protocol_schema::v1::KillTerminalResponse::new())
-                    .map_err(|error| format!("serialize terminal/kill response: {error}"))
-            }),
-        "terminal/release" => registry
-            .release(
-                object
-                    .and_then(|p| p.get("terminalId"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-                session_id,
-            )
-            .await
-            .and_then(|_| {
-                serde_json::to_value(
-                    agent_client_protocol_schema::v1::ReleaseTerminalResponse::new(),
-                )
-                .map_err(|error| format!("serialize terminal/release response: {error}"))
-            }),
-        _ => Err("unsupported terminal method".to_string()),
-    };
-    match result {
-        Ok(value) => {
-            let responder = { acp.lock().await.responder() };
-            let _ = responder.respond(request_id, value).await;
-        }
-        Err(error) => {
-            respond_tool_error(acp, request_id, host_terminal_error_response(&error)).await;
-        }
-    }
-}
-
-async fn handle_filesystem_request(
-    acp: &AcpLock,
-    method: &str,
-    request_id: crate::acp::RequestId,
-    params: Option<&serde_json::Value>,
-    runtime: crate::acp::file_system_runtime::FileSystemRuntime,
-) {
-    let object = params.and_then(serde_json::Value::as_object);
-    let result: Result<serde_json::Value, FsToolError> = match method {
-        "fs/read_text_file" => {
-            match object
-                .and_then(|p| p.get("path"))
-                .and_then(serde_json::Value::as_str)
-            {
-                Some(path) => runtime
-                    .read_text_file(std::path::Path::new(path))
-                    .await
-                    .map_err(FsToolError::Runtime)
-                    .and_then(|content| {
-                        serde_json::to_value(
-                            agent_client_protocol_schema::v1::ReadTextFileResponse::new(content),
-                        )
-                        .map_err(|error| {
-                            FsToolError::Message(format!(
-                                "serialize fs/read_text_file response: {error}"
-                            ))
-                        })
-                    }),
-                None => Err(FsToolError::Message(
-                    "fs/read_text_file requires path".to_string(),
-                )),
-            }
-        }
-        "fs/write_text_file" => {
-            match (
-                object
-                    .and_then(|p| p.get("path"))
-                    .and_then(serde_json::Value::as_str),
-                object
-                    .and_then(|p| p.get("content"))
-                    .and_then(serde_json::Value::as_str),
-            ) {
-                (Some(path), Some(content)) => runtime
-                    .write_text_file(std::path::Path::new(path), content)
-                    .await
-                    .map_err(FsToolError::Runtime)
-                    .and_then(|_| {
-                        serde_json::to_value(
-                            agent_client_protocol_schema::v1::WriteTextFileResponse::new(),
-                        )
-                        .map_err(|error| {
-                            FsToolError::Message(format!(
-                                "serialize fs/write_text_file response: {error}"
-                            ))
-                        })
-                    }),
-                (None, _) => Err(FsToolError::Message(
-                    "fs/write_text_file requires path".to_string(),
-                )),
-                (_, None) => Err(FsToolError::Message(
-                    "fs/write_text_file requires content".to_string(),
-                )),
-            }
-        }
-        _ => Err(FsToolError::UnsupportedMethod),
-    };
-    let responder = { acp.lock().await.responder() };
-    match result {
-        Ok(value) => {
-            let _ = responder.respond(request_id, value).await;
-        }
-        Err(error) => {
-            drop(responder);
-            respond_tool_error(acp, request_id, host_fs_error_response(&error)).await;
-        }
-    }
-}
-
-/// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
-/// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
-pub(crate) fn resolve_agent_provider(
-    agents: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
-    agent_id: &str,
-) -> Option<String> {
-    agents
-        .get(agent_id)
-        .and_then(|agent| agent.provider.clone())
-}
-
-/// B9 权限审批（R8 自主循环拆分）：agent 主动 request_permission（带 id 请求，
-/// 客户端必须应答）。C4/C5 语义保持：代复核（应答不误写新代进程）+ 模式判定
-/// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
-/// P0-3（R2-WI03）：provider-scoped adapter dispatch——未注册 provider 明确
-/// unsupported + runtime log 可观察，不生成 RPC；classify 非 interaction 同样丢弃。
-/// 参数多为各锁/上下文的按引用透传（与同文件 L316/L751 同类），故保留显式形参。
-#[allow(clippy::too_many_arguments)]
-async fn handle_permission_request<R: tauri::Runtime>(
-    window: &tauri::Window<R>,
-    acp: &AcpLock,
-    client_generation: &AtomicU64,
-    approval_mode: &std::sync::Mutex<String>,
-    pending_permissions: &PermissionLock,
-    sessions: &SessionsLock,
-    hook_bridge: &Arc<crate::hook_bridge::HookBridge>,
-    runtimes: &crate::runtime::AgentRuntimeManager,
-    provider: &str,
-    agent_id: &str,
-    method: Option<&str>,
-    request_id: crate::acp::RequestId,
-    params: Option<&serde_json::Value>,
-) {
-    // #98: method-driven dispatch - adapter lookup by ACP method, provider name
-    // no longer a gate; unknown methods get a stable method_unsupported with the
-    // raw params kept observable via the rejection event.
-    let Some(adapter) =
-        crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
-    else {
-        reject_interaction_request(
-            window,
-            acp,
-            provider,
-            agent_id,
-            method,
-            Some(request_id),
-            params,
-            "method_unsupported",
-            WireErrorCode::MethodNotFound,
-            &format!(
-                "interaction method unsupported: {}",
-                method.unwrap_or("<missing>")
-            ),
-        )
-        .await;
-        return;
-    };
-    if adapter.classify(method) != crate::protocol_adapter::InteractionClassification::Interaction {
-        reject_interaction_request(
-            window,
-            acp,
-            provider,
-            agent_id,
-            method,
-            Some(request_id),
-            params,
-            "method_unsupported",
-            WireErrorCode::MethodNotFound,
-            &format!(
-                "interaction method unsupported: {}",
-                method.unwrap_or("<missing>")
-            ),
-        )
-        .await;
-        return;
-    }
-    // C4：记录到达时 client_generation——应答时复核，客户端替换后
-    // 旧进程同 id 请求不得被旧审批决策误写。
-    let Some(permission) =
-        adapter.normalize_request(params, client_generation.load(Ordering::Acquire))
-    else {
-        // ACP-04（§5.6）：解析失败 = protocol error，不是可 approve/reject 的 pending
-        // permission——**不伪造 optionId**（旧实现按拒绝兜底回 reject_once，OBS-03
-        // 已证实协议缺陷），按 ACP 标准发 JSON-RPC error（-32602 Invalid params），
-        // 让 agent 按标准错误处理。未挂起 pending，无需清理。
-        // O9/G3 §2.2.2：锁内只克隆发送句柄，锁外发送；同时发出独立拒绝事件，
-        // 让前端能解释“为什么没有弹出权限卡”。
-        reject_interaction_request(
-            window,
-            acp,
-            provider,
-            agent_id,
-            method,
-            Some(request_id),
-            params,
-            "invalid_params",
-            WireErrorCode::InvalidParams,
-            // Keep the stable diagnostic phrase used by the OBS-03 evidence
-            // surface while retaining the machine-readable invalid_params
-            // reason code and JSON-RPC -32602 response above.
-            "ACP request_permission 解析失败: invalid params",
-        )
-        .await;
-        return;
-    };
-    // Reducer ownership is resolved by the protocol session id, never by the
-    // request id alone (request ids may be reused across sessions).
-    let remember_permission = |sessions: &SessionsLock| {
-        let _ = sessions.lock().map(|mut sessions| {
-            if let Some(session) = sessions.get_mut(&permission.session_id) {
-                // R-t5 续命：**等用户答复不算沉默**。本回合此前只有 `session/update` 刷新
-                // `last_activity`，于是 agent 发出权限请求后静默等待用户点击的那段时间被当成
-                // "无输出"，闲置窗口到点即判死——真机实测一次 `elapsed 472535ms` 的截断正卡在
-                // 等权限答复上，并留下一个无法关闭的悬空模态（#209）。用户答复后 agent 恢复产出
-                // 会自然续命，故只在**收到请求**这一刻打点。
-                session.last_activity = Some(std::time::Instant::now());
-                let deltas = session.acp_state.apply(&crate::acp::RawMessage {
-                    id: Some(request_id.clone()),
-                    method: Some("session/request_permission".into()),
-                    kind: crate::acp::AcpKind::PermissionRequest,
-                    result: None,
-                    params: params.cloned(),
-                    error: None,
-                });
-                if let Some(depth) = deltas.iter().find_map(|delta| match delta {
-                    crate::acp::AcpStateDelta::PermissionQueueDepth { depth } => Some(*depth),
-                    _ => None,
-                }) {
-                    tracing::trace!(
-                        session_id = %permission.session_id,
-                        request_id = %request_id,
-                        depth,
-                        "ACP permission reducer queue updated"
-                    );
-                }
-            }
-        });
-    };
-    let mode = approval_mode
-        .lock()
-        .map(|m| m.clone())
-        .unwrap_or_else(|_| "default".to_string());
-    // API 1.3（#37）：钩子缝——先把 ACP 远端 sessionId 规范化为本地 source，
-    // 再依次派发 tool.beforeCall（gate）与 permission.request（allow/deny/modify）。
-    // 不可映射 = 可诊断跳过（fail-open 至常规审批流）；桥故障/超时/未注册不阻断。
-    // modify 仅接受原选项的过滤/重排（interpret 侧校验），后续 bypass/auto 与
-    // 前端事件均使用过滤后的选项集。
-    let local_source =
-        crate::hook_bridge::resolve_local_source(runtimes, Some(agent_id), &permission.session_id);
-    let mut effective_permission = permission.clone();
-    if let Some(local_source) = local_source {
-        let tool_payload = serde_json::json!({
-            "source": local_source,
-            "toolCallId": permission.tool_call_id,
-            "title": permission.title,
-            "prompt": permission.prompt,
-            "options": permission.options,
-        });
-        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
-            .dispatch(
-                Some(window),
-                crate::hook_bridge::HOOK_TOOL_BEFORE_CALL,
-                &local_source,
-                tool_payload,
-            )
-            .await
-        {
-            if response.get("action").and_then(serde_json::Value::as_str) == Some("cancel") {
-                let reason = response
-                    .get("reason")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("denied by tool.beforeCall hook");
-                tracing::info!(
-                    source = %local_source,
-                    tool_call_id = %permission.tool_call_id,
-                    reason = %reason,
-                    "tool.beforeCall hook denied tool call"
-                );
-                // 钩子驱动的拒绝用严格 reject 选择（无 first() 回退）：请求不含
-                // reject 语义项时不伪造 optionId（ACP-04 §5.6），落回常规流程。
-                if let Some(option_id) = pick_reject_option(&permission.options) {
-                    if client_generation.load(Ordering::Acquire) != permission.client_generation {
-                        // C4：钩子派发窗口（最长 ~3s）内客户端已换代——旧决策不得
-                        // 写到新进程同 id 请求，丢弃应答交由 agent 侧超时收敛。
-                        tracing::warn!(
-                            request_id = %request_id,
-                            "hook deny decision dropped: client generation advanced during hook dispatch"
-                        );
-                        return;
-                    }
-                    let responder = {
-                        let acp = acp.lock().await;
-                        acp.responder()
-                    };
-                    responder
-                        .respond(request_id, permission_response(option_id))
-                        .await;
-                    return;
-                }
-                tracing::warn!("tool.beforeCall 拒绝但请求无 reject 选项，跳过应答交回常规流程");
-            }
-        }
-        let permission_payload = serde_json::json!({
-            "source": local_source,
-            "provider": provider,
-            "agentId": agent_id,
-            "requestId": request_id.to_string(),
-            "toolCallId": permission.tool_call_id,
-            "title": permission.title,
-            "prompt": permission.prompt,
-            "options": permission.options,
-        });
-        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
-            .dispatch(
-                Some(window),
-                crate::hook_bridge::HOOK_PERMISSION_REQUEST,
-                &local_source,
-                permission_payload,
-            )
-            .await
-        {
-            match crate::hook_bridge::interpret_permission_hook_response(
-                &response,
-                &permission.options,
-            ) {
-                crate::hook_bridge::PermissionHookDecision::Allow => {
-                    // 钩子驱动的批准用严格 allow 选择 + C4 代际复核（同 deny 路径）。
-                    if let Some(option_id) = pick_allow_option(&permission.options) {
-                        if client_generation.load(Ordering::Acquire) != permission.client_generation
-                        {
-                            tracing::warn!(
-                                request_id = %request_id,
-                                "hook allow decision dropped: client generation advanced during hook dispatch"
-                            );
-                            return;
-                        }
-                        let responder = {
-                            let acp = acp.lock().await;
-                            acp.responder()
-                        };
-                        responder
-                            .respond(request_id, permission_response(option_id))
-                            .await;
-                        return;
-                    }
-                    tracing::warn!(
-                        "permission.request 钩子允许但请求无 allow 语义项，跳过应答交回常规流程"
-                    );
-                }
-                crate::hook_bridge::PermissionHookDecision::Deny => {
-                    if let Some(option_id) = pick_reject_option(&permission.options) {
-                        if client_generation.load(Ordering::Acquire) != permission.client_generation
-                        {
-                            tracing::warn!(
-                                request_id = %request_id,
-                                "hook deny decision dropped: client generation advanced during hook dispatch"
-                            );
-                            return;
-                        }
-                        let responder = {
-                            let acp = acp.lock().await;
-                            acp.responder()
-                        };
-                        responder
-                            .respond(request_id, permission_response(option_id))
-                            .await;
-                        return;
-                    }
-                    tracing::warn!(
-                        "permission.request 钩子拒绝但请求无 reject 语义项，跳过应答交回常规流程"
-                    );
-                }
-                crate::hook_bridge::PermissionHookDecision::Modify(options) => {
-                    tracing::info!(
-                        source = %local_source,
-                        option_count = options.len(),
-                        "permission.request hook modified permission options"
-                    );
-                    effective_permission.options = options;
-                }
-                crate::hook_bridge::PermissionHookDecision::Pass => {}
-            }
-        }
-    } else {
-        tracing::warn!(
-            session_id = %permission.session_id,
-            agent_id = %agent_id,
-            request_id = %request_id,
-            "Pylon hook bridge: permission request sessionId not mappable to a local session; hooks skipped"
-        );
-    }
-    if matches!(mode.as_str(), "bypass" | "auto") {
-        tracing::info!(
-            "权限模式 {mode}：自动批准工具调用 {}",
-            permission.tool_call_id
-        );
-        // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。ACP-04（§5.6）：
-        // 解析层保证 options 非空（空集不可能进此分支），pick_option 恒返回 Some；
-        // 防御分支不得伪造 optionId——如异常出现则跳过应答并告警（agent 侧自会
-        // 超时收敛），绝不硬编码不存在的选项。
-        let Some(option_id) = pick_option(&effective_permission.options, false) else {
-            tracing::error!(
-                "权限模式 {mode}：请求 options 为空（不应发生），跳过自动批准应答，不伪造 optionId"
-            );
-            reject_interaction_request(
-                window,
-                acp,
-                provider,
-                agent_id,
-                method,
-                Some(request_id),
-                params,
-                "invalid_options",
-                WireErrorCode::InvalidParams,
-                "invalid params: permission request options 为空",
-            )
-            .await;
-            return;
-        };
-        // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
-        let responder = {
-            let acp = acp.lock().await;
-            acp.responder()
-        };
-        responder
-            .respond(request_id, permission_response(option_id))
-            .await;
-    } else {
-        remember_permission(sessions);
-        let _ = pending_permissions.lock().map(|mut pending| {
-            pending.insert(request_id.clone(), effective_permission.clone());
-        });
-        // #98：统一交互队列登记（FIFO / 单一 Active / queued depth）。队列是
-        // cancel/timeout/disconnect drain 终态与冷挂载快照的数据源；permission
-        // 即 kind="approval"，队列里的事件载荷与 pylon:interaction 完全同构。
-        let payload = serde_json::json!({
-            "title": effective_permission.title,
-            "prompt": effective_permission.prompt,
-            "options": effective_permission.options,
-            "requestedAt": effective_permission.requested_at,
-            // ACP-03（§5.6）：deadline 由后端单一来源（PERMISSION_REQUEST_TIMEOUT_SECS），
-            // 前端只做倒计时展示，不自行持有 300s 常量。
-            "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
-        });
-        // #98: unified interaction queue admission (FIFO / single Active /
-        // queued depth). The queue feeds cancel/timeout/disconnect drain
-        // terminal states and the cold-mount snapshot; kind = "approval" and
-        // the stored event payload is identical to pylon:interaction.
-        let interaction_event = serde_json::json!({
-            "provider": provider,
-            "agentId": agent_id,
-            "sessionId": permission.session_id,
-            "eventType": "permission.request",
-            "requestId": request_id.to_string(),
-            "toolCallId": permission.tool_call_id,
-            "clientGeneration": permission.client_generation,
-            "payload": payload,
-        });
-        if let Some(runtime) = runtimes.get(agent_id) {
-            match runtime
-                .interactions
-                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
-                    request_id: request_id.to_string(),
-                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
-                    kind: "approval".to_string(),
-                    session_id: permission.session_id.clone(),
-                    agent_id: agent_id.to_string(),
-                    client_generation: permission.client_generation,
-                    enqueued_at: permission.requested_at,
-                    event: interaction_event.clone(),
-                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
-                }) {
-                Ok(admission) => {
-                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
-                    tracing::trace!(
-                        agent_id = %agent_id,
-                        request_id = %request_id,
-                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
-                        waiting,
-                        "interaction queue admitted permission request"
-                    );
-                }
-                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
-            }
-        }
-        emit_event(window, crate::event_names::INTERACTION, interaction_event);
-    }
-}
+/// provider 解析正身已迁 interaction_route.rs（#416 W2 步骤①）；permission.rs
+/// 仍经本路径消费，保留 crate 内再导出。
+pub(crate) use interaction_route::resolve_agent_provider;
 
 /// 剥离 replay 的 user 消息 persona/session_prompt 前缀（验收回归 D3）。
 /// Pylon 首条消息发送"{effective_persona}\n\n---\n\n{content}"给 Hermes（prompt.rs
@@ -1163,7 +125,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     binding_health: &std::sync::Mutex<
         std::collections::HashMap<String, crate::agent::runtime::SessionBindingHealth>,
     >,
-    pet: &std::sync::Mutex<PetState>,
+    reactions: &dyn KernelReactionSink,
     update_channels: &crate::runtime::UpdateChannelMap,
     client_generation: &AtomicU64,
     generation: u64,
@@ -1459,8 +421,14 @@ async fn handle_session_update<R: tauri::Runtime>(
                     },
                 );
             }
-            pet_events.extend(apply_update_event_routed(
-                session, update, variant, decision,
+            // 感知派生（O7/C11）：live 门控 = sink.wants_live_reactions(class)——
+            // PetEvent 收集仍在 sessions 锁内、按序产出（收集顺序 = 应用顺序），
+            // 应用在锁外经 sink（reactions.rs 三表征文档钉住）。
+            pet_events.extend(derive_session_reactions(
+                session,
+                update,
+                variant,
+                reactions.wants_live_reactions(decision.class),
             ));
             // Agents may advertise commands or mode changes asynchronously after
             // session/new or session/load. Persist the merged session snapshot so
@@ -1568,9 +536,10 @@ async fn handle_session_update<R: tauri::Runtime>(
             );
         }
     }
-    for event in pet_events {
-        let _ = pet.lock().map(|mut p| event.apply(&mut p));
-    }
+    // O7：感知事件锁外应用（原逐事件 `pet.lock()` 循环改经订阅缝，每事件一次
+    // 锁获取 + 中毒吸收语义在 PetReactionSink 内逐位保留）。位置不变：commit →
+    // set_session_state → 感知应用 → 代际复核 → publish。
+    reactions.on_pet_events(pet_events);
     if client_generation.load(Ordering::Acquire) != generation {
         return false; // 原 :437-439 语义：mutation 后本代已结束，主循环退出
     }
@@ -1597,34 +566,16 @@ async fn handle_session_update<R: tauri::Runtime>(
             );
         }
     }
-    // C1：广播旧轨已拆除——SESSION_UPDATE 仅走 Channel（信封帧）；未注册 source
-    // （平台会话 / 未升级前端）仍走既有 emit_event_all（gateway.deliver_all 同源独立）。
-    // 平台源（qq:* 等）永远走广播路径：deliver_all 是其唯一出站通道，Channel 只服务
-    // GUI 流式回显。即使未来误为平台源注册 channel 也不得截胡平台投递（防御深度）。
-    let channel = if gateway.is_platform_source(&source) {
-        None
-    } else {
-        update_channels
-            .lock()
-            .ok()
-            .and_then(|map| map.get(&source).cloned())
-    };
-    if let Some(channel) = channel {
-        let frame = serde_json::json!({
-            "event": crate::event_names::SESSION_UPDATE,
-            "payload": payload,
-        });
-        if let Err(error) = channel.send(frame) {
-            tracing::warn!("channel update 帧发送失败 source={source}: {error}");
-        }
-        return true;
-    }
-    emit_event_all(
+    // C1：广播旧轨已拆除——SESSION_UPDATE 出站选路单点化于 publish_route.rs
+    // （平台源广播红线/Channel 截胡防御注释随迁）；本调用点的 send 失败日志
+    // 文案按现状保留（收口不做文案统一，见 publish_route 模块文档）。
+    publish_route::publish_session_update(
         window,
         gateway,
+        update_channels,
         &source,
-        crate::event_names::SESSION_UPDATE,
         payload,
+        "channel update 帧发送失败",
     );
     true
 }
@@ -1693,7 +644,7 @@ macro_rules! pump_flush_context {
             window: &$self.window,
             gateway: &$self.gateway,
             update_channels: &$self.runtime.update_channels,
-            pet: &$self.pet,
+            reactions: $self.reactions.as_ref(),
             client_generation: &$self.client_generation,
             agent_id: &$self.agent_id,
             event_service: $self.event_service.as_ref(),
@@ -1710,7 +661,9 @@ struct NotificationPump<R: tauri::Runtime> {
             std::collections::HashMap<String, crate::agent::runtime::SessionBindingHealth>,
         >,
     >,
-    pet: Arc<std::sync::Mutex<PetState>>,
+    /// 产品反应订阅缝（#416 W2 步骤③）：宿主装配的 pet sink；泵只持 trait
+    /// 对象，不再点名 pet 状态（装配点见 `NotificationPump::new`）。
+    reactions: Arc<dyn KernelReactionSink>,
     /// 本 dispatcher 代际（构造时刻快照；每轮循环与 client_generation 复核）。
     generation: u64,
     client_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -1755,6 +708,9 @@ impl<R: tauri::Runtime> NotificationPump<R> {
         let sessions = runtime.sessions.clone();
         let binding_health = runtime.binding_health.clone();
         let pet = handles.pet.clone();
+        // #416 W2 步骤③：宿主装配——pet 状态包成 KernelReactionSink 唯一实现；
+        // 泵/崩溃处理器/handle_session_update 全走 trait 对象（kernel 不点名 pet）。
+        let reactions: Arc<dyn KernelReactionSink> = Arc::new(PetReactionSink::new(pet.clone()));
         let generation = runtime
             .client_generation
             .load(std::sync::atomic::Ordering::Acquire);
@@ -1810,7 +766,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 runtimes: runtimes.clone(),
                 agents: agents.clone(),
                 active_agent,
-                pet: pet.clone(),
+                pet,
                 runtime_logs,
                 gateway: gateway.clone(),
                 approval_mode: approval_mode.clone(),
@@ -1822,6 +778,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             window.clone(),
             runtime_for_reconnect,
             reconnect_epoch,
+            reactions.clone(),
         );
         // #155 T3：prompt 终态写路径经本通道请求 dispatcher 先收口在途 draft
         // 再分配终态序列。装配时点与拆分前一致（任务复位后、spawn 前）。
@@ -1830,7 +787,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             acp,
             sessions,
             binding_health,
-            pet,
+            reactions,
             generation,
             client_generation,
             agent_id,
@@ -2042,12 +999,14 @@ impl<R: tauri::Runtime> NotificationPump<R> {
 
     /// 路由分支链（原主循环体内联分支逐一迁入，次序不变）：ProviderExtension
     /// 包络 → 窗口 flush 判定 → 崩溃 / elicitation 完成 / 权限请求 / terminal /
-    /// fs / 私有交互 / 未知通知 / session/update 内核路径。每分支副作用完成后
-    /// 返回 true（继续下一帧）；返回 false = 主循环退出——出自本函数内两处
-    /// 窗口 flush 失败（#155 T3 起经 draft 吸收路径，普通批次照常直flush、
-    /// 可折 delta 进在途 run），或 `handle_session_update` 返回 false（mutation
-    /// 后本代结束/锁异常等该函数自身的退出判定，见其文档；定时 flush 的失败经
-    /// `pump_step` 以 `PumpStep::Stop` 表达，不经本函数）。
+    /// fs / 私有交互 / 未知通知 / session/update 内核路径 → 终态边界补 flush。
+    /// 每分支副作用完成后返回 true（继续下一帧）；返回 false = 主循环退出，
+    /// 共出自本函数内 **4 处**：① 预 flush `absorb_window` 失败；② Crashed
+    /// 分支 `publish_due_draft` 失败；③ `handle_session_update` 返回 false
+    /// （mutation 后本代结束/锁异常等该函数自身的退出判定，见其文档）；
+    /// ④ 终态边界补 flush `absorb_window` 失败。循环内定时 flush（8ms 窗口 /
+    /// draft 片段节流 / prompt 终态收口）的失败不经本函数，由 `pump_step`
+    /// 以 `PumpStep::Stop` 表达。
     async fn route_frame(
         &mut self,
         mut raw: crate::acp::RawMessage,
@@ -2190,7 +1149,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             &self.gateway,
             &self.sessions,
             &self.binding_health,
-            &self.pet,
+            self.reactions.as_ref(),
             &self.runtime.update_channels,
             &self.client_generation,
             self.generation,
@@ -2258,182 +1217,8 @@ fn crash_reason_from_params(params: Option<&serde_json::Value>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{host_fs_error_response, host_terminal_error_response, FsToolError};
-    use crate::private_interaction::PendingPrivateInteraction;
-    use pylon_acp::fs_policy::FsFailure;
-
-    /// #354：fs 负路径 → 官方 wire 语义（纯函数映射）。
-    #[test]
-    fn host_fs_errors_map_to_official_wire_semantics() {
-        let (code, data, message) =
-            host_fs_error_response(&FsToolError::Runtime(FsFailure::NotFound {
-                uri: r"C:\w\missing.txt".into(),
-            }));
-        assert_eq!(i32::from(code), -32002);
-        assert_eq!(
-            data,
-            Some(serde_json::json!({ "uri": r"C:\w\missing.txt" }))
-        );
-        assert_eq!(message, r"resource not found: C:\w\missing.txt");
-
-        let (code, data, message) =
-            host_fs_error_response(&FsToolError::Runtime(FsFailure::SandboxDenied {
-                message: "path is outside allowed write roots: X".into(),
-            }));
-        assert_eq!(i32::from(code), -32602);
-        assert!(data.is_none());
-        assert!(message.starts_with("sandbox: "));
-
-        // 其余失败 wire 逐字不变：-32602 裸消息、无 data。
-        for error in [
-            FsToolError::Runtime(FsFailure::Other("filesystem read timed out".into())),
-            FsToolError::Message("fs/read_text_file requires path".into()),
-        ] {
-            let (code, data, message) = host_fs_error_response(&error);
-            assert_eq!(i32::from(code), -32602);
-            assert!(data.is_none());
-            assert!(!message.starts_with("sandbox: "));
-        }
-
-        let (code, data, message) = host_fs_error_response(&FsToolError::UnsupportedMethod);
-        assert_eq!(i32::from(code), -32601);
-        assert!(data.is_none());
-        assert_eq!(message, "unsupported filesystem method");
-    }
-
-    /// #354：terminal 负路径映射——registry 稳定文案的最小分类。
-    #[test]
-    fn host_terminal_errors_map_not_found_and_unsupported_method() {
-        let (code, data, message) = host_terminal_error_response("terminal t-1 not found");
-        assert_eq!(i32::from(code), -32002);
-        assert!(data.is_none());
-        assert_eq!(message, "terminal t-1 not found");
-
-        let (code, _, _) = host_terminal_error_response("unsupported terminal method");
-        assert_eq!(i32::from(code), -32601);
-
-        for raw in [
-            "terminal t-1 does not belong to session s-1",
-            "serialize terminal/output response: x",
-        ] {
-            let (code, data, message) = host_terminal_error_response(raw);
-            assert_eq!(i32::from(code), -32602, "{raw}");
-            assert!(data.is_none(), "{raw}");
-            assert_eq!(message, raw);
-        }
-    }
-
-    fn pending_elicitation(elicitation_id: &str) -> PendingPrivateInteraction {
-        PendingPrivateInteraction {
-            provider: "peri".into(),
-            agent_id: "a1".into(),
-            session_id: "peri-s1".into(),
-            method: "elicitation/create".into(),
-            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
-            params: serde_json::json!({
-                "sessionId": "peri-s1",
-                "elicitationId": elicitation_id,
-                "url": "https://example.com/auth",
-                "message": "完成登录",
-            }),
-            question_specs: None,
-            client_generation: 1,
-            enqueued_at: crate::time::Timestamp::now(),
-        }
-    }
-
-    /// #316：elicitation/complete 按 elicitationId 匹配 pending 私有交互。
-    #[test]
-    fn match_pending_elicitation_finds_only_exact_id_and_method() {
-        let a = crate::acp::RequestId::Number(11);
-        let b = crate::acp::RequestId::Number(12);
-        let snapshot = vec![
-            (a, pending_elicitation("el-1")),
-            (b.clone(), pending_elicitation("el-2")),
-        ];
-        let (hit, pending) = match_pending_elicitation(&snapshot, "el-2").expect("el-2 必须命中");
-        assert_eq!(hit, b);
-        assert_eq!(pending.session_id, "peri-s1");
-        // 未知 id → None（官方契约：忽略）
-        assert!(match_pending_elicitation(&snapshot, "el-404").is_none());
-    }
-
-    #[test]
-    fn match_pending_elicitation_ignores_other_methods_and_malformed_params() {
-        let mut other_method = pending_elicitation("el-1");
-        other_method.method = "session/request_permission".into();
-        let mut malformed = pending_elicitation("el-1");
-        malformed.params = serde_json::json!({"message": "form 模式无 elicitationId"});
-        let snapshot = vec![
-            (crate::acp::RequestId::Number(21), other_method),
-            (crate::acp::RequestId::Number(22), malformed),
-        ];
-        assert!(
-            match_pending_elicitation(&snapshot, "el-1").is_none(),
-            "方法不符或缺 elicitationId 的条目不得命中"
-        );
-    }
-
-    #[test]
-    fn session_workspace_root_resolves_by_peri_id_and_generation() {
-        let sessions: SessionsLock = std::sync::Mutex::new(std::collections::HashMap::new());
-        let mut s1 = SessionInfo::new("peri-1".into(), String::new(), "G:/ws/one".into(), true, 1);
-        s1.generation = 1;
-        let mut s2 = SessionInfo::new("peri-1".into(), String::new(), "G:/ws/two".into(), true, 2);
-        s2.generation = 2;
-        sessions.lock().unwrap().insert("local:1".into(), s1);
-        sessions.lock().unwrap().insert("local:2".into(), s2);
-
-        // 命中：periId + generation 双键，各代各归其工作区
-        assert_eq!(
-            session_workspace_root(&sessions, "peri-1", 1),
-            Some(std::path::PathBuf::from("G:/ws/one"))
-        );
-        assert_eq!(
-            session_workspace_root(&sessions, "peri-1", 2),
-            Some(std::path::PathBuf::from("G:/ws/two"))
-        );
-        // 代际不符 → None（旧代际请求不进新代际沙箱）
-        assert_eq!(session_workspace_root(&sessions, "peri-1", 3), None);
-        // 未知 periId → None
-        assert_eq!(session_workspace_root(&sessions, "peri-404", 1), None);
-    }
-
-    #[test]
-    fn session_workspace_root_rejects_empty_cwd() {
-        let sessions: SessionsLock = std::sync::Mutex::new(std::collections::HashMap::new());
-        sessions.lock().unwrap().insert(
-            "local:1".into(),
-            SessionInfo::new("peri-empty".into(), String::new(), String::new(), true, 1),
-        );
-        assert_eq!(session_workspace_root(&sessions, "peri-empty", 1), None);
-    }
-
-    #[test]
-    fn runtime_store_roundtrip_supports_complete_matching() {
-        let runtime = crate::test_utils::connected_runtime();
-        let request_id = crate::acp::RequestId::Number(31);
-        runtime
-            .private_interactions
-            .insert(request_id.clone(), pending_elicitation("el-9"))
-            .expect("insert 必须成功");
-        let matched = match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9")
-            .expect("inserted pending must match");
-        assert_eq!(matched.0, request_id);
-        assert!(
-            runtime
-                .private_interactions
-                .take(&request_id)
-                .map(|taken| taken.is_some())
-                .unwrap_or(false),
-            "take 成功才 settle+emit（P2-2 守卫的数据前提）"
-        );
-        assert!(
-            match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9").is_none()
-        );
-    }
-
     use super::*;
+    use reactions::{apply_pet_event, apply_update_event};
     use tracing_subscriber::layer::Layer as _;
 
     #[test]
@@ -2599,7 +1384,6 @@ mod tests {
             variant: Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
             mutate_session: true,
             collect_response: true,
-            apply_pet: true,
             persist_canonical: true,
             publish: true,
         };
@@ -2633,15 +1417,18 @@ mod tests {
             })
             .collect();
         // #335/U1b：上下文结构体化后，测试侧的临时值需具名绑定（结构体字段
-        // 借用不能指向语句级临时）。
-        let flush_pet = std::sync::Mutex::new(crate::pet::PetState::default());
+        // 借用不能指向语句级临时）。#416 W2：flush 上下文的 pet 字段改为
+        // 订阅缝 sink（装配与生产路径同形：PetReactionSink 包 pet 状态）。
+        let flush_reactions = PetReactionSink::new(std::sync::Arc::new(std::sync::Mutex::new(
+            crate::pet::PetState::default(),
+        )));
         let flush_generation = AtomicU64::new(1);
         let flush_window = window.as_ref().window();
         let flush_context = CanonicalFlushContext {
             window: &flush_window,
             gateway: &gateway,
             update_channels: &update_channels,
-            pet: &flush_pet,
+            reactions: &flush_reactions,
             client_generation: &flush_generation,
             agent_id: "agent",
             event_service: Some(&event_service),
@@ -2753,7 +1540,7 @@ mod tests {
             let mut pet = crate::pet::PetState::default();
             let before = snapshot(&pet);
             for event in events {
-                event.apply(&mut pet);
+                apply_pet_event(&mut pet, event);
             }
             assert_eq!(
                 before,
@@ -2910,35 +1697,6 @@ mod tests {
         assert_eq!(session.context_size, 100);
         assert_eq!(session.tokens_in, 5);
         assert_eq!(session.tokens_out, 2);
-    }
-
-    /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。
-    #[test]
-    fn resolve_agent_provider_follows_live_config() {
-        use std::collections::HashMap;
-        let mut agents = HashMap::new();
-        let mut peri = crate::test_utils::fake_acp_agent_stub("peri");
-        peri.provider = Some("peri".to_string());
-        agents.insert("peri-copy".to_string(), peri);
-        assert_eq!(
-            resolve_agent_provider(&agents, "peri-copy").as_deref(),
-            Some("peri"),
-            "活配置解析 provider"
-        );
-        // reload 把该实例 provider 改为 hermes → 新请求即用新 provider
-        let mut reloaded = crate::test_utils::fake_acp_agent_stub("peri");
-        reloaded.provider = Some("hermes".to_string());
-        agents.insert("peri-copy".to_string(), reloaded);
-        assert_eq!(
-            resolve_agent_provider(&agents, "peri-copy").as_deref(),
-            Some("hermes"),
-            "reload 后 provider 变更必须生效"
-        );
-        assert_eq!(
-            resolve_agent_provider(&agents, "missing"),
-            None,
-            "未知 agent 无 provider"
-        );
     }
 
     // ── P56/D2：单值 config_option_update 键归一化 + session_info_update models 消费 ──

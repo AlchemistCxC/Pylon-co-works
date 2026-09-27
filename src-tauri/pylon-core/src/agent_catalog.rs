@@ -896,14 +896,7 @@ fn catalog() -> Result<&'static CatalogDocument, String> {
 static CATALOG_REVISION: OnceLock<String> = OnceLock::new();
 
 pub fn catalog_revision() -> &'static str {
-    CATALOG_REVISION.get_or_init(|| {
-        let mut hash = 0xcbf29ce484222325u64;
-        for byte in CATALOG_JSON.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        format!("fnv1a-{hash:016x}")
-    })
+    CATALOG_REVISION.get_or_init(|| crate::fnv1a::fnv1a_64_prefixed(CATALOG_JSON.as_bytes()))
 }
 
 /// Adaptation policies read out of the catalog's untyped adaptation block.

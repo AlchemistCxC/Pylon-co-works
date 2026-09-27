@@ -16,6 +16,9 @@ pub mod turn_rollup;
 pub mod user_data;
 
 pub use error::SessionError;
+// #205 折叠预算 Rust 侧单源：宿主写侧（dispatcher）预算应改引此处，不再各写一份；
+// 数值与前端 `canonicalEventBatch.CANONICAL_BATCH_LIMITS` 同口径（TS 拷贝独立存在）。
+pub use event_repo::{MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES};
 pub use owner::DurableSessionOwner;
 
 /// B1.2 结构化错误 wire 形状的单源实现：`{ "code", "message" }` 两键 map。

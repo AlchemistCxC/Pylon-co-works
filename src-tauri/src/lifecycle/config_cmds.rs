@@ -9,6 +9,8 @@ use crate::AppState;
 
 #[tauri::command]
 #[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：reload 全程与连接状态机串行，防 reload 撕裂在途连接
+                                             // L13/锁面例外：reload 是 registry 操作，只持 active runtime 的 agent_lifecycle、
+                                             // 不持 switch_lock（R9 锁序表外的 C6 例外，见 lifecycle/mod.rs 模块文档）——清理集合与 switch 不相交。
 pub(crate) async fn reload_agents(
     state: tauri::State<'_, AppState>,
     config_path: Option<String>,

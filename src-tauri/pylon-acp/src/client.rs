@@ -483,7 +483,7 @@ impl AcpClient {
         match agent.transport.as_str() {
             "subprocess" => {
                 let mut child =
-                    super::engine::spawn_agent_child(agent, base_dir.as_deref()).await?;
+                    super::process::spawn_agent_child(agent, base_dir.as_deref()).await?;
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
                 let crashed = Arc::new(AtomicBool::new(false));
                 // OBS-02：hub 以连接级 correlation context（含 clientGeneration）构造。

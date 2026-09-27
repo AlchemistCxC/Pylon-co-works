@@ -74,6 +74,111 @@ fn rollback_load_slot_else(
     }
 }
 
+/// P3（W3 重构批次）：persist / revive 两条 load 链共享骨架的载荷类型。
+/// `LoadedReplay` 以同形字段（events/metadata）承接 `pylon_acp::replay::ReplayBatch`
+/// （该类型未在 crate 边界再导出，不可命名），消费方字段路径不变。
+pub(super) struct LoadedReplay {
+    pub(super) events: Vec<serde_json::Value>,
+    pub(super) metadata: crate::acp::ReplayMetadata,
+}
+
+/// [`run_load_with_replay_capture`] 的结果分类。`previous` 归还调用方，供各自
+/// 的错误策略（persist = 回滚失败优先上抛；revive = `let _` 忽略回滚错误）消费。
+pub(super) enum ReplayLoadOutcome {
+    Loaded {
+        response: serde_json::Value,
+        replay: LoadedReplay,
+        previous: Option<SessionInfo>,
+    },
+    /// 同 owner 已有 load（ReplayLoadInProgress 等无副作用拒绝）；槽位已由
+    /// helper 回滚（失败仅记录日志）。
+    CaptureRejected { error: crate::acp::AcpError },
+    /// load 失败；**槽位未回滚**——两侧回滚时序不同（persist 在 trace 之后、
+    /// revive 在内层 generation 检查之后），由调用方按既有次序自行回滚。
+    LoadFailed {
+        error: crate::acp::AcpError,
+        previous: Option<SessionInfo>,
+    },
+}
+
+/// [`run_load_with_replay_capture`] 入参装配。`log_label` 仅用于 capture 被拒时
+/// 回滚失败日志的域标签（persist = "replay"、revive = "revive"，与拆分前逐字一致）。
+pub(super) struct ReplayLoadArgs<'a> {
+    pub(super) runtime: &'a AgentRuntime,
+    pub(super) source: &'a str,
+    pub(super) peri_id: &'a str,
+    pub(super) generation: u64,
+    pub(super) cwd: &'a str,
+    pub(super) mcp_servers: Vec<serde_json::Value>,
+    pub(super) mode: crate::agent_config::McpServersMode,
+    pub(super) loading_session: SessionInfo,
+    pub(super) log_label: &'a str,
+}
+
+/// P3（W3 重构批次）：persist（`load_persisted_session`）与 revive（create.rs
+/// `revive_session_slot`）两条 load 链的同构骨架——「loading 临时槽插入 →
+/// begin_replay_capture（锁内原子登记）→ 锁外 load_session_with_replay 等待」
+/// 三步逐行等价收敛到单点。两侧**错误策略是契约差异，不在本 helper 内合并**：
+/// - persist 侧：capture 被拒 → 上抛原错误；load 失败 → `rollback_load_slot_else`（回滚失败优先于原错误）。
+/// - revive 侧：capture 被拒 / load 失败 → 降级 `Ok(None)` 新建；回滚失败仅记录，外层 generation 臂用 `let _` 忽略回滚错误（既有语义，非遗漏）。
+///
+/// capture 被拒的「回滚 + 失败日志」两侧逐字相同（仅域标签不同），由本 helper
+/// 承担；slot 插入失败（`?`）两侧同为 Err 上抛。
+pub(super) async fn run_load_with_replay_capture(
+    args: ReplayLoadArgs<'_>,
+) -> Result<ReplayLoadOutcome, PylonError> {
+    let ReplayLoadArgs {
+        runtime,
+        source,
+        peri_id,
+        generation,
+        cwd,
+        mcp_servers,
+        mode,
+        loading_session,
+        log_label,
+    } = args;
+    let previous = replace_session_slot(
+        runtime,
+        source,
+        loading_session,
+        true,
+        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
+    )?;
+    // A-02/#349 B1：锁内原子建立 replay capture，等待在锁外进行——回放最长 30s，
+    // 不阻塞其他命令。若同 owner 已有 load，拒绝新请求并撤销本次临时 slot，避免
+    // 失败请求覆盖首个 load 的绑定/状态（ReplayLoadInProgress 是无副作用的拒绝路径）。
+    let handles = match runtime.acp.lock().await.begin_replay_capture(peri_id) {
+        Ok(handles) => handles,
+        Err(error) => {
+            if let Err(restore_error) =
+                restore_previous_slot(runtime, source, peri_id, generation, previous)
+            {
+                tracing::error!(
+                    source,
+                    error = %restore_error,
+                    "failed to roll back rejected {log_label} load slot"
+                );
+            }
+            return Ok(ReplayLoadOutcome::CaptureRejected { error });
+        }
+    };
+    // 回放收集与响应等待在锁外进行：load 响应是确定性边界。
+    let load_result =
+        crate::acp::load_session_with_replay(handles, peri_id, cwd, mcp_servers, mode).await;
+    Ok(match load_result {
+        Ok((response, batch)) => ReplayLoadOutcome::Loaded {
+            response,
+            replay: LoadedReplay {
+                events: batch.events,
+                metadata: batch.metadata,
+            },
+            previous,
+        },
+        Err(error) => ReplayLoadOutcome::LoadFailed { error, previous },
+    })
+}
+
 #[tauri::command]
 #[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
 pub(crate) async fn load_persisted_session(
@@ -112,41 +217,28 @@ pub(crate) async fn load_persisted_session(
     // CWD-03：恢复历史会话沿用 workspace 绑定（None = legacy 未绑定，root 解析回退 cwd）。
     loading_session.workspace_id = workspace_id;
     loading_session.replay_loading = true;
-    let previous = replace_session_slot(
-        &runtime,
-        &source,
-        loading_session,
-        true,
-        crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
-    )?;
-    // A-02：锁内原子建立 replay capture，等待在锁外进行——回放最长 30s，不阻塞其他命令。
-    // 若同 owner 已有 load，拒绝新请求并撤销本次临时 slot，避免失败请求覆盖
-    // 首个 load 的绑定/状态（ReplayLoadInProgress 是无副作用的拒绝路径）。
-    let handles = match runtime.acp.lock().await.begin_replay_capture(&peri_id) {
-        Ok(handles) => handles,
-        Err(error) => {
-            if let Err(restore_error) =
-                restore_previous_slot(&runtime, &source, &peri_id, generation, previous.clone())
-            {
-                tracing::error!(
-                    source,
-                    error = %restore_error,
-                    "failed to roll back rejected replay load slot"
-                );
-            }
-            return Err(error.into());
-        }
-    };
-    let load_result = crate::acp::load_session_with_replay(
-        handles,
-        &peri_id,
-        &cwd,
+    // P3（W3 重构批次）：loading 槽插入 → capture → 锁外 load 三步收敛到共享
+    // helper（create.rs revive_session_slot 同构骨架）；persist 侧错误策略保持
+    // 原样——capture 被拒上抛原错误；load 失败经 rollback_load_slot_else
+    // （回滚失败优先于原错误）。
+    match run_load_with_replay_capture(ReplayLoadArgs {
+        runtime: &runtime,
+        source: &source,
+        peri_id: &peri_id,
+        generation,
+        cwd: &cwd,
         mcp_servers,
-        state.protocol_for_runtime(&runtime).mcp_servers,
-    )
-    .await;
-    match load_result {
-        Ok((mut response, replay)) => {
+        mode: state.protocol_for_runtime(&runtime).mcp_servers,
+        loading_session,
+        log_label: "replay",
+    })
+    .await
+    {
+        Ok(ReplayLoadOutcome::Loaded {
+            mut response,
+            replay,
+            previous,
+        }) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {
                 return Err(rollback_load_slot_else(
                     &runtime,
@@ -341,7 +433,8 @@ pub(crate) async fn load_persisted_session(
             })
             .map_err(|error| PylonError::from(error.to_string()))
         }
-        Err(error) => {
+        Ok(ReplayLoadOutcome::CaptureRejected { error }) => Err(error.into()),
+        Ok(ReplayLoadOutcome::LoadFailed { error, previous }) => {
             // Failure paths still emit a bounded trace.  Collection counters are
             // explicitly zero because the collector does not claim a complete
             // batch when timeout/EOF/RPC error prevents observing the boundary.
@@ -374,6 +467,8 @@ pub(crate) async fn load_persisted_session(
                 PylonError::from(error),
             ))
         }
+        // 槽位插入失败（原 `?` 传播语义，收敛为 match 臂后逐位一致）。
+        Err(error) => Err(error),
     }
 }
 

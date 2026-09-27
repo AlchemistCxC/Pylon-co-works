@@ -5,8 +5,9 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use super::{log_canonical_ingest_error, PetEvent, SessionsLock};
-use crate::pet::PetState;
+use super::reactions::KernelReactionSink;
+use super::reactions::PetEvent;
+use super::{log_canonical_ingest_error, SessionsLock};
 
 /// A live canonical update whose in-memory effects are already applied but
 /// whose durable append and external publication are held until the current
@@ -95,6 +96,8 @@ pub(crate) fn should_flush_batch(
 
 // 显式参数风格（window/gateway/update_channels/source/payload/committed_event
 // 六参），与 flush 循环内逐参对应，结构体重构收益低。
+// 选路本体单点化于 publish_route::publish_session_update（#416 W2 步骤②）；
+// 本函数只保留 canonical 路径的载荷富化（source + canonicalEvent）。
 fn publish_committed_update<R: tauri::Runtime>(
     window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
@@ -113,30 +116,13 @@ fn publish_committed_update<R: tauri::Runtime>(
             serde_json::to_value(committed_event).unwrap_or(serde_json::Value::Null),
         );
     }
-    let channel = if gateway.is_platform_source(source) {
-        None
-    } else {
-        update_channels
-            .lock()
-            .ok()
-            .and_then(|map| map.get(source).cloned())
-    };
-    if let Some(channel) = channel {
-        let frame = serde_json::json!({
-            "event": crate::event_names::SESSION_UPDATE,
-            "payload": payload,
-        });
-        if let Err(error) = channel.send(frame) {
-            tracing::warn!("channel update frame send failed source={source}: {error}");
-        }
-        return;
-    }
-    crate::emit_event_all(
+    super::publish_route::publish_session_update(
         window,
         gateway,
+        update_channels,
         source,
-        crate::event_names::SESSION_UPDATE,
         payload,
+        "channel update frame send failed",
     );
 }
 
@@ -145,11 +131,13 @@ fn publish_committed_update<R: tauri::Runtime>(
 /// `NotificationPump::flush_context`，#336 起每次 flush 现场构造，取值时机与原
 /// 「调用点逐参求值」逐点一致）。#155 T3 的 draft 吸收/提交路径（draft_flush）
 /// 字段面完全相同，直接共用本结构。字段与原形参一一对应，锁语义/调用时序不变。
+/// #416 W2 步骤③：`pet` 字段改为产品反应订阅缝 `reactions`——flush 内的感知
+/// 应用点改调 sink（应用位置/顺序不变，见 reactions.rs 三表征文档）。
 pub(crate) struct CanonicalFlushContext<'a, R: tauri::Runtime> {
     pub(crate) window: &'a tauri::Window<R>,
     pub(crate) gateway: &'a crate::gateway::GatewayCore,
     pub(crate) update_channels: &'a crate::runtime::UpdateChannelMap,
-    pub(crate) pet: &'a std::sync::Mutex<PetState>,
+    pub(crate) reactions: &'a dyn KernelReactionSink,
     pub(crate) client_generation: &'a std::sync::atomic::AtomicU64,
     pub(crate) agent_id: &'a str,
     pub(crate) event_service: Option<&'a Arc<crate::session::EventService>>,
@@ -164,7 +152,7 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         window,
         gateway,
         update_channels,
-        pet,
+        reactions,
         client_generation,
         agent_id,
         event_service,
@@ -174,7 +162,7 @@ pub(crate) async fn flush_pending_canonical<R: tauri::Runtime>(
         window,
         gateway,
         update_channels,
-        pet,
+        reactions,
         client_generation,
         agent_id,
         event_service,
@@ -198,7 +186,7 @@ pub(crate) async fn flush_committed_draft<R: tauri::Runtime>(
         window,
         gateway,
         update_channels,
-        pet,
+        reactions,
         client_generation,
         agent_id,
         event_service,
@@ -208,7 +196,7 @@ pub(crate) async fn flush_committed_draft<R: tauri::Runtime>(
         window,
         gateway,
         update_channels,
-        pet,
+        reactions,
         client_generation,
         agent_id,
         event_service,
@@ -224,7 +212,7 @@ async fn flush_pending_canonical_inner<R: tauri::Runtime>(
     window: &tauri::Window<R>,
     gateway: &crate::gateway::GatewayCore,
     update_channels: &crate::runtime::UpdateChannelMap,
-    pet: &std::sync::Mutex<PetState>,
+    reactions: &dyn KernelReactionSink,
     client_generation: &std::sync::atomic::AtomicU64,
     agent_id: &str,
     event_service: Option<&Arc<crate::session::EventService>>,
@@ -360,9 +348,10 @@ async fn flush_pending_canonical_inner<R: tauri::Runtime>(
                 );
             }
         }
-        for pet_event in item.pet_events {
-            let _ = pet.lock().map(|mut state| pet_event.apply(&mut state));
-        }
+        // 感知应用经订阅缝（原逐事件 `pet.lock()` 循环改调 sink；位置不变：
+        // set_session_state 之后、代际复核与 publish 之前——commit 后 publish 前；
+        // 每项事件按收集顺序整批交付，应用序 = 收集序在 sink 内逐位保持）。
+        reactions.on_pet_events(item.pet_events);
         if client_generation.load(Ordering::Acquire) != item.input.generation {
             return false;
         }

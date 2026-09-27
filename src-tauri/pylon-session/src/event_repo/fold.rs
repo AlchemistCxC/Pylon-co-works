@@ -6,8 +6,13 @@ use super::row::CanonicalEventRow;
 /// #205：读侧尾部折叠预算——与写侧 `canonicalEventBatch.CANONICAL_BATCH_LIMITS` 同口径
 /// （48 KiB / 2000 chunk，落在 `retain_raw_payload` 的 64 KiB 截断线之内）。读侧不需要
 /// 截断约束，沿用该预算只为产出「同一种 batch 行形状」，任何既有解析路径都认。
-pub(super) const MAX_FOLDED_CHUNKS: usize = 2000;
-pub(super) const MAX_FOLD_BYTES: usize = 48 * 1024;
+///
+/// Rust 侧单源（W3 重构批次）：两常量经 `event_repo` 与 crate 根 re-export
+/// （`pylon_session::{MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES}`）供宿主写侧引用，宿主
+/// dispatcher 不再各写一份。前端 `canonicalEventBatch.ts` 的 CANONICAL_BATCH_LIMITS
+/// 仍为独立拷贝（TS 侧不随本单源化消失，彻底单源需走 generate-* 代码生成）。
+pub const MAX_FOLDED_CHUNKS: usize = 2000;
+pub const MAX_FOLD_BYTES: usize = 48 * 1024;
 
 /// 该行能否参与折叠：静态 delta 类型，且 `typed_payload.text` 是 string。
 /// `.batch` 行不二次折叠。**text 门控与写侧同款**：无 string text 的 chunk 在逐行投影里

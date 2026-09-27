@@ -1,6 +1,7 @@
 //! 会话创建域：槽位替换 / session/new / 建立与复用。
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
+use super::persist::{run_load_with_replay_capture, ReplayLoadArgs, ReplayLoadOutcome};
 use super::*;
 /// R32：会话槽位替换——上限检查 + 插入新 SessionInfo +
 /// 返回被替换的旧会话（None = 新槽位）。`allow_same_source_replace`：
@@ -1277,27 +1278,28 @@ async fn revive_session_slot(
             );
             loading_session.profile_id = profile_id.map(str::to_string);
             loading_session.replay_loading = true;
-            let previous = replace_session_slot(
+            // P3（W3 重构批次）：loading 槽插入 → capture → 锁外 load 收敛到共享
+            // helper（persist.rs load_persisted_session 同构骨架）；revive 侧错误
+            // 策略保持原样——capture 被拒/load 失败均降级 Ok(None)（capture 被拒
+            // 的槽位回滚 + 失败日志在 helper 内，域标签 revive）；load 失败的回滚
+            // 时序（内层 generation 检查之后）由下方各臂自持。
+            let outcome = run_load_with_replay_capture(ReplayLoadArgs {
                 runtime,
                 source,
+                peri_id,
+                generation,
+                cwd: session_cwd,
+                mcp_servers: wire_mcp_servers.to_vec(),
+                mode: state.protocol_for_runtime(runtime).mcp_servers,
                 loading_session,
-                true,
-                crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
-            )?;
-            let handles = match runtime.acp.lock().await.begin_replay_capture(peri_id) {
-                Ok(handles) => handles,
-                Err(error) => {
-                    // 同 owner 已有 load（如 continuity probe 抢先登记）：撤销本次
-                    // 临时槽位后按 revive 失败降级 new（无副作用拒绝路径，同 persist）。
-                    if let Err(restore_error) =
-                        restore_previous_slot(runtime, source, peri_id, generation, previous)
-                    {
-                        tracing::error!(
-                            source,
-                            error = %restore_error,
-                            "failed to roll back rejected revive load slot"
-                        );
-                    }
+                log_label: "revive",
+            })
+            .await?;
+            match outcome {
+                ReplayLoadOutcome::CaptureRejected { error } => {
+                    // 同 owner 已有 load（如 continuity probe 抢先登记）：槽位已由
+                    // helper 回滚（失败仅记录）后按 revive 失败降级 new（无副作用
+                    // 拒绝路径，同 persist）。
                     tracing::info!(
                         target: "replay_trace",
                         owner = source,
@@ -1328,25 +1330,15 @@ async fn revive_session_slot(
                     );
                     return Ok(None);
                 }
-            };
-            // 回放收集与响应等待在锁外进行（同 persist）：load 响应是确定性边界。
-            let load_result = crate::acp::load_session_with_replay(
-                handles,
-                peri_id,
-                session_cwd,
-                wire_mcp_servers.to_vec(),
-                state.protocol_for_runtime(runtime).mcp_servers,
-            )
-            .await;
-            if let Err(error) = state.ensure_generation(runtime, generation) {
-                // generation 失配保持既有 Err 传播语义（revive_tests 断言失败后
-                // 不留槽位），传播前先撤销临时 loading 槽。
-                let _ = restore_previous_slot(runtime, source, peri_id, generation, previous);
-                return Err(error.into());
-            }
-            let (response, replay) = match load_result {
-                Ok(result) => result,
-                Err(error) => {
+                ReplayLoadOutcome::LoadFailed { error, previous } => {
+                    // 内层 generation 失配保持既有 Err 传播语义（revive_tests 断言
+                    // 失败后不留槽位），传播前先撤销临时 loading 槽（既有 `let _`
+                    // 忽略回滚错误）；该检查先于 load 错误消费（既有次序）。
+                    if let Err(generation_error) = state.ensure_generation(runtime, generation) {
+                        let _ =
+                            restore_previous_slot(runtime, source, peri_id, generation, previous);
+                        return Err(generation_error.into());
+                    }
                     if let Err(restore_error) =
                         restore_previous_slot(runtime, source, peri_id, generation, previous)
                     {
@@ -1389,23 +1381,35 @@ async fn revive_session_slot(
                     );
                     return Ok(None);
                 }
-            };
-            // #349 B1：回放内容丢弃（canonical journal 是唯一 durable 权威，与
-            // persist/lifecycle/export 一致）；仅以响应做挂载判定，观测计数留痕。
-            tracing::info!(
-                target: "replay_trace",
-                owner = source,
-                runtime_generation = generation,
-                recovery_method = "load",
-                result = "success",
-                response_boundary = "observed",
-                capture_lp = "active-replay-registry",
-                observed_count = replay.metadata.boundary.observed_count,
-                dropped_count = replay.metadata.dropped_count,
-                canonical_import = "none",
-                "session/load recovery attempt"
-            );
-            (response, Some(previous))
+                ReplayLoadOutcome::Loaded {
+                    response,
+                    replay,
+                    previous,
+                } => {
+                    // 内层 generation 失配：同上（既有检查先于 load 结果消费）。
+                    if let Err(generation_error) = state.ensure_generation(runtime, generation) {
+                        let _ =
+                            restore_previous_slot(runtime, source, peri_id, generation, previous);
+                        return Err(generation_error.into());
+                    }
+                    // #349 B1：回放内容丢弃（canonical journal 是唯一 durable 权威，与
+                    // persist/lifecycle/export 一致）；仅以响应做挂载判定，观测计数留痕。
+                    tracing::info!(
+                        target: "replay_trace",
+                        owner = source,
+                        runtime_generation = generation,
+                        recovery_method = "load",
+                        result = "success",
+                        response_boundary = "observed",
+                        capture_lp = "active-replay-registry",
+                        observed_count = replay.metadata.boundary.observed_count,
+                        dropped_count = replay.metadata.dropped_count,
+                        canonical_import = "none",
+                        "session/load recovery attempt"
+                    );
+                    (response, Some(previous))
+                }
+            }
         }
     };
     if let Err(error) = state.ensure_generation(runtime, generation) {
