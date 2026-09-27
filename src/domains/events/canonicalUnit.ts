@@ -24,7 +24,9 @@ import {
 import { normalizeCanonicalEventRow } from './canonicalEventRow.ts'
 
 export const TURN_UNIT_AGGREGATE_KIND = 'turn-rollup'
-export const TURN_UNIT_FOLD_SCHEME = 'adjacent-delta-fold-v1'
+export const TURN_UNIT_FOLD_SCHEME = 'adjacent-delta-fold-v2'
+/** v1：只有相邻 delta 折叠（v2 之前的单元行）。读侧按 `foldScheme` 认得两个方案。 */
+export const TURN_UNIT_FOLD_SCHEME_V1 = 'adjacent-delta-fold-v1'
 
 export type TurnUnitDeltaEventType = 'assistant.text.delta' | 'assistant.thinking.delta'
 
@@ -54,7 +56,22 @@ export interface TurnUnitEventSegment {
   readonly event: CanonicalConversationEvent
 }
 
-export type TurnUnitSegment = TurnUnitDeltaRunSegment | TurnUnitEventSegment
+/**
+ * #380-b：同一 `toolCallId` 的累积式工具拍压缩段。`event` 是**末拍**的整行 canonical 事件
+ * （EVT-01，与 `event` 段同形状）；`foldedCount`/`seqStart`/`seqEnd` 记录被压缩的拍数与跨度。
+ */
+export interface TurnUnitToolRunSegment {
+  readonly kind: 'tool-run'
+  readonly eventType: 'tool.call.updated'
+  readonly seqStart: number
+  readonly seqEnd: number
+  readonly foldedCount: number
+  readonly identity?: CanonicalEventIdentity
+  readonly occurredAt: string
+  readonly event: CanonicalConversationEvent
+}
+
+export type TurnUnitSegment = TurnUnitDeltaRunSegment | TurnUnitEventSegment | TurnUnitToolRunSegment
 
 export interface TurnUnitPayload {
   readonly aggregateKind: string
@@ -103,6 +120,26 @@ export function parseTurnUnitPayload(event: CanonicalConversationEvent): TurnUni
       })
       continue
     }
+    if (segment.kind === 'tool-run') {
+      if (segment.eventType !== 'tool.call.updated') return undefined
+      if (!Number.isSafeInteger(segment.seqStart) || !Number.isSafeInteger(segment.seqEnd)) return undefined
+      if ((segment.seqStart as number) < (seqStart as number) || (segment.seqEnd as number) > (seqEnd as number)) return undefined
+      if (!Number.isSafeInteger(segment.foldedCount) || (segment.foldedCount as number) < 2) return undefined
+      if (typeof segment.occurredAt !== 'string') return undefined
+      const inner = segment.event
+      if (!inner || typeof inner !== 'object' || typeof (inner as { sequence?: unknown }).sequence !== 'number') return undefined
+      parsedSegments.push({
+        kind: 'tool-run',
+        eventType: 'tool.call.updated',
+        seqStart: segment.seqStart as number,
+        seqEnd: segment.seqEnd as number,
+        foldedCount: segment.foldedCount as number,
+        ...(segment.identity && typeof segment.identity === 'object' ? { identity: segment.identity as CanonicalEventIdentity } : {}),
+        occurredAt: segment.occurredAt,
+        event: normalizeCanonicalEventRow(inner),
+      })
+      continue
+    }
     if (segment.kind === 'event') {
       const inner = segment.event
       // 先在**载荷原文**上校验 sequence 存在（`normalizeCanonicalEventRow` 会把缺失的
@@ -147,6 +184,9 @@ export function expandTurnUnitRows(events: readonly CanonicalConversationEvent[]
     }
     return payload.segments.map(segment => {
       if (segment.kind === 'event') return segment.event
+      // #380-b：压缩段展开成末拍那一行——中间拍在投影上被末拍取代（写侧的累积判据
+      // 保证了「末拍正文包含中间拍全部正文」），故与逐拍投影等价。
+      if (segment.kind === 'tool-run') return segment.event
       return createCanonicalEvent({
         owner: event.owner,
         clientGeneration: event.clientGeneration,

@@ -17,7 +17,6 @@ import {
   type WorkbenchDocument,
 } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
-import { withoutEnvelopeRaw } from '../../../sheets/agent-workbench/agentWorkbenchProjection.ts'
 
 const base = {
   provider: 'peri',
@@ -125,31 +124,6 @@ describe('#375-c / #375-e 载荷单一持有的另外两半', () => {
     // 输入的那份数组本身也被冻结（冻结发生在边界，不产生第七份副本）
     expect(Object.isFrozen(parts)).toBe(true)
   })
-
-  it('#375-c fold.log 副本剥掉 wire 原始 JSON，原信封契约不变', () => {
-    const env = createWorkbenchEnvelope({
-      ...base,
-      sequence: 1,
-      source: { provider: base.provider, sourceId: 'wire-1' },
-      identity: { toolCallId: 'call-a' },
-      provenance: { origin: 'local-observed', trust: 'authoritative' },
-      event: { type: 'tool.started', tool: { name: 'Bash' } },
-      raw: { update: { sessionUpdate: 'tool_call', toolCallId: 'call-a' } },
-    })
-    expect(env.raw).toBeDefined()
-    const logged = withoutEnvelopeRaw(env)
-    expect(logged.raw).toBeUndefined()
-    expect(logged.rawMetadata).toBeUndefined()
-    // 其余字段逐字段保留（回滚重折算的就是这些）
-    expect(logged.eventId).toBe(env.eventId)
-    expect(logged.event).toBe(env.event)
-    expect(logged.identity).toEqual(env.identity)
-    expect(logged.coverage).toEqual(env.coverage)
-    // 原信封未被改写
-    expect(env.raw).toBeDefined()
-    // 幂等：已剥过的再剥返回自身
-    expect(withoutEnvelopeRaw(logged)).toBe(logged)
-  })
 })
 
   it('#375-a 长正文（rawOutput.text 这类）不进 timeline.data，短身份标量照留', () => {
@@ -194,17 +168,26 @@ describe('#375-d 同内容元数据快照复用', () => {
   })
 })
 
-describe('#375-c 接线守卫（这条曾经静默失效过）', () => {
-  it('foldPage 入日志走 withoutEnvelopeRaw，而不是直接 push 原信封', () => {
-    // 为什么用源码断言：`fold.log` 是运行时内部状态，没有观测面；而「helper 写了但没接线」
-    // 恰恰是本批真实发生过的一次错误（一次失败的脚本编辑只落了 import、没落调用点，
-    // 类型检查也不报错——import 有使用点即可）。这条守卫让那种静默失效无法通过测试。
-    const source = readFileSync(
-      fileURLToPath(new URL('../../../sheets/agent-workbench/agentWorkbenchSession.ts', import.meta.url)),
-      'utf8',
-    )
-    const pushLines = source.split('\n').filter(line => line.includes('fold.log.push('))
-    expect(pushLines).toHaveLength(1)
-    expect(pushLines[0]).toContain('withoutEnvelopeRaw(')
+describe('#380 会话侧不再常驻整会话信封', () => {
+  const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
+  const sessionSource = () => read('../../../sheets/agent-workbench/agentWorkbenchSession.ts')
+  const echoSource = () => read('../../../sheets/agent-workbench/agentWorkbenchOptimisticEcho.ts')
+
+  it('会话里没有 fold.log / fold.ids 这类整会话信封持有', () => {
+    // 为什么用源码断言：这份日志是运行时内部状态，没有观测面；它的「不存在」同样没有观测面
+    // ——谁把整会话信封日志加回来，这里必须红（#380 的会话级驻留全靠这条删除；#375-c 当年
+    // 只剥 `raw` 也挡不住 ≈Σ载荷 那份常驻）。
+    // 只匹配**代码形态**（赋值 / push / add / clear）：注释里提到这个名字不算违规。
+    expect(sessionSource()).not.toMatch(/fold\.log\s*=|fold\.log\.push\(|fold\.ids\.(add|clear)\(/)
+  })
+
+  it('被拒回滚的源是 journal 重读，而不是内存里的信封日志', () => {
+    // 反向断言：回滚必须显式要一次 canonical 重读（宿主 refresh）——否则「删掉日志」就变成
+    // 「回滚什么都不做」，那比留着日志更糟。
+    const echo = echoSource()
+    expect(echo).toContain('await reloadFromJournal()')
+    expect(echo).not.toContain('fold.log')
+    // 接线必须带 rebuild——缺省的 refresh 是**续折**，乐观行会留在文档里（本 issue 施工中真的踩过）。
+    expect(sessionSource()).toContain('reloadFromJournal: () => refresh(binding.boundSession, undefined, { rebuild: true })')
   })
 })

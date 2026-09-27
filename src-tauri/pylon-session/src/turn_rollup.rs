@@ -21,7 +21,13 @@ use super::event_repo::{
 
 pub const TURN_UNIT_EVENT_TYPE: &str = "turn.unit";
 pub const TURN_UNIT_AGGREGATE_KIND: &str = "turn-rollup";
-pub const TURN_UNIT_FOLD_SCHEME: &str = "adjacent-delta-fold-v1";
+/// #380-b：当前折叠方案。v2 = v1 的相邻 delta 折叠 **+** 「累积式工具拍压缩」。
+pub const TURN_UNIT_FOLD_SCHEME: &str = "adjacent-delta-fold-v2";
+/// v1：只有相邻 delta 折叠（v2 之前的所有单元行都用它算 sha256）。
+pub const TURN_UNIT_FOLD_SCHEME_V1: &str = "adjacent-delta-fold-v1";
+
+/// #380-b 压缩对象：工具中间拍。
+pub const TOOL_CALL_UPDATED_EVENT_TYPE: &str = "tool.call.updated";
 
 /// 终态事件类型（触发单元行构建）。
 pub fn is_turn_terminal(event_type: &str) -> bool {
@@ -38,6 +44,16 @@ enum Segment {
         text: String,
         occurred_at: String,
         markdown: bool,
+    },
+    /// #380-b：同一 `toolCallId` 的**累积式**连续拍压成一段——保留末拍的整行 canonical 事件
+    /// （`event`）+ 覆盖跨度 + 拍数。中间拍在交付面上被末拍取代（这正是投影语义）。
+    ToolRun {
+        seq_start: i64,
+        seq_end: i64,
+        identity: Option<Value>,
+        folded_count: usize,
+        occurred_at: String,
+        event: Value,
     },
     Event(Value),
 }
@@ -81,19 +97,41 @@ fn delta_sequence_span(row: &CanonicalEventRow) -> Option<(i64, i64)> {
 /// 折叠 turn 范围行（升序、含 terminal 行）为保序 segments。
 /// 规则与前端 `canonicalEventBatch`/`canonicalUnit` 同口径：类型同类 +
 /// identity 全字段相等（serde_json Value 相等与键序无关）才并入 run。
-fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
+///
+/// `allow_tool_runs`（#380-b，方案 v2 起）额外允许把**累积式**的连续工具拍压成一段：
+/// 判据是「后一拍正文以前一拍正文为前缀」——满足时末拍完全取代中间拍（投影语义本就如此），
+/// 压缩**不丢任何可见内容**；不满足（增量式回传）时一拍都不折，行原样保留为 event 段。
+fn fold_segments(rows: &[CanonicalEventRow], allow_tool_runs: bool) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
-    for row in rows {
+    let mut index = 0usize;
+    while index < rows.len() {
+        let row = &rows[index];
+        if allow_tool_runs && row.event_type == TOOL_CALL_UPDATED_EVENT_TYPE {
+            if let Some((end, last_event)) = tool_run_at(rows, index) {
+                segments.push(Segment::ToolRun {
+                    seq_start: row.sequence,
+                    seq_end: rows[end].sequence,
+                    identity: row.identity.clone(),
+                    folded_count: end - index + 1,
+                    occurred_at: rows[end].occurred_at.clone(),
+                    event: last_event,
+                });
+                index = end + 1;
+                continue;
+            }
+        }
         if !is_foldable_delta(&row.event_type) {
             // 整行 segment：EVT-01 canonical 事件（嵌套 owner/provenance），与前端
             // `CanonicalConversationEvent` 契约同构；raw 恒存。不得改回
             // `serde_json::to_value(row)`——那是数据库扁平列形状，会绕过前端读边界
             // 的归一化（#81 回归：重启后整轮历史丢失）。
             segments.push(Segment::Event(canonical_event_wire(row)));
+            index += 1;
             continue;
         }
         let Some((seq_start, row_seq_end)) = delta_sequence_span(row) else {
             segments.push(Segment::Event(canonical_event_wire(row)));
+            index += 1;
             continue;
         };
         let text = row
@@ -120,6 +158,7 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
                 *seq_end = row_seq_end;
                 run_text.push_str(&text);
                 *run_markdown |= markdown;
+                index += 1;
                 continue;
             }
         }
@@ -132,8 +171,76 @@ fn fold_segments(rows: &[CanonicalEventRow]) -> Vec<Segment> {
             occurred_at: row.occurred_at.clone(),
             markdown,
         });
+        index += 1;
     }
     segments
+}
+
+/// #380-b：从 `start` 起尝试吞掉一段**累积式**工具拍。
+///
+/// 返回 `(末拍下标, 末拍的 EVT-01 行)`；不满足压缩条件（单拍 / identity 或 sequence 不连续 /
+/// 出现非 `tool.call.updated` / 正文不是前缀扩展 / 正文读不出来）返回 `None`，调用方按原样
+/// 保留整行 segment。压缩的安全性来自「前缀扩展」这条判据：末拍正文包含中间拍的全部正文，
+/// 投影上末拍即终态，故丢弃中间拍**不改变任何可见内容**（增量式回传的 provider 不满足该判据，
+/// 也就一拍都不折）。
+fn tool_run_at(rows: &[CanonicalEventRow], start: usize) -> Option<(usize, Value)> {
+    let first = rows.get(start)?;
+    if first.event_type != TOOL_CALL_UPDATED_EVENT_TYPE {
+        return None;
+    }
+    let mut text = tool_beat_text(first)?;
+    let mut end = start;
+    while let Some(next) = rows.get(end + 1) {
+        if next.event_type != TOOL_CALL_UPDATED_EVENT_TYPE
+            || next.sequence != rows[end].sequence + 1
+            || next.identity != first.identity
+        {
+            break;
+        }
+        let Some(next_text) = tool_beat_text(next) else {
+            break;
+        };
+        if !next_text.starts_with(&text) {
+            break;
+        }
+        text = next_text;
+        end += 1;
+    }
+    if end == start {
+        // 单拍压缩没有收益（反而多一层间接），保持整行 segment。
+        return None;
+    }
+    Some((end, canonical_event_wire(&rows[end])))
+}
+
+/// 工具拍正文：优先 typed 的 `tool.contentBlocks[*].content.text`（归一后的载荷），
+/// 退化到 raw 的 `update.content[*].text`（wire 原文）。读不出来返回 `None` ⇒ 不折。
+fn tool_beat_text(row: &CanonicalEventRow) -> Option<String> {
+    if let Some(typed) = row.typed_payload.as_ref() {
+        if let Some(text) = content_parts_text(typed.pointer("/tool/contentBlocks")) {
+            return Some(text);
+        }
+    }
+    let raw: Value = serde_json::from_str(&row.raw_payload_json).ok()?;
+    content_parts_text(raw.pointer("/update/content"))
+}
+
+/// `[{text}]`（wire content）与 `[{content:{text}}]`（contentBlocks）两种形状的正文拼接。
+fn content_parts_text(value: Option<&Value>) -> Option<String> {
+    let parts = value?.as_array()?;
+    let mut text = String::new();
+    let mut found = false;
+    for part in parts {
+        let candidate = part
+            .get("text")
+            .and_then(Value::as_str)
+            .or_else(|| part.pointer("/content/text").and_then(Value::as_str));
+        if let Some(candidate) = candidate {
+            text.push_str(candidate);
+            found = true;
+        }
+    }
+    found.then_some(text)
 }
 
 fn segment_to_json(segment: &Segment) -> Value {
@@ -160,6 +267,29 @@ fn segment_to_json(segment: &Segment) -> Value {
             object.insert("markdown".into(), json!(markdown));
             Value::Object(object)
         }
+        Segment::ToolRun {
+            seq_start,
+            seq_end,
+            identity,
+            folded_count,
+            occurred_at,
+            event,
+        } => {
+            let mut object = serde_json::Map::new();
+            object.insert("kind".into(), json!("tool-run"));
+            object.insert("eventType".into(), json!(TOOL_CALL_UPDATED_EVENT_TYPE));
+            object.insert("seqStart".into(), json!(seq_start));
+            object.insert("seqEnd".into(), json!(seq_end));
+            object.insert("foldedCount".into(), json!(folded_count));
+            object.insert("occurredAt".into(), json!(occurred_at));
+            if let Some(value) = identity {
+                object.insert("identity".into(), value.clone());
+            }
+            // 末拍的整行 canonical 事件（EVT-01，与 `event` 段同形状）：读侧原样展开成
+            // 一个信封，投影与「逐拍行」等价（累积式判据保证了这点）。
+            object.insert("event".into(), event.clone());
+            Value::Object(object)
+        }
         Segment::Event(value) => json!({ "kind": "event", "event": value }),
     }
 }
@@ -179,8 +309,36 @@ pub struct TurnFold {
 
 /// L3 裁剪校验用：对仍存续的 turn 范围行重折叠，产出与构建期一致的
 /// segments/sha256（行集含 terminal 行，与构建时同一输入域）。
+///
+/// **按当前方案**重折——只适用于当前方案构建的单元；其它方案请用
+/// [`fold_turn_rows_with_scheme`] 并传入单元自己记的 `foldScheme`。
 pub fn fold_turn_rows(rows: &[CanonicalEventRow]) -> TurnFold {
-    let segments_value = Value::Array(fold_segments(rows).iter().map(segment_to_json).collect());
+    fold_turn_rows_with_scheme(rows, Some(TURN_UNIT_FOLD_SCHEME))
+}
+
+/// #380-b：按**单元自己记录的方案**重折叠，供 L3 裁剪校验。
+///
+/// 方案一变，同一批行重折出的 segments 就不同——裁剪若不认方案，旧单元（v1）会永远
+/// 报 `ShaMismatch` 而**一条也删不掉**（安全但让迁移停摆）。这里显式认两个方案：
+/// `v1` = 只折相邻 delta；`v2`（=`None`，视为当前）额外折累积式工具拍。
+/// **未知方案**返回空 sha（必然与单元的 sha 不等）⇒ 裁剪保留行并跳过，绝不误删。
+pub fn fold_turn_rows_with_scheme(rows: &[CanonicalEventRow], scheme: Option<&str>) -> TurnFold {
+    let allow_tool_runs = match scheme {
+        Some(TURN_UNIT_FOLD_SCHEME_V1) => false,
+        Some(TURN_UNIT_FOLD_SCHEME) | None => true,
+        Some(_) => {
+            return TurnFold {
+                segments: Value::Null,
+                content_sha256: String::new(),
+            }
+        }
+    };
+    let segments_value = Value::Array(
+        fold_segments(rows, allow_tool_runs)
+            .iter()
+            .map(segment_to_json)
+            .collect(),
+    );
     TurnFold {
         content_sha256: segments_sha256(&segments_value),
         segments: segments_value,
@@ -525,5 +683,114 @@ mod tests {
             fold.segments[0]["event"]["eventType"],
             json!("assistant.text.delta.batch")
         );
+    }
+
+    /// #380-b：同一 toolCallId 的连续工具拍（`tool.call.updated`）。
+    /// `content` 逐拍累积（wire 形状与真实 provider 的 content 数组一致）。
+    fn tool_beat(sequence: i64, tool_call_id: &str, text: &str) -> CanonicalEventRow {
+        row(
+            sequence,
+            TOOL_CALL_UPDATED_EVENT_TYPE,
+            json!({ "tool": { "toolCallId": tool_call_id, "status": "in_progress",
+                "contentBlocks": [{ "type": "content", "content": { "type": "text", "text": text } }] } }),
+            Some(json!({ "toolCallId": tool_call_id })),
+            json!({ "source": "local:s1", "update": { "sessionUpdate": "tool_call_update",
+                "toolCallId": tool_call_id, "content": [{ "type": "text", "text": text }] } }),
+        )
+    }
+
+    #[test]
+    fn cumulative_tool_beats_fold_into_one_tool_run_segment() {
+        let beats = vec![
+            tool_beat(1, "call-1", "aaa"),
+            tool_beat(2, "call-1", "aaaaaa"),
+            tool_beat(3, "call-1", "aaaaaabbb"),
+        ];
+        let fold = fold_turn_rows(&beats);
+        assert_eq!(kinds(&fold.segments), vec!["tool-run"]);
+        let segment = &fold.segments[0];
+        assert_eq!(segment["foldedCount"], json!(3));
+        assert_eq!(segment["seqStart"], json!(1));
+        assert_eq!(segment["seqEnd"], json!(3));
+        // 保留的是**末拍**整行事件（投影上等价于逐拍），正文是最终累积值
+        assert_eq!(segment["event"]["sequence"], json!(3));
+        assert_eq!(
+            segment["event"]["rawPayload"]["update"]["content"][0]["text"],
+            json!("aaaaaabbb")
+        );
+    }
+
+    #[test]
+    fn non_cumulative_tool_beats_are_not_folded() {
+        // 增量式回传（后一拍不含前一拍正文）⇒ 压缩会丢内容，一拍都不折。
+        let beats = vec![
+            tool_beat(1, "call-1", "aaa"),
+            tool_beat(2, "call-1", "bbb"),
+            tool_beat(3, "call-1", "ccc"),
+        ];
+        let fold = fold_turn_rows(&beats);
+        assert_eq!(kinds(&fold.segments), vec!["event", "event", "event"]);
+    }
+
+    #[test]
+    fn tool_run_breaks_on_identity_gap_or_single_beat() {
+        let single = fold_turn_rows(&[tool_beat(1, "call-1", "aaa")]);
+        assert_eq!(kinds(&single.segments), vec!["event"], "单拍压缩没有收益");
+
+        let other_call = vec![
+            tool_beat(1, "call-1", "aaa"),
+            tool_beat(2, "call-1", "aaaaaa"),
+            tool_beat(3, "call-2", "aaaaaa"),
+        ];
+        assert_eq!(
+            kinds(&fold_turn_rows(&other_call).segments),
+            vec!["tool-run", "event"],
+            "换 toolCallId 必须断开 run"
+        );
+
+        let gap = vec![
+            tool_beat(1, "call-1", "aaa"),
+            tool_beat(5, "call-1", "aaaaaa"),
+        ];
+        assert_eq!(
+            kinds(&fold_turn_rows(&gap).segments),
+            vec!["event", "event"],
+            "sequence 不连续必须断开 run"
+        );
+    }
+
+    #[test]
+    fn v1_scheme_keeps_tool_beats_unfolded_and_hashes_differ() {
+        let beats = vec![
+            tool_beat(1, "call-1", "aaa"),
+            tool_beat(2, "call-1", "aaaaaa"),
+        ];
+        let v1 = fold_turn_rows_with_scheme(&beats, Some(TURN_UNIT_FOLD_SCHEME_V1));
+        assert_eq!(kinds(&v1.segments), vec!["event", "event"]);
+        let v2 = fold_turn_rows_with_scheme(&beats, Some(TURN_UNIT_FOLD_SCHEME));
+        assert_eq!(kinds(&v2.segments), vec!["tool-run"]);
+        assert_ne!(
+            v1.content_sha256, v2.content_sha256,
+            "同一批行在两个方案下的 sha256 必须不同（否则 L3 裁剪会认错方案）"
+        );
+        // 未知方案：不可校验（空 sha ⇒ 必然 mismatch ⇒ 裁剪保留行，不误删）
+        let unknown = fold_turn_rows_with_scheme(&beats, Some("adjacent-delta-fold-v9"));
+        assert!(unknown.content_sha256.is_empty());
+    }
+
+    #[test]
+    fn v1_rows_refold_identically_under_their_own_scheme() {
+        // L3 裁剪的契约：v1 单元的行用 v1 重折必须字节相同（否则旧单元一条也删不掉）。
+        let rows = vec![
+            delta(1, "assistant.text.delta", "甲", "m1"),
+            delta(2, "assistant.text.delta", "乙", "m1"),
+            tool_beat(3, "call-1", "aaa"),
+            tool_beat(4, "call-1", "aaaaaa"),
+        ];
+        let first = fold_turn_rows_with_scheme(&rows, Some(TURN_UNIT_FOLD_SCHEME_V1));
+        let again = fold_turn_rows_with_scheme(&rows, Some(TURN_UNIT_FOLD_SCHEME_V1));
+        assert_eq!(first.content_sha256, again.content_sha256);
+        assert_eq!(first.segments, again.segments);
+        assert_eq!(kinds(&first.segments), vec!["delta-run", "event", "event"]);
     }
 }

@@ -2532,3 +2532,91 @@ fn payload_retention_holds_for_multibyte_payloads() {
         encoded.len()
     );
 }
+
+/// #380-b：L3 裁剪必须按**单元自己记录的方案**重折。
+///
+/// 方案 v2 起，同一批累积式工具拍在 v1 下折不出 `tool-run`（字节不同）——若裁剪一律用当前
+/// 方案重折，v1 单元会永远 `ShaMismatch`（保留行、永久跳过 ⇒ 迁移停摆）。这条用例锁两件事：
+/// ①记 v1 + 按 v1 算的 sha ⇒ 正常裁剪；②记 v1 却拿着 v2 的 sha ⇒ mismatch 保行（不误删）。
+#[test]
+fn rollup_trim_refolds_with_the_scheme_recorded_on_the_unit() {
+    let repo = repo();
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    let tool_beat = |sequence: i64, text: &str| {
+        parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            sequence,
+            "tool.call.updated",
+            serde_json::json!({ "update": { "sessionUpdate": "tool_call_update", "toolCallId": "call-1",
+                "content": [{ "type": "text", "text": text }] } }),
+        ))
+        .unwrap()
+    };
+    let rows = vec![
+        tool_beat(1, "aaa"),
+        tool_beat(2, "aaaaaa"),
+        parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            3,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap(),
+    ];
+    repo.append_events(&rows, None).unwrap();
+
+    let v1 = crate::turn_rollup::fold_turn_rows_with_scheme(&rows, Some("adjacent-delta-fold-v1"));
+    let v2 = crate::turn_rollup::fold_turn_rows_with_scheme(&rows, Some("adjacent-delta-fold-v2"));
+    assert_ne!(
+        v1.content_sha256, v2.content_sha256,
+        "该语料在两个方案下必须折出不同字节"
+    );
+
+    let unit_row = |sequence: i64, sha: &str, segments: serde_json::Value| {
+        let mut unit_value = event_json(
+            "peri",
+            "local:s1",
+            sequence,
+            "turn.unit",
+            serde_json::json!({ "kind": "turn-unit" }),
+        );
+        unit_value["typedPayload"] = serde_json::json!({
+            "aggregateKind": "turn-rollup",
+            "seqStart": 1,
+            "seqEnd": 3,
+            "foldedCount": 3,
+            "foldScheme": "adjacent-delta-fold-v1",
+            "contentSha256": sha,
+            "terminal": { "eventType": "turn.completed", "occurredAt": "2026-08-14T00:00:00.000Z" },
+            "segments": segments,
+        });
+        parse_canonical_event(&unit_value).unwrap()
+    };
+
+    // ②记 v1 但 sha 来自 v2 ⇒ 不匹配，保行（证明不是「认识 v1 就无脑放行」）
+    repo.append_events(
+        &[unit_row(4, v2.content_sha256.as_str(), v2.segments.clone())],
+        Some(3),
+    )
+    .unwrap();
+    let mismatched = repo.rollup_trim(None).unwrap();
+    assert_eq!(mismatched.mismatch_units, 1, "方案与 sha 不符必须保行");
+
+    // ①记 v1 且 sha 按 v1 算 ⇒ 按记录的方案重折通过，行被裁剪
+    repo.append_events(
+        &[unit_row(5, v1.content_sha256.as_str(), v1.segments.clone())],
+        Some(4),
+    )
+    .unwrap();
+    let report = repo.rollup_trim(None).unwrap();
+    assert_eq!(report.trimmed_units, 1, "v1 单元按 v1 重折必须通过并裁剪");
+    let remaining = repo.list_events(&owner_key, None, 100).unwrap();
+    let plain_rows = remaining
+        .events
+        .iter()
+        .filter(|e| e.event_type != "turn.unit")
+        .count();
+    assert_eq!(plain_rows, 0, "覆盖行已删除");
+}

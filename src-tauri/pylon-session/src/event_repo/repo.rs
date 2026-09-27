@@ -924,7 +924,15 @@ impl EventRepo {
             tx.commit().map_err(EventError::from)?;
             return Ok(RollupUnitOutcome::AlreadyGone);
         }
-        let rebuilt = crate::turn_rollup::fold_turn_rows(&rows);
+        // #380-b：重折必须按**单元自己记录的方案**——方案一变，同一批行折出的 segments 就不同，
+        // 认错方案会让旧单元永远 ShaMismatch（保留行、永久跳过，等于迁移停摆）。
+        let scheme = unit
+            .typed_payload
+            .as_ref()
+            .and_then(|typed| typed.get("foldScheme"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let rebuilt = crate::turn_rollup::fold_turn_rows_with_scheme(&rows, scheme.as_deref());
         let expected = unit
             .typed_payload
             .as_ref()

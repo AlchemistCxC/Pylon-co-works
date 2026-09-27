@@ -37,6 +37,15 @@ function chunkRows(wires: readonly unknown[]): CanonicalConversationEvent[] {
   }).event)
 }
 
+
+/** #380-b：wire 形状的工具拍（`tool_call_update` 的 content 数组逐拍累积）。 */
+function rawToolCall(toolCallId: string, title: string): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'tool_call', toolCallId, title, kind: 'execute' } }
+}
+function rawToolUpdate(toolCallId: string, text: string): unknown {
+  return { source: 'local:s1', update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', content: [{ type: 'text', text }] } }
+}
+
 /** Rust `canonical_event_wire` 形状：嵌套 owner/provenance 的 EVT-01 事件。 */
 function canonicalSegmentEvent(event: CanonicalConversationEvent): CanonicalConversationEvent {
   return { ...event, provenance: { origin: 'local-observed', trust: 'authoritative' } }
@@ -197,5 +206,65 @@ describe('turn.unit 段内事件读入（#81 回归修复）', () => {
     expect(parseTurnUnitPayload(unit)).toBeUndefined()
     // 不可解析 ⇒ 整行按原样保留（不展开、不丢 raw 证据）
     expect(expandTurnUnitRows([unit])).toHaveLength(1)
+  })
+
+  it('#380-b：tool-run 段展开为**末拍**那一行，与逐拍路径下的末拍逐字段相同', () => {
+    const beats = chunkRows([
+      rawUser('问题'), rawToolCall('call-1', 'Bash'),
+      rawToolUpdate('call-1', 'aaa'), rawToolUpdate('call-1', 'aaaaaa'), rawToolUpdate('call-1', 'aaaaaabbb'),
+      rawDone(),
+    ])
+    const last = beats[4]
+    const unit: CanonicalConversationEvent = createCanonicalEvent({
+      owner, clientGeneration: 1, sequence: 6, occurredAt: last.occurredAt, receivedAt: last.occurredAt,
+      eventType: 'turn.unit', payloadVersion: 1,
+      typedPayload: {
+        aggregateKind: 'turn-rollup', seqStart: 1, seqEnd: 6, foldedCount: beats.length,
+        foldScheme: 'adjacent-delta-fold-v2', contentSha256: 'x',
+        terminal: { eventType: 'turn.completed', occurredAt: last.occurredAt },
+        segments: [
+          { kind: 'event', event: canonicalSegmentEvent(beats[0]) },
+          { kind: 'event', event: canonicalSegmentEvent(beats[1]) },
+          {
+            kind: 'tool-run', eventType: 'tool.call.updated', seqStart: 3, seqEnd: 5, foldedCount: 3,
+            occurredAt: last.occurredAt, identity: { toolCallId: 'call-1' }, event: canonicalSegmentEvent(last),
+          },
+          { kind: 'event', event: canonicalSegmentEvent(beats[5]) },
+        ],
+      },
+      rawPayload: { kind: 'turn-unit' },
+    })
+    const payload = parseTurnUnitPayload(unit)
+    expect(payload?.segments.map(segment => segment.kind)).toEqual(['event', 'event', 'tool-run', 'event'])
+    const run = payload!.segments[2]
+    expect(run.kind === 'tool-run' && run.foldedCount).toBe(3)
+
+    const expanded = expandTurnUnitRows([unit])
+    // 逐拍路径的输入是 beats（6 行）；单元路径是展开后的 4 行——工具那 3 拍折成 1 行。
+    expect(expanded.map(event => event.sequence)).toEqual([1, 2, 5, 6])
+    const expandedBeat = expanded[2]
+    // 等价性判据：展开出的那一行与逐拍路径里的**末拍行**逐字段相同（同一 eventType /
+    // identity / typedPayload / rawPayload）——投影器是这些行的纯函数，故投影等价；
+    // 中间两拍在投影语义上被末拍取代（写侧的累积前缀判据保证了这点，见 Rust 侧测试）。
+    expect(expandedBeat.eventType).toBe(last.eventType)
+    expect(expandedBeat.identity).toEqual(last.identity)
+    expect(expandedBeat.typedPayload).toEqual(last.typedPayload)
+    expect(expandedBeat.rawPayload).toEqual(last.rawPayload)
+  })
+
+  it('#380-b：摺叠拍数 <2 或无末拍事件的 tool-run 段判为不可解析', () => {
+    const rows = chunkRows([rawUser('问题'), rawToolUpdate('call-1', 'aaa'), rawDone()])
+    const unit = unitRowFromTurn(rows)
+    const typed = unit.typedPayload as { segments: Record<string, unknown>[] }
+    typed.segments[1] = {
+      kind: 'tool-run', eventType: 'tool.call.updated', seqStart: 2, seqEnd: 2, foldedCount: 1,
+      occurredAt: rows[1].occurredAt, event: canonicalSegmentEvent(rows[1]),
+    }
+    expect(parseTurnUnitPayload(unit)).toBeUndefined()
+    typed.segments[1] = {
+      kind: 'tool-run', eventType: 'tool.call.updated', seqStart: 2, seqEnd: 2, foldedCount: 2,
+      occurredAt: rows[1].occurredAt,
+    }
+    expect(parseTurnUnitPayload(unit)).toBeUndefined()
   })
 })

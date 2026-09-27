@@ -52,7 +52,6 @@ import {
   runningTailStartTime,
   toWorkbenchEnvelopes,
   withJournalDiagnostic,
-  withoutEnvelopeRaw,
   type LocalSessionFact,
 } from './agentWorkbenchProjection.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
@@ -190,12 +189,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     selectorRequestInFlight: false,
   }
   // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
-  // 是其产出的物化视图。foldLog 保留全部已折信封（到达序、按 eventId 去重，与投影
-  // 核幂等判据同口径——refresh 全量重折的 journal 行不会重复入日志），供 reject 回滚
-  // 时「整页重折、剔除被拒乐观信封」重建投影核——wasm 侧没有就地删除已入账事件的出口。
+  // 是其产出的物化视图。
+  //
+  // #380：这里曾有一个 `fold.log`（整会话已折信封，供 reject 回滚整页重折）+ `fold.ids`
+  // （入日志去重集）。它是**载荷的第二份常驻持有**（合成语料 2237 事件 / Σ载荷 61.5 MB 下
+  // ≈Σ载荷，也是会话级驻留与拍数敏感性的唯一来源），而 journal 本就是权威源——reject 改为
+  // 按需 canonical 重读（`reloadFromJournal` → `refresh`）后整份日志不再需要，只剩下面这个
+  // 宿主侧 overlay 计数。
   const fold = {
-    log: [] as WorkbenchEventEnvelope[],
-    ids: new Set<string>(),
     // journal 迁移失败诊断（canonical.journal.malformed）是宿主侧 overlay：折叠物化
     // 出来的文档不带它，物化后按当前计数重挂（withJournalDiagnostic 幂等：filter+append）。
     journalDiagnosticCount: 0,
@@ -252,12 +253,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     setTimelinePayloadNarrowing(!timelinePayloadNarrowingDisabled())
     const initial = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source ?? '')
     const projected = projectWorkbench(envelopes, { initialDocument: initial }).document
-    for (const envelope of envelopes) {
-      if (fold.ids.has(envelope.eventId)) continue
-      fold.ids.add(envelope.eventId)
-      // #375-c：入日志前剥掉 wire 原始副本（本日志是它唯一的持有者，回滚重折只读 event）。
-      fold.log.push(withoutEnvelopeRaw(envelope))
-    }
     return fold.journalDiagnosticCount > 0 ? withJournalDiagnostic(projected, fold.journalDiagnosticCount) : projected
   }
 
@@ -331,11 +326,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const echo = createAgentWorkbenchOptimisticEcho({
     runtime,
     binding,
-    fold,
     clock,
     updateRuntimeState,
     foldPage,
     foldEvent,
+    // #380：被拒回滚的权威源是 journal（不再是常驻信封日志）——复用 bind/refresh 同一条
+    // 发布路径（epoch/generation 守卫、`binding.buffered` 覆盖读期间到达的 live 行、
+    // `withPending` 补折仍 pending 的乐观行都在那边）。
+    reloadFromJournal: () => refresh(binding.boundSession, undefined, { rebuild: true }),
   })
 
   const commands = createAgentWorkbenchCommandFacade({
@@ -806,7 +804,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * 合成、不依赖一次性 event。因此「本回合是否已收敛」= journal 读到终态行
    * **或** 账本说已收敛——只认前者会让一次早于终态行落盘的读把摘要判成不存在。
    */
-  const refresh = async (session: Session | undefined, ledgerTurn?: unknown): Promise<void> => {
+  /**
+   * `rebuild`（#380）：以**空文档**为 base 整页重建，而不是续折当前文档。bind（冷装载）与
+   * **被拒回滚**要的是重建语义——「重建视角里那条乐观行从未发生」；续折会把当前文档原样带过来，
+   * 乐观行也就删不掉（这正是回滚不能直接复用缺省 refresh 的原因）。其余语义（epoch/generation
+   * 守卫、`buffered` 覆盖读期间到达的 live 行、`withPending` 补折剩余乐观行）两条路径共用。
+   */
+  const refresh = async (session: Session | undefined, ledgerTurn?: unknown, options: { rebuild?: boolean } = {}): Promise<void> => {
     if (binding.destroyed || !session || !binding.ownerKey || !binding.boundSessionId || !binding.source) return
     const bindingKey = workbenchSessionBindingKey(session)
     const refreshOwnerKey = binding.ownerKey
@@ -861,13 +865,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         // live 已应用区间完全覆盖者跳过——折叠状态在会话投影核里，live 行与 journal
         // 行同判幂等，整页重折即收敛。
         if (refreshMalformedCount > 0) fold.journalDiagnosticCount = refreshMalformedCount
-        // #204③：foldLog 以本次 journal 权威集**整体替换**。此前 log 永远保留 bind 时代
-        // 的旧信封实例——refresh 重建文档后它们不再与文档共享事件对象，等于把一整份
-        // 旧事件图钉在内存里（大会话的主要留存浪费之一）。替换后 log 的信封与文档
-        // timeline 共享同一语义事件对象（仅余信封壳），且被拒回滚的整页重折源恰好
-        // 就是这份 journal 权威集（未提交的乐观行由 withPendingOptimistic 随后补入）。
-        fold.log = []
-        fold.ids.clear()
+        // #380：此处原有一份「以 journal 权威集整体替换 foldLog」的记账（#204③）——日志本身
+        // 已整份删除，回滚改走 canonical 重读，这里不再需要任何替换动作。
         publishCanonicalRead({
           readSource: refreshSource,
           readOwnerKey: refreshOwnerKey,
@@ -875,7 +874,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           readSessionId: refreshSessionId,
           envelopes,
           bufferedAtRead: bufferedAtRefresh,
-          base: draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
+          base: options.rebuild || draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
           malformedCount: refreshMalformedCount,
           canonicalDuration,
           canonicalHasTerminal,
@@ -998,9 +997,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       draft.reconcilePending = false; draft.liveDuringReconcile = []
       binding.malformedCount = 0
       fold.journalDiagnosticCount = 0
-      // 绑定重建：折叠日志清空（journal 重放会重新入日志），文档由下面的整页折从空文档起。
-      fold.log = []
-      fold.ids.clear()
+      // 绑定重建：文档由下面的整页折从空文档起（#380 起不再需要清「折叠日志」——它已删除）。
       binding.loading = Boolean(session)
       // #217：空文档的活性申报走有效权威（内核表态随 source 的 map 跨 rebind 保留；
       // 无表态回退时钟，语义与 #213 一致）。
@@ -1140,7 +1137,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
       clock.clearAll(); echo.clear()
-      fold.log = []; fold.ids.clear()
     },
   }
 }

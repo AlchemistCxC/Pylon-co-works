@@ -438,6 +438,37 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
+  it('#380：被拒回滚的权威源是 journal——重读会把期间落盘的行一并带回来', async () => {
+    const active = session('session-380-reject', 'local:380-reject')
+    const userRow = message(1, 'user', 'hello', 'local:380-reject')
+    // 判据的构造：这份 journal 行**从未**进过任何 fold（bind 时还不存在，也没有 refresh），
+    // 因此它只可能来自「回滚时真的读了一次 journal」——修前整页重折走的是内存里的信封日志，
+    // 这条 assistant 行不会出现（用例会失败）。
+    const laterRow = message(9, 'assistant', 'landed-later', 'local:380-reject')
+    let rows: readonly unknown[] = [userRow]
+    const loadAll = vi.fn(async () => rows)
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-380-reject',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    const readsAfterBind = loadAll.mock.calls.length
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello'])
+
+    rows = [userRow, laterRow]
+    await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
+    // 回滚读了一次 journal（不是内存日志），乐观行消失、两条 journal 行都在。
+    expect(loadAll.mock.calls.length).toBeGreaterThan(readsAfterBind)
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'landed-later'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
   it('生产 appearance 命令经 Zustand adapter 写回主题权威', () => {
     const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
     try {
