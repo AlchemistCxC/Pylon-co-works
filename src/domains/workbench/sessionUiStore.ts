@@ -14,6 +14,8 @@ export type SessionUiKey =
   | 'input-history-index'
   | 'message-expansion'
   | 'selector-pending'
+  /** #394：Agent 推送预测的消费标记（值 = 预测实例键，见 `session/assistPrediction.ts`）。 */
+  | 'assist-prediction-consumed'
 
 export interface SessionUiStore {
   get<T>(sessionId: string, key: SessionUiKey, fallback: T): T

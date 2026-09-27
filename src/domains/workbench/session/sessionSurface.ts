@@ -58,7 +58,8 @@ export interface SessionConfigOption {
 }
 
 export interface AssistSnapshot {
-  readonly prediction?: { readonly placeholder?: string; readonly actions: readonly JsonValue[] }
+  /** #394：`eventId` 是本次预测实例的身份——接受/拒绝按它消费（消费标记见 `SessionUiKey`）。 */
+  readonly prediction?: { readonly placeholder?: string; readonly actions: readonly JsonValue[]; readonly eventId?: string }
   readonly files: readonly string[]
   readonly queuedCommand?: string
 }

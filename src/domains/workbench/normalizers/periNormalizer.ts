@@ -142,6 +142,7 @@ function normalizePeriAgentEvent(
   const diagnostics: NormalizeDiagnostic[] = []
   const event = mapAcpEventValue(eventType, value, diagnostics, context, update)
   if (event === undefined) {
+    if (SILENT_ACP_EVENT_VARIANTS.has(eventType)) return silentPeriEvent(eventType, context, update, diagnostics)
     diagnostics.push(createDiagnostic(
       context, update, 'peri.agent-event-unknown',
       `unknown peri AcpEvent variant: ${eventType}`,
@@ -152,6 +153,31 @@ function normalizePeriAgentEvent(
   return { events: [makeEnvelope(event, input, context, update)], diagnostics }
 }
 
+/**
+ * #405：已知但**按策略不做展示**的 AcpEvent 变体——peri 的回合簿记帧（goal_snapshot 在
+ * 无 goal 时全字段为 null）与全量消息快照（StateSnapshot）都在此列。它们此前走 unknown
+ * 兜底，于是在会话流里渲成一张「标题 = 120 字符原始 JSON」的 warning 卡：用户视角是与
+ * 对话无关的噪声，且每回合必现。
+ *
+ * 只留 **info 诊断**（诊断面可回溯、raw 仍在 canonical 行里），不产事件 ⇒ 不进时间轴
+ * （`solidWorkbenchProjectionSupport.visibleDiagnostics` 过滤 info）。
+ */
+const SILENT_ACP_EVENT_VARIANTS = new Set(['goal_snapshot', 'turn_committed', 'state_snapshot'])
+
+function silentPeriEvent(
+  eventType: string,
+  context: NormalizeContext,
+  update: Record<string, unknown> | undefined,
+  diagnostics: NormalizeDiagnostic[],
+): NormalizeResult {
+  diagnostics.push(createDiagnostic(
+    context, update, 'peri.agent-event-muted',
+    `peri AcpEvent ${eventType} is known but carries no timeline fact`,
+    ['eventJson'], true,
+  ))
+  return { events: [], diagnostics }
+}
+
 function createUnknownPeriEvent(value: unknown, originalType: string): WorkbenchSemanticEvent {
   const raw = toJsonValue(value)
   const summary = typeof raw === 'string' ? raw.slice(0, 120) : JSON.stringify(raw).slice(0, 120)
@@ -159,8 +185,10 @@ function createUnknownPeriEvent(value: unknown, originalType: string): Workbench
 }
 
 /** AcpEvent（peri-acp event/mod.rs，snake_case）→ workbench 语义事件。
- *  无 peri 侧语义的变体（TurnCommitted/StateSnapshot 全量消息快照）不在此通道
- *  消费，返回 undefined 走 unknown 兜底；数据不丢（raw 恒保留）。 */
+ *  本函数只映射**有展示价值**的变体；回合簿记与全量快照类变体（goal_snapshot /
+ *  TurnCommitted / StateSnapshot）返回 undefined，由 `SILENT_ACP_EVENT_VARIANTS`
+ *  按静默策略收口（#405，不产事件、只留 info 诊断）；真正的未知变体才走
+ *  `event.unknown` 兜底。数据不丢：raw 恒在 canonical 行里。 */
 function mapAcpEventValue(
   eventType: string,
   value: Record<string, unknown>,

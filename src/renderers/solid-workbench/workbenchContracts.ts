@@ -37,6 +37,12 @@ export interface WorkbenchMountInput {
   readonly sheetId: string
   readonly sessionOwnerKey: string | null
   readonly sessionId: string | null
+  /**
+   * #395：会话的 **provider source**（如 `local:smujxe9cc`）。文档按 source 建键
+   * （`WorkbenchDocument.sessionId` 即 source），而 `sessionId` 是身份域的 `Session.id`；
+   * 渲染器判「这份文档是不是本会话的」必须拿 source 比，否则判据恒假（ghost 与历史上下文全哑）。
+   */
+  readonly sessionSource: string | null
   readonly replayReadonly: boolean
   readonly reducedMotion: boolean
   readonly visibility: 'active' | 'background'
@@ -91,6 +97,8 @@ export interface WorkbenchRendererInstance {
 export interface SolidWorkbenchInput {
   sheetId: string
   sessionId: string | null
+  /** #395：见 `WorkbenchMountInput.sessionSource`。缺省（undefined/null）时不收紧文档判据。 */
+  sessionSource?: string | null
   replayReadonly?: boolean
   rightInset?: number
   preview?: boolean
@@ -110,6 +118,7 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     sheetId: input.sheetId,
     sessionOwnerKey: input.sessionOwnerKey ?? null,
     sessionId: input.sessionId,
+    sessionSource: input.sessionSource ?? null,
     replayReadonly: input.replayReadonly === true,
     reducedMotion: input.reducedMotion === true,
     visibility: input.visibility ?? 'active',
