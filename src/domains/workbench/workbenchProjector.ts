@@ -1842,7 +1842,7 @@ function findLastMessageIndex(
  * `reduceExtension` 全部是"替换新建"，`upsertActivity` 只做浅合并，没有任何下游就地改写。
  * 冻结即把该判据变成运行时契约：一旦有人就地写就抛（开发期立刻暴露）。
  *
- * 收益不止省掉克隆：活动节点与（fold.log 持有的）信封语义事件**共享同一批载荷对象**，
+ * 收益不止省掉克隆：活动节点与信封语义事件**共享同一批载荷对象**，
  * 同一份载荷在文档里只存在一份。
  */
 function freezeJsonValue<T>(value: T): T | undefined {

@@ -161,8 +161,11 @@ export function createAgentWorkbenchOptimisticEcho(deps: AgentWorkbenchOptimisti
       if (binding.destroyed) return
       // P52 D3：发送被拒 = 回合回滚；若无其它在途乐观回合，时钟一并撤销，
       // 后续迟到帧不得经 updateRuntimeState 复活指示器（原 controller 侧由
-      // reject-optimistic-user reducer 承担）。
+      // reject-optimistic-user reducer 承担）。时钟按 source 归档，切走也照撤。
       if (remaining.length === 0) clock.rollback(targetSource)
+      // 重读期间可能已切到别的会话（异步化引入的窗口）：那时不要再拿旧 source 的剩余 pending
+      // 去写当前 UI 的生成态——新会话的生成态归它自己的时钟/绑定管。
+      if (binding.source !== targetSource) return
       const existingActivity = runtime.getSnapshot().generationActivity
       updateRuntimeState({
         // #213：回滚后的活性只认"是否还有未撤销的乐观回合"——**不得**再看文档里有没有

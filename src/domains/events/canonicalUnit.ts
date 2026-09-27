@@ -24,9 +24,11 @@ import {
 import { normalizeCanonicalEventRow } from './canonicalEventRow.ts'
 
 export const TURN_UNIT_AGGREGATE_KIND = 'turn-rollup'
+/**
+ * 当前折叠方案（写侧写进 `typedPayload.foldScheme`）。读侧**不校验**方案字符串——段按 `kind`
+ * 展开、方案只影响写侧字节与 L3 裁剪的重折口径，故这里不需要枚举历史方案（v1 = 只折相邻 delta）。
+ */
 export const TURN_UNIT_FOLD_SCHEME = 'adjacent-delta-fold-v2'
-/** v1：只有相邻 delta 折叠（v2 之前的单元行）。读侧按 `foldScheme` 认得两个方案。 */
-export const TURN_UNIT_FOLD_SCHEME_V1 = 'adjacent-delta-fold-v1'
 
 export type TurnUnitDeltaEventType = 'assistant.text.delta' | 'assistant.thinking.delta'
 

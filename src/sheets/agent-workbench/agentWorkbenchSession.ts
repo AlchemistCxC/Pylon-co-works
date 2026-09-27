@@ -818,7 +818,18 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const refreshSessionId = binding.boundSessionId
     const refreshGeneration = binding.generation
     if (bindingKey !== binding.boundSessionBindingKey || session.id !== refreshSessionId || session.source !== refreshSource) return
-    if (binding.refreshInFlight) return binding.refreshInFlight
+    if (binding.refreshInFlight) {
+      // #380：**rebuild 请求不能被在途读合并掉**。合并返回的是先前那次读的 promise，而它的 base
+      // 是含乐观行的 current 文档（续折）——被拒乐观行会因此留在屏幕上，「send 返回时已撤销」的
+      // 时序保证在这个窗口里失效（评审发现的合并竞态）。故 rebuild 请求排队：等在途读落地后
+      // 再跑一次（那时 `refreshInFlight` 已被清空，递归调用走新读）。
+      if (!options.rebuild) return binding.refreshInFlight
+      const inFlight = binding.refreshInFlight
+      return inFlight.then(
+        () => refresh(session, ledgerTurn, options),
+        () => refresh(session, ledgerTurn, options),
+      )
+    }
     const refreshEpoch = ++binding.canonicalReadEpoch
     // 账本终态按 source 归档；本次调用的账本可能被去重丢掉，但归档会留下。
     const ledgerTerminalReason = resolveGenerationLedgerTerminalReason(ledgerTurn)

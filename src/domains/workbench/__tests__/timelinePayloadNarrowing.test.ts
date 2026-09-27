@@ -187,7 +187,9 @@ describe('#380 会话侧不再常驻整会话信封', () => {
     const echo = echoSource()
     expect(echo).toContain('await reloadFromJournal()')
     expect(echo).not.toContain('fold.log')
-    // 接线必须带 rebuild——缺省的 refresh 是**续折**，乐观行会留在文档里（本 issue 施工中真的踩过）。
-    expect(sessionSource()).toContain('reloadFromJournal: () => refresh(binding.boundSession, undefined, { rebuild: true })')
+    // 只断言「这条缝存在」；`rebuild: true` 与合并竞态由行为用例覆盖
+    // （agentWorkbenchSession.test.ts 的「在途 refresh 不会把被拒回滚的重建吞掉」，
+    // 该用例实测过去掉排队逻辑即红——整行字符串断言测不到那一层，评审指出后已换掉）。
+    expect(sessionSource()).toContain('reloadFromJournal:')
   })
 })

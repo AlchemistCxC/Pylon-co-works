@@ -180,15 +180,26 @@ fn fold_segments(rows: &[CanonicalEventRow], allow_tool_runs: bool) -> Vec<Segme
 ///
 /// 返回 `(末拍下标, 末拍的 EVT-01 行)`；不满足压缩条件（单拍 / identity 或 sequence 不连续 /
 /// 出现非 `tool.call.updated` / 正文不是前缀扩展 / 正文读不出来）返回 `None`，调用方按原样
-/// 保留整行 segment。压缩的安全性来自「前缀扩展」这条判据：末拍正文包含中间拍的全部正文，
-/// 投影上末拍即终态，故丢弃中间拍**不改变任何可见内容**（增量式回传的 provider 不满足该判据，
-/// 也就一拍都不折）。
+/// 保留整行 segment。压缩的安全性来自两条判据，缺一不可：
+///
+/// 1. **正文前缀扩展**：末拍正文包含中间拍的全部正文 ⇒ 丢弃中间拍不改变可见正文；
+/// 2. **键集不回缩**：每一拍的 raw `update` 键集都必须是**末拍键集的子集**。
+///    理由不是正文而是**投影的 previous 回退**：`workbenchProjector` 的工具节点对
+///    `title`/`kind`/`semanticKind`/`parentToolUseId`/`canonicalName`/`rawInput`/`name` 等
+///    身份与展示字段走 `previous?.X` 惰性回退——逐拍投影下「首拍给了 title、后拍省略」仍能显示，
+///    折成末拍一行后 previous 链消失、这些字段就没了。要求键集不回缩即可保证「末拍自己带全」，
+///    于是两条路径的节点字段逐个相同。（评审反例：beat1 带 title/kind、beat2 只带 status+content
+///    ⇒ 键集回缩 ⇒ 本判据拒绝折叠。）
+///
+/// 放置序由读侧负责：`tool-run` 展开出的信封序取 `seqStart`（创建时刻事实），与逐拍路径的
+/// 「活动节点在首拍处创建」一致（见 `expandCanonicalUnitRow`）。
 fn tool_run_at(rows: &[CanonicalEventRow], start: usize) -> Option<(usize, Value)> {
     let first = rows.get(start)?;
     if first.event_type != TOOL_CALL_UPDATED_EVENT_TYPE {
         return None;
     }
     let mut text = tool_beat_text(first)?;
+    let mut keys = raw_update_keys(first)?;
     let mut end = start;
     while let Some(next) = rows.get(end + 1) {
         if next.event_type != TOOL_CALL_UPDATED_EVENT_TYPE
@@ -203,7 +214,15 @@ fn tool_run_at(rows: &[CanonicalEventRow], start: usize) -> Option<(usize, Value
         if !next_text.starts_with(&text) {
             break;
         }
+        let Some(next_keys) = raw_update_keys(next) else {
+            break;
+        };
+        // 键集只能长大：末拍必须涵盖此前每一拍出现过的键（否则该键在折叠后消失）。
+        if !next_keys.is_superset(&keys) {
+            break;
+        }
         text = next_text;
+        keys = next_keys;
         end += 1;
     }
     if end == start {
@@ -213,16 +232,23 @@ fn tool_run_at(rows: &[CanonicalEventRow], start: usize) -> Option<(usize, Value
     Some((end, canonical_event_wire(&rows[end])))
 }
 
-/// 工具拍正文：优先 typed 的 `tool.contentBlocks[*].content.text`（归一后的载荷），
-/// 退化到 raw 的 `update.content[*].text`（wire 原文）。读不出来返回 `None` ⇒ 不折。
+/// raw `update` 对象的键集（读不出来返回 `None` ⇒ 不折）。
+fn raw_update_keys(row: &CanonicalEventRow) -> Option<std::collections::BTreeSet<String>> {
+    let raw: Value = serde_json::from_str(&row.raw_payload_json).ok()?;
+    let update = raw.get("update")?.as_object()?;
+    Some(update.keys().cloned().collect())
+}
+
+/// 工具拍正文：**先读 raw 的 `update.content[*].text`**（与工作台投影读的就是这份 wire 一致），
+/// 退化到 typed 的 `tool.contentBlocks[*].content.text`。两份都读不出来返回 `None` ⇒ 不折。
 fn tool_beat_text(row: &CanonicalEventRow) -> Option<String> {
-    if let Some(typed) = row.typed_payload.as_ref() {
-        if let Some(text) = content_parts_text(typed.pointer("/tool/contentBlocks")) {
+    if let Ok(raw) = serde_json::from_str::<Value>(&row.raw_payload_json) {
+        if let Some(text) = content_parts_text(raw.pointer("/update/content")) {
             return Some(text);
         }
     }
-    let raw: Value = serde_json::from_str(&row.raw_payload_json).ok()?;
-    content_parts_text(raw.pointer("/update/content"))
+    let typed = row.typed_payload.as_ref()?;
+    content_parts_text(typed.pointer("/tool/contentBlocks"))
 }
 
 /// `[{text}]`（wire content）与 `[{content:{text}}]`（contentBlocks）两种形状的正文拼接。
@@ -792,5 +818,69 @@ mod tests {
         assert_eq!(first.content_sha256, again.content_sha256);
         assert_eq!(first.segments, again.segments);
         assert_eq!(kinds(&first.segments), vec!["delta-run", "event", "event"]);
+    }
+
+    /// #380-b（评审反例）：首拍带身份/展示字段、后拍省略 ⇒ 键集回缩 ⇒ **不折**。
+    /// 投影器的 `previous?.title/kind/…` 回退在逐拍路径里能让这些字段存活，折成一行就会丢。
+    fn tool_beat_with_extra(
+        sequence: i64,
+        tool_call_id: &str,
+        text: &str,
+        extra: Value,
+    ) -> CanonicalEventRow {
+        let mut update = serde_json::json!({ "sessionUpdate": "tool_call_update", "toolCallId": tool_call_id,
+            "status": "in_progress", "content": [{ "type": "text", "text": text }] });
+        if let Some(object) = update.as_object_mut() {
+            if let Some(extra) = extra.as_object() {
+                for (key, value) in extra {
+                    object.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        row(
+            sequence,
+            TOOL_CALL_UPDATED_EVENT_TYPE,
+            json!({ "tool": { "toolCallId": tool_call_id, "status": "in_progress",
+                "contentBlocks": [{ "type": "content", "content": { "type": "text", "text": text } }] } }),
+            Some(json!({ "toolCallId": tool_call_id })),
+            json!({ "source": "local:s1", "update": update }),
+        )
+    }
+
+    #[test]
+    fn tool_run_refuses_when_a_beat_drops_a_key_an_earlier_beat_carried() {
+        let beats = vec![
+            tool_beat_with_extra(
+                1,
+                "call-1",
+                "aaa",
+                json!({ "title": "Bash", "kind": "execute" }),
+            ),
+            tool_beat_with_extra(2, "call-1", "aaaaaa", json!({})),
+        ];
+        let fold = fold_turn_rows(&beats);
+        assert_eq!(
+            kinds(&fold.segments),
+            vec!["event", "event"],
+            "键集回缩会让 title/kind 只存在于首拍 ⇒ 折叠会丢展示字段"
+        );
+    }
+
+    #[test]
+    fn tool_run_accepts_when_later_beats_keep_or_add_keys() {
+        let beats = vec![
+            tool_beat_with_extra(1, "call-1", "aaa", json!({ "title": "Bash" })),
+            tool_beat_with_extra(2, "call-1", "aaaaaa", json!({ "title": "Bash" })),
+            // 后拍多带一个键（键集长大）也可以：末拍涵盖前面的键集
+            tool_beat_with_extra(
+                3,
+                "call-1",
+                "aaaaaabbb",
+                json!({ "title": "Bash", "kind": "execute" }),
+            ),
+        ];
+        let fold = fold_turn_rows(&beats);
+        assert_eq!(kinds(&fold.segments), vec!["tool-run"]);
+        assert_eq!(fold.segments[0]["foldedCount"], json!(3));
     }
 }

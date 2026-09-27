@@ -83,7 +83,9 @@
 | 增量式工具拍一拍都不折 | PASS（`non_cumulative_tool_beats_are_not_folded`） |
 | 单拍 / 换 `toolCallId` / sequence 不连续 一律断开 | PASS（`tool_run_breaks_on_identity_gap_or_single_beat`） |
 | v1 单元按 v1 重折可裁剪；记 v1 却持 v2 的 sha ⇒ mismatch 保行 | PASS（`rollup_trim_refolds_with_the_scheme_recorded_on_the_unit`） |
-| 前端 `tool-run` 展开为末拍行、与逐拍路径的末拍逐字段相同 | PASS（`canonicalUnit.test.ts` 新增 2 条，含形状防御：`foldedCount < 2` / 缺末拍事件判不可解析） |
+| 前端 `tool-run` 展开为末拍行（**消息侧** `expandTurnUnitRows`） | PASS（`canonicalUnit.test.ts` 新增 2 条，含形状防御：`foldedCount < 2` / 缺末拍事件判不可解析） |
+| 前端 `tool-run` 展开（**工作台侧** `expandCanonicalUnitRow`，经 `canonicalRowToWorkbench`） | 初版**漏做**（评审阻塞项）→ 已修：见「评审轮」；新增 `agentWorkbenchSession.batch.test.ts` 用例断言工具活动与逐拍路径逐字段相同、且不产出幽灵 reasoning 行 |
+| 全量类型检查（`tsc -p tsconfig.json` / `build` 的 `tsc -b`） | 初版**红**（评审阻塞项）→ 已修（`tsc -p tsconfig.json --noEmit` exit 0） |
 | 既有门禁 | 见「证据」一节 |
 
 ## 测试处置
@@ -139,3 +141,58 @@
 2. `refresh(rebuild: true)` 的 live 行窗口（见方案要点 2 的代价②）沿用既有 refresh 语义，未额外加固；
    若后续发现「reject 恰逢未落盘 live 行」的可见回跳，可考虑把 `binding.buffered` 之外再留一个
    极短的尾部缓冲（有界）。
+
+---
+
+## 评审轮（独立子 agent，对抗式）与处置
+
+评审任务：把本次改动**证伪**（回滚正确性/异步化对调用方的影响、折叠安全性、方案版本化与 L3 裁剪、
+前端展开等价、测试是否恒真、门禁与记录诚实度）。总判 **REQUEST CHANGES**——两个阻塞项都是真的，
+已全部修复并补了会失败的回归测试。
+
+### 阻塞项（已修）
+
+1. **全量类型检查红**：`canonicalUnit.ts` 把 `TurnUnitToolRunSegment` 加进联合后，
+   `agentWorkbenchProjection.ts` 的 delta-run 分支继续访问 `segment.markdown/text` ⇒ `tsc -b` 挂
+   （即 `bun run build` 挂）。**我先前跑的门禁有盲点**：`check:solid` 只覆盖 `tsconfig.solid.json`
+   （不含该文件），`bun run test` 走 esbuild 剥类型。→ 已补 `tool-run` 分支修好类型；
+   **门禁口径改为必跑 `bun run build`（`tsc -b`）或 `bun run check:all`**（全量类型检查在
+   `check:all → check:frontend → build` 这条链上，本批此前只跑 `check:solid` 才漏掉）。
+2. **工作台读路径把 `tool-run` 展开成幽灵行**：`expandCanonicalUnitRow`（会话侧 `canonicalRowToWorkbench`
+   的展开点）没有 `tool-run` 分支，压缩段落进 delta-run 兜底 ⇒ 展开出 parts 为空的 `reasoning.delta`
+   幽灵信封、**末拍工具事件整行丢失**，等于「同一构建读不回自己写的数据」。而 issue 范围第 1 条
+   明写要这条分支。→ 已补分支：末拍整行走既有单行归一，**信封序取 `seqStart`**（活动节点的 placement
+   是创建时刻事实，投影器取信封 sequence；用末拍序会让卡片在消息流里跳位），coverage 取整个 run 跨度；
+   新增用例 `agentWorkbenchSession.batch.test.ts` 断言工作台侧的工具活动与逐拍路径**逐字段相同**
+   （title/status/toolKindWire/displayName/sequence/parts）且 timeline 无 reasoning 行。
+
+### 重要项（已修）
+
+3. **`refreshInFlight` 把 `rebuild` 静默降级为续折**：reject 触发的重建若撞上在途 refresh
+   （活跃回合期间 canonical 回放相当频繁），会返回先前那次**续折**的 promise ⇒ 被拒乐观行留在文档里，
+   「send 返回时已撤销」在这个窗口里不成立。→ 已改为**排队**：rebuild 请求等在途读落地后再跑一次
+   （`refreshInFlight` 那时已清空，递归调用走新读）。新增行为用例（`#380：在途 refresh 不会把被拒
+   回滚的重建吞掉`），并**实测过去掉排队逻辑即红**（`readCount` 停在 2）。
+4. **折叠的「投影等价」前提不成立**（评审给出反例）：投影器的工具节点对
+   `title`/`kind`/`semanticKind`/`parentToolUseId`/`canonicalName`/`rawInput`/`name` 走
+   `previous?.X` 惰性回退 ⇒ 折成末拍一行后 previous 链消失，**只出现在早期拍的身份/展示字段会丢**；
+   另外活动 placement 取首拍序（创建时刻事实），折叠后会变末拍序。→ 已做两件事：
+   - **判据加第二维「键集不回缩」**：每一拍的 raw `update` 键集必须是末拍键集的子集（保证末拍自己带全
+     这些字段）；正文前缀判据改为**先读 raw**（与投影器读的是同一份 wire）。评审的最小反例
+     （beat1 带 title/kind、beat2 省略）现在**直接不折**，已加用例锁住。
+   - **placement 修好**：读侧信封序取 `seqStart`（见阻塞项 2）。
+   - 记录里「投影器是这些行的纯函数，故投影等价」的注释与用例前提已作废并改写。
+
+### 次要/提示项
+
+5. **未知 `foldScheme` 会被永久标 mismatch**（不误删，但未来换版后旧二进制遇到 v3 单元就出队了）。
+   取舍已写进代码注释与本节：**本轮接受**（安全的代价是升级路径要靠 `rollup_migration_state` 手工清）；
+   若将来引入 v3，需同时给出「未知方案」的独立状态而不是复用 `mismatch`。
+6. 源码守卫的价值与脆弱性：已按建议**收掉整行接线字符串断言**（它测不到合并竞态那一层），
+   行为面交给第 3 条的新用例；正则守卫（防信封日志复活）保留。
+7. 过时残留已清：`workbenchProjector.ts` 里「fold.log 持有」的注释、`agentWorkbenchSession.test.ts`
+   里名为「refresh 后 foldLog 以 journal 权威集替换」的用例名（机制已不存在）。
+8. 其它：删掉前端零消费的 `TURN_UNIT_FOLD_SCHEME_V1` 导出（读侧不校验方案字符串，段按 `kind` 展开）；
+   live 行窗口的措辞更正为「**sink 1000 ms trailing debounce + 读时长**」（旧实现由 fold.log 保住，
+   新实现会先消失约 1 s 再由下一次 canonical 读回补）；`contentSha256` 的
+   `serde_json` `preserve_order` 跨构建图差异是 v1 已有的性质，非本批引入，在此登记。
