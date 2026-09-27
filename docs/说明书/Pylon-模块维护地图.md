@@ -7,7 +7,7 @@
 | 维护块 | 路径与入口 | 所有者、输入输出与限制 | 验证入口 |
 | --- | --- | --- | --- |
 | 公开契约 | `src/contracts/`、`src/sdk/` | 定义插件可消费的类型、语义和版本边界；不拥有运行时状态 | SDK / manifest / contribution 测试；`check:deps` |
-| 领域 | `src/domains/`；[workbenchProjector](../../src/domains/workbench/workbenchProjector.ts) | normalized envelope → 可丢弃文档；projector 保持唯一，选择器不改 journal | `vitest run src/domains` |
+| 领域 | `src/domains/`；[workbenchProjector](../../src/domains/workbench/workbenchProjector.ts) | normalized envelope → 可丢弃文档；projector 保持唯一，选择器不改 journal；`timeline.data` 是**标量身份面**（tool/activity 两族按长度收窄：≤512 短标量 + 一层内嵌短标量，省略键名记入 `payloadKeys`），载荷的唯一承载面是 `document.activities[]`，契约见渲染引擎唯一入口台账 **K20**，逃生口 `data-timeline-payload="full"`（运维开关，插件不得依赖） | `vitest run src/domains` |
 | 应用装配 | `src/app/`、`src/application/`、`src/kernel/`；[applicationRuntime](../../src/application/applicationRuntime.ts) | application 层拥有应用注册和事务；kernel 负责根挂载、恢复与启动接线；`app/startupTiming.ts` 是启动相位打点（#269，release 可用旁路，ready 时一次性上报，权威出口在后端 runtime log） | `vitest run src/kernel src/application` |
 | 基础设施 | `src/infrastructure/`；[runtimeClient](../../src/infrastructure/tauri/runtimeClient.ts) | UI / domain 边界到 IPC、存储、传输；处理错误和取消，不决定产品布局 | `vitest run src/infrastructure`；`check:boundaries` |
 | 插件宿主 | `src/plugin-runtime/`；[pluginCompositionRoot](../../src/plugin-runtime/pluginCompositionRoot.ts) | 拥有 registry、activation、权限与资源 Scope；产品通过贡献接入 | `vitest run src/plugin-runtime` |

@@ -173,11 +173,6 @@ impl DeltaRun {
     }
 }
 
-/// 行 `next` 是否延续以 `previous` 起始的 run（与折叠同一判定；供分页前瞻用）。
-pub(super) fn continues_run(previous: &CanonicalEventRow, next: &CanonicalEventRow) -> bool {
-    DeltaRun::start(previous).is_some_and(|run| run.accepts(next))
-}
-
 /// 依次走 `rows`，返回「窗口内最后一个 run 末行索引」（`None` = 整个窗口是一个 run，
 /// 或没有可折叠的 run）。与折叠用同一个累加器，故切点判定与折叠结果必然一致。
 pub(super) fn last_run_boundary_index(rows: &[CanonicalEventRow]) -> Option<usize> {
