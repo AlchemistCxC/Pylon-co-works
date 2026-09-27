@@ -56,6 +56,16 @@ export interface GenerationFooterInput {
    * without treating every projected startTime write as a new turn.
    */
   generationKey?: string
+  /**
+   * #390：宿主持有的**回合身份**（runtime 快照的 `turnEpoch`，进程内单调、不落 wire）。
+   * 每个真实回合恰好 +1（发送入口的乐观投影与 live user 起手各推进一次）。
+   *
+   * 渲染层此前自己铸号（`generation-N`）来判断「这是不是新回合」，与宿主对"回合"的
+   * 认知可能漂移——一次多算的边沿会让最短展示计时重开、预设词重抽，用户看到的就是
+   * 「状态混乱」。改为以宿主身份为准；`turnEpoch` 缺失时（预览/无主机的夹具）退回
+   * 原有的 running 边沿判断。
+   */
+  turnId?: number
   tokenCount: number
   startTime: number
   lastTokenAt?: number

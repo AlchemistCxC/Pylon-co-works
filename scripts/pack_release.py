@@ -90,6 +90,10 @@ SENSITIVE_KEY_RE = re.compile(
     r"(?i)\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)\b\s*[:=]"
 )
 DRIVE_PATH_RE = re.compile(r"\b[A-Za-z]:[\\/]")
+# C:\Windows（含子路径）是每台 Windows 机器都有的系统目录，不携带构建机信息；
+# 说明书需如实描述「UNC cwd 被 cmd.exe 换成 C:\Windows」这类系统行为（#353）。
+# 只豁免该字面前缀，其余盘符路径（尤其构建机独有盘符）照旧拒绝。
+UNIVERSAL_SYSTEM_PATH_RE = re.compile(r"(?i)c:[\\/]windows\b")
 PLACEHOLDER_MARKERS = ("path\\to", "path/to", "your-", "example", "占位", "...")
 # 插件开发 SDK：发行包附带完整离线分发包（2026-09-01 用户决定——不再只带最小
 # runtime 子集，插件开发者需拿到 testing.js + types/ 类型声明全套）。
@@ -167,7 +171,8 @@ def scan_text_file(rel_path: str, text: str) -> None:
         stripped = line.strip()
         if not stripped:
             continue
-        if DRIVE_PATH_RE.search(stripped):
+        residue = UNIVERSAL_SYSTEM_PATH_RE.sub("", stripped)
+        if DRIVE_PATH_RE.search(residue):
             if not any(marker in stripped for marker in PLACEHOLDER_MARKERS):
                 raise PackError(
                     f"包内文本文件含疑似本机绝对路径 {rel_path}:{line_no}: {stripped}"

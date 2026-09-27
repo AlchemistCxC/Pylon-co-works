@@ -233,11 +233,13 @@ describe('C04 SolidToolInvocationCard', () => {
     const card = container.querySelector('.term-tool')
     expect(container.querySelector('.tool-progress-track')).toHaveAttribute('aria-valuenow', '50')
 
+    // #389：终态后活态进度区不再渲染（陈旧进度条会让已完成卡片显得仍在进行），
+    // 但流式修订不得重挂卡片——身份与展开态保持稳定。
     setSnapshot(previous => ({ ...previous, status: 'completed', progress: { completed: 2, total: 2, message: 'done' }, result: { rawOutput: 'passed' } }))
 
     expect(container.querySelector('.term-tool')).toBe(card)
     expect(container.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'true')
-    expect(container.querySelector('.tool-progress-track')).toHaveAttribute('aria-valuenow', '100')
+    expect(container.querySelector('.tool-progress-section')).toBeNull()
     expect(container.querySelector('.tool-plain-output')).toHaveTextContent('passed')
   })
 
@@ -412,8 +414,7 @@ describe('C06 edit/write nested content', () => {
 })
 
 describe('C07 execute nested content', () => {
-  it('renders terminal and log result parts through typed components and command port', () => {
-    const execute = vi.fn()
+  it('renders terminal and log result parts through typed components and command port', () => {    const execute = vi.fn()
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.execute"
       appearance={{ defaultCollapsed: false, showCopy: true }}
@@ -435,5 +436,36 @@ describe('C07 execute nested content', () => {
     screen.getByRole('button', { name: '复制' }).click()
     expect(execute).toHaveBeenCalledWith({ type: 'clipboard.write', payload: { text: 'passed' } })
     expect(container.textContent).not.toContain('"kind": "terminal"')
+  })
+})
+
+describe('#389 活态进度只在工具未终态时渲染', () => {
+  it('hides the progress section once the tool reaches a terminal state', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.read"
+      appearance={{ defaultCollapsed: false }}
+      snapshot={{
+        id: 'progress-terminal', name: 'Read', status: 'completed',
+        progress: { completed: 2, total: 4, message: 'reading' },
+        result: { rawOutput: 'file body' },
+      }}
+    />)
+
+    expect(container.querySelector('.tool-progress-section')).toBeNull()
+    expect(container.querySelector('.tool-progress-track')).toBeNull()
+  })
+
+  it('keeps the progress section (with default 进行中 heading) while the tool is unsettled', () => {
+    for (const status of [undefined, 'running', 'in_progress', 'progress'] as const) {
+      const { container } = render(() => <SolidToolInvocationCard
+        renderKind="tool.read"
+        appearance={{ defaultCollapsed: false }}
+        snapshot={{ id: `progress-live-${status ?? 'none'}`, name: 'Read', status, progress: { partial: true } }}
+      />)
+
+      const section = container.querySelector('.tool-progress-section')
+      expect(section, `status=${String(status)}`).not.toBeNull()
+      expect(section).toHaveTextContent('进行中')
+    }
   })
 })

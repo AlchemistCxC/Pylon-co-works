@@ -646,6 +646,8 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
                 // session switch cannot reset the footer against the previous
                 // session's start timestamp for one render.
                 generationKey={snapshot().sessionId ?? ''}
+                // #390：回合身份也由宿主给出（`turnEpoch` 每回合 +1），footer 不再本地铸号。
+                turnId={snapshot().turnEpoch ?? 0}
                 tokenCount={canonicalTokenCount(document()?.session.usage, snapshot().tokenCount)}
                 startTime={snapshot().generationStart}
                 lastTokenAt={snapshot().lastTokenAt}

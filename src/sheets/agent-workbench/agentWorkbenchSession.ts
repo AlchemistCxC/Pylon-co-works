@@ -45,7 +45,7 @@ import {
 } from '../../infrastructure/acp/chatContracts.ts'
 import {
   canonicalDurationFromRows,
-  canonicalHasTerminalFromRows,
+  canonicalLatestBoundaryFromRows,
   draftChunkToWorkbenchEnvelopes,
   isLiveTextDelta,
   localSessionFactEvent,
@@ -54,6 +54,7 @@ import {
   withJournalDiagnostic,
   type LocalSessionFact,
 } from './agentWorkbenchProjection.ts'
+import type { LatestTurnBoundary } from '../../domains/events/canonicalTurnDuration.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
 import { createAgentWorkbenchOptimisticEcho } from './agentWorkbenchOptimisticEcho.ts'
 import type { CanonicalDraftChunkNotification, CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
@@ -542,8 +543,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       clock.start(envelope.sessionId, runningTailStartTime(currentBefore) ?? envelopeTime)
       clock.reconcile(envelope.sessionId)
     }
-    // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time）。
-    clock.touch(envelope.sessionId, envelopeTime)
+    // 每条 live envelope 刷新时钟活性（append-delta 不更新 message.time），并把刷新后的
+    // lastTokenAt 一并写进快照。#390 之前 `touch` 只改时钟**内部**条目，快照里的
+    // lastTokenAt 停在回合起点（文档派生那一路在 append-delta 下也不推进）⇒ 长流式回合里
+    // `idleMs = now - lastTokenAt` 无界增长，页脚被顶成「等待响应 / 仍在等待后端响应」
+    // （假 stalled），同时页脚也少了一条随帧推进的重绘驱动。
+    const touchedAt = clock.touch(envelope.sessionId, envelopeTime)
     if (binding.loading) { binding.buffered.push(envelope); return }
     const liveness = clock.effectiveLiveness(envelope.sessionId)
     runtime.applyDocument(foldEvent(envelope), {
@@ -554,6 +559,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       preserveGeneration: true,
       livenessSource: liveness.source,
       livenessGenerating: liveness.generating,
+      ...(touchedAt !== undefined ? { generationPatch: { lastTokenAt: touchedAt } } : {}),
     })
   }
 
@@ -712,7 +718,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     base: WorkbenchDocument
     malformedCount: number
     canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
-    canonicalHasTerminal: boolean
+    /** #390：回合作用域的终态判据（只看最新回合边界），不得用回合无关的「历史曾终态」。 */
+    canonicalLatestBoundary: LatestTurnBoundary
+    /** #390：本次读的发起时刻——封存新鲜度守卫的锚点。 */
+    readStartedAt: number
     withLedgerEvidence: boolean
   }): void => {
     const readEnvelopes = input.bufferedAtRead.length === 0 ? input.envelopes : [...input.envelopes, ...input.bufferedAtRead]
@@ -734,7 +743,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     readEnvelopes: readonly WorkbenchEventEnvelope[]
     malformedCount: number
     canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
-    canonicalHasTerminal: boolean
+    canonicalLatestBoundary: LatestTurnBoundary
+    readStartedAt: number
     withLedgerEvidence: boolean
   }): void => {
     const readEnvelopes = input.readEnvelopes
@@ -763,11 +773,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // #99：账本是第二条终态证据——journal 读可能早于终态行落盘（后端
     // "done 先于 persist"），只认 journal 会让这类读把在途投影判成当前事实，
     // 既封不住时钟、也补不出摘要。
+    // #390：journal 侧的判据必须是**回合作用域**的（`latestTurnBoundary`）——
+    // 「历史上出现过终态」会把上一轮的终态行当成本轮收敛的证据，直接导致在途回合
+    // 被压成上一轮的 displayOnly 摘要（切页/重读即触发）。
     // #217：终态证据同样收敛内核在途事实——账本/journal 终态就是内核自己在说
     // 「回合已终态」（终帧丢失时这是唯一落静路，displayOnly 摘要依赖它）。
     const ledgerTerminalReason = input.withLedgerEvidence ? clock.ledgerTerminalOf(input.readSource) : undefined
-    const hasTerminalEvidence = input.canonicalHasTerminal || ledgerTerminalReason !== undefined
-    clock.settleFromDocument(input.readSource, hasTerminalEvidence)
+    const hasTerminalEvidence = input.canonicalLatestBoundary === 'terminal' || ledgerTerminalReason !== undefined
+    clock.settleFromDocument(input.readSource, hasTerminalEvidence, input.readStartedAt)
     // #217：终态证据收敛内核事实。**只认账本终态**（ledgerTerminalReason，内核
     // 自己的账本）——journal 终态行是文档历史，不是内核活性事实，不得制造内核
     // 条目（时钟封存那一半维持 #99 无条件既有语义，kernel 写跟随账本那一半）。
@@ -831,6 +844,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       )
     }
     const refreshEpoch = ++binding.canonicalReadEpoch
+    // #390：读的发起时刻——封存新鲜度守卫的锚点（读发起之后到达的帧证明读已过时）。
+    const refreshStartedAt = Date.now()
     // 账本终态按 source 归档；本次调用的账本可能被去重丢掉，但归档会留下。
     const ledgerTerminalReason = resolveGenerationLedgerTerminalReason(ledgerTurn)
     if (ledgerTerminalReason !== undefined) clock.archiveLedgerTerminal(refreshSource, ledgerTerminalReason)
@@ -843,7 +858,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
         const fragments = await loadDrafts(refreshOwnerKey)
         const current = runtime.getSnapshot().document ?? createWorkbenchDocument(refreshSource)
         const canonicalDuration = canonicalDurationFromRows(rows)
-        const canonicalHasTerminal = canonicalHasTerminalFromRows(rows)
+        const canonicalLatestBoundary = canonicalLatestBoundaryFromRows(rows)
         // Session switches/rebinds invalidate the result. Do not let a late
         // canonical read replace the document belonging to the new owner.
         if (binding.destroyed || bindingKey !== binding.boundSessionBindingKey || binding.ownerKey !== refreshOwnerKey
@@ -888,7 +903,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           base: options.rebuild || draft.reconcilePending ? createWorkbenchDocument(refreshSource) : current,
           malformedCount: refreshMalformedCount,
           canonicalDuration,
-          canonicalHasTerminal,
+          canonicalLatestBoundary,
+          readStartedAt: refreshStartedAt,
           withLedgerEvidence: true,
         })
         draft.reconcilePending = false
@@ -1043,6 +1059,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       if (!session || !binding.ownerKey) return
       const loadingOwnerKey = binding.ownerKey
       const bindReadEpoch = binding.canonicalReadEpoch
+      // #390：读的发起时刻——封存新鲜度守卫的锚点。切页/切回时本 source 上仍在途的
+      // 回合，其时钟的 lastTokenAt 会晚于这个时刻 ⇒ 该读不得把在途判成收敛。
+      const bindReadStartedAt = Date.now()
       const staleBindRead = (): boolean => (binding.destroyed || binding.generation !== nextGeneration || binding.ownerKey !== loadingOwnerKey
         || binding.canonicalReadEpoch !== bindReadEpoch)
       // #376-b：分页冷装载——逐页折进同一份文档，页内行与信封折完即可回收。发布（status
@@ -1076,7 +1095,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
             base: createWorkbenchDocument(session.source),
             malformedCount: binding.malformedCount,
             canonicalDuration: canonicalDurationFromRows(rows),
-            canonicalHasTerminal: canonicalHasTerminalFromRows(rows),
+            canonicalLatestBoundary: canonicalLatestBoundaryFromRows(rows),
+            readStartedAt: bindReadStartedAt,
             withLedgerEvidence: false,
           })
           return
@@ -1129,7 +1149,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           readEnvelopes: finalEnvelopes,
           malformedCount: binding.malformedCount,
           canonicalDuration: canonicalDurationFromRows(boundaryRows),
-          canonicalHasTerminal: canonicalHasTerminalFromRows(boundaryRows),
+          canonicalLatestBoundary: canonicalLatestBoundaryFromRows(boundaryRows),
+          readStartedAt: bindReadStartedAt,
           withLedgerEvidence: false,
         })
       })().catch(error => {

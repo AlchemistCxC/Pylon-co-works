@@ -48,12 +48,18 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     return verbs.length > 0 ? verbs : ['思考中']
   })
   const verbSignature = createMemo(() => `${props.appearance.verbSet}\u0000${configuredVerbs().join('\u0001')}`)
+  /**
+   * #390：回合身份取自宿主（`generationKey` + `turnEpoch`），不再本地铸号。
+   * `turnEpoch` 由会话层在每个真实回合推进恰好一次（发送入口的乐观投影与 live user
+   * 起手），因此同一回合内该值稳定、跨回合必变。
+   */
+  const turnToken = () => `${props.generationKey ?? ''}\u0000${props.turnId ?? 0}`
+  const generationIdOf = (token: string) => `turn:${token}`
   const copyMachine = createGenerationIndicatorCopyMachine()
-  let generationSerial = 0
   let initialGenerationId = ''
   let initialPresetVerb = ''
   if (props.running) {
-    initialGenerationId = `generation-${++generationSerial}`
+    initialGenerationId = generationIdOf(turnToken())
     initialPresetVerb = chooseGenerationIndicatorVerb(configuredVerbs(), props.random ?? Math.random)
     copyMachine.dispatch({
       type: 'start',
@@ -72,6 +78,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   let observedStartTime = props.startTime
   let observedGenerationRunning = props.running
   let observedGenerationKey = props.generationKey ?? ''
+  let observedTurnToken = turnToken()
   let observedVerbSignature = verbSignature()
   let observedCopyPrimary: string | undefined
   let observedCopyLiveness: GenerationLiveness | undefined
@@ -209,15 +216,20 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   }))
   const secondaryContext = () => copy().secondary
 
-  // 生成生命周期只在 running 由 false→true、宿主明确切换 owner/session，
-  // 或 Footer 尚未建立 generation 时开启。generation id 不暴露给协议，
+  // 生成生命周期只在 running 由 false→true、宿主回合身份（owner/session + turnEpoch）
+  // 变化，或 Footer 尚未建立 generation 时开启。generation id 不暴露给协议，
   // 专门用于阻断旧定时器回写新回合。
   createEffect(() => {
     const running = props.running
     const generationKey = props.generationKey ?? ''
+    const token = turnToken()
     const previousRunning = observedGenerationRunning
     const previousGenerationKey = observedGenerationKey
     const generationKeyChanged = generationKey !== previousGenerationKey
+    // #390：宿主回合身份变化也算新回合（同一 owner 上换回合）。此前只认 false→true
+    // 边沿 + owner 变化，本地的"回合"观感与宿主可能漂移——多算一次边沿就会重开最短
+    // 展示计时、重抽预设词（用户看到的「状态混乱」）。
+    const turnTokenChanged = token !== observedTurnToken
     // A generation is a lifecycle edge, not every projection write.  The
     // document and live-controller readers may publish different start times
     // for a few microtasks; treating that write as a new generation resets the
@@ -225,21 +237,22 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     // it tells us that two sessions are being viewed while both remain
     // running, so the local footer state must be isolated for the new owner.
     const startsNewGeneration = running && (
-      !previousRunning || !currentGenerationId() || generationKeyChanged
+      !previousRunning || !currentGenerationId() || generationKeyChanged || turnTokenChanged
     )
 
     observedGenerationRunning = running
     observedGenerationKey = generationKey
+    observedTurnToken = token
 
     if (startsNewGeneration) {
       const previousId = currentGenerationId()
-      if (previousId && generationKeyChanged) {
+      if (previousId && (generationKeyChanged || turnTokenChanged)) {
         // A key switch can happen without a false→true edge. Finish the old
         // copy state first so a pending timer cannot leak its text into the
         // newly selected session; `dispatchCopy` also clears that timer.
         dispatchCopy({ type: 'finish', generationId: previousId, at: clock().now() })
       }
-      const id = `generation-${++generationSerial}`
+      const id = generationIdOf(token)
       const preset = chooseGenerationIndicatorVerb(configuredVerbs(), props.random ?? Math.random)
       setEffectiveStartTime(normalizeGenerationStart(props.startTime, clock().now()))
       // `effectiveStartTime` is intentionally updated only at lifecycle

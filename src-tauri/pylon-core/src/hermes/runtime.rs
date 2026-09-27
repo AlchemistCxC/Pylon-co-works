@@ -285,13 +285,18 @@ fn pack_runtime_roots() -> Vec<(PathBuf, bool)> {
     }
 
     // `CARGO_MANIFEST_DIR` keeps `cargo run`/unit smoke usable when Tauri has
-    // not copied resources to target/debug yet.  It is harmless in release
-    // builds and never outranks the executable-adjacent tree.  A dev-tree hit
-    // must NOT be reported as `bundled` — that is the build machine's
-    // checkout, not something the package carries.
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    roots.push((manifest.join("../resources/runtime/git"), false));
-    roots.push((manifest.join("resources/runtime/git"), false));
+    // not copied resources to target/debug yet.  Debug builds only (#387): a
+    // release binary must neither carry nor probe the build machine's checkout
+    // path — it leaks that path into every user's logs, and on a machine that
+    // still has the tree it would outrank a healthy system Git Bash.  A
+    // dev-tree hit must NOT be reported as `bundled` — that is the build
+    // machine's checkout, not something the package carries.
+    #[cfg(debug_assertions)]
+    {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        roots.push((manifest.join("../resources/runtime/git"), false));
+        roots.push((manifest.join("resources/runtime/git"), false));
+    }
     roots
 }
 

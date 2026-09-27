@@ -4,6 +4,7 @@ import { createUnknownContentPart, type ContentPart } from '../../../../domains/
 import type { ToolInvocationSnapshot } from '../../../../domains/workbench/workbenchProjector.ts'
 import { ToolObjectInspector } from './ToolObjectInspector.solid.tsx'
 import { classifyResourceTarget, resourceRange, type RenderResourceTarget } from './resourceTarget.ts'
+import { isTerminalToolVisualState, normalizeToolStatus } from '../../../../domains/tool/status.ts'
 import { isRecord } from '../../../../utils/wireGuards.ts'
 
 export function ToolBody(props: {
@@ -15,6 +16,9 @@ export function ToolBody(props: {
   renderPart: (part: ContentPart, index: number, source: 'input' | 'output') => JSX.Element
 }) {
   const kind = () => effectiveKind(props.renderKind, props.snapshot)
+  // #389：终态工具不再渲染活态进度（投影按设计在终态保留首份 progress 快照，
+  // 若继续渲染会让已完成卡片滞留「进行中」标题与陈旧进度条）。
+  const toolSettled = () => isTerminalToolVisualState(normalizeToolStatus(props.snapshot.status))
   const input = () => isRecord(props.snapshot.input) ? props.snapshot.input : undefined
   const rawFallback = createMemo(() => props.parts.length === 0 && props.snapshot.result?.rawOutput !== undefined
     ? { value: safeDisplayValue(props.snapshot.result.rawOutput) }
@@ -62,7 +66,7 @@ export function ToolBody(props: {
       />
     </Show>
 
-    <Show when={props.snapshot.progress !== undefined}>
+    <Show when={props.snapshot.progress !== undefined && !toolSettled()}>
       <ProgressSection value={props.snapshot.progress} commands={props.commands} />
     </Show>
 

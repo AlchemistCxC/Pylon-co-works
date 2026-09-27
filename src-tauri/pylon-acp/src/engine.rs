@@ -629,15 +629,13 @@ pub async fn spawn_agent_child(
         );
     }
     // #353：plan→Command 的 Windows 特调（`.cmd`/`.bat` ∧ UNC cwd 的 pushd 绕行、
-    // spawn 期裸名解析）收在 windows_launch 一处；条件不满足时与直启逐字节一致。
+    // spawn 期裸名解析）收在 windows_launch 一处。plan（argv/cwd/env）在该处恰好
+    // 应用一次，UTF-8 默认先于 plan env、控制台隐藏也由它承载——#386 曾因此处
+    // 再 apply 一次把 argv 翻倍（hermes 收到 `acp acp` 连不上）。
     let mut cmd = super::windows_launch::agent_command(&plan);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // #363-1：UTF-8 环境先钉（默认值），再让 plan/用户 env 覆盖——显式声明优先。
-    // 同处隐藏控制台窗口（#348 A3，Windows 上 agent 不该在桌面闪黑框）。
-    super::process::configure_agent_child(&mut cmd);
-    super::launch_plan::apply_launch_plan(&mut cmd, &plan);
     if let Some(selection) = hermes_runtime.as_ref() {
         pylon_core::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
     }

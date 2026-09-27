@@ -1,10 +1,17 @@
 /**
- * TurnClock / kernel-liveness subsystem (P52 D3, #213, #217, ADR-0017).
+ * TurnClock / kernel-liveness subsystem (P52 D3, #213, #217, ADR-0017, #390).
  * 生成时钟唯一主人（source 隔离，事件驱动）：回合起点 = 发送入口（乐观投影）；
  * 终态 = feed 终帧（done/error/cancelled）或 canonical 终态证据（bind/refresh 时
  * journal 已终态）；拒绝发送 = 回滚。内核在途回合标记（`livenessSource: 'kernel'`
  * 的事实来源）同样归本模块持有——活性权威恒为 kernel > clock > document。
  * 快照写入只经注入的 `updateRuntimeState` 缝，本模块不直接拼文档。
+ *
+ * #390 结构收敛：此前五个各自隔离的 Map（`turnClocks` / `ledgerTerminalBySource` /
+ * `kernelLivenessBySource` / `kernelTurnStamps` / `clockOnlyStarts`）合并为**一条
+ * per-source 记录**，且所有写入者共用同一组守卫（`kernelInFlight` 让位规则、
+ * 封存新鲜度规则）。合并前的缺陷是「每个写入者自带一套手写守卫」——`reconcile` 与
+ * `activeUnsettledClock` 都遵守「内核说在途则让位」，唯独 `settleFromDocument` 漏了，
+ * 于是一次早于在途事实的 canonical 读能把时钟**不可逆**封存（#390 根因）。
  */
 import { resolveKernelLiveness, type GenerationLedgerTerminalReason } from '../../domains/workbench/generationLedgerSummary.ts'
 import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
@@ -29,8 +36,13 @@ export interface AgentWorkbenchTurnClock {
   terminal(targetSource: string, reason: 'done' | 'cancelled' | 'error', at: number, failure?: PromptFailureMetadata): void
   /** 发送被拒绝：活动回合回滚（后续帧不得复活指示器）。 */
   rollback(targetSource: string): void
-  /** bind/refresh 发现 journal 已终态：封存时钟但不写摘要。 */
-  settleFromDocument(targetSource: string, hasTerminal: boolean): void
+  /**
+   * bind/refresh 发现 journal 已终态：封存时钟但不写摘要。
+   *
+   * #390：`readStartedAt` 是本次 canonical 读的**发起时刻**。时钟若在该时刻之后仍
+   * 观测到帧，说明这条读早于更新的在途事实，没有资格判定收敛——不得封存。
+   */
+  settleFromDocument(targetSource: string, hasTerminal: boolean, readStartedAt?: number): void
   /** bind/refresh 后把活动时钟写回快照（覆盖投影间隙的 Date.now() 回退）。 */
   reconcile(targetSource: string): void
   /** #213：本 source 是否有一个未终结的回合时钟（权威活性的值）。 */
@@ -61,10 +73,37 @@ export interface AgentWorkbenchTurnClock {
   clearAll(): void
 }
 
-interface TurnClockEntry {
+interface ClockEntry {
   generationStart: number
   lastTokenAt: number
   terminal: boolean
+  /**
+   * live 摘要是否已写出。首终态 wins；但**封存若发生在写出之前**（#390 误封恢复），
+   * 后续真终帧仍可补写一次——否则误封会让本回合的耗时永远停留在上一轮的 displayOnly 值。
+   */
+  summaryWritten: boolean
+}
+
+/** 一个 source 的全部回合事实（#390：原五个 Map 合并到这里）。 */
+interface SourceTurnRecord {
+  /** 本进程回合时钟（含已封存条目）。 */
+  clock?: ClockEntry
+  /** 最近一次 canonical 重载读到的 #99 账本终态。 */
+  ledgerTerminal?: GenerationLedgerTerminalReason
+  /**
+   * #217/ADR-0017 内核在途回合标记。语义严格为「本进程已派发 prompt、尚未收到终态」。
+   * **条目只由 refresh（真实内核快照）创建**；本地生命周期只 Fresh化已存在的条目，
+   * 不得制造内核权威（旧内核宿主必须永久保持 `'clock'` 权威）。
+   */
+  kernel?: { inFlight: boolean }
+  /**
+   * 内核回合身份戳（`${generation}:${turnId}`，取自快照 `turn.key`）。终帧不携带
+   * turnId，但它收敛的就是「最近一次 active 快照」里的那个回合——把该身份记为
+   * settled，此后带**同一身份**的 `turnInFlight=true` 快照即可判定为早于终态的 stale。
+   */
+  stamps?: { active?: string; settled?: string }
+  /** 空态创建路径（会话已 select、尚未 bind）只启动了回合时钟、没有文档投影。 */
+  clockOnlyStart?: string
 }
 
 /** 从冷挂载快照读回合身份戳（缺 key/字段非数值 ⇒ undefined，不猜）。 */
@@ -82,126 +121,160 @@ function kernelTurnStampOf(snapshot: unknown): string | undefined {
 
 export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps): AgentWorkbenchTurnClock {
   const { runtime, updateRuntimeState, getSource } = deps
-  const turnClocks = new Map<string, TurnClockEntry>()
-  /**
-   * 最近一次 canonical 重载读到的 #99 账本终态，按 source 隔离。
-   *
-   * 单独存而不是只用作 refresh 的入参：`refresh` 对同 source 会去重（`refreshInFlight`），
-   * 一次早于终态收敛发起的重载可能与携带账本的那次同窗，入参会被去重丢掉。按 source
-   * 保留最近观测到的终态即可让在途的那次重载用上它。
-   *
-   * **新回合起点必须清空**（见 `start`）：否则上一回合的终态会被当成本回合的
-   * 证据，把在途的新回合判成已收敛。
-   */
-  const ledgerTerminalBySource = new Map<string, GenerationLedgerTerminalReason>()
+  const records = new Map<string, SourceTurnRecord>()
+
+  const recordOf = (source: string): SourceTurnRecord => {
+    const existing = records.get(source)
+    if (existing !== undefined) return existing
+    const created: SourceTurnRecord = {}
+    records.set(source, created)
+    return created
+  }
+
+  /** 字段全空即回收，避免长会话里残留空记录。 */
+  const prune = (source: string): void => {
+    const record = records.get(source)
+    if (record === undefined) return
+    if (record.clock === undefined && record.ledgerTerminal === undefined && record.kernel === undefined
+      && record.stamps === undefined && record.clockOnlyStart === undefined) {
+      records.delete(source)
+    }
+  }
+
+  /** 内核权威是否明确表态「在途」。这是所有活性写入者共享的让位规则。 */
+  const kernelInFlight = (record: SourceTurnRecord | undefined): boolean =>
+    record?.kernel?.inFlight === true
 
   /**
-   * #217/ADR-0017：内核在途回合标记，按 source 隔离（`livenessSource: 'kernel'` 的
-   * 事实来源）。语义严格为「本进程已派发 prompt、尚未收到终态」。
-   *
-   * **条目只由 refresh（真实内核快照）创建**：`resolveKernelLiveness` 有表态才入表。
-   * 本地生命周期（发送入口/终帧/回滚）只**更新已存在的条目**——它们是内核事实的
-   * 及时Fresh化（派发后内核必然置位、终帧即内核收敛证据），但不得**制造**内核权威：
-   * 旧内核（快照永无 `turnInFlight` 字段）的宿主必须永久保持 `'clock'` 权威，#213 的
-   * 采纳启发式不能被一个前端自造的表态关闭（ADR 兼容矩阵：新前端 + 旧内核）。
-   *
-   * refresh 写入的新鲜度守卫：观测 false 而该 source 存在活动本地时钟时不覆盖
-   * （load 链与发送竞态时本地生命周期更新；内核若真已收敛，终帧随后到达自会落静）；
-   * 观测 true 而本地时钟已封存时同理不覆盖（终帧比早于它合成的快照更新——否则
-   * late 快照会在终态之后复活生成态，正是 ADR 风险条款点名的故障类）。
-   *
-   * 无内核表态（旧内核/快照缺字段）的 source 不入表 ⇒ 活性回退 `'clock'` 权威；
-   * 两条 applyLive 采纳启发式只在**有内核表态**时停用（ADR-0017 收敛推断）。
+   * 终态/回滚路径上的内核事实同步：只 Fresh 已有条目（不得制造内核权威——ADR 兼容
+   * 矩阵：新前端 + 旧内核必须永久保持 `'clock'` 权威）；终帧额外推进身份戳，
+   * 回滚（派发从未发生）不动身份戳。
    */
-  const kernelLivenessBySource = new Map<string, boolean>()
+  const markKernelSettled = (record: SourceTurnRecord, withStamp: boolean): void => {
+    if (record.kernel === undefined) return
+    record.kernel = { inFlight: false }
+    if (!withStamp) return
+    const active = record.stamps?.active
+    if (active !== undefined) record.stamps = { settled: active }
+    else delete record.stamps
+  }
 
-  /**
-   * #217：内核回合身份戳（`${generation}:${turnId}`，取自快照 `turn.key`）。终帧
-   * 不携带 turnId，但它收敛的就是「最近一次 active 快照」里的那个回合——把该身份
-   * 记为 settled，此后带**同一身份**的 `turnInFlight=true` 快照即可判定为早于终态
-   * 的 stale（无本地时钟的他窗回合在终帧后没有时钟可作旁证，这是唯一的判别依据）；
-   * 不同身份 = 新回合，照常采纳。
-   */
-  const kernelTurnStamps = new Map<string, { active?: string; settled?: string }>()
+  /** #217：有效活性权威——内核表态优先（kernel > clock）。 */
+  const effectiveLivenessOf = (targetSource: string): { source: 'kernel' | 'clock'; generating: boolean } => {
+    const record = records.get(targetSource)
+    if (record?.kernel !== undefined) return { source: 'kernel', generating: record.kernel.inFlight }
+    const entry = record?.clock
+    return { source: 'clock', generating: entry !== undefined && !entry.terminal }
+  }
 
-  /** 空态创建路径（会话已 select、尚未 bind）在发送入口只启动了回合时钟、没有文档投影：
-   *  source → 该 source 上"仅时钟起点"的 clientMessageId。发送被拒时据此精确撤销，
-   *  不误伤同 source 上由外部客户端 echo 启动的回合（issue #68 配套）。 */
-  const clockOnlyStarts = new Map<string, string>()
+  const settleRuntimeLiveness = (targetSource: string): void => {
+    // #217：本函数的第二、三步作用于**当前绑定 source** 的全局快照——targetSource
+    // 非绑定 source 时必须早退，否则任意他 source 的终帧会把正在生成的会话压熄
+    // （终帧投递不过滤绑定 source，且双轨设计上重复投递）。
+    if (targetSource !== getSource()) return
+    // #217：活性判定走有效权威（kernel > clock）——内核说在途时不得落静。
+    if (effectiveLivenessOf(targetSource).generating) return
+    if (!runtime.getSnapshot().generating) return
+    updateRuntimeState({
+      generating: false,
+      generationStart: 0,
+      lastTokenAt: undefined,
+      generationPhase: undefined,
+      generationActivity: undefined,
+      thinkingStart: undefined,
+    })
+  }
+
+  /** 写 live 终态摘要（首个 live 摘要 wins；误封后由真终帧补写一次）。 */
+  const writeLiveSummary = (
+    clock: ClockEntry,
+    reason: 'done' | 'cancelled' | 'error',
+    at: number,
+    failure?: PromptFailureMetadata,
+  ): void => {
+    clock.summaryWritten = true
+    updateRuntimeState({
+      summary: {
+        elapsedMs: Math.max(0, at - clock.generationStart),
+        tokenCount: runtime.getSnapshot().tokenCount,
+        completedFrame: '',
+        reason,
+        ...(failure ? { failure } : {}),
+        durationSource: 'live-monotonic',
+        durationAvailable: true,
+      },
+    })
+  }
 
   const clock: AgentWorkbenchTurnClock = {
     start(targetSource, at) {
-      turnClocks.set(targetSource, { generationStart: at, lastTokenAt: at, terminal: false })
-      ledgerTerminalBySource.delete(targetSource)
+      const record = recordOf(targetSource)
+      record.clock = { generationStart: at, lastTokenAt: at, terminal: false, summaryWritten: false }
+      // 新回合起点必须清空上一回合的账本终态：否则它会被当成本回合的收敛证据。
+      record.ledgerTerminal = undefined
     },
 
     touch(targetSource, at) {
-      const entry = turnClocks.get(targetSource)
+      const entry = records.get(targetSource)?.clock
       if (!entry || entry.terminal) return undefined
       entry.lastTokenAt = Math.max(entry.lastTokenAt, at)
       return entry.lastTokenAt
     },
 
     terminal(targetSource, reason, at, failure) {
-      const entry = turnClocks.get(targetSource)
-      if (!entry || entry.terminal) {
-        // #217：无时钟（本 source 的回合由他窗派发）或已封存——终帧仍是内核已收敛的
-        // 权威证据，但只 Fresh化**已存在**的内核条目并落静快照。终帧双轨投递
-        // （Channel + 广播）与本窗未绑定的 source 都会走到这里：内核条目不存在
-        // （纯时钟/旧内核宿主）时保持既有 no-op 语义；settleRuntimeLiveness 自身
-        // 只作用于当前绑定的 source（防跨 source 误伤）。
-        if (kernelLivenessBySource.has(targetSource)) {
-          kernelLivenessBySource.set(targetSource, false)
-          const stamps = kernelTurnStamps.get(targetSource)
-          if (stamps?.active !== undefined) kernelTurnStamps.set(targetSource, { settled: stamps.active })
-          clock.settleRuntimeLiveness(targetSource)
-        }
-        return
+      const record = records.get(targetSource)
+      const entry = record?.clock
+      const sealed = entry === undefined || entry.terminal
+      if (!sealed) {
+        entry.terminal = true
+        // 回合已有终态："仅时钟起点"的记账已完成使命。
+        if (record) record.clockOnlyStart = undefined
       }
-      entry.terminal = true
-      // 回合已有终态："仅时钟起点"的记账已完成使命。
-      clockOnlyStarts.delete(targetSource)
       // #217：终帧 = 内核已收敛（后端终态先于终帧发布）——内核活性事实同步落静
       // （仅更新已有条目；无内核表态的宿主不得被制造出内核权威）。
-      if (kernelLivenessBySource.has(targetSource)) {
-        kernelLivenessBySource.set(targetSource, false)
-        const stamps = kernelTurnStamps.get(targetSource)
-        if (stamps?.active !== undefined) kernelTurnStamps.set(targetSource, { settled: stamps.active })
+      if (record) markKernelSettled(record, true)
+      if (getSource() === targetSource && entry !== undefined) {
+        // 已封存但从未写过 live 摘要 ⇒ #390 误封恢复：真终帧是比 displayOnly 兜底
+        // 更强的事实，补写一次（`start` 会重置 summaryWritten，故不会跨回合误补）。
+        if (!sealed) writeLiveSummary(entry, reason, at, failure)
+        else if (!entry.summaryWritten && entry.generationStart > 0) {
+          const current = runtime.getSnapshot().summary
+          if (current === null || current.displayOnly === true) writeLiveSummary(entry, reason, at, failure)
+        }
       }
-      if (getSource() !== targetSource) return
-      updateRuntimeState({
-        summary: {
-          elapsedMs: Math.max(0, at - entry.generationStart),
-          tokenCount: runtime.getSnapshot().tokenCount,
-          completedFrame: '',
-          reason,
-          ...(failure ? { failure } : {}),
-          durationSource: 'live-monotonic',
-          durationAvailable: true,
-        },
-      })
+      settleRuntimeLiveness(targetSource)
+      prune(targetSource)
     },
 
     rollback(targetSource) {
-      const entry = turnClocks.get(targetSource)
-      if (!entry || entry.terminal) return
-      turnClocks.delete(targetSource)
+      const record = records.get(targetSource)
+      const entry = record?.clock
+      if (!record || !entry || entry.terminal) return
+      record.clock = undefined
       // #217：派发从未发生（或被拒）——内核在途事实同样为否（仅更新已有条目）。
-      if (kernelLivenessBySource.has(targetSource)) kernelLivenessBySource.set(targetSource, false)
+      markKernelSettled(record, false)
+      prune(targetSource)
     },
 
-    settleFromDocument(targetSource, hasTerminal) {
+    settleFromDocument(targetSource, hasTerminal, readStartedAt) {
       if (!hasTerminal) return
-      const entry = turnClocks.get(targetSource)
+      const record = records.get(targetSource)
+      const entry = record?.clock
       if (!entry || entry.terminal) return
+      // #390①：内核权威明确表态「在途」时不得封存——与 `reconcile` /
+      // `activeUnsettledClock` 的让位规则同源；此前本函数是唯一漏掉它的写入者。
+      if (kernelInFlight(record)) return
+      // #390②：新鲜度——本次读发起之后时钟仍观测到帧，说明读早于在途事实，无资格判收敛。
+      if (readStartedAt !== undefined && entry.lastTokenAt > readStartedAt) return
       entry.terminal = true
     },
 
     reconcile(targetSource) {
-      const entry = turnClocks.get(targetSource)
+      const record = records.get(targetSource)
+      const entry = record?.clock
       if (!entry || entry.terminal) return
       // #217：内核已就本 source 表态「不在途」时，时钟不得复活生成态（权威让位）。
-      if (kernelLivenessBySource.get(targetSource) === false) return
+      if (record?.kernel?.inFlight === false) return
       updateRuntimeState({
         generating: true,
         generationStart: entry.generationStart,
@@ -211,60 +284,46 @@ export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps)
     },
 
     isGenerating(targetSource) {
-      const entry = turnClocks.get(targetSource)
+      const entry = records.get(targetSource)?.clock
       return entry !== undefined && !entry.terminal
     },
 
     effectiveLiveness(targetSource) {
-      const kernelFact = kernelLivenessBySource.get(targetSource)
-      if (kernelFact !== undefined) return { source: 'kernel', generating: kernelFact }
-      return { source: 'clock', generating: clock.isGenerating(targetSource) }
+      return effectiveLivenessOf(targetSource)
     },
 
-    settleRuntimeLiveness(targetSource) {
-      // #217：本函数的第二、三步作用于**当前绑定 source** 的全局快照——targetSource
-      // 非绑定 source 时必须早退，否则任意他 source 的终帧会把正在生成的会话压熄
-      // （终帧投递不过滤绑定 source，且双轨设计上重复投递）。
-      if (targetSource !== getSource()) return
-      // #217：活性判定走有效权威（kernel > clock）——内核说在途时不得落静。
-      if (clock.effectiveLiveness(targetSource).generating) return
-      if (!runtime.getSnapshot().generating) return
-      updateRuntimeState({
-        generating: false,
-        generationStart: 0,
-        lastTokenAt: undefined,
-        generationPhase: undefined,
-        generationActivity: undefined,
-        thinkingStart: undefined,
-      })
-    },
+    settleRuntimeLiveness,
 
     markClockOnlyStart(targetSource, clientMessageId) {
-      clockOnlyStarts.set(targetSource, clientMessageId)
+      recordOf(targetSource).clockOnlyStart = clientMessageId
     },
 
     peekClockOnlyStart(targetSource) {
-      return clockOnlyStarts.get(targetSource)
+      return records.get(targetSource)?.clockOnlyStart
     },
 
     hasClockOnlyStart(targetSource) {
-      return clockOnlyStarts.has(targetSource)
+      return records.get(targetSource)?.clockOnlyStart !== undefined
     },
 
     clearClockOnlyStart(targetSource) {
-      clockOnlyStarts.delete(targetSource)
+      const record = records.get(targetSource)
+      if (record === undefined) return
+      record.clockOnlyStart = undefined
+      prune(targetSource)
     },
 
     freshenKernelInFlight(targetSource) {
-      if (kernelLivenessBySource.has(targetSource)) kernelLivenessBySource.set(targetSource, true)
+      const record = records.get(targetSource)
+      if (record?.kernel !== undefined) record.kernel = { inFlight: true }
     },
 
     kernelAuthoritative(targetSource) {
-      return kernelLivenessBySource.has(targetSource)
+      return records.get(targetSource)?.kernel !== undefined
     },
 
     hasClock(targetSource) {
-      return turnClocks.get(targetSource) !== undefined
+      return records.get(targetSource)?.clock !== undefined
     },
 
     observeKernelSnapshot(targetSource, ledgerTurn) {
@@ -275,62 +334,53 @@ export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps)
       //  · true 而本地时钟已封存：不覆盖（终帧比该快照新；采纳会让 late 快照在终态
       //    之后复活生成态——merge 层还会顺带清掉 terminalFence，ADR 风险条款的故障类）。
       const kernelFact = resolveKernelLiveness(ledgerTurn)
-      if (kernelFact !== undefined) {
-        const clockEntry = turnClocks.get(targetSource)
-        // 守卫一（时钟旁证）：无本地时钟 ⇒ 快照是唯一事实，采纳；时钟活动 ⇒ 只认
-        // true（false 必是竞态旧值）；时钟已封存 ⇒ 只认 false（true 必是早于终态的
-        // 旧快照）。
-        const clockAllows = clockEntry === undefined
-          ? true
-          : clockEntry.terminal ? !kernelFact : kernelFact
-        // 守卫二（回合身份）：true 快照的身份与已记 settled 的身份相同 ⇒ 它是早于
-        // 终态的同一回合（终帧不携带 turnId，身份戳是唯一判别依据）；不同/缺身份
-        // 视为新回合，照常采纳。
-        const stamp = kernelTurnStampOf(ledgerTurn)
-        const stamps = kernelTurnStamps.get(targetSource)
-        const stampAllows = !(kernelFact
-          && stamps?.settled !== undefined
-          && stamp !== undefined
-          && stamp === stamps.settled)
-        if (clockAllows && stampAllows) {
-          kernelLivenessBySource.set(targetSource, kernelFact)
-          if (kernelFact) {
-            kernelTurnStamps.set(targetSource, stamp !== undefined ? { active: stamp } : {})
-          } else {
-            // 内核自己确认了「不在途」：settled 标记完成使命。
-            kernelTurnStamps.delete(targetSource)
-          }
-        }
-      }
+      if (kernelFact === undefined) return
+      const record = recordOf(targetSource)
+      const entry = record.clock
+      // 守卫一（时钟旁证）：无本地时钟 ⇒ 快照是唯一事实，采纳；时钟活动 ⇒ 只认
+      // true（false 必是竞态旧值）；时钟已封存 ⇒ 只认 false（true 必是早于终态的旧快照）。
+      const clockAllows = entry === undefined
+        ? true
+        : entry.terminal ? !kernelFact : kernelFact
+      // 守卫二（回合身份）：true 快照的身份与已记 settled 的身份相同 ⇒ 它是早于
+      // 终态的同一回合（终帧不携带 turnId，身份戳是唯一判别依据）；不同/缺身份
+      // 视为新回合，照常采纳。
+      const stamp = kernelTurnStampOf(ledgerTurn)
+      const settled = record.stamps?.settled
+      const stampAllows = !(kernelFact && settled !== undefined && stamp !== undefined && stamp === settled)
+      if (!clockAllows || !stampAllows) return
+      record.kernel = { inFlight: kernelFact }
+      if (kernelFact) record.stamps = stamp !== undefined ? { active: stamp } : {}
+      // 内核自己确认了「不在途」：settled 标记完成使命。
+      else delete record.stamps
     },
 
     settleKernelFromLedger(targetSource) {
-      kernelLivenessBySource.set(targetSource, false)
-      kernelTurnStamps.delete(targetSource)
+      recordOf(targetSource).kernel = { inFlight: false }
+      const record = records.get(targetSource)
+      if (record !== undefined) delete record.stamps
+      prune(targetSource)
     },
 
     archiveLedgerTerminal(targetSource, reason) {
-      ledgerTerminalBySource.set(targetSource, reason)
+      recordOf(targetSource).ledgerTerminal = reason
     },
 
     ledgerTerminalOf(targetSource) {
-      return ledgerTerminalBySource.get(targetSource)
+      return records.get(targetSource)?.ledgerTerminal
     },
 
     activeUnsettledClock(targetSource) {
-      const entry = turnClocks.get(targetSource)
+      const record = records.get(targetSource)
+      const entry = record?.clock
       if (!entry || entry.terminal) return undefined
       // #217：内核已表态「不在途」时，活动时钟不得顶起生成态（权威让位）。
-      if (kernelLivenessBySource.get(targetSource) === false) return undefined
+      if (record?.kernel?.inFlight === false) return undefined
       return { generationStart: entry.generationStart, lastTokenAt: entry.lastTokenAt }
     },
 
     clearAll() {
-      turnClocks.clear()
-      ledgerTerminalBySource.clear()
-      kernelLivenessBySource.clear()
-      kernelTurnStamps.clear()
-      clockOnlyStarts.clear()
+      records.clear()
     },
   }
   return clock
