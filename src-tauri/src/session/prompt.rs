@@ -983,6 +983,27 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     result
 }
 
+/// #352：构造「用户 cancel 已发出」判死探针——只认 generation 一致的置位
+/// （载体键化 generation，镜像 turn_in_flight：客户端替换后旧代际的迟到置位
+/// 不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按 dev-standards #331
+/// 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，就地恢复——判死输入
+/// 不得因锁中毒静默消失。
+pub(crate) fn cancel_requested_probe(
+    runtime: Arc<AgentRuntime>,
+    source: String,
+    generation: u64,
+) -> impl Fn() -> bool {
+    move || {
+        runtime
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&source)
+            .and_then(|session| session.cancel_requested)
+            .is_some_and(|mark| mark.generation == generation)
+    }
+}
+
 async fn send_prompt_core_impl<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -1315,6 +1336,12 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         .is_some_and(|agent| crate::hermes::runtime::should_apply(&agent));
     let runtime_for_recovery = runtime.clone();
     let expected_generation = flow.generation;
+    // #352：用户 cancel 一等判死输入——cancel_prompt 置位后，等待循环跳过
+    // 闲置/首 token 评估直接进入 cancel-settle 窗口；agent cancel 后继续产出
+    // 刷新 last_activity 不再能推迟收敛（flag 命中后完全绕开 liveness 评估）。
+    // 探针只认本代际置位（构造器内注释详述锁形态与键化）。
+    let cancel_requested =
+        cancel_requested_probe(runtime.clone(), source.to_string(), expected_generation);
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
     // 用作"闲置超时"判据：活动即续命，只有持续无输出才截。
     let source_for_liveness = source.to_string();
@@ -1330,6 +1357,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         Duration::from_secs(idle_timeout_secs),
         Duration::from_secs(first_token_timeout_secs),
         liveness_activity,
+        cancel_requested,
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
             acp_for_cancel
@@ -1633,6 +1661,8 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     let timeout_label = match timeout_kind {
         PromptTimeoutKind::FirstToken => "first-token",
         PromptTimeoutKind::Idle => "idle",
+        // #352：用户 cancel 判死——"超时"指的是 settle 窗口（等终态）超时。
+        PromptTimeoutKind::UserCancel => "user-cancel",
     };
     let timeout_secs = timeout_bound.as_secs().max(1);
     let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
@@ -2206,6 +2236,54 @@ mod tests {
                 .turn_in_flight(),
             "report_settle must clear the keyed in-flight mark"
         );
+    }
+
+    /// #352：用户 cancel 判死输入的载体语义——置位可见（键化 generation）；
+    /// 新回合起点（mark_turn_in_flight）清除，旧回合的 cancel 不继承到新回合。
+    #[test]
+    fn cancel_requested_mark_is_set_and_cleared_on_new_turn() {
+        let mut session = crate::session::SessionInfo::new(
+            "local:cancel-flag".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        assert!(
+            session.cancel_requested.is_none(),
+            "新会话不得携带 cancel 判死输入"
+        );
+        session.mark_cancel_requested(3, std::time::Instant::now());
+        let mark = session.cancel_requested.expect("置位后判死输入必须可见");
+        assert_eq!(mark.generation, 3, "标记必须携带置位时的会话代际");
+        session.mark_turn_in_flight(4, 2);
+        assert!(
+            session.cancel_requested.is_none(),
+            "mark_turn_in_flight 必须清除旧回合的 cancel 判死输入"
+        );
+    }
+
+    /// #352：判死探针只认本代际置位——客户端替换（代际已换）后，旧代际的
+    /// 迟到置位不得把新代际等待循环拖进 cancel-settle 窗口（spec「本 generation
+    /// 本 session 已发出用户 cancel」钉死在探针构造器）。
+    #[test]
+    fn cancel_requested_probe_only_fires_for_current_generation() {
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session = crate::session::SessionInfo::new(
+            "local:cancel-gen".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            5,
+        );
+        session.mark_cancel_requested(5, std::time::Instant::now());
+        runtime
+            .sessions
+            .lock()
+            .expect("sessions")
+            .insert("local:cancel-gen".to_string(), session);
+        let probe = cancel_requested_probe(runtime, "local:cancel-gen".to_string(), 7);
+        assert!(!probe(), "旧代际（5）置位不得触发新代际（7）的判死输入");
     }
 
     #[test]

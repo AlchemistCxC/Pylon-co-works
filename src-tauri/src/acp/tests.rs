@@ -561,6 +561,7 @@ async fn timeout_sends_cancel_and_waits_for_final_response() {
         std::time::Duration::from_millis(10),
         std::time::Duration::from_millis(10),
         || None,
+        || false,
         move || async move {
             cancel_called_for_task.store(true, Ordering::SeqCst);
             tx.send(response())
@@ -609,6 +610,7 @@ async fn recovery_callback_runs_only_when_cancel_does_not_settle() {
         std::time::Duration::from_millis(5),
         std::time::Duration::from_millis(5),
         || None,
+        || false,
         || async { Ok(()) },
         move || async move {
             force_called_for_task.store(true, Ordering::SeqCst);
@@ -636,6 +638,7 @@ async fn response_before_timeout_does_not_send_cancel() {
         std::time::Duration::from_secs(1),
         std::time::Duration::from_secs(1),
         || None,
+        || false,
         move || async move {
             cancel_called_for_task.store(true, Ordering::SeqCst);
             Ok(())
@@ -659,6 +662,7 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         // A real dispatcher updates this value for every thinking/tool/output step.
         // Returning now on every poll models an indefinitely active turn.
         || Some(std::time::Instant::now()),
+        || false,
         || async { Ok(()) },
         || async {},
     );
@@ -671,6 +675,114 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         "持续活动不得受 prompt total timeout 截断，实际结果: {result:?}"
     );
 }
+
+// #352：用户 cancel 是一等判死输入——即使 agent 在 cancel 后持续产出（liveness
+// 不断刷新、闲置判死被无限续命），flag 命中后也必须在一个轮询周期内判死并进入
+// settle 窗口。以下三例分别钉：flag 初始置位直接判死、窗口内终态胜出、flag 迟到
+// 置位仍能收敛（对修复前「永不收敛」的回归）。
+#[tokio::test]
+async fn user_cancel_flag_fires_immediately_despite_sustained_activity() {
+    let (_tx, mut rx) = tokio::sync::oneshot::channel();
+    let outcome = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(40),
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(30),
+        || Some(std::time::Instant::now()),
+        || true,
+        || async { Ok(()) },
+        || async {},
+    )
+    .await;
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            timeout_kind,
+            timeout_bound,
+            settle,
+            elapsed,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            // 判死边界 = settle 窗口配置（flag 路径没有墙钟边界）。
+            assert_eq!(timeout_bound, std::time::Duration::from_millis(40));
+            assert_eq!(settle, crate::acp::CancelSettleResolution::SettleTimeout);
+            assert!(
+                elapsed < std::time::Duration::from_secs(5),
+                "flag 初始置位必须立即判死，实际 elapsed = {elapsed:?}"
+            );
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn user_cancel_settle_window_terminal_wins() {
+    let (tx, mut rx) = oneshot::channel();
+    let outcome = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(500),
+        std::time::Duration::from_millis(50),
+        std::time::Duration::from_millis(50),
+        || Some(std::time::Instant::now()),
+        || true,
+        move || async move {
+            tx.send(response())
+                .map_err(|_| "receiver closed".to_string())
+        },
+        || async {},
+    )
+    .await;
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            response,
+            timeout_kind,
+            settle,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            assert_eq!(settle, crate::acp::CancelSettleResolution::Responded);
+            assert!(response.and_then(|raw| raw.result).is_some());
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn user_cancel_flag_converges_sustained_turn_after_late_set() {
+    let (_tx, mut rx) = tokio::sync::oneshot::channel();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_flag_for_task = cancel_flag.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancel_flag_for_task.store(true, Ordering::SeqCst);
+    });
+    let wait = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(60),
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_millis(20),
+        // 持续活动：没有 cancel 输入时该回合不会被闲置/首 token 判死。
+        || Some(std::time::Instant::now()),
+        || cancel_flag.load(Ordering::SeqCst),
+        || async { Ok(()) },
+        || async {},
+    );
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), wait)
+        .await
+        .expect("用户 cancel 后回合必须收敛（不被持续活动续命拖住）");
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            timeout_kind,
+            settle,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            assert_eq!(settle, crate::acp::CancelSettleResolution::SettleTimeout);
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
     let agent = crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", "alive"]);
@@ -1339,6 +1451,7 @@ async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response()
         std::time::Duration::from_millis(20),
         std::time::Duration::from_millis(20),
         || None,
+        || false,
         || async {
             client
                 .cancel_session("fake-session-timeout")
@@ -1487,6 +1600,7 @@ async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
         std::time::Duration::from_millis(20),
         std::time::Duration::from_millis(20),
         || None,
+        || false,
         || async {
             client
                 .cancel_session("fake-session-cancel-response")
