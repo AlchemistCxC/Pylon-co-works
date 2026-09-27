@@ -94,6 +94,42 @@ describe('removeSessionTransaction（DEL-03 本地优先）', () => {
     expect(deps.reportError).toHaveBeenCalledWith('关闭会话', expect.any(Error))
   })
 
+  // ── #398：agent 侧 session/delete 步骤（close 之后、finalize 之前，best-effort）──
+
+  it('#398：deleteSessionRemote 在 close 之后、finalize 之前调用', async () => {
+    const { deps, calls } = createDeps({
+      deleteSessionRemote: async (session: Session) => { calls.push(`agentDelete:${session.source}@${session.agentId}`) },
+    })
+    const result = await removeSessionTransaction('s1', deps)
+    expect(result).toEqual({ ok: true, value: 's1' })
+    expect(calls).toEqual([
+      'delete:s1@peri',
+      'markDeleted:s1',
+      'remove:s1',
+      'clear:s1',
+      'close:local:x@peri',
+      'agentDelete:local:x@peri',
+      'finalize:s1@local:x',
+    ])
+  })
+
+  it('#398：deleteSessionRemote 失败仅报告不阻断（close/finalize 照常），返回 ok', async () => {
+    const { deps, calls } = createDeps({
+      deleteSessionRemote: async () => { throw new Error('agent delete failed') },
+    })
+    const result = await removeSessionTransaction('s1', deps)
+    expect(result.ok).toBe(true)
+    expect(calls).toEqual(['delete:s1@peri', 'markDeleted:s1', 'remove:s1', 'clear:s1', 'close:local:x@peri', 'finalize:s1@local:x'])
+    expect(deps.reportError).toHaveBeenCalledWith('删除 Agent 侧会话', expect.any(Error))
+  })
+
+  it('#398：deleteSessionRemote 未注入（可选依赖）时行为与现状一致', async () => {
+    const { deps, calls } = createDeps()
+    const result = await removeSessionTransaction('s1', deps)
+    expect(result).toEqual({ ok: true, value: 's1' })
+    expect(calls).toEqual(['delete:s1@peri', 'markDeleted:s1', 'remove:s1', 'clear:s1', 'close:local:x@peri', 'finalize:s1@local:x'])
+  })
+
   it('finalize 失败：本地删除已完成，finalize 仅报告，返回 ok', async () => {
     const { deps, calls } = createDeps({
       finalizeSessionDelete: async () => { throw new Error('finalize failed') },

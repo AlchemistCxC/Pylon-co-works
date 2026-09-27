@@ -77,6 +77,10 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
         }
       },
       closeSession: s => sessionClient.closeSession({ agentId: s.agentId, source: s.source }),
+      // #398：agent 侧 session/delete（close 之后）；periId 缺失（从未连接 agent）跳过。
+      deleteSessionRemote: s => s.periId
+        ? sessionClient.deleteSessionAgentSide({ agentId: s.agentId, source: s.source, periId: s.periId })
+        : Promise.resolve(),
       finalizeSessionDelete: s => invoke('user_session_delete_finalize', {
         sessionId: s.id,
         ownerKey: sessionDurableOwnerKey(s),

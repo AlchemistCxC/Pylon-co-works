@@ -97,6 +97,10 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       },
       // OWNER-02：close 目标 owner 由 session 携带（agentId + source）；best effort，失败仅报告
       closeSession: s => sessionClient.closeSession({ agentId: s.agentId, source: s.source }),
+      // #398：agent 侧 session/delete（close 之后）；periId 缺失（从未连接 agent）跳过。
+      deleteSessionRemote: s => s.periId
+        ? sessionClient.deleteSessionAgentSide({ agentId: s.agentId, source: s.source, periId: s.periId })
+        : Promise.resolve(),
       // DEL-03 终态化：deleting → deleted（best effort）
       finalizeSessionDelete: s => invoke('user_session_delete_finalize', {
         sessionId: s.id,

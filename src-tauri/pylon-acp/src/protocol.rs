@@ -9,8 +9,8 @@ use base64::Engine;
 use std::io::Read;
 
 use agent_client_protocol_schema::v1::{
-    CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+    CloseSessionRequest, ContentBlock, DeleteSessionRequest, LoadSessionRequest, NewSessionRequest,
+    PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
     SetSessionModeRequest,
 };
 
@@ -207,6 +207,21 @@ mod session_mode_tests {
     }
 }
 
+#[cfg(test)]
+mod session_delete_tests {
+    use super::session_delete_params;
+    use serde_json::json;
+
+    /// #398：官方 DeleteSessionRequest wire 形状——params 仅 sessionId（_meta 缺省不发射）。
+    #[test]
+    fn session_delete_params_use_official_wire_shape() {
+        assert_eq!(
+            session_delete_params("remote-1").unwrap(),
+            json!({ "sessionId": "remote-1" }),
+        );
+    }
+}
+
 /// session/prompt 参数。仅被 `AcpClient::prepare_prompt` 内部使用。
 pub fn session_prompt_params(
     session_id: &str,
@@ -220,6 +235,12 @@ pub fn session_prompt_params(
 pub fn session_close_params(session_id: &str) -> Result<serde_json::Value, String> {
     let req = CloseSessionRequest::new(session_id.to_string());
     to_params(&req, "session/close")
+}
+
+/// session/delete 参数（#398：官方 DeleteSessionRequest，响应无载荷）。
+pub fn session_delete_params(session_id: &str) -> Result<serde_json::Value, String> {
+    let req = DeleteSessionRequest::new(session_id.to_string());
+    to_params(&req, "session/delete")
 }
 
 /// session/set_model 参数（Hermes unstable 扩展，字段与官方 SetSessionModelRequest 一致）。

@@ -5,9 +5,11 @@
  *   本地删除（OwnerKey 校验 → deleting tombstone → 本地事务删除用户记录/消息）→
  *   markDeleted（主动 cancel 调度器未落盘写，DEL-04）→ 清理 UI/localStorage →
  *   远端 close best effort（失败仅报告，不阻断本地删除）→
+ *   agent 侧 session/delete best effort（#398，close 之后清 agent 持久记录，
+ *   失败仅报告）→
  *   终态化（deleting → deleted，best effort）。
- * 本地删除失败仍返回 transport（可重试），本地会话保留；远端 close/finalize 失败不回滚
- * 已完成的本地删除。UI 收尾（关对话框/选中态）由调用方在 ok 后处理。
+ * 本地删除失败仍返回 transport（可重试），本地会话保留；远端 close/delete/finalize
+ * 失败不回滚已完成的本地删除。UI 收尾（关对话框/选中态）由调用方在 ok 后处理。
  */
 import type { Session } from '../../domains/identity/identityStore'
 import type { TransactionResult } from './transactionResult'
@@ -38,6 +40,13 @@ export interface RemoveSessionDeps {
   markSessionDeleted: (sessionId: string) => void
   /** OWNER-02：close 目标 owner 由 session 携带（agentId + source 一并传递，绝不取 activeAgent）——best effort，失败仅报告 */
   closeSession: (session: Session) => Promise<unknown>
+  /**
+   * #398：agent 侧会话删除（session/delete，官方 best-effort 语义）——close 之后
+   * 调用（先停活跃工作再清持久记录）。可选：未注入（periId 缺失的纯本地会话、
+   * 旧调用方）时跳过。失败仅报告，不阻断本地删除；调用方自行判定 periId 缺失
+   * 时 resolve 以跳过 RPC。
+   */
+  deleteSessionRemote?: (session: Session) => Promise<unknown>
   /** DEL-03 终态化：deleting → deleted（best effort，失败仅报告） */
   finalizeSessionDelete: (session: Session) => Promise<unknown>
   removeSession: (id: string) => void
@@ -85,6 +94,13 @@ export async function removeSessionTransaction(id: string, deps: RemoveSessionDe
     await deps.closeSession(session)
   } catch (error) {
     deps.reportError('关闭会话', error)
+  }
+  // #398：agent 侧会话删除（session/delete）best effort——close 之后清 agent 持久
+  // 记录；失败仅报告，不阻断本地删除（skipped 由后端返回而非 reject）。
+  try {
+    await deps.deleteSessionRemote?.(session)
+  } catch (error) {
+    deps.reportError('删除 Agent 侧会话', error)
   }
   // §5.13 终态化：deleting → deleted（best effort，失败仅报告；tombstone 保持 deleting 仍 gate 迟到写）
   try {

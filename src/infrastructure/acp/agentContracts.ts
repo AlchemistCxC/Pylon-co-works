@@ -44,6 +44,8 @@ export interface AgentCapabilitySnapshot {
   sessionFork: boolean
   sessionResume: boolean
   sessionClose: boolean
+  /** #398：session/delete（删除会话时同步清 agent 侧记录；agent 侧为 best-effort，本地删除不依赖它）。 */
+  sessionDelete: boolean
   sessionList: boolean
   mcpHttp: boolean
   mcpSse: boolean
@@ -97,6 +99,7 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
       sessionFork: usableFromSnapshot(snapshotPayload, 'fork'),
       sessionResume: usableFromSnapshot(snapshotPayload, 'resume'),
       sessionClose: usableFromSnapshot(snapshotPayload, 'close'),
+      sessionDelete: usableFromSnapshot(snapshotPayload, 'delete'),
       sessionList: usableFromSnapshot(snapshotPayload, 'list'),
       mcpHttp: usableFromSnapshot(snapshotPayload, 'mcpHttp'),
       mcpSse: usableFromSnapshot(snapshotPayload, 'mcpSse'),
@@ -116,6 +119,7 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
     sessionFork: false,
     sessionResume: rawObjectCapability(session, 'resume'),
     sessionClose: rawBooleanOrObjectCapability(session, 'close'),
+    sessionDelete: rawBooleanOrObjectCapability(session, 'delete'),
     sessionList: rawBooleanOrObjectCapability(session, 'list'),
     mcpHttp: mcp?.http === true,
     mcpSse: mcp?.sse === true,
