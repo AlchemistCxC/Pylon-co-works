@@ -219,7 +219,7 @@ function snapshot(name, records) {
       // overloaded 终态关闭连接并记录 gap 计数。静默 drop-on-full 已废除。
       backpressure: "bounded-spill-then-overload-terminal",
       evidence:
-        "engine::tests::inbox_full_spills_then_delivers_every_frame_in_order + spill_overflow_terminates_connection_with_explicit_overload",
+        "engine::inbound::tests::inbox_full_spills_then_delivers_every_frame_in_order + spill_overflow_terminates_connection_with_explicit_overload",
     },
     traceBytes,
     memoryBound: traceBytes <= 4 * 1024 * 1024,
@@ -230,8 +230,9 @@ function snapshot(name, records) {
 function runBackpressureCheck() {
   // #99：背压探针必须命中的测试逐一校验。注意 `cargo test` 对匹配 0 个测试的情况也退出 0，
   // 因此这里的测试名必须与源码同步维护（名字失效 = 探针假绿）。
-  // #247 起协议引擎核抽至 `pylon-acp` crate——`acp::engine::tests::*` 只在 pylon-acp
-  // 自己的 lib 测试里存在（glob 重导出带不出依赖 crate 的 cfg(test) 模块）。
+  // #247 起协议引擎核抽至 `pylon-acp` crate——`engine::tests::*` 只在 pylon-acp
+  // 自己的 lib 测试里存在（glob 重导出带不出依赖 crate 的 cfg(test) 模块）；
+  // 2026-09-28 engine.rs 拆块（#416）后入站背压测试位于 engine/inbound.rs。
   // #401：①两条测试名合并进**一次**调用（libtest 接受多个过滤名，省一次 cargo 进程）；
   // ②选择口径与 fixture 对齐为 `-p pylon -p pylon-acp --lib --features test-agent`——
   // 此前只用 `-p pylon-acp`（不带 feature），按受限依赖图形解析 feature，与主形态在同一
@@ -240,8 +241,8 @@ function runBackpressureCheck() {
   // 且复用主形态已构建的 pylon 二进制。
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
   const tests = [
-    "engine::tests::inbox_full_spills_then_delivers_every_frame_in_order",
-    "engine::tests::spill_overflow_terminates_connection_with_explicit_overload",
+    "engine::inbound::tests::inbox_full_spills_then_delivers_every_frame_in_order",
+    "engine::inbound::tests::spill_overflow_terminates_connection_with_explicit_overload",
   ];
   const result = run(cargo, [
     "test",

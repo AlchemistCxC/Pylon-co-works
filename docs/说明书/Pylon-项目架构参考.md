@@ -104,11 +104,11 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：engine/client/negotiated/replay/wire trace/policies；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine.rs`、`client.rs`、`negotiated.rs` |
+| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：`engine/`（mod/inbound/outbound/prompt_wait，#416 拆分）/client/negotiated/replay/wire trace/policies/`adapter/`（private_ext 方言信封 + permission_wire + interaction_bridge）；spawn 入口在 `process.rs`；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine/mod.rs`、`client.rs`、`negotiated.rs` |
 | `src-tauri/src/agent_config` | agents.yaml 读取/补丁/config 域原子事务编排（AgentDef 值类型在 pylon-core）；通用原子写正身在 `pylon-foundations/src/atomic_write.rs`（#317 批次二） | Rust Kernel | `load.rs`、`patch.rs`、`atomic_write.rs` |
 | `src-tauri/pylon-session` | 会话存储核：canonical event / message / user_data 仓库、retention、turn 聚合（rusqlite，零 tauri） | 可复用 Kernel library | `event_repo/`、`msg_repo/`、`error.rs`（SessionError） |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
-| `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
+| `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect；产品反应经 KernelReactionSink 订阅 adapter（`reactions.rs`）、会话更新选路收口 `publish_session_update`（`publish_route.rs`），#416 起 kernel 决策面不再内嵌 pet 策略字段 | Rust Kernel | `mod.rs`、`reactions.rs` |
 | `src-tauri/src/agent` | GUI 检测命令层（`detection.rs`：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消，P74 B0）与多 agent 运行时状态机（`runtime.rs`） | Rust Kernel | `detection.rs`、`runtime.rs` |
 | `src-tauri/pylon-core` | Agent Catalog、native detection、preflight/环境诊断、launch plan、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs`、`agent_diagnostics.rs` |
 | `src-tauri/pylon-foundations` | event_names、sanitize、time、workspace、git、atomic_write（通用原子写正身，#317 批次二下沉）等零 tauri 纯逻辑（P58 拆分） | 可复用 Kernel library | `src/lib.rs` |
@@ -306,7 +306,7 @@ flowchart TB
 `agents.yaml`（#372 起随包：模板源 `resources/release/agents.template.yaml`，打包时改名），因此发行包首跑的配置来源是
 第 2 档而非第 3 档，效果同为零 Agent 空态，用户在包内即有可编辑的预置入口。
 
-当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
+当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1；门禁在设置页前端状态机 `agentDraftMachine` + `AgentRuntimePanel` UI 拦截，后端 `update_agents_config` 仅 revision CAS/active 保护、无凭证校验——后端化为待决策项，见 issue #417）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 
 ## 10. Plugin Runtime 生命周期
 
@@ -365,7 +365,7 @@ stateDiagram-v2
 | Product Shell/UI | `App.tsx`、components | First-party Product Plugin |
 | Workspace/Renderer/Tools | product/core plugins | First-party Product Plugin |
 | SQLite、Tauri IPC、ACP subprocess | Rust/TS infrastructure | Kernel adapters |
-| Pet/Prism/Gateway 产品反应 | 部分嵌在 dispatcher/prompt | 待确认是否迁为 Kernel events 的订阅 adapter |
+| Pet/Prism/Gateway 产品反应 | KernelReactionSink 订阅 adapter（`dispatcher/reactions.rs`）+ PromptTurnHooks（`session/prompt/hooks.rs`） | 已收敛为 Kernel events 订阅 adapter（#416） |
 
 ## 12. 必须维持或建立的 invariants
 
@@ -384,7 +384,7 @@ stateDiagram-v2
 - Agent Instance 配置写盘状态与 live runtime 生效状态必须可区分。
 - generation 变化后，旧 runtime 的迟到事件不得污染新 runtime。
 - Runtime Candidate 的“身份可信”和“ACP 可运行”是两个不同证据级别。
-- 检测、版本探测、连接测试和 replay 都必须有总时间预算。
+- 检测、版本探测、连接测试和 replay 都必须有总时间预算（现状缺口：生产 connect 尚无外层总预算、仅 initialize 受 `rpc_timeout` 约束，见 issue #417；预算常量归口 `lifecycle/budgets.rs`）。
 
 ### Plugin Runtime
 
