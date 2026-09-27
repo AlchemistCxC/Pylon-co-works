@@ -439,8 +439,9 @@ bun run build
 bun run check:solid
 # #106 workspace 化后：单锁单 target，全 crate 单元测试一条命令（含子 crate）
 cargo test --manifest-path src-tauri/Cargo.toml --workspace --lib
-# 集成/夹具形态测试（先构建测试专用假 agent bin）
-cargo build --manifest-path src-tauri/Cargo.toml --bin pylon-fake-agent --features test-agent
+# 集成/夹具形态测试（先构建测试专用假 agent bin——#382 起它是独立 member crate，
+# 用 `-p` 选择；不再用 `--bin`：那会落在主包上、连带编译整棵 Tauri 依赖树）
+cargo build --manifest-path src-tauri/Cargo.toml -p pylon-fake-agent --features test-agent
 cargo test --manifest-path src-tauri/Cargo.toml --workspace --tests --features test-agent
 ```
 

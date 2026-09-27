@@ -267,13 +267,14 @@ jobs:
       # #106 P0 workspace 化：--workspace 关闭子 crate 测试黑洞（pylon-core /
       # foundations / pet-core 的内嵌测试首次进 CI）。
       # #106 P1：b11/obs03/p1_wire 等集成形态测试解除 skip 进 CI（历史 skip 系
-      # locale 不可复现 + 本地 Python 依赖）；假 agent = pylon-fake-agent bin，
-      # 先构建再跑测试——测试进程经 current_exe 祖先目录定位该 bin。
+      # locale 不可复现 + 本地 Python 依赖）；假 agent = `pylon-fake-agent` member
+      # crate 的 bin（#382 迁出主 crate），先构建再跑测试——测试进程经 current_exe
+      # 祖先目录定位该 bin。
       # #184：本 job 拆自原单 rust job；shadow parity / clippy 并行见独立 job。
       - name: Rust 测试与构建
         run: |
           cd src-tauri
-          cargo build --bin pylon-fake-agent --features test-agent
+          cargo build -p pylon-fake-agent --features test-agent
           cargo test --workspace --lib --features test-agent
           cargo test --workspace --tests --features test-agent
           cargo build
@@ -489,10 +490,13 @@ jobs:
         run: bun run build
 
       # #106 P1：假 agent 先构建再跑 fixture——测试进程经 current_exe 祖先目录定位该 bin。
+      # #382：夹具已迁出主 crate（`-p pylon-fake-agent`）——旧 `--bin` 选择落在主包上，
+      # Cargo 的「包内 bin 隐式链接本包 lib」规则使这一步连带编译整棵 Tauri 依赖树，
+      # 本 job 实测每次 405 crate / 5m26s（该 job 合计 15m08s），迁出后为秒级。
       # #184：shadow 拆为独立并行 job——旧单 job 里它排在测试之后串行（9.2 min，
       # 其中 fixture 测试本体仅 0.2s，其余是 feature 错配重编 + cargo 进程开销）。
       - name: 构建 fake agent
-        run: cd src-tauri && cargo build --bin pylon-fake-agent --features test-agent
+        run: cd src-tauri && cargo build -p pylon-fake-agent --features test-agent
 
       # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
       - name: ACP shadow parity（check:acp-shadow）

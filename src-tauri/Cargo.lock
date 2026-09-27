@@ -3234,6 +3234,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pylon-fake-agent"
+version = "0.3.0-AUE"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "pylon-foundations"
 version = "1.0.0"
 dependencies = [

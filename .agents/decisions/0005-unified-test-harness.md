@@ -2,6 +2,7 @@
 
 - **日期**：2026-09-16
 - **状态**：已采用（部分）——P0/P1/P2/P3a/P3b/P6/P7 已实施并验证（2026-09-16）；P4/P5 未落地，遗留清单见开发记录 `.agents/records/issue-106-unified-test-harness.md`
+  - 决定 1 的**载体**已由 ADR-0028（#382）迁移：假 agent 从主 crate 的 `[[bin]]` 改为独立 member crate `src-tauri/pylon-fake-agent`，命令入口由 `--bin` 改 `-p`；实质不变——仍 feature 门控，默认构建与发行包不含它。
 
 ## 背景与约束
 

@@ -4,10 +4,10 @@
 //! b11 inject / gateway 平台测试）之间的重复构造；AppState 字面量（10 处）与
 //! build_state_with 包装（4 份）收敛到 TestStateBuilder。仅 cfg(test) 编译。
 //!
-//! #106 P1：fake agent 一律为本 crate 的 `pylon-fake-agent` bin（feature
-//! `test-agent`），内嵌 Python 脚本与解释器探测链已删除——测试不再依赖宿主
-//! 解释器与 locale（cp1252 surrogate escape 问题随之消失）。场景旗标见
-//! `src/bin/pylon-fake-agent.rs` 模块文档。
+//! #106 P1：fake agent 一律为 `pylon-fake-agent` member crate 的 bin（feature
+//! `test-agent`；#382 起独立成 crate，见其 manifest），内嵌 Python 脚本与解释器
+//! 探测链已删除——测试不再依赖宿主解释器与 locale（cp1252 surrogate escape 问题
+//! 随之消失）。场景旗标见 `src-tauri/pylon-fake-agent/src/main.rs` 模块文档。
 
 use crate::acp::AcpClient;
 use crate::agent_config::AgentDef;
@@ -54,7 +54,7 @@ pub(crate) fn fake_agent_bin() -> std::path::PathBuf {
         }
     }
     panic!(
-        "pylon-fake-agent bin not found（先构建：cargo build --bin pylon-fake-agent \
+        "pylon-fake-agent bin not found（先构建：cargo build -p pylon-fake-agent \
          --features test-agent；或设 PYLON_FAKE_AGENT_BIN 指向已有 bin）"
     )
 }

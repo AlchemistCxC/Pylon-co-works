@@ -2258,7 +2258,7 @@ mod test_support {
             }
         }
         panic!(
-            "pylon-fake-agent bin not found（先构建：cargo build --bin pylon-fake-agent              --features test-agent；或设 PYLON_FAKE_AGENT_BIN 指向已有 bin）"
+            "pylon-fake-agent bin not found（先构建：cargo build -p pylon-fake-agent              --features test-agent；或设 PYLON_FAKE_AGENT_BIN 指向已有 bin）"
         )
     }
 
