@@ -1673,8 +1673,6 @@ describe('mountSolidWorkbench', () => {
   it('生产中控消费提交模式、隐藏项与排布权威（落脚处内按序号排）', async () => {
     const { host, services, lifecycle } = mountPreview()
     const theme = structuredClone(DEFAULTS)
-    theme.inputMode = 'default'
-    theme.inputVariant = 'composer'
     theme.inputSubmitButtonMode = 'inline'
     services.appearance.setTheme(theme)
 
@@ -1714,8 +1712,6 @@ describe('mountSolidWorkbench', () => {
   it('外置按钮模式下隐藏发送不会误吞掉输入栏按钮', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
-    theme.inputMode = 'default'
-    theme.inputVariant = 'composer'
     theme.inputSubmitButtonMode = 'external'
     theme.ccHidden = ['cc-send-button']
     services.appearance.setTheme(theme)
@@ -1958,7 +1954,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
   })
 
-  it('#266 · 属性面板不按输入模式判明：命令行边框三项在两种模式下都渲染（条件字段已撤）', async () => {
+  it('#266 · 输入栏属性面板：字段恒定（形态固定后不再有"按输入模式判明/切换"的项）', async () => {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '输入栏 属性' }))
@@ -1967,25 +1963,15 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     const editableLabels = () => [...panel().querySelectorAll('.cc-prop-field')]
       .map(el => el.querySelector('label')?.textContent ?? '')
       .filter(label => !['顺序', '水平微调', '垂直微调'].includes(label))
-    const panelChip = (label: string) => [...panel().querySelectorAll('button')].find(button => button.textContent === label)!
-    const EIGHT = ['背景色', '文字色', '字号', '最小高度', '模式', '边框宽度', '边框颜色', '内边距']
-
-    // 命令行模式（预览档默认）：8 项，与改造前一致
-    expect(services.appearance.getSnapshot().inputMode).toBe('cli')
-    expect(editableLabels()).toEqual(EIGHT)
-
-    // ★ 标准输入模式：**此前只有 5 项**（命令行边框三项被 showIf 藏掉）⇒ 现在 8 项
-    fireEvent.click(panelChip('标准输入'))
-    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'default', inputVariant: 'composer' }))
-    expect(editableLabels()).toEqual(EIGHT)
-    for (const label of ['边框宽度', '边框颜色', '内边距']) {
-      expect(screen.getByLabelText(label), `${label} 在标准输入模式下也必须显示`).toBeInTheDocument()
-    }
-
-    // 切回命令行：仍是同样 8 项（两模式差集为空）
-    fireEvent.click(panelChip('命令行'))
-    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli' }))
-    expect(editableLabels()).toEqual(EIGHT)
+    const chipTexts = () => [...panel().querySelectorAll('button')].map(button => button.textContent ?? '')
+    // ★ #266 刀7/刀9/刀13：原 8 项里的「模式」（chips，写 inputMode↔inputVariant 双写）、
+    //   「最小高度」（inputMinHeight）、「内边距」（cliLinePadding）三项随字段删除
+    //   ⇒ 只剩 5 项；形态固定命令行 ⇒ 面板里**没有**「模式 / 标准输入 / 命令行」这组切换。
+    const FIVE = ['背景色', '文字色', '字号', '边框宽度', '边框颜色']
+    expect(editableLabels()).toEqual(FIVE)
+    expect(chipTexts()).not.toContain('模式')
+    expect(chipTexts()).not.toContain('标准输入')
+    expect(chipTexts()).not.toContain('命令行')
 
     // 面板字段本身照旧响应式（原用例的靶子保留）
     const lineColor = screen.getByLabelText('边框颜色')

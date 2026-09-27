@@ -67,7 +67,7 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
   it('select 字段的 options 与 defs 动态一致，复合字段 default 与 DEFAULTS 一致', () => {
     const schema = getSkinSchema()
 
-    expect(schema.fields.inputVariant?.options).toEqual([...(THEME_FIELD_DEFS.inputVariant.options ?? [])])
+    // ★ #266 刀9：原样本 `inputVariant` 字段已删除 ⇒ 只留下面这条同形（select + cc）样本
     // ★ #238 刀8：原样本「整体风格」（ccVariant）已整套删除 ⇒ 换一个同样是 select 的 cc 字段
     expect(schema.fields.cliHintMode?.options).toEqual([...(THEME_FIELD_DEFS.cliHintMode.options ?? [])])
 
@@ -78,7 +78,9 @@ describe('Skin Schema 动态枚举（S5-A）', () => {
   it('componentVariants 来自实际组件真值（无硬编码 variant 枚举）', () => {
     const schema = getSkinSchema()
 
-    expect(schema.componentVariants['input-bar']).toEqual([...(THEME_FIELD_DEFS.inputVariant.options ?? [])])
+    // ★ #266 刀9：输入形态固定命令行 ⇒ `input-bar` 白名单显式落成单值（原先取自 `inputVariant.options`，
+    //   该字段已删除）；断言锁住"白名单与渲染形态一致"这件事本身。
+    expect(schema.componentVariants['input-bar']).toEqual(['cli'])
     // 刀4：'control-center' 变体随 ccStyle 下线（用量条四形态移除）
     expect(schema.componentVariants['control-center']).toBeUndefined()
     expect(schema.componentVariants.message).toEqual([...MESSAGE_ROLES])

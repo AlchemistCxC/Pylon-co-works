@@ -13,33 +13,24 @@ describe('ccHeightState 状态栏可见计数', () => {
 })
 
 describe('ccHeightState 最小高度', () => {
-  it('resolveCcMinHeight 按输入模式/footer/hint/换行状态行计算布局约束', () => {
-    expect(resolveCcMinHeight({
-      inputMode: 'default', footerLayout: 'free', hintMode: 'full', visibleStatusWidgets: 7, cliOverflowMode: 'fixed-scroll',
-    })).toBe(64)
-    expect(resolveCcMinHeight({
-      inputMode: 'cli', footerLayout: 'free', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-    })).toBe(64)
-    expect(resolveCcMinHeight({
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'hidden', visibleStatusWidgets: 4, cliOverflowMode: 'fixed-scroll',
-    })).toBe(64)
-    expect(resolveCcMinHeight({
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 4, cliOverflowMode: 'fixed-scroll',
-    })).toBe(84)
-    expect(resolveCcMinHeight({
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-    })).toBe(109)
-    expect(resolveCcMinHeight({
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 7, cliOverflowMode: 'grow',
-    })).toBe(64)
+  /**
+   * ★ #266 刀9/刀10/刀11：形态收敛成唯一一种（命令行输入 + 独立状态行 + 随内容增高）后，
+   * `resolveCcMinHeight` 退化为常量 64 —— 原先那两个会涨上去的取值（peri + hint 84 / 109）
+   * 随 `footerLayout` / `cliOverflowMode` 字段一并退场。
+   *
+   * 改造前的等价性：`free` 形态（唯一形态，也是用户实际在用的）走的就是
+   * `inputMode !== 'cli' || footerLayout !== 'peri'` ⇒ `return BASE_MIN_HEIGHT` 这一支。
+   */
+  it('单一形态 ⇒ 常量 64（不再随形态/详细档/可见控件数浮动）', () => {
+    expect(resolveCcMinHeight()).toBe(64)
+    expect(clampCcHeight(0)).toBe(64)
   })
 
   it('clampCcHeight 以最小高度与 400 上限夹紧', () => {
-    expect(clampCcHeight(20, {
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-    })).toBe(109)
-    expect(clampCcHeight(999, {
-      inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-    })).toBe(400)
+    expect(clampCcHeight(20)).toBe(64)
+    expect(clampCcHeight(999)).toBe(400)
+    expect(clampCcHeight(150)).toBe(150)
+    // 非有限值回落最小高（原行为：`Number.isFinite` 为假 ⇒ 取 min）
+    expect(clampCcHeight(Number.NaN)).toBe(64)
   })
 })

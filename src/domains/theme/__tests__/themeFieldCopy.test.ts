@@ -43,18 +43,15 @@ describe('主题设置展示文案契约', () => {
 
   it('关键枚举保留稳定值，并为每个值提供人类可读名称', () => {
     const expectedOptions = {
-      inputMode: ['cli', 'default'],
-      inputShowPlaceholder: ['shown', 'hidden'],
       inputShowHistoryHint: ['shown', 'hidden'],
       inputSubmitButtonMode: ['inline', 'external', 'hidden'],
       cliHintMode: ['hidden', 'compact', 'full'],
-      footerLayout: ['free', 'peri'],
-      cliOverflowMode: ['fixed-scroll', 'grow', 'overlay'],
       modelSwitchMode: ['menu', 'cycle'],
       permissionSwitchMode: ['menu', 'cycle'],
       // ★ #266 遗留①：`permissionBgColor` / `permissionTextColor` 已由「白/黑(+跟模式) 枚举」改成
       //   **自由选色**（`type: 'color'`，无 options）⇒ 不再属于「关键枚举」这一组。
-      sendVariant: ['icon', 'square', 'minimal'],
+      // ★ #266 CC-07：`inputShowPlaceholder` / `sendVariant` 两字段真的删除 ⇒ 样本同步移除。
+      // ★ #266 刀9~11：`inputMode` / `footerLayout` / `cliOverflowMode` 三字段真的删除 ⇒ 同步移除。
     } as const
 
     for (const [key, options] of Object.entries(expectedOptions)) {
@@ -66,7 +63,8 @@ describe('主题设置展示文案契约', () => {
 
   it('诊断中点名的模糊字段表达真实作用域', () => {
     expect(THEME_FIELD_DEFS.assistantDot.label).toBe('显示助手消息标记')
-    expect(THEME_FIELD_DEFS.footerLayout.label).toBe('底部信息布局')
+    // ★ #266 刀11：原样本 `footerLayout`（底部信息布局）已删除 ⇒ 换成仍在的同类字段
+    expect(THEME_FIELD_DEFS.cliHintMode.label).toBe('快捷提示详细程度')
     // ★ #238 刀8：原「整体风格」（ccVariant）已整套删除 ⇒ 本条样本换成另一个 noCssVar 布尔/文本类字段
     expect(THEME_FIELD_DEFS.ccLayout.label).toBe('布局')
   })

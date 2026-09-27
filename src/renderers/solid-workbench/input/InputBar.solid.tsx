@@ -80,15 +80,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const styles = getComputedStyle(slot)
     const staticHeight = Number.parseFloat(styles.getPropertyValue('--cc-input-height')) || textarea.clientHeight || 40
     const controlCenter = slot.closest<HTMLElement>('.control-center')
-    if (inputBar?.classList.contains('cli-mode')) {
-      slot.style.height = ''
-      controlCenter?.style.removeProperty('--cc-input-extra-height')
-      textarea.style.height = ''
-      textarea.style.maxHeight = ''
-      textarea.style.overflowY = ''
-      inputBar.dataset.expanded = 'false'
-      return
-    }
+    // ★ #266 刀10：原先命令行有一次提前 `return`（清空高度 ⇒ 冻在 CSS 的 22px）。
+    //   那个 `return` 随 `cliOverflowMode` 字段退场 —— 命令行现在也走「随内容增高」这一套：
+    //   底边不动、上边延伸、3 倍静态高封顶、超出后内部滚动（不显示滚动条）。
     const maxHeight = staticHeight * 3
     textarea.style.height = 'auto'
     const contentHeight = Math.max(textarea.scrollHeight, staticHeight)
@@ -218,7 +212,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
     })
   })
   onCleanup(() => predictionScheduler?.dispose())
-  const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
+  // ★ #266 刀9：输入形态固定为命令行（`inputVariant` / `inputMode` 两字段已删除）。
   // Placeholder copy is deferred to the send/indicator work; keep the
   // textarea free of a standalone instruction line.
   const placeholder = () => ''
@@ -570,7 +564,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   return (
     <div
       ref={inputBar}
-      class={`input-bar input-variant-${inputVariant()}${inputVariant() === 'cli' ? ' cli-mode' : ''} cli-overflow-${appearance().cliOverflowMode}${emptyState() ? ' input-empty' : ''}`}
+      class={`input-bar input-variant-cli cli-mode${emptyState() ? ' input-empty' : ''}`}
       data-expanded="false"
     >
       {/* Empty state is intentionally quiet: the control-center itself already
@@ -646,7 +640,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
       </Show>
       <Show when={emptyState()?.before}>{content => <div class="input-empty-before">{content()}</div>}</Show>
       <div class="input-row">
-        <Show when={inputVariant() === 'cli'}><span class="cli-prefix">❯</span></Show>
+        <span class="cli-prefix">❯</span>
         <div class="input-editor-stack">
           <Show when={prediction()}>{candidate => (
             <div class="input-ghost-suggestion" aria-hidden="true">

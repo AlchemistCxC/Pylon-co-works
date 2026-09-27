@@ -697,8 +697,6 @@
 .app[data-interface-mode="tactical-blue"] .input-bar .input-row { display:flex; width:100%; min-width:0; align-items:flex-end; }
 .app[data-interface-mode="tactical-blue"] .input-editor-stack { flex:1 1 0; min-width:0; }
 .app[data-interface-mode="tactical-blue"] .input-editor-stack .input-textarea { display:block; box-sizing:border-box; min-height:48px; line-height:1.6; padding:10px 12px; }
-.app[data-interface-mode="tactical-blue"] .input-btn.send { color:#071f45; background:#80e6ff; border-color:#80e6ff; border-radius:2px; box-shadow:none; }
-.app[data-interface-mode="tactical-blue"] .input-btn.stop { background:#442032; color:#ffc5cf; border-color:#ff8c99; }
 .app[data-interface-mode="tactical-blue"] .cc-footer-status-row { flex-wrap:wrap; gap:6px 0; font-size:12px; }
 .app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-group) { flex-wrap:wrap; max-width:100%; }
 .app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .control-center { min-height:140px; height:auto; }

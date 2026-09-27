@@ -53,7 +53,8 @@ describe('plugin Interface Mode integration', () => {
     }))
     registrations.push(getPresentationProfileRegistry().register(owner, {
       id: 'example.presentation.focus', label: 'Focus', family: 'custom', interfaceMode: 'example.focus',
-      tokens: { msgStyle: 'bubble', inputVariant: 'composer' },
+      // ★ #266 刀9：原样本含 `inputVariant: 'composer'` —— 该字段已删除，不再是合法 token
+      tokens: { msgStyle: 'bubble' },
     }))
     const modeRegistration = getInterfaceModeRegistry().register(owner, {
       id: 'example.focus', label: 'Focus Mode', description: 'Plugin-owned complete workbench',
