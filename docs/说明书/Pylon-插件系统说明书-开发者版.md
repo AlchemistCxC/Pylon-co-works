@@ -568,14 +568,12 @@ context.presentation.registerProfile({
     msgStyle: 'bubble',
     messageLayout: 'bubble',
     msgFont: 'system',
-    inputVariant: 'composer',
-    ccVariant: 'glass',
   },
   assets: { assistantGlyph: '✦', runningGlyph: '▶', completedGlyph: '✓' },
 })
 ```
 
-Profile 只能声明 `themeFieldDefs` 中已验证的结构令牌，不直接挂载 UI，也不决定 React/Solid。`interfaceMode` 只声明 Profile 在哪个现有模式的选择器中出现，可选 `modern-gui` / `terminal-like`；省略时按兼容规则归入 `terminal-like`。它不能注册或切换新的 Interface Mode。注册项由 owner/scope 管理，并参与 shadow hot-swap。
+Profile 只能声明 `themeFieldDefs` 中已验证的结构令牌，不直接挂载 UI，也不决定 React/Solid。★ 本示例**曾含 `inputVariant` / `ccVariant` 两个键，现已移除** —— 那两个字段分别随「输入形态固定命令行」（#266 刀9）与「整体风格整套删除」（#238 刀8）退场，照旧写会因「未知 token」注册失败。写 Profile 前请以 `THEME_FIELD_DEFS` 的当前键集为准。`interfaceMode` 只声明 Profile 在哪个现有模式的选择器中出现，可选 `modern-gui` / `terminal-like`；省略时按兼容规则归入 `terminal-like`。它不能注册或切换新的 Interface Mode。注册项由 owner/scope 管理，并参与 shadow hot-swap。
 
 Interface Mode 是 Application Shell 的应用级契约，不是 Renderer、Presentation Profile、Theme Preset 或 Skin。插件通过 `context.interfaceModes.registerMode(contribution)` 注册完整模式（`workbench` 支持 `renderer-suite` / `host` / `isolated-surface` 三种渲染来源，激活期做跨注册表引用校验），并随 Scope 回收、参与 shadow hot-swap。
 

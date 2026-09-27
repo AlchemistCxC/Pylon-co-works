@@ -47,8 +47,6 @@ export interface WorkbenchAppearanceSnapshot {
   toolConnectorStyle: string
   toolConnectorWidth: number
   toolConnectorOpacity: number
-  inputMode: string
-  inputVariant: string
   inputOffsetTop: number
   inputHeight: number
   inputMarginX: number
@@ -66,7 +64,6 @@ export interface WorkbenchAppearanceSnapshot {
   inputLineHeight: string
   inputTextColor: string
   inputPlaceholder: string
-  inputShowPlaceholder: boolean
   inputShowHistoryHint: boolean
   inputSubmitButtonMode: string
   reasoningSwitchMode: string
@@ -90,7 +87,6 @@ export interface WorkbenchAppearanceSnapshot {
   modelRadius: number
   modelFontSize: number
   modelTextColor: string
-  sendVariant: string
   permissionSwitchMode: string
   permissionBgColor: string
   permissionWidth: number
@@ -99,8 +95,6 @@ export interface WorkbenchAppearanceSnapshot {
   permissionFontSize: number
   permissionTextColor: string
   cliHintMode: string
-  footerLayout: string
-  cliOverflowMode: string
   ccHeight: number
   ccBg: string
   ccBgImage: string
@@ -166,8 +160,6 @@ export function selectWorkbenchAppearance(
     toolConnectorStyle: theme.toolConnectorStyle,
     toolConnectorWidth: theme.toolConnectorWidth,
     toolConnectorOpacity: theme.toolConnectorOpacity,
-    inputMode: theme.inputMode,
-    inputVariant: theme.inputVariant,
     inputOffsetTop: theme.inputOffsetTop,
     inputHeight: theme.inputHeight,
     inputMarginX: theme.inputMarginX,
@@ -185,7 +177,6 @@ export function selectWorkbenchAppearance(
     inputLineHeight: theme.inputLineHeight,
     inputTextColor: theme.inputTextColor,
     inputPlaceholder: theme.inputPlaceholder,
-    inputShowPlaceholder: theme.inputShowPlaceholder !== false,
     inputShowHistoryHint: theme.inputShowHistoryHint !== false,
     inputSubmitButtonMode: theme.inputSubmitButtonMode,
     sendButtonColor: theme.sendButtonColor,
@@ -216,10 +207,7 @@ export function selectWorkbenchAppearance(
     permissionRadius: theme.permissionRadius,
     permissionFontSize: theme.permissionFontSize,
     permissionTextColor: theme.permissionTextColor,
-    sendVariant: theme.sendVariant,
     cliHintMode: theme.cliHintMode,
-    footerLayout: theme.footerLayout,
-    cliOverflowMode: theme.cliOverflowMode,
     ccHeight: theme.ccHeight,
     ccBg: theme.ccBg,
     ccBgImage: theme.ccBgImage,
@@ -282,15 +270,11 @@ export function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSe
     inputBg: theme.inputBg,
     inputTextColor: theme.inputTextColor,
     inputFontSize: theme.inputFontSize,
-    inputMinHeight: theme.inputMinHeight,
     inputHeight: theme.inputHeight,
     inputOffsetTop: theme.inputOffsetTop,
     inputLineHeight: theme.inputLineHeight,
-    inputMode: theme.inputMode,
-    inputVariant: theme.inputVariant,
     cliLineWidth: theme.cliLineWidth,
     cliLineColor: theme.cliLineColor,
-    cliLinePadding: theme.cliLinePadding,
     modelSwitchMode: theme.modelSwitchMode,
     modelBgColor: theme.modelBgColor,
     modelWidth: theme.modelWidth,
@@ -312,6 +296,5 @@ export function selectCcProperties(theme: Readonly<ThemeSettings>): Pick<ThemeSe
     permissionRadius: theme.permissionRadius,
     permissionFontSize: theme.permissionFontSize,
     permissionTextColor: theme.permissionTextColor,
-    sendVariant: theme.sendVariant,
   }
 }

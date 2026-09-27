@@ -14,8 +14,7 @@ import {
   removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './domains/cc/ccHeightState.ts'
-import { resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
+import { clampCcHeight } from './domains/cc/ccHeightState.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
@@ -74,12 +73,11 @@ export interface ThemeSettings {
   inputSurfaceBg: string; inputSurfaceOpacity: number
   inputBorder: string; inputBorderWidth: number; inputBorderOpacity: number
   inputFocusRingEnabled: 'shown' | 'hidden'; inputFocusRingColor: string; inputHighlightOpacity: number; inputShadowEnabled: 'shown' | 'hidden'
-  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
-  inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
+  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string
+  inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string
   cliHintMode: 'hidden' | 'compact' | 'full'
   /** #238 刀5：命令行提示自己的字号（原为整条信息行继承 `ccStatusFontSize`，已删除） */
   ccHintFontSize: number
-  pillText: string; prismOnColor: string
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
@@ -107,13 +105,11 @@ export interface ThemeSettings {
   assistantDot: boolean; assistantDotGlyph: string; assistantDotColor: string
   /** 自定义头像/图标路径（非空时替代圆点字形，列宽随图） */
   assistantDotImage: string
-  footerLayout: 'free' | 'peri'
-  cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
   reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
-  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; sendVariant: string
+  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string
   permissionSwitchMode: string; permissionBgColor: string; permissionWidth: number; permissionHeight: number; permissionRadius: number; permissionFontSize: number; permissionTextColor: string
   /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
   modeAutoColor: string; modeEditColor: string
@@ -217,16 +213,8 @@ export const useStore = create<ThemeState>()(persist(
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
-    // D1：ccHeight 经布局约束漏斗归一化。
-    const ccHeight = clampCcHeight(height, {
-      inputMode: state.inputMode,
-      footerLayout: state.footerLayout,
-      hintMode: state.cliHintMode,
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: state.ccHidden, cliHintMode: state.cliHintMode }),
-      }),
-      cliOverflowMode: state.cliOverflowMode,
-    })
+    // D1：ccHeight 经布局约束漏斗归一化（★ #266 刀9~11：形态固定 ⇒ 最小高度为常量，参数已收敛）
+    const ccHeight = clampCcHeight(height)
     return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
   updateCcPlacement: (id, partial) => set(state => ({
@@ -239,15 +227,7 @@ export const useStore = create<ThemeState>()(persist(
   })),
   setCcHidden: (id, hidden) => set(state => {
     const ccHidden = setCcHiddenState(state.ccHidden, id, hidden)
-    const ccHeight = clampCcHeight(state.ccHeight, {
-      inputMode: state.inputMode,
-      footerLayout: state.footerLayout,
-      hintMode: state.cliHintMode,
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden, cliHintMode: state.cliHintMode }),
-      }),
-      cliOverflowMode: state.cliOverflowMode,
-    })
+    const ccHeight = clampCcHeight(state.ccHeight)
     return {
       ccHidden,
       ccHeight,

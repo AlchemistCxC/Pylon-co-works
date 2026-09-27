@@ -7,19 +7,17 @@ import { selectCcProperties } from '../appearance.ts'
  * 中控可编辑属性键集合（CC_EDITABLE_PROPERTY_KEYS）—— 逐个列出，本用例钉住「不多不少」。
  * 真值是 widgetDefinitions.ts 的 CcEditablePropertyKey 联合类型（类型层，无运行时列表）。
  */
+// ★ #266 刀7~13：原列表里的 `cliLinePadding` / `inputMinHeight` / `inputMode` / `inputVariant`
+//   四项随字段删除摘除（属性面板可编辑集 = `CcEditablePropertyKey` 联合，见 widgetDefinitions）。
 const CC_EDITABLE_KEYS = [
   'cliLineColor',
-  'cliLinePadding',
   'cliLineWidth',
   'inputBg',
   'inputFontSize',
   'inputHeight',
   'inputLineHeight',
-  'inputMinHeight',
-  'inputMode',
   'inputOffsetTop',
   'inputTextColor',
-  'inputVariant',
   'modelBgColor',
   'modelFontSize',
   'modelHeight',
@@ -41,7 +39,6 @@ const CC_EDITABLE_KEYS = [
   'reasoningSwitchMode',
   'reasoningTextColor',
   'reasoningWidth',
-  'sendVariant',
 ]
 
 function theme(overrides: Partial<ThemeSettings> = {}): ThemeSettings {
@@ -57,11 +54,13 @@ describe('selectCcProperties', () => {
   })
 
   it('取值逐一取自入参的同名字段', () => {
-    const picked = selectCcProperties(theme({ inputBg: '#123456', inputLineHeight: '1.5', sendVariant: 'icon' }))
+    // ★ #266 CC-07：原样本 `sendVariant` 已删除 ⇒ 换成 `inputVariant`；
+    //   ★ 刀9 又把 `inputVariant` 删了 ⇒ 改用仍在集里的字符串档 `modelSwitchMode`。
+    const picked = selectCcProperties(theme({ inputBg: '#123456', inputLineHeight: '1.5', modelSwitchMode: 'cycle' }))
 
     expect(picked.inputBg).toBe('#123456')
     expect(picked.inputLineHeight).toBe('1.5')
-    expect(picked.sendVariant).toBe('icon')
+    expect(picked.modelSwitchMode).toBe('cycle')
   })
 
   it('空输入：键集合不变，取值全为 undefined', () => {

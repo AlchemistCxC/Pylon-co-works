@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../cc/ccHeightState.ts'
-import { resolveCcHiddenWidgetIds } from '../../cc/widgetDefinitions.ts'
 import { THEME_DEFAULTS, THEME_PRESET_KEYS, THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
 import { clampPresetCcHeight, filterPresetTheme, syncPresetCcHeight, toThemeDelta } from '../presetReducer.ts'
 
@@ -45,58 +43,32 @@ describe('toThemeDelta', () => {
 })
 
 describe('clampPresetCcHeight / syncPresetCcHeight', () => {
-  // 只有 cli + peri 才会走「状态行参与最小高」的分支
-  const cliPeri = {
-    inputMode: 'cli',
-    footerLayout: 'peri',
-    cliHintMode: 'full',
-    cliOverflowMode: 'fixed-scroll',
-  } as const
-  const manyVisible = { ...cliPeri, ccHidden: [] as string[] }
-  const fewVisible = {
-    ...cliPeri,
-    ccHidden: ['model', 'reasoning'],
-  }
-
-  const visibleCount = (hidden: string[]) =>
-    resolveVisibleStatusWidgetCount({
-      // ★ #266 ⑰：隐藏名单的组装只有一处（预设的值 + 详细档折叠）—— 调用点照渲染侧那样组装。
-      hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: hidden, cliHintMode: cliPeri.cliHintMode }),
-    })
-  const minHeight = (visible: number) =>
-    resolveCcMinHeight({
-      inputMode: 'cli',
-      footerLayout: 'peri',
-      hintMode: 'full',
-      visibleStatusWidgets: visible,
-      cliOverflowMode: 'fixed-scroll',
-    })
-
-  it('下界跟着「可见状态控件数」联动（⑰ 后名单上限 5，满员会触发状态行换行）', () => {
-    // ★ #266 ⑰：可见数由 4 变 5（命令行提示不再被"有没有会话 / 是不是命令行模式"挡掉）
-    //   ⇒ `wrappedStatusRows`（>4 才多让一行）**从此会生效**，这正是空态数值不受影响的另一面：
-    //   空态那一侧由语境侧名单挡住提示，计数仍是 0。
-    expect(visibleCount(manyVisible.ccHidden)).toBe(5)
-    expect(visibleCount(fewVisible.ccHidden)).toBe(3)
-
-    expect(clampPresetCcHeight({ ...manyVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(manyVisible.ccHidden)))
-    expect(clampPresetCcHeight({ ...fewVisible, ccHeight: 0 })).toBe(minHeight(visibleCount(fewVisible.ccHidden)))
-    // 现在两者的最小高**不同**（满员 5 ⇒ 换行 + 提示行）
-    expect(minHeight(visibleCount(manyVisible.ccHidden))).toBe(109)
-    expect(minHeight(visibleCount(fewVisible.ccHidden))).toBe(84)
+  /**
+   * ★ #266 刀9~11：`inputMode` / `footerLayout` / `cliOverflowMode` 三个字段删除后，
+   * 形态只剩一种 ⇒ `clampPresetCcHeight` 收敛为「常量最小高 64 + 上界 400」——
+   * 原先那套「可见控件数 ⇒ 状态行换行 ⇒ 最小高 84/109」的联动随 peri 形态一并退场。
+   */
+  it('下界 = 常量 64（不再随可见状态控件数 / 形态浮动）', () => {
+    expect(clampPresetCcHeight({ ccHeight: 0 })).toBe(64)
+    expect(clampPresetCcHeight({ ccHeight: 12 })).toBe(64)
+    expect(clampPresetCcHeight({ ccHeight: 64 })).toBe(64)
   })
 
   it('上界固定 400，区间内原样返回', () => {
-    expect(clampPresetCcHeight({ ...manyVisible, ccHeight: 999 })).toBe(400)
-    expect(clampPresetCcHeight({ ...fewVisible, ccHeight: 200 })).toBe(200)
+    expect(clampPresetCcHeight({ ccHeight: 999 })).toBe(400)
+    expect(clampPresetCcHeight({ ccHeight: 200 })).toBe(200)
   })
 
-  it('ccHeight 非数字时回落到默认值', () => {
-    expect(clampPresetCcHeight({ inputMode: 'cli', footerLayout: 'free' })).toBe(THEME_DEFAULTS.ccHeight)
+  it('ccHeight 缺省时回落到默认值；非有限值回落到最小高（既有语义，未变）', () => {
+    // 缺省（`typeof !== 'number'`）⇒ 取 DEFAULTS.ccHeight 再 clamp
+    expect(clampPresetCcHeight({})).toBe(THEME_DEFAULTS.ccHeight)
+    // NaN 是 number 类型 ⇒ 进 clamp，被 `Number.isFinite` 判掉后取**最小高**（常量 64）。
+    // ★ 这是改造前就有的语义（原实现同样回落 min），本次形状收敛后结果从 109 变 64。
+    expect(clampPresetCcHeight({ ccHeight: Number.NaN })).toBe(64)
   })
 
   it('syncPresetCcHeight 只回 ccHeight，且与 clampPresetCcHeight 同值', () => {
-    const theme = { ...manyVisible, ccHeight: 999 }
+    const theme = { ccHeight: 999 }
 
     expect(syncPresetCcHeight(theme)).toEqual({ ccHeight: 400 })
     expect(syncPresetCcHeight(theme).ccHeight).toBe(clampPresetCcHeight(theme))

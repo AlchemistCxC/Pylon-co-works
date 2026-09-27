@@ -136,6 +136,7 @@ export function activate(context: any): void {
     description: '第三方 Suite 的表现令牌示例。',
     family: 'custom',
     interfaceMode: 'modern-gui',
-    tokens: { msgStyle: 'bubble', inputVariant: 'composer', assistantDot: true },
+    // ★ #266 刀9：原样本含 `inputVariant: 'composer'` —— 该字段已删除、不再是合法 token
+    tokens: { msgStyle: 'bubble', assistantDot: true },
   })
 }

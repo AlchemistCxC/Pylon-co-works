@@ -26,12 +26,15 @@ afterEach(() => {
 })
 afterAll(() => { void modelCommand.dispose() })
 
-function renderInput(sessionId = 'session-a', inputVariant: 'cli' | 'composer' = 'composer', predictionProvider?: InputPredictionProvider, inInputSlot = false) {
+/**
+ * ★ #266 刀9：原第二参 `inputVariant: 'cli' | 'composer'`（用来摆两种输入形态）已删除 ——
+ * 输入形态固定命令行，`inputVariant` / `inputMode` 两个字段不存在了。
+ * 参数位保留为「摆位/其它可选项」的占位（调用点里原本传 'composer' 的地方传 undefined）。
+ */
+function renderInput(sessionId = 'session-a', _legacyVariant?: 'cli' | 'composer', predictionProvider?: InputPredictionProvider, inInputSlot = false) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ sessionId, generating: false })
   const theme = structuredClone(DEFAULTS)
-  theme.inputVariant = inputVariant
-  theme.inputMode = inputVariant === 'cli' ? 'cli' : 'default'
   services.appearance.setTheme(theme)
   servicesList.push(services)
   const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())

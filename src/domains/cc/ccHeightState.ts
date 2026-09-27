@@ -1,9 +1,11 @@
 import { isWidgetVisible, STATUS_WIDGET_IDS } from './widgetDefinitions.ts'
 
-export type CcInputMode = 'cli' | 'default' | string
-export type CcFooterLayout = 'free' | 'peri' | string
+/**
+ * 快捷提示详细档（`cliHintMode`）—— 唯一还活着的「形态」类字段。
+ * ★ #266 刀9/刀10/刀11：`CcInputMode` / `CcFooterLayout` / `CcOverflowMode` 三个类型已随
+ *   对应字段删除（输入固定命令行、底部信息固定独立状态行、多行输入固定「随内容增高 + 3 倍封顶」）。
+ */
 export type CcHintMode = 'hidden' | 'compact' | 'full' | string
-export type CcOverflowMode = 'fixed-scroll' | 'grow' | 'overlay' | string
 
 export const INPUT_LINE_HEIGHTS = ['0.5', '1', '1.5'] as const
 export type InputLineHeight = (typeof INPUT_LINE_HEIGHTS)[number]
@@ -59,14 +61,6 @@ export function clampInputTypography<T extends { inputFontSize: number; inputLin
   }
 }
 
-export interface CcMinHeightOptions {
-  inputMode: CcInputMode
-  footerLayout: CcFooterLayout
-  hintMode: CcHintMode
-  visibleStatusWidgets: number
-  cliOverflowMode: CcOverflowMode
-}
-
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
 }: {
@@ -81,42 +75,25 @@ export function resolveVisibleStatusWidgetCount({
 }
 
 const BASE_MIN_HEIGHT = 64
-const COMPOSER_HEIGHT = 30
-const FOOTER_GAP = 5
-const STATUS_ROW_HEIGHT = 25
-const HINT_ROW_HEIGHT = 21
-const BOTTOM_PADDING = 3
 
 /**
- * 计算中控区能够容纳当前结构的最小高度。
- * 这是布局约束真值；CSS、Settings 和 store action 都应消费同一结果。
+ * 中控区最小高度。
+ *
+ * ★ #266 刀9/刀10/刀11：形态收敛成**唯一一种**（命令行输入 + 独立状态行 + 随内容增高）之后，
+ *   原先那三条分支 —— `cliOverflowMode==='grow'`、`inputMode!=='cli'`、`footerLayout!=='peri'`
+ *   —— 全部导向同一个值 ⇒ 本函数退化为常量。
+ *   **行为等价**：改造前 free 形态（= 现在唯一形态，也是用户实际在用的）走的就是
+ *   `return BASE_MIN_HEIGHT` 这一支；peri 形态那一套算式随 `footerLayout` 字段一并退场。
+ *
+ * ★ 用户口径：位置 / 尺寸差异不再由「元件的小预设」承载，改由**区域预设记值**；中控最小高度
+ *   因此回归到一个固定约束，不再随提示详细档或状态控件个数浮动。
  */
-export function resolveCcMinHeight(options: CcMinHeightOptions): number {
-  const {
-    inputMode,
-    footerLayout,
-    hintMode,
-    visibleStatusWidgets,
-    cliOverflowMode,
-  } = options
-
-  if (cliOverflowMode === 'grow') return BASE_MIN_HEIGHT
-  if (inputMode !== 'cli' || footerLayout !== 'peri') return BASE_MIN_HEIGHT
-
-  const hintHeight = hintMode === 'hidden' ? 0 : HINT_ROW_HEIGHT
-  const wrappedStatusRows = visibleStatusWidgets > 4 ? STATUS_ROW_HEIGHT : 0
-  const contentHeight = COMPOSER_HEIGHT
-    + FOOTER_GAP
-    + STATUS_ROW_HEIGHT
-    + wrappedStatusRows
-    + hintHeight
-    + BOTTOM_PADDING
-
-  return Math.max(BASE_MIN_HEIGHT, contentHeight)
+export function resolveCcMinHeight(): number {
+  return BASE_MIN_HEIGHT
 }
 
-export function clampCcHeight(height: number, options: CcMinHeightOptions): number {
-  const min = resolveCcMinHeight(options)
+export function clampCcHeight(height: number): number {
+  const min = resolveCcMinHeight()
   const safeHeight = Number.isFinite(height) ? height : min
   return Math.max(min, Math.min(400, safeHeight))
 }

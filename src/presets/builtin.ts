@@ -115,11 +115,11 @@ export const INTERFACE_MODE_PRESET_BUCKET: Readonly<Record<string, PresetInterfa
  * 外观来源（用户拍板）：
  * - GUI：取 `glass` 的四区切面（刀3 起是**字面量快照**，值等于 glass 的有效值）；
  * - 终端：**复制** `glass`（最早那款浅色；深色的 nord/tokyo/amber/matrix/claude 用户已否决）
- *   + 终端契约字段（`msgStyle` / `messageLayout` / `inputMode` / `inputVariant`，
+ *   + 终端契约字段（`msgStyle` / `messageLayout`，
  *   即刀3 拆掉的那层终端补全里的同一组契约字段）。★ #238 刀8：原第 5 项
  *   「整体风格」已整套删除（字段不存在了，不再是契约字段）。
- *   其中 `inputVariant` 与 `inputMode` 必须同写——`inputMode==='cli' ⟺ inputVariant==='cli'`
- *   是本仓既有的联动不变量（`presetReducer.resolveInputMode`）。
+ *   ★ #266 刀9：原第 6/7 项 `inputMode` / `inputVariant` 已随「固定命令行」删除
+ *   （连同那条「两者必须同写」的联动不变量）。
  */
 /**
  * 两条默认预设的**值来源**（刀3 改）：
@@ -194,14 +194,10 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   inputPlaceholder: "rgba(0,0,0,0.22)",
   inputFocusBorder: "rgba(99,102,241,0.35)",
   inputFontSize: 15,
-  inputMinHeight: 52,
   cliLineWidth: 2,
   cliLineColor: "#9a9a9a",
   cliTextColor: "rgba(0,0,0,0.80)",
   cliPromptColor: "#6b7280",
-  cliLinePadding: 3,
-  pillText: "rgba(0,0,0,0.50)",
-  prismOnColor: "#22c55e",
   modelSwitchMode: "cycle",
   modeAutoColor: "#f59e0b",
   modeEditColor: "#6366f1",
@@ -209,13 +205,11 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   rightWidth: 250,
 }
 
-/** 终端默认 = `glass` 的副本 + 终端契约字段（`inputVariant` 与 `inputMode` 必须同写）。 */
+/** 终端默认 = `glass` 的副本 + 终端契约字段（★ #266 刀9：`inputVariant` / `inputMode` 已删）。 */
 const TERMINAL_DEFAULT_THEME: Partial<ThemeSettings> = {
   ...structuredClone(GLASS_THEME),
   msgStyle: 'terminal',
   messageLayout: 'classic',
-  inputMode: 'cli',
-  inputVariant: 'cli',
 }
 
 /**

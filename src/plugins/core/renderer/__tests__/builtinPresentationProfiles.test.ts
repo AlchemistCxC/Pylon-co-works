@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { BUILTIN_PRESENTATION_PROFILES } from '../builtinPresentationProfiles.ts'
 import { validatePresentationProfile } from '../../../../plugin-runtime/presentation/presentationProfileRegistry.ts'
 
+// ★ #266 刀9~11：快照里原先还含 `inputMode` / `inputVariant` / `footerLayout` 三个 token ——
+//   字段删除后这三项不再出现在 profile 定义里，快照同步（冻结的仍是「其余逐字不变」）。
 const TERMINAL_CLASSIC_SNAPSHOT = {
   id: 'builtin.presentation.terminal-classic',
   label: '终端经典',
@@ -10,24 +12,26 @@ const TERMINAL_CLASSIC_SNAPSHOT = {
   order: 100,
   tokens: {
     msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'system',
-    msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', inputBg: 'rgba(0,0,0,0.02)',
+    msgLineHeight: 1.55, inputBg: 'rgba(0,0,0,0.02)',
     inputBorderColor: '', inputFocusBorder: 'rgba(0,0,0,0.22)', inputRadius: 0,
     assistantDot: false, toolIndicator: '●', toolIndicatorRun: 'circle', toolIndicatorOk: 'circle', toolIndicatorErr: 'circle', toolIndicatorGlow: 0,
     toolConnectorMode: 'none', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
-    cliHintMode: 'compact', footerLayout: 'free',
+    cliHintMode: 'compact',
   },
   assets: { promptGlyph: '❯', runningGlyph: '●', completedGlyph: '●', failedGlyph: '●' },
 }
 
+// ★ #266 刀9~11：`inputMode` / `inputVariant` / `footerLayout` 三字段删除 ⇒ 从两份必需 token
+//   清单里摘除（presentation profile 不再覆盖形态类字段，形态由固定实现决定）。
 const COMPLETE_SURFACE_TOKENS = [
   'msgStyle', 'messageLayout', 'messageUserBg', 'messageAssistantBg', 'messageReasoningBg',
-  'messageBorderColor', 'messageRadius', 'inputMode', 'inputVariant', 'inputBg',
+  'messageBorderColor', 'messageRadius', 'inputBg',
   'inputBorderColor', 'inputFocusBorder', 'inputRadius',
 ] as const
 
 const COMPLETE_CC_INPUT_TOKENS = [
-  'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
-  'inputRadius', 'cliHintMode', 'footerLayout',
+  'inputBg', 'inputBorderColor', 'inputFocusBorder',
+  'inputRadius', 'cliHintMode',
 ] as const
 
 describe('built-in terminal-like presentation profiles', () => {

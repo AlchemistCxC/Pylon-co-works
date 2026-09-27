@@ -1,6 +1,8 @@
 // 迁移自 scripts/test-theme-migration.mts（P91 A1）
+// ★ #266 刀9：`themeDomainMigrate` 的 `inputVariant↔inputMode` 联动用例已随字段删除退场
+//   ⇒ 该函数在本文件不再被引用，import 同步收窄。
 import { describe, expect, it } from 'vitest'
-import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
+import { normalizeThemeMigrationState } from '../migration.ts'
 import { DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
@@ -100,31 +102,6 @@ describe('normalizeThemeMigrationState A1 映射矩阵（迁移自 scripts/test-
   })
 })
 
-describe('themeDomainMigrate inputVariant↔inputMode 联动不变量（MEDIUM 5，迁移自 scripts/test-theme-migration.mts，P91 A1）', () => {
-  const migrateDefaults = {
-    base: {
-      inputMode: 'cli', inputVariant: 'cli', inputSubmitButtonMode: 'inline',
-      ccHeight: 150, footerLayout: 'free', cliHintMode: 'full',
-      ccHidden: [], cliOverflowMode: 'fixed-scroll',
-    },
-    appliedPreset: defaults.appliedPreset,
-    custom: defaults.custom,
-    ccLayout: DEFAULT_CC_LAYOUT,
-  }
-
-  it('inputVariant=composer → inputMode=default', () => {
-    const fullMigrated = themeDomainMigrate({ inputVariant: 'composer' }, migrateDefaults)
-    expect(fullMigrated.inputMode).toBe('default') // inputVariant=composer → inputMode=default
-    expect(fullMigrated.inputVariant).toBe('composer')
-  })
-
-  it('inputVariant=cli → inputMode=cli', () => {
-    const cliMigrated = themeDomainMigrate({ inputVariant: 'cli' }, migrateDefaults)
-    expect(cliMigrated.inputMode).toBe('cli') // inputVariant=cli → inputMode=cli
-  })
-})
-
-// 下沉自 scripts/test-natural-position-schema.mts（P91 A2）：废弃坐标 v3 清理负向契约。
 describe('废弃坐标字段已清除（v3 以 slot layout 为真值）', () => {
   it('预设主题不得再携带 ekg/pct/tokens/model/mode/send/attach 坐标对象', () => {
     const deprecated = ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach']

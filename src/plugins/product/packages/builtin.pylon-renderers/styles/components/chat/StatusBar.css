@@ -2,18 +2,6 @@
 
 .pill-mono { font-size:inherit; color:var(--text-dim); padding:0; border-radius: 0; background:transparent; font-family:var(--mono); border:0; flex-shrink:0; }
 
-/* ── Prism tag ── */
-.prism-tag { font-size:12px; font-weight:400; padding:0; border:none; cursor:pointer; background:transparent; color:var(--text-dim); font-family:var(--mono); }
-.prism-tag.on { color:var(--prism-on-color,#4EBA65); }
-.prism-tag.off { color:var(--text-dim); }
-.prism-tag:hover { text-decoration:underline; }
-
-/* ── 模型控件 variants ── */
-.model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius: 0; overflow:hidden; min-width:180px; z-index:100; }
-.model-item { padding:6px 14px; font-size:12px; font-family:var(--mono); color:#999; cursor:pointer; }
-.model-item:hover { background:#373737; color:#fff; }
-.model-item.active { color:var(--pill-text,#999); font-weight:600; }
-
 /* 权限模式控件（S10 重构）：本体只显示后端机器值（不翻译）。
    颜色＝[data-mode] 语义色；当 permissionTextColor 不是 'mode' 时，
    组件会写 inline color 覆盖以下规则（内联样式优先级高于本文件）。

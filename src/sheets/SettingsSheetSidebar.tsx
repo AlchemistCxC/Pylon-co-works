@@ -59,13 +59,21 @@ export default function SettingsSheetSidebar({ sheet, state }: WorkspaceViewProp
     useWorkspaceStore.getState().patchSheetState(sheet.id, normalizeSettingsSheetState({ ...state, ...partial }) as unknown as Record<string, unknown>)
   }
   const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[state.domain]
-  // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
+  // section → 二级项。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 项返回空（不显示箭头）。
+  // ★ #266 CC-09：中控台的二级项取**元件名**（`GROUP_ORDER.cc` 的 `heading`，源头是元件定义表
+  //   `CC_WIDGET_GROUPS` 的行 label）—— 原先取 `block.groups`（子部件名）会把「中控本体面 /
+  //   输入框本体 / 提示符 ❯ …」这类零件平铺一长串，与主区「元件 h3 → 子部件组」的层级对不上。
+  //   其它 zone 的 block 没有 `heading`（仍是手写分组表），行为一字不动。
   const navGroupsFor = (section: SettingsSectionId): readonly { readonly id: string; readonly label: string }[] => {
     if (section === 'renderers') return []
     const zone = sectionZone(section)
     if (!zone) return []
-    const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
-    return groups.length >= 2 ? groups.map(title => ({ id: title, label: title })) : []
+    const labels = zone === 'cc'
+      ? (GROUP_ORDER.cc ?? [])
+        .map(block => block.heading)
+        .filter((heading): heading is string => typeof heading === 'string' && heading.length > 0)
+      : (GROUP_ORDER[zone] ?? []).flatMap(block => block.groups.map(group => group.title))
+    return labels.length >= 2 ? labels.map(label => ({ id: label, label })) : []
   }
 
   return (

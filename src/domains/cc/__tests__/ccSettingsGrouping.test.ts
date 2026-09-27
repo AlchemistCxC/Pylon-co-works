@@ -25,22 +25,26 @@ const defs = THEME_FIELD_DEFS as Record<string, ThemeFieldDef>
  * ★ #238 刀8：原为刀6 落地时的 78 项；「整体风格」（`ccVariant`）整字段删除后变 **77** 项 ⇒
  * 清单同步 −1（本刀是**字段真的不存在了**，不是归属写坏 —— 这条不变量照样守得住：
  * 除它以外的任何增减都会红）。
+ * ★ #266 CC-07：四个字段真的删除（`sendVariant` / `inputShowPlaceholder` / `prismOnColor` / `pillText`）
+ * ⇒ **77 → 73**。连带：「用量胶囊」是 `tokens` 元件唯一的子部件，它没有可渲染项 ⇒
+ * 该元件不再进 `GROUP_ORDER.cc`（设置页与左栏导航都不再出现「用量」一块）。
+ * ★ #266 刀7~13：再删 7 项（`cliLinePadding` / `cliContentOffsetY` / `inputMode` / `inputVariant` /
+ * `cliOverflowMode` / `footerLayout` / `inputMinHeight`）⇒ **73 → 66**。
+ * 注意「上下两条线」「输入框本体」「中控本体面」三个子部件**都还在** —— 它们名下还有别的字段。
  */
 const RENDERABLE_CC_FIELDS_BEFORE: readonly string[] = [
   'ccBg', 'ccBgImage', 'ccHeight', 'ccHintFontSize', 'ccMarginBottom', 'ccMarginX', 'ccRadius', 'ccSurfaceOpacity',
-  'cliContentOffsetY', 'cliHintMode', 'cliLineColor', 'cliLinePadding', 'cliLineWidth', 'cliOverflowMode', 'cliPromptColor', 'cliTextColor',
-  'footerLayout',
+  'cliHintMode', 'cliLineColor', 'cliLineWidth', 'cliPromptColor', 'cliTextColor',
   'inputBg', 'inputBgImage', 'inputBorder', 'inputBorderColor', 'inputBorderOpacity', 'inputBorderWidth', 'inputFocusBorder',
   'inputFocusRingColor', 'inputFocusRingEnabled', 'inputFontSize', 'inputHeight', 'inputHighlightOpacity', 'inputLineHeight', 'inputMarginX',
-  'inputMinHeight', 'inputMode', 'inputOffsetTop', 'inputPlaceholder', 'inputRadius', 'inputShadowEnabled', 'inputShowHistoryHint',
-  'inputShowPlaceholder', 'inputSubmitButtonMode', 'inputSurfaceBg', 'inputSurfaceOpacity', 'inputTextColor', 'inputVariant',
+  'inputOffsetTop', 'inputPlaceholder', 'inputRadius', 'inputShadowEnabled', 'inputShowHistoryHint',
+  'inputSubmitButtonMode', 'inputSurfaceBg', 'inputSurfaceOpacity', 'inputTextColor',
   'modeAutoColor', 'modeEditColor',
   'modelBgColor', 'modelFontSize', 'modelHeight', 'modelRadius', 'modelSwitchMode', 'modelTextColor', 'modelWidth',
   'permissionBgColor', 'permissionFontSize', 'permissionHeight', 'permissionRadius', 'permissionSwitchMode', 'permissionTextColor', 'permissionWidth',
-  'pillText', 'prismOnColor',
   'reasoningBgColor', 'reasoningFontSize', 'reasoningHeight', 'reasoningRadius', 'reasoningSwitchMode', 'reasoningTextColor', 'reasoningWidth',
   'sendButtonBorderColor', 'sendButtonColor', 'sendButtonIcon', 'sendButtonIconColor', 'sendButtonIconGenerating', 'sendButtonIconRound',
-  'sendButtonRadius', 'sendVariant',
+  'sendButtonRadius',
 ]
 
 /** 渲染器认的"能显示出来" = 非 hidden + 自己的 group 在分组表里（同 `themeFieldRenderer.tsx` 的判据）。 */
@@ -104,8 +108,12 @@ describe('#238 刀6 · 设置页中控区分组：字段集合不变量', () => 
     // 也没有任何"只有标题、没有组"的分区（那正是本刀要清的病）
     const emptySections = (GROUP_ORDER.cc ?? []).filter(section => section.groups.length === 0)
     expect(emptySections, '分组表里还有空分区（会渲染成只有标题的分类）').toEqual([])
-    // 反向确认没被"空手放过"：8 个元件都还在
-    expect(headings).toHaveLength(CC_WIDGET_GROUPS.length)
+    // 反向确认没被"空手放过"：元件行仍在 8 行，**但**「用量」已无任何可调项 ⇒ 只剩 7 个分区
+    // （★ #266 CC-07：`tokens` 的两个字段删完后它的成员计数为 0，按派生规则整块退出设置页与左栏导航）
+    expect(CC_WIDGET_GROUPS).toHaveLength(8)
+    expect(headings).toHaveLength(CC_WIDGET_GROUPS.length - 1)
+    expect(headings).toContain('发送按钮')
+    expect(headings).not.toContain('用量')
   })
 
   it('没有可调项的子部件不进分组表（命令菜单 / 输入预测 / 待发送队列 / 报错条 / 空态插槽 / 各菜单）', () => {
@@ -115,23 +123,15 @@ describe('#238 刀6 · 设置页中控区分组：字段集合不变量', () => 
     }
   })
 
-  it('★ 两模式可渲染集合相同（77 / 77）—— 中控区没有"按输入模式判明"的项', () => {
+  it('★ 中控区没有"按输入模式判明"的项（可渲染 66 项，与模式无关）', () => {
     // #266（2026-09-23 用户口径「不要这个判明条件，常态显示」）：设置页侧的 cc 字段本来就没有
     // showIf，这条把"没有"钉住 —— 有人给中控字段挂条件即红（上一条冻结清单也会同步红）。
-    const groupTitles = new Set((GROUP_ORDER.cc ?? []).flatMap(section => section.groups.map(group => group.title)))
-    const renderableIn = (inputMode: string) => THEME_FIELD_KEYS
-      .filter(key => {
-        const def = defs[key]
-        if (def.zone !== 'cc' || def.hidden || def.group === undefined || !groupTitles.has(def.group)) return false
-        return !def.showIf || def.showIf({ inputMode } as Parameters<NonNullable<ThemeFieldDef['showIf']>>[0])
-      })
-      .sort()
-    const standard = renderableIn('default')
-    const cli = renderableIn('cli')
-    expect(standard, '标准输入模式下的可渲染项数').toHaveLength(77)
-    expect(cli, '命令行模式下的可渲染项数').toHaveLength(77)
-    expect(standard, '两模式差集必须为空').toEqual(cli)
-    // 反向确认判据真的读了 inputMode：cc 区任何字段都不该有 showIf
+    // ★ #266 刀9：原先这个用例拿 `{ inputMode }` 当 showIf 的上下文去跑两遍；`inputMode`
+    //   字段已删除、cc 区也早已没有任何 showIf ⇒ 改成**直接按冻结清单**断言项数（判据更直白：
+    //   可渲染集合只由「zone/group/隐藏」决定，没有任何条件可言）。
+    const renderable = renderableCcFields()
+    expect(renderable, '中控区可渲染项数').toHaveLength(66)
+    // 反向确认：cc 区任何字段都不该有 showIf（这条才是"没有判明条件"的真正守卫）
     expect(THEME_FIELD_KEYS.filter(key => defs[key].zone === 'cc' && defs[key].showIf)).toEqual([])
   })
 })

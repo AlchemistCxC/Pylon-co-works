@@ -6,17 +6,9 @@
  */
 import { normalizeCustomPresetId, normalizeCustomPresets } from '../../customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
-import {
-  clampCcHeight,
-  resolveVisibleStatusWidgetCount,
-  type CcFooterLayout,
-  type CcHintMode,
-  type CcInputMode,
-  type CcOverflowMode,
-} from '../cc/ccHeightState.ts'
+import { clampCcHeight } from '../cc/ccHeightState.ts'
 import { normalizeThemeState } from '../../themeFieldDefs.ts'
-import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
-import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
+import { PRESET_ZONES } from './presetReducer.ts'
 
 /**
  * 主题域 schema 版本（A4：独立于 PROFILE_SCHEMA_VERSION=4）。
@@ -226,32 +218,17 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
   // ★ #266 遗留①②：先搬老枚举（`white`/`black`/`gray`/`mode`）→ 等价颜色，再让下面的规则按颜色值走
   normalizeLegacyCcColorEnums(state)
-  state.inputShowPlaceholder = state.inputShowPlaceholder !== false
   state.inputShowHistoryHint = state.inputShowHistoryHint !== false
   // These select fields historically accepted booleans. Persist the enum
   // values now so the settings control always has a valid selected option.
   state.inputFocusRingEnabled = state.inputFocusRingEnabled === false || state.inputFocusRingEnabled === 'hidden' ? 'hidden' : 'shown'
   state.inputShadowEnabled = state.inputShadowEnabled === false || state.inputShadowEnabled === 'hidden' ? 'hidden' : 'shown'
-  state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
-    ? state.inputVariant
-    : state.inputMode === 'cli' ? 'cli' : 'composer'
-  state.inputMode = resolveInputMode(String(state.inputVariant))
-  const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : String((base as Record<string, unknown>).inputMode ?? 'cli')
-  const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
-  const migratedFooterLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
-  const migratedOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
-  state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150), {
-    inputMode: migratedInputMode as CcInputMode,
-    footerLayout: migratedFooterLayout as CcFooterLayout,
-    hintMode: migratedHintMode as CcHintMode,
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: resolveCcHiddenWidgetIds({
-        ccHidden: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-        cliHintMode: migratedHintMode,
-      }),
-    }),
-    cliOverflowMode: migratedOverflowMode as CcOverflowMode,
-  })
+  // ★ #266 刀9/刀10/刀11：`inputVariant`↔`inputMode` 联动、`footerLayout`、`cliOverflowMode` 的
+  //   归一化随字段删除一并退场（输入固定命令行、底部信息固定独立状态行、多行输入固定增高）。
+  //   老数据里残留的这些键由 `store.ts` 的 A4 白名单在下次写盘修剪（与刀5A/CC-07 前六刀同一处置）。
+  state.ccHeight = clampCcHeight(
+    typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150),
+  )
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state
 }
