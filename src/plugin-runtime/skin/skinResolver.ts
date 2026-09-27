@@ -37,17 +37,15 @@ export const SKIN_DATA_ATTRIBUTES = [
   'data-ui-scheme',
   'data-msg-style',
   'data-message-layout',
-  'data-footer-layout',
-  'data-cli-overflow-mode',
 ] as const
 
 export function resolveSkinDataAttributes(tokens: Record<string, unknown>): Record<string, string> {
+  // ★ #266 刀10/刀11：`data-footer-layout` / `data-cli-overflow-mode` 随
+  //   `footerLayout` / `cliOverflowMode` 字段删除（形态固定，没有可切的分支）。
   return {
     'data-ui-scheme': typeof tokens.uiScheme === 'string' && tokens.uiScheme ? tokens.uiScheme : 'light',
     'data-msg-style': typeof tokens.msgStyle === 'string' && tokens.msgStyle ? tokens.msgStyle : 'terminal',
     'data-message-layout': typeof tokens.messageLayout === 'string' && tokens.messageLayout ? tokens.messageLayout : 'classic',
-    'data-footer-layout': typeof tokens.footerLayout === 'string' && tokens.footerLayout ? tokens.footerLayout : 'free',
-    'data-cli-overflow-mode': typeof tokens.cliOverflowMode === 'string' && tokens.cliOverflowMode ? tokens.cliOverflowMode : 'fixed-scroll',
   }
 }
 

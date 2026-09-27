@@ -470,18 +470,6 @@ ol:has(> .term-li) > .term-li::before { content:none; }
 .term-summary { padding:var(--ui-space-1) 0; color:var(--text-dim); font-size:var(--spinner-size, var(--font-size-md)); display:flex; align-items:center; gap:0.5em; }
 .term-summary-frame { color:inherit; font-size:1.15em; min-width:1.15em; text-align:center; display:inline-block; }
 
-/* ── W4-02 回放只读姿态占位条（消费现有输入主题变量，零新主题字段）── */
-.replay-continue-bar {
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
-  width:100%; min-height:var(--input-min-height,56px); margin-top:var(--ui-space-2);
-  background:var(--input-bg,var(--bg-input)); border:var(--line-width-1) solid var(--border);
-  border-radius: 0; padding:var(--ui-space-3) var(--ui-space-4); cursor:pointer; text-align:left;
-  color:var(--input-text-color,var(--text)); font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--input-font-size, var(--font-size-xl));
-}
-.replay-continue-bar:hover { border-color:var(--input-focus-border,var(--border-focus)); }
-.replay-continue-hint { opacity:0.6; }
-.replay-continue-cta { color:var(--accent,inherit); font-weight:600; }
-
 /* ── 回底按钮（Peri ⌄ 风格）── */
 .scroll-bottom-btn {
   /* 聊天区右下、紧贴中控区上方 */
@@ -1062,15 +1050,6 @@ ol:has(> .term-li) > .term-li::before { content:none; }
 }
 .spinner-stop-btn:hover { background: color-mix(in srgb, var(--tool-err) 8%, transparent); }
 .spinner-stop-btn:focus-visible { outline: var(--line-width-2) solid var(--accent); outline-offset: 2px; }
-
-.replay-continue-bar {
-  border-radius: 0;
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
-  background: color-mix(in srgb, var(--accent) 6%, var(--input-bg, var(--bg-input)));
-  transition: border-color 120ms ease, background-color 120ms ease;
-}
-.replay-continue-bar:hover { background: var(--bg-hover); }
-.replay-continue-bar:focus-visible { outline: var(--line-width-2) solid var(--accent); outline-offset: 2px; }
 
 .scroll-bottom-btn {
   width: var(--ui-control-compact);
@@ -1835,7 +1814,6 @@ ol:has(> .term-li) > .term-li::before { content:none; }
 @media (max-width: 720px) {
   .term { padding: var(--ui-space-4); }
   .term-tool-summary { max-width: 42%; }
-  .replay-continue-bar { align-items: flex-start; flex-direction: column; }
 }
 
 /* Final chat rhythm/alignment contract. Keep this after all presentation

@@ -106,17 +106,6 @@
 /* The slot owns the themed height; mounted widgets fill it. */
 .cc-input-slot > .cc-widget { height:100%; }
 .cc-footer { display:contents; }
-.cc-footer-peri { display:flex; flex-direction:column; gap:5px; min-width:0; min-height:0; }
-/* peri 布局（输入栏 + 状态行纵向排队）下，输入栏必须回到文档流参与 flex 排列。
-   基类 .cc-input-slot 是 absolute（free 布局靠它浮在状态行上方），cli-mode 又重申一次；
-   若不在 peri 下复位，输入栏会脱离队列浮到状态行正上方，把状态行里的控件整个盖住
-   ——现代 GUI 走 default + peri，表现为模型控件看不见、也点不到。 */
-.control-center .cc-footer-peri .cc-input-slot,
-.control-center.cli-mode .cc-footer-peri .cc-input-slot {
-  position:relative; inset:auto;
-  margin-inline:var(--cc-input-margin-x,10px);
-  flex:0 0 auto;
-}
 .cc-footer-status { display:flex; flex-direction:column; gap:0; min-width:0; min-height:0; }
 .cc-footer-status-row {
   display:flex; align-items:center; min-width:0; min-height:18px;
@@ -161,8 +150,10 @@
   padding:3px 7px;
   border:1px solid color-mix(in srgb, var(--danger, #d66) 60%, transparent);
   border-radius:4px;
-  /* --cc-bg 归 CLI 输入栏消费（InputBar.css）；中控子树内的底色一律走全局面板色，
-     否则浅色主题下会掉进 #1b1b1b 硬编码深灰（问题 3 的同类残留，2026-09-15 清） */
+  /* 中控子树内的底色一律走全局面板色，否则浅色主题下会掉进 #1b1b1b 硬编码深灰
+     （问题 3 的同类残留，2026-09-15 清）。
+     ★ #266 刀10：原注里「`--cc-bg` 归 CLI 输入栏消费」已失效 —— 那个消费者是随
+     overlay 浮层一并删除的规则；`--cc-bg` 本身也不再注入（见 themeFieldDefs 的 `ccBg`）。 */
   background:var(--bg-panel, #1b1b1b);
   color:var(--danger, #f08a8a);
   font-size:.78em;
@@ -201,7 +192,10 @@
 
 /* ── CLI mode ── */
 .control-center.cli-mode {
-  height:var(--cc-height, 76px);
+  /* ★ #266 刀10 配套：命令行现在也走 `resizeInput()` 的增高路径 ⇒ 容器高度必须把
+     `--cc-input-extra-height` 算进去（与基础 `.control-center` 规则同一算法）。
+     漏了它，多行输入会把输入栏**向下**长、压住状态行 —— 而不是"底边不动、上边延伸"。 */
+  height:calc(var(--cc-height, 76px) + var(--cc-input-extra-height, 0px));
   min-height:var(--cc-min-height,76px);
 }
 .control-center.cli-mode .cc-bg { background:transparent; }
@@ -223,12 +217,9 @@
   flex:0 0 auto;
   row-gap:0;
 }
-.control-center.cli-mode .cc-footer-peri { flex:0 0 auto; }
-.control-center.cli-mode .cc-footer-peri .cc-footer-status { flex:0 0 auto; }
-.app[data-cli-overflow-mode="grow"] .control-center.cli-mode { height:auto; }
-.app[data-cli-overflow-mode="grow"] .control-center.cli-mode .cc-body { height:auto; min-height:var(--cc-min-height,64px); }
-.app[data-cli-overflow-mode="overlay"] .control-center.cli-mode,
-.app[data-cli-overflow-mode="fixed-scroll"] .control-center.cli-mode { height:var(--cc-height,76px); }
+/* ★ #266 刀10/刀11：按「底部信息布局 / 多行输入行为」两个字段切的两族规则一并删除 ——
+   两个字段退场后中控只剩「输入栏 + 独立状态行」一种结构，高度由 `resizeInput()` 的
+   内联高度承担（不再需要按 data 属性切高度）。 */
 
 /* ── 变体样式（`.cc-variant-*`）已于 #238 刀8 整族删除 ──
    原「整体风格」三值（terminal/glass/pill）是"界面模式那一层"的东西、设置页那个入口是假入口

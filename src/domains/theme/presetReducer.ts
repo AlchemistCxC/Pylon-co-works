@@ -14,16 +14,7 @@ export const PRESET_ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as cons
 export type PresetZone = (typeof PRESET_ZONES)[number]
 import type { CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import { normalizeCcLayout } from '../cc/ccLayoutState.ts'
-import {
-  clampCcHeight,
-  clampInputTypography,
-  resolveVisibleStatusWidgetCount,
-  type CcFooterLayout,
-  type CcHintMode,
-  type CcInputMode,
-  type CcOverflowMode,
-} from '../cc/ccHeightState.ts'
-import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
+import { clampCcHeight, clampInputTypography } from '../cc/ccHeightState.ts'
 import {
   pickCustomPresetTheme,
   upsertCustomPreset,
@@ -62,65 +53,25 @@ export interface ThemePresetState {
   customPresets: CustomPreset[]
   ccLayout: CcLayoutV3
   ccHeight: number
-  inputMode: string
-  inputVariant: string
   inputSubmitButtonMode: string
-  footerLayout: string
   cliHintMode: string
   ccHidden: string[]
-  cliOverflowMode: string
 }
 
 /** reducer 返回的 patch：主题字段 + 预设路由/cc 同步字段（可赋值给 Partial<ThemeState>） */
 export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'appliedPreset' | 'custom' | 'customPresets' | 'ccLayout' | 'ccHeight'>>
 
-/** cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState */
+/**
+ * cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState。
+ * ★ #266 刀9~11：形态固定后最小高度是常量 ⇒ 不再需要 `inputMode` / `footerLayout` /
+ *   `cliOverflowMode` / 可见控件数参与（它们改造前也只影响已删除的 peri 分支）。
+ */
 export function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
-  const inputMode = (theme.inputMode ?? String(DEFAULTS.inputMode)) as CcInputMode
-  const footerLayout = (theme.footerLayout ?? String(DEFAULTS.footerLayout)) as CcFooterLayout
-  const hintMode = (theme.cliHintMode ?? String(DEFAULTS.cliHintMode)) as CcHintMode
-  const cliOverflowMode = (theme.cliOverflowMode ?? String(DEFAULTS.cliOverflowMode)) as CcOverflowMode
-  const visibleStatusWidgets = resolveVisibleStatusWidgetCount({
-    hiddenIds: resolveCcHiddenWidgetIds({
-      ccHidden: Array.isArray(theme.ccHidden) ? theme.ccHidden : [],
-      cliHintMode: String(hintMode),
-    }),
-  })
-  return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : Number(DEFAULTS.ccHeight), {
-    inputMode,
-    footerLayout,
-    hintMode,
-    visibleStatusWidgets,
-    cliOverflowMode,
-  })
+  return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : Number(DEFAULTS.ccHeight))
 }
 
 export function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number } {
   return { ccHeight: clampPresetCcHeight(theme) }
-}
-
-/**
- * inputVariant↔inputMode 联动不变量（MEDIUM 5 收敛）：inputMode==='cli' ⟺ inputVariant==='cli'。
- * 单一真值：setZoneFieldReducer 漏斗 / migration 派生 / UI 层 chips sync 全部满足同一关系。
- */
-export function resolveInputMode(inputVariant: string): 'cli' | 'default' {
-  return inputVariant === 'cli' ? 'cli' : 'default'
-}
-
-export function applyInputVariantInvariant(
-  partial: Record<string, unknown>,
-  current: { inputMode: string; inputVariant: string },
-): Record<string, unknown> {
-  const patch = { ...partial }
-  if ('inputVariant' in patch) {
-    patch.inputMode = resolveInputMode(String(patch.inputVariant))
-  } else if ('inputMode' in patch) {
-    const inputMode = String(patch.inputMode)
-    patch.inputVariant = inputMode === 'cli'
-      ? 'cli'
-      : (current.inputVariant !== 'cli' ? current.inputVariant : 'composer')
-  }
-  return patch
 }
 
 /**
@@ -130,9 +81,12 @@ export function applyInputVariantInvariant(
  * （界面模式 / 呈现风格的 token）写字段是**模式自身的基准**，不是用户手改；若照旧置 custom，
  * 全局派生命中「任一 zone custom ⇒ custom」，预设行就亮出兜底的「自定义」chip
  *（重置主题、切换界面模式都会踩到）。默认 `true` ⇒ 既有调用点行为零变化。
- * 漏斗内聚三条布局不变量（此前只在 setCcHeight/预设 action/migrate 各自维护）：
- * - inputVariant↔inputMode 联动（cli ⟺ cli，否则 inputMode=default）
+ * 漏斗内聚两条布局不变量（此前只在 setCcHeight/预设 action/migrate 各自维护）：
+ * - 输入字号/行高/高度的排版约束
  * - ccHeight clamp（≥ resolveCcMinHeight 布局约束真值）
+ *
+ * ★ #266 刀9：原先还有一条 `inputVariant`↔`inputMode` 联动不变量 —— 两个字段删除后，
+ *   连带 `resolveInputMode` / `applyInputVariantInvariant` 两个导出一起退场（无声明方、无读者）。
  */
 export function setZoneFieldReducer(
   state: ThemePresetState,
@@ -140,8 +94,7 @@ export function setZoneFieldReducer(
   partial: Record<string, unknown>,
   markCustom = true,
 ): ThemePresetPatch {
-  // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
-  const patch = applyInputVariantInvariant(partial, state)
+  const patch = { ...partial }
 
   if (zone === 'cc' && ('inputHeight' in patch || 'inputOffsetTop' in patch || 'inputFontSize' in patch || 'inputLineHeight' in patch)) {
     const merged = clampInputTypography({ ...state, ...patch } as ThemePresetState & { inputHeight: number; inputFontSize: number; inputLineHeight: string; inputOffsetTop: number })
@@ -159,22 +112,11 @@ export function setZoneFieldReducer(
   }
 
   // cc 高度不变量：高度或影响最小高的结构字段被写时整组收敛。
-  // 属性面板/设置页恢复控件或切换 CLI 布局后，状态高度必须与 CSS 实际最小高一致。
+  // 属性面板/设置页恢复控件后，状态高度必须与 CSS 实际最小高一致。
+  // ★ #266 刀9~11：形态固定 ⇒ 最小高是常量，clamp 不再需要形态参数。
   if (zone === 'cc' || 'ccHeight' in patch) {
     const merged = { ...state, ...patch } as ThemePresetState
-    const clamped = clampCcHeight(Number(merged.ccHeight), {
-      inputMode: String(merged.inputMode),
-      footerLayout: String(merged.footerLayout),
-      hintMode: String(merged.cliHintMode),
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: resolveCcHiddenWidgetIds({
-          ccHidden: merged.ccHidden ?? [],
-          cliHintMode: String(merged.cliHintMode),
-        }),
-      }),
-      cliOverflowMode: String(merged.cliOverflowMode),
-    })
-    patch.ccHeight = clamped
+    patch.ccHeight = clampCcHeight(Number(merged.ccHeight))
   }
 
   return {

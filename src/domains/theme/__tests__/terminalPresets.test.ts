@@ -26,8 +26,8 @@ describe('Terminal-like preset snapshots', () => {
 
     for (const name of ['nord', 'tokyo', 'amber'] as const) {
       const theme = effectivePresetTheme(GLOBAL_PRESETS.find(preset => preset.name === name)!)
-      expect(theme.inputMode, name).toBe('cli')
-      expect(theme.inputVariant, name).toBe('cli')
+      // ★ #266 刀9：原 `inputMode` / `inputVariant` 两条断言随字段删除（形态固定命令行，
+      //   不再由预设区分）；终端契约的其余项仍逐条锁住。
       expect(theme.msgStyle, name).toBe('terminal')
       expect(theme.toolConnectorMode, name).toBe('follow')
     }

@@ -14,9 +14,11 @@ import { useIdentityStore } from '../../identity/identityStore.ts'
 
 const registrations: AsyncDisposable[] = []
 
+// ★ #266 刀9~11：原列表含 `inputMode` / `inputVariant` / `footerLayout` 三项 —— 字段已删除
+//   ⇒ 摘掉；其余输入 token 仍锁「方案切换会写入 / 切回会恢复」这件事。
 const CC_INPUT_TOKEN_KEYS = [
-  'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
-  'inputRadius', 'cliHintMode', 'footerLayout',
+  'inputBg', 'inputBorderColor', 'inputFocusBorder',
+  'inputRadius', 'cliHintMode',
 ] as const
 
 function resetAppearanceState(): void {
@@ -111,11 +113,12 @@ describe('Interface Mode contract', () => {
     const owner = createPluginIdentity('test.interface', 'one')
     registrations.push(registry.register(owner, {
       id: 'builtin.presentation.modern-gui', label: 'Modern', family: 'gui', interfaceMode: 'modern-gui',
-      tokens: { msgStyle: 'bubble', inputVariant: 'composer' },
+      // ★ #266 刀9：原样本含 `inputVariant`（`composer` / `cli`）—— 该字段已删除、不再是合法 token
+      tokens: { msgStyle: 'bubble' },
     }))
     registrations.push(registry.register(owner, {
       id: 'builtin.presentation.terminal-classic', label: 'Classic', family: 'terminal',
-      tokens: { msgStyle: 'terminal', inputVariant: 'cli' },
+      tokens: { msgStyle: 'terminal' },
     }))
     const modes = getInterfaceModeRegistry()
     registrations.push(modes.register(owner, {
@@ -130,12 +133,14 @@ describe('Interface Mode contract', () => {
     expect(activateInterfaceMode('terminal-like')).toBe(true)
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('terminal-like')
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.terminal-classic')
-    expect(useStore.getState()).toMatchObject({ msgStyle: 'terminal', inputVariant: 'cli' })
+    // ★ #266 刀9：原断言还比对 `inputVariant`（'cli' / 'composer'）—— 该字段已删除，
+    //   样例 profile 也不再声明它 ⇒ 断言收缩到仍在的 `msgStyle`（切换确实落地了该 profile 的 token）。
+    expect(useStore.getState()).toMatchObject({ msgStyle: 'terminal' })
 
     expect(activateInterfaceMode('modern-gui')).toBe(true)
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('modern-gui')
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.modern-gui')
-    expect(useStore.getState()).toMatchObject({ msgStyle: 'bubble', inputVariant: 'composer' })
+    expect(useStore.getState()).toMatchObject({ msgStyle: 'bubble' })
   })
 
   it('四条重置/切换路径回到 Modern 后得到同一套中控与输入 token', () => {
@@ -233,7 +238,9 @@ describe('Interface Mode contract', () => {
     const palette = { accent: useStore.getState().accent, chatBg: useStore.getState().chatBg }
     expect(activateInterfaceMode('tactical-blue')).toBe(true)
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.tactical-blue')
-    expect(useStore.getState().inputVariant).toBe('composer')
+    // ★ #266 刀9：原断言 `inputVariant === 'composer'`（那是该 profile 写下的输入 token）；
+    //   字段已删除 ⇒ 换成同一 profile 里仍在的输入 token，锁的仍是「它的输入 token 确实落地」。
+    expect(appearanceSnapshot().inputBg).not.toBe(original.inputBg)
     const mode = BUILTIN_INTERFACE_MODES.find(item => item.id === 'tactical-blue')!
     expect(resolveInterfaceModeSuite(mode, undefined, ['builtin.solid']).activeSuiteId).toBe('builtin.solid')
     expect(useIdentityStore.getState()).toBe(identity)

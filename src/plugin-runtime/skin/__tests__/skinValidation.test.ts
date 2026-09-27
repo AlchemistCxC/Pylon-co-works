@@ -44,11 +44,13 @@ describe('Skin Draft 校验（S5-B）', () => {
     const invalid = validateSkinDraft(makeDraft({ tokens: { uiScheme: 'blue' } }), schema)
     expect(invalid.issues).toContainEqual(expect.objectContaining({ path: 'tokens.uiScheme', code: 'invalid-option' }))
 
-    // inputShowPlaceholder defs 为 select options + boolean default
-    const asBoolean = validateSkinDraft(makeDraft({ tokens: { inputShowPlaceholder: true } }), schema)
+    // inputShowHistoryHint defs 为 select options + boolean default
+    // ★ #266 CC-07：原样本 `inputShowPlaceholder` 已删除 ⇒ 换同形的 `inputShowHistoryHint`
+    //   （同族、同为 `S(...)` 选项 + `default: true`，锁的是「这种历史写法仍被接受」这件事）。
+    const asBoolean = validateSkinDraft(makeDraft({ tokens: { inputShowHistoryHint: true } }), schema)
     expect(asBoolean.valid).toBe(true)
 
-    const asOption = validateSkinDraft(makeDraft({ tokens: { inputShowPlaceholder: 'shown' } }), schema)
+    const asOption = validateSkinDraft(makeDraft({ tokens: { inputShowHistoryHint: 'shown' } }), schema)
     expect(asOption.valid).toBe(true)
   })
 

@@ -31,7 +31,6 @@
  * 取现状值）；`mode` 同理取「权限模式」而非骨架里的「权限」。
  * 新增 widget：此处加一行 + `widgetRenderers` 补 renderer + 该行的 `propertyFields` 补表单。
  */
-import type { ThemeSettings } from '../../store.ts'
 import type { ThemeFieldKey } from '../../themeFieldDefs.ts'
 
 export type CcColorPropertyKey =
@@ -42,11 +41,11 @@ export type CcColorPropertyKey =
   | 'reasoningBgColor' | 'reasoningTextColor'
   | 'permissionBgColor' | 'permissionTextColor'
 export type CcNumberPropertyKey =
-  | 'inputFontSize' | 'inputMinHeight' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth' | 'cliLinePadding'
+  | 'inputFontSize' | 'inputHeight' | 'inputOffsetTop' | 'cliLineWidth'
   | 'modelWidth' | 'modelHeight' | 'modelRadius' | 'modelFontSize'
   | 'reasoningWidth' | 'reasoningHeight' | 'reasoningRadius' | 'reasoningFontSize'
   | 'permissionWidth' | 'permissionHeight' | 'permissionRadius' | 'permissionFontSize'
-export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'inputLineHeight' | 'modelSwitchMode' | 'sendVariant' | 'reasoningSwitchMode' | 'permissionSwitchMode'
+export type CcStringPropertyKey = 'inputLineHeight' | 'modelSwitchMode' | 'reasoningSwitchMode' | 'permissionSwitchMode'
 export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey
 
 export type WidgetPropertyField =
@@ -57,27 +56,22 @@ export type WidgetPropertyField =
       kind: 'chips'
       key: CcStringPropertyKey
       label: string
-      options: { value: string; label: string; sync?: { key: CcStringPropertyKey; value: string } }[]
+      options: { value: string; label: string }[]
     }
 
 export type CcPropertyCommand =
   | { readonly type: 'set-cc-property'; readonly key: CcColorPropertyKey | CcStringPropertyKey; readonly value: string }
   | { readonly type: 'set-cc-property'; readonly key: CcNumberPropertyKey; readonly value: number }
 
-export type WidgetPropertyVisibilityContext = Pick<ThemeSettings, 'inputMode'>
-
-export interface WidgetPropertyDef {
-  /**
-   * 条件显示钩子。★ **当前无任何声明方使用**（2026-09-23 起：`cliLine*` 三项改常态显示，
-   * 全表再无 `showIf`）；读取点仍在 `ControlCenter.solid.tsx` 的属性面板过滤里。
-   * 口径 = 属性项一律常态显示，值由预设给、用户自己改 ⇒ **不要再往这里加条件**。
-   */
-  showIf?: (theme: WidgetPropertyVisibilityContext) => boolean
-}
-
-/** 每 widget 的属性表单（纯数据）。inputMode↔inputVariant 双写经 chips 的 sync 表达
- * （主键写 value 时同步写 sync.key），保持与 Settings 双写一致。 */
-export type WidgetPropertyForm = readonly (WidgetPropertyField & WidgetPropertyDef)[]
+/**
+ * 每 widget 的属性表单（纯数据）。
+ *
+ * ★ #266 刀9：原先这里有两层"联动"——`WidgetPropertyDef.showIf`（按 `inputMode` 判明）与
+ *   chips 选项上的 `sync`（`inputMode`↔`inputVariant` 双写）。两个字段删除后它们都失去声明方，
+ *   读取点（`ControlCenter` 的属性面板过滤 / chips 点击）也一并撤掉 ⇒ 属性项一律**常态显示**，
+ *   值由预设给、用户自己改（口径不变，机制不再需要承载者）。
+ */
+export type WidgetPropertyForm = readonly WidgetPropertyField[]
 
 // ── 成员层（两级中的第二级）──
 
@@ -247,7 +241,7 @@ export const CC_WIDGET_GROUPS = [
         visibility: { kind: 'always' },
       },
     ],
-    note: '最外的容器：不参与排布（所有其它行的锚点终点）、不可拖不可藏（其值在设置页编辑）。★ `footerLayout` 由 #238 刀3 从「跨元件系统字段」桶转入本行（只做**归属转移**：字段与 peri/free 两种实现都不动）。',
+    note: '最外的容器：不参与排布（所有其它行的锚点终点）、不可拖不可藏（其值在设置页编辑）。★ #266 刀11：原「底部信息布局」字段已删除（`free`/`peri` 两值）—— 结构固定「独立状态行」，本行字段只剩外观项。',
   }),
   widgetGroup({
     id: 'input',
@@ -262,19 +256,11 @@ export const CC_WIDGET_GROUPS = [
       { kind: 'color', key: 'inputBg', label: '背景色' },
       { kind: 'color', key: 'inputTextColor', label: '文字色' },
       { kind: 'number', key: 'inputFontSize', label: '字号', min: 12, max: 22, step: 1 },
-      { kind: 'number', key: 'inputMinHeight', label: '最小高度', min: 36, max: 120, step: 0.1 },
-      {
-        kind: 'chips', key: 'inputMode', label: '模式',
-        options: [
-          { value: 'default', label: '标准输入', sync: { key: 'inputVariant', value: 'composer' } },
-          { value: 'cli', label: '命令行', sync: { key: 'inputVariant', value: 'cli' } },
-        ],
-      },
       // ★ 2026-09-23 用户口径：命令行边框三项**不再按输入模式判明**，两模式常态显示
       //   （值由预设给、用户自己改）。此前三条 `showIf: t => t.inputMode === 'cli'` 已删。
+      // ★ #266 刀9：「模式」chips（`inputMode` ↔ `inputVariant` 双写）随两个字段删除退场。
       { kind: 'number', key: 'cliLineWidth', label: '边框宽度', min: 1, max: 6, step: 0.1 },
       { kind: 'color', key: 'cliLineColor', label: '边框颜色' },
-      { kind: 'number', key: 'cliLinePadding', label: '内边距', min: 0, max: 24, step: 0.1 },
     ],
     members: [
       {
@@ -308,7 +294,7 @@ export const CC_WIDGET_GROUPS = [
       { id: 'error', label: '报错条', visibility: { kind: 'content' } },
       { id: 'empty-slot', label: '空态插槽', visibility: { kind: 'host' } },
     ],
-    note: '间距不写死在表里：横向上/纵向上的实际数值由既有的两个 CSS 变量提供（`--cc-input-margin-x` = 输入栏左右间距、`--cc-input-offset-top` = 输入栏上间距，都是设置页字段），`x.side=stretch` + `y.side=top` 描述的就是它们。peri 下由 `.cc-footer-peri` 让它回到文档流当第一个，free 下由绝对定位浮起 —— 这套差值仍在 CSS 里（本刀不动）。',
+    note: '间距不写死在表里：横向上/纵向上的实际数值由既有的两个 CSS 变量提供（`--cc-input-margin-x` = 输入栏左右间距、`--cc-input-offset-top` = 输入栏上间距，都是设置页字段），`x.side=stretch` + `y.side=top` 描述的就是它们。★ #266 刀11：原先「peri 下回文档流 / free 下绝对定位」两套差值已随该字段退场 —— 现在只有一套（独立状态行 + 绝对定位浮起）。',
   }),
   widgetGroup({
     id: 'model',
@@ -466,7 +452,6 @@ export const CC_WIDGET_GROUPS = [
         id: 'button',
         label: '按钮本体',
         visibility: { kind: 'always' },
-        note: 'sendVariant 是「能改没人读」的僵尸字段（规范 §11.3）：本刀照现状保留，只在表里标注。',
       },
       {
         id: 'icon',

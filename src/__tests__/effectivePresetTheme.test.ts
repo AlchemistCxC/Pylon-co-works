@@ -52,10 +52,31 @@ const REPO_ROOT = resolve(__dirname, '..', '..')
  * - `glass` `68 → 67`（它的 cc 区切面里有 `ccVariant`）；
  * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区不含 `ccVariant`）。
  * ★ 同样由脚本实测（`Object.keys(...).length` + `'ccVariant' in t`），与上面的账逐条一致。
+ *
+ * ★ #266 CC-07（设置页中控台多余项清理）：删掉 4 个 cc 字段
+ * （`sendVariant` / `inputShowPlaceholder` / `prismOnColor` / `pillText`）⇒ 基线第四次按**真值**重算。
+ * 本刀的账：**出厂数据里含这些键的预设各按实际含有数递减**
+ * - 6 套「完整快照」型（claude / nord / tokyo / solarized / amber / matrix）`187 → 183`（四个键都有）；
+ * - `glass` `67 → 65`（它的 cc 区切面只含 `pillText` / `prismOnColor` 两个，
+ *   本来就没有 `sendVariant` / `inputShowPlaceholder`——与 `gui-cc.ts` 的 glass 条目一致）；
+ * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区仅 6 键，四个键都不含）。
+ * ★ 真值由脚本实测得出（`.agents/spec/266-probe-preset-counts.mts`，逐套打印
+ * `Object.keys(effectivePresetTheme(preset)).length`），**不是手推**：实测
+ * `claude/nord/tokyo/solarized/amber/matrix = 183`、`glass = 65`、`agent-* = 36`。
+ *
+ * ★ #266 刀7~13（第二批七刀）：再删 7 个 cc 字段
+ * （`cliLinePadding` / `cliContentOffsetY` / `inputMode` / `inputVariant` / `cliOverflowMode` /
+ * `footerLayout` / `inputMinHeight`）⇒ 基线第五次按**真值**重算。
+ * 本刀的账：**出厂数据里含这些键的预设按实际含有数递减**
+ * - 6 套「完整快照」型（claude / nord / tokyo / solarized / amber / matrix）`183 → 176`（七个键都有）；
+ * - `glass` `65 → 63`（它的 cc 区切面只含 `inputMinHeight` / `cliLinePadding` 两个）；
+ * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区仅 6 键，七个键都不含）。
+ * ★ 真值同样由 `.agents/spec/266-probe-preset-counts.mts` 实测：本次实测
+ * `claude/nord/tokyo/solarized/amber/matrix = 176`、`glass = 63`、`agent-* = 36`。
  */
 const BASELINE_FIELD_COUNTS: Record<string, number> = {
-  claude: 187, glass: 67, nord: 187, tokyo: 187, solarized: 187,
-  amber: 187, matrix: 187, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
+  claude: 176, glass: 63, nord: 176, tokyo: 176, solarized: 176,
+  amber: 176, matrix: 176, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
 }
 
 /** 该预设的有效值 —— 用测试侧独立算法（直接并池里的 5 个切面），不复用被测函数。 */
