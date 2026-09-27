@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { waitFor } from '@solidjs/testing-library'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
+import { CC_WIDGET_LABELS, EMPTY_STATE_HIDDEN_WIDGET_IDS } from '../../../domains/cc/widgetDefinitions.ts'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { mountSolidControlCenterPreview } from '../__fixtures__/mountSolidControlCenterPreview.solid.tsx'
 import { createBuiltinCcWidgetPluginDefinition } from '../../../plugins/core/cc/builtinCcWidgetPlugin.ts'
@@ -305,6 +306,47 @@ describe('mountSolidControlCenterPreview', () => {
       // 编辑态：内置件露出来，且与发送按钮走**同一份**名单 ⇒ 同样带标记（走裸预设值则不带）
       await waitFor(() => expect(controlCenter?.querySelector('[data-widget-id="model"]')).not.toBeNull())
       expect(controlCenter?.querySelector('[data-widget-id="model"]')).toHaveClass('cc-hidden')
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('CC-02 第 5 步收口：工具栏那一格与控件同源 —— 被空态名单藏起来的件显示为「已隐藏」', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputSubmitButtonMode = 'inline'
+    services.appearance.setTheme(theme)
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(controlCenter).not.toBeNull()
+      // 前提：这里是**空态语境名单**在藏件，预设值 ccHidden 里一件都没有。
+      // ⇒ 工具栏若读裸预设值，就会把这几格报成「● 显示着」——同一个事实两处判据，正是本单病灶。
+      expect(theme.ccHidden).not.toContain('model')
+
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+        .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
+      const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-toolbar-chip')?.textContent?.trim().at(0)
+
+      // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim），与控件自己的 cc-hidden 幽灵态一致
+      await waitFor(() => expect(chipWrap('model')?.classList.contains('dim')).toBe(true))
+      for (const id of EMPTY_STATE_HIDDEN_WIDGET_IDS) {
+        expect(chipWrap(id)?.classList.contains('dim')).toBe(true)
+        expect(chipMark(id)).toBe('＋')
+      }
+      // 不在名单里的输入栏仍是「● 显示着」—— 挡住"这条用例恒为全部隐藏"
+      expect(chipWrap('input')?.classList.contains('dim')).toBe(false)
+      expect(chipMark('input')).toBe('●')
       destroy()
     } finally {
       services.destroy()

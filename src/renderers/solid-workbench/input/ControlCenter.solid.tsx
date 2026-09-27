@@ -99,8 +99,8 @@ export function SolidControlCenter() {
   let controlCenterElement: HTMLDivElement | undefined
   const sendButtonMode = () => {
     // 04b：空态隐藏发送按钮 —— 与其余控件共用 hiddenWidgetIds() 这一个入口。
-    // 注册轨的发送按钮不经 isWidgetVisible（没有 !edit 短路），故编辑态豁免在此显式保留（丁）。
-    if (sendButtonHidden() && !appearance().ccEditMode) return undefined
+    // ★ CC-02：编辑态豁免不再手抄，改由 isWidgetVisible 承担（与渲染处同一判据）。
+    if (!isWidgetVisible('cc-send-button', visibilityContext())) return undefined
     return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
   }
   createEffect(() => {
@@ -689,7 +689,7 @@ export function SolidControlCenter() {
       <div class="cc-edit-toolbar" role="toolbar" aria-label="中控控件工具栏">
         <span class="cc-edit-toolbar-label">控件</span>
         <For each={CC_EDIT_TOOLBAR_IDS}>{id => {
-          const hidden = () => appearance().ccHidden.includes(id)
+          const hidden = () => hiddenWidgetIds().includes(id)
           return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
             <button type="button" class="cc-edit-toolbar-chip" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
             <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
