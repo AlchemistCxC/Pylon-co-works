@@ -87,3 +87,8 @@
 - [kumo] **#399 `.cargo/config.toml` 上移仓库根**（cwd 决定的构建指纹分叉 → CI shadow job 重复全量编译）：`git mv src-tauri/.cargo/config.toml → .cargo/config.toml`（内容不变，补「位置约定」注释）、`docs/说明书/Pylon-模块维护地图.md`（「验证」节 #193 那句补一句 config 可见性）。**不改任何 cargo 调用点**——shadow/clippy 脚本的 cwd 与参数原样保留。验证：双 cwd 指纹探针（同 target 交替调用重编数 9→0）+ 实跑 `bun run check:acp-shadow` 分段耗时对照 + `tools/webview2-mcp` release 构建。
   - ⚠️ 触 `docs/说明书/Pylon-模块维护地图.md` 与 #375/#376/#380 声明域重叠——本批只改「验证」节一句，提交按 hunk 分账、提交前核 `git diff`。
   - **不碰**：`.github/workflows/**`、`scripts/**`、任何 Rust 源码（含 `src-tauri/**`）、`tools/**` 源码、前端 `src/**`。规格 `.agents/spec/399-cargo-config-root-relocation.md`。
+  - **进展（2026-09-27 21:5x）——已入库待合并**：提交 `b5ab171f`（config 搬迁 + ADR-0031）、`4cf87413`（开发记录），随共享分支 PR #400 一并走。验收：双 cwd 指纹探针 **9/9/9 → 0/0/0**（含子 crate cwd）、`bun run check:acp-shadow` exit 0（parity 全 true，`fixtureElapsedMs` 295s 量级 → **[3865, 2394] ms**）、`tools/webview2-mcp` release 构建 exit 0、`fmt`/`check:clippy` exit 0（6 crate `added: []`）。
+  - ⚠️ **`docs/说明书/Pylon-模块维护地图.md` 那句已被 #398 批提交 `6dd5a6cf` 连带带入库**（其标题含「说明书同步」），故本批 PR diff 不含该文件——内容在库，与 #382 批遇到的同型现象。
+  - ⚠️ 施工期间与 #398 批的 clippy 争过 `src-tauri/target` build lock，并删除了 `target/debug/incremental`（可再生，腾磁盘）；未动 `target/release`。
+  - **遗留（另立条目候选）**：背压探针 ~51s 与 cwd 无关（本地 51.0s / CI 51–58s，两条测试本体 0.02s/0.00s），属「同活多算」另一条线。
+  - 合并后撤本条。
