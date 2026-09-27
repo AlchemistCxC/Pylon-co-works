@@ -3240,7 +3240,7 @@ mod tests {
             DetectionOutcome::Unknown
         );
 
-        let mut retryable = clean.clone();
+        let mut retryable = clean;
         retryable.diagnostics.push(scan_diagnostic(
             "version_probe",
             None,
@@ -3319,7 +3319,7 @@ mod tests {
                     == crate::agent_preflight::PreflightStatus::NotInstalled)
         );
         assert_eq!(
-            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::classify(&Ok(snapshot.report)),
             DetectionOutcome::Success
         );
     }
@@ -3350,7 +3350,7 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "version_probe_timeout"));
         assert_eq!(
-            DetectionOutcome::classify(&Ok(snapshot.report.clone())),
+            DetectionOutcome::classify(&Ok(snapshot.report)),
             DetectionOutcome::Unknown
         );
     }

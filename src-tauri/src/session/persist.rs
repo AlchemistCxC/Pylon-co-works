@@ -75,6 +75,7 @@ fn rollback_load_slot_else(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     owner: DurableSessionOwner,

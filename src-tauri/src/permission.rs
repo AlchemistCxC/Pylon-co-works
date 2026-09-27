@@ -1629,7 +1629,7 @@ mod tests {
             "exit_plan 超时 = keep_planning（不批准也不代弃）"
         );
 
-        let mut grok = elicitation.clone();
+        let mut grok = elicitation;
         grok.bridge = PrivateBridge::GrokExtQuestions;
         grok.question_specs = Some(
             crate::acp::question_policy::parse_questions(&serde_json::json!({"questions": [{
@@ -1644,7 +1644,7 @@ mod tests {
             "grok 问题桥超时 = 既有 declined 映射"
         );
 
-        let mut pi = grok.clone();
+        let mut pi = grok;
         pi.bridge = PrivateBridge::PiSelectAsk;
         assert_eq!(
             private_interaction_timeout_response(&pi).unwrap(),

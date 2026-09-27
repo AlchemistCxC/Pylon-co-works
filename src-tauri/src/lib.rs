@@ -1113,7 +1113,7 @@ fn setup_restore_gateway_instances(app: &tauri::App, dirs: &crate::paths::DataDi
     }
     let service = state.gateway_instances.clone();
     let path_for_task = path.clone();
-    let credentials_for_refresh = credentials.clone();
+    let credentials_for_refresh = credentials;
     tokio::spawn(async move {
         let loaded = tokio::task::spawn_blocking(move || {
             crate::gateway::instance_store::load_instances(&path_for_task)
@@ -1277,6 +1277,8 @@ fn setup_spawn_default_agent_connect(app: &tauri::App, default_runtime_connectin
     let connect_window = app.get_webview_window("main");
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
     crate::startup_timing::mark("default_agent_connect_started");
+    // spawn 块内锁序 switch_lock→agent_lifecycle：后台初始连接须与手动 switch/reconnect 串行（同 reconnect_agent）。
+    #[allow(clippy::await_holding_invalid_type)]
     tokio::spawn(async move {
         let state = app_handle.state::<AppState>();
         // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
@@ -2008,10 +2010,8 @@ mod init_tracing_tests {
             logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
                 .expect("系统临时目录必须可写");
 
-        let (subscriber, guard) = build_subscriber(
-            runtime_log::RuntimeLogLayer::with_hub(hub.clone()),
-            Some(sink),
-        );
+        let (subscriber, guard) =
+            build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub), Some(sink));
         let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
         tracing::subscriber::with_default(subscriber, || {
             tracing::info!(target: "pylon.init_tracing.test", "kept-383");

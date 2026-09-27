@@ -246,7 +246,7 @@ impl AppState {
             .lock()
             .ok()
             .and_then(|name| self.agents.lock().ok()?.get(&*name).cloned())
-            .and_then(|a| a.cwd.clone())
+            .and_then(|a| a.cwd)
             .unwrap_or_else(|| ".".to_string())
     }
 
@@ -475,6 +475,7 @@ impl AppState {
 
     /// 平台 ingest 目标 runtime 就绪检查（B10.3）：未连接时懒启动连接。
     /// announce=false——平台消息路由不切换/不广播 GUI active agent 状态。
+    #[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接
     pub(crate) async fn ensure_runtime_ready(
         &self,
         runtime: &Arc<AgentRuntime>,

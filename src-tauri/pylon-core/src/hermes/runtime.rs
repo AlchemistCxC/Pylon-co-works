@@ -541,7 +541,7 @@ mod tests {
     fn provider_gate_is_case_insensitive_but_transport_scoped() {
         let hermes = agent(Some("HeRmEs"), "SUBPROCESS");
         assert!(is_hermes_agent(&hermes));
-        let mut other_transport = hermes.clone();
+        let mut other_transport = hermes;
         other_transport.transport = "embedded".to_string();
         assert!(!should_apply(&other_transport));
     }

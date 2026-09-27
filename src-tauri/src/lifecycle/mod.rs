@@ -636,6 +636,7 @@ pub(crate) async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：switch_lock→agent_lifecycle 跨 await 串行是 LifecycleOp 状态机设计（模块文档）
 pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -712,6 +713,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：与 switch_agent 共用串行锁，防交叉杀进程
 pub(crate) async fn reconnect_agent(
     state: tauri::State<'_, AppState>,
     window: tauri::Window,
@@ -742,6 +744,7 @@ pub(crate) async fn reconnect_agent(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：restart 属 LifecycleOp 统一序列，须与 switch/reconnect 串行
 pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -987,7 +990,7 @@ mod tests {
             AgentConfigActivationState::Activated
         );
 
-        let mut changed = stored.clone();
+        let mut changed = stored;
         changed.args.push("--new-runtime-option".into());
         assert_eq!(
             config_activation_state(

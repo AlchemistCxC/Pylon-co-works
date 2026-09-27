@@ -295,7 +295,7 @@ fn apply_update_event_with_pet_policy(
                 // rawInput 仅提取文件名白名单形态（"path":"..."），原文绝不下沉
                 if let Some(raw) = update.get("rawInput").and_then(|v| v.as_str()) {
                     if let Some(file) = extract_tool_file_name(raw) {
-                        pet_events.push(PetEvent::CodeFile(file.to_string()));
+                        pet_events.push(PetEvent::CodeFile(file));
                     }
                 }
             }
@@ -2348,7 +2348,7 @@ mod tests {
         let a = crate::acp::RequestId::Number(11);
         let b = crate::acp::RequestId::Number(12);
         let snapshot = vec![
-            (a.clone(), pending_elicitation("el-1")),
+            (a, pending_elicitation("el-1")),
             (b.clone(), pending_elicitation("el-2")),
         ];
         let (hit, pending) = match_pending_elicitation(&snapshot, "el-2").expect("el-2 必须命中");
@@ -2520,7 +2520,7 @@ mod tests {
         let runtime = crate::test_utils::connected_runtime();
         let sent: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink = sent.clone();
+        let sink = sent;
         let channel = tauri::ipc::Channel::new(move |body| {
             if let tauri::ipc::InvokeResponseBody::Json(text) = body {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {

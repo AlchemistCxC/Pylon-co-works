@@ -272,9 +272,12 @@ impl TerminalRegistry {
         output_limit: usize,
         child: ManagedChild,
     ) -> String {
-        let mut next = self.next_id.lock().await;
-        *next = next.saturating_add(1);
-        let id = format!("terminal-{}", *next);
+        // id 计数锁卫不得跨过 terminals 锁的 await（#414：缩短临界区）。
+        let id = {
+            let mut next = self.next_id.lock().await;
+            *next = next.saturating_add(1);
+            format!("terminal-{}", *next)
+        };
         self.terminals.lock().await.insert(
             id.clone(),
             TerminalInstance::new(session_id, output_limit, child),
@@ -338,7 +341,10 @@ impl TerminalRegistry {
                 .collect()
         };
         for id in &owned {
-            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+            // 先在独立作用域内取出再 await：`if let Some(x) = lock().await.remove(..)`
+            // 的检视位临时守卫会活过整个分支体（#414：持注册表锁跨 kill().await）。
+            let terminal = self.terminals.lock().await.remove(id);
+            if let Some(terminal) = terminal {
                 let _ = terminal.kill().await;
             }
         }
@@ -353,7 +359,9 @@ impl TerminalRegistry {
             terminals.keys().cloned().collect()
         };
         for id in &ids {
-            if let Some(terminal) = self.terminals.lock().await.remove(id) {
+            // 同 release_session：检视位临时守卫不得跨 kill().await（#414）。
+            let terminal = self.terminals.lock().await.remove(id);
+            if let Some(terminal) = terminal {
                 let _ = terminal.kill().await;
             }
         }

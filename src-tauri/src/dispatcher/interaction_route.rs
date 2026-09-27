@@ -309,7 +309,7 @@ mod tests {
                 }
             });
         }
-        let window = webview.as_ref().window().clone();
+        let window = webview.as_ref().window();
         (window, webview, app, rx)
     }
 

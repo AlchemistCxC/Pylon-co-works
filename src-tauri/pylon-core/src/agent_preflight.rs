@@ -1032,7 +1032,7 @@ mod tests {
         // Node 达标 → 回落到安装面结论，不被 Node 分支截走。
         let ok_node = PreflightInputs {
             node: ToolVersion::Known("26.7.0".into()),
-            ..base.clone()
+            ..base
         };
         assert_eq!(diagnose(&npx, &ok_node).code, "adapter_missing");
 
@@ -1041,7 +1041,7 @@ mod tests {
             (bare.clone(), found),
             (bare.clone(), off_path),
             (bare.clone(), missing),
-            (bare.clone(), no_gap),
+            (bare, no_gap),
             (wrapper, native_only),
             (npx, no_node),
         ] {
@@ -1346,7 +1346,7 @@ mod tests {
         // 但「无法证明违反」也不会被报成 versionTooOld。
         let unknown = PreflightInputs {
             adapter_version: None,
-            ..installed.clone()
+            ..installed
         };
         let result = evaluate("claude-code", &unknown).unwrap();
         assert_eq!(result.status, PreflightStatus::Installed);

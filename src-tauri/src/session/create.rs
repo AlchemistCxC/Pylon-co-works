@@ -1046,6 +1046,7 @@ async fn create_session_slot(
 /// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
 /// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
+#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：映射复活/建立与并发 create/close 串行（G2-04）
 pub(crate) async fn ensure_session_mapping(
     assembly: &SessionAssembly<'_>,
     known_peri_id: Option<&str>,
@@ -1509,6 +1510,7 @@ pub(crate) fn restore_previous_slot(
     clippy::too_many_arguments,
     reason = "IPC 契约签名：参数与 wire 面一一对应不可折叠；摘除条件 = 改为 payload 结构体并同步前端调用方"
 )]
+#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：会话建立序列（守卫/上限/RPC/插入/close 旧）整体串行
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,

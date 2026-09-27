@@ -454,7 +454,7 @@ fn runtime_fingerprint_ignores_display_fields_and_tracks_runtime_fields() {
             value
         },
         {
-            let mut value = baseline.clone();
+            let mut value = baseline;
             value.acp = Some(AcpProtocolConfig {
                 host_terminal: Some(crate::agent_config::HostToolsMode::Unrestricted),
                 ..Default::default()

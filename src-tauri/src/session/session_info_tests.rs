@@ -373,7 +373,7 @@ fn inspector_row_serializes_exact_wire_and_sorts() {
         tokens_out: s.tokens_out,
         tokens_total: s.tokens_total,
         context_size: s.context_size,
-        cwd: s.cwd.clone(),
+        cwd: s.cwd,
     };
     let value = serde_json::to_value(&row).expect("serialize");
     assert_eq!(

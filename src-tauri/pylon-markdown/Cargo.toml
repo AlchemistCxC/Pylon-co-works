@@ -36,3 +36,7 @@ wasm-opt = [
     "--enable-sign-ext",
     "--enable-mutable-globals",
 ]
+
+# #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
+[lints]
+workspace = true

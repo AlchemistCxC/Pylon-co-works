@@ -8,6 +8,7 @@ use crate::error::PylonError;
 use crate::AppState;
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：reload 全程与连接状态机串行，防 reload 撕裂在途连接
 pub(crate) async fn reload_agents(
     state: tauri::State<'_, AppState>,
     config_path: Option<String>,
@@ -106,6 +107,7 @@ pub(crate) async fn update_agents_config(
 /// `effective_config_path()`（`config_path_override=None`，行为不变）；测试注入
 /// 临时配置路径，不再 `set_var` 进程全局 `PYLON_AGENTS_CONFIG`（进程级 env 变异
 /// 与并行测试竞态）。
+#[allow(clippy::await_holding_invalid_type)] // config_write_lock 跨 await：串行「读→校验→写盘→提交」全窗口，防基于旧版本互相覆盖
 pub(crate) async fn update_agents_config_via(
     state: tauri::State<'_, AppState>,
     scope: String,
@@ -239,6 +241,7 @@ pub(crate) async fn update_agents_config_via(
 /// 不写 `data/agents.yaml`，不写 AppData。走与 `update_agents_config` 相同的
 /// 候选校验、原子写盘、内存提交与 gateway reload。
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // 同 update_agents_config_via：config_write_lock 串行初始化事务全窗口
 pub(crate) async fn initialize_agents_config(
     state: tauri::State<'_, AppState>,
     agent_id: Option<String>,

@@ -30,3 +30,7 @@ test-agent = []
 name = "pylon-fake-agent"
 path = "src/main.rs"
 required-features = ["test-agent"]
+
+# #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
+[lints]
+workspace = true

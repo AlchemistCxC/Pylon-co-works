@@ -63,7 +63,7 @@ fn catalog_only_provider_flows_through_every_consumption_stage() {
         crate::acp::host_tools::HostToolsPolicy::default(),
     )
     .unwrap();
-    let mut expected_caps = declared.clone();
+    let mut expected_caps = declared;
     expected_caps["fs"] = serde_json::json!({"readTextFile": true, "writeTextFile": true});
     expected_caps["elicitation"] = serde_json::json!({"form": {}});
     assert_eq!(

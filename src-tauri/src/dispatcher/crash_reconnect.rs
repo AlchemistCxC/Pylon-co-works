@@ -40,6 +40,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
 
     /// 崩溃通知入口（broadcast 分支 / watch 订阅即查 / watch changed 三路共用）。
     /// `reason` 为稳定 code（transport.rs CrashReason::as_str）。
+    #[allow(clippy::await_holding_invalid_type)] // R9：自动重连是 LifecycleOp 状态机一环，agent_lifecycle 跨 await 与 switch/reconnect 串行
     pub(crate) async fn handle(&self, reason: String) {
         // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
         let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -71,7 +72,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
         }
         if let Ok(mut runtime_state) = self.agent_runtime.lock() {
             runtime_state.status = AgentLifecycleStatus::Crashed;
-            runtime_state.last_error = Some(last_error.clone());
+            runtime_state.last_error = Some(last_error);
         }
         let _ = self
             .handles
