@@ -237,3 +237,58 @@ describe('C04 provider-neutral snapshot selector (toolInvocationSnapshot)', () =
     expect(toolInvocationSnapshot(document, 'no-such-id')).toBeNull()
   })
 })
+
+describe('#389 terminal fence settles unsettled tool activities', () => {
+  // hermes 的 read/patch 只发 tool_call、从不发 tool_call_update——终局 fence
+  // （reduceTool 已拒绝其后一切迟到工具事件）若不收敛，指示器永久停在「运行中」。
+  it('settles still-running tools to completed when the session completes normally', () => {
+    const document = reduce([
+      envelope(1, { type: 'tool.started', tool: { name: 'Read', kind: 'read' } }, 'settle-ok'),
+      envelope(2, { type: 'session.completed' }),
+    ])
+    const snapshot = toolInvocationSnapshot(document, 'settle-ok')
+    expect(snapshot?.status).toBe('completed')
+    expect(snapshot?.result?.status).toBe('completed')
+  })
+
+  it('settles still-running tools to cancelled on interrupted terminal sessions', () => {
+    for (const [status, event] of [
+      ['cancelled', { type: 'session.status-updated', status: 'cancelled' }],
+      ['error', { type: 'session.status-updated', status: 'error' }],
+    ] as const) {
+      const document = reduce([
+        envelope(1, { type: 'tool.started', tool: { name: 'Patch', kind: 'edit' } }, `settle-${status}`),
+        envelope(2, event),
+      ])
+      expect(toolInvocationSnapshot(document, `settle-${status}`)?.status).toBe('cancelled')
+    }
+  })
+
+  it('does not rewrite tools that already reached a terminal state', () => {
+    const document = reduce([
+      envelope(1, { type: 'tool.started', tool: { name: 'Bash' } }, 'settle-failed'),
+      envelope(2, { type: 'tool.failed', tool: { status: 'failed', error: 'exit 1' } }, 'settle-failed'),
+      envelope(3, { type: 'session.completed' }),
+    ])
+    expect(toolInvocationSnapshot(document, 'settle-failed')?.status).toBe('failed')
+  })
+
+  it('keeps non-tool activities untouched and stays idempotent across repeated terminal events', () => {
+    const once = reduce([
+      envelope(1, { type: 'activity.started', activityId: 'proc-1', activity: { kind: 'process' } }),
+      envelope(2, { type: 'tool.started', tool: { name: 'Read', kind: 'read' } }, 'settle-twice'),
+      envelope(3, { type: 'session.completed' }),
+    ])
+    const twice = reduce([
+      envelope(1, { type: 'activity.started', activityId: 'proc-1', activity: { kind: 'process' } }),
+      envelope(2, { type: 'tool.started', tool: { name: 'Read', kind: 'read' } }, 'settle-twice'),
+      envelope(3, { type: 'session.completed' }),
+      envelope(4, { type: 'session.status-updated', status: 'completed' }),
+    ])
+    for (const document of [once, twice]) {
+      expect(document.activities.find(node => node.id === 'settle-twice')?.status).toBe('completed')
+      // activity.* 有自己的生命周期事件，可合法跨回合，不在收敛之列
+      expect(document.activities.find(node => node.id === 'proc-1')?.status).not.toBe('completed')
+    }
+  })
+})

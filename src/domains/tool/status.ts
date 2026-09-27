@@ -52,6 +52,11 @@ export const TOOL_STATE_LABELS: Record<ToolVisualState, string> = {
   unknown: '状态未知',
 }
 
+/** #389：终态判定（completed/failed/cancelled）——渲染层据此停用「进行中」类活态 UI */
+export function isTerminalToolVisualState(state: ToolVisualState): boolean {
+  return state === 'completed' || state === 'failed' || state === 'cancelled'
+}
+
 export interface ToolPresentation {
   state: ToolVisualState
   tone: ToolTone

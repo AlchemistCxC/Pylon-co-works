@@ -1392,6 +1392,14 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
           ? { thoughtDurationMs: Math.max(0, completedAt - message.thoughtStartedAtMs) }
           : {}),
       }) : message),
+      // #389：fence 的对称收敛——reduceTool 已拒绝终局后的一切迟到工具事件，
+      // 非终态工具不再可能等到翻转（hermes 的 read/patch 只发 tool_call、从不发
+      // tool_call_update，指示器因此永久停在「运行中」）。与消息 running 收敛同拍，
+      // 按回合结局定投向：正常完成 → completed；中断类终局 → cancelled。
+      activities: settleUnsettledTools(
+        document.activities,
+        nextStatus.toLowerCase() === 'completed' ? 'completed' : 'cancelled',
+      ),
     } : {}),
     session: {
       ...document.session,
@@ -1413,6 +1421,21 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 
 const TERMINAL_SESSION_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled'])
 const SESSION_LIFECYCLE_STATUSES = new Set(['idle', 'loading', 'ready', 'degraded', 'running', 'generating', 'thinking', 'responding', 'working', ...TERMINAL_SESSION_STATUSES])
+
+/**
+ * #389：终局 fence 收敛在途工具活动。只动 kind === 'tool'——activity.*
+ * （process/后台任务/子代理/工作流）有自己的生命周期事件，可合法跨回合。
+ * 已终态节点不动（终态幂等）；无可收敛节点时保持原引用，避免无谓的文档替换。
+ */
+function settleUnsettledTools(
+  activities: readonly WorkbenchActivityNode[],
+  target: 'completed' | 'cancelled',
+): readonly WorkbenchActivityNode[] {
+  if (!activities.some(node => node.kind === 'tool' && !TERMINAL_TOOL_STATUSES.has(node.status))) return activities
+  return activities.map(node => node.kind === 'tool' && !TERMINAL_TOOL_STATUSES.has(node.status)
+    ? { ...node, status: target }
+    : node)
+}
 
 function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
   if (event.type === 'assist.prediction') {
