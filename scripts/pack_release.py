@@ -314,7 +314,16 @@ def preflight_build_disk(target_root: Path | None = None) -> None:
 def run_release_build() -> None:
     print("== bun run release:portable（wasm + 前端 + SDK + 离线文档站 + tauri --no-bundle"
           " + pylon-detect + webview2-mcp + 打包审计）==")
-    result = subprocess.run(["bun", "run", "release:portable"], cwd=REPO_DIR)
+    # bun 常是 npm 风格的 .cmd 垫片：CreateProcess 只自动补 .exe，裸 "bun" 会
+    # WinError 2——先按 PATHEXT 解析真实路径，.cmd/.bat 经 cmd /c 启动。
+    bun = shutil.which("bun")
+    if not bun:
+        raise PackError("PATH 上找不到 bun——--build 需要它编排 release:portable 全链")
+    if bun.lower().endswith((".cmd", ".bat")):
+        command: list[str] | str = ["cmd", "/c", bun, "run", "release:portable"]
+    else:
+        command = [bun, "run", "release:portable"]
+    result = subprocess.run(command, cwd=REPO_DIR)
     if result.returncode != 0:
         raise PackError(f"release:portable 失败（exit {result.returncode}）")
 
