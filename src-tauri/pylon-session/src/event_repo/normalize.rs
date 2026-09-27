@@ -263,6 +263,28 @@ pub(super) fn normalize_kernel_event(
             if let Some(model) = model {
                 typed_payload.insert("model".to_string(), serde_json::Value::String(model));
             }
+            // ACP `SessionInfoUpdate.title/updatedAt` 是 `MaybeUndefined`：字段缺席 =
+            // 不修改、显式 null = 清空、字符串 = 设置。三态不得压平——只在键存在时落
+            // typed，且清空原样落 null。与 model 的「只收非空机器 id」口径不同：标题
+            // 有清除语义，丢了清空信号界面就撤不回标题。
+            for field in ["title", "updatedAt"] {
+                match update.get(field) {
+                    Some(serde_json::Value::Null) => {
+                        typed_payload.insert(field.to_string(), serde_json::Value::Null);
+                    }
+                    Some(serde_json::Value::String(text)) => {
+                        let trimmed = text.trim();
+                        let value = if trimmed.is_empty() {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::Value::String(trimmed.to_string())
+                        };
+                        typed_payload.insert(field.to_string(), value);
+                    }
+                    // 缺席 = 不修改；非字符串是上游形状漂移，不猜。
+                    _ => {}
+                }
+            }
         }
     }
 

@@ -767,6 +767,7 @@ pub(crate) fn install_process_registrations() {
     for consumer in [
         CC::SessionEstablishment,
         CC::SessionClose,
+        CC::SessionDelete,
         CC::SessionList,
         CC::SessionFork,
         CC::Elicitation,
@@ -1721,6 +1722,7 @@ pub fn run() {
                 crate::session::set_mode,
                 crate::session::set_config_option,
                 crate::session::close_session,
+                crate::session::agent_session_delete,
                 crate::session::cancel_prompt,
                 crate::session::load_sessions,
                 crate::session::session_fork,

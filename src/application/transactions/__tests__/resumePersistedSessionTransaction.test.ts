@@ -52,15 +52,17 @@ describe('resumePersistedSessionTransaction', () => {
     expect(created).toEqual([])
   })
 
-  it('未命中：addSession 返回 id 并纠正 source/periId/updatedAt（不靠数组长度）', () => {
+  it('未命中：addSession 返回 id 并纠正 source/periId/autoName/updatedAt（不靠数组长度）', () => {
     const { deps, created } = createDeps([])
     const result = resumePersistedSessionTransaction('qq:group:5', 'peri-5', '存档名', 123456, deps)
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value).toBe('created-0')
     expect(created).toHaveLength(2)
+    // #393：存档 title 是 Agent 给的会话名 → 落 `autoName`（存储以 Agent 为准），
+    // 显示名由 `resolveSessionDisplayName` 决定，用户改名只置 renamedByUser。
     expect(created[1]).toEqual({
       id: 'created-0',
-      partial: { source: 'qq:group:5', periId: 'peri-5', lastActiveAt: 123456 },
+      partial: { source: 'qq:group:5', periId: 'peri-5', autoName: '存档名', lastActiveAt: 123456 },
     })
   })
 

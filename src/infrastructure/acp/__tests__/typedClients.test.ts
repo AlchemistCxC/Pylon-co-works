@@ -245,6 +245,32 @@ describe('sessionClient', () => {
     expect(sessions.length).toBe(1)
     expect(sessions[0]?.id).toBe('a')
   })
+
+  /** #396：真机拿到的是官方 `ListSessionsResponse`——包装对象 + `sessionId` 键。
+   *  此前只认裸数组 + `item.id`，整批被丢，存档列表恒空。 */
+  it('listPersistedSessions 认官方 ListSessionsResponse（包装 + sessionId）', async () => {
+    const invoke = new FakeInvoke().register('list_persisted_sessions', () => ({
+      sessions: [
+        { sessionId: '01a0e28d-4d18-7220-b7f0-17692f90af44', cwd: 'G:\\ws', title: 'Riccati 助手介绍', updatedAt: '2026-09-27T11:08:35.934670100+00:00' },
+        { sessionId: '01a0e28a-ebb3-7242-936e-1f340fd61067', cwd: 'G:\\ws', updatedAt: '2026-09-27T11:05:50.259756100+00:00' },
+        null,
+      ],
+    }))
+    const client = createSessionClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+    const sessions = await client.listPersistedSessions()
+    expect(sessions.map(session => session.periId)).toEqual([
+      '01a0e28d-4d18-7220-b7f0-17692f90af44',
+      '01a0e28a-ebb3-7242-936e-1f340fd61067',
+    ])
+    expect(sessions[0]).toMatchObject({
+      id: '01a0e28d-4d18-7220-b7f0-17692f90af44',
+      title: 'Riccati 助手介绍',
+    })
+    expect(sessions[0]?.updatedAt).toBe(Date.parse('2026-09-27T11:08:35.934670100+00:00'))
+    // 无 title 的条目照常列出（恢复入口不因缺标题而消失）。
+    expect(sessions[1]?.title).toBeUndefined()
+    expect(sessions[1]?.updatedAt).toBeGreaterThan(0)
+  })
 })
 
 describe('chatClient', () => {

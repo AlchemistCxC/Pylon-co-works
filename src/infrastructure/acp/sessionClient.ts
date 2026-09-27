@@ -305,6 +305,23 @@ export interface CloseSessionPayload {
   source: string
 }
 
+/**
+ * #398：agent 侧会话删除载荷（session/delete）。periId 显式传递——close 已先行
+ * 移除 runtime 映射，后端按 agentId 路由 + periId 定位目标。返回
+ * `{outcome: 'deleted' | 'skipped', reason?}`：skipped 是常态（agent 未实现
+ * delete），失败以 reject 上抛（agent 支持却失败）。
+ */
+export interface DeleteSessionAgentSidePayload {
+  agentId: string
+  source: string
+  periId: string
+}
+
+export interface DeleteSessionAgentSideResult {
+  outcome: 'deleted' | 'skipped'
+  reason?: string
+}
+
 /** #98：session/fork 请求载荷——childSource 命名权在本地身份层，由调用方提供。 */
 export interface ForkSessionPayload {
   source: string
@@ -331,6 +348,10 @@ export function createSessionClient(transport: ClientTransport) {
   return {
     newSession: (payload: NewSessionPayload): Promise<unknown> => transport.invoke('new_session', payload),
     closeSession: (payload: CloseSessionPayload): Promise<unknown> => transport.invoke('close_session', payload),
+    // #398：删除链路的 agent 侧步骤（close 之后）——后端按能力协商 gate，
+    // 不可用/未连接时返回 skipped 而非 reject。
+    deleteSessionAgentSide: (payload: DeleteSessionAgentSidePayload): Promise<DeleteSessionAgentSideResult> =>
+      transport.invoke('agent_session_delete', payload) as Promise<DeleteSessionAgentSideResult>,
     // #53：起一次性会话读 Agent 广告的选择器面后即弃；空 configOptions 合法。
     probeAgentSelectors: (payload: ProbeAgentSelectorsPayload): Promise<AgentSelectorsSnapshot> =>
       transport.invoke('probe_agent_selectors', payload) as Promise<AgentSelectorsSnapshot>,

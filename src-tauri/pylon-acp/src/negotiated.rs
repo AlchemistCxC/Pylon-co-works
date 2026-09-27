@@ -81,6 +81,8 @@ pub enum CapabilityConsumer {
     SessionEstablishment,
     /// `session/close`（control.rs close_via_rpc）。
     SessionClose,
+    /// `session/delete`（control.rs agent_session_delete，#398）。
+    SessionDelete,
     /// `session/list`（persist.rs 会话枚举）。
     SessionList,
     /// `session/fork` raw RPC 消费者（session/fork.rs）。
@@ -169,6 +171,18 @@ pub const CAPABILITY_MATRIX: &[CapabilityMatrixEntry] = &[
         alias: None,
         requires_declaration: false,
         consumer: Some(CapabilityConsumer::SessionClose),
+    },
+    CapabilityMatrixEntry {
+        // #398：官方形状为 object（SessionDeleteCapabilities 空结构，schema 1.9.1）；
+        // 与 list/close 同按双形状收（防线上显式 `true` 旧广告）。
+        id: "delete",
+        advertisement: Some((
+            &["sessionCapabilities", "delete"],
+            CapabilityKind::BooleanOrObject,
+        )),
+        alias: None,
+        requires_declaration: false,
+        consumer: Some(CapabilityConsumer::SessionDelete),
     },
     CapabilityMatrixEntry {
         id: "list",
@@ -835,5 +849,68 @@ mod tests {
         );
         let error = snapshot.establishment_channels().unwrap_err();
         assert!(error.contains("未知通道"), "实际: {error}");
+    }
+
+    /// #398：delete 双形状——官方 object 广告（SessionDeleteCapabilities 空结构）
+    /// 与显式 `true` 旧广告都算广告；其它值 fail-closed 且诊断写实际接受集。
+    /// 未注册消费者时协商通过但不可 usable（与 fork 同防线）。
+    #[test]
+    fn delete_accepts_object_and_boolean_shapes_and_requires_consumer() {
+        const REGISTERED: &[CapabilityConsumer] = &[CapabilityConsumer::SessionDelete];
+
+        let object_shape = build_snapshot(
+            json!({"sessionCapabilities": {"delete": {}}}),
+            &["new"],
+            REGISTERED,
+        );
+        let decision = object_shape.decision("delete").unwrap();
+        assert!(decision.negotiated);
+        assert_eq!(decision.fact, CapabilityFact::Usable);
+        assert_eq!(decision.source, CapabilitySource::Canonical);
+
+        let boolean_shape = build_snapshot(
+            json!({"sessionCapabilities": {"delete": true}}),
+            &["new"],
+            REGISTERED,
+        );
+        assert!(boolean_shape.usable("delete"));
+
+        // 消费者未注册：广告与协商成立（delete 无声明维度）但不可 usable
+        // （ghost capability 防线，与 fork AC7 同态——fact=Negotiated）。
+        let unregistered = build_snapshot(
+            json!({"sessionCapabilities": {"delete": {}}}),
+            &["new"],
+            &[],
+        );
+        let decision = unregistered.decision("delete").unwrap();
+        assert_eq!(decision.fact, CapabilityFact::Negotiated);
+        assert!(!unregistered.usable("delete"));
+        assert!(
+            decision
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("消费者未注册")),
+            "诊断必须指明消费者缺口：{:?}",
+            decision.diagnostics
+        );
+
+        // 其它值 fail-closed，诊断写实际接受集（object 或 boolean true）。
+        for wrong in [json!(false), json!("yes"), json!(null), json!(1)] {
+            let snapshot = build_snapshot(
+                json!({"sessionCapabilities": {"delete": wrong}}),
+                &["new"],
+                REGISTERED,
+            );
+            let decision = snapshot.decision("delete").unwrap();
+            assert!(!decision.negotiated, "{wrong} 不得判定为 delete 已广告");
+            assert_eq!(decision.fact, CapabilityFact::Unknown, "@ {wrong}");
+            assert!(
+                decision.diagnostics.iter().any(|line| {
+                    line.contains("类型错误") && line.contains("object 或 boolean true")
+                }),
+                "@ {wrong} 必须报实际接受集：{:?}",
+                decision.diagnostics
+            );
+        }
     }
 }

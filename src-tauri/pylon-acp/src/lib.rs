@@ -60,8 +60,9 @@ pub use protocol::{
     validate_protocol_version, PromptStopOutcome,
 };
 pub use protocol::{
-    session_close_params, session_new_params, session_set_config_option_params,
-    session_set_mode_params, session_set_model_params, SessionUpdateVariant,
+    session_close_params, session_delete_params, session_new_params,
+    session_set_config_option_params, session_set_mode_params, session_set_model_params,
+    SessionUpdateVariant,
 };
 pub use replay::{load_session_with_replay, ReplayMetadata};
 pub use stderr::spawn_stderr_reader;

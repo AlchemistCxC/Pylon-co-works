@@ -7,6 +7,7 @@ import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
 import { useModalOverlayVeil } from '../../app/modalOverlayStore'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
+import { resolveSessionDisplayName } from '../../domains/identity/identityStore.ts'
 import { useBlockActionHandler } from './useBlockActionHandler.ts'
 
 function workspaceNameFromPath(rootPath: string): string {
@@ -148,21 +149,25 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
    */
   const renderSession = (session: (typeof props.sessions)[number]) => {
     const pinned = session.pinned === true
+    // #393：显示名与存储名分口径——Agent 标题优先，用户改过名则恒用 `name`。
+    const displayName = resolveSessionDisplayName(session)
     return (
       <div key={session.id} role="treeitem" tabIndex={0} className={`session-item ${props.activeSessionId === session.id ? 'active' : ''}`}
         data-pinned={pinned ? 'true' : undefined}
         onClick={() => props.onSelectSession(session.id)}
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); props.onSelectSession(session.id) }
-          if (event.key === 'F2') { event.preventDefault(); setRenaming(session.id); setRenameValue(session.name) }
+          // 改名输入框预填**当前显示名**（用户看到什么就改什么）；提交后 name 即新名、
+          // 并置 renamedByUser，显示从此不再被 Agent 标题顶替。
+          if (event.key === 'F2') { event.preventDefault(); setRenaming(session.id); setRenameValue(displayName) }
         }}
-        onDoubleClick={event => { event.stopPropagation(); setRenaming(session.id); setRenameValue(session.name) }}>
+        onDoubleClick={event => { event.stopPropagation(); setRenaming(session.id); setRenameValue(displayName) }}>
         <button
           type="button"
           className="session-pin"
           aria-pressed={pinned}
           title={pinned ? '取消置顶' : '置顶会话（移到本工作区最前）'}
-          aria-label={pinned ? `取消置顶 ${session.name}` : `置顶 ${session.name}`}
+          aria-label={pinned ? `取消置顶 ${displayName}` : `置顶 ${displayName}`}
           onClick={event => { event.stopPropagation(); props.onToggleSessionPin?.(session.id) }}
         >
           {pinned ? <PinOff size={12} aria-hidden="true" /> : <Pin size={12} aria-hidden="true" />}
@@ -175,7 +180,7 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
               if (event.key === 'Escape') setRenaming(null)
             }}
             onBlur={() => setRenaming(null)} onClick={event => event.stopPropagation()} />
-        ) : <span className="session-name">{session.name}</span>}
+        ) : <span className="session-name">{displayName}</span>}
         {/* 运行指示点跟着时间走（不再占名字左边的列）：那一列让位给置顶图标，
             名字才能与工作区名对齐。 */}
         <span className="session-dot" data-running={liveGenerating.has(session.source) ? 'true' : undefined} />

@@ -54,6 +54,10 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
   // #110 F5：当前模型是同一包里的第三个独立事实——`models.currentModelId`
   // （camel/snake 变体）或扁平 `model` 存在时必须产出 `session.model-updated`，
   // 否则 journal 永远收不到模型事实，状态条只能退回兜底串。
+  // 会话标题（`title`）是同一包里的第四个独立事实：ACP `SessionInfoUpdate` 把它
+  // 声明成 `MaybeUndefined`（字段缺席 = 不修改 / null = 清空 / 字符串 = 设置），
+  // 因此**只在键存在时**产出 `session.title-updated`——「缺席」由事件不存在表达，
+  // 压平会让「不改」和「清空」互相冒充。
   if (canonicalSessionUpdate(effectiveUpdate) === 'session_info_update') {
     const mode = typeof effectiveUpdate.mode === 'string'
       ? effectiveUpdate.mode
@@ -63,10 +67,12 @@ export function normalizeAcpEvent(input: AgentWireEnvelope | unknown, context: N
       ? effectiveUpdate.status
       : undefined
     const model = sessionModelOf(effectiveUpdate)
+    const title = 'title' in effectiveUpdate ? sessionTitleOf(effectiveUpdate.title) : undefined
     const facts: WorkbenchSemanticEvent[] = []
     if (mode !== undefined) facts.push({ type: 'session.mode-updated', mode })
     if (status !== undefined) facts.push({ type: 'session.status-updated', status })
     if (model !== undefined) facts.push({ type: 'session.model-updated', model })
+    if (title !== undefined) facts.push({ type: 'session.title-updated', title })
     if (facts.length > 0) {
       return {
         events: facts.map(fact => makeEnvelope(fact, input, context, update, {}, identityFromUpdate(effectiveUpdate))),
@@ -119,6 +125,20 @@ function sessionModelOf(update: Record<string, unknown>): string | undefined {
       ?? models.currentModel ?? models.current_model ?? models.current,
   )
   return nested ?? extractMachineIdString(update.model)
+}
+
+/**
+ * `session_info_update.title` 的三态值（ACP `MaybeUndefined`）。
+ *
+ * 与 model 不同，标题**有清除语义**：`null` 是 Agent 明确要求清空，必须让它走到
+ * 投影里去删标题；空白串按同一语义收敛（空标题不是标题）。非字符串（上游形状
+ * 漂移）返回 `undefined` —— 与「不改」同一结论，不猜。调用方只在键存在时调用，
+ * 所以「键缺席 = 不修改」由「不产出事件」表达。
+ */
+function sessionTitleOf(value: unknown): string | null | undefined {
+  if (value === null) return null
+  if (typeof value !== 'string') return undefined
+  return value.trim() || null
 }
 
 function semanticEventForUpdate(update: Record<string, unknown>, context: NormalizeContext): { event: WorkbenchSemanticEvent; diagnostics: ReturnType<typeof createDiagnostic>[] } {  const sessionUpdate = canonicalSessionUpdate(update)

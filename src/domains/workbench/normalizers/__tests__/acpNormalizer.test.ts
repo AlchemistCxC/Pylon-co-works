@@ -469,3 +469,37 @@ describe('peri _meta deep consumption (#315)', () => {
     expect((empty.events[0]?.event as { skillNames?: unknown }).skillNames).toBeUndefined()
   })
 })
+
+/** #393：ACP `SessionInfoUpdate.title` 是 `MaybeUndefined` 三态——「缺席 = 不修改」
+ *  由「不产出事件」表达，`null` 必须产出**清空**事实而不是被吞掉，否则 Agent 撤回
+ *  标题后界面会一直挂着旧名字。 */
+describe('ACP session_info_update 标题事实', () => {
+  const sessionInfo = (update: Record<string, unknown>, sequence = 21) => normalizeAcpEvent({
+    source: 'peri',
+    update: { sessionUpdate: 'session_info_update', ...update },
+  }, { ...context, sequence })
+
+  it('带值（含 mode 同包）→ 产出 session.title-updated', () => {
+    const result = sessionInfo({ title: 'Riccati 助手介绍', mode: 'build' })
+    expect(result.events.map(event => event.event)).toContainEqual({
+      type: 'session.title-updated',
+      title: 'Riccati 助手介绍',
+    })
+    expect(result.events.map(event => event.event)).toContainEqual({ type: 'session.mode-updated', mode: 'build' })
+  })
+
+  it('显式 null → 产出清空事实（title: null）', () => {
+    const result = sessionInfo({ title: null })
+    expect(result.events.map(event => event.event)).toContainEqual({ type: 'session.title-updated', title: null })
+  })
+
+  it('键缺席 → 不产出标题事实（「不改」不得冒充「清空」）', () => {
+    const result = sessionInfo({ mode: 'build' })
+    expect(result.events.some(event => event.event.type === 'session.title-updated')).toBe(false)
+  })
+
+  it('空白串按清空收敛（空标题不是标题）', () => {
+    const result = sessionInfo({ title: '   ' })
+    expect(result.events.map(event => event.event)).toContainEqual({ type: 'session.title-updated', title: null })
+  })
+})

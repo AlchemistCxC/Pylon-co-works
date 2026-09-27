@@ -26,6 +26,7 @@ import {
   type WorkbenchDocument,
 } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
@@ -189,6 +190,25 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     canonicalReadEpoch: 0,
     selectorRequestInFlight: false,
   }
+  /**
+   * #393：把 Agent 标题（ACP `session_info_update.title`，投影在 `document.session.title`）
+   * 回写到绑定行的 `autoName`。
+   *
+   * 为什么必须落库而不是显示时算：侧栏/搜索列的是**全部**会话，其中绝大多数没有
+   * 活动文档；会话运行时是唯一同时持有「文档 + 本地行」的地方，所以镜像在这里做。
+   * 存储以 Agent 为准（每帧覆盖写，Agent 清空则回落 `''`）；显示优先用户改名，见
+   * `resolveSessionDisplayName`。
+   */
+  const unsubscribeSessionTitle = runtime.subscribe(() => {
+    const sessionId = binding.boundSessionId
+    if (binding.destroyed || sessionId === undefined) return
+    const title = runtime.getSnapshot().document?.session.title ?? ''
+    // 以 store 当前值为判据（`binding.boundSession` 在普通元数据更新后不再刷新，
+    // 拿它比会在每次发布时都判定为「变了」而反复写盘）。
+    const row = useIdentityStore.getState().sessions.find(session => session.id === sessionId)
+    if (!row || row.autoName === title) return
+    useIdentityStore.getState().updateSession(sessionId, { autoName: title })
+  })
   // #220 折叠已下沉 wasm：折叠状态常驻会话持有的投影核（PylonProjector），JS 文档
   // 是其产出的物化视图。
   //
@@ -1165,7 +1185,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       if (binding.destroyed) return
       binding.destroyed = true
       unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents()
-      unsubscribeDraftChunks(); unsubscribeDraftCommits()
+      unsubscribeDraftChunks(); unsubscribeDraftCommits(); unsubscribeSessionTitle()
       runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()
       clock.clearAll(); echo.clear()

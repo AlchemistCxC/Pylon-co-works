@@ -311,6 +311,103 @@ pub(crate) async fn close_session(
     Ok(())
 }
 
+/// #398：agent 侧会话删除（`session/delete`，官方 DeleteSessionRequest）。
+///
+/// 删除链路语义：本地删除（`user_session_delete`）独立先行，本命令在其后的
+/// close（停活跃工作）之后调用——目标是清 agent 侧持久会话记录，因此以**显式
+/// periId** 为目标、按 agentId 路由（`resolve_agent_runtime` 不查 session 映射：
+/// close 已移除映射后仍可路由）。
+///
+/// 结果分级（尽力而为，跳过是常态而非错误——多数 agent 尚未实现 delete）：
+/// - `{"outcome":"deleted"}`：RPC 成功；
+/// - `{"outcome":"skipped","reason":..}`：periId 缺失 / runtime 不存在 / 能力未
+///   协商（fail-closed）/ stale generation / agent 报 -32601（广告了能力但未实现）；
+/// - `Err`：能力协商通过但删除失败（agent 支持却失败是异常，上抛供前端报告）。
+pub(crate) async fn delete_agent_session(
+    state: &AppState,
+    agent_id: &str,
+    source: &str,
+    peri_id: &str,
+) -> Result<serde_json::Value, PylonError> {
+    // source 仅用于日志关联（诊断对齐 close 的 source 维度）；路由与目标按显式参数。
+    if peri_id.trim().is_empty() {
+        return Ok(delete_outcome_skipped("no_remote_session"));
+    }
+    // OWNER-02 同款显式 agentId 路由，但删除目标会话此刻可能已无 runtime 映射
+    // （close 先行移除），故用 resolve_agent_runtime（不要求会话存在）。
+    let Ok(runtime) = state.resolve_agent_runtime(agent_id) else {
+        return Ok(delete_outcome_skipped("agent_runtime_unavailable"));
+    };
+    // 能力 gate（#98 矩阵）：delete 必须 usable（广告 ∩ 消费者注册）才发送；
+    // disconnected 客户端无广告，天然落此分支——不发注定失败的 RPC。
+    let snapshot = crate::acp::capture_negotiated_snapshot(&runtime)
+        .await
+        .map_err(PylonError::Protocol)?;
+    if !snapshot.usable("delete") {
+        let reason = snapshot
+            .decision("delete")
+            .map(|decision| {
+                if decision.advertised == Some(true) {
+                    "delete_capability_consumer_unregistered"
+                } else {
+                    "delete_capability_unavailable"
+                }
+            })
+            .unwrap_or("delete_capability_unavailable");
+        return Ok(delete_outcome_skipped(reason));
+    }
+    let generation = state.current_generation(&runtime);
+    let delete_params = acp::session_delete_params(peri_id).map_err(PylonError::Protocol)?;
+    match state
+        .acp_rpc_generation_checked(
+            &runtime,
+            acp::METHOD_SESSION_DELETE,
+            delete_params,
+            generation,
+        )
+        .await
+    {
+        Ok(_) => {
+            tracing::info!(
+                "agent_session_delete({source}): session/delete 已送达 (peri_id={peri_id}, generation={generation})"
+            );
+            Ok(serde_json::json!({"outcome": "deleted"}))
+        }
+        Err(error) if error.is_method_not_found() => {
+            tracing::warn!(
+                "agent_session_delete({source}): agent advertises delete but returns method-not-found ({error}); local delete already applied"
+            );
+            Ok(delete_outcome_skipped("method_not_found"))
+        }
+        Err(error) if error.to_string().contains("stale ACP client generation") => {
+            // 客户端已替换：与 close 同款降级——本地删除已生效，旧代际 periId
+            // 不写入新连接，agent 侧遗留由新代际的会话清单/替换流程处理。
+            tracing::warn!(
+                "agent_session_delete({source}): skipped, ACP client replaced (stale generation)"
+            );
+            Ok(delete_outcome_skipped("stale_generation"))
+        }
+        Err(error) => Err(PylonError::Protocol(format!(
+            "session/delete rpc failed (peri_id={peri_id}, source={source}): {error}"
+        ))),
+    }
+}
+
+fn delete_outcome_skipped(reason: &str) -> serde_json::Value {
+    serde_json::json!({"outcome": "skipped", "reason": reason})
+}
+
+/// `delete_agent_session` 的 Tauri 薄壳（参数 camelCase 直传）。
+#[tauri::command(rename_all = "camelCase")]
+pub(crate) async fn agent_session_delete(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+    source: String,
+    peri_id: String,
+) -> Result<serde_json::Value, PylonError> {
+    delete_agent_session(state.inner(), &agent_id, &source, &peri_id).await
+}
+
 #[tauri::command]
 pub(crate) async fn cancel_prompt(
     state: tauri::State<'_, AppState>,
@@ -370,4 +467,150 @@ pub(crate) async fn cancel_prompt(
         session.mark_cancel_requested(generation, std::time::Instant::now());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod delete_session_tests {
+    use super::*;
+
+    /// #398：`delete_agent_session` 执行链 wire 级测试（`pylon-fake-agent
+    /// --scenario delete-session` + trace 断言；fork.rs 同款 harness）。
+    /// 消费者注册是进程级全局，每个用例独立注册（fork 测试 CI 顺序教训）。
+    fn register_delete_consumer() {
+        crate::acp::negotiated::register_capability_consumer(
+            crate::acp::CapabilityConsumer::SessionDelete,
+        );
+    }
+
+    async fn delete_runtime(
+        name: &str,
+        outcome: Option<&str>,
+    ) -> (
+        std::sync::Arc<AgentRuntime>,
+        crate::agent_config::AgentDef,
+        std::path::PathBuf,
+    ) {
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-delete-{name}-{}.jsonl", std::process::id()));
+        let trace_file = trace_path.to_string_lossy().into_owned();
+        let mut args = vec![
+            "--scenario",
+            "delete-session",
+            "--trace-file",
+            &trace_file,
+            "--trace-mode",
+            "all",
+        ];
+        if let Some(outcome) = outcome {
+            args.extend(["--outcome", outcome]);
+        }
+        let agent = crate::test_utils::fake_acp_agent(name, &args);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        (runtime, agent, trace_path)
+    }
+
+    fn state_for(
+        name: &str,
+        agent: crate::agent_config::AgentDef,
+        runtime: &std::sync::Arc<AgentRuntime>,
+    ) -> AppState {
+        crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent(name)
+            .with_agent(agent)
+            .with_runtime(name, runtime.clone())
+            .build()
+    }
+
+    /// 能力协商通过 ⇒ 实发 `session/delete`（params 仅 sessionId），outcome=deleted；
+    /// wire 原文经 fake agent trace 落证。
+    #[tokio::test]
+    async fn delete_sends_rpc_when_capability_usable() {
+        register_delete_consumer();
+        let (runtime, agent, trace_path) = delete_runtime("delete-ok", None).await;
+        let state = state_for("delete-ok", agent, &runtime);
+        let outcome = delete_agent_session(&state, "delete-ok", "local:x", "remote-peri-1")
+            .await
+            .expect("能力 usable 时删除必须成功");
+        assert_eq!(outcome.get("outcome"), Some(&serde_json::json!("deleted")));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        assert!(
+            trace.contains("\"method\":\"session/delete\"")
+                && trace.contains("\"sessionId\":\"remote-peri-1\""),
+            "wire 必须出现 session/delete 与目标 periId: {trace}"
+        );
+    }
+
+    /// 能力未协商（disconnected runtime 无广告）⇒ 稳定 skipped、不发 RPC。
+    #[tokio::test]
+    async fn delete_skips_stably_without_negotiated_capability() {
+        register_delete_consumer();
+        let runtime = AgentRuntime::new_disconnected();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("delete-gate")
+            .with_runtime("delete-gate", runtime.clone())
+            .build();
+        let outcome = delete_agent_session(&state, "delete-gate", "local:x", "remote-peri-1")
+            .await
+            .expect("能力不可用是跳过而非错误");
+        assert_eq!(outcome.get("outcome"), Some(&serde_json::json!("skipped")));
+        assert_eq!(
+            outcome.get("reason"),
+            Some(&serde_json::json!("delete_capability_unavailable"))
+        );
+    }
+
+    /// agent 广告了能力但报 -32601（老 agent 广告面与实现面不一致）⇒ 降级
+    /// skipped/method_not_found，本地删除（已先行）不受影响。
+    #[tokio::test]
+    async fn delete_downgrades_method_not_found_to_skipped() {
+        register_delete_consumer();
+        let (runtime, agent, _trace) = delete_runtime("delete-nf", Some("not-found")).await;
+        let state = state_for("delete-nf", agent, &runtime);
+        let outcome = delete_agent_session(&state, "delete-nf", "local:x", "remote-peri-1")
+            .await
+            .expect("-32601 必须降级而非报错");
+        assert_eq!(outcome.get("outcome"), Some(&serde_json::json!("skipped")));
+        assert_eq!(
+            outcome.get("reason"),
+            Some(&serde_json::json!("method_not_found"))
+        );
+    }
+
+    /// 能力协商通过但 agent 删除失败 ⇒ Err 上抛（失败可见，前端 reportError）。
+    #[tokio::test]
+    async fn delete_failure_propagates_after_capability_gate() {
+        register_delete_consumer();
+        let (runtime, agent, _trace) = delete_runtime("delete-fail", Some("error")).await;
+        let state = state_for("delete-fail", agent, &runtime);
+        let error = delete_agent_session(&state, "delete-fail", "local:x", "remote-peri-1")
+            .await
+            .expect_err("RPC 失败必须上抛");
+        assert!(
+            error.to_string().contains("session/delete rpc failed"),
+            "实际: {error}"
+        );
+    }
+
+    /// periId 缺失（从未连接 agent 的本地会话）⇒ skipped/no_remote_session，
+    /// 不解析 runtime。
+    #[tokio::test]
+    async fn delete_skips_when_no_remote_session() {
+        register_delete_consumer();
+        // 不注册任何 runtime：若尝试路由会返回 agent_runtime_unavailable 而非
+        // no_remote_session——以此断言 periId 空分支先行短路。
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        let outcome = delete_agent_session(&state, "ghost-agent", "local:x", "  ")
+            .await
+            .expect("periId 缺失是跳过而非错误");
+        assert_eq!(outcome.get("outcome"), Some(&serde_json::json!("skipped")));
+        assert_eq!(
+            outcome.get("reason"),
+            Some(&serde_json::json!("no_remote_session"))
+        );
+    }
 }
