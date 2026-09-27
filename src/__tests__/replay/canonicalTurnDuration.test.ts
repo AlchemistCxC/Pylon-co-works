@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, latestTurnBoundary } from '../../domains/events/canonicalTurnDuration.ts'
+import {
+  deriveCanonicalTurnDuration,
+  hasCanonicalTurnTerminal,
+  latestTurnBoundary,
+  type CanonicalTurnBoundaryEvent,
+} from '../../domains/events/canonicalTurnDuration.ts'
 
 const row = (sequence: number, eventType: 'user.message' | 'turn.completed' | 'turn.failed', at: string) => ({
   sequence,
@@ -9,7 +14,7 @@ const row = (sequence: number, eventType: 'user.message' | 'turn.completed' | 't
 })
 
 /** #390：`latestTurnBoundary` 只看边界形态与序号，不读时间戳。 */
-const boundary = (sequence: number, eventType: string) => ({ sequence, eventType })
+const boundary = (sequence: number, eventType: CanonicalTurnBoundaryEvent['eventType']) => ({ sequence, eventType })
 
 describe('deriveCanonicalTurnDuration', () => {
   it('derives the latest completed turn from canonical event timestamps', () => {
