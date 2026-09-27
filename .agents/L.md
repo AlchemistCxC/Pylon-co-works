@@ -92,3 +92,6 @@
   - ⚠️ 施工期间与 #398 批的 clippy 争过 `src-tauri/target` build lock，并删除了 `target/debug/incremental`（可再生，腾磁盘）；未动 `target/release`。
   - **遗留（另立条目候选）**：背压探针 ~51s 与 cwd 无关（本地 51.0s / CI 51–58s，两条测试本体 0.02s/0.00s），属「同活多算」另一条线。
   - 合并后撤本条。
+- [kumo] **#401 `check:acp-shadow` 同活多算收口**（三类同一根源：同一产物被多套构建输入各算一遍）：① 形态分裂——主形态 `--lib --features test-agent`（只选主包）与背压探针 `-p pylon-acp --lib` 交替重编（实测 50 / 1 crate），改为**同一选择**（`-p pylon -p pylon-acp --lib --features test-agent`）并把两条探针测试名合并为一次调用；② 一份 trace 两用——generator 的 A/B 两份直接供 parity 比对（fixture 执行 4→2、cargo 进程 6→3）；③ debug 口径单一真源——删 CI 的 `CARGO_PROFILE_DEV_DEBUG=1`（与 `.cargo/config.toml` 的 `line-tables-only` 是两个不同 flag 串，翻转整图重编），incremental 只做文档化不 pin。
+  - 改动域：`scripts/check-acp-shadow-parity.mjs`、`scripts/generate-acp-golden-trace.mjs`、`.github/workflows/ci.yml`（仅 workflow 级 env 一处）、`.cargo/config.toml`（注释）、`docs/说明书/Pylon-模块维护地图.md`（「验证」节一句）。
+  - **不碰**：任何 Rust 源码（含 `src-tauri/**`）、`src/**`、rust-test/rust-clippy job 的命令、rust-cache 配置、golden 基线文件、夹具场景。规格 `.agents/spec/401-acp-shadow-single-form.md`。
