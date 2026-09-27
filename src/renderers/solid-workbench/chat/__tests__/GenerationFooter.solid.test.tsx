@@ -344,6 +344,39 @@ describe('SolidGenerationFooter', () => {
     />)
     expect(result.container.childElementCount).toBe(0)
   })
+
+  /**
+   * #390：回合身份由宿主给出（`turnEpoch`），footer 不再本地铸号。宿主推进 turnId
+   * 即开新回合——重抽预设词并重开最短展示计时；同一 turnId 内不重开。
+   */
+  it('宿主推进 turnId 即开新回合（重抽预设词 + 重开计时）；同一 turnId 内不重开', async () => {
+    const clock = createFakeWorkbenchClock(1_700_000_000_000)
+    const [turnId, setTurnId] = createSignal(1)
+    // 脚本化 random：本回合先抽 index 0（博大精深），新回合抽 index 1（大道至简）。
+    const picks = [0, 0.99]
+    let pickIndex = 0
+    const result = render(() => <SolidGenerationFooter
+      running
+      generationKey="session-a"
+      turnId={turnId()}
+      tokenCount={0}
+      startTime={clock.now() - 30_000}
+      lastTokenAt={clock.now()}
+      summary={null}
+      appearance={{ ...APPEARANCE, verbs: ['博大精深', '大道至简'] }}
+      clock={clock}
+      random={() => picks[Math.min(pickIndex++, picks.length - 1)]!}
+    />)
+
+    expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('博大精深')
+    clock.advance(1_000)
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(31s)')
+
+    // 宿主推进 turnId = 新回合：重抽预设词，并以新的宿主起点重开计时。
+    setTurnId(2)
+    await waitFor(() => expect(result.container.querySelector('.spinner-verb')).toHaveTextContent('大道至简'))
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(30s)')
+  })
 })
 
 describe('GenerationFooter formatter', () => {

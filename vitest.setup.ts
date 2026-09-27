@@ -43,6 +43,8 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/__tests__/replay/agentWorkbenchSession.snapshotBridge.test.ts',
   // #376-b：与上面三个 agentWorkbenchSession 同族（同一个 feed 注册噪音源）。
   'src/__tests__/replay/agentWorkbenchSession.pagedLoad.test.ts',
+  // #390：同族（生成指示器稳定性回归，同一个 feed 注册噪音源）。
+  'src/__tests__/replay/agentWorkbenchSession.indicatorStability.test.ts',
   'src/__tests__/replay/documentLayer.test.ts',
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',

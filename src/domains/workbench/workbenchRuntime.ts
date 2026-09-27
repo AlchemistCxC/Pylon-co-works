@@ -376,7 +376,14 @@ export function mergeWorkbenchRuntimeSnapshot(
   // A late clock patch (TurnClock reconcile, optimistic rollback) can arrive
   // with a stale active flag; never let that patch resurrect the spinner or
   // active-only metadata.
-  if (documentIsTerminal && !epochIsNew) {
+  //
+  // #390：但**活性权威明确表态「在途」时不适用**——一次折叠于终态之后的投影
+  // （journal 尾行仍是上一轮的终态行，本轮的锚点尚未落盘）会把在途回合压熄，
+  // 这正是「切页/重读后指示器塌成上一轮已完成」的第二条独立路径。权威
+  // （kernel/clock）是比「文档形状」更强的证据，故此处让位。
+  const authorityInFlight = (livenessSource === 'kernel' || livenessSource === 'clock')
+    && (input.livenessGenerating ?? previous.generating) === true
+  if (documentIsTerminal && !epochIsNew && !authorityInFlight) {
     candidate.generating = false
     candidate.generationStart = 0
     candidate.generationPhase = undefined
@@ -774,6 +781,13 @@ function applyLivenessAuthority(
       ...preserved,
       generating: true,
       ...(previous.generationStart > 0 ? { generationStart: previous.generationStart } : {}),
+      // #390：`lastTokenAt` 也要随权威保住（不只 generationStart）。权威是回合时钟对
+      // 「最近一次收到帧」的观测，文档派生的那一路在 append-delta 下不推进；只保起点
+      // 会让 idleMs 无界增长、把页脚顶成假的「等待响应 / 仍在等待后端响应」。
+      // 取二者较大值：单调不回退，也不覆盖文档侧更新的工具活动时间。
+      ...(previous.lastTokenAt !== undefined
+        ? { lastTokenAt: Math.max(previous.lastTokenAt, preserved.lastTokenAt ?? previous.lastTokenAt) }
+        : {}),
     }
   }
   return {

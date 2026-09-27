@@ -11,7 +11,7 @@ import {
   canonicalBatchSpanOf,
   isCanonicalBatchDeltaType,
 } from '../../infrastructure/events/canonicalEventBatch.ts'
-import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnBoundaryEvent } from '../../domains/events/canonicalTurnDuration.ts'
+import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, latestTurnBoundary, type CanonicalTurnBoundaryEvent, type LatestTurnBoundary } from '../../domains/events/canonicalTurnDuration.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type JsonValue, type SessionEvent, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
@@ -267,6 +267,14 @@ export function canonicalDurationFromRows(rows: readonly unknown[]) {
 
 export function canonicalHasTerminalFromRows(rows: readonly unknown[]): boolean {
   return hasCanonicalTurnTerminal(canonicalBoundaryRows(rows))
+}
+
+/**
+ * 回合作用域的终态判据（#390）。封存回合时钟、决定「当前回合是否已收敛」只能用它；
+ * `canonicalHasTerminalFromRows` 的回合无关语义会把上一轮的终态行当成本轮的证据。
+ */
+export function canonicalLatestBoundaryFromRows(rows: readonly unknown[]): LatestTurnBoundary {
+  return latestTurnBoundary(canonicalBoundaryRows(rows))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
