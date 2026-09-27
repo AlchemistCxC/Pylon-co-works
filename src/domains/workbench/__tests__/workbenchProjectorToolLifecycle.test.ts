@@ -29,13 +29,19 @@ const base = {
 function envelope(
   sequence: number,
   event: WorkbenchSemanticEvent,
-  toolCallId: string,
+  /**
+   * 工具身份。**可选**：#389 的终局收敛用例里，`session.completed` /
+   * `session.status-updated` / `activity.started` 这类非工具事件本就没有 toolCallId，
+   * 调用形状即 `envelope(2, { type: 'session.completed' })`（`identity` 在 envelope
+   * 契约里是可选的，省略即不写）。
+   */
+  toolCallId?: string,
 ): WorkbenchEventEnvelope {
   return createWorkbenchEnvelope({
     ...base,
     sequence,
     source: { provider: base.provider, sourceId: `${base.sourceId}-${sequence}` },
-    identity: { toolCallId },
+    ...(toolCallId === undefined ? {} : { identity: { toolCallId } }),
     provenance: { origin: 'local-observed', trust: 'authoritative' },
     event,
   })
