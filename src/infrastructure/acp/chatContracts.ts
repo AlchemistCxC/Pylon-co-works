@@ -2,7 +2,7 @@
  * chatContracts — ACP wire 类型与 extract 收边界（P1-09，归一化层归属 infrastructure/acp）。
  *
  * 从 components/chat/acpTypes 迁入（§5.2/§7 收拢）：wire 类型 + 宽容提取函数只在此处
- * 真实定义；components/chat/acpTypes 保留兼容 re-export。归一化只搬运不翻译。
+ * 真实定义；兼容 re-export 已随 #381 清理删除。归一化只搬运不翻译。
  */
 
 export interface ConfigOptionChoice {
@@ -347,7 +347,11 @@ export function extractConfigOptionChoices(option: unknown): readonly unknown[] 
     if (depth > 5 || seen.has(value)) return
     seen.add(value)
     if (Array.isArray(value)) {
-      found.push(...value)
+      for (const item of value) {
+        const group = asWireRecord(item)
+        if (group && typeof group.group === 'string' && Array.isArray(group.options)) collect(group.options, depth + 1)
+        else found.push(item)
+      }
       return
     }
     const nested = asWireRecord(value)
@@ -560,7 +564,7 @@ export function extractModelConfig(
   // 方兼容）。
   const modelChoices = uniqueModelChoices([
     ...extractConfigOptionChoices(option).map(choice => toModelChoice(choice)),
-    ...responseChoices(response, 'model').map(choice => toModelChoice(choice)),
+    ...(option ? [] : responseChoices(response, 'model').map(choice => toModelChoice(choice))),
   ])
   const models = modelChoices.map(choice => choice.id)
   return {
@@ -573,10 +577,10 @@ export function extractModelConfig(
 export function extractModeConfig(response: SessionResponseObject): { mode?: string; modes?: string[] } {
   const options = responseConfigOptions(response)
   const option = findConfigOption(options, 'mode')
-  const current = responseCurrent(response, 'mode')
-    ?? extractWireString(extractConfigOptionValue(option), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
+  const current = extractWireString(extractConfigOptionValue(option), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
+    ?? responseCurrent(response, 'mode')
     ?? extractWireString(readWireField(asWireRecord(response), ['mode', 'mode_id', 'modeId']), ['valueId', 'value_id', 'modeId', 'mode_id', 'id', 'key', 'value'])
-  const modes = uniqueStrings(responseChoices(response, 'mode').map(choice => extractChoiceId(choice, 'mode')))
+  const modes = uniqueStrings((option ? extractConfigOptionChoices(option) : responseChoices(response, 'mode')).map(choice => extractChoiceId(choice, 'mode')))
   return {
     ...(current ? { mode: current } : {}),
     ...(modes.length > 0 ? { modes } : {}),

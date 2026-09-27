@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { alignThemeStructure } from '../migration.ts'
 import { DEFAULTS } from '../themeDefaults.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
-import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout, type CcLayoutV3 } from '../../../ccLayoutState.ts'
+import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout, type CcLayoutV3 } from '../../cc/ccLayoutState.ts'
 
 /**
  * #238 刀2 · 结构对齐（`alignThemeStructure`）的等价性 / 幂等 / 不覆盖用户值。

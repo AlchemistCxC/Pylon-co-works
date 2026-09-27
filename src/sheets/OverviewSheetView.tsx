@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles } from 'lucide-react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
-import { useIdentityStore, type AgentEntry, type Session } from '../identityStore'
-import { useRuntimeStore } from '../runtimeStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { useIdentityStore, type AgentEntry, type Session } from '../domains/identity/identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
@@ -15,7 +16,7 @@ import PylonMark from '../components/PylonMark'
 import { statusLabel } from '../components/settings/agentTypes.ts'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
+import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
@@ -45,7 +46,8 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const [tacticalPanel, setTacticalPanel] = useState<TacticalPanel>('home')
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  // #326：空串 = 没有 Agent（零 Agent 首跑）。空串下所有按 agent 的查找自然不命中。
+  const activeAgent = useIdentityStore(s => s.activeAgent)
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const workspaces = useWorkspaceEntityStore(s => s.workspaces)
@@ -72,7 +74,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       .catch(error => {
         if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
           key: 'overview:startup-diagnostics', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-          recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
         })
       })
     return () => { disposed = true }
@@ -88,7 +89,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     } catch (error) {
       reportRuntimeError('迁移 AppData 到便携目录', error, undefined, {
         key: 'overview:migrate-portable', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
       })
     } finally {
       setMigrationBusy(false)
@@ -99,7 +99,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const client = createSessionClient({ invoke: tauriInvokeTransport })
     client.listPersistedSessions().then(all => {
       if (!disposed) {
         setRecent(recentPersistedSessions(all))
@@ -108,7 +108,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     }).catch(err => {
       if (!disposed) reportRuntimeError('读取最近会话', err, undefined, {
         key: 'overview:recent-sessions', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-        recovery: { kind: 'open-runtime-log', sheetId: 'overview' },
       })
     })
     return () => { disposed = true }
@@ -119,7 +118,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     setSwitchingId(agent.id)
     setError('')
     setErrorIsValidation(false)
-    const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
@@ -134,7 +133,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
           key: `overview:agent:${agent.id}:${action}`,
           scope: { kind: 'agent', id: agent.id },
           source: 'overview.agent-switch',
-          recovery: { kind: 'open-runtime-log', agentId: agent.id },
         })
       },
       resolveError: action => resolveRuntimeErrors({ key: `overview:agent:${agent.id}:${action}` }),
@@ -206,7 +204,10 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     }
     const resolvedOwnerId = ownerAgentId || activeAgent
     const owner = agents.find(agent => agent.id === resolvedOwnerId)
-    ctx.openSheet({ kind: 'agent', title: owner?.name ?? resolvedOwnerId, agentId: resolvedOwnerId })
+    // #326：没有可用 owner（零 Agent 首跑）时不铸「无主 agent sheet」——那会写入一份
+    // 没有主人的会话归属记忆。改为把用户送到配置入口。
+    if (!owner) { openAgentSettings(); return }
+    ctx.openSheet({ kind: 'agent', title: owner.name, agentId: owner.id })
   }
 
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })

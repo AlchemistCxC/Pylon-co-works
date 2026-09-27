@@ -124,11 +124,11 @@ fn refine_empty_turn(
     ) {
         return cause;
     }
-    let (ledger_text, ledger_tool) = runtime
+    let (ledger_text, ledger_tool, ledger_thinking) = runtime
         .turn_ledger
         .snapshot(turn_key)
-        .map(|record| (record.saw_text, record.saw_tool))
-        .unwrap_or((false, false));
+        .map(|record| (record.saw_text, record.saw_tool, record.saw_thinking))
+        .unwrap_or((false, false, false));
     let (saw_text, saw_tool) = match runtime.sessions.lock() {
         Ok(sessions) => match sessions.get(&turn_key.local_session_id) {
             Some(session) => (
@@ -141,10 +141,18 @@ fn refine_empty_turn(
     };
     let saw_text = ledger_text || saw_text;
     let saw_tool = ledger_tool || saw_tool;
-    match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool) {
+    // #316：思考流只有账本侧证据（会话 live 态无对应投影），ledger_thinking
+    // 单独透传——thinking-only 回合判有产出，不再误报 agent-empty。
+    match crate::acp::empty_turn_cause(&cause, saw_text, saw_tool, ledger_thinking) {
         Some(empty) => crate::acp::TurnTerminalCause::EmptyTurn { cause: empty },
         None => cause,
     }
+}
+
+/// SDK outbound pump may surface a closed transport as a synthetic response
+/// error string. It has the same recovery semantics as ConnectionClosed.
+fn is_closed_transport_response(raw: &acp::RawMessage) -> bool {
+    raw.error.as_ref().and_then(serde_json::Value::as_str) == Some("ACP connection closed")
 }
 
 /// #99：从 prompt 响应帧结算 turn 终态（wire 权威，先于展示/持久化路径执行，
@@ -154,7 +162,9 @@ fn settle_turn_from_response(
     turn_key: &crate::acp::TurnKey,
     raw: &acp::RawMessage,
 ) {
-    let mut cause = if raw.error.is_some() {
+    let mut cause = if is_closed_transport_response(raw) {
+        crate::acp::TurnTerminalCause::ConnectionLost
+    } else if raw.error.is_some() {
         crate::acp::TurnTerminalCause::ProtocolError
     } else {
         let data = raw.result.clone().unwrap_or(serde_json::Value::Null);
@@ -245,6 +255,16 @@ async fn ingest_prompt_event(
     let Some(owner) = owner else {
         return Ok(None);
     };
+    if raw_payload
+        .pointer("/update/sessionUpdate")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| matches!(kind, "done" | "error" | "cancelled"))
+    {
+        runtime
+            .flush_draft_before_terminal(source, generation)
+            .await
+            .map_err(PylonError::Protocol)?;
+    }
     let result = event_service_of(state)?
         .ingest_event(owner, remote_session_id, generation, raw_payload)
         .await?;
@@ -312,19 +332,38 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
         if let Some(failure) = failure {
             update["failure"] = failure.to_json();
         }
-        let result = event_service_of(state)?
-            .ingest_event(
-                owner,
-                remote_session_id,
-                state.current_generation(runtime),
-                serde_json::json!({
-                    "source": ctx.source,
-                    "update": update,
-                }),
-            )
-            .await?;
-        if let Some(committed_event) = result.events.into_iter().next() {
-            error_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+        let event_service = event_service_of(state)?;
+        let connection_lost_with_draft = failure
+            .is_some_and(|failure| failure.source == "connection")
+            && !event_service
+                .list_draft_fragments(
+                    owner
+                        .key()
+                        .map_err(|error| PylonError::Protocol(error.to_string()))?,
+                )
+                .await?
+                .is_empty();
+        if !connection_lost_with_draft {
+            runtime
+                .flush_draft_before_terminal(&ctx.source, state.current_generation(runtime))
+                .await
+                .map_err(PylonError::Protocol)?;
+            let result = event_service
+                .ingest_event(
+                    owner,
+                    remote_session_id,
+                    state.current_generation(runtime),
+                    serde_json::json!({
+                        "source": ctx.source,
+                        "update": update,
+                    }),
+                )
+                .await?;
+            if let Some(committed_event) = result.events.into_iter().next() {
+                error_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+            }
+        } else {
+            error_payload["draftInterrupted"] = serde_json::Value::Bool(true);
         }
     }
     if let Some(window) = window {
@@ -595,19 +634,25 @@ async fn finalize_response<R: tauri::Runtime>(
     let prompt_generation = flow.generation;
     let is_first = flow.is_first;
     let message_round = flow.message_round;
-    crate::acp::prompt_stop_reason(&data).map_err(|error| {
+    // #324：用户主动停止的 wire 终态（stopReason=cancelled）不进错误呈现链。
+    // #316 闭式表（protocol.rs）仍拒绝 cancelled 作为成功完成；此处在其之前
+    // 拦截，改走 done 通道中性结算（账本侧 Cancelled 终因已由
+    // settle_turn_from_response 先行落定，#99）。
+    if is_cancelled_stop_response(&data) {
+        return finalize_cancelled_response(flow, data).await;
+    }
+    // #316：stopReason 闭式判定表（typed-first）。max_tokens 转正为合法终态
+    // （pet on_maxed + done 正常广播，UI 凭 stopReason 文案提示）；未知值在
+    // 协议层已 warn 降级 end_turn；refusal/cancelled 维持 Err。
+    let stop = crate::acp::prompt_stop_outcome(&data).map_err(|error| {
         let error = error.to_string();
-        // M5 感知：refusal / max_turn 区分于普通失败
+        // M5 感知：refusal 区分于普通失败（max_turn_requests 现走 Ok 终态，
+        // 旧错误分支里的 max_turn 探测随之消亡）。
         if error.contains("refused") {
             let _ = state
                 .pet
                 .lock()
                 .map(|mut pet| crate::pet::on_refused(&mut pet));
-        } else if error.contains("max_turn") {
-            let _ = state
-                .pet
-                .lock()
-                .map(|mut pet| crate::pet::on_maxed(&mut pet));
         } else {
             let _ = state
                 .pet
@@ -616,6 +661,12 @@ async fn finalize_response<R: tauri::Runtime>(
         }
         error
     })?;
+    if matches!(stop, crate::acp::PromptStopOutcome::MaxTokens) {
+        let _ = state
+            .pet
+            .lock()
+            .map(|mut pet| crate::pet::on_maxed(&mut pet));
+    }
     if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
         let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
         return Err(error.into());
@@ -725,6 +776,88 @@ async fn finalize_response<R: tauri::Runtime>(
         serde_json::Map::from_iter([(
             "result".to_string(),
             serde_json::Value::String("success".to_string()),
+        )]),
+    );
+    Ok(flow.peri_id.clone())
+}
+
+/// #324：精确匹配 `stopReason: "cancelled"`（空白/大小写变体不享拦截，仍走
+/// #316 闭式表 fail-closed）。
+fn is_cancelled_stop_response(data: &serde_json::Value) -> bool {
+    data.get("stopReason").and_then(|value| value.as_str()) == Some("cancelled")
+}
+
+/// #324：cancelled 响应的中性结算——镜像 `finalize_response` 的收尾骨架
+/// （generation 复核 → 首轮标记 → canonical 提交 → done 广播），但：
+/// pet 不感知（非自然完成也非失败）、B11.2 persist 跳过（与
+/// CancelledAfterTimeout 臂口径一致：中断回合不落 Prism 摘要）。
+async fn finalize_cancelled_response<R: tauri::Runtime>(
+    flow: &mut PromptFlow<'_, R>,
+    data: serde_json::Value,
+) -> Result<String, PylonError> {
+    let state = flow.state;
+    let runtime = flow.runtime;
+    let window = flow.window;
+    let gateway = flow.gateway;
+    let source = &flow.ctx.source;
+    let peri_id = &flow.peri_id;
+    let prompt_generation = flow.generation;
+    let is_first = flow.is_first;
+    if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
+        let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
+        return Err(error.into());
+    }
+    if is_first {
+        state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
+    }
+    let mut done_payload = serde_json::json!({"source": source, "data": data});
+    let mut done_update = serde_json::json!({ "sessionUpdate": "done", "stopReason": "cancelled" });
+    if let Some(object) = data.as_object() {
+        for key in ["stopReason", "usage", "model"] {
+            if let Some(value) = object.get(key) {
+                done_update[key] = value.clone();
+            }
+        }
+    }
+    if let Some(committed_event) = ingest_prompt_event(
+        state,
+        runtime,
+        source,
+        Some(peri_id.clone()),
+        prompt_generation,
+        serde_json::json!({
+            "source": source,
+            "update": done_update,
+        }),
+    )
+    .await?
+    {
+        done_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
+    }
+    if let Some(window) = window {
+        emit_event_all(
+            window,
+            gateway,
+            source,
+            crate::event_names::SESSION_DONE,
+            done_payload.clone(),
+        );
+    }
+    send_channel_terminal(
+        state,
+        runtime,
+        source,
+        crate::event_names::SESSION_DONE,
+        done_payload,
+    );
+    state.log_runtime_summary(
+        "info",
+        "prompt",
+        Some(source.to_string()),
+        "Prompt cancelled; settled via done channel (#324)",
+        serde_json::Map::from_iter([(
+            "result".to_string(),
+            serde_json::Value::String("cancelled".to_string()),
         )]),
     );
     Ok(flow.peri_id.clone())
@@ -850,6 +983,27 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     result
 }
 
+/// #352：构造「用户 cancel 已发出」判死探针——只认 generation 一致的置位
+/// （载体键化 generation，镜像 turn_in_flight：客户端替换后旧代际的迟到置位
+/// 不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按 dev-standards #331
+/// 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，就地恢复——判死输入
+/// 不得因锁中毒静默消失。
+pub(crate) fn cancel_requested_probe(
+    runtime: Arc<AgentRuntime>,
+    source: String,
+    generation: u64,
+) -> impl Fn() -> bool {
+    move || {
+        runtime
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&source)
+            .and_then(|session| session.cancel_requested)
+            .is_some_and(|mark| mark.generation == generation)
+    }
+}
+
 async fn send_prompt_core_impl<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -938,14 +1092,19 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         // &dyn callback across the await would make the command future
         // non-Send); the callback is replaced by a plain Option<String> out.
         let mut recreated_peri_id: Option<String> = None;
-        let mapping = match ensure_session_mapping(
+        // #335/U1b：装配参数收敛为结构体；具名绑定（借用须跨 await 存活，
+        // 语句级临时不可用）。
+        let assembly = SessionAssembly {
             state,
             runtime,
             source,
-            profile_id.as_deref(),
+            profile_id: profile_id.as_deref(),
             persona,
-            &session_cwd,
-            &requested_mcp_servers,
+            session_cwd: &session_cwd,
+            wire_mcp_servers: &requested_mcp_servers,
+        };
+        let mapping = match ensure_session_mapping(
+            &assembly,
             revived_peri_id.as_deref(),
             &mut recreated_peri_id,
         )
@@ -1177,6 +1336,12 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         .is_some_and(|agent| crate::hermes::runtime::should_apply(&agent));
     let runtime_for_recovery = runtime.clone();
     let expected_generation = flow.generation;
+    // #352：用户 cancel 一等判死输入——cancel_prompt 置位后，等待循环跳过
+    // 闲置/首 token 评估直接进入 cancel-settle 窗口；agent cancel 后继续产出
+    // 刷新 last_activity 不再能推迟收敛（flag 命中后完全绕开 liveness 评估）。
+    // 探针只认本代际置位（构造器内注释详述锁形态与键化）。
+    let cancel_requested =
+        cancel_requested_probe(runtime.clone(), source.to_string(), expected_generation);
     // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
     // 用作"闲置超时"判据：活动即续命，只有持续无输出才截。
     let source_for_liveness = source.to_string();
@@ -1192,6 +1357,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         Duration::from_secs(idle_timeout_secs),
         Duration::from_secs(first_token_timeout_secs),
         liveness_activity,
+        cancel_requested,
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
             acp_for_cancel
@@ -1315,15 +1481,24 @@ async fn settle_prompt_response<R: tauri::Runtime>(
             "stale session mapping for source: {source}"
         )));
     }
+    let connection_closed = is_closed_transport_response(&raw);
     if let Some(error) = raw.error {
         let error = error.to_string();
         *failure = Some(PromptFailureMetadata {
-            source: "provider",
+            source: if connection_closed {
+                "connection"
+            } else {
+                "provider"
+            },
             actual_elapsed_ms: Some(elapsed_millis(prompt_started_at)),
-            provider_message: Some(error.clone()),
+            provider_message: (!connection_closed).then_some(error.clone()),
             ..Default::default()
         });
-        let typed_error = AcpError::Rpc(error.clone());
+        let typed_error = if connection_closed {
+            AcpError::ConnectionClosed
+        } else {
+            AcpError::Rpc(error.clone())
+        };
         let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
         // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
         // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
@@ -1486,6 +1661,8 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     let timeout_label = match timeout_kind {
         PromptTimeoutKind::FirstToken => "first-token",
         PromptTimeoutKind::Idle => "idle",
+        // #352：用户 cancel 判死——"超时"指的是 settle 窗口（等终态）超时。
+        PromptTimeoutKind::UserCancel => "user-cancel",
     };
     let timeout_secs = timeout_bound.as_secs().max(1);
     let actual_elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
@@ -1559,6 +1736,50 @@ async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
 mod tests {
     use super::*;
 
+    #[test]
+    fn sdk_synthetic_closed_response_has_connection_semantics() {
+        let raw = acp::RawMessage {
+            id: None,
+            method: None,
+            kind: acp::AcpKind::Response,
+            result: None,
+            params: None,
+            error: Some(serde_json::json!("ACP connection closed")),
+        };
+        assert!(is_closed_transport_response(&raw));
+        let provider = acp::RawMessage {
+            error: Some(serde_json::json!({"code": -32000, "message": "provider failed"})),
+            ..raw
+        };
+        assert!(!is_closed_transport_response(&provider));
+    }
+
+    /// #324：拦截谓词只认精确 `stopReason: "cancelled"`——空白/大小写变体与
+    /// 缺失字段不享中性结算（仍走 #316 闭式表 fail-closed）。
+    #[test]
+    fn is_cancelled_stop_response_matches_exact_spelling_only() {
+        assert!(is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": "cancelled"})
+        ));
+        assert!(is_cancelled_stop_response(&serde_json::json!({
+            "stopReason": "cancelled",
+            "usage": {"total": 3}
+        })));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": " cancelled"})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": "Cancelled"})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": ""})
+        ));
+        assert!(!is_cancelled_stop_response(
+            &serde_json::json!({"stopReason": 42})
+        ));
+        assert!(!is_cancelled_stop_response(&serde_json::json!({})));
+    }
+
     /// #99（评审 E3 回归锁）：empty-turn 细分以账本活动标志为判定源——
     /// dispatcher 在处理 chunk/工具调用的同一临界区写入账本，settle 侧据此
     /// 判定 tool-only / agent-empty，不受响应直达路径先于 inbox 排空的影响。
@@ -1573,9 +1794,16 @@ mod tests {
         };
         runtime.turn_ledger.begin(key.clone(), 0);
         // 账本只见到工具活动 → tool-only
-        runtime
-            .turn_ledger
-            .note_session_activity("local:r1", "peri-r1", 1, 1, false, true);
+        runtime.turn_ledger.note_session_activity(
+            "local:r1",
+            "peri-r1",
+            1,
+            1,
+            crate::acp::ActivityFlags {
+                saw_tool: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(
             refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
             TurnTerminalCause::EmptyTurn {
@@ -1583,11 +1811,40 @@ mod tests {
             }
         );
         // 账本随后见到文本 → 不再是空回合
-        runtime
-            .turn_ledger
-            .note_session_activity("local:r1", "peri-r1", 1, 2, true, false);
+        runtime.turn_ledger.note_session_activity(
+            "local:r1",
+            "peri-r1",
+            1,
+            2,
+            crate::acp::ActivityFlags {
+                saw_text: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(
             refine_empty_turn(&runtime, &key, TurnTerminalCause::Completed),
+            TurnTerminalCause::Completed
+        );
+        // #316：只有思考流也算有产出（thinking-only 回合不再误报 agent-empty）。
+        let thinking_key = crate::acp::TurnKey {
+            local_session_id: "local:thinking".to_string(),
+            remote_session_id: "peri-thinking".to_string(),
+            generation: 1,
+            turn_id: 1,
+        };
+        runtime.turn_ledger.begin(thinking_key.clone(), 0);
+        runtime.turn_ledger.note_session_activity(
+            "local:thinking",
+            "peri-thinking",
+            1,
+            1,
+            crate::acp::ActivityFlags {
+                saw_thinking: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            refine_empty_turn(&runtime, &thinking_key, TurnTerminalCause::Completed),
             TurnTerminalCause::Completed
         );
         // 未登记 turn 且会话无活动 → agent-empty 保守归类
@@ -1676,7 +1933,7 @@ mod tests {
         );
 
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         assert_eq!(
@@ -1685,6 +1942,83 @@ mod tests {
             "one successful prompt produces one authoritative user row"
         );
         assert_eq!(page.events[0], row);
+    }
+
+    #[tokio::test]
+    async fn prompt_terminal_waits_for_draft_commit_before_allocating_sequence() {
+        let source = "local:draft-terminal";
+        let agent_id = "prompt-agent";
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session =
+            SessionInfo::new("remote-draft".into(), String::new(), ".".into(), false, 3);
+        session.profile_id = Some("profile-prompt".into());
+        runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .insert(source.into(), session);
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent(agent_id)
+            .with_agent(crate::test_utils::fake_acp_agent_stub(agent_id))
+            .with_runtime(agent_id, runtime.clone())
+            .build();
+        let service = Arc::new(EventService::in_memory().unwrap());
+        *state.event_service.lock().unwrap() = Some(service.clone());
+        let owner = DurableSessionOwner::new("profile-prompt", agent_id, source);
+        let owner_key = owner.key().unwrap();
+        let raw = serde_json::json!({
+            "source": source,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "draft text"}}
+        });
+        service
+            .append_draft_fragment(crate::session::DraftFragmentInput {
+                owner: owner.clone(),
+                draft_id: "run".into(),
+                fragment_index: 0,
+                client_generation: 3,
+                remote_session_id: Some("remote-draft".into()),
+                event_type: "assistant.text.delta".into(),
+                identity: None,
+                raw_payload: vec![raw.clone()],
+                first_received_at: "2026-09-25T00:00:00.000Z".into(),
+            })
+            .await
+            .unwrap();
+        let mut requests = runtime.install_draft_flush_channel(3);
+        let terminal = ingest_prompt_event(
+            &state,
+            &runtime,
+            source,
+            Some("remote-draft".into()),
+            3,
+            serde_json::json!({"source": source, "update": {"sessionUpdate": "done"}}),
+        );
+        let close_draft = async {
+            let request = requests.recv().await.unwrap();
+            assert_eq!(request.source, source);
+            let committed = service
+                .commit_draft_events(
+                    owner,
+                    Some("remote-draft".into()),
+                    3,
+                    "run".into(),
+                    vec![crate::session::DraftCommitChunk {
+                        raw_payload: std::sync::Arc::new(raw),
+                        received_at: "2026-09-25T00:00:00.000Z".into(),
+                    }],
+                )
+                .await
+                .unwrap();
+            assert_eq!(committed.events[0].sequence, 1);
+            request.reply.send(Ok(())).unwrap();
+        };
+        let (terminal, ()) = tokio::join!(terminal, close_draft);
+        assert_eq!(terminal.unwrap().unwrap().sequence, 2);
+        assert!(service
+            .list_draft_fragments(owner_key)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// B-02 / C0-OPT：完整 send_prompt_core 成功路径仍只为用户 prompt 产生一条
@@ -1736,7 +2070,7 @@ mod tests {
         ])
         .expect("owner key");
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         let user_rows: Vec<_> = page
@@ -1904,6 +2238,54 @@ mod tests {
         );
     }
 
+    /// #352：用户 cancel 判死输入的载体语义——置位可见（键化 generation）；
+    /// 新回合起点（mark_turn_in_flight）清除，旧回合的 cancel 不继承到新回合。
+    #[test]
+    fn cancel_requested_mark_is_set_and_cleared_on_new_turn() {
+        let mut session = crate::session::SessionInfo::new(
+            "local:cancel-flag".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            0,
+        );
+        assert!(
+            session.cancel_requested.is_none(),
+            "新会话不得携带 cancel 判死输入"
+        );
+        session.mark_cancel_requested(3, std::time::Instant::now());
+        let mark = session.cancel_requested.expect("置位后判死输入必须可见");
+        assert_eq!(mark.generation, 3, "标记必须携带置位时的会话代际");
+        session.mark_turn_in_flight(4, 2);
+        assert!(
+            session.cancel_requested.is_none(),
+            "mark_turn_in_flight 必须清除旧回合的 cancel 判死输入"
+        );
+    }
+
+    /// #352：判死探针只认本代际置位——客户端替换（代际已换）后，旧代际的
+    /// 迟到置位不得把新代际等待循环拖进 cancel-settle 窗口（spec「本 generation
+    /// 本 session 已发出用户 cancel」钉死在探针构造器）。
+    #[test]
+    fn cancel_requested_probe_only_fires_for_current_generation() {
+        let runtime = AgentRuntime::new_disconnected();
+        let mut session = crate::session::SessionInfo::new(
+            "local:cancel-gen".to_string(),
+            String::new(),
+            ".".to_string(),
+            true,
+            5,
+        );
+        session.mark_cancel_requested(5, std::time::Instant::now());
+        runtime
+            .sessions
+            .lock()
+            .expect("sessions")
+            .insert("local:cancel-gen".to_string(), session);
+        let probe = cancel_requested_probe(runtime, "local:cancel-gen".to_string(), 7);
+        assert!(!probe(), "旧代际（5）置位不得触发新代际（7）的判死输入");
+    }
+
     #[test]
     fn prompt_failure_metadata_keeps_timeout_provenance_additive() {
         let metadata = PromptFailureMetadata {
@@ -2063,7 +2445,7 @@ mod tests {
             serde_json::to_string(&["profile-hook", "hook-dual-agent", "local:hook-dual"])
                 .expect("owner key");
         let page = event_service
-            .list_events(owner_key, None, 100)
+            .list_events(owner_key, None, 100, false)
             .await
             .expect("list canonical rows");
         let user_row = page

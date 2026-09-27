@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
-import { useIdentityStore } from '../identityStore'
-import { useRuntimeStore } from '../runtimeStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import Select from './ui/Select.tsx'
 
 // 样式绞杀（P93）：原 ProfileEditor.css 的 utility 化。settings-* 共享底座

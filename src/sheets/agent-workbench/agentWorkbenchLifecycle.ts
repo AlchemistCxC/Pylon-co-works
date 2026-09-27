@@ -13,17 +13,17 @@
  *
  * 框架无关（无 React hooks）：宿主 AgentRendererSuiteWorkbench 以 bind 效应驱动。
  */
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
-import { useIdentityStore, type Session } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
 import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../components/chat/chatReplayTrace.ts'
 import { clearMessageStorage } from '../../components/chat/messagePersistence.ts'
-import { sessionContext } from '../../agentContext.ts'
+import { sessionContext } from '../../domains/agent/agentContext.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
@@ -164,7 +164,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-placeholder:${session.id}`,
         scope: { kind: 'session', id: session.id },
         source: 'chat.session-placeholder',
-        recovery: { kind: 'open-runtime-log', sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       })
       return undefined
@@ -204,7 +203,7 @@ export class AgentWorkbenchLifecycle {
   private async createSession(session: Session, context: ReturnType<typeof sessionContext>, persona: string, isCurrent: () => boolean): Promise<void> {
     const loadGeneration = (this.loadGenerations.get(session.source) ?? 0) + 1
     this.loadGenerations.set(session.source, loadGeneration)
-    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
     // OWNER-02：new_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     try {
@@ -228,7 +227,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-create:${session.id}`,
         scope: { kind: 'session', id: session.id },
         source: 'chat.session-create',
-        recovery: { kind: 'open-runtime-log', sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       })
     }
@@ -241,7 +239,7 @@ export class AgentWorkbenchLifecycle {
     isCurrent: () => boolean,
     placeholderRows?: readonly CanonicalEventRow[],
   ): Promise<void> {
-    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
     // OWNER-02：load_persisted_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     void getHookRuntime().invoke('session.loading', { session, source: session.source }, session.hooks.length > 0 ? session.hooks : undefined)
@@ -312,6 +310,11 @@ export class AgentWorkbenchLifecycle {
       resolveRuntimeErrors({ key: `session-placeholder:${session.id}`, source: 'chat.session-placeholder' })
       this.recoveryAttempts.delete(session.source)
       applySessionStateResponse(sessionContext(session), res)
+      // #358：复活的协商目录也必须作为**协商事实**进文档面。建会话路径把 new_session 响应
+      // 同时交给 session-state 与工作台文档（投影成 `session.started`，`sessionResponseProjection.ts`），
+      // 而 `WorkbenchDocumentSurface` 的守卫正是靠这条事实才不把 model / mode 目录渲染成会话下方的
+      // 第二份配置表单；load 路径此前只同步前者，于是复活会话的目录卡片消不掉。
+      this.onSessionLoadResponse?.(session, res)
       // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
       // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
       useRuntimeStore.getState().setBindingGeneration(sessionContext(session), useRuntimeStore.getState().agentStatuses[session.agentId]?.generation)
@@ -335,7 +338,6 @@ export class AgentWorkbenchLifecycle {
         key: `session-recovery:${session.id}`,
         scope: { kind: 'session' as const, id: session.id },
         source: 'chat.session-recovery',
-        recovery: { kind: 'open-runtime-log' as const, sessionId: session.id },
         recoveryAction: { label: '重试会话恢复', run: () => this.retryRecovery(session.id) },
       }
       // canonical 首屏占位已经提供可用历史时，远端 ACP replay 失败不应
@@ -380,4 +382,6 @@ export class AgentWorkbenchLifecycle {
 
   /** load 完成信号（宿主接 sessionRuntime.refresh）。 */
   onCanonicalRefresh?: (session: Session, canonicalRevision: number, turn?: ColdMountTurnSnapshot) => void
+  /** #358：load 成功后的会话响应（协商目录）交宿主投影进工作台文档；未接线时静默跳过。 */
+  onSessionLoadResponse?: (session: Session, response: unknown) => void
 }

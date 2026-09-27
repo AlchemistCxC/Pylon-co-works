@@ -5,6 +5,7 @@ import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSo
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
+import { createSessionResponseEnvelope } from '../../../sheets/agent-workbench/sessionResponseProjection.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
@@ -21,7 +22,7 @@ import { parseTranslateOffset } from '../input/ccPlacementCollision.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -171,6 +172,70 @@ function installAnimatedScrollTo(viewport: HTMLElement, model: ScrollModel, pump
 }
 
 describe('mountSolidWorkbench', () => {
+  it('marks a live tool arrival once while later status projections reuse its card', async () => {
+    const { host, services } = mountPreview(undefined, { reducedMotion: false })
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'acp', sourceId: `motion-${sequence}` }, identity: { toolCallId: 'motion-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const started = envelope(1, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } })
+    const completed = envelope(2, { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '读取结果' }] } })
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    services.runtime.replaceDocument(projectWorkbench([started]).document, {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    const slot = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-activity-id="motion-tool"]')
+      expect(value).toHaveAttribute('data-entry', 'new')
+      return value!
+    })
+    services.runtime.replaceDocument(projectWorkbench([started, completed]).document, {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true, generationPatch: { generating: true },
+    })
+    await waitFor(() => expect(host.querySelector('[data-activity-id="motion-tool"]')).toBe(slot))
+    await waitFor(() => expect(slot).toHaveAttribute('data-result-receipt', 'new'))
+    await waitFor(() => expect(slot).not.toHaveAttribute('data-result-receipt'), { timeout: 1_000 })
+    await waitFor(() => expect(slot).not.toHaveAttribute('data-entry'), { timeout: 1_000 })
+    expect(host.querySelectorAll('[data-activity-id="motion-tool"]')).toHaveLength(1)
+  })
+
+  it.each([
+    { reducedMotion: false, generating: false },
+    { reducedMotion: true, generating: true },
+  ])('keeps a restored or reduced-motion tool static (%j)', async ({ reducedMotion, generating }) => {
+    const { host, services } = mountPreview(undefined, { reducedMotion })
+    const started = createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-25T00:00:01.000Z', sequence: 1,
+      source: { provider: 'acp', sourceId: 'static-tool' }, identity: { toolCallId: 'static-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } },
+    })
+    const options = {
+      ownerKey: 'owner-preview', generation: 1, preserveGeneration: true,
+      generationPatch: { generating },
+    }
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), options)
+    services.runtime.replaceDocument(projectWorkbench([started]).document, options)
+    const slot = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-activity-id="static-tool"]')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    expect(slot).not.toHaveAttribute('data-entry')
+    const completed = createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-25T00:00:02.000Z', sequence: 2,
+      source: { provider: 'acp', sourceId: 'static-tool-result' }, identity: { toolCallId: 'static-tool' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '已完成' }] } },
+    })
+    services.runtime.replaceDocument(projectWorkbench([started, completed]).document, options)
+    await waitFor(() => expect(host.querySelector('[data-activity-id="static-tool"]')).toBe(slot))
+    expect(slot).not.toHaveAttribute('data-result-receipt')
+  })
+
   it('按 canonical sequence 把工具活动插入用户消息与助手回复之间', async () => {
     const { host, services } = mountPreview()
     const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({
@@ -1525,6 +1590,33 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.solid-workbench-config')).toBeNull()
   })
 
+  // #358：复活会话的时间线里只有回放出来的 `session.config-updated`（journal 不会存建会话那条
+  // `session.started`）。load 响应被投影成协商事实后，守卫必须认账——model / mode 不再落到
+  // 会话下方那份配置卡（这正是用户报的「怎么也消不掉」）。
+  it('#358：复活文档补上 load 响应的协商事实后，会话配置卡消失', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'revived-session', preview: true })
+    const catalogue = [
+      { id: 'model', label: 'model', valueType: 'select', value: 'fable', editable: true, schema: { options: [{ id: 'fable', label: 'fable' }] } },
+      { id: 'mode', label: 'mode', valueType: 'select', value: 'default', editable: true, schema: { options: [{ id: 'default', label: 'default' }] } },
+    ]
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']): WorkbenchEventEnvelope => createWorkbenchEnvelope({
+      eventId: `revived-${sequence}`, sessionId: 'revived-session', sequence,
+      recordedAt: `2026-09-26T00:00:0${sequence}.000Z`, source: { provider: 'hermes', sourceId: `revived-${sequence}` },
+      identity: { runId: `revived-${sequence}` },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const replayed = envelope(1, { type: 'session.config-updated', options: catalogue })
+    const replayedDocument = projectWorkbench([replayed]).document
+    services.runtime.replaceDocument(replayedDocument, { ownerKey: 'owner-preview', generation: 1, sessionId: 'revived-session' })
+    await waitFor(() => expect(host.querySelector('.solid-workbench-config')?.getAttribute('data-config-count')).toBe('2'))
+
+    const negotiation = createSessionResponseEnvelope('revived-session', 'hermes', { sessionId: 'remote-1', configOptions: catalogue }, 2, 'session.started', 'session-load-response')
+    services.runtime.replaceDocument(projectWorkbench([replayed, negotiation]).document, { ownerKey: 'owner-preview', generation: 1, sessionId: 'revived-session' })
+
+    await waitFor(() => expect(host.querySelector('.solid-workbench-config')).toBeNull())
+  })
+
   it('空态创建失败后保留草稿，并把焦点交还输入框', async () => {
     const { services, lifecycle } = mountPreview()
     services.commands.setHandler('createSession', vi.fn(async () => { throw new Error('Agent 暂时不可用') }))
@@ -1581,8 +1673,6 @@ describe('mountSolidWorkbench', () => {
   it('生产中控消费提交模式、隐藏项与排布权威（落脚处内按序号排）', async () => {
     const { host, services, lifecycle } = mountPreview()
     const theme = structuredClone(DEFAULTS)
-    theme.inputMode = 'default'
-    theme.inputVariant = 'composer'
     theme.inputSubmitButtonMode = 'inline'
     services.appearance.setTheme(theme)
 
@@ -1622,8 +1712,6 @@ describe('mountSolidWorkbench', () => {
   it('外置按钮模式下隐藏发送不会误吞掉输入栏按钮', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
-    theme.inputMode = 'default'
-    theme.inputVariant = 'composer'
     theme.inputSubmitButtonMode = 'external'
     theme.ccHidden = ['cc-send-button']
     services.appearance.setTheme(theme)
@@ -1866,7 +1954,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
   })
 
-  it('#266 · 属性面板不按输入模式判明：命令行边框三项在两种模式下都渲染（条件字段已撤）', async () => {
+  it('#266 · 输入栏属性面板：字段恒定（形态固定后不再有"按输入模式判明/切换"的项）', async () => {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '输入栏 属性' }))
@@ -1875,25 +1963,15 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     const editableLabels = () => [...panel().querySelectorAll('.cc-prop-field')]
       .map(el => el.querySelector('label')?.textContent ?? '')
       .filter(label => !['顺序', '水平微调', '垂直微调'].includes(label))
-    const panelChip = (label: string) => [...panel().querySelectorAll('button')].find(button => button.textContent === label)!
-    const EIGHT = ['背景色', '文字色', '字号', '最小高度', '模式', '边框宽度', '边框颜色', '内边距']
-
-    // 命令行模式（预览档默认）：8 项，与改造前一致
-    expect(services.appearance.getSnapshot().inputMode).toBe('cli')
-    expect(editableLabels()).toEqual(EIGHT)
-
-    // ★ 标准输入模式：**此前只有 5 项**（命令行边框三项被 showIf 藏掉）⇒ 现在 8 项
-    fireEvent.click(panelChip('标准输入'))
-    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'default', inputVariant: 'composer' }))
-    expect(editableLabels()).toEqual(EIGHT)
-    for (const label of ['边框宽度', '边框颜色', '内边距']) {
-      expect(screen.getByLabelText(label), `${label} 在标准输入模式下也必须显示`).toBeInTheDocument()
-    }
-
-    // 切回命令行：仍是同样 8 项（两模式差集为空）
-    fireEvent.click(panelChip('命令行'))
-    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli' }))
-    expect(editableLabels()).toEqual(EIGHT)
+    const chipTexts = () => [...panel().querySelectorAll('button')].map(button => button.textContent ?? '')
+    // ★ #266 刀7/刀9/刀13：原 8 项里的「模式」（chips，写 inputMode↔inputVariant 双写）、
+    //   「最小高度」（inputMinHeight）、「内边距」（cliLinePadding）三项随字段删除
+    //   ⇒ 只剩 5 项；形态固定命令行 ⇒ 面板里**没有**「模式 / 标准输入 / 命令行」这组切换。
+    const FIVE = ['背景色', '文字色', '字号', '边框宽度', '边框颜色']
+    expect(editableLabels()).toEqual(FIVE)
+    expect(chipTexts()).not.toContain('模式')
+    expect(chipTexts()).not.toContain('标准输入')
+    expect(chipTexts()).not.toContain('命令行')
 
     // 面板字段本身照旧响应式（原用例的靶子保留）
     const lineColor = screen.getByLabelText('边框颜色')

@@ -1,4 +1,4 @@
-import { resolveBackgroundImage } from '../../backgroundImage.ts'
+import { resolveBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
 import type { MediaSourceResolverOptions } from '../../domains/rendererContent/mediaSourceResolver.ts'
 
 /**

@@ -117,14 +117,22 @@ describe('C16 provider coverage inventory', () => {
 
     expect(sourceOnly.map(item => item.id).sort(), 'SOURCE-ONLY 必须与 not-transported 双向一致')
       .toEqual(notTransported.map(item => item.id).sort())
-    expect(sourceOnly, '固定 provider revision 下的 SOURCE-ONLY 分布发生未审计漂移').toHaveLength(47)
+    // #315：peri 16 个 Category ③ 单元脱离 SOURCE-ONLY（15 项经 peri/agent_event
+    // 扩展通道 + peri-12 经标准 usage_update._meta 深消费），SOURCE-ONLY 从 47 收敛到
+    // 31（差额逐项见 periCoverage followUp：hitlPending 通道上游休眠、TurnCommitted
+    // 载荷上游显式抑制、Stage*/queue/plugin 家族仍为 tracer-only）。
+    expect(sourceOnly, '固定 provider revision 下的 SOURCE-ONLY 分布发生未审计漂移').toHaveLength(31)
     for (const item of sourceOnly) {
       expect(item.pylonAnchors, `${item.id} 未到 wire，不得保留目标 seam/unknown fallback 等 Pylon 消费锚点`)
         .toEqual([])
     }
 
-    expect(items.filter(item => item.transportStatus === 'WIRE-EXTENSION').map(item => item.id),
-      '当前没有经协商且有 fixture 的 provider extension wire').toEqual([])
+    expect(items.filter(item => item.transportStatus === 'WIRE-EXTENSION').map(item => item.id).sort(),
+      '#315 后 peri/agent_event 承载的扩展 wire 单元（15 项；peri-12 carrier 为标准 usage_update._meta，归 WIRE-STANDARD）').toEqual([
+      'peri-05', 'peri-08', 'peri-10', 'peri-13', 'peri-14', 'peri-15',
+      'peri-16', 'peri-17', 'peri-21', 'peri-22', 'peri-23', 'peri-24', 'peri-25',
+      'peri-26', 'peri-34',
+    ])
     expect(items.filter(item => item.transportStatus === 'SYNTHETIC').map(item => item.id),
       '只有 Claude prompt response 由 host 合成为 canonical done').toEqual(['cc-14'])
   })
@@ -162,16 +170,21 @@ describe('C16 provider coverage inventory', () => {
     }
   })
 
-  it('Peri 事件结论服从 mapper 的实际 SessionUpdate 输出', () => {
+  it('Peri 事件结论服从 mapper 的实际 SessionUpdate 输出（#315：扩展通道另计）', () => {
     const items = new Map(PROVIDER_COVERAGE.peri.map(item => [item.id, item]))
 
-    for (const id of ['peri-05', 'peri-07'] as const) {
-      expect(items.get(id), `${id} mapper 明确零输出，不得拿目标 projector 冒充 wire`).toMatchObject({
-        status: 'not-transported',
-        transportStatus: 'SOURCE-ONLY/BACKLOG',
-        semanticEvent: '',
-      })
-    }
+    // mapper 的标准 SessionUpdate 输出仍为零；peri-05 经 peri/agent_event 扩展
+    // 通道到线（WIRE-EXTENSION）。peri-07（TurnCommitted 载荷上游显式抑制）维持 SOURCE-ONLY。
+    expect(items.get('peri-05')).toMatchObject({
+      status: 'normalized',
+      transportStatus: 'WIRE-EXTENSION',
+      semanticEvent: 'budget.warning',
+    })
+    expect(items.get('peri-07'), '无扩展通道承载的零输出变体不得拿目标 projector 冒充 wire').toMatchObject({
+      status: 'not-transported',
+      transportStatus: 'SOURCE-ONLY/BACKLOG',
+      semanticEvent: '',
+    })
     expect(items.get('peri-09'), 'SyntheticUserMessage 实际映射为标准 user_message_chunk').toMatchObject({
       status: 'normalized',
       transportStatus: 'WIRE-STANDARD',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout, type CcLayoutV3 } from '../../../ccLayoutState.ts'
+import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, normalizeCcLayout, type CcLayoutV3 } from '../ccLayoutState.ts'
 import { CC_WIDGET_IDS } from '../widgetDefinitions.ts'
 
 describe('Control Center layout v9（刀4 名单换代）', () => {

@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError.ts'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './ccLayoutState.ts'
-import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError.ts'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from './domains/cc/ccLayoutState.ts'
+import type { CcLayoutV3, CcWidgetPlacement } from './domains/cc/ccLayoutState.ts'
 import { createCustomPresetId, normalizeCustomPresetId, pickCustomPresetTheme } from './customPresets.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { ZONE_FIELDS } from './themeFieldDefs.ts'
@@ -14,8 +14,7 @@ import {
   removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
-import { resolveCcHiddenWidgetIds } from './domains/cc/widgetDefinitions.ts'
+import { clampCcHeight } from './domains/cc/ccHeightState.ts'
 import { THEME_PRESET_KEYS, THEME_SETTING_KEYS } from './themeFieldDefs.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './domains/theme/migration.ts'
 import { DEFAULTS } from './domains/theme/themeDefaults.ts'
@@ -35,15 +34,15 @@ import {
   type AssembleGlobalPresetOptions,
   type GlobalPresetZoneSlice,
 } from './domains/theme/presetReducer.ts'
-import type { Profile } from './identityStore.ts'
+import type { Profile } from './domains/identity/identityStore.ts'
 import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, PresetProviderTransactionError, recordPayload, type PresentationPresetPayload, type PresetApplyResult, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
 import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 import { recordSettingWrites, type SettingWriteSource } from './domains/theme/settingProvenance.ts'
 
-export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
-export type { SessionConfig } from './runtimeStore'
+export type { Profile, Session, UserMapping, AgentEntry } from './domains/identity/identityStore'
+export type { SessionConfig } from './domains/runtime/runtimeStore'
 
 export interface ThemeSettings {
   /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
@@ -74,12 +73,11 @@ export interface ThemeSettings {
   inputSurfaceBg: string; inputSurfaceOpacity: number
   inputBorder: string; inputBorderWidth: number; inputBorderOpacity: number
   inputFocusRingEnabled: 'shown' | 'hidden'; inputFocusRingColor: string; inputHighlightOpacity: number; inputShadowEnabled: 'shown' | 'hidden'
-  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string; inputMinHeight: number
-  inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
+  inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; sendButtonColor: string; sendButtonRadius: string; sendButtonBorderColor: string; sendButtonIcon: string; sendButtonIconGenerating: string; sendButtonIconRound: string; sendButtonIconColor: string; inputBorderColor: string; inputFocusBorder: string; inputRadius: number; inputFontSize: number; inputLineHeight: string
+  inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string
   cliHintMode: 'hidden' | 'compact' | 'full'
   /** #238 刀5：命令行提示自己的字号（原为整条信息行继承 `ccStatusFontSize`，已删除） */
   ccHintFontSize: number
-  pillText: string; prismOnColor: string
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
@@ -107,13 +105,11 @@ export interface ThemeSettings {
   assistantDot: boolean; assistantDotGlyph: string; assistantDotColor: string
   /** 自定义头像/图标路径（非空时替代圆点字形，列宽随图） */
   assistantDotImage: string
-  footerLayout: 'free' | 'peri'
-  cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBg: string; ccSurfaceOpacity: number
   ccBgImage: string
   ccMarginX: number; ccMarginBottom: number; ccRadius: number
   reasoningSwitchMode: string; reasoningBgColor: string; reasoningWidth: number; reasoningHeight: number; reasoningRadius: number; reasoningFontSize: number; reasoningTextColor: string
-  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string; sendVariant: string
+  modelSwitchMode: string; modelBgColor: string; modelWidth: number; modelHeight: number; modelRadius: number; modelFontSize: number; modelTextColor: string
   permissionSwitchMode: string; permissionBgColor: string; permissionWidth: number; permissionHeight: number; permissionRadius: number; permissionFontSize: number; permissionTextColor: string
   /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
   modeAutoColor: string; modeEditColor: string
@@ -217,16 +213,8 @@ export const useStore = create<ThemeState>()(persist(
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
-    // D1：ccHeight 经布局约束漏斗归一化。
-    const ccHeight = clampCcHeight(height, {
-      inputMode: state.inputMode,
-      footerLayout: state.footerLayout,
-      hintMode: state.cliHintMode,
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: state.ccHidden, cliHintMode: state.cliHintMode }),
-      }),
-      cliOverflowMode: state.cliOverflowMode,
-    })
+    // D1：ccHeight 经布局约束漏斗归一化（★ #266 刀9~11：形态固定 ⇒ 最小高度为常量，参数已收敛）
+    const ccHeight = clampCcHeight(height)
     return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
   updateCcPlacement: (id, partial) => set(state => ({
@@ -239,15 +227,7 @@ export const useStore = create<ThemeState>()(persist(
   })),
   setCcHidden: (id, hidden) => set(state => {
     const ccHidden = setCcHiddenState(state.ccHidden, id, hidden)
-    const ccHeight = clampCcHeight(state.ccHeight, {
-      inputMode: state.inputMode,
-      footerLayout: state.footerLayout,
-      hintMode: state.cliHintMode,
-      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-        hiddenIds: resolveCcHiddenWidgetIds({ ccHidden, cliHintMode: state.cliHintMode }),
-      }),
-      cliOverflowMode: state.cliOverflowMode,
-    })
+    const ccHeight = clampCcHeight(state.ccHeight)
     return {
       ccHidden,
       ccHeight,
@@ -364,7 +344,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = `自定义预设不存在：${canonicalId}`
         reportRuntimeError('应用自定义预设', new Error(message), undefined, {
           key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: canonicalId, failedProvider: 'preset', message, rolledBack: true, revision }
       }
@@ -382,7 +361,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = `自定义预设主题缺失：${presetId}`
         reportRuntimeError('准备应用预设', new Error(message), undefined, {
           key: `preset-prepare:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: presetId, failedProvider: 'builtin.theme', message, rolledBack: true, revision }
       }
@@ -459,7 +437,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = error instanceof Error ? error.message : String(error)
         reportRuntimeError('应用预设', error, undefined, {
           key: `preset:${presetId}`, scope: { kind: 'operation', id: `preset:${presetId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: presetId, failedProvider, message, rolledBack: true, revision }
       }
@@ -479,7 +456,6 @@ export const useStore = create<ThemeState>()(persist(
         const message = error instanceof Error ? error.message : String(error)
         reportRuntimeError('应用预设', error, undefined, {
           key: `preset:${canonicalId}`, scope: { kind: 'operation', id: `preset:${canonicalId}` }, source: 'theme.preset',
-          recovery: { kind: 'open-runtime-log' },
         })
         return { status: 'failed', id: canonicalId, failedProvider: 'unknown', message, rolledBack: false, revision }
       }
@@ -539,7 +515,6 @@ export const useStore = create<ThemeState>()(persist(
           key: 'app:theme-persistence',
           scope: { kind: 'app', id: 'theme' },
           source: 'theme.persistence',
-          recovery: { kind: 'open-runtime-log' },
         })
       }
     },
@@ -590,6 +565,6 @@ function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts')
 }
 
 // ── 组合出口：按域导入点 ──
-export { useIdentityStore } from './identityStore'
-export { useRuntimeStore } from './runtimeStore'
-export { useWorkspaceStore } from './workspaceStore'
+export { useIdentityStore } from './domains/identity/identityStore'
+export { useRuntimeStore } from './domains/runtime/runtimeStore'
+export { useWorkspaceStore } from './domains/workspace/workspaceStore'

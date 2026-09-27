@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
-import { MarkdownPreview } from '../MarkdownPreview'
+import MarkdownPreview from '../MarkdownPreview'
 
 // #276：FileTabView markdown 预览的 wasm 计算核渲染路径。解析走真实
 // pylon-markdown（vitest globalSetup 预载 wasm），断言的是「渲染模型 → React

@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../identityStore.ts'
+import type { AgentEntry } from '../../domains/identity/identityStore.ts'
 import type { AgentConnectionTestResult } from '../../infrastructure/acp/agentClient.ts'
 
 export interface ProvisionAgentInput {

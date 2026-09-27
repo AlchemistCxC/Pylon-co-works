@@ -1,6 +1,6 @@
 // 迁移自 scripts/test-apply-custom-preset.mts（P91 A1）；源码正则结构守卫段不迁（行为已由下列断言证实）。
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
+import { DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
 import { ZONE_FIELDS } from '../../../themeFieldDefs.ts'
@@ -27,13 +27,9 @@ function makeState(customPresets: ThemePresetState['customPresets']): ThemePrese
     customPresets,
     ccLayout: DEFAULT_CC_LAYOUT,
     ccHeight: 150,
-    inputMode: 'cli',
-    inputVariant: 'cli',
     inputSubmitButtonMode: 'never',
-    footerLayout: 'free',
     cliHintMode: 'full',
     ccHidden: [],
-    cliOverflowMode: 'fixed-scroll',
   }
 }
 
@@ -115,30 +111,22 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
       customPresets: [],
       ccLayout: DEFAULT_CC_LAYOUT,
       ccHeight: 150,
-      inputMode: 'cli',
-      inputVariant: 'cli',
       inputSubmitButtonMode: 'inline',
-      footerLayout: 'free',
       cliHintMode: 'full',
       ccHidden: [],
-        cliOverflowMode: 'fixed-scroll',
       ...overrides,
     }
   }
 
-  it('D1 校验漏斗：ccHeight clamp + inputVariant↔inputMode 联动', () => {
+  it('D1 校验漏斗：ccHeight clamp（★ 刀9：`inputVariant`↔`inputMode` 联动不变量已随字段删除）', () => {
     const state = makeZoneState()
-    // ccHeight 低于最小高（64 base）→ clamp 上调
+    // ccHeight 低于最小高（常量 64）→ clamp 上调
     const lowPatch = setZoneFieldReducer(state, 'cc', { ccHeight: 5 })
     expect(typeof lowPatch.ccHeight).toBe('number')
-    expect(lowPatch.ccHeight as number).toBeGreaterThanOrEqual(64) // ccHeight 必须 clamp 到最小高
-    // inputVariant → inputMode 联动
-    const variantPatch = setZoneFieldReducer(state, 'cc', { inputVariant: 'composer' })
-    expect(variantPatch.inputMode).toBe('default') // inputVariant=composer → inputMode=default
-    expect(variantPatch.inputVariant).toBe('composer')
-    // inputMode → inputVariant 联动（cli ⟺ cli）
-    const modePatch = setZoneFieldReducer(makeZoneState({ inputVariant: 'composer' }), 'cc', { inputMode: 'cli' })
-    expect(modePatch.inputVariant).toBe('cli') // inputMode=cli → inputVariant=cli
+    expect(lowPatch.ccHeight as number).toBe(64)
+    // 区间内原样（上界 400 见纯函数用例）
+    expect(setZoneFieldReducer(state, 'cc', { ccHeight: 200 }).ccHeight).toBe(200)
+    expect(setZoneFieldReducer(state, 'cc', { ccHeight: 999 }).ccHeight).toBe(400)
   })
 
   it('setZoneField：写入字段 + 标 zone custom，不污染其他 zone、不带 appliedPreset（基准不动）', () => {

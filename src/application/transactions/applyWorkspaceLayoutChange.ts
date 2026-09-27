@@ -1,6 +1,6 @@
-import { useWorkspaceStore } from '../../workspaceStore.ts'
-import { useRightRailStore } from '../../rightRailStore.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
+import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface WorkspaceLayoutPatch {
   readonly sidebarWidth?: number

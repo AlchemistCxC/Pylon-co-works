@@ -202,7 +202,8 @@ describe('测试文件判据', () => {
 
   it('Rust 文件级判据（tests 目录与假 agent）', () => {
     expect(isTestPathRust('src-tauri/tests/issue53_selector_probe/mod.rs')).toBe(true)
-    expect(isTestPathRust('src-tauri/src/bin/pylon-fake-agent.rs')).toBe(true)
+    expect(isTestPathRust('src-tauri/pylon-fake-agent/src/main.rs')).toBe(true)
+    expect(isTestPathRust('src-tauri/pylon-fake-agent/Cargo.toml')).toBe(false)
     expect(isTestPathRust('src-tauri/src/session/prompt.rs')).toBe(false)
   })
 })

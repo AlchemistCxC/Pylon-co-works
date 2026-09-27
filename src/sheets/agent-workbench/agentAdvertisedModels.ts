@@ -12,7 +12,7 @@
  * runtime store (check-runtime-boundaries), so the suite host subscribes and
  * hands the renderer plain frozen entries via WorkbenchMountInput.
  */
-import { useRuntimeStore, type SessionConfig } from '../../runtimeStore.ts'
+import { useRuntimeStore, type SessionConfig } from '../../domains/runtime/runtimeStore.ts'
 import { extractModelConfig, type ConfigOption } from '../../infrastructure/acp/chatContracts.ts'
 import type { WorkbenchOptionEntry } from '../../renderers/solid-workbench/input/workbenchOptionCatalog.ts'
 

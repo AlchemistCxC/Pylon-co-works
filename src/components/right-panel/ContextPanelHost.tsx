@@ -6,9 +6,10 @@ import { settingFieldKey } from '../../plugin-runtime/renderers/rendererSettings
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { ContextPanelContributionProps } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
+import type { ContextPanelSurfaceInput } from '../../plugin-runtime/context-panel/contextPanelSurfaceProtocol.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
-import { useRightRailStore } from '../../rightRailStore.ts'
+import { useRightRailStore } from './rightRailStore.ts'
 import { RendererSettingsSchemaHost } from '../settings/RendererSettingField.tsx'
 
 export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet: SheetRecord; ctx: SheetContext; activePanelId?: string | null }) {
@@ -62,7 +63,7 @@ export default function ContextPanelHost({ sheet, ctx, activePanelId }: { sheet:
             sheet: { id: sheet.id, kind: sheet.kind, title: sheet.title, agentId: sheet.agentId, metadata: sheet.metadata },
             activeSessionId: ctx.activeSession,
             values: adapterSnapshot.values,
-          }}
+          } satisfies ContextPanelSurfaceInput}
           onEvent={(event, detail) => {
             if (event === 'host:collapse') {
               useRightRailStore.getState().setCollapsed(true)

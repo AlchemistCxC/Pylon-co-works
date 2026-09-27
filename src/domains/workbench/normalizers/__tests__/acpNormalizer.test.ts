@@ -404,3 +404,68 @@ describe('ACP normalizer plan entries (C08)', () => {
     ])
   })
 })
+
+// ── #315 P0-4：peri tokenStats _meta 深消费 + _meta.skillNames 接线 ─────────
+
+describe('peri _meta deep consumption (#315)', () => {
+  it('usage_update._meta 深消费 token 键与身份证据键，非法数值不伪造', () => {
+    const result = normalizeAcpEvent({
+      source: 'peri',
+      update: {
+        sessionUpdate: 'usage_update',
+        used: 53000,
+        size: 200000,
+        _meta: {
+          inputTokens: 12000,
+          outputTokens: 3400,
+          cacheCreationTokens: 512,
+          cacheReadTokens: 780,
+          model: 'deepseek-v4',
+          requestId: 'req-42',
+          stopReason: 'end_turn',
+          inputTokensBad: '12',
+        },
+      },
+    }, context)
+    const usage = result.events[0]?.event.type === 'usage.updated'
+      ? (result.events[0].event as { usage: Record<string, unknown> }).usage
+      : undefined
+    expect(usage).toBeDefined()
+    expect(usage).toMatchObject({
+      inputTokens: 12000,
+      outputTokens: 3400,
+      cacheCreationTokens: 512,
+      cacheReadTokens: 780,
+      model: 'deepseek-v4',
+      requestId: 'req-42',
+      providerStopReason: 'end_turn',
+      contextUsed: 53000,
+      contextLimit: 200000,
+    })
+  })
+
+  it('available_commands_update 透传 _meta.skillNames；空集与非字符串不产出', () => {
+    const withSkills = normalizeAcpEvent({
+      source: 'peri',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        commands: [{ name: '/help' }],
+        _meta: { skillNames: ['review', '  ', 'deploy'] },
+      },
+    }, context)
+    expect(withSkills.events[0]?.event).toMatchObject({
+      type: 'session.commands-updated',
+      skillNames: ['review', 'deploy'],
+    })
+
+    const empty = normalizeAcpEvent({
+      source: 'peri',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        commands: [{ name: '/help' }],
+        _meta: { skillNames: ['   '] },
+      },
+    }, context)
+    expect((empty.events[0]?.event as { skillNames?: unknown }).skillNames).toBeUndefined()
+  })
+})

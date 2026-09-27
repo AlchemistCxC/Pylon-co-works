@@ -26,6 +26,37 @@ pub(crate) async fn write_lock() -> tokio::sync::MutexGuard<'static, ()> {
         .await
 }
 
+/// 插件写事务公共骨架：写锁 → root 解析 → 盘 IO 移出 reactor 线程（#261）。
+///
+/// JoinHandle 的意外终止（后台任务 panic / runtime 关停取消）在此映射为
+/// `PluginError::Transaction` 上抛——不允许 panic 穿透 command 线程，
+/// 前端只会见到结构化 PylonError。
+async fn run_plugin_write<T, F>(app: &AppHandle, op: F) -> Result<T, PylonError>
+where
+    F: FnOnce(PathBuf) -> Result<T, PluginError> + Send + 'static,
+    T: Send + 'static,
+{
+    let _guard = write_lock().await;
+    let root = root(app)?;
+    let result = tauri::async_runtime::spawn_blocking(move || op(root))
+        .await
+        .map_err(|e| PluginError::Transaction(format!("plugin task aborted: {e}")))?;
+    Ok(result?)
+}
+
+/// install/stage 共享的入口校验：plugin id 合法 + sourcePath 为存在的绝对目录。
+fn validate_source_path(expected_id: &str, source_path: &str) -> Result<PathBuf, PylonError> {
+    validate_plugin_id(expected_id)?;
+    let source = PathBuf::from(source_path);
+    if !source.is_absolute() || !source.is_dir() {
+        return Err(PluginError::SourceInvalid(
+            "sourcePath must be an existing absolute directory".into(),
+        )
+        .into());
+    }
+    Ok(source)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Journal {
@@ -299,25 +330,14 @@ pub(crate) async fn plugin_package_install(
     source_path: String,
     expected_id: String,
 ) -> Result<PluginPackageOperationResult, PylonError> {
-    validate_plugin_id(&expected_id)?;
-    let source = PathBuf::from(source_path);
-    if !source.is_absolute() || !source.is_dir() {
-        return Err(PluginError::SourceInvalid(
-            "sourcePath must be an existing absolute directory".into(),
-        )
-        .into());
-    }
-    let _guard = write_lock().await;
-    let root = root(&app)?;
+    let source = validate_source_path(&expected_id, &source_path)?;
     // #261：二进制复制/批量 rename 等文件 IO 移出 reactor 线程（对齐存储核
     // 「所有盘 IO 经 spawn_blocking」标准）；写锁仍在 async 侧串行化，操作与错误逐字不变。
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_plugin_write(&app, move |root| {
         ensure_layout_at(&root)?;
         install_at(&root, &source, &expected_id)
     })
     .await
-    .expect("plugin package install task panicked");
-    Ok(result?)
 }
 
 #[tauri::command]
@@ -335,24 +355,13 @@ pub(crate) async fn plugin_package_stage(
     source_path: String,
     expected_id: String,
 ) -> Result<PluginPackageOperationResult, PylonError> {
-    validate_plugin_id(&expected_id)?;
-    let source = PathBuf::from(source_path);
-    if !source.is_absolute() || !source.is_dir() {
-        return Err(PluginError::SourceInvalid(
-            "sourcePath must be an existing absolute directory".into(),
-        )
-        .into());
-    }
-    let _guard = write_lock().await;
-    let root = root(&app)?;
+    let source = validate_source_path(&expected_id, &source_path)?;
     // #261：同 install——staging 目录复制/校验/rename 移出 reactor 线程。
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_plugin_write(&app, move |root| {
         ensure_layout_at(&root)?;
         stage_at(&root, &source, &expected_id)
     })
     .await
-    .expect("plugin package stage task panicked");
-    Ok(result?)
 }
 
 #[tauri::command]
@@ -360,14 +369,8 @@ pub(crate) async fn plugin_package_stage_commit(
     app: AppHandle,
     operation_id: String,
 ) -> Result<PluginPackageOperationResult, PylonError> {
-    let _guard = write_lock().await;
-    let root = root(&app)?;
     // #261：journal 提交含目录 rename，移出 reactor 线程。
-    let result =
-        tauri::async_runtime::spawn_blocking(move || commit_stage_at(&root, &operation_id))
-            .await
-            .expect("plugin package stage commit task panicked");
-    Ok(result?)
+    run_plugin_write(&app, move |root| commit_stage_at(&root, &operation_id)).await
 }
 
 #[tauri::command]
@@ -375,13 +378,8 @@ pub(crate) async fn plugin_package_stage_abort(
     app: AppHandle,
     operation_id: String,
 ) -> Result<(), PylonError> {
-    let _guard = write_lock().await;
-    let root = root(&app)?;
     // #261：abort 含 staging 残留清理（remove_dir_all），移出 reactor 线程。
-    let result = tauri::async_runtime::spawn_blocking(move || abort_stage_at(&root, &operation_id))
-        .await
-        .expect("plugin package stage abort task panicked");
-    Ok(result?)
+    run_plugin_write(&app, move |root| abort_stage_at(&root, &operation_id)).await
 }
 
 #[tauri::command]
@@ -444,16 +442,12 @@ pub(crate) async fn plugin_package_set_enabled(
     enabled: bool,
 ) -> Result<(), PylonError> {
     validate_plugin_id(&plugin_id)?;
-    let _guard = write_lock().await;
-    let root = root(&app)?;
     // #261：状态文件 read/rewrite 移出 reactor 线程。
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_plugin_write(&app, move |root| {
         ensure_layout_at(&root)?;
         set_enabled_at(&root, &plugin_id, enabled)
     })
     .await
-    .expect("plugin package set enabled task panicked");
-    Ok(result?)
 }
 
 pub(crate) fn set_enabled_at(
@@ -523,16 +517,12 @@ pub(crate) async fn plugin_package_rollback(
     plugin_id: String,
     package_instance_id: Option<String>,
 ) -> Result<PluginPackageOperationResult, PylonError> {
-    let _guard = write_lock().await;
-    let root = root(&app)?;
     // #261：回滚 rename + 状态回写移出 reactor 线程。
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    run_plugin_write(&app, move |root| {
         ensure_layout_at(&root)?;
         rollback_at(&root, plugin_id, package_instance_id)
     })
     .await
-    .expect("plugin package rollback task panicked");
-    Ok(result?)
 }
 
 pub(crate) fn uninstall_at(
@@ -565,12 +555,9 @@ pub(crate) async fn plugin_package_uninstall(
     purge_data: bool,
 ) -> Result<(), PylonError> {
     validate_plugin_id(&plugin_id)?;
-    let _guard = write_lock().await;
-    let root = root(&app)?;
     // #261：目录树删除（remove_dir_all）移出 reactor 线程——Windows 上可能秒级阻塞。
-    let result =
-        tauri::async_runtime::spawn_blocking(move || uninstall_at(&root, &plugin_id, purge_data))
-            .await
-            .expect("plugin package uninstall task panicked");
-    Ok(result?)
+    run_plugin_write(&app, move |root| {
+        uninstall_at(&root, &plugin_id, purge_data)
+    })
+    .await
 }

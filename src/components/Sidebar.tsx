@@ -1,13 +1,14 @@
 import { Fragment, Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ChevronsUpDown, PawPrint, SlidersHorizontal } from 'lucide-react'
-import { useIdentityStore } from '../identityStore'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import type {
   AgentSidebarContribution,
 } from '../plugin-runtime/sidebar/sidebarTypes.ts'
+import type { AgentSidebarSurfaceInput } from '../plugin-runtime/sidebar/sidebarSurfaceProtocol.ts'
 import {
   isBlockCollapsed,
   isBlockPageOpen,
@@ -267,7 +268,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
       blockAction: streamedAction ? { actionId: streamedAction.actionId, nonce: streamedAction.nonce } : null,
       sessions: sharedProps.sessions.map(session => ({ id: session.id, name: session.name, workspaceId: session.workspaceId })),
       workspaces: sharedProps.workspaces.map(workspace => ({ id: workspace.id, name: workspace.name, rootPath: workspace.rootPath })),
-    }
+    } satisfies AgentSidebarSurfaceInput
 
     const body = isolated
       ? (

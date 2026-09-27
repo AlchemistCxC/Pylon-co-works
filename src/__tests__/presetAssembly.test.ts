@@ -24,7 +24,7 @@ import {
   DEFAULT_CC_LAYOUT,
   cloneCcLayout,
   type CcLayoutV3,
-} from '../ccLayoutState.ts'
+} from '../domains/cc/ccLayoutState.ts'
 import {
   PRESET_ZONES,
   applyZonePresetReducer,
@@ -274,11 +274,14 @@ describe('B4 cc 区特殊处理在逐区域路径上仍生效', () => {
     }
   })
 
-  it('ccHeight 收敛：claude 的裸值 76 装配后是 clamp 过的 84（且等于旧路径）', () => {
+  it('ccHeight 收敛：装配必过 clamp 漏斗（★ 刀9~11：下界已是常量 64，上界 400）', () => {
     const claude = GLOBAL_PRESETS.find(candidate => candidate.name === 'claude')!
     const ccSlice = filterPresetTheme(pickZoneFields(effectivePresetTheme(claude), 'cc')) as Partial<ThemeSettings>
     expect(ccSlice.ccHeight, 'claude 预设里的裸 ccHeight').toBe(76)
-    expect(clampPresetCcHeight(ccSlice), '裸值 != clamp 值，这条断言才不空洞').not.toBe(76)
+    // ★ #266 刀9~11：形态固定 ⇒ 最小高为常量 64。76 在 [64,400] 区间内 ⇒ 原样穿过
+    //   （原先"裸值必被抬高"是因为 peri 形态的下界 84/109，该形态已删除）。
+    expect(clampPresetCcHeight(ccSlice), '区间内原样').toBe(76)
+    expect(clampPresetCcHeight({ ...ccSlice, ccHeight: 0 }), '低于下界必被抬到常量 64').toBe(64)
 
     const assembled = assembleFromRefs(baseState(), claude)
     expect(assembled.ccHeight).toBe(clampPresetCcHeight(ccSlice))

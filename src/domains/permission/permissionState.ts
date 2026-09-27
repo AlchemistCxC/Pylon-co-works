@@ -143,7 +143,13 @@ function reduceSliceAction(
   switch (action.type) {
     case 'choose': {
       if (active.status !== 'pending') return slice
-      if (!active.request.options.some(option => option.optionId === action.optionId)) return slice
+      // #316：elicitation 三值应答（accept/declined/cancel）不经 options 表——
+      // 按白名单放行，否则卡片永远进不了 answering（防抖全失效）。
+      const isElicitation = active.request.interactionKind === 'elicitation'
+      const optionKnown = isElicitation
+        ? ['accept', 'declined', 'cancel'].includes(action.optionId)
+        : active.request.options.some(option => option.optionId === action.optionId)
+      if (!optionKnown) return slice
       return { ...slice, active: { ...active, status: 'answering', chosenOptionId: action.optionId } }
     }
     case 'resolve': {

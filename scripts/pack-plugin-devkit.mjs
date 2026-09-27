@@ -55,7 +55,16 @@ const tsStarter = join(kitRoot, 'starter', 'typescript')
 mkdirSync(tsStarter, { recursive: true })
 cpSync(join(repoRoot, 'examples', 'web-plugins', 'hello-starter', 'src'), join(tsStarter, 'src'), { recursive: true })
 cpSync(join(repoRoot, 'examples', 'web-plugins', 'hello-starter', 'styles'), join(tsStarter, 'styles'), { recursive: true })
-cpSync(join(repoRoot, 'examples', 'web-plugins', 'hello-starter', 'dist'), join(tsStarter, 'dist'), { recursive: true })
+// 预构建 dist 对套件 SDK 现打（与 manager-demo 同一模式）——仓库内
+// examples/*/dist 只是历史快照，直接拷贝会把陈旧内嵌 SDK 带进套件（#343）。
+mkdirSync(join(tsStarter, 'dist'), { recursive: true })
+execFileSync(process.execPath, [
+  join(repoRoot, 'node_modules', 'esbuild', 'bin', 'esbuild'),
+  join(repoRoot, 'examples', 'web-plugins', 'hello-starter', 'src', 'index.ts'),
+  '--bundle', '--format=esm', '--platform=browser',
+  `--alias:@pylon/plugin-sdk=${join(sdkOut, 'pylon-plugin-sdk.js').replaceAll('\\', '/')}`,
+  `--outfile=${join(tsStarter, 'dist', 'index.js').replaceAll('\\', '/')}`,
+], { cwd: repoRoot, stdio: 'inherit' })
 writeFileSync(join(tsStarter, 'pylon-plugin.json'), JSON.stringify({
   $schema: '../../sdk/pylon-plugin-manifest.schema.json',
   schema: 1, id: 'starter.hello', name: 'Starter Hello', version: '1.0.0',

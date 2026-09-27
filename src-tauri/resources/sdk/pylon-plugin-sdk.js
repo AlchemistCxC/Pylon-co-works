@@ -45,8 +45,8 @@ var HOOK_TIMEOUT_BUDGET_MS = Object.freeze(
 
 // src/plugin-runtime/packageManifest.ts
 var PYLON_PLUGIN_API_MIN = "1.0";
-var PYLON_PLUGIN_API_LATEST = "2.3";
-var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", "1.2", "1.3", "2.0", "2.1", "2.2", PYLON_PLUGIN_API_LATEST];
+var PYLON_PLUGIN_API_LATEST = "2.4";
+var PYLON_PLUGIN_API_SUPPORTED = [PYLON_PLUGIN_API_MIN, "1.1", "1.2", "1.3", "2.0", "2.1", "2.2", "2.3", PYLON_PLUGIN_API_LATEST];
 var PYLON_PLUGIN_API_VERSION = PYLON_PLUGIN_API_MIN;
 var PYLON_PLUGIN_MANIFEST_FILE = "pylon-plugin.json";
 var PYLON_PLUGIN_CAPABILITIES = ["plugin.management"];
@@ -80,7 +80,7 @@ var HOT_SWAP_MODES = /* @__PURE__ */ new Set([
 ]);
 var API_SUPPORTED_SET = new Set(PYLON_PLUGIN_API_SUPPORTED);
 var CAPABILITY_SET = new Set(PYLON_PLUGIN_CAPABILITIES);
-var API_MINOR_ORDER = { "1.0": 0, "1.1": 1, "1.2": 2, "1.3": 3, "2.0": 4, "2.1": 5, "2.2": 6, "2.3": 7 };
+var API_MINOR_ORDER = { "1.0": 0, "1.1": 1, "1.2": 2, "1.3": 3, "2.0": 4, "2.1": 5, "2.2": 6, "2.3": 7, "2.4": 8 };
 function apiVersionAtLeast(api, minor) {
   const order = typeof api === "string" ? API_MINOR_ORDER[api] : void 0;
   return order !== void 0 && order >= API_MINOR_ORDER[minor];
@@ -202,59 +202,29 @@ function parsePylonPluginManifest(source) {
   return manifest;
 }
 
-// src/plugin-runtime/management/pluginManagementTypes.ts
-var PluginManagementError = class extends Error {
-  constructor(code, pluginId, message) {
-    super(message);
-    this.code = code;
-    this.pluginId = pluginId;
-    this.name = "PluginManagementError";
-  }
-};
+// src/plugin-runtime/sidebar/sidebarSurfaceProtocol.ts
+var SIDEBAR_SURFACE_EVENTS = [
+  /** detail: 会话 id（string）——选中会话 */
+  "host:select-session",
+  /** detail: 无——新建散会话 */
+  "host:create-loose-session",
+  /** detail: 工作区 id（string）——在该工作区内新建会话 */
+  "host:create-workspace-session",
+  /** detail: 会话 id（string）——打开会话设置 */
+  "host:open-session-settings"
+];
 
-// src/plugin-runtime/settings/settingsTargetGrammar.ts
-var NAMESPACES = /* @__PURE__ */ new Set(["theme", "kind", "slot", "suite", "plugin-page", "context-panel"]);
-function validateSettingsTarget(target) {
-  if (!target || !NAMESPACES.has(target.namespace)) throw new Error("Settings target namespace \u975E\u6CD5");
-  if (!target.ownerId.trim()) throw new Error("Settings target ownerId \u4E0D\u80FD\u4E3A\u7A7A");
-  if (!target.fieldKey.trim()) throw new Error("Settings target fieldKey \u4E0D\u80FD\u4E3A\u7A7A");
-  if (target.ownerPluginId !== void 0 && !target.ownerPluginId.trim()) throw new Error("Settings target ownerPluginId \u4E0D\u80FD\u4E3A\u7A7A");
-  return Object.freeze({ ...target });
-}
-function stringifySettingsTarget(target) {
-  const normalized = validateSettingsTarget(target);
-  const encode = (value) => encodeURIComponent(value).replaceAll(".", "%2E");
-  if (normalized.namespace === "theme" && normalized.ownerId === "theme") {
-    return ["theme", encode(normalized.fieldKey)].join(".");
-  }
-  const parts = [normalized.namespace];
-  if (normalized.ownerPluginId !== void 0) parts.push(encode(normalized.ownerPluginId));
-  parts.push(encode(normalized.ownerId), encode(normalized.fieldKey));
-  return parts.join(".");
-}
-function parseSettingsTarget(value) {
-  if (typeof value !== "string" || !value.trim()) return void 0;
-  const parts = value.split(".");
-  const namespace = parts[0];
-  if (!NAMESPACES.has(namespace)) return void 0;
-  try {
-    if (namespace === "theme" && parts.length === 2) {
-      const fieldKey2 = decodeURIComponent(parts[1]);
-      return fieldKey2 ? validateSettingsTarget({ namespace, ownerId: "theme", fieldKey: fieldKey2 }) : void 0;
-    }
-    if (parts.length !== 3 && parts.length !== 4) return void 0;
-    const decode = (part) => decodeURIComponent(part);
-    const ownerPluginId = parts.length === 4 ? decode(parts[1]) : void 0;
-    const ownerPart = parts.length === 4 ? parts[2] : parts[1];
-    const fieldPart = parts.length === 4 ? parts[3] : parts[2];
-    const ownerId = decode(ownerPart);
-    const fieldKey = decode(fieldPart);
-    if (!ownerId || !fieldKey || ownerId === "theme" && namespace === "theme") return void 0;
-    return validateSettingsTarget({ namespace, ownerId, fieldKey, ...ownerPluginId ? { ownerPluginId } : {} });
-  } catch {
-    return void 0;
-  }
-}
+// src/plugin-runtime/context-panel/contextPanelSurfaceProtocol.ts
+var CONTEXT_PANEL_SURFACE_EVENTS = [
+  /** detail: 无——折叠右栏 */
+  "host:collapse",
+  /** detail: 会话 id（string | null）——选中会话；`null` 清除选中 */
+  "host:select-session",
+  /** detail: `{ key: string; value: unknown }`——写面板设置（声明了 schema + 适配器时生效） */
+  "settings:set",
+  /** detail: 设置键（string）——删面板设置 */
+  "settings:remove"
+];
 
 // src/domains/theme/visualSemantics.ts
 var VISUAL_SEMANTIC_ROLE_TOKENS = Object.freeze({
@@ -310,6 +280,16 @@ var VISUAL_SEMANTIC_TOKENS = Object.freeze({
   })
 });
 
+// src/plugin-runtime/management/pluginManagementTypes.ts
+var PluginManagementError = class extends Error {
+  constructor(code, pluginId, message) {
+    super(message);
+    this.code = code;
+    this.pluginId = pluginId;
+    this.name = "PluginManagementError";
+  }
+};
+
 // src/plugin-runtime/storage/pluginStorageContract.ts
 var PLUGIN_STORAGE_BUDGET_BYTES = 1024 * 1024;
 var PluginStorageError = class extends Error {
@@ -321,10 +301,54 @@ var PluginStorageError = class extends Error {
   }
 };
 
-// src/sdk/index.ts
+// src/plugin-runtime/settings/settingsTargetGrammar.ts
+var NAMESPACES = /* @__PURE__ */ new Set(["theme", "kind", "slot", "suite", "plugin-page", "context-panel"]);
+function validateSettingsTarget(target) {
+  if (!target || !NAMESPACES.has(target.namespace)) throw new Error("Settings target namespace \u975E\u6CD5");
+  if (!target.ownerId.trim()) throw new Error("Settings target ownerId \u4E0D\u80FD\u4E3A\u7A7A");
+  if (!target.fieldKey.trim()) throw new Error("Settings target fieldKey \u4E0D\u80FD\u4E3A\u7A7A");
+  if (target.ownerPluginId !== void 0 && !target.ownerPluginId.trim()) throw new Error("Settings target ownerPluginId \u4E0D\u80FD\u4E3A\u7A7A");
+  return Object.freeze({ ...target });
+}
+function stringifySettingsTarget(target) {
+  const normalized = validateSettingsTarget(target);
+  const encode = (value) => encodeURIComponent(value).replaceAll(".", "%2E");
+  if (normalized.namespace === "theme" && normalized.ownerId === "theme") {
+    return ["theme", encode(normalized.fieldKey)].join(".");
+  }
+  const parts = [normalized.namespace];
+  if (normalized.ownerPluginId !== void 0) parts.push(encode(normalized.ownerPluginId));
+  parts.push(encode(normalized.ownerId), encode(normalized.fieldKey));
+  return parts.join(".");
+}
+function parseSettingsTarget(value) {
+  if (typeof value !== "string" || !value.trim()) return void 0;
+  const parts = value.split(".");
+  const namespace = parts[0];
+  if (!NAMESPACES.has(namespace)) return void 0;
+  try {
+    if (namespace === "theme" && parts.length === 2) {
+      const fieldKey2 = decodeURIComponent(parts[1]);
+      return fieldKey2 ? validateSettingsTarget({ namespace, ownerId: "theme", fieldKey: fieldKey2 }) : void 0;
+    }
+    if (parts.length !== 3 && parts.length !== 4) return void 0;
+    const decode = (part) => decodeURIComponent(part);
+    const ownerPluginId = parts.length === 4 ? decode(parts[1]) : void 0;
+    const ownerPart = parts.length === 4 ? parts[2] : parts[1];
+    const fieldPart = parts.length === 4 ? parts[3] : parts[2];
+    const ownerId = decode(ownerPart);
+    const fieldKey = decode(fieldPart);
+    if (!ownerId || !fieldKey || ownerId === "theme" && namespace === "theme") return void 0;
+    return validateSettingsTarget({ namespace, ownerId, fieldKey, ...ownerPluginId ? { ownerPluginId } : {} });
+  } catch {
+    return void 0;
+  }
+}
+
+// src/sdk/runtime.ts
 function definePlugin(module) {
   if (!module || typeof module.activate !== "function") {
-    throw new Error("API 1.0 \u63D2\u4EF6\u5165\u53E3\u5FC5\u987B\u5BFC\u51FA activate");
+    throw new Error("\u63D2\u4EF6\u5165\u53E3\u5FC5\u987B\u5BFC\u51FA activate");
   }
   for (const name of ["prepare", "suspend", "resume", "deactivate"]) {
     if (module[name] !== void 0 && typeof module[name] !== "function") {
@@ -335,6 +359,9 @@ function definePlugin(module) {
 }
 function validatePluginManifest(value) {
   return parsePylonPluginManifest(value);
+}
+function defineManifest(manifest) {
+  return Object.freeze(parsePylonPluginManifest(manifest));
 }
 function createPluginLogger(pluginId) {
   const prefix = `%c[${pluginId}]`;
@@ -446,6 +473,7 @@ function createSettingsSurface(definition) {
   };
 }
 export {
+  CONTEXT_PANEL_SURFACE_EVENTS,
   PLUGIN_STORAGE_BUDGET_BYTES,
   PYLON_PLUGIN_API_LATEST,
   PYLON_PLUGIN_API_MIN,
@@ -455,10 +483,12 @@ export {
   PYLON_PLUGIN_MANIFEST_FILE,
   PluginManagementError,
   PluginStorageError,
+  SIDEBAR_SURFACE_EVENTS,
   VISUAL_SEMANTIC_ROLE_TOKENS,
   VISUAL_SEMANTIC_TOKENS,
   createPluginLogger,
   createSettingsSurface,
+  defineManifest,
   definePlugin,
   parseSettingsTarget,
   stringifySettingsTarget,

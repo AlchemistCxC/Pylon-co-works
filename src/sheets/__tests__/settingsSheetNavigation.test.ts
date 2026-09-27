@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { SETTINGS_SHEET_KIND, openOrFocusSettingsSheet } from '../settingsSheetNavigation.ts'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 

@@ -1,12 +1,10 @@
-import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../../ccLayoutState.ts'
+import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
-import { clampCcHeight, clampInputTypography, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
-import { resolveCcHiddenWidgetIds } from '../cc/widgetDefinitions.ts'
+import { clampCcHeight, clampInputTypography } from '../cc/ccHeightState.ts'
 import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
   type AppearanceCommand,
-  type WorkbenchAppearanceSnapshot,
   type WorkbenchAppearanceStore,
 } from './appearance.ts'
 
@@ -106,15 +104,8 @@ export function reduceAppearanceCommand(
     case 'set-cc-hidden':
       return settleCcHeight({ ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) })
     case 'set-cc-height': {
-      const ccHeight = clampCcHeight(command.height, {
-        inputMode: theme.inputMode,
-        footerLayout: theme.footerLayout,
-        hintMode: theme.cliHintMode,
-        visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-          hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: theme.ccHidden, cliHintMode: theme.cliHintMode }),
-        }),
-        cliOverflowMode: theme.cliOverflowMode,
-      })
+      // ★ #266 刀9~11：形态固定 ⇒ 最小高度为常量，clamp 不再需要形态参数。
+      const ccHeight = clampCcHeight(command.height)
       return settleCcInputBounds({ ...theme, ccHeight }, 'ccHeight')
     }
     case 'update-cc-placement':
@@ -129,15 +120,7 @@ export function reduceAppearanceCommand(
 }
 
 function settleCcHeight(theme: ThemeSettings): ThemeSettings {
-  const ccHeight = clampCcHeight(theme.ccHeight, {
-    inputMode: theme.inputMode,
-    footerLayout: theme.footerLayout,
-    hintMode: theme.cliHintMode,
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: resolveCcHiddenWidgetIds({ ccHidden: theme.ccHidden, cliHintMode: theme.cliHintMode }),
-    }),
-    cliOverflowMode: theme.cliOverflowMode,
-  })
+  const ccHeight = clampCcHeight(theme.ccHeight)
   return { ...theme, ccHeight }
 }
 
@@ -155,8 +138,4 @@ function settleCcInputBounds(theme: ThemeSettings, changedKey: string): ThemeSet
     }
   }
   return settleCcHeight(next)
-}
-
-export function snapshotRevision(snapshot: WorkbenchAppearanceSnapshot): number {
-  return snapshot.revision
 }

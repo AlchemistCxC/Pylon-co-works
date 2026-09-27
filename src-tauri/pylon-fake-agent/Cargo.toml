@@ -1,0 +1,32 @@
+[package]
+name = "pylon-fake-agent"
+version = "0.3.0-AUE"
+edition = "2021"
+description = "Pylon 测试专用假 ACP agent（feature-gated 夹具，不随发行包发布）"
+
+# #382：夹具独立成 crate。依赖面刻意只留 serde_json——它是纯 stdin/stdout 的
+# JSON-RPC 假 agent，不碰生产代码；留在主 crate 当 [[bin]] 时，Cargo 的「包内
+# bin 隐式链接本包 lib」规则会把整棵 Tauri 依赖树拖进编译（CI 实测 405 crate /
+# 5m26s）。迁出后冷编为秒级，且不再需要前端 `../dist` 前置（那是主 crate lib 里
+# `tauri::generate_context!()` 的要求）。
+[dependencies]
+# preserve_order 是**行为契约**，不是优化开关：夹具用 `json!` 字面量按语义顺序构造响应
+# 体（如 `{"sessionUpdate": …, "content": …}`），键序即 wire 字节序。在主 crate 里这是
+# 由其他依赖开启的 serde_json feature（feature 统一），迁出后必须显式声明——否则 Map
+# 退化成 BTreeMap、键序变字典序，golden trace 基线（逐字节比对）与实际输出立刻漂移
+# （#382 实测：cancel.jsonl 第 7 行 `update` 的两个键换位）。不要顺手删。
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# 门控保留（ADR-0005 决定 1 的载体迁移，不反转决定）：default 不开 ⇒ 默认构建与
+# 发行包不含该 bin。本 crate 内该 feature 无副作用，只为 required-features 存在。
+[features]
+test-agent = []
+
+# 显式声明（而非依赖 src/main.rs 自动发现）才能挂 required-features。
+# 不带 feature 时 `cargo build --bin pylon-fake-agent` 报 required-features 错误，
+# 带 feature 时经 `-p pylon-fake-agent` 选择；产物落在 workspace 共享的
+# target/<profile>/pylon-fake-agent(.exe)，测试侧定位器（test_utils.rs）不变。
+[[bin]]
+name = "pylon-fake-agent"
+path = "src/main.rs"
+required-features = ["test-agent"]

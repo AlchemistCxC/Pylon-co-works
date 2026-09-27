@@ -16,7 +16,7 @@
  *   · Rust 按**行级**：`#[cfg(test)]`（含 any/all/not 组合求值）标注的 item 区域在词法层面切出——
  *     词法器处理 raw string（`r#"…"#`，可跨行）、嵌套块注释、char 与生命周期歧义；
  *   · Rust 测试专属文件：父模块中 `#[cfg(test)] mod x;` 声明的文件、`tests/` 目录（集成测试）、
- *     `src-tauri/src/bin/pylon-fake-agent.rs`（test-agent 专属假 agent）。
+ *     `src-tauri/pylon-fake-agent/**`（test-agent 专属假 agent，#382 起为独立 crate）。
  * - 行类型：代码行=非空非纯注释；注释行=整行均为注释；空行=纯空白；行内尾注计入代码行。
  *   跨行字符串/块注释的内部行按内容归类（code/comment），内部纯空行仍为空行（#259 前内部行一律误计空行）。
  * - 工具链（scripts/、tools/、markdown gen+parity、根配置）与排除面一样不计入生产口径，单列存照。
@@ -155,8 +155,8 @@ export function isTestPathTs(path: string): boolean {
 export function isTestPathRust(path: string, rustParentTestMods?: ReadonlySet<string>): boolean {
   if (LANG_BY_EXT[path.slice(path.lastIndexOf('.') + 1)] !== 'rs') return false
   if (/(?:^|\/)tests\//.test(path)) return true
-  // test-agent 专属假 agent：Cargo feature 门控的测试基建，永远不进生产构建。
-  if (path === 'src-tauri/src/bin/pylon-fake-agent.rs') return true
+  // test-agent 专属假 agent（#382 起独立 crate）：Cargo feature 门控的测试基建，永远不进生产构建。
+  if (path.startsWith('src-tauri/pylon-fake-agent/')) return true
   return rustParentTestMods?.has(stemOf(path)) ?? false
 }
 

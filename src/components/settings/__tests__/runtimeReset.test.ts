@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore'
-import { toAgentContextKey } from '../../../agentContext'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
+import { toAgentContextKey } from '../../../domains/agent/agentContext'
 
 describe('runtime reset boundary', () => {
   it('clears session runtime while retaining agent status snapshots', () => {

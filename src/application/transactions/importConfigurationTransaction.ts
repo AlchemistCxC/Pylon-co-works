@@ -5,7 +5,7 @@
  * 统一 rehydrate（profiles/sessions/workspace，不允许多组件各自 reload）→
  * 失败回滚恢复旧值。返回导入成功的 key 列表。
  */
-import { CONFIG_STORAGE_KEYS, type ImportPreflight } from '../../configExportImport'
+import { CONFIG_STORAGE_KEYS, type ImportPreflight } from '../configExportImport'
 import type { TransactionResult } from './transactionResult'
 
 interface StorageLike {

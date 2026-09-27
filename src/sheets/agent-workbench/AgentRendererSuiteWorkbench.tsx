@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { Session } from '../../identityStore.ts'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { RendererSuiteHost } from '../../host/renderer-suite/rendererSuiteHost.ts'
 import { resolveRendererActivation } from '../../plugin-runtime/renderers/rendererActivationResolver.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
@@ -32,19 +32,16 @@ export interface WorkbenchFatalFailure {
   readonly retained?: boolean
 }
 
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
-import { setSessionModel } from '../../components/chat/sessionModel.ts'
-import { setSessionMode } from '../../components/chat/sessionMode.ts'
-import { normalizeSessionMode } from '../../components/chat/sessionModeState.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -90,27 +87,17 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       },
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
       setModel: async (context, modelId) => {
-        await setSessionModel(context, modelId)
-        // The ACP set_model response may be empty (Hermes), so the document needs
-        // the confirmed value published locally. It goes in as a fact, not as a
-        // synthetic session response: that shape replaces the whole
-        // `session.options` surface and silently dropped the mode and reasoning
-        // catalogues (the control center then fell back to its local tables).
-        sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'model', model: modelId }, context.source)
+        await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'model', model: modelId },
+          () => createTauriChatClient().setConfigOption({ ...context, key: 'model', value: modelId }))
       },
       setMode: async (context, modeId) => {
-        await setSessionMode(context, modeId)
-        // Same reason as setModel: an accepted switch may be announced by nobody,
-        // so publish it as a document fact. The value that actually went on the
-        // wire is the normalized one.
-        const confirmed = normalizeSessionMode(modeId)
-        if (confirmed) sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'mode', mode: confirmed }, context.source)
+        await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'mode', mode: modeId },
+          () => createTauriChatClient().setMode({ ...context, mode: modeId }))
       },
       setConfigOption: async (context, key, value) => {
-        await createTauriChatClient().setConfigOption({ agentId: context.agentId, source: context.source, key, value })
-        if (typeof value === 'string' || typeof value === 'boolean') {
-          sessionRuntimeRef.current?.applyLocalSessionFact({ kind: 'option', id: key, value }, context.source)
-        }
+        if (typeof value !== 'string' && typeof value !== 'boolean') throw new Error('config_value_unsupported')
+        await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'option', id: key, value },
+          () => createTauriChatClient().setConfigOption({ ...context, key, value }))
       },
       discardSession: discardAgentWorkbenchSession,
       async openResource(session, resource) {
@@ -159,7 +146,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!sheetAgentId) return
     if (agentProbeFresh(sheetAgentId) || agentProbeInFlight(sheetAgentId)) return
     markProbeInFlight(sheetAgentId, true)
-    createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    createSessionClient({ invoke: tauriInvokeTransport })
       .probeAgentSelectors({ agentId: sheetAgentId })
       .then(snapshot => {
         noteAgentSelectorsSnapshot(sheetAgentId, snapshot)
@@ -255,7 +242,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         key: runtimeErrorKey,
         scope,
         source: 'workbench.runtime',
-        recovery: { kind: 'open-runtime-log', sessionId: session?.id },
         recoveryAction: {
           label: '重试会话恢复',
           run: () => session ? sessionRuntime.bind(session) : undefined,
@@ -530,7 +516,6 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       key,
       scope,
       source: 'renderer-suite',
-      recovery: { kind: 'open-runtime-log', sessionId: session?.id, suiteId: failure.suiteId },
       recoveryAction: { label: '重试 Solid', run: () => retrySolidRef.current() },
     })
   }, [failure, fatal, props.sheet.id, session, session?.id, session?.agentId])
@@ -570,6 +555,12 @@ function ActiveAgentSessionLifecycle(props: {
     // 一次性 event 的终态证据，refresh 用它补出 journal 读漏掉的收敛事实。
     lifecycleRef.current.onCanonicalRefresh = (session, _canonicalRevision, turn) => {
       void props.sessionRuntime.refresh(session, turn)
+    }
+    // #358：复活的协商目录投影成工作台文档的 `session.started`——与建会话路径同构。
+    // 没有这条事实，`WorkbenchDocumentSurface` 的守卫在复活会话上必然失配，model / mode
+    // 目录会以「配置 / 保存 / select」卡片常驻会话下方（且每次重启由 journal 回放重建）。
+    lifecycleRef.current.onSessionLoadResponse = (session, response) => {
+      props.sessionRuntime.applySessionResponse(response, session.id, { syntheticReason: 'session-load-response' })
     }
   }
   const lifecycle = lifecycleRef.current

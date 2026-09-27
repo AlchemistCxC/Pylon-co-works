@@ -23,6 +23,8 @@ export interface Message {
   toolOutput?: string
   toolOutputLines?: number
   running?: boolean
+  interruptedDraft?: boolean
+  draftId?: string
   thoughtStartedAt?: number
   thoughtDurationMs?: number
   /** C01：provider 隐去推理——渲染层据此显示安全占位，不显示正文。 */

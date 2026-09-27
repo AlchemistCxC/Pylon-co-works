@@ -5,7 +5,7 @@ import { createSignal } from 'solid-js'
 import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
-import { ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
+import { AssistantContent, ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
 
 const APPEARANCE: Pick<WorkbenchAppearanceSnapshot,
   'userName' | 'userPrefix' | 'userColor' | 'assistantDot' | 'assistantDotGlyph' | 'assistantDotImage'> = {
@@ -31,6 +31,46 @@ afterEach(() => {
 })
 
 describe('SolidMessageRow', () => {
+  it('finishes only after terminal text stops growing and never replays for a settled row', () => {
+    vi.useFakeTimers()
+    try {
+      const [state, setState] = createSignal({ text: 'live', streaming: true })
+      const result = render(() => <AssistantContent
+        text={state().text}
+        appearance={APPEARANCE}
+        streaming={state().streaming}
+        semanticContent={<span data-testid="stable-content">live</span>}
+      />)
+      const body = result.container.querySelector('.term-assistant-body')
+      const content = result.getByTestId('stable-content')
+      expect(body?.querySelector('.term-stream-sheen')).toHaveAttribute('aria-hidden', 'true')
+      setState({ text: 'live', streaming: false })
+      vi.advanceTimersByTime(300)
+      expect(body?.querySelector('.term-stream-sheen')).not.toBeNull()
+      expect(body?.querySelector('.term-stream-completion')).toBeNull()
+      setState({ text: 'live tail', streaming: false })
+      vi.advanceTimersByTime(439)
+      expect(body?.querySelector('.term-stream-completion')).toBeNull()
+      vi.advanceTimersByTime(1)
+      expect(body?.querySelector('.term-stream-sheen')).toBeNull()
+      expect(body?.querySelector('.term-stream-completion')).toHaveAttribute('aria-hidden', 'true')
+      vi.advanceTimersByTime(760)
+      expect(body?.querySelector('.term-stream-completion')).toBeNull()
+      setState({ text: 'live tail corrected', streaming: false })
+      vi.advanceTimersByTime(500)
+      expect(body?.querySelector('.term-stream-completion')).toBeNull()
+      expect(result.getByTestId('stable-content')).toBe(content)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a history-mounted assistant free of completion motion', () => {
+    const result = render(() => <AssistantContent text="history" appearance={APPEARANCE} streaming={false} />)
+    expect(result.container.querySelector('.term-stream-sheen')).toBeNull()
+    expect(result.container.querySelector('.term-stream-completion')).toBeNull()
+  })
+
   it.each(['wheel', 'touch', 'keyboard'])('inner reasoning respects %s intent inside its 24px sticky band (#74)', async inputKind => {
     const callbacks: (() => void)[] = []
     vi.stubGlobal('requestAnimationFrame', (fn: () => void) => callbacks.push(fn))

@@ -4,7 +4,7 @@
 无 Node、无源码环境使用离线版单文件 runtime。本套件自包含正常版 SDK、
 离线 starter、说明书和自检脚本，解压后即可开始插件开发。
 
-前置条件：一台已安装 **Pylon ≥ 1.4.1** 的机器（插件最终在 Pylon 里启用和验证）。
+前置条件：一台已安装 **Pylon ≥ 0.3.0-AUE** 的机器（插件最终在 Pylon 里启用和验证）。
 
 ## 两套 SDK
 
@@ -99,8 +99,9 @@ await ctx.__commands.execute('your.command.id', { /* args */ })
 
 ## 契约速查
 
-- 清单：`schema: 1`、`api: "1.0" | "1.1" | "1.2"`（1.1 才有 `context.storage`；1.2 才有
-  `capabilities` 能力声明与用户授权）、kind 十选一；
+- 清单：`schema: 1`、`api: "1.0"`–`"1.3"` / `"2.0"`–`"2.4"`（1.1 才有 `context.storage`；1.2 才有
+  `capabilities` 能力声明与用户授权；2.0 起左栏贡献按 `region` 注册，allowlist 全表见
+  说明书 §6.11.3）、kind 十选一；
 - 生命周期：`activate` / `deactivate`（可选 `prepare` / `suspend` / `resume`）；
 - 所有副作用（定时器 / 事件监听）走 `context.scope.*`，停用时自动回收；
 - 样式：选择器以插件前缀类名限定，颜色间距用宿主语义 token（§6.4.2）；

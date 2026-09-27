@@ -16,12 +16,19 @@ use agent_client_protocol_schema::v1::{
 
 use super::AcpError;
 use pylon_core::agent_config::McpServersMode;
+use serde::Deserialize as _;
 
-/// session/update 变体（wire 字符串 → 枚举；dispatcher/export 分支依据）。
+/// session/update 变体（dispatcher/export 分支依据）。
+///
+/// #316：分类真源改为官方 schema `SessionUpdate` typed-first
+/// （[`classify_session_update`]），本枚举退化为宿主路由投影；`from_str`
+/// 仅作为 typed 失败后的 raw-fallback（保留 Peri/Hermes 私有别名宽容语义）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionUpdateVariant {
     AgentMessageChunk,
     UserMessageChunk,
+    AgentThoughtChunk,
+    Plan,
     UsageUpdate,
     ToolCall,
     ToolCallUpdate,
@@ -33,12 +40,17 @@ pub enum SessionUpdateVariant {
 
 impl SessionUpdateVariant {
     /// wire 字符串 → 变体；未知变体返回 None（调用方按忽略处理，与旧 `_ => {}` 一致）。
+    /// #316：仅作 [`classify_session_update`] 的 raw-fallback，生产调用方不再直连。
     // #247：固有关联函数（非 FromStr trait——这里不消费 Err 形态），名称沿用原实现。
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
             "agent_message_chunk" => Some(Self::AgentMessageChunk),
             "user_message_chunk" => Some(Self::UserMessageChunk),
+            // Peri 私有别名 agent_reasoning_chunk 与官方 agent_thought_chunk 同义
+            // （state.rs 同表维护）。
+            "agent_thought_chunk" | "agent_reasoning_chunk" => Some(Self::AgentThoughtChunk),
+            "plan" => Some(Self::Plan),
             "usage_update" => Some(Self::UsageUpdate),
             "tool_call" => Some(Self::ToolCall),
             "tool_call_update" => Some(Self::ToolCallUpdate),
@@ -49,6 +61,44 @@ impl SessionUpdateVariant {
             _ => None,
         }
     }
+
+    /// 官方 typed 变体 → 宿主路由投影。`#[non_exhaustive]` 通配臂只接住
+    /// 编译进二进制的 unstable 变体（当前 feature 集下不可达）——归 None，
+    /// 与「未知变体按忽略处理」同一结论。
+    fn from_typed(update: &agent_client_protocol_schema::v1::SessionUpdate) -> Option<Self> {
+        use agent_client_protocol_schema::v1::SessionUpdate as S;
+        Some(match update {
+            S::UserMessageChunk(_) => Self::UserMessageChunk,
+            S::AgentMessageChunk(_) => Self::AgentMessageChunk,
+            S::AgentThoughtChunk(_) => Self::AgentThoughtChunk,
+            S::Plan(_) => Self::Plan,
+            S::UsageUpdate(_) => Self::UsageUpdate,
+            S::ToolCall(_) => Self::ToolCall,
+            S::ToolCallUpdate(_) => Self::ToolCallUpdate,
+            S::SessionInfoUpdate(_) => Self::SessionInfoUpdate,
+            S::ConfigOptionUpdate(_) => Self::ConfigOptionUpdate,
+            S::AvailableCommandsUpdate(_) => Self::AvailableCommandsUpdate,
+            S::CurrentModeUpdate(_) => Self::CurrentModeUpdate,
+            _ => return None,
+        })
+    }
+}
+
+/// session/update 变体分类（#316 单一入口）：官方 schema typed-first，
+/// 解析失败落 raw-fallback（`from_str` 宽容别名）。未知变体返回 None
+/// （调用方按忽略处理——raw payload 照常 publish，与既有行为一致）。
+pub fn classify_session_update(update: &serde_json::Value) -> Option<SessionUpdateVariant> {
+    // 借用式解析：&Value 实现 Deserializer，internally-tagged derive 不做深拷贝
+    // ——dispatcher 每 chunk 一帧的热路径零分配增长（#316 审查采纳）。
+    if let Ok(typed) = agent_client_protocol_schema::v1::SessionUpdate::deserialize(update) {
+        return SessionUpdateVariant::from_typed(&typed);
+    }
+    SessionUpdateVariant::from_str(
+        update
+            .get("sessionUpdate")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    )
 }
 
 fn to_params<T: serde::Serialize>(req: &T, what: &str) -> Result<serde_json::Value, String> {
@@ -184,34 +234,122 @@ pub fn session_set_model_params(
 }
 
 /// Extract and validate sessionId from a session/new response.
+///
+/// #316：typed-first（`NewSessionResponse`）；typed 失败落 raw 路径。三件
+/// 手写守卫**必须保留**——`SessionId` 是透明 String 不做 trim/空串校验，而
+/// Pylon 契约拒绝 trim 后为空与字面 "error" 的回显。
 pub fn session_id_from(response: &serde_json::Value) -> Result<String, AcpError> {
+    let invalid = |session_id: &str| {
+        AcpError::Child(format!(
+            "session/new failed: invalid sessionId {session_id:?}"
+        ))
+    };
+    if let Ok(typed) = serde_json::from_value::<agent_client_protocol_schema::v1::NewSessionResponse>(
+        response.clone(),
+    ) {
+        let session_id = typed.session_id.0.as_ref().trim();
+        if session_id.is_empty() || session_id.eq_ignore_ascii_case("error") {
+            return Err(invalid(session_id));
+        }
+        return Ok(session_id.to_string());
+    }
     let session_id = response
         .get("sessionId")
         .and_then(|value| value.as_str())
         .ok_or_else(|| AcpError::Child(format!("invalid session/new response: {response}")))?
         .trim();
     if session_id.is_empty() || session_id.eq_ignore_ascii_case("error") {
-        return Err(AcpError::Child(format!(
-            "session/new failed: invalid sessionId {session_id:?}"
-        )));
+        return Err(invalid(session_id));
     }
     Ok(session_id.to_string())
 }
 
-/// Validate a session/prompt response and return its stop reason.
-pub fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, AcpError> {
-    let stop_reason = response
+/// session/prompt 响应的合法成功终态（#316 闭式判定表）。
+///
+/// 行为变化（#316 已批准）：`max_tokens` 从 unsupported 错误转正为合法终态；
+/// 未知 stopReason 从硬错误转为 warn + 宽松降级 `EndTurn`（官方规范未来新增
+/// 值不再炸成用户可见失败）。`cancelled`/`refusal` 维持 Err（文案不变）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptStopOutcome {
+    /// end_turn：模型正常收尾。
+    EndTurn,
+    /// max_tokens：达到 token 上限（UI 应提示，非故障）。
+    MaxTokens,
+    /// max_turn_requests：单回合模型请求次数达上限。
+    MaxTurnRequests,
+}
+
+/// Validate a session/prompt response and classify its stop reason.
+///
+/// typed-first：官方 `StopReason` 五变体；解析失败（未知值/非字符串）落
+/// raw-fallback 宽松降级。缺 `stopReason` 字段仍按畸形响应拒绝（文案不变）。
+pub fn prompt_stop_outcome(response: &serde_json::Value) -> Result<PromptStopOutcome, AcpError> {
+    let raw = response
         .get("stopReason")
         .and_then(|value| value.as_str())
-        .ok_or_else(|| AcpError::Child(format!("invalid session/prompt response: {response}")))?
-        .trim();
-    match stop_reason {
-        "end_turn" | "max_turn_requests" => Ok(stop_reason),
-        "cancelled" => Err(AcpError::Child("prompt cancelled".to_string())),
-        "refusal" => Err(AcpError::Child("prompt refused by agent".to_string())),
-        other => Err(AcpError::Child(format!(
-            "unsupported prompt stopReason: {other}"
-        ))),
+        .map(str::trim)
+        .ok_or_else(|| AcpError::Child(format!("invalid session/prompt response: {response}")))?;
+    if raw.is_empty() {
+        // 空白/空串归畸形（#316 审查裁定：非「未知值」，不享宽松降级）。
+        return Err(AcpError::Child(format!(
+            "invalid session/prompt response: {response}"
+        )));
+    }
+    use agent_client_protocol_schema::v1::StopReason as S;
+    if let Ok(typed) = serde_json::from_value::<S>(serde_json::Value::String(raw.to_string())) {
+        return match typed {
+            S::EndTurn => Ok(PromptStopOutcome::EndTurn),
+            S::MaxTokens => Ok(PromptStopOutcome::MaxTokens),
+            S::MaxTurnRequests => Ok(PromptStopOutcome::MaxTurnRequests),
+            S::Refusal => Err(AcpError::Child("prompt refused by agent".to_string())),
+            S::Cancelled => Err(AcpError::Child("prompt cancelled".to_string())),
+            _ => {
+                tracing::warn!(
+                    stop_reason = raw,
+                    "unknown prompt stopReason (typed); treating as end_turn"
+                );
+                Ok(PromptStopOutcome::EndTurn)
+            }
+        };
+    }
+    tracing::warn!(
+        stop_reason = raw,
+        "unknown prompt stopReason; treating as end_turn"
+    );
+    Ok(PromptStopOutcome::EndTurn)
+}
+
+/// 校验 initialize 响应的 protocolVersion 回显（#316）。
+///
+/// 官方契约：agent 回显所支持的版本，或返回自己的最新版；不一致时客户端必须
+/// 断连并告知用户。缺字段按 lenient 放行（warn）——存量非合规 agent 不因
+/// 本校验新增失败；存在且不一致 → 结构化失败（稳定码
+/// `protocol_version_mismatch`，由调用方包装为 `AgentConnectFailure`）。
+pub fn validate_protocol_version(
+    response: &serde_json::Value,
+    requested: u16,
+) -> Result<(), String> {
+    let actual = match response.get("protocolVersion") {
+        None | Some(serde_json::Value::Null) => {
+            tracing::warn!(
+                requested,
+                "initialize response missing protocolVersion; assuming negotiated version"
+            );
+            return Ok(());
+        }
+        // 官方 wire 是整数；数字字符串视为同一信息的非合规格式，比对不放过。
+        Some(serde_json::Value::Number(number)) => number.as_u64(),
+        Some(serde_json::Value::String(text)) => text.trim().parse::<u64>().ok(),
+        Some(_) => None,
+    };
+    match actual {
+        Some(actual) if actual == u64::from(requested) => Ok(()),
+        Some(actual) => Err(format!(
+            "protocol version mismatch: Pylon requested {requested}, agent answered {actual}"
+        )),
+        None => Err(format!(
+            "protocol version mismatch: Pylon requested {requested}, agent sent unparseable protocolVersion"
+        )),
     }
 }
 
@@ -228,7 +366,15 @@ pub fn prompt_blocks(
             limits.max_attachments
         ));
     }
-    let mut blocks = vec![serde_json::json!({"type": "text", "text": text})];
+    // #316：ContentBlock typed 构造（出站形状由 schema 保证，wire 与手写
+    // json! 逐字节一致：{"type":"text","text":..}）。
+    let mut blocks =
+        vec![
+            serde_json::to_value(agent_client_protocol_schema::v1::ContentBlock::Text(
+                agent_client_protocol_schema::v1::TextContent::new(text),
+            ))
+            .map_err(|error| format!("serialize text block: {error}"))?,
+        ];
     for raw_path in attachments {
         let path = std::path::Path::new(raw_path);
         let metadata = std::fs::metadata(path).map_err(|error| {
@@ -270,11 +416,15 @@ pub fn prompt_blocks(
                     "image/png" | "image/jpeg" | "image/gif" | "image/webp"
                 ) =>
             {
-                blocks.push(serde_json::json!({
-                    "type": "image",
-                    "mimeType": mime,
-                    "data": base64::engine::general_purpose::STANDARD.encode(bytes),
-                }));
+                blocks.push(
+                    serde_json::to_value(agent_client_protocol_schema::v1::ContentBlock::Image(
+                        agent_client_protocol_schema::v1::ImageContent::new(
+                            base64::engine::general_purpose::STANDARD.encode(bytes),
+                            mime,
+                        ),
+                    ))
+                    .map_err(|error| format!("serialize image block: {error}"))?,
+                );
             }
             Some(mime) if mime.starts_with("text/") => {
                 let content = String::from_utf8(bytes).map_err(|error| {
@@ -283,12 +433,22 @@ pub fn prompt_blocks(
                         path.display()
                     )
                 })?;
-                blocks.push(serde_json::json!({"type": "text", "text": content}));
+                blocks.push(
+                    serde_json::to_value(agent_client_protocol_schema::v1::ContentBlock::Text(
+                        agent_client_protocol_schema::v1::TextContent::new(content),
+                    ))
+                    .map_err(|error| format!("serialize text block: {error}"))?,
+                );
             }
             None => {
                 let content = String::from_utf8(bytes)
                     .map_err(|_| format!("unsupported attachment type: {}", path.display()))?;
-                blocks.push(serde_json::json!({"type": "text", "text": content}));
+                blocks.push(
+                    serde_json::to_value(agent_client_protocol_schema::v1::ContentBlock::Text(
+                        agent_client_protocol_schema::v1::TextContent::new(content),
+                    ))
+                    .map_err(|error| format!("serialize text block: {error}"))?,
+                );
             }
             Some(mime) => {
                 return Err(format!(
@@ -352,6 +512,13 @@ pub fn resume_params(session_id: &str, cwd: &str) -> Result<serde_json::Value, S
 }
 
 pub fn resume_capability_advertised(capabilities: &serde_json::Value) -> bool {
+    // #316：typed 视图（object → Some、非 object → DefaultOnError → None 拒绝）
+    // 与 raw 判定逐例一致；raw 路径保留为 fallback（registry 原文可能非合规格式）。
+    if let Ok(caps) = serde_json::from_value::<agent_client_protocol_schema::v1::AgentCapabilities>(
+        capabilities.clone(),
+    ) {
+        return caps.session_capabilities.resume.is_some();
+    }
     capabilities
         .get("sessionCapabilities")
         .and_then(|session| session.get("resume"))

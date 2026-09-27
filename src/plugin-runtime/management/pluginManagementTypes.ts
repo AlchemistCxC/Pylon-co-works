@@ -184,6 +184,5 @@ export interface PluginManagementApi {
   installOrUpdate(sourcePath: string): Promise<void>
   installOrUpdateFromZip(zipPath: string): Promise<void>
   installOrUpdateFromUrl(url: string): Promise<void>
-  enterSafeMode(): Promise<void>
   setBuiltinEnabled(pluginId: string, enabled: boolean): Promise<void>
 }

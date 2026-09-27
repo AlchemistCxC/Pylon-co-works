@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import type { AdapterInstance } from '../../infrastructure/tauri/gatewayClient'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 
 // FE-AUD-008：typed client 收口 gateway 域 command literal
-const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+const gatewayClient = createGatewayClient({ invoke: tauriInvokeTransport })
 
 const credentialLabel = (status: AdapterInstance['credentialStatus']): string =>
   status === 'configured' ? '已配置' : status === 'invalid' ? '损坏' : '未配置'
@@ -61,7 +61,6 @@ export default function GatewayRiskPanel() {
           key: 'settings:gateway-risk:instances',
           scope: { kind: 'app', id: 'settings-gateway' },
           source: 'settings.gateway-risk',
-          recovery: { kind: 'open-runtime-log' },
         })
       })
       .finally(() => { if (mountedRef.current) setLoading(false) })

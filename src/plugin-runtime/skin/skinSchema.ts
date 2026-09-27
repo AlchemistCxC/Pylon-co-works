@@ -3,7 +3,9 @@
  *
  * 字段来源：`THEME_FIELD_DEFS`（唯一字段元数据真值）。
  * componentVariants 来源：
- * - `input-bar`：直接取 `THEME_FIELD_DEFS` 中 `inputVariant` 的 options（避免第二张枚举表）；
+ * - `input-bar`：**单值 `['cli']`**（★ #266 刀9：输入形态固定命令行后，原先那条
+ *   「取 `THEME_FIELD_DEFS.inputVariant.options`」的来源字段已删除 ⇒ 显式落成单值，
+ *   皮肤契约形状与校验行为不变：`'cli'` 合法、其它值报 `invalid-option`）；
  * - `message`：来自 `components/chat/messageTypes.ts` 的 `MESSAGE_ROLES`；
  * - `tool-call`：来自 `domains/tool/status.ts` 的 `TOOL_VISUAL_STATES`。
  * surfaces：当前源码尚无 `data-pylon-surface` 真值；本阶段先输出最小稳定集合，
@@ -85,7 +87,7 @@ function buildFields(): Record<string, SkinFieldSchema> {
 }
 
 function buildComponentVariants(): Record<string, string[]> {
-  const inputBarOptions = THEME_FIELD_DEFS.inputVariant.options ?? []
+  const inputBarOptions = ['cli']
   return {
     'input-bar': [...inputBarOptions],
     'message': [...MESSAGE_ROLES],

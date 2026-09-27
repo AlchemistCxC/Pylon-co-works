@@ -67,18 +67,12 @@ pub enum TurnTerminalCause {
     IdleTimeout,
     /// cancel 已发出但 settle 窗口内未收到终态。
     CancelSettleTimeout,
-    /// stdin 写超时（agent 存活但不读 stdin）。
-    ///
-    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
-    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
-    /// 收敛裁除时摘除。
-    #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
-    WriterTimeout,
     /// stdin 写失败（EPIPE 等）。
     ///
-    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败/超时现经
-    /// `CrashReason` + ConnectionLost 收敛，未映射到账本终因；接线或词表
-    /// 收敛裁除时摘除。
+    /// 预留（#99 词表，仅测试构造锁定 wire code）：writer 失败现经
+    /// `CrashReason::WriterFailed` + ConnectionLost 收敛，未映射到账本终因；
+    /// 接线或词表收敛裁除时摘除。`WriterTimeout` 已随 #348 A1 词表收敛裁除
+    /// （无写超时语义即无产生点）。
     #[allow(dead_code)] // 预留：writer 结算映射到账本终因时摘除
     WriterFailed,
     /// 连接关闭 / EOF / 引擎任务消失。
@@ -106,7 +100,6 @@ impl TurnTerminalCause {
             Self::FirstTokenTimeout => "first_token_timeout",
             Self::IdleTimeout => "idle_timeout",
             Self::CancelSettleTimeout => "cancel_settle_timeout",
-            Self::WriterTimeout => "writer_timeout",
             Self::WriterFailed => "writer_failed",
             Self::ConnectionLost => "connection_lost",
             Self::ProtocolError => "protocol_error",
@@ -176,6 +169,9 @@ pub struct TurnRecord {
     pub saw_text: bool,
     /// 本 turn 是否观测到 live 工具调用（empty-turn 判定输入）。
     pub saw_tool: bool,
+    /// 本 turn 是否观测到 live 思考流（#316：thinking-only 回合算有产出，
+    /// 不再误判 agent-empty）。
+    pub saw_thinking: bool,
 }
 
 /// [`TurnKey`] 的可序列化快照形态。
@@ -219,14 +215,40 @@ pub enum SettleOutcome {
 
 /// turn 终态账本（per-agent runtime 一份）。
 ///
-/// 内部为 `Mutex<HashMap<TurnKey, TurnRecord>>`；所有操作锁内完成、锁外返回
-/// clone，避免把账本锁跨越 await（与 runtime.rs 锁序纪律一致）。
+/// 内部为单 `Mutex` 下的双表：`active`（在途，逐帧热路径命中）与 `terminal`
+/// （CAS 已收敛，终态保留裁剪只作用于本表）。所有操作锁内完成、锁外返回
+/// clone，避免把账本锁跨越 await（与 runtime.rs 锁序纪律一致）；CAS 语义
+/// 依赖「remove 出 active → 写终态 → 插入 terminal」在同一临界区内完成。
+///
+/// #334/P3：`note_session_activity` 每 chunk 只扫 `active` 表（每会话在途
+/// 至多一个，`prompt_gate` 保证）并原地 `values_mut` 更新——不再全表扫、
+/// 不再重建 `TurnKey`（原每 chunk 两次 `to_string()` + 全表 `filter().min()`）。
 /// 内存上界（评审 E8）：settle 内建每会话终态保留裁剪，`drop_generation`
 /// 随代际退出收敛；`late_terminal_events` 为诊断计数（读取面见其方法文档）。
 #[derive(Debug, Default)]
 pub struct TurnLedger {
-    records: Mutex<HashMap<TurnKey, TurnRecord>>,
+    tables: Mutex<LedgerTables>,
     late_terminal_events: AtomicU64,
+}
+
+/// 账本双表（同一 `Mutex` 保护）。
+#[derive(Debug, Default)]
+struct LedgerTables {
+    /// 在途 turn：begin 插入，settle 移出（同一锁内转移，非终态恒在此表）。
+    active: HashMap<TurnKey, TurnRecord>,
+    /// 已终态 turn：受 `TERMINAL_RETENTION_PER_SESSION` 裁剪约束。
+    terminal: HashMap<TurnKey, TurnRecord>,
+}
+
+/// #99/#316：empty-turn 判定的活动标志（文本/工具/思考三 bit，可叠加）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ActivityFlags {
+    /// 观测到 live 正文 chunk。
+    pub saw_text: bool,
+    /// 观测到 live 工具调用/更新。
+    pub saw_tool: bool,
+    /// 观测到 live 思考流（thinking-only 回合算有产出）。
+    pub saw_thinking: bool,
 }
 
 impl TurnLedger {
@@ -245,23 +267,26 @@ impl TurnLedger {
 
     /// 登记一个新 turn（Prompting 起点）。同一 key 重复 begin 幂等返回
     /// `AlreadyActive`（不重置已登记状态——原始 begin 的时间戳与阶段保持）。
+    /// key 已在终态表（同 turn_id 重新 begin）同样按协议异常幂等拒绝。
     pub fn begin(&self, key: TurnKey, started_at_ms: u64) -> BeginOutcome {
-        let mut records = self.lock();
-        match records.entry(key.clone()) {
-            std::collections::hash_map::Entry::Occupied(_) => BeginOutcome::AlreadyActive,
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(TurnRecord {
-                    key: key.snapshot(),
-                    phase: TurnPhase::Prompting,
-                    started_at_ms,
-                    terminal: None,
-                    last_ingress_seq: 0,
-                    saw_text: false,
-                    saw_tool: false,
-                });
-                BeginOutcome::Started
-            }
+        let mut tables = self.lock();
+        if tables.active.contains_key(&key) || tables.terminal.contains_key(&key) {
+            return BeginOutcome::AlreadyActive;
         }
+        tables.active.insert(
+            key.clone(),
+            TurnRecord {
+                key: key.snapshot(),
+                phase: TurnPhase::Prompting,
+                started_at_ms,
+                terminal: None,
+                last_ingress_seq: 0,
+                saw_text: false,
+                saw_tool: false,
+                saw_thinking: false,
+            },
+        );
+        BeginOutcome::Started
     }
 
     /// 推进阶段。Streaming/Settling 只能向前，不能从终态回退；未知 turn 静默
@@ -272,8 +297,8 @@ impl TurnLedger {
     /// 生产调用方出现时摘除 `#[cfg(test)]`。
     #[cfg(test)]
     pub fn advance(&self, key: &TurnKey, phase: TurnPhase) {
-        let mut records = self.lock();
-        if let Some(record) = records.get_mut(key) {
+        let mut tables = self.lock();
+        if let Some(record) = tables.active.get_mut(key) {
             if record.terminal.is_some() {
                 return;
             }
@@ -286,45 +311,39 @@ impl TurnLedger {
     }
 
     /// 会话作用域的活动推进（dispatcher 用：不持有 turn_id，命中该会话在途的
-    /// 唯一 turn）——刷新 ingress cursor / 文本与工具标志，并把阶段推进到
-    /// Streaming。多活跃 turn（理论竞态）时取 turn_id 最小者，与
-    /// `settle_by_session` 的选择语义一致（评审 E9）。
+    /// 唯一 turn）——刷新 ingress cursor / [`ActivityFlags`] 标志（#316 加思考
+    /// 位），并把阶段推进到 Streaming。多活跃 turn（理论竞态）时取 turn_id
+    /// 最小者，与 `settle_by_session` 的选择语义一致（评审 E9）。
     /// 返回是否命中在途 turn（false = 回合未登记或已终态，迟到活动只算诊断）。
+    ///
+    /// #334/P3：只扫 active 表单遍 `values_mut` 原地更新——终态记录已移出
+    /// （不需 `terminal.is_none()` 过滤）、命中即改（不再重建 `TurnKey` 二次查表）。
     pub fn note_session_activity(
         &self,
         local_session_id: &str,
         remote_session_id: &str,
         generation: u64,
         ingress_seq: u64,
-        saw_text: bool,
-        saw_tool: bool,
+        flags: ActivityFlags,
     ) -> bool {
-        let mut records = self.lock();
-        let target = records
-            .values()
+        let mut tables = self.lock();
+        let target = tables
+            .active
+            .values_mut()
             .filter(|record| {
-                record.terminal.is_none()
-                    && record.key.local_session_id == local_session_id
+                record.key.local_session_id == local_session_id
                     && record.key.remote_session_id == remote_session_id
                     && record.key.generation == generation
             })
-            .map(|record| record.key.turn_id)
-            .min();
+            .min_by_key(|record| record.key.turn_id);
         match target {
-            Some(turn_id) => {
-                let key = TurnKey {
-                    local_session_id: local_session_id.to_string(),
-                    remote_session_id: remote_session_id.to_string(),
-                    generation,
-                    turn_id,
-                };
-                if let Some(record) = records.get_mut(&key) {
-                    record.last_ingress_seq = record.last_ingress_seq.max(ingress_seq);
-                    record.saw_text |= saw_text;
-                    record.saw_tool |= saw_tool;
-                    if phase_rank(record.phase) < phase_rank(TurnPhase::Streaming) {
-                        record.phase = TurnPhase::Streaming;
-                    }
+            Some(record) => {
+                record.last_ingress_seq = record.last_ingress_seq.max(ingress_seq);
+                record.saw_text |= flags.saw_text;
+                record.saw_tool |= flags.saw_tool;
+                record.saw_thinking |= flags.saw_thinking;
+                if phase_rank(record.phase) < phase_rank(TurnPhase::Streaming) {
+                    record.phase = TurnPhase::Streaming;
                 }
                 true
             }
@@ -345,25 +364,35 @@ impl TurnLedger {
         settled_at_ms: u64,
         detail: Option<String>,
     ) -> SettleOutcome {
-        let mut records = self.lock();
-        match records.get_mut(key) {
-            Some(record) => {
-                if let Some(terminal) = &record.terminal {
-                    self.late_terminal_events.fetch_add(1, Ordering::Relaxed);
-                    return SettleOutcome::Late {
-                        existing: terminal.cause.clone(),
-                    };
-                }
+        let mut tables = self.lock();
+        // CAS 语义（#334/P3 拆表后保持）：remove 出 active → 写终态 → 插入
+        // terminal 全在同一临界区内；不在 active 表则在 terminal 表查迟到终态。
+        match tables.active.remove(key) {
+            Some(mut record) => {
                 record.terminal = Some(TurnTerminal {
                     cause,
                     settled_at_ms,
                     detail,
                 });
                 record.phase = TurnPhase::Terminal;
-                Self::prune_terminal_retention(&mut records, key);
+                tables.terminal.insert(key.clone(), record);
+                Self::prune_terminal_retention(&mut tables.terminal, key);
                 SettleOutcome::Published
             }
-            None => SettleOutcome::UnknownTurn,
+            None => match tables.terminal.get(key) {
+                Some(record) => {
+                    self.late_terminal_events.fetch_add(1, Ordering::Relaxed);
+                    SettleOutcome::Late {
+                        existing: record
+                            .terminal
+                            .as_ref()
+                            .expect("terminal 表内记录必已收敛")
+                            .cause
+                            .clone(),
+                    }
+                }
+                None => SettleOutcome::UnknownTurn,
+            },
         }
     }
 
@@ -371,7 +400,7 @@ impl TurnLedger {
     /// 余量供诊断对比）。
     const TERMINAL_RETENTION_PER_SESSION: usize = 8;
 
-    /// 裁剪同会话三元组下超量的旧终态记录（settle 锁内调用）。
+    /// 裁剪同会话三元组下超量的旧终态记录（settle 锁内调用，只作用于 terminal 表）。
     ///
     /// just-settled 永不参与裁剪候选（评审 P2-2）：墙钟回拨时它的
     /// `settled_at_ms` 可能小于存量终态，若参排会被误判为最旧而即时丢失
@@ -379,14 +408,13 @@ impl TurnLedger {
     /// `TERMINAL_RETENTION_PER_SESSION` 条**含 just-settled**——候选为存量
     /// 终态，超出容纳空间时从最旧开始裁剪，为其腾位。
     fn prune_terminal_retention(
-        records: &mut HashMap<TurnKey, TurnRecord>,
+        terminal: &mut HashMap<TurnKey, TurnRecord>,
         just_settled: &TurnKey,
     ) {
-        let mut terminals: Vec<(u64, u64)> = records
+        let mut stale_candidates: Vec<(u64, u64)> = terminal
             .iter()
-            .filter(|(key, record)| {
+            .filter(|(key, _)| {
                 key.turn_id != just_settled.turn_id
-                    && record.terminal.is_some()
                     && key.local_session_id == just_settled.local_session_id
                     && key.remote_session_id == just_settled.remote_session_id
                     && key.generation == just_settled.generation
@@ -396,22 +424,25 @@ impl TurnLedger {
                     record
                         .terminal
                         .as_ref()
-                        .map(|t| t.settled_at_ms)
+                        .map(|terminal| terminal.settled_at_ms)
                         .unwrap_or(0),
                     key.turn_id,
                 )
             })
             .collect();
         // candidates + just_settled 的总数须 ≤ 上界；超出即从最旧候选裁起。
-        let excess = (terminals.len() + 1).saturating_sub(Self::TERMINAL_RETENTION_PER_SESSION);
+        let excess =
+            (stale_candidates.len() + 1).saturating_sub(Self::TERMINAL_RETENTION_PER_SESSION);
         if excess == 0 {
             return;
         }
         // 最旧优先（时间戳同毫秒时以 turn_id 定序，保证确定性）。
-        terminals.sort_unstable_by_key(|(at, id)| (*at, *id));
-        let stale_ids: std::collections::HashSet<u64> =
-            terminals[..excess].iter().map(|(_, id)| *id).collect();
-        records.retain(|key, _| {
+        stale_candidates.sort_unstable_by_key(|(at, id)| (*at, *id));
+        let stale_ids: std::collections::HashSet<u64> = stale_candidates[..excess]
+            .iter()
+            .map(|(_, id)| *id)
+            .collect();
+        terminal.retain(|key, _| {
             !(key.local_session_id == just_settled.local_session_id
                 && key.remote_session_id == just_settled.remote_session_id
                 && key.generation == just_settled.generation
@@ -437,10 +468,14 @@ impl TurnLedger {
         settled_at_ms: u64,
         detail: Option<String>,
     ) -> SettleOutcome {
+        // 与原全表选择语义逐一对照：候选含在途与终态（终态命中走 Late），
+        // 取 turn_id 最小者。
         let target = {
-            let records = self.lock();
-            records
+            let tables = self.lock();
+            tables
+                .active
                 .keys()
+                .chain(tables.terminal.keys())
                 .filter(|key| {
                     key.local_session_id == local_session_id
                         && key.remote_session_id == remote_session_id
@@ -457,7 +492,12 @@ impl TurnLedger {
 
     /// 快照：指定 turn 的当前记录（冷挂载/诊断只读投影）。
     pub fn snapshot(&self, key: &TurnKey) -> Option<TurnRecord> {
-        self.lock().get(key).cloned()
+        let tables = self.lock();
+        tables
+            .active
+            .get(key)
+            .cloned()
+            .or_else(|| tables.terminal.get(key).cloned())
     }
 
     /// 快照：某会话「在途优先、否则最近终态」的单条 turn 记录（冷挂载数据面）。
@@ -471,24 +511,26 @@ impl TurnLedger {
         remote_session_id: &str,
         generation: u64,
     ) -> Option<TurnRecord> {
-        let records = self.lock();
-        let candidates: Vec<&TurnRecord> = records
+        let tables = self.lock();
+        let active = tables
+            .active
             .values()
             .filter(|record| {
                 record.key.local_session_id == local_session_id
                     && record.key.remote_session_id == remote_session_id
                     && record.key.generation == generation
             })
-            .collect();
-        let active = candidates
-            .iter()
-            .filter(|record| record.terminal.is_none())
             .min_by_key(|record| record.key.turn_id);
         match active {
-            Some(record) => Some((*record).clone()),
-            None => candidates
-                .iter()
-                .filter(|record| record.terminal.is_some())
+            Some(record) => Some(record.clone()),
+            None => tables
+                .terminal
+                .values()
+                .filter(|record| {
+                    record.key.local_session_id == local_session_id
+                        && record.key.remote_session_id == remote_session_id
+                        && record.key.generation == generation
+                })
                 .max_by_key(|record| {
                     record
                         .terminal
@@ -496,7 +538,7 @@ impl TurnLedger {
                         .map(|terminal| terminal.settled_at_ms)
                         .unwrap_or(0)
                 })
-                .map(|record| (*record).clone()),
+                .cloned(),
         }
     }
 
@@ -504,16 +546,23 @@ impl TurnLedger {
     /// 返回被清理的条目数（诊断）。
     /// (#260-B7) 单遍 retain 替代「收集 keys 再逐个 remove」的两遍遍历，同删除集。
     pub fn drop_generation(&self, generation: u64) -> usize {
-        let mut records = self.lock();
-        let before = records.len();
-        records.retain(|key, _| key.generation != generation);
-        before - records.len()
+        let mut tables = self.lock();
+        let before = tables.active.len() + tables.terminal.len();
+        tables.active.retain(|key, _| key.generation != generation);
+        tables
+            .terminal
+            .retain(|key, _| key.generation != generation);
+        let after = tables.active.len() + tables.terminal.len();
+        before - after
     }
 
     #[cfg(test)]
     fn snapshot_records_for_test(&self, local: &str, remote: &str, generation: u64) -> Vec<u64> {
-        self.lock()
+        let tables = self.lock();
+        tables
+            .active
             .values()
+            .chain(tables.terminal.values())
             .filter(|record| {
                 record.key.local_session_id == local
                     && record.key.remote_session_id == remote
@@ -523,8 +572,8 @@ impl TurnLedger {
             .collect()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<TurnKey, TurnRecord>> {
-        self.records
+    fn lock(&self) -> std::sync::MutexGuard<'_, LedgerTables> {
+        self.tables
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -541,8 +590,10 @@ fn phase_rank(phase: TurnPhase) -> u8 {
 
 /// 从 session/prompt 响应 result 推导终态 cause（纯函数，供 prompt 路径与测试共用）。
 ///
-/// 与 `prompt_stop_reason` 的接受集对齐：end_turn / max_turn_requests 是协议级
-/// 成功；refusal / cancelled 是协议级提前终止；其余/缺失 = protocol error。
+/// 与 `prompt_stop_outcome` 的判定表对齐（#316）：end_turn / max_tokens /
+/// max_turn_requests 是协议级成功（max_tokens 达上限也是合法终态，UI 凭
+/// done 载荷里的 stopReason 区分提示）；refusal / cancelled 是协议级提前
+/// 终止；其余/缺失 = protocol error。
 pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerminalCause {
     let stop_reason = result
         .get("stopReason")
@@ -550,6 +601,7 @@ pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerm
         .map(str::trim);
     match stop_reason {
         Some("end_turn") => TurnTerminalCause::Completed,
+        Some("max_tokens") => TurnTerminalCause::Completed,
         Some("max_turn_requests") => TurnTerminalCause::MaxTurn,
         Some("cancelled") => TurnTerminalCause::Cancelled,
         Some("refusal") => TurnTerminalCause::Refusal,
@@ -560,14 +612,17 @@ pub fn terminal_cause_from_prompt_result(result: &serde_json::Value) -> TurnTerm
 /// empty-turn cause 推导（纯函数）。
 ///
 /// 优先级：agent 明确取消/拒绝 → 它们本身就是"无文本"的权威解释；否则有工具
-/// 无文本 = tool-only（合法成功）；完全无产出 = agent-empty；把本函数用在
-/// 不代表"成功收尾"的终态上属于调用方契约破坏，防御性归 unknown（不猜）。
+/// 无文本 = tool-only（合法成功）；有思考流无文本 = 同样算有产出（#316：
+/// thinking-only 回合判 completed，不再误报 agent-empty）；完全无产出 =
+/// agent-empty；把本函数用在不代表"成功收尾"的终态上属于调用方契约破坏，
+/// 防御性归 unknown（不猜）。
 pub fn empty_turn_cause(
     terminal: &TurnTerminalCause,
     saw_text: bool,
     saw_tool: bool,
+    saw_thinking: bool,
 ) -> Option<EmptyTurnCause> {
-    if saw_text {
+    if saw_text || saw_thinking {
         return None;
     }
     match terminal {
@@ -725,8 +780,26 @@ mod tests {
         let ledger = ledger();
         let k = key(9);
         ledger.begin(k.clone(), 0);
-        ledger.note_session_activity("local:s1", "peri-s1", 1, 5, true, false);
-        ledger.note_session_activity("local:s1", "peri-s1", 1, 3, false, true); // 乱序 cursor 不回退
+        ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            5,
+            ActivityFlags {
+                saw_text: true,
+                ..Default::default()
+            },
+        );
+        ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            3,
+            ActivityFlags {
+                saw_tool: true,
+                ..Default::default()
+            },
+        ); // 乱序 cursor 不回退
         let record = ledger.snapshot(&k).unwrap();
         assert_eq!(record.last_ingress_seq, 5);
         assert!(record.saw_text);
@@ -823,28 +896,51 @@ mod tests {
     fn empty_turn_cause_prioritizes_tool_only_and_agent_states() {
         // 有文本 → 不是空回合
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, true, false),
+            empty_turn_cause(&TurnTerminalCause::Completed, true, false, false),
             None
         );
         // 有工具无文本 → tool-only
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, false, true),
+            empty_turn_cause(&TurnTerminalCause::Completed, false, true, false),
             Some(EmptyTurnCause::ToolOnly)
         );
         // 取消/拒绝本身解释了空文本
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Cancelled, false, false),
+            empty_turn_cause(&TurnTerminalCause::Cancelled, false, false, false),
             Some(EmptyTurnCause::Cancelled)
         );
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Refusal, false, false),
+            empty_turn_cause(&TurnTerminalCause::Refusal, false, false, false),
             Some(EmptyTurnCause::Refusal)
         );
         // 完全无产出 → agent-empty
         assert_eq!(
-            empty_turn_cause(&TurnTerminalCause::Completed, false, false),
+            empty_turn_cause(&TurnTerminalCause::Completed, false, false, false),
             Some(EmptyTurnCause::AgentEmpty)
         );
+        // #316：只有思考流也算有产出 → 不是空回合
+        assert_eq!(
+            empty_turn_cause(&TurnTerminalCause::Completed, false, false, true),
+            None
+        );
+    }
+
+    #[test]
+    fn note_session_activity_ors_thinking_flag() {
+        let ledger = ledger();
+        ledger.begin(key(7), 0);
+        assert!(ledger.note_session_activity(
+            "local:s1",
+            "peri-s1",
+            1,
+            1,
+            ActivityFlags {
+                saw_thinking: true,
+                ..Default::default()
+            }
+        ));
+        let record = ledger.snapshot(&key(7)).expect("turn must be tracked");
+        assert!(!record.saw_text && !record.saw_tool && record.saw_thinking);
     }
 
     #[test]

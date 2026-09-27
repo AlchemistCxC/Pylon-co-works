@@ -546,6 +546,48 @@ fn established_options_unchanged(
 }
 
 /// 从建立/恢复响应里提取权威 configOptions envelope（camel/snake 双形）。
+/// Journal projection only: retain legacy selector catalogues alongside standard
+/// options. Do not use this synthesized list to infer outbound ACP methods.
+pub(crate) fn response_projection_options(response: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut options = response_config_options(response);
+    for (kind, state_key, choices_key, current_key) in [
+        ("model", "models", "availableModels", "currentModelId"),
+        ("mode", "modes", "availableModes", "currentModeId"),
+    ] {
+        if super::find_config_option(&options, kind).is_some() {
+            continue;
+        }
+        let selection = response.get(state_key).unwrap_or(response);
+        let snake_choices = if kind == "model" {
+            "available_models"
+        } else {
+            "available_modes"
+        };
+        let snake_current = if kind == "model" {
+            "current_model_id"
+        } else {
+            "current_mode_id"
+        };
+        let choices = selection
+            .get(choices_key)
+            .or_else(|| selection.get(snake_choices))
+            .and_then(serde_json::Value::as_array);
+        let current = selection
+            .get(current_key)
+            .or_else(|| selection.get(snake_current));
+        if choices.is_none() && current.is_none() {
+            continue;
+        }
+        let mut option = serde_json::json!({"id":kind,"name":kind,"category":kind,"type":"select",
+            "options":choices.cloned().unwrap_or_default(),"_meta":{"pylonLegacySelector":true}});
+        if let Some(value) = current {
+            option["currentValue"] = value.clone();
+        }
+        options.push(option);
+    }
+    options
+}
+
 pub(crate) fn response_config_options(response: &serde_json::Value) -> Vec<serde_json::Value> {
     response
         .get("configOptions")
@@ -638,22 +680,50 @@ fn plan_initial_model(
     }
 }
 
+/// #335/U1b（期票兑现）：建会话装配参数的共享域——`apply_initial_session_options`
+/// / `create_session_slot` / `ensure_session_mapping` / `revive_session_slot` 四个
+/// 装配函数的公共参数面（state/runtime/source/profile/persona/cwd/mcp servers）
+/// 收敛于此，取代原 9/12/9 参的逐参手抄。`new_session` 是 Tauri command（参数即
+/// wire 面，契约不动），仅在命令体内装配本结构体后调用内部装配函数。
+pub(crate) struct SessionAssembly<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) runtime: &'a Arc<AgentRuntime>,
+    /// 本地会话源（sessions 映射键，runtime 内唯一）。
+    pub(crate) source: &'a str,
+    /// GUI profile 声明维（平台自动会话为 None）。
+    pub(crate) profile_id: Option<&'a str>,
+    pub(crate) persona: &'a str,
+    pub(crate) session_cwd: &'a str,
+    pub(crate) wire_mcp_servers: &'a [serde_json::Value],
+}
+
+/// 空态控制中心的初始可选值（model/reasoning/mode；全 None = 不下发任何选项）。
+#[derive(Debug, Clone, Copy, Default)]
+struct InitialSessionOptions<'a> {
+    model: Option<&'a str>,
+    reasoning: Option<&'a str>,
+    mode: Option<&'a str>,
+}
+
 /// Apply the optional values selected in the empty-state control center.  The
 /// operation is intentionally atomic from the caller's perspective: a failed
 /// setting RPC is returned so the newly-created remote session can be closed
 /// before any local mapping is published.
 async fn apply_initial_session_options(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
+    assembly: &SessionAssembly<'_>,
     peri_id: &str,
     generation: u64,
     response: &mut serde_json::Value,
-    initial_model: Option<&str>,
-    initial_reasoning: Option<&str>,
-    initial_mode: Option<&str>,
+    options: InitialSessionOptions<'_>,
 ) -> Result<(), PylonError> {
-    if let Some(model) = initial_model
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        ..
+    } = *assembly;
+    if let Some(model) = options
+        .model
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -739,7 +809,8 @@ async fn apply_initial_session_options(
         }
     }
 
-    if let Some(mode) = initial_mode
+    if let Some(mode) = options
+        .mode
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -761,7 +832,8 @@ async fn apply_initial_session_options(
         );
     }
 
-    if let Some(reasoning) = initial_reasoning
+    if let Some(reasoning) = options
+        .reasoning
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -829,19 +901,20 @@ async fn apply_initial_session_options(
 /// 不持 sessions 锁（V14），await 后 ensure_generation（RPC 后位置不变量）。
 /// "Session creation failed" 日志在本函数内发出（唯一出口）。
 async fn create_session_slot(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
-    profile_id: Option<&str>,
-    persona: &str,
-    session_cwd: &str,
+    assembly: &SessionAssembly<'_>,
     workspace_id: Option<String>,
-    wire_mcp_servers: &[serde_json::Value],
-    initial_model: Option<&str>,
-    initial_reasoning: Option<&str>,
-    initial_mode: Option<&str>,
+    options: InitialSessionOptions<'_>,
     close_replaced: bool,
 ) -> Result<SessionMapping, PylonError> {
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
+        persona,
+        session_cwd,
+        wire_mcp_servers,
+    } = *assembly;
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         if sessions.len() >= crate::agent::runtime::SessionSlotPolicy::default().max_sessions {
@@ -887,19 +960,10 @@ async fn create_session_slot(
     };
     state.ensure_generation(runtime, generation)?;
     let peri_id = crate::acp::session_id_from(&response)?;
-    if initial_model.is_some() || initial_reasoning.is_some() || initial_mode.is_some() {
-        if let Err(error) = apply_initial_session_options(
-            state,
-            runtime,
-            source,
-            &peri_id,
-            generation,
-            &mut response,
-            initial_model,
-            initial_reasoning,
-            initial_mode,
-        )
-        .await
+    if options.model.is_some() || options.reasoning.is_some() || options.mode.is_some() {
+        if let Err(error) =
+            apply_initial_session_options(assembly, &peri_id, generation, &mut response, options)
+                .await
         {
             let _ = close_session_rpc(state, runtime, &peri_id, generation, false).await;
             return Err(error);
@@ -926,7 +990,7 @@ async fn create_session_slot(
             .agent_for_runtime(runtime)
             .and_then(|agent| agent.model)
             .as_deref(),
-        initial_model,
+        options.model,
         Some(response_model.as_str()),
     )
     .map(str::to_string);
@@ -952,7 +1016,7 @@ async fn create_session_slot(
     }
     // #51：建立期选择器面入 journal——重启后打开历史会话时中控区由此恢复
     // model choices / reasoning / mode 候选（空 envelope 不写，见 helper 文档）。
-    let established_options = response_config_options(&response);
+    let established_options = response_projection_options(&response);
     let _ = ingest_established_config_options_event(
         state,
         runtime,
@@ -983,16 +1047,17 @@ async fn create_session_slot(
 /// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
 pub(crate) async fn ensure_session_mapping(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
-    profile_id: Option<&str>,
-    persona: &str,
-    session_cwd: &str,
-    wire_mcp_servers: &[serde_json::Value],
+    assembly: &SessionAssembly<'_>,
     known_peri_id: Option<&str>,
     recreated_peri_id: &mut Option<String>,
 ) -> Result<SessionMapping, PylonError> {
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
+        ..
+    } = *assembly;
     let _creation_guard = runtime.session_creation.lock().await;
     if let Some(health) = runtime
         .binding_health
@@ -1037,17 +1102,7 @@ pub(crate) async fn ensure_session_mapping(
     // 原生 session/load 复活远端会话。复活成功则本消息续用原会话上下文，
     // provider 会话列表不再因每次重启膨胀。
     if let Some(peri_id) = known_peri_id.filter(|id| !id.is_empty()) {
-        if let Some(mapping) = revive_session_slot(
-            state,
-            runtime,
-            source,
-            peri_id,
-            profile_id,
-            session_cwd,
-            wire_mcp_servers,
-        )
-        .await?
-        {
+        if let Some(mapping) = revive_session_slot(assembly, peri_id).await? {
             // #98：revive 成功但远端 identity 变化（server 返回了不同的
             // sessionId）——不得静默复用旧映射。复用 recreated 事件通道显式
             // 广播新 id（前端回写持久化），runtime log 记录 rebind 细节。
@@ -1077,48 +1132,37 @@ pub(crate) async fn ensure_session_mapping(
             return Ok(mapping);
         }
     }
-    let mapping = create_session_slot(
-        state,
-        runtime,
-        source,
-        profile_id,
-        persona,
-        session_cwd,
-        None,
-        wire_mcp_servers,
-        None,
-        None,
-        None,
-        true,
-    )
-    .await?;
+    let mapping =
+        create_session_slot(assembly, None, InitialSessionOptions::default(), true).await?;
     // 上下文已断（远端会话死亡，本轮起是新会话）：前端需要知道新 peri_id
     // 才能持久化并让后续 load 复活这条新会话。
     *recreated_peri_id = Some(mapping.peri_id.clone());
     Ok(mapping)
 }
 
-/// ACP 原生会话复活：session/load（普通 RPC，无 replay capture——历史由本地
-/// canonical journal 呈现，无需重放）成功后重建本地槽位并 Attached。
-/// 返回 Ok(None) = 复活不可行/失败，调用方降级新建；不返回 Err（错误留给
-/// 新建路径统一报告，避免双重报错）。
+/// ACP 原生会话复活：session/load 成功后重建本地槽位并 Attached。
+/// #349 B1：load 与 persist/lifecycle/export 同构走 replay capture——先插
+/// loading 槽（replay_loading=true）再 `begin_replay_capture`，回放帧在传输
+/// 边界被分类为 Replay 并随映射立即解析（不再逐条 100ms 未知会话等待），
+/// 既不进 canonical journal（persist_canonical=false），也不做本地导入：
+/// journal 是唯一 durable 权威，回放内容丢弃，load 响应只用于挂载判定。
+/// resume 通道保持既有裸 RPC（resume 语义是挂靠在途会话，其后帧属 live）。
+/// 返回 Ok(None) = 复活不可行/失败，调用方降级新建；不返回 Err（load 失败
+/// 留给新建路径统一报告，避免双重报错；generation 失配仍按 Err 传播）。
 async fn revive_session_slot(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    source: &str,
+    assembly: &SessionAssembly<'_>,
     peri_id: &str,
-    profile_id: Option<&str>,
-    session_cwd: &str,
-    wire_mcp_servers: &[serde_json::Value],
 ) -> Result<Option<SessionMapping>, PylonError> {
-    let generation = state.current_generation(runtime);
-    let params = crate::acp::load_params(
-        peri_id,
+    let SessionAssembly {
+        state,
+        runtime,
+        source,
+        profile_id,
         session_cwd,
-        wire_mcp_servers.to_vec(),
-        state.protocol_for_runtime(runtime).mcp_servers,
-    )
-    .map_err(PylonError::Protocol)?;
+        wire_mcp_servers,
+        ..
+    } = *assembly;
+    let generation = state.current_generation(runtime);
     // B2/#98：建立通道 = catalog 声明顺序 ∩ 服务端能力广告，真源是协商快照
     // （与 continuity probe、agent_status 消费同一份）。声明侧是 connect 时按
     // provider 解析的 establishment_order（无 profile = 默认 resume→load→new，
@@ -1187,8 +1231,12 @@ async fn revive_session_slot(
     } else {
         None
     };
-    let response = match response {
-        Some(response) => response,
+    // #349 B1：load 臂预插的临时 loading 槽在**外层** generation 检查失败时
+    // 也必须撤销——内层检查（load 响应返回处）与外层检查之间存在多线程交叉
+    // 窗口，Err 从外层 `?` 传播时槽位尚未恢复会持续抑制该 source 的 live 投影。
+    // 故把 `previous` 带出 match，供外层失败路径恢复。
+    let (response, pending_restore) = match response {
+        Some(response) => (response, None),
         None if !establishment_channels
             .contains(&crate::acp::initialize_plan::EstablishmentChannel::Load) =>
         {
@@ -1214,65 +1262,159 @@ async fn revive_session_slot(
             return Ok(None);
         }
         None => {
-            let load_result = state
-                .acp_rpc_generation_checked(
-                    runtime,
-                    crate::acp::METHOD_SESSION_LOAD,
-                    params,
-                    generation,
-                )
-                .await;
-            state.ensure_generation(runtime, generation)?;
-            if let Ok(response) = load_result {
-                tracing::info!(
-                    target: "replay_trace",
-                    owner = source,
-                    runtime_generation = generation,
-                    recovery_method = "load",
-                    result = "success",
-                    response_boundary = "observed",
-                    canonical_import = "none",
-                    "session/load recovery attempt"
-                );
-                response
-            } else {
-                // A3：回退到 `new` 也是回退，必须与 resume 分支一样带上 typed reason；
-                // 旧行为在此丢弃了 load 错误，使 `resume -> load -> new` 链条中
-                // 最后一次回退没有可诊断的原因。
-                tracing::info!(
-                    target: "replay_trace",
-                    owner = source,
-                    runtime_generation = generation,
-                    recovery_method = "new",
-                    result = "fallback",
-                    failed_method = "load",
-                    failure_class = ?load_result.as_ref().err().map(|error| error.recovery_failure_class()),
-                    response_boundary = "error",
-                    canonical_import = "none",
-                    "session/new recovery fallback"
-                );
-                let error = "session resume/load failed";
-                state.log_runtime_summary(
-                    "info",
-                    "session",
-                    Some(source.to_string()),
-                    "Session revive via session/load failed; falling back to session/new",
-                    serde_json::Map::from_iter([
-                        (
-                            "periId".to_string(),
-                            serde_json::Value::String(peri_id.to_string()),
-                        ),
-                        (
-                            "error".to_string(),
-                            serde_json::Value::String(error.to_string()),
-                        ),
-                    ]),
-                );
-                return Ok(None);
+            // #349 B1：与 persist.rs（load_persisted_session）同构——loading 槽
+            // 先入（回放帧经映射立即解析，不再走未知会话 100ms 等待；replay 分
+            // 类帧被 replay_loading 抑制流式转发），capture 锁内原子登记后锁外
+            // 等待。回放帧在传输边界命中 active replay 登记被分类为 Replay，
+            // 不进 canonical journal（persist_canonical=false）。
+            let mut loading_session = SessionInfo::new(
+                peri_id.to_string(),
+                String::new(),
+                session_cwd.to_string(),
+                true,
+                generation,
+            );
+            loading_session.profile_id = profile_id.map(str::to_string);
+            loading_session.replay_loading = true;
+            let previous = replace_session_slot(
+                runtime,
+                source,
+                loading_session,
+                true,
+                crate::agent::runtime::SessionSlotPolicy::default().max_sessions,
+            )?;
+            let handles = match runtime.acp.lock().await.begin_replay_capture(peri_id) {
+                Ok(handles) => handles,
+                Err(error) => {
+                    // 同 owner 已有 load（如 continuity probe 抢先登记）：撤销本次
+                    // 临时槽位后按 revive 失败降级 new（无副作用拒绝路径，同 persist）。
+                    if let Err(restore_error) =
+                        restore_previous_slot(runtime, source, peri_id, generation, previous)
+                    {
+                        tracing::error!(
+                            source,
+                            error = %restore_error,
+                            "failed to roll back rejected revive load slot"
+                        );
+                    }
+                    tracing::info!(
+                        target: "replay_trace",
+                        owner = source,
+                        runtime_generation = generation,
+                        recovery_method = "new",
+                        result = "fallback",
+                        failed_method = "load",
+                        failure_class = ?error.recovery_failure_class(),
+                        response_boundary = "error",
+                        canonical_import = "none",
+                        "session/new recovery fallback"
+                    );
+                    state.log_runtime_summary(
+                        "info",
+                        "session",
+                        Some(source.to_string()),
+                        "Session revive via session/load failed; falling back to session/new",
+                        serde_json::Map::from_iter([
+                            (
+                                "periId".to_string(),
+                                serde_json::Value::String(peri_id.to_string()),
+                            ),
+                            (
+                                "error".to_string(),
+                                serde_json::Value::String(error.to_string()),
+                            ),
+                        ]),
+                    );
+                    return Ok(None);
+                }
+            };
+            // 回放收集与响应等待在锁外进行（同 persist）：load 响应是确定性边界。
+            let load_result = crate::acp::load_session_with_replay(
+                handles,
+                peri_id,
+                session_cwd,
+                wire_mcp_servers.to_vec(),
+                state.protocol_for_runtime(runtime).mcp_servers,
+            )
+            .await;
+            if let Err(error) = state.ensure_generation(runtime, generation) {
+                // generation 失配保持既有 Err 传播语义（revive_tests 断言失败后
+                // 不留槽位），传播前先撤销临时 loading 槽。
+                let _ = restore_previous_slot(runtime, source, peri_id, generation, previous);
+                return Err(error.into());
             }
+            let (response, replay) = match load_result {
+                Ok(result) => result,
+                Err(error) => {
+                    if let Err(restore_error) =
+                        restore_previous_slot(runtime, source, peri_id, generation, previous)
+                    {
+                        tracing::error!(
+                            source,
+                            error = %restore_error,
+                            "failed to roll back failed revive load slot"
+                        );
+                    }
+                    // A3：回退到 `new` 也是回退，必须与 resume 分支一样带上 typed reason；
+                    // 旧行为在此丢弃了 load 错误，使 `resume -> load -> new` 链条中
+                    // 最后一次回退没有可诊断的原因。
+                    tracing::info!(
+                        target: "replay_trace",
+                        owner = source,
+                        runtime_generation = generation,
+                        recovery_method = "new",
+                        result = "fallback",
+                        failed_method = "load",
+                        failure_class = ?error.recovery_failure_class(),
+                        response_boundary = "error",
+                        canonical_import = "none",
+                        "session/new recovery fallback"
+                    );
+                    state.log_runtime_summary(
+                        "info",
+                        "session",
+                        Some(source.to_string()),
+                        "Session revive via session/load failed; falling back to session/new",
+                        serde_json::Map::from_iter([
+                            (
+                                "periId".to_string(),
+                                serde_json::Value::String(peri_id.to_string()),
+                            ),
+                            (
+                                "error".to_string(),
+                                serde_json::Value::String(error.to_string()),
+                            ),
+                        ]),
+                    );
+                    return Ok(None);
+                }
+            };
+            // #349 B1：回放内容丢弃（canonical journal 是唯一 durable 权威，与
+            // persist/lifecycle/export 一致）；仅以响应做挂载判定，观测计数留痕。
+            tracing::info!(
+                target: "replay_trace",
+                owner = source,
+                runtime_generation = generation,
+                recovery_method = "load",
+                result = "success",
+                response_boundary = "observed",
+                capture_lp = "active-replay-registry",
+                observed_count = replay.metadata.boundary.observed_count,
+                dropped_count = replay.metadata.dropped_count,
+                canonical_import = "none",
+                "session/load recovery attempt"
+            );
+            (response, Some(previous))
         }
     };
-    state.ensure_generation(runtime, generation)?;
+    if let Err(error) = state.ensure_generation(runtime, generation) {
+        // 外层 generation 失配：先撤销预插的 loading 槽（若有）再传播——
+        // Err 语义与既有外层 `?` 一致，差异只在槽位恢复。
+        if let Some(previous) = pending_restore {
+            let _ = restore_previous_slot(runtime, source, peri_id, generation, previous);
+        }
+        return Err(error.into());
+    }
     let revived_peri_id =
         crate::acp::session_id_from(&response).unwrap_or_else(|_| peri_id.to_string());
     let mut session = SessionInfo::new(
@@ -1317,7 +1459,7 @@ async fn revive_session_slot(
     // #51：revive 槽位的 new_response 为 None（不向调用方回传响应），前端 document
     // 因此拿不到选择器面——把 load/resume 响应里的 configOptions 写进 journal，
     // 经 live/replay 同通道收敛到 document.session.options。
-    let revived_options = response_config_options(&response);
+    let revived_options = response_projection_options(&response);
     let _ = ingest_established_config_options_event(
         state,
         runtime,
@@ -1363,6 +1505,10 @@ pub(crate) fn restore_previous_slot(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "IPC 契约签名：参数与 wire 面一一对应不可折叠；摘除条件 = 改为 payload 结构体并同步前端调用方"
+)]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -1404,21 +1550,22 @@ pub(crate) async fn new_session(
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
     // G2-04：会话建立收敛——守卫/上限/RPC/构造/插入（notify 唯一出口）/
     // close 旧会话全部收敛进 create_session_slot（close_replaced=true，new_session 语义）。
-    let mapping = create_session_slot(
-        state.inner(),
-        &runtime,
-        &source,
-        Some(&profile_id),
-        &persona,
-        &session_cwd,
-        workspace_id,
-        &mcp_servers,
-        model.as_deref(),
-        reasoning_level.as_deref(),
-        mode.as_deref(),
-        true,
-    )
-    .await?;
+    // #335/U1b：命令 wire 签名不动，内部经装配结构体调用。
+    let assembly = SessionAssembly {
+        state: state.inner(),
+        runtime: &runtime,
+        source: &source,
+        profile_id: Some(&profile_id),
+        persona: &persona,
+        session_cwd: &session_cwd,
+        wire_mcp_servers: &mcp_servers,
+    };
+    let options = InitialSessionOptions {
+        model: model.as_deref(),
+        reasoning: reasoning_level.as_deref(),
+        mode: mode.as_deref(),
+    };
+    let mapping = create_session_slot(&assembly, workspace_id, options, true).await?;
     state.inner().log_runtime_summary(
         "info",
         "session",

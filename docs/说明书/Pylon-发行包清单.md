@@ -13,9 +13,10 @@
 - Agent 检测器；
 - 自带的调试 MCP 服务器（`tools/webview2-mcp/`，2026-09-17 起随包分发）；
 - 前端资源（字体等）；
-- `agents.example.yaml` 和便携模式启动说明；
+- 零 Agent 的 `agents.yaml` 配置模板（#372 起随包：打包时由 `resources/release/agents.template.yaml` 改名收取）和便携模式启动说明；
 - `portable.flag` 与空的 `data/` 目录；
-- 离线插件 SDK（单文件 ESM + manifest schema，不含 testing harness）；
+- 插件开发分发包 `resources/sdk/`（`dist-plugin-sdk/normal` 全量：单文件 ESM runtime + testing harness + `types/` 类型声明 + manifest schema + package.json，2026-09-01 起随包）；
+- 离线文档站 `resources/docs-site/`（#371 起随包：VitePress 离线变体静态产物，应用内 Docs Sheet（`pylon-docs://`）的数据源，与 `docs/说明书/**` markdown 并存）；
 - WebView2 兜底安装引导脚本（运行时按 Windows 自带处理，不再内置安装器——2026-09-19 决定）；
 - 包外的 SHA-256 文件和 manifest。
 
@@ -38,9 +39,13 @@
 | `resources/runtime/git/**` | 可选（`--with-runtime`，Hermes） | 完整 PortableGit；至少应能找到 `bin/bash.exe`、`usr/bin/msys-2.0.dll` 及 `true/cat/mktemp/mv/awk/grep.exe`。默认打包会剔除整个 `resources/runtime/` |
 | `resources/runtime/portable-git.json` | 可选（`--with-runtime`） | PortableGit 版本、来源和 SHA-256 元数据 |
 | `resources/runtime/README.txt` | 可选（`--with-runtime`） | 运行时用途、许可和准备方式说明 |
-| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 离线插件 SDK（单文件浏览器 ESM）：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
-| `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema；与离线 SDK 一起发布 |
-| `agents.example.yaml` | 必须 | 不含真实路径/密钥的配置模板 |
+| `resources/sdk/pylon-plugin-sdk.js` | 必须 | 插件 SDK 单文件 ESM runtime：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
+| `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema |
+| `resources/sdk/testing.js`、`types/**`、`package.json` | 必须 | 插件开发分发包全量其余部分（2026-09-01 起，打包器从 `dist-plugin-sdk/normal` 收集；缺 `pylon-plugin-sdk.js`/`testing.js`/schema 时打包失败） |
+| `resources/docs-site/**` | 必须 | 离线文档站（#371）：`PYLON_DOCS_OFFLINE=1` 构建的 VitePress 静态产物（base 回根、裁 Web 字体，约 2.4 MB），由 `bun run docs:build:offline` 暂存 `src-tauri/resources/docs-site/`、Tauri 资源拷贝带入；缺 `index.html` 时打包失败 |
+| `README.md` | 必须 | 项目说明（仓库根 README，2026-09-01 起随包） |
+| `docs/说明书/**` | 必须 | 全量用户说明书（2026-09-01 起随包） |
+| `agents.yaml` | 必须 | 零 Agent 配置模板（#372 起随包：仓库侧 `resources/release/agents.template.yaml` 打包时改名；包内可直接编辑预置 Agent，#326 的裸启动零 Agent 口径不变——模板不含占位 Agent） |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
 | `portable.flag` | 必须 | 触发便携模式 |
 | `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据 |
@@ -82,12 +87,13 @@ bun run release:portable
 
 `release:portable` 依次完成：
 
-1. 构建前端（`tsc -b` + vite build）；
-2. 生成正常版与离线版 SDK（正常版留在构建目录，离线版由 Tauri 复制到 release resources）；
-3. 构建 Tauri release（不生成安装器；`beforeBuildCommand` 会再执行一次 `bun run build`）；
-4. 构建 `pylon-detect.exe`；
-5. 构建 `tools/webview2-mcp` 的 release 二进制（`cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release`）；
-6. 收集文件、审计、压缩并核对 manifest。打包器会在缺少该 exe 或它的 README 时直接失败——这条能力缺了要到用户真正需要调试时才暴露，所以按构建期错误处理。默认剔除 `resources/runtime/`（PortableGit）；打包器会拒绝缺失、超 64 KiB 或混入 testing/宿主闭包的离线 SDK。
+1. 构建前端（`build:wasm` + `tsc -b` + vite build）；
+2. 生成正常版与离线版 SDK（打包器从正常版 `dist-plugin-sdk/normal` 全量收取进包；离线版仅作构建期 64 KiB 守卫产物，Tauri 打包的最小集被显式跳过）；
+3. 构建离线文档站并暂存（`docs:build:offline`：以 `PYLON_DOCS_OFFLINE=1` 跑 vitepress build，守卫 index.html 存在、无大字体分块、无 Pages 前缀，产物拷入 `src-tauri/resources/docs-site/`——必须在下一步 Tauri 构建之前，资源拷贝才会带上它）；
+4. 构建 Tauri release（不生成安装器；`beforeBuildCommand` 会再执行一次 `bun run build`）；
+5. 构建 `pylon-detect.exe`；
+6. 构建 `tools/webview2-mcp` 的 release 二进制（`cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release`）；
+7. 收集文件、审计、压缩并核对 manifest。打包器会在缺少该 exe 或它的 README、或缺 `resources/docs-site/index.html` 时直接失败——这些能力缺了要到用户真正需要时才暴露，所以按构建期错误处理。默认剔除 `resources/runtime/`（PortableGit）；离线单文件 SDK 的 64 KiB 守卫与 testing/宿主闭包拒绝在 `build:plugin-sdk` 构建期执行，`dist-plugin-sdk/normal` 缺 `pylon-plugin-sdk.js`/`testing.js`/schema 时打包失败。
 
 需要内嵌 PortableGit 的发行，先准备运行时，再对打包脚本加 `--with-runtime`：
 
@@ -100,20 +106,15 @@ python scripts/pack_release.py --with-runtime
 见 ADR-0014）：Runtime 按 Windows 自带处理；包内 `tools/install-webview2.bat` 在系统缺
 WebView2 时联网下载安装器，发布说明无需再区分常规/降级包。
 
-## 4.1 谁来发布（2026-09-18 决定）
+## 4.1 谁来发布（2026-09-22 起，#232：打 tag 即发行）
 
-发行由**本地构建 + 手动上传**完成，CI 不参与自动发布：
+发行由 CI 完成：合并 PR 进 main 后，打 `v<version>` tag 并推送，`.github/workflows/release.yml`
+自动执行版本一致性守卫（tag = `package.json` = `tauri.conf.json`）与 main 归属守卫（tag 必须
+位于 main 之上），随后运行 `bun run release:portable`，把 zip / `.sha256` / `.manifest.json`
+三件资产上传到该 tag 的 Release。本地 `bun run release:portable` 保留为出包与排障手段，不再
+承担发布步骤。
 
-```bash
-bun run release:portable                       # 出 release/pylon-<version>-win64.{zip,sha256,manifest.json}
-gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md> --target <commit>   release/pylon-<version>-win64.zip   release/pylon-<version>-win64.zip.sha256   release/pylon-<version>-win64.manifest.json  # 一并创建 tag 与 release，并上传三件资产
-```
-
-`.github/workflows/release.yml` 现在**只在手动 `workflow_dispatch` 时运行**：它原先还挂
-`push: tags: ['v*']`，于是每次打 tag 都会再构建一遍同一个提交——而资产在打 tag 之前早已
-上传，那次运行没有任何产出（0.2.0 / 0.2.1 / 0.2.2 三次都在构建中途被取消）。需要让 CI 验
-一遍发行链时手动 dispatch 即可；在 tag ref 上 dispatch 仍会走到发布步骤，在分支上 dispatch
-只构建、不发布。
+`workflow_dispatch` 保留为预演/重试入口：在分支上 dispatch 只构建、不发布。
 
 ## 5. 打包前后验收
 
@@ -123,9 +124,10 @@ gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md>
 - [ ] 仅 `--with-runtime` 包：`python scripts/prepare_hermes_runtime.py` 成功，且运行时校验通过。
 - [ ] 仅 `--with-runtime` 包：`resources/runtime/git/bin/bash.exe`、`usr/bin/msys-2.0.dll` 和关键命令均存在，
       `portable-git.json` 的 URL、版本和 SHA-256 与本次树一致。
-- [ ] `resources/sdk/pylon-plugin-sdk.js` 与 manifest schema 存在，且 runtime 不含 `testing.js`、`PluginScope` 或 `createMockContext`。
+- [ ] `resources/sdk/` 开发分发包齐全：`pylon-plugin-sdk.js`、`testing.js`、manifest schema、`types/`、`package.json`。
 - [ ] 离线 SDK bundle 不超过 64 KiB；正常版 package（含 `./testing` 类型入口）在插件开发套件中可独立导入。
-- [ ] `agents.yaml`、`.env`、密钥和本机绝对路径没有被放入待打包目录。
+- [ ] 离线文档站已构建并暂存：`src-tauri/resources/docs-site/index.html` 存在（`docs:build:offline` 的三项守卫通过）。
+- [ ] 真实 `agents.yaml`（任何非包根位置）、`.env`、密钥和本机绝对路径没有被放入待打包目录；包根 `agents.yaml` 只能来自 release 模板改名（#372）。
 
 ### 打包后
 
@@ -133,7 +135,11 @@ gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md>
 - [ ] 使用 `Get-FileHash <zip> -Algorithm SHA256`（或等价工具）核对 `.sha256`。
 - [ ] ZIP 只有一个 `pylon-<version>-win64/` 顶层目录，并包含空 `data/`。
 - [ ] 包内 `tools/webview2-mcp/` 同时有 `pylon-webview2-mcp.exe` 与 `README.md`；该 exe 能独立运行（`--version` / `--help` 先于一切校验）。
+- [ ] 包内 `resources/docs-site/index.html` 存在；应用内打开 Docs Sheet 能看到文档站首页，站内导航与本地搜索可用，`docs/说明书/**` markdown 仍在包内（#371）。
 - [ ] 解压到全新目录后可启动 `pylon.exe`；没有 WebView2 时，运行 `tools/install-webview2.bat` 能完成联网安装。
+- [ ] `pylon.exe` 是 GUI 子系统（PE `OptionalHeader.Subsystem` = 2，与 `notepad.exe` 同类），
+      双击启动**不出现控制台窗口**（#361）。顺带确认起始阶段与 agent 会话不会闪黑框：
+      改了子系统后，任何漏加 `CREATE_NO_WINDOW` 的 spawn 都会浮出来（收口见 `pylon_foundations::child_command`）。
 - [ ] 使用 `provider=hermes` 的 Agent 发起一次真实 ACP 会话：默认包确认 Hermes 能解析
       本机标准路径的健康 Git Bash 并完成最小工具调用；`--with-runtime` 包确认 Hermes 使用包内 Bash。
 - [ ] 使用一个非 Hermes Agent 启动会话，确认它不继承 Hermes 的 Bash 路径和变量。
@@ -145,7 +151,7 @@ gh release create v<version> --title "Pylon <version>"   --notes-file <notes.md>
 
 打包脚本会拒绝或应人工清除以下内容：
 
-- `agents.yaml`、`.env`、API key、token、密码和真实本机路径；
+- 真实 `agents.yaml`、`.env`、API key、token、密码和真实本机路径（#372 起唯一例外：包根 `agents.yaml`——由打包器从 `resources/release/agents.template.yaml` 改名收取的零 Agent 模板；其他位置的 `agents.yaml` 一律拒绝）；
 - 源码目录 `src/`、`src-tauri/src/`、`.git/`、`node_modules/`；
 - `*.pdb`、`*.rlib`、`*.d`、开发期 target 中间文件；
 - `--with-runtime` 包中未经校验的残缺 PortableGit 目录（默认包则根本不携带该树）。

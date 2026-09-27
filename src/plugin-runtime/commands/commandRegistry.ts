@@ -1,4 +1,4 @@
-import type { CommandPermission, CommandSetDescriptor } from '../../contracts/agentCommandSet.ts'
+import type { CommandPermission, CommandSetDescriptor, CommandTier } from '../../contracts/agentCommandSet.ts'
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegisterOptions, RegistrySnapshot } from '../registry/types.ts'
@@ -28,6 +28,9 @@ export interface CommandDescriptor {
   ownerRuntimeInstanceId: string
   name: string
   aliases?: readonly string[]
+  keywords?: readonly string[]
+  /** 可见性档；未声明即 `internal`（插件贡献命令默认不进默认菜单）。 */
+  tier: CommandTier
   description: string
   inputHint?: string
   agentPromptSnippet?: string
@@ -129,6 +132,8 @@ export class CommandRegistry {
       ownerRuntimeInstanceId,
       name: command.name,
       ...(command.aliases ? { aliases: command.aliases } : {}),
+      ...(command.keywords ? { keywords: command.keywords } : {}),
+      tier: command.tier ?? 'internal',
       description: command.description,
       ...(command.inputHint ? { inputHint: command.inputHint } : {}),
       ...(command.agentPromptSnippet ? { agentPromptSnippet: command.agentPromptSnippet } : {}),

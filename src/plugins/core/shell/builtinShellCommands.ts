@@ -3,7 +3,7 @@ import { getPluginSettingsPageRegistry, getPluginSettingsStore } from '../../../
 import type { PluginSettingValue } from '../../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import { THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
 import { useStore } from '../../../store.ts'
-import { buildExportPayload, preflightImportPayload } from '../../../configExportImport.ts'
+import { buildExportPayload, preflightImportPayload } from '../../../application/configExportImport.ts'
 import { activateInterfaceMode } from '../../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore.ts'
 import { record, text } from '../../../utils/wireGuards.ts'

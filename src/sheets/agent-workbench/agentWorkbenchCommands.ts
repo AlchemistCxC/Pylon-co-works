@@ -1,7 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
-import { useIdentityStore, type Session } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
+import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
@@ -9,9 +9,9 @@ import { setSessionModel } from '../../components/chat/sessionModel.ts'
 import { setSessionMode } from '../../components/chat/sessionMode.ts'
 import { createInteractionResponseTransport } from '../../infrastructure/acp/interactionTransport.ts'
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
-import type { AgentContext } from '../../agentContext.ts'
+import type { AgentContext } from '../../domains/agent/agentContext.ts'
 import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
-import { formatRuntimeError, reportRuntimeError } from '../../runtimeError.ts'
+import { formatRuntimeError, reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
@@ -27,7 +27,11 @@ export interface AgentWorkbenchCommandDependencies {
   optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
   rejectOptimisticUser(source: string, clientMessageId: string): void
   optimisticDocument(source: string, content: string, clientMessageId: string): void
-  rejectOptimisticDocument(source: string, clientMessageId: string): void
+  /**
+   * #380：被拒回滚走 canonical 重读，因此可能是异步的。`send` 会 await 它，好让
+   * `send()` 的 promise 落地时「乐观行已撤销」成立（其余调用方可以不管返回值）。
+   */
+  rejectOptimisticDocument(source: string, clientMessageId: string): void | Promise<void>
   nextClientMessageId(source: string): string
   /** P52 D4：cancel 状态机由 facade 持有（原 controller requestCancel 迁入）。 */
   requestCancel(source: string, agentId: string): void
@@ -61,20 +65,20 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
       // P52 D4：原 controller requestCancel 状态机迁入。begin-cancel 去重
       // （非生成态不调后端）由调用方 generating 守卫承担（footer 只在 running
       // 时渲染 onStop）；后端取消结果的收敛由终帧（pylon:error cancelled）驱动。
-      void createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+      void createChatClient({ invoke: tauriInvokeTransport })
         .cancelPrompt({ agentId, source })
         .catch(error => { reportRuntimeError('取消生成', error) })
     },
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
     setConfigOption: async (context, key, value) => {
-      await createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+      await createChatClient({ invoke: tauriInvokeTransport })
         .setConfigOption({ agentId: context.agentId, source: context.source, key, value })
     },
     resolveConfigOption: () => undefined,
     resolveInteraction: () => undefined,
     respondInteraction: (request, answer) => createInteractionResponseTransport({
-      invoke: (command, args) => invoke(command, args),
+      invoke: tauriInvokeTransport,
     }).respond(request, answer),
     async openResource() { throw new Error('production_command_not_connected') },
     async revealResource() { throw new Error('production_command_not_connected') },
@@ -136,7 +140,9 @@ export function createAgentWorkbenchCommandFacade(
       return { status: 'sent', messageId: clientMessageId }
     } catch (error) {
       dependencies.rejectOptimisticUser(session.source, clientMessageId)
-      dependencies.rejectOptimisticDocument(session.source, clientMessageId)
+      // #380：回滚要等 canonical 重读落地——这样 `send()` 返回 rejected 时文档里已经
+      // 没有那条乐观行（修前是同步整页重折，同样是「返回时已撤销」的时序）。
+      await dependencies.rejectOptimisticDocument(session.source, clientMessageId)
       return { status: 'rejected', messageId: clientMessageId, error: commandError(error) }
     }
   }

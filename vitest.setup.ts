@@ -41,6 +41,10 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/__tests__/replay/agentWorkbenchSession.batch.test.ts',
   'src/__tests__/replay/agentWorkbenchSession.rebindIndicator.test.ts',
   'src/__tests__/replay/agentWorkbenchSession.snapshotBridge.test.ts',
+  // #376-b：与上面三个 agentWorkbenchSession 同族（同一个 feed 注册噪音源）。
+  'src/__tests__/replay/agentWorkbenchSession.pagedLoad.test.ts',
+  // #390：同族（生成指示器稳定性回归，同一个 feed 注册噪音源）。
+  'src/__tests__/replay/agentWorkbenchSession.indicatorStability.test.ts',
   'src/__tests__/replay/documentLayer.test.ts',
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
   'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
@@ -51,7 +55,7 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/sheets/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
   'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
   // A 类：错误路径契约
-  'src/__tests__/identityStore.hydration.test.ts',
+  'src/domains/identity/__tests__/identityStore.hydration.test.ts',
   'src/__tests__/replay/canonicalEventFeed.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceLayoutChange.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
@@ -178,4 +182,9 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   }
   globalThis.ResizeObserver = ResizeObserverShim as unknown as typeof ResizeObserver
+}
+// #329：命令面板在展开「全部」后可能超出面板高度，键盘选中的行需要 `scrollIntoView`
+// 把它带进视口；jsdom 未实现该方法（调用会抛 TypeError），故在测试环境补空实现。
+if (typeof window !== 'undefined' && typeof window.Element.prototype.scrollIntoView !== 'function') {
+  window.Element.prototype.scrollIntoView = function scrollIntoView() {}
 }

@@ -1,6 +1,6 @@
 # Pylon CLI 命令表
 
-> 适用版本：Pylon 0.2.2（2026-09-18）  
+> 适用版本：Pylon 0.3.0-AUE  
 > 单一真值：`shared/pylon-cli-manifest.json`（CLI 壳命令）+ 运行时 Command Registry（插件命令）
 
 Pylon CLI 连接已经运行的桌面应用。CLI 壳不复制插件业务逻辑：固定控制命令进入对应控制端口，插件功能统一通过 `command exec <commandId>` 调用。
@@ -79,7 +79,7 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 显式别名：`ps`、`logs`、`kill`、`compact`、`model`、`new`、`export`、`clear`、`mode`。第一段还支持无歧义前缀，例如 `sess list`。
 
-## 3. 内置插件命令（64 个）
+## 3. 内置插件命令（83 个）
 
 以下命令均已注册 `execute`，通过 `pylon-cli command exec <id> --args '{...}'` 调用。外置插件新增可执行命令后会自动出现在 `command list`，无需修改 CLI 壳。
 
@@ -114,9 +114,9 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 `layout.agent-sidebar.block.set` 的入参是 `{ blockId, collapsed }`，用于设置左栏某个模块的折叠状态。折叠是**跨 Sheet 的应用级偏好**（独立持久化键，切换 Sheet 与重启都不改变），因此入参不需要 `sheetId`。它取代了更早的 `layout.agent-sidebar.set`——后者设置的 `sidebarMode ('work' | 'chat')` 随「左栏是一对互斥视图」的旧模型一并废除，参数已无消费方。
 
-### 3.4 呈现风格
+### 3.4 呈现风格与界面
 
-`presentation.list`、`presentation.inspect`、`presentation.apply`。
+`presentation.list`、`presentation.inspect`、`presentation.apply`；`interface.tactical-blue.activate`（切换到可选的蓝调战术界面）。
 
 呈现风格和消息渲染器保持正交：`presentation.apply` 修改视觉/交互 token。消息渲染引擎/Suite 的选择由设置中的 Renderer Suite 选择器（呈现偏好）管理，当前没有对应的 CLI 命令。
 

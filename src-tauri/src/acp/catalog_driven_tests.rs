@@ -54,8 +54,22 @@ fn catalog_only_provider_flows_through_every_consumption_stage() {
     );
 
     // 阶段 4：initialize 计划成形（B2 计划层消费同一配置）。
-    let plan = crate::acp::initialize_plan::build_initialize_plan(&config, Some(PROVIDER)).unwrap();
-    assert_eq!(plan.client_capabilities, declared);
+    // #316：宿主门注入是**计划层**职责（与 provider 合并正交）——默认 fs 门
+    // 开启，计划在 declared 之上注入 fs 声明；阶段 3 锁的「provider 维度不
+    // 凭空注入」不受影响。
+    let plan = crate::acp::initialize_plan::build_initialize_plan(
+        &config,
+        Some(PROVIDER),
+        crate::acp::host_tools::HostToolsPolicy::default(),
+    )
+    .unwrap();
+    let mut expected_caps = declared.clone();
+    expected_caps["fs"] = serde_json::json!({"readTextFile": true, "writeTextFile": true});
+    expected_caps["elicitation"] = serde_json::json!({"form": {}});
+    assert_eq!(
+        plan.client_capabilities, expected_caps,
+        "计划层应只叠加宿主门声明（fs/elicitation），不得引入 provider 差异"
+    );
 
     // requires 消费者可见性：detection profile 携带 catalog 声明的 checks
     // （codex 声明 requires.node → node-min 检查必须在 profile 中可见）。

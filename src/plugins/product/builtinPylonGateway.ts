@@ -42,7 +42,7 @@ const GATEWAY_WORKSPACE_TYPE: WorkspaceTypeDefinition<unknown> = Object.freeze({
   getSingletonKey: singleton('gateway'),
   sidebarMode: 'sheet',
   component: lazyWorkspace(GatewaySheetView),
-  launch: { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', launchable: true, icon: 'waypoints', category: 'system', categoryLabel: '系统与管理', categoryOrder: 30, order: 20, keywords: ['route', 'adapter'] },
+  launch: { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', launchable: true, icon: 'waypoints', category: 'system', categoryLabel: '系统与管理', categoryOrder: 30, order: 20, keywords: ['route', 'adapter', '网关', '路由', '适配器'] },
   createInitialState: emptyState,
   serialize: serializeEmptyState,
   deserialize: deserializeEmptyState,

@@ -1,4 +1,4 @@
-import type { Session } from '../../identityStore.ts'
+import type { Session } from '../../domains/identity/identityStore.ts'
 import type { NewSessionPayload, SessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { runSessionPreflight } from '../../plugins/core/sessionCreation/sessionPreflight.ts'
 

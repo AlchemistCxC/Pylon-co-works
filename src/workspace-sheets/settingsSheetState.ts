@@ -1,4 +1,4 @@
-import { normalizeSettingsIntent, type SettingsIntent } from '../settingsDomains.ts'
+import { normalizeSettingsIntent, type SettingsIntent } from '../components/settings/settingsDomains.ts'
 
 /**
  * Settings Sheet 的持久化状态（#154 阶段 4：设置由固定覆盖层迁入 sheet 体系）。

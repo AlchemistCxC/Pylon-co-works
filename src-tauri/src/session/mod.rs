@@ -403,10 +403,18 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::WebviewWindow) {
+    pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::Window) {
         let mut events = self.runtime_logs.subscribe();
         let hub = Arc::clone(&self.runtime_logs);
         tokio::spawn(async move {
+            // #362：lag 告警的前缘节流。这条 warn 会经 RuntimeLogLayer 回到**同一个**
+            // hub，再由 hub 广播出去——消费者持续慢于生产者时，不节流就等于每 lag 一次
+            // 就往刚排空一点的 channel 里再塞一条，channel 永不排空（RuntimeSheet 打开
+            // 且窗口繁忙时触发）。前缘立即放行保证第一次一定看得见，窗口内的命中折叠成
+            // 计数搭下一条的车，不静默丢弃。
+            let mut lag_throttle = crate::logging::throttle::LeadingEdgeThrottle::new(
+                crate::logging::throttle::LAG_LOG_WINDOW,
+            );
             loop {
                 match events.recv().await {
                     Ok(entry) => {
@@ -425,7 +433,14 @@ impl AppState {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        tracing::warn!("runtime log event dispatcher lagged by {count} entries");
+                        if let Some(summary) = lag_throttle.record(count) {
+                            tracing::warn!(
+                                "runtime log event dispatcher lagged: skipped {} entries across {} occurrence(s) in the last {}s",
+                                summary.dropped,
+                                summary.occurrences,
+                                crate::logging::throttle::LAG_LOG_WINDOW.as_secs()
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -436,7 +451,7 @@ impl AppState {
     pub(crate) async fn connect_and_replace(
         &self,
         runtime: &Arc<AgentRuntime>,
-        window: &tauri::WebviewWindow,
+        window: &tauri::Window,
         agent: &AgentDef,
         agent_id: Option<String>,
         start_status: AgentLifecycleStatus,
@@ -464,7 +479,7 @@ impl AppState {
         &self,
         runtime: &Arc<AgentRuntime>,
         agent_id: &str,
-        window: &tauri::WebviewWindow,
+        window: &tauri::Window,
     ) -> Result<(), String> {
         let status = runtime
             .agent_runtime
@@ -574,14 +589,18 @@ fn require_user_data_service(
 }
 
 /// 读取指定 key 的 envelope（无数据返回 None）；payload 损坏 → `user_data_corrupt`。
+/// #317 批次二：错误经 PylonError::UserData 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn user_data_load(
     state: tauri::State<'_, AppState>,
     key: String,
-) -> Result<Option<UserDataEnvelope>, UserDataError> {
+) -> Result<Option<UserDataEnvelope>, PylonError> {
     let key = UserDataKey::parse(&key)
         .ok_or_else(|| UserDataError::Unavailable(format!("unknown user data key: {key}")))?;
-    require_user_data_service(&state)?.load(key).await
+    require_user_data_service(&state)?
+        .load(key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 原子保存（expected_revision 不匹配 → conflict；形状非法/超限 → corrupt）。
@@ -592,7 +611,7 @@ pub(crate) async fn user_data_save(
     key: String,
     payload: serde_json::Value,
     expected_revision: Option<i64>,
-) -> Result<UserDataSaveResult, UserDataError> {
+) -> Result<UserDataSaveResult, PylonError> {
     let key = UserDataKey::parse(&key)
         .ok_or_else(|| UserDataError::Unavailable(format!("unknown user data key: {key}")))?;
     let revision = require_user_data_service(&state)?
@@ -607,10 +626,11 @@ pub(crate) async fn user_data_save(
 pub(crate) async fn user_profile_delete(
     state: tauri::State<'_, AppState>,
     profile_id: String,
-) -> Result<ProfileDeleteResult, UserDataError> {
+) -> Result<ProfileDeleteResult, PylonError> {
     require_user_data_service(&state)?
         .delete_profile(profile_id)
         .await
+        .map_err(PylonError::from)
 }
 
 /// I14-W7 + DEL-02 + DEL-03（§5.13）：删除会话核心（命令与测试共用，CR-09：非 Tauri 命令，
@@ -650,20 +670,23 @@ pub(crate) async fn user_session_delete(
     state: tauri::State<'_, AppState>,
     session_id: String,
     owner_key: Option<String>,
-) -> Result<(), UserDataError> {
+) -> Result<(), PylonError> {
     let owner_key = validate_delete_owner(owner_key)?;
-    delete_session_core(state.inner(), session_id, owner_key).await
+    delete_session_core(state.inner(), session_id, owner_key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// DEL-03（§5.13）：删除终态化——deleting → deleted。本地删除成功且远端 close best effort
 /// 后由前端调用；幂等（不存在/已终态均为 no-op），失败不阻断（tombstone 保持 'deleting'
-/// 仍 gate 迟到写）。返回 MessageError（消息仓库层错误）。
+/// 仍 gate 迟到写）。#317 批次二：错误经 PylonError::MessagePersistence 委托，
+/// wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn user_session_delete_finalize(
     state: tauri::State<'_, AppState>,
     session_id: String,
     owner_key: Option<String>,
-) -> Result<(), MessageError> {
+) -> Result<(), PylonError> {
     if let Some(ref key) = owner_key {
         crate::session::msg_repo::validate_owner_key(key)
             .map_err(|error| MessageError::Unavailable(error.to_string()))?;
@@ -671,6 +694,7 @@ pub(crate) async fn user_session_delete_finalize(
     require_message_service(&state)?
         .finalize_session_delete(session_id, owner_key)
         .await
+        .map_err(PylonError::from)
 }
 
 // ============================================================================
@@ -700,15 +724,17 @@ fn require_event_service(
 }
 
 /// 校验 + 批量 append canonical 事件（单事务；event_id 去重；expected_revision 冲突检测）。
+/// #317 批次二：错误经 PylonError::CanonicalEvent 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn evt_append(
     state: tauri::State<'_, AppState>,
     events: Vec<serde_json::Value>,
     expected_revision: Option<i64>,
-) -> Result<EventAppendResult, EventError> {
+) -> Result<EventAppendResult, PylonError> {
     require_event_service(&state)?
         .append_events(events, expected_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 /// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基准）。
@@ -716,21 +742,73 @@ pub(crate) async fn evt_append(
 pub(crate) async fn evt_revision(
     state: tauri::State<'_, AppState>,
     owner_key: String,
-) -> Result<i64, EventError> {
-    require_event_service(&state)?.revision(owner_key).await
+) -> Result<i64, PylonError> {
+    require_event_service(&state)?
+        .revision(owner_key)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 游标分页读取（最新页 before_seq=null；limit 缺省 100；升序返回）。
+///
+/// #376：`cap_typed_payload`（缺省 true）是读出口载荷收口的杀停开关——前端发现页面上
+/// 出现 `data-typed-payload-cap="off"` 即传 false，回到「原样下发 typed」。与
+/// `data-highlight-lifecycle="off"` / `data-row-virtualization="off"` 同惯例，
+/// 不需要回滚版本。
 #[tauri::command]
 pub(crate) async fn evt_list(
     state: tauri::State<'_, AppState>,
     owner_key: String,
     before_sequence: Option<i64>,
     limit: Option<u32>,
-) -> Result<EventPage, EventError> {
+    cap_typed_payload: Option<bool>,
+) -> Result<EventPage, PylonError> {
     require_event_service(&state)?
-        .list_events(owner_key, before_sequence, limit.unwrap_or(100))
+        .list_events(
+            owner_key,
+            before_sequence,
+            limit.unwrap_or(100),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
+        .map_err(PylonError::from)
+}
+
+/// #155 T3：独立读取已落盘的在途片段，供会话重启后标记为中断内容。
+/// 片段不属于 canonical 历史，也不推进 revision。
+#[tauri::command]
+pub(crate) async fn evt_draft_list(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+) -> Result<Vec<DraftFragment>, PylonError> {
+    require_event_service(&state)?
+        .list_draft_fragments(owner_key)
+        .await
+        .map_err(PylonError::from)
+}
+
+#[tauri::command]
+pub(crate) async fn evt_draft_keep(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+    draft_id: String,
+) -> Result<EventAppendResult, PylonError> {
+    require_event_service(&state)?
+        .keep_interrupted_draft(owner_key, draft_id)
+        .await
+        .map_err(PylonError::from)
+}
+
+#[tauri::command]
+pub(crate) async fn evt_draft_discard(
+    state: tauri::State<'_, AppState>,
+    owner_key: String,
+    draft_id: String,
+) -> Result<bool, PylonError> {
+    require_event_service(&state)?
+        .discard_interrupted_draft(owner_key, draft_id)
+        .await
+        .map_err(PylonError::from)
 }
 
 /// Corrupt-row forensic export: returns the exact stored JSON text without decoding it.
@@ -738,10 +816,11 @@ pub(crate) async fn evt_list(
 pub(crate) async fn evt_export_raw(
     state: tauri::State<'_, AppState>,
     event_id: String,
-) -> Result<Option<CanonicalEventRawExport>, EventError> {
+) -> Result<Option<CanonicalEventRawExport>, PylonError> {
     require_event_service(&state)?
         .export_raw_event(event_id)
         .await
+        .map_err(PylonError::from)
 }
 
 /// B6：跨 owner 内容搜索候选（raw/typed payload + eventType LIKE，大小写不敏感）。
@@ -751,22 +830,37 @@ pub(crate) async fn evt_search(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: Option<u32>,
-) -> Result<Vec<EventSearchOwner>, EventError> {
+) -> Result<Vec<EventSearchOwner>, PylonError> {
     require_event_service(&state)?
         .search_owners(query, limit.unwrap_or(50))
         .await
+        .map_err(PylonError::from)
 }
 
 /// #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（文档投影/搜索的读取
 /// 入口；被单元覆盖的行不再传输/解析，读放大随单元粒度下降）。
+///
+/// #376-b：一次一页（前向游标 `after_sequence`；`next_after_sequence` 为 None 即到底）。
+/// 冷装载据此逐页续折，装载期不再「整库行 + 整库信封 + 文档」三份并存；页边界落在
+/// delta run 边界上，分页折叠与一次性折叠的切点因此逐位相同。
+/// `cap_typed_payload` 语义同 `evt_list`（缺省 true）。
 #[tauri::command]
 pub(crate) async fn evt_load_compact(
     state: tauri::State<'_, AppState>,
     owner_key: String,
-) -> Result<Vec<CanonicalEventRow>, EventError> {
+    after_sequence: Option<i64>,
+    limit: Option<u32>,
+    cap_typed_payload: Option<bool>,
+) -> Result<CompactEventPage, PylonError> {
     require_event_service(&state)?
-        .load_events_compact(owner_key)
+        .load_events_compact_page(
+            owner_key,
+            after_sequence,
+            limit.unwrap_or(1000),
+            cap_typed_payload.unwrap_or(true),
+        )
         .await
+        .map_err(PylonError::from)
 }
 
 /// #81 L3：裁剪迁移（应用关闭时调用）。budget_ms 控制单次预算（逐 turn 单事务，
@@ -775,7 +869,7 @@ pub(crate) async fn evt_load_compact(
 pub(crate) async fn evt_rollup_trim(
     state: tauri::State<'_, AppState>,
     budget_ms: Option<u64>,
-) -> Result<RollupTrimReport, EventError> {
+) -> Result<RollupTrimReport, PylonError> {
     let service = require_event_service(&state)?;
     let policy = require_retention_service(&state)
         .map_err(|error| EventError::Unavailable(error.to_string()))?
@@ -791,7 +885,10 @@ pub(crate) async fn evt_rollup_trim(
         };
         return Ok(report);
     }
-    service.rollup_trim(budget_ms).await
+    service
+        .rollup_trim(budget_ms)
+        .await
+        .map_err(PylonError::from)
 }
 
 // ============================================================================
@@ -810,11 +907,15 @@ fn require_retention_service(
 }
 
 /// 读取保留策略行；无 → None（前端按默认永久保存处理，D-15）。
+/// #317 批次二：错误经 PylonError::Retention 委托，wire code 逐字不变。
 #[tauri::command]
 pub(crate) async fn retention_policy_get(
     state: tauri::State<'_, AppState>,
-) -> Result<Option<msg_repo::RetentionPolicyRow>, retention::RetentionError> {
-    require_retention_service(state.inner())?.get_policy().await
+) -> Result<Option<msg_repo::RetentionPolicyRow>, PylonError> {
+    require_retention_service(state.inner())?
+        .get_policy()
+        .await
+        .map_err(PylonError::from)
 }
 
 /// 写入保留策略（先校验档位契约，非法拒绝；合法 → revision+1 原子落盘）。
@@ -825,10 +926,11 @@ pub(crate) async fn retention_policy_set(
     state: tauri::State<'_, AppState>,
     json: String,
     expected_revision: Option<i64>,
-) -> Result<i64, retention::RetentionError> {
+) -> Result<i64, PylonError> {
     require_retention_service(state.inner())?
         .set_policy(json, expected_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 /// preview：统计将删除的候选（不执行删除；与 prune 同一筛选）。
@@ -836,10 +938,11 @@ pub(crate) async fn retention_policy_set(
 pub(crate) async fn retention_preview(
     state: tauri::State<'_, AppState>,
     policy: retention::RetentionPolicy,
-) -> Result<msg_repo::RetentionPreview, retention::RetentionError> {
+) -> Result<msg_repo::RetentionPreview, PylonError> {
     require_retention_service(state.inner())?
         .preview(policy)
         .await
+        .map_err(PylonError::from)
 }
 
 /// prune：事务内统计候选 + 执行删除（与 preview 同一筛选）；返回实际删除计数。
@@ -850,10 +953,11 @@ pub(crate) async fn retention_prune(
     state: tauri::State<'_, AppState>,
     policy: retention::RetentionPolicy,
     expected_policy_revision: Option<i64>,
-) -> Result<msg_repo::RetentionPreview, retention::RetentionError> {
+) -> Result<msg_repo::RetentionPreview, PylonError> {
     require_retention_service(state.inner())?
         .prune(policy, expected_policy_revision)
         .await
+        .map_err(PylonError::from)
 }
 
 #[cfg(test)]
@@ -1617,12 +1721,17 @@ gateway:
 
     /// S3：prompt 错误"会话不存在"语义匹配——宽松子串匹配覆盖 agent 实际错误形态
     /// （JSON-RPC 错误对象序列化串 / 纯字符串），网络与临时/方法级错误不命中。
+    ///
+    /// #354 契约更新（清理陈旧样本）：`code == -32000` 现在**一票**判为
+    /// `RpcFailureKind::AuthRequired`（协议已定义该码语义，agent 误用它表别的含义属
+    /// 协议违规，不做文本竞猜，见 `pylon-acp/src/error.rs::rpc_failure_details`）。
+    /// 因此原先挂在这里的 `{"code":-32000,"message":"session missing"}` 不再、也不应
+    /// 命中 SessionMissing —— 它移到下面单独钉住「协议码优先于文本」这条。
     #[test]
     fn prompt_error_indicates_missing_session_matching() {
         let missing = [
             r#"{"code":-32602,"message":"session not found: session-42"}"#,
             r#"{"code":-32602,"message":"Invalid params: unknown session: session-42"}"#,
-            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in missing {
             assert!(
@@ -1634,6 +1743,8 @@ gateway:
             r#"{"code":-32601,"message":"Method not found"}"#,
             r#"{"code":-32602,"message":"invalid params: missing content"}"#,
             r#"{"code":-32000,"message":"rate limited"}"#,
+            // #354：-32000 是协议级 authRequired，文本里写着 session missing 也不改判
+            r#"{"code":-32000,"message":"session missing"}"#,
         ];
         for error in transient {
             assert!(
@@ -1729,13 +1840,15 @@ gateway:
         let state = state_without_active_runtime();
 
         let error = ensure_session_mapping(
-            &state,
-            &runtime,
-            "source-a",
-            None,
-            "persona",
-            ".",
-            &[],
+            &SessionAssembly {
+                state: &state,
+                runtime: &runtime,
+                source: "source-a",
+                profile_id: None,
+                persona: "persona",
+                session_cwd: ".",
+                wire_mcp_servers: &[],
+            },
             None,
             &mut None,
         )

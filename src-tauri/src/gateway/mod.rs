@@ -156,13 +156,17 @@ pub struct GatewayCore {
 }
 
 impl GatewayCore {
-    /// 从 agents.yaml 的 `gateway` 段构建（缺段 → 空路由表 + 默认平台配置）。
+    /// 从配置文本的 `gateway` 段构建（缺段 → 空路由表 + 默认平台配置）。
+    ///
+    /// 取内嵌兜底样例而非仓库根 `agents.example.yaml`：后者是开发模板 + 测试夹具，
+    /// 无 `gateway` 段故两者语义等价，但把开发配置编进生产代码不是本意（#326）。
     pub fn new() -> Self {
-        let config = GatewayConfig::from_yaml_str(include_str!("../../../agents.example.yaml"))
-            .unwrap_or_else(|error| {
-                tracing::warn!("gateway 配置解析失败，使用空配置: {error}");
-                GatewayConfig::empty()
-            });
+        let config =
+            GatewayConfig::from_yaml_str(include_str!("../agent_config/embedded_agents.yaml"))
+                .unwrap_or_else(|error| {
+                    tracing::warn!("gateway 配置解析失败，使用空配置: {error}");
+                    GatewayConfig::empty()
+                });
         Self::from_config(config)
     }
 
@@ -452,10 +456,8 @@ fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<Stri
         return None;
     }
     let update = payload.get("update")?;
-    if update
-        .get("sessionUpdate")
-        .and_then(|v| v.as_str())
-        .and_then(crate::acp::SessionUpdateVariant::from_str)
+    // #316：变体分类单一入口（typed-first + 宽容 fallback）。
+    if crate::acp::classify_session_update(update)
         != Some(crate::acp::SessionUpdateVariant::AgentMessageChunk)
     {
         return None;

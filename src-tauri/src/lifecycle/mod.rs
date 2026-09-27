@@ -87,7 +87,7 @@ fn config_activation_state(
 pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
     handles: &AppStateHandles,
     runtime: &Arc<AgentRuntime>,
-    window: &tauri::WebviewWindow<R>,
+    window: &tauri::Window<R>,
     agent: &AgentDef,
     agent_id: Option<String>,
     start_status: AgentLifecycleStatus,
@@ -191,7 +191,8 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
-    runtime.set_host_tools_policy(&host_env);
+    // #316：YAML 双门声明优先，env 兼容回退（见 HostToolsPolicy::resolve）。
+    runtime.set_host_tools_policy(agent.protocol(), &host_env);
     // 本地 client epoch 与远端 Session continuity 分开表达。Unknown 不迁移旧映射；
     // replace 后由有界 probe 收敛，Invalidated 直接清除，Preserved 才直接迁移。
     let activation = ClientActivation {
@@ -559,11 +560,13 @@ pub(crate) async fn set_session_state(
     remote_session_id: Option<String>,
     state: serde_json::Value,
     app_state: tauri::State<'_, crate::AppState>,
-) -> Result<(), crate::session::MessageError> {
+) -> Result<(), PylonError> {
+    // #317 批次二：错误经 PylonError::MessagePersistence 委托，wire code 逐字不变。
     let service = crate::session::message_service_of(&app_state)?;
     service
         .set_session_state(owner, remote_session_id, state)
         .await
+        .map_err(PylonError::from)
 }
 
 #[tauri::command]
@@ -599,7 +602,11 @@ async fn remove_stale_runtimes(inner: &AppState, removed: Vec<String>) {
 /// C7：停掉旧 runtime 的进程——先 abort notification_task（防 kill 触发的崩溃
 /// 通知被旧 dispatcher 处理并调度自动重连）再 kill acp，状态置 Disconnected。
 /// switch 换目标 / reload 删除 agent 共用。
-async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
+///
+/// #363-4：`pub(crate)` 开放给空闲回收 watcher（`session/expiry.rs`）——回收零会话的
+/// 闲置连接必须走**同一条** kill 路径（Job Object 杀进程树 + 归还实例预算槽），
+/// 不在回收侧另写一份清理。
+pub(crate) async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
     if let Some(old) = inner.runtimes.get(agent_id) {
         if let Ok(mut task) = old.notification_task.lock() {
             if let Some(handle) = task.take() {
@@ -609,6 +616,12 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
         // A4：清空流式通道注册——旧 runtime 的 channel 随 dispatcher 一起失效，
         // 防 kill 后残留帧投递到已被前端废弃的通道对象。
         old.clear_update_channels();
+        // #316：清空宿主终端注册表——旧 runtime 的 terminal/* 子进程不再跨代
+        // 泄漏（registry 本体随 runtime 保留复用，仅清终端）。
+        let cleared = old.terminal_registry.clear().await;
+        if cleared > 0 {
+            tracing::debug!(agent_id, cleared, "host terminals cleared on runtime stop");
+        }
         let mut acp = old.acp.lock().await;
         let _ = acp.kill();
         drop(acp);
@@ -625,7 +638,7 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
 #[tauri::command]
 pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow<R>,
+    window: tauri::Window<R>,
     name: String,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
@@ -701,7 +714,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 #[tauri::command]
 pub(crate) async fn reconnect_agent(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
+    window: tauri::Window,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
     // C7：switch/reconnect 串行锁（与 switch_agent 共用，防交叉杀进程）。
@@ -731,7 +744,7 @@ pub(crate) async fn reconnect_agent(
 #[tauri::command]
 pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow<R>,
+    window: tauri::Window<R>,
     agent_id: String,
 ) -> Result<serde_json::Value, PylonError> {
     let inner = state.inner();
@@ -1087,7 +1100,7 @@ mod tests {
         }
     }
 
-    async fn mock_window() -> tauri::WebviewWindow<tauri::test::MockRuntime> {
+    async fn mock_window() -> tauri::Window<tauri::test::MockRuntime> {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -1098,6 +1111,8 @@ mod tests {
         )
         .build()
         .expect("mock window must build")
+        .as_ref()
+        .window()
     }
 
     #[tokio::test]

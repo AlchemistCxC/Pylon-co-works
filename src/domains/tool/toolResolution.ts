@@ -114,7 +114,14 @@ export function resolveToolType(
         const names = [candidate.name, ...(candidate.aliases ?? [])]
         for (const candidateName of names) {
           const normalizedCandidate = candidateName.trim().toLowerCase()
-          if (!normalizedCandidate || normalizedRaw === normalizedCandidate) continue
+          if (!normalizedCandidate) continue
+          // #315：全等命中——hermes 长尾工具的 polished title 恰为裸 machine name
+          // 或无参全等别名（如 "browser snapshot"），无内嵌参数可提取。
+          if (normalizedRaw === normalizedCandidate) {
+            entry = candidate
+            provider = candidate.provider as ToolProvider
+            break outer
+          }
           if (
             normalizedRaw.startsWith(`${normalizedCandidate} `) ||
             normalizedRaw.startsWith(`${normalizedCandidate}:`) ||

@@ -6,7 +6,6 @@ import type {
   AgentProviderId,
   InteractionAdapterContract,
 } from './agentContracts.ts'
-import { resolveActivity } from '../activity/activity.ts'
 import { normalizeInteractionRequest } from '../activity/interaction.ts'
 import { resolveToolType, type ToolResolution, type ToolProvider } from '../tool/toolPresentation.ts'
 import { applyToolRegistryOverlay, clearToolRegistryForTests, removeToolRegistryOverlay } from '../tool/toolRegistry.ts'
@@ -165,22 +164,6 @@ export function resolveAgentInteraction(input: {
   const adapter = listInteractionAdapters().find(candidate => candidate.provider === (provider ?? 'unknown') && candidate.canHandle(input))
   if (adapter) return adapter.normalize(input)
   return normalizeInteractionRequest({ payload: input.payload, eventType: input.eventType, name: input.name })
-}
-
-export function resolveAgentInteractionEnvelope(envelope: import('../activity/interaction.ts').InteractionEventEnvelope) {
-  const input = { envelope, eventType: envelope.eventType, payload: envelope.payload }
-  const adapter = listInteractionAdapters().find(candidate => candidate.provider === envelope.provider && candidate.canHandle(input))
-  if (adapter) return adapter.normalize(input)
-  return normalizeInteractionRequest({ payload: envelope.payload, eventType: envelope.eventType, metadata: envelope })
-}
-
-export function resolveAgentActivity(input: {
-  provider?: AgentProviderId
-  eventType?: string
-  name?: string
-  payload?: unknown
-}) {
-  return resolveActivity({ name: input.name, eventType: input.eventType })
 }
 
 export function clearAgentRegistriesForTests(): void {

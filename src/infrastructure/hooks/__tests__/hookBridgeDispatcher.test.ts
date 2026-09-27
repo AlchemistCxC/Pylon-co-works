@@ -38,7 +38,7 @@ vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({
   }),
 }))
 
-import { useIdentityStore, type Session } from '../../../identityStore.ts'
+import { useIdentityStore, type Session } from '../../../domains/identity/identityStore.ts'
 import { HOOK_NAMES } from '../../../plugin-runtime/hooks/hookTypes.ts'
 import { installPylonHookBridge } from '../hookBridgeDispatcher.ts'
 

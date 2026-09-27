@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { listen } from '@tauri-apps/api/event'
 import {
   createPluginProcessClient,
@@ -7,7 +7,7 @@ import {
 
 let client: PluginProcessClient = createPluginProcessClient({
   transport: {
-    invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+    invoke: tauriInvokeTransport,
   },
   events: {
     listen: (event, listener) => listen(event, listener),

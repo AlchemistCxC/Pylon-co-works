@@ -254,15 +254,15 @@ pub fn serialize_state(state: &PetState) -> Result<String, String> {
 static STATE_FILE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。经 agent_config
-/// 正身 [`crate::agent_config::AtomicWriteOptions`] 收敛（issue #228 批次D；
+/// 正身 [`pylon_foundations::atomic_write::AtomicWriteOptions`] 收敛（issue #228 批次D；
 /// 旧内联 temp 生成器删除）。历史行为保留：不 fsync 临时文件（best-effort
 /// 存档路径，与 lifecycle MCP 同源），失败告警后仍返回 Err。
 pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), String> {
     let _write_guard = STATE_FILE_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
-    if let Err(error) = crate::agent_config::write_file_atomically(
+    if let Err(error) = pylon_foundations::atomic_write::write_file_atomically(
         path,
         json.as_bytes(),
-        crate::agent_config::AtomicWriteOptions::best_effort_data_file(),
+        pylon_foundations::atomic_write::AtomicWriteOptions::best_effort_data_file(),
     ) {
         tracing::warn!("write state file failed: {error}");
         return Err(error.to_string());

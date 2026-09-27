@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render } from '@testing-library/react'
 import SheetLayout from '../SheetLayout'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { resetStores } from '../../test/resetStores'
 
 function renderLayout() {

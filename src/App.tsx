@@ -3,17 +3,17 @@ import SheetLayout from './workspace-sheets/SheetLayout'
 import TacticalScene from './sheets/TacticalScene'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
-import { flushIdentityBackend, useIdentityStore } from './identityStore'
-import { useRuntimeStore } from './runtimeStore'
-import { useWorkspaceStore } from './workspaceStore'
+import { flushIdentityBackend, useIdentityStore } from './domains/identity/identityStore'
+import { useRuntimeStore } from './domains/runtime/runtimeStore'
+import { useWorkspaceStore } from './domains/workspace/workspaceStore'
 import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
 import { useShallow } from 'zustand/react/shallow'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
-import { invoke } from '@tauri-apps/api/core'
-import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
-import { reportRuntimeError, resolveRuntimeErrors } from './runtimeError'
+import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
+import { loadWindowSize, persistWindowSize } from './infrastructure/persistence/windowSizePersistence'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
 import {
   closeOtherWorkspaces,
@@ -31,9 +31,11 @@ import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFee
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
+import './app/bootstrap/identityCrossDomainWiring'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
+import { useModalOverlayVeil } from './app/modalOverlayStore'
 import { startupMark, reportStartupTiming } from './app/startupTiming'
 import PermissionDialog from './components/PermissionDialog'
 import ErrorCenter from './components/ErrorCenter'
@@ -58,7 +60,7 @@ import { usePresentationPreferenceStore } from './domains/presentation/presentat
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
-import { useRightRailStore } from './rightRailStore.ts'
+import { useRightRailStore } from './components/right-panel/rightRailStore.ts'
 import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
@@ -102,8 +104,8 @@ function LazyDialogFallback() {
 }
 
 // FE-AUD-008：typed client 收口 command literal（注入真实 transport）
-const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
+const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
@@ -175,7 +177,9 @@ export default function App() {
     }).length > 0
     : false
   const agents = useIdentityStore(s => s.agents)
-  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  // #326：空串 = 没有 Agent（零 Agent 首跑）。不再回落硬编码 'peri'——那会凭空造出一个
+  // 不存在的 Agent（sheet 聚焦、权限切片、会话归属都按它算）。
+  const activeAgent = useIdentityStore(s => s.activeAgent)
   const prevActiveAgentRef = useRef<string>(activeAgent)
 
   useEffect(() => {
@@ -254,7 +258,6 @@ export default function App() {
         key: bootstrapKey(action),
         scope: bootstrapScope,
         source: 'application.bootstrap',
-        recovery: { kind: 'open-runtime-log' },
         recoveryAction: {
           label: '重试启动',
           run: () => setBootstrapRetry(value => value + 1),
@@ -282,7 +285,6 @@ export default function App() {
       key: approvalModeKey(action),
       scope: approvalModeScope,
       source: 'permission.approval-mode',
-      recovery: { kind: 'open-runtime-log' },
     })
     const persisted = readPersistedApprovalMode()
     if (persisted) {
@@ -323,9 +325,9 @@ export default function App() {
       dispatch: action => useRuntimeStore.getState().setPermission(action),
       getState: () => useRuntimeStore.getState().permission,
       // P1-1：controller 只作用在当前 agent 的权限切片
-      getCurrentAgentId: () => useIdentityStore.getState().activeAgent || 'peri',
+      getCurrentAgentId: () => useIdentityStore.getState().activeAgent,
       listen: (event, handler) => listen(event, handler),
-      invoke: (cmd, args) => invoke(cmd, args),
+      invoke: tauriInvokeTransport,
     })
     registerPermissionController(controller)
     return () => {
@@ -405,7 +407,6 @@ export default function App() {
         key: 'app:browser-demo-bootstrap',
         scope: { kind: 'app', id: 'browser-demo' },
         source: 'app.browser-demo',
-        recovery: { kind: 'open-runtime-log' },
       })
     })
     return undefined
@@ -449,7 +450,6 @@ export default function App() {
     } catch (error) {
       reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
         key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
-        recovery: { kind: 'open-runtime-log' },
       })
       return
     }
@@ -466,7 +466,6 @@ export default function App() {
       } catch (error) {
         reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
           key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
-          recovery: { kind: 'open-runtime-log' },
         })
         return
       }
@@ -475,6 +474,12 @@ export default function App() {
     return () => { unlisten?.() }
   }, [])
   const profilesOpen = showProfileEdit
+  // #309：原生子视图（浏览器 WebView2 子窗口）在原生层位于 DOM 之上，覆盖层盖不住它。
+  // 模态覆盖层打开期间让原生子视图暂时隐藏（页面继续运行），否则覆盖层上的按钮被
+  // 原生页面吃掉点击；关闭后由消费方恢复可见。
+  useModalOverlayVeil('sheet-launcher', showSheetLauncher)
+  useModalOverlayVeil('profile-editor', profilesOpen)
+  useModalOverlayVeil('session-settings', sessionSettingsId !== null)
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>

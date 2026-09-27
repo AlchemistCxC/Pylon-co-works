@@ -15,6 +15,15 @@
 use crate::error::{AcpError, AgentConnectFailure};
 use pylon_core::agent_config::{AcpProtocolConfig, McpServersMode};
 
+/// #348 A6：Pylon 接受的 ACP `protocolVersion` 白名单（fail-closed）。
+///
+/// Pylon 只有 v1 wire 实现（代码 100% 走 `agent_client_protocol_schema::v1`，
+/// 未启用 `unstable_protocol_v2`）；官方将 V2 定性为 unstable draft 且必须
+/// 显式选择。`validate_protocol_version` 只验「agent 回显 == 请求」，拦不住
+/// 「请求 2、agent 回 2」的互相确认；本集合在计划层拦住「发出 Pylon 无实现
+/// 的版本号」。将来启用 v2 时只扩这一处。
+const SUPPORTED_PROTOCOL_VERSIONS: &[u16] = &[1];
+
 /// initialize 握手计划：三段参数的不可变成形。
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitializePlan {
@@ -27,9 +36,14 @@ pub struct InitializePlan {
 ///
 /// 非法 clientCapabilities 声明 → `agent_client_capabilities_invalid`
 /// （A3 裁定：显式 YAML 与 catalog 声明非法都当场失败，不静默回退默认）。
+/// `policy`：宿主门解析结论（YAML+env 单一解析，见
+/// [`crate::host_tools::HostToolsPolicy::resolve`]）——**广告侧与 dispatcher
+/// 门禁侧必须消费同一份结论**（#316 P1：env 回退若只被门禁消费，会出现
+/// 「广告 fs 但每发必拒」的同源破窗）。
 pub fn build_initialize_plan(
     protocol: &AcpProtocolConfig,
     provider: Option<&str>,
+    policy: crate::host_tools::HostToolsPolicy,
 ) -> Result<InitializePlan, AcpError> {
     let invalid = |message: String| {
         AcpError::Connect(Box::new(AgentConnectFailure::preflight(
@@ -37,9 +51,18 @@ pub fn build_initialize_plan(
             message,
         )))
     };
-    let client_capabilities = protocol
+    let mut client_capabilities = protocol
         .initialize_caps_for_provider(provider)
         .map_err(invalid)?;
+    // #348 A6：protocolVersion 接受集合断言——集合外的用户配置当场失败，
+    // 不再静默发出（稳定码沿用 `agent_client_capabilities_invalid`，不扩词表）。
+    let requested_protocol_version = protocol.protocol_version();
+    if !SUPPORTED_PROTOCOL_VERSIONS.contains(&requested_protocol_version) {
+        return Err(invalid(format!(
+            "acp.protocol_version = {requested_protocol_version} 不在 Pylon 支持集合 \
+             {SUPPORTED_PROTOCOL_VERSIONS:?} 内（Pylon 当前仅有 v1 wire 实现）"
+        )));
+    }
     // 显式 YAML 覆盖此前不经任何形状校验：`initialize_caps: 42` 会把标量
     // clientCapabilities 发上 wire。顶层必须是 object（B2 fail-closed）。
     if !client_capabilities.is_object() {
@@ -48,11 +71,53 @@ pub fn build_initialize_plan(
                 .to_string(),
         ));
     }
+    // #316：宿主门声明注入——「广告 ⇔ dispatcher 门禁」同源（门开注入官方
+    // 形状，门关裁剪残留声明）。显式 initialize_caps 覆盖制契约不变：声明了
+    // 就整体自担（fs/terminal 键需自含），不追加不裁剪。
+    if protocol.initialize_caps.is_none() {
+        apply_host_gates(&mut client_capabilities, policy);
+        // #316：elicitation 标准 form 模式广告（GUI 表单卡随本 issue 上线，
+        // 能力与 UI 同步交付）。url 模式不支持故不广告——官方语义：未广告的
+        // mode 视为不支持，agent 不得发起。
+        if let Some(obj) = client_capabilities.as_object_mut() {
+            obj.insert("elicitation".into(), serde_json::json!({"form": {}}));
+        }
+    }
     Ok(InitializePlan {
         protocol_version: protocol.protocol_version(),
         client_capabilities,
         client_info: protocol.client_info(),
     })
+}
+
+/// #316：按宿主门在 clientCapabilities 上注入/裁剪 fs 与 terminal 声明。
+/// 官方形状：`fs:{readTextFile:true,writeTextFile:true}`（object 值）与
+/// `terminal:true`（顶层布尔）。Host 与 Unrestricted 广告面相同，差异只在
+/// fs 执行沙箱（dispatcher 侧 strict 判定）。
+fn apply_host_gates(caps: &mut serde_json::Value, policy: crate::host_tools::HostToolsPolicy) {
+    let Some(obj) = caps.as_object_mut() else {
+        return;
+    };
+    use pylon_core::agent_config::HostToolsMode;
+    match policy.fs {
+        HostToolsMode::Agent => {
+            obj.remove("fs");
+        }
+        HostToolsMode::Host | HostToolsMode::Unrestricted => {
+            obj.insert(
+                "fs".into(),
+                serde_json::json!({"readTextFile": true, "writeTextFile": true}),
+            );
+        }
+    }
+    match policy.terminal {
+        pylon_core::agent_config::HostToolsMode::Agent => {
+            obj.remove("terminal");
+        }
+        _ => {
+            obj.insert("terminal".into(), serde_json::Value::Bool(true));
+        }
+    }
 }
 
 impl InitializePlan {
@@ -115,17 +180,71 @@ mod tests {
         AcpProtocolConfig::default()
     }
 
-    /// 计划的 wire 形状与 client 旧内联拼装逐字节一致（golden 前提）。
+    /// 计划的 wire 形状：默认 caps + #316 宿主门注入（默认 fs 开/terminal 关）。
     #[test]
     fn initialize_plan_params_match_the_inline_wire_shape() {
         let config = protocol();
-        let plan = build_initialize_plan(&config, None).unwrap();
+        let plan =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap();
+        let mut caps = config.initialize_caps_for_provider(None).unwrap();
+        caps["fs"] = json!({"readTextFile": true, "writeTextFile": true});
+        caps["elicitation"] = json!({"form": {}});
         let expected = json!({
             "protocolVersion": config.protocol_version(),
-            "clientCapabilities": config.initialize_caps_for_provider(None).unwrap(),
+            "clientCapabilities": caps,
             "clientInfo": config.client_info(),
         });
         assert_eq!(plan.params(), expected);
+    }
+
+    /// #316：默认门控 = fs 广告（host 沙箱）+ terminal 不广告。
+    #[test]
+    fn default_host_gates_advertise_fs_but_not_terminal() {
+        let config = protocol();
+        let plan =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap();
+        let caps = &plan.params()["clientCapabilities"];
+        assert_eq!(
+            caps["fs"],
+            json!({"readTextFile": true, "writeTextFile": true})
+        );
+        assert!(caps.get("terminal").is_none());
+    }
+
+    /// #316：显式 initialize_caps 覆盖制——不追加也不裁剪（声明整体自担）。
+    #[test]
+    fn explicit_caps_skip_host_gate_injection() {
+        let mut config = protocol();
+        config.initialize_caps = Some(json!({"tokenStats": true}));
+        // 门虽为 host，但显式 caps 路径跳过注入——不得冒出 fs 键。
+        config.host_tools = Some(pylon_core::agent_config::HostToolsMode::Host);
+        let plan =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap();
+        assert_eq!(
+            plan.params()["clientCapabilities"],
+            json!({"tokenStats": true})
+        );
+    }
+
+    /// #316：terminal 门开启时注入官方布尔；fs 门 agent 时裁剪残留声明。
+    #[test]
+    fn host_gates_inject_terminal_and_strip_closed_fs() {
+        let mut config = protocol();
+        config.host_terminal = Some(pylon_core::agent_config::HostToolsMode::Host);
+        let policy = crate::host_tools::HostToolsPolicy {
+            fs: pylon_core::agent_config::HostToolsMode::Host,
+            terminal: pylon_core::agent_config::HostToolsMode::Host,
+        };
+        let plan = build_initialize_plan(&config, None, policy).unwrap();
+        let caps = &plan.params()["clientCapabilities"];
+        assert_eq!(caps["terminal"], json!(true));
+
+        let mut caps = json!({"fs": {"readTextFile": true}});
+        apply_host_gates(&mut caps, crate::host_tools::HostToolsPolicy::closed());
+        assert!(caps.get("fs").is_none(), "门关必须裁剪声明（同源防漂移）");
     }
 
     /// 非法 caps 声明在计划层 fail-closed（稳定错误码）。
@@ -133,10 +252,43 @@ mod tests {
     fn initialize_plan_fails_closed_on_invalid_caps() {
         let mut config = protocol();
         config.initialize_caps = Some(json!(42));
-        let AcpError::Connect(failure) = build_initialize_plan(&config, None).unwrap_err() else {
+        let AcpError::Connect(failure) =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap_err()
+        else {
             panic!("非法 caps 必须映射为 Connect 失败");
         };
         assert_eq!(failure.code, "agent_client_capabilities_invalid");
+    }
+
+    /// #348 A6：protocolVersion 接受集合 fail-closed——集合外的用户配置当场
+    /// 拒绝（此前静默发出 Pylon 无实现的版本号）；集合内与缺省照常放行。
+    #[test]
+    fn initialize_plan_rejects_unsupported_protocol_version() {
+        let mut config = protocol();
+        config.protocol_version = Some(2);
+        let AcpError::Connect(failure) =
+            build_initialize_plan(&config, None, crate::host_tools::HostToolsPolicy::default())
+                .unwrap_err()
+        else {
+            panic!("集合外 protocol_version 必须映射为 Connect 失败");
+        };
+        assert_eq!(failure.code, "agent_client_capabilities_invalid");
+
+        config.protocol_version = Some(1);
+        assert!(build_initialize_plan(
+            &config,
+            None,
+            crate::host_tools::HostToolsPolicy::default()
+        )
+        .is_ok());
+        config.protocol_version = None;
+        assert!(build_initialize_plan(
+            &config,
+            None,
+            crate::host_tools::HostToolsPolicy::default()
+        )
+        .is_ok());
     }
 
     fn registry(capabilities: serde_json::Value) -> crate::CapabilityRegistry {

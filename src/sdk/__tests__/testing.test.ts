@@ -171,3 +171,31 @@ describe('createMockContext', () => {
     await module.activate(ctx)
   }
 })
+
+describe('createMockContext management（API 1.2 capability 面）', () => {
+  it('缺省不装配 management 属性（对齐宿主 C3 门控语义）', async () => {
+    const ctx = createMockContext()
+    expect('management' in ctx).toBe(false)
+    expect(ctx.management).toBeUndefined()
+  })
+
+  it('management: true 装配内存实现：只读投影返回空结构、管理操作被记录', async () => {
+    const ctx = createMockContext({ management: true })
+    expect(ctx.management).toBeDefined()
+    expect(ctx.management!.runtimeOverview()).toEqual({
+      revision: 0, activePluginIds: [], instances: [], switches: [],
+    })
+    expect(ctx.management!.bootstrapOverview().state).toBe('idle')
+    expect(ctx.management!.contractDiagnostics()).toEqual({ revision: 0, eligibleIds: [], diagnostics: [] })
+    expect(ctx.management!.storageUsage()).toEqual([])
+    await expect(ctx.management!.listInstalled()).resolves.toEqual([])
+    await ctx.management!.setEnabled('other.plugin', false)
+    await ctx.management!.reload('other.plugin')
+    await expect(ctx.management!.retryCleanup('rt-1')).resolves.toEqual({ complete: true })
+    const managementCalls = ctx.__recorded.filter(call => call.member === 'management')
+    expect(managementCalls.map(call => call.method)).toEqual([
+      'runtimeOverview', 'bootstrapOverview', 'contractDiagnostics', 'storageUsage',
+      'listInstalled', 'setEnabled', 'reload', 'retryCleanup',
+    ])
+  })
+})

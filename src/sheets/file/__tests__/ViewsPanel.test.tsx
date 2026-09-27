@@ -2,8 +2,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import ViewsPanel, { formatTouchTime } from '../ViewsPanel'
-import { useWorkspaceStore } from '../../../workspaceStore'
-import { toAgentContextKey } from '../../../agentContext'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
+import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { resetStores } from '../../../test/resetStores'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))

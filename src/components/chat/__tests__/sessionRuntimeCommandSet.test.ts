@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { buildSendMessagePayload } from '../sessionRuntime'
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../../contracts/agentCommandSet'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../../domains/identity/identityStore'
 
 function session(overrides: Partial<Session> = {}): Session {
   return {

@@ -46,12 +46,17 @@ describe('Skin Resolver（S5-B）', () => {
     expect(defaults['data-msg-style']).toBe('terminal')
     expect(defaults['data-message-layout']).toBe('classic')
 
-    const overridden = resolveSkinDataAttributes({ uiScheme: 'dark', messageLayout: 'claude', cliOverflowMode: 'overlay' })
+    // ★ #266 刀10/刀11：原样本里的 `cliOverflowMode: 'overlay'` 与它派生的
+    //   `data-cli-overflow-mode` 断言随字段删除（该数据属性已不产出），样本换成仍在的键。
+    const overridden = resolveSkinDataAttributes({ uiScheme: 'dark', messageLayout: 'claude', msgStyle: 'bubble' })
     expect(overridden['data-ui-scheme']).toBe('dark')
     expect(overridden['data-message-layout']).toBe('claude')
-    expect(overridden['data-cli-overflow-mode']).toBe('overlay')
+    expect(overridden['data-msg-style']).toBe('bubble')
     // ★ #238 刀8：`data-cc-variant` 连生产者一起删除 ⇒ 该属性不再出现在皮肤数据属性里
     expect('data-cc-variant' in overridden).toBe(false)
+    // ★ #266 刀10/刀11：两个已删字段的数据属性同样不再产出（防回摆）
+    expect('data-cli-overflow-mode' in overridden).toBe(false)
+    expect('data-footer-layout' in overridden).toBe(false)
   })
 
   it('不修改输入 layer 对象', () => {

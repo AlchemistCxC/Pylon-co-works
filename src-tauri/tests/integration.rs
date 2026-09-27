@@ -5,7 +5,7 @@
 //! AppState / command 函数可见性零新增；断言逐条保持（验收 8/13）。
 //!
 //! 运行：`cargo test --workspace --tests --features test-agent`
-//! 前置：`cargo build --bin pylon-fake-agent --features test-agent`
+//! 前置：`cargo build -p pylon-fake-agent --features test-agent`
 //! （bin 经 current_exe 祖先目录定位，见 test_utils::fake_agent_bin）。
 
 mod auto_reconnect;
@@ -14,3 +14,4 @@ mod b11_inject;
 mod issue110_establishment;
 mod issue53_selector_probe;
 mod model_switch;
+mod prompt_cancel;

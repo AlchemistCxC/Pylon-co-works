@@ -27,8 +27,12 @@ describe('input queue and variant style guards', () => {
     expect(css).toMatch(/\.queued-message-list/)
   })
 
-  it('compact/command 输入变体必须有样式', () => {
-    expect(css).toMatch(/\.input-bar\.input-variant-compact/)
-    expect(css).toMatch(/\.input-bar\.input-variant-command/)
+  it('命令行形态仍有专属样式，且已删的两个变体族不再回来', () => {
+    // ★ #266 刀9：输入形态固定命令行 ⇒ 原 `input-variant-compact` / `input-variant-command`
+    //   两族已删除（字段不存在了）。这条守卫的**靶子反转**：原先锁"两族必须有样式"，
+    //   现在锁"命令行这一族的 scoped 样式仍在、且那两个变体族不得回摆"。
+    expect(css).toMatch(/\.input-bar\.cli-mode/)
+    expect(css).not.toMatch(/\.input-bar\.input-variant-compact/)
+    expect(css).not.toMatch(/\.input-bar\.input-variant-command/)
   })
 })

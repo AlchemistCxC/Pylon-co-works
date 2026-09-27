@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw } from 'lucide-react'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import { classifyWorkspaceError, mergeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
 import FileTypeIcon from './FileTypeIcon'
@@ -48,7 +48,6 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
         key: errorKey(relativePath ?? ''),
         scope: { kind: 'sheet', id: `file-tree:${targetKey ?? 'none'}` },
         source: 'file.tree',
-        recovery: { kind: 'open-runtime-log', sheetId: `file-tree:${targetKey ?? 'none'}` },
       })
     } finally {
       if (isCurrentSourceRequest(requestContext.current, token)) {

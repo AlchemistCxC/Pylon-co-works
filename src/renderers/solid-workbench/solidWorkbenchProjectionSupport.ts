@@ -97,6 +97,8 @@ export function toSolidMessage(message: WorkbenchDocument['messages'][number]): 
     content: message.content,
     time: message.time,
     running: message.running,
+    interruptedDraft: message.interruptedDraft,
+    draftId: message.draftId,
     thoughtStartedAt: message.thoughtStartedAtMs,
     thoughtDurationMs: message.thoughtDurationMs,
     redacted: message.redacted,
@@ -105,4 +107,13 @@ export function toSolidMessage(message: WorkbenchDocument['messages'][number]): 
   } as Message & { semanticParts: readonly ContentPart[] }
   solidMessageCache.set(message, wrapped)
   return wrapped
+}
+
+/** #324：info 级诊断不进对话面（如 peri.turn-done 传输层留痕）——数据仍在
+ * document.diagnostics 与 Runtime 日志可观测；warning/error 照常呈现。
+ * systemErrors 已覆盖的 eventId 不重复出卡。 */
+export function visibleDiagnostics(document: WorkbenchDocument) {
+  const errorEventIds = new Set(document.systemErrors.flatMap(error => error.eventId ? [error.eventId] : []))
+  return document.diagnostics.filter(diagnostic =>
+    diagnostic.level !== 'info' && !errorEventIds.has(diagnostic.eventId))
 }

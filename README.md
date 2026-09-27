@@ -7,6 +7,8 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 
 它连接本地 Agent，管理工作区与会话，并把对话、思考、工具、文件和权限请求放在同一个工作面中。Pylon 不提供模型，也不绑定某一家 Agent；能通过 ACP 接入的本地 runtime，都可以使用同一套界面。
 
+📖 **[在线文档](https://alchemistcxc.github.io/Pylon-co-works/)**：发行包清单、Agent 检测器、插件系统（用户版/开发者版）、CLI 命令表与架构参考等篇目的导航与全文搜索版。
+
 ## 你可以用 Pylon 做什么
 
 - 连接和切换多个本地 Agent runtime，为每个 Agent 保留独立会话。
@@ -136,7 +138,7 @@ bun run test src/renderers/solid-workbench
 bun run release:portable
 ```
 
-该命令会构建前端、离线插件 SDK、Tauri 程序、Agent 检测器，并生成便携包和校验文件。
+该命令会构建前端（含 WASM 计算核）、插件 SDK、Tauri 程序、Agent 检测器与 WebView2 MCP 调试工具，并生成便携包和校验文件。
 
 ## 代码地图
 
@@ -152,8 +154,11 @@ src/sheets/agent-workbench/          Agent 工作台 Sheet
 src/infrastructure/                  Tauri 客户端与 canonical 事件仓库
 src/plugins/product/                 第一方插件、样式和注册表
 src/sdk/                             插件开发 SDK
-src-tauri/src/acp/                   ACP 客户端与传输
-src-tauri/src/session/               会话仓库与 canonical journal
+src-tauri/pylon-acp/                 ACP 协议引擎核（客户端、传输与策略）
+src-tauri/pylon-session/             会话存储核与 canonical journal
+src-tauri/pylon-*/                   其余 workspace crate：Agent 目录、基础纯逻辑、canonical 契约、WASM 计算核
+src-tauri/src/acp/                   ACP 宿主适配层（实例注册表，重导出 crate API）
+src-tauri/src/session/               会话命令编排层
 src-tauri/src/gateway/               Gateway 实例与平台路由
 shared/                              前后端共享协议和类型
 ```

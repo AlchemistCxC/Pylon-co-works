@@ -13,6 +13,7 @@ export type SessionUiKey =
   | 'input-history'
   | 'input-history-index'
   | 'message-expansion'
+  | 'selector-pending'
 
 export interface SessionUiStore {
   get<T>(sessionId: string, key: SessionUiKey, fallback: T): T

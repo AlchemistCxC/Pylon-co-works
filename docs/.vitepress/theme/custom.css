@@ -1,0 +1,21 @@
+/*
+ * 排版层（#339）：全站衬线正文字体 + 中文行距。
+ * 默认主题在 vars.css 对 :lang(zh) 有单独的字体栈，这里用相同选择器覆盖
+ * （本文件在默认主题样式之后加载，同特异性后者胜）。
+ */
+:root,
+:root:where(:lang(zh)) {
+  --vp-font-family-base:
+    'Source Serif 4', 'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC',
+    'Songti SC', 'STSong', 'SimSun', serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 中文衬线正文比西文需要更松的行距（默认 1.7） */
+.vp-doc {
+  line-height: 1.85;
+}

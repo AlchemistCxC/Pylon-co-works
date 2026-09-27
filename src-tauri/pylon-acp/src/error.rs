@@ -23,6 +23,16 @@ pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 /// session/update 通知名官方为 pub，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
+/// #316：elicitation/complete —— URL 模式外带交互完成通知（agent→client）。
+pub const NOTIF_ELICITATION_COMPLETE: &str = CLIENT_METHOD_NAMES.elicitation_complete;
+/// #315 Peri 私有扩展通知（Category ③/⑤，peri 侧 `PeriCaps` 经
+/// `clientCapabilities._meta` 协商开启；wire method 名即包络后的 sessionUpdate
+/// 判别符，见 `client::wrap_provider_extension_notification`）。命名对照 peri-acp
+/// 源 event_sink.rs / host/mod.rs：agent_event 系列为下划线，其余为连字符。
+pub const NOTIF_PERI_AGENT_EVENT: &str = "peri/agent_event";
+pub const NOTIF_PERI_AGENT_EVENT_DONE: &str = "peri/agent_event_done";
+pub const NOTIF_PERI_UNSTABLE_EVENT: &str = "peri/unstable-event";
+pub const NOTIF_PERI_PREDICTION_READY: &str = "peri/prediction_ready";
 /// G3 Step 8a（4.2）：进程内崩溃伪通知常量迁移——事件名唯一来源收口到
 /// event_names 常量表，本名保持既有引用（dispatcher/reader/测试）零改动。
 pub use pylon_foundations::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
@@ -122,6 +132,11 @@ impl AgentConnectFailure {
         if let AcpError::Rpc(raw) = &error {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
                 failure.remote_code = value.get("code").and_then(serde_json::Value::as_i64);
+                if failure.remote_code == Some(-32000) {
+                    // #354：协议级 authRequired → 稳定码（cause 词表与前端码表
+                    // 已登记 `agent_auth_required`）。
+                    failure.code = "agent_auth_required".to_string();
+                }
                 if let Some(message) = value.get("message").and_then(serde_json::Value::as_str) {
                     failure.message = format!(
                         "initialize RPC error{}: {}",
@@ -211,6 +226,9 @@ pub enum AcpError {
 pub enum RpcFailureKind {
     SessionMissing,
     MethodMissing,
+    /// #354：agent 回协议级 `-32000 authRequired`——需要登录/认证后才可继续，
+    /// 宿主据此给稳定码 `agent_auth_required`（用户可见「去登录」语义）。
+    AuthRequired,
     Other,
 }
 
@@ -242,6 +260,25 @@ impl AcpError {
             RecoveryFailureClass::Unavailable
         }
     }
+
+    /// 机器可读错误码（#317 批次二 2c：边界区分度保留）。词汇表与宿主
+    /// `session/persist.rs::replay_load_error_code` 的既有回放契约逐字一致——
+    /// 本方法是该词汇表的单源（persist.rs 改为转调本方法）。
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ConnectionClosed => "connection_closed",
+            Self::WriteTimeout => "write_timeout",
+            Self::RpcTimeout => "rpc_timeout",
+            Self::ReplayTimeout { .. } => "replay_timeout",
+            Self::ReplayLagged { .. } => "replay_lag",
+            Self::ReplayStreamClosed => "replay_transport_error",
+            Self::ReplayLoadInProgress => "replay_load_in_progress",
+            Self::Rpc(_) => "rpc_error",
+            Self::Connect(_) => "connect_error",
+            Self::Child(_) => "transport_error",
+        }
+    }
+
     pub fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
         let Self::Rpc(raw) = self else {
             return None;
@@ -267,6 +304,11 @@ impl AcpError {
             .map(|marker| marker.to_ascii_lowercase());
         let kind = if code == Some(-32601) {
             RpcFailureKind::MethodMissing
+        } else if code == Some(-32000) {
+            // #354：协议级 authRequired 按结构化 code 一票判定，置于文本启发式
+            // 之前——协议已定义该码的语义，agent 误用它表其它含义属协议违规，
+            // 不做文本竞猜。
+            RpcFailureKind::AuthRequired
         } else if data_marker.as_deref().is_some_and(|marker| {
             matches!(
                 marker,
@@ -332,9 +374,11 @@ impl From<AcpError> for String {
 
 impl AcpError {
     /// H14 类型化：close 降级判定（session.rs:1619 错误串 contains 的声明式替代，
-    /// G2-03 消费点）。JSON-RPC error 信封的 `code` 字段解析优先（-32601 =
-    /// MethodNotFound），字符串兜底（"-32601" / "Method not found"，保留现状
-    /// 大小写敏感语义）。
+    /// G2-03 消费点）。JSON-RPC error 信封**只看顶层字段**：`code` == -32601
+    /// 命中；无 code 时退看顶层 `message` 含 "Method not found"（保留现状
+    /// 大小写敏感语义）。#348 A5：不再对整信封序列化值做 "-32601" 扫描——
+    /// `data` 里恰好含同名字样会被误判为 method-not-found。非 JSON 纯文本
+    /// 保留原字符串兜底。
     /// G2（W2 链 E）消费：`if error.is_method_not_found() { 降级本地清理 }`。
     pub fn is_method_not_found(&self) -> bool {
         let AcpError::Rpc(message) = self else {
@@ -344,8 +388,10 @@ impl AcpError {
             if value.get("code").and_then(|code| code.as_i64()) == Some(-32601) {
                 return true;
             }
-            let text = value.to_string();
-            return text.contains("-32601") || text.contains("Method not found");
+            return value
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains("Method not found"));
         }
         message.contains("-32601") || message.contains("Method not found")
     }
@@ -385,5 +431,127 @@ mod resume_failure_tests {
             AcpError::ConnectionClosed.recovery_failure_class(),
             RecoveryFailureClass::Unavailable
         );
+    }
+}
+
+#[cfg(test)]
+mod wire_code_tests {
+    use super::{AcpError, AgentConnectFailure, RpcFailureKind};
+
+    /// #354：协议级 `-32000 authRequired` 按结构化 code 一票判定（置于文本
+    /// 启发式之前）；非 `-32000` 的既有文本启发式（session_missing 等）不变。
+    #[test]
+    fn rpc_failure_kind_classifies_auth_required_by_wire_code_before_text_heuristics() {
+        for raw in [
+            r#"{"code":-32000,"message":"authentication required"}"#,
+            r#"{"code":-32000,"message":"please login via the agent CLI"}"#,
+            // 即使文本像 session 缺失，-32000 的协议语义优先。
+            r#"{"code":-32000,"message":"session not found: s-1"}"#,
+        ] {
+            assert_eq!(
+                AcpError::Rpc(raw.into()).rpc_failure_kind(),
+                Some(RpcFailureKind::AuthRequired),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32602,"message":"session not found: s-1"}"#.into())
+                .rpc_failure_kind(),
+            Some(RpcFailureKind::SessionMissing)
+        );
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32601,"message":"Method not found"}"#.into())
+                .rpc_failure_kind(),
+            Some(RpcFailureKind::MethodMissing)
+        );
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32001,"message":"rate limited"}"#.into()).rpc_failure_kind(),
+            Some(RpcFailureKind::Other)
+        );
+    }
+
+    /// #354：initialize 对远端 `-32000` 产出稳定码 `agent_auth_required`
+    /// （cause 词表与前端码表已登记）；其它远端码不触发。
+    #[test]
+    fn initialize_maps_remote_auth_required_to_a_stable_code() {
+        let failure = AgentConnectFailure::initialize(
+            AcpError::Rpc(r#"{"code":-32000,"message":"authentication required"}"#.into()),
+            None,
+        );
+        assert_eq!(failure.code, "agent_auth_required");
+        assert_eq!(failure.remote_code, Some(-32000));
+        assert!(!failure.retryable);
+        assert!(failure.message.contains("authentication required"));
+
+        let other = AgentConnectFailure::initialize(
+            AcpError::Rpc(r#"{"code":-32602,"message":"bad params"}"#.into()),
+            None,
+        );
+        assert_eq!(other.code, "agent_initialize_failed");
+        assert_eq!(other.remote_code, Some(-32602));
+    }
+
+    /// #317 批次二 2c：边界码表稳定性——词汇表与宿主 persist.rs 回放契约逐字一致，
+    /// 前端 replayErrorCode 按 code 透传，拼写不得漂移。
+    #[test]
+    fn wire_codes_are_stable_and_machine_readable() {
+        assert_eq!(AcpError::ConnectionClosed.code(), "connection_closed");
+        assert_eq!(AcpError::WriteTimeout.code(), "write_timeout");
+        assert_eq!(AcpError::RpcTimeout.code(), "rpc_timeout");
+        assert_eq!(
+            AcpError::ReplayTimeout { seconds: 30 }.code(),
+            "replay_timeout"
+        );
+        assert_eq!(AcpError::ReplayLagged { count: 1 }.code(), "replay_lag");
+        assert_eq!(
+            AcpError::ReplayStreamClosed.code(),
+            "replay_transport_error"
+        );
+        assert_eq!(
+            AcpError::ReplayLoadInProgress.code(),
+            "replay_load_in_progress"
+        );
+        assert_eq!(AcpError::Rpc("x".into()).code(), "rpc_error");
+        assert_eq!(
+            AcpError::Connect(Box::new(crate::error::AgentConnectFailure::preflight(
+                "preflight",
+                "unavailable".into(),
+            )))
+            .code(),
+            "connect_error"
+        );
+        assert_eq!(
+            AcpError::Child("spawn failed".into()).code(),
+            "transport_error"
+        );
+    }
+
+    /// #348 A5：close 降级判定只看信封顶层（code / message），不做整信封
+    /// "-32601" 扫描——`data` 内同名字样不得误判。非 JSON 纯文本保留原兜底。
+    #[test]
+    fn method_not_found_reads_envelope_top_level_only() {
+        // 顶层 code 命中（含/不含 message 均可）。
+        assert!(
+            AcpError::Rpc(r#"{"code":-32601,"message":"Method not found"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(AcpError::Rpc(r#"{"code":-32601}"#.into()).is_method_not_found());
+        // 无 code 信封：退看顶层 message。
+        assert!(AcpError::Rpc(r#"{"message":"Method not found"}"#.into()).is_method_not_found());
+        // 非 JSON 纯文本：原字符串兜底。
+        assert!(AcpError::Rpc("RPC error: Method not found".into()).is_method_not_found());
+        assert!(AcpError::Rpc("RPC error: -32601".into()).is_method_not_found());
+        // data 内同名 "-32601" 字样不得误判（整值扫描已移除）。
+        assert!(!AcpError::Rpc(
+            r#"{"code":-32000,"message":"boom","data":{"hint":"see -32601 elsewhere"}}"#.into()
+        )
+        .is_method_not_found());
+        // 其它 code / 无记号文本 → false。
+        assert!(
+            !AcpError::Rpc(r#"{"code":-32602,"message":"Invalid params"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(!AcpError::Rpc("RPC error: connection closed".into()).is_method_not_found());
+        assert!(!AcpError::ConnectionClosed.is_method_not_found());
     }
 }

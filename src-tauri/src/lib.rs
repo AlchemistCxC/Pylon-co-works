@@ -17,6 +17,7 @@ pub mod browser;
 pub(crate) use pylon_core::correlation;
 mod cwd;
 mod dispatcher;
+mod docs_sheet;
 mod error;
 mod export;
 mod gateway;
@@ -24,6 +25,9 @@ pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
 mod lifecycle;
+/// #362：崩溃取证的落盘日志链（每日轮转 + 每日预算 + 同步 panic hook）。
+/// 对 crate 内可见即可；`is_self_target` 供 `runtime_log` 的自反馈隔离复用。
+pub(crate) mod logging;
 mod mcp;
 mod paths;
 mod permission;
@@ -83,6 +87,7 @@ use session::SessionInfo;
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::load_mcp_persisted;
 use crate::permission::check_pending_permission_timeouts;
+use crate::permission::check_pending_private_interaction_timeouts;
 use crate::pet::cmds::persist_pet_if_possible;
 use crate::session::{check_session_expiry, send_prompt_core};
 
@@ -168,6 +173,8 @@ pub(crate) struct AppState {
     pub(crate) config_write_lock: tokio::sync::Mutex<()>,
     /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
     pub(crate) browser: Arc<browser::BrowserManager>,
+    /// #371：文档 Sheet 管理（离线文档站子 WebView；setup() 注入主窗口）。
+    pub(crate) docs_sheet: Arc<docs_sheet::DocsSheetManager>,
     /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
     /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
     /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
@@ -480,7 +487,7 @@ impl AppStateHandles {
         runtime: &Arc<AgentRuntime>,
         agent_id: Option<String>,
         new_acp: AcpClient,
-        window: tauri::WebviewWindow<R>,
+        window: tauri::Window<R>,
         activation: crate::agent::runtime::ClientActivation,
     ) -> Result<Vec<crate::session::store::SessionProbeCandidate>, String> {
         if new_acp.is_crashed() {
@@ -632,18 +639,95 @@ pub(crate) fn prompt_lock_for(
 
 // ── B10.4 平台链路集成测试（fake QQ 事件 → ingest → 注入 → fake ACP → deliver 回发） ──
 
-/// R18：初始化 tracing subscriber——fmt（stderr，INFO 上限）+ RuntimeLogLayer
-/// （tracing event → RuntimeLogHub 转发，level/source/message/fields 形状保持）。
-/// main.rs 在 run() 之前调用；hub 本身由 run() 创建后经 register_hub 注册，
-/// Layer 按事件惰性读取，注册前的 event 直接丢弃（此前 log 宏本就无 sink）。
-pub fn init_tracing() {
-    use tracing_subscriber::layer::Layer;
-    let base = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(std::io::stderr)
-        .finish();
-    let subscriber = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
+/// R18 + #362：初始化 tracing subscriber。
+///
+/// 三个 sink 共享一条订阅：
+/// - **stderr**：`fmt` 层，INFO 上限（行为不变）。
+/// - **落盘文件**（#362）：每日轮转 `<data_root>/logs/pylon.<date>.log`、保留 30 个、
+///   每日 512 MiB 上限且**从当日既有文件尺寸续算**；debug 构建下这是多余的一份，
+///   但 release 是 GUI 子系统（#361）——stderr 不可见，落盘是唯一活口。
+/// - **RuntimeLogLayer**：tracing event → RuntimeLogHub（level/source/message/fields 形状不变）。
+///
+/// 另外安装 panic hook（同步写盘），见 [`logging::panic_hook`]。
+///
+/// 返回值必须由调用方（`main()`）绑定到进程生命周期：`WorkerGuard` 一 drop，
+/// non_blocking 的 worker 线程就收摊，缓冲里的尾巴会丢。`main.rs` 里写成
+/// `let _log_guard = ...`。
+///
+/// hub 由 `run()` 创建后经 `register_hub` 注册，Layer 按事件惰性读取，注册前的
+/// event 直接丢弃（此前 log 宏本就无 sink）。
+pub fn init_tracing() -> LogGuard {
+    let file_sink = crate::paths::resolve_log_root().and_then(|root| {
+        logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(root))
+    });
+    let (subscriber, worker) = build_subscriber(runtime_log::RuntimeLogLayer::new(), file_sink);
+    // `set_global_default` 失败（例如同一进程里已装过 subscriber）不致命：日志链降级，
+    // 应用照常启动。
     let _ = tracing::subscriber::set_global_default(subscriber);
+    logging::panic_hook::install();
+    LogGuard { _worker: worker }
+}
+
+/// #383：构造三个 sink 的 subscriber——**基底必须是 `Registry`**。
+///
+/// 曾经的写法把带 `.with_filter(...)` 的落盘层挂到 `fmt::Subscriber` 上
+/// （`file_layer.with_subscriber(base)`）。`tracing-subscriber` 给 `fmt::Subscriber`
+/// 实现的 `LookupSpan::register_filter` 是**默认实现、直接 panic**
+/// （`registry/mod.rs`：`"{type} does not currently support filters"`），于是这条分支
+/// 一被走到进程就启动即崩——触发条件只是「日志根可写」，portable 与 AppData 两条路
+/// 都满足，**与 debug/release 无关**，于是从源码构建的发行包 100% 起不来。`Registry`
+/// 支持 per-layer filtering，三个 sink 平铺挂上去即可（各层的级别/目标过滤语义不变）。
+///
+/// 抽成独立函数是为了能被测试直接驱动：`set_global_default` 每进程只成功一次，而
+/// 「构造这条订阅栈不 panic」正是 #383 的回归点。
+fn build_subscriber(
+    hub_layer: runtime_log::RuntimeLogLayer,
+    file_sink: Option<(
+        tracing_appender::non_blocking::NonBlocking,
+        tracing_appender::non_blocking::WorkerGuard,
+    )>,
+) -> (
+    Box<dyn tracing::Subscriber + Send + Sync>,
+    Option<tracing_appender::non_blocking::WorkerGuard>,
+) {
+    use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+    // #383 的一处**已知语义差异**（评审实测，接受）：修前 stderr 是 `fmt::Subscriber` 自带的
+    // 订阅者级 `LevelFilter::INFO`，全局 max level hint = INFO；换 registry 后各层各自过滤，
+    // 全局 hint 落到 TRACE（`LevelFilter::current()` 实测 TRACE）。**可记录的可见输出不变**
+    // （hub 层内部仍有 `level > INFO` 守卫、落盘层有 INFO 过滤、stderr 层也有），差别只是
+    // debug!/trace! 调用不再被全局短路、每次多一次 enabled 走查（全仓 20 处、均在罕见错误分支）。
+    // 若将来要把 hint 收紧回 INFO，在 registry 上再加一层 `LevelFilter::INFO` 即可。
+    let base = tracing_subscriber::registry().with(hub_layer).with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+    );
+    match file_sink {
+        Some((writer, worker_guard)) => {
+            // 文件 sink 也限 INFO：debug/trace 只留在 stderr，不写盘也不冲 ring。
+            // panic 记录由 hook 同步写过同一个文件（且带完整 backtrace），这里按
+            // target 等值去重，避免每个 panic 在文件里出现两遍。
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer)
+                .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                    metadata.target() != logging::PANIC_TARGET
+                }))
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+            (Box::new(base.with(file_layer)), Some(worker_guard))
+        }
+        None => (Box::new(base), None),
+    }
+}
+
+/// #362：落盘 sink 的存活守卫。
+///
+/// 只有绑定到进程生命周期才有意义（drop = 关闭 worker 线程并 flush），所以带
+/// `#[must_use]`：漏绑会静默丢掉每一次缓冲未刷的日志，不会有编译错误提醒。
+#[must_use = "绑定到进程生命周期（main 里 let _log_guard = ...），drop 会关掉落盘 worker"]
+pub struct LogGuard {
+    _worker: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
 /// #269：进程侧启动相位打点（main.rs 在 t0 处调用；供 lib 外的入口 facade 使用）。
@@ -734,6 +818,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         mcp_write_lock: tokio::sync::Mutex::new(()),
         config_write_lock: tokio::sync::Mutex::new(()),
         browser: Arc::new(browser::BrowserManager::new()),
+        docs_sheet: Arc::new(docs_sheet::DocsSheetManager::new()),
         // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
         // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
         mcp_wire: Mutex::new(None),
@@ -762,17 +847,54 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
 // P3a（#106）：setup 管道提取——DataDirs 解析→portable 迁移→workspace 恢复→storage 诊断
 // →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
 // run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
+// #331/M2：18 个阶段拆为具名 `setup_*` 函数，失败策略在编排处逐行标注——
+// 〔致命〕Err 上抛中止启动；〔可见〕tracing 报错但不中止；〔静默〕warn 后继续。
+// 阶段顺序即依赖顺序（施工文档 §2.3），不得重排。
 pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::startup_timing::mark("setup_enter");
+    let window = setup_open_main_window(app)?; // 〔致命〕主窗口缺失
+    let dirs = setup_install_data_dirs(app)?; // 〔致命〕数据目录解析/安装失败——消费者禁止各自回退
+    setup_migrate_appdata(app, &dirs)?; // 〔致命〕AppData 路径解析失败；迁移失败〔可见〕不中止（UI 横幅兜底）
+    setup_hydrate_workspaces(app)?; // 〔致命〕workspace 注册表恢复失败
+    setup_install_storage_diagnostics(app, &dirs)?; // 〔致命〕诊断锁中毒 / 路径解析失败
+    setup_register_browser_host(app, &window, &dirs); // 无失败路径
+    setup_register_docs_sheet_host(app, &window); // 无失败路径
+    setup_ensure_plugin_dirs(app); // 〔静默〕插件目录树创建失败仅 warn
+    setup_restore_pet(app, &dirs); // 〔静默〕宠物存档缺失/损坏保持新宠物
+    setup_restore_mcp_config(app, &dirs); // 〔静默〕MCP 配置缺失/损坏/非法保持空配置
+    setup_install_persistence_services(app, &dirs)?; // 〔致命〕Kernel 三 service 打开/安装失败（就绪屏障）
+    setup_restore_gateway_instances(app, &dirs); // 〔可见〕实例/凭据恢复失败保留原文件继续
+    setup_wire_gateway_registry(app); // 无失败路径（HTTP client 构建失败降级默认 client）
+    let connecting = setup_start_dispatchers(app, &window); // 无失败路径；返回默认 agent 是否 Connecting
+    setup_spawn_default_agent_connect(app, connecting); // 〔可见〕后台初始连接失败仅 warn（窗口已可见）
+    setup_install_gateway_ingest_handler(app); // 无失败路径（handler 内部自行报错/拒绝）
+    setup_spawn_session_expiry_watcher(app); // 无失败路径（循环内自报错）
+    setup_spawn_journal_maintenance_watcher(app); // 无失败路径（循环内自报错）
+    setup_spawn_permission_timeout_watcher(app); // 无失败路径（循环内自报错）
+    crate::startup_timing::mark("setup_complete");
+    Ok(())
+}
+
+/// 阶段 1：取主窗口并设标题。标题失败仅 warn（不阻断）。
+fn setup_open_main_window(
+    app: &tauri::App,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
     let window = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
     if let Err(error) = window.set_title("Pylon") {
         tracing::warn!("set window title failed: {error}");
     }
-    // 施工文档 §2.3：任何插件/Pet/MCP/SQLite/Gateway 路径消费者运行前，
-    // 用 app.handle() 解析一次 DataDirs 并写入 AppState 一次性槽位。
-    // 失败 = 启动中止（blocked），禁止消费者各自回退不同目录。
+    Ok(window)
+}
+
+/// 阶段 2：解析 DataDirs 并写入 AppState 一次性槽位。
+/// 施工文档 §2.3：任何插件/Pet/MCP/SQLite/Gateway 路径消费者运行前，
+/// 用 app.handle() 解析一次 DataDirs 并写入 AppState 一次性槽位。
+/// 失败 = 启动中止（blocked），禁止消费者各自回退不同目录。
+fn setup_install_data_dirs(
+    app: &tauri::App,
+) -> Result<crate::paths::DataDirs, Box<dyn std::error::Error>> {
     let data_dirs = crate::paths::resolve_data_dirs(app.handle())
         .map_err(|error| format!("resolve data dirs failed: {error}"))?;
     app.state::<AppState>()
@@ -782,265 +904,324 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     // 后续 setup 路径消费者统一使用这份一次性解析结果；跨 async/spawn_blocking
     // 时按需 clone（PathBuf 拷贝成本可忽略）。
     let dirs = app.state::<AppState>().data_dirs_cloned()?;
+    // #362：日志目录在 `main()`（`init_tracing`）就已解析，早于这里的 DataDirs。
+    // 两边应当落在同一个 data_root 下；不一致说明路径推理漂移了（用户会按说明书
+    // 去错地方找日志），所以显式说出来而不是静默分叉。
+    if let Some(log_root) = crate::logging::active_log_root() {
+        let expected = dirs.data_root.join("logs");
+        if log_root != expected {
+            tracing::warn!(
+                "日志目录与 data_root 不一致：日志在 {}，data_root 下的位置是 {}",
+                log_root.display(),
+                expected.display()
+            );
+        }
+    }
     crate::startup_timing::mark("data_dirs_resolved");
-    // portable 首次启动自动迁移（2026-08-19 修复）：
-    // AppData 旧数据 → data/。必须在此处（hydrate_workspaces 之前、
-    // message_service 初始化之前）——服务打开后迁移命令会被拒绝，
-    // hydrate 在迁移前会读到空 workspaces 表。失败不中止启动：
-    // AppData 数据未动，可后续手动处理（UI 横幅兜底）。
-    {
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?;
-        let app_config_dir = app
-            .path()
-            .app_config_dir()
-            .map_err(|error| error.to_string())?;
-        if crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir) {
-            match crate::paths::migrate_appdata_to_portable_staged(
-                &app_data_dir,
-                &app_config_dir,
-                &dirs.data_root,
-            ) {
-                Ok(()) => tracing::info!(
+    Ok(dirs)
+}
+
+/// 阶段 3：portable 首次启动自动迁移（2026-08-19 修复）：AppData 旧数据 → data/。
+/// 必须在此处（hydrate_workspaces 之前、message_service 初始化之前）——服务打开后
+/// 迁移命令会被拒绝，hydrate 在迁移前会读到空 workspaces 表。路径解析失败上抛
+/// （〔致命〕）；迁移本身失败不中止启动：AppData 数据未动，可后续手动处理（UI 横幅兜底）。
+fn setup_migrate_appdata(
+    app: &tauri::App,
+    dirs: &crate::paths::DataDirs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let app_config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    if crate::paths::migration_available(dirs, &app_data_dir, &app_config_dir) {
+        match crate::paths::migrate_appdata_to_portable_staged(
+            &app_data_dir,
+            &app_config_dir,
+            &dirs.data_root,
+        ) {
+            Ok(()) => {
+                tracing::info!(
                     "AppData 旧数据已自动迁移至 portable: {}",
                     dirs.data_root.display()
-                ),
-                Err(error) => tracing::error!(
+                )
+            }
+            Err(error) => {
+                tracing::error!(
                     "portable 自动迁移失败（AppData 数据未动，可后续手动处理）：{error}"
-                ),
+                )
             }
         }
     }
-    // Workspace 注册表必须先于前端 hydrate 恢复；文件缺失即首次启动，返回空表。
+    Ok(())
+}
+
+/// 阶段 4：Workspace 注册表恢复。必须先于前端 hydrate；文件缺失即首次启动，返回空表。
+fn setup_hydrate_workspaces(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::workspaces::hydrate_workspaces(app.state::<AppState>().inner())
-        .map_err(|error| format!("load workspaces failed: {error}"))?;
-    // 施工文档 §7.4：storage 诊断与路径同时确定（只暴露模式/脱敏原因）。
-    {
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?;
-        let app_config_dir = app
-            .path()
-            .app_config_dir()
-            .map_err(|error| error.to_string())?;
-        let migration_available =
-            crate::paths::migration_available(&dirs, &app_data_dir, &app_config_dir);
-        let storage = crate::startup::StorageDiagnostics::from_dirs(&dirs)
-            .with_migration_available(migration_available);
-        let app_state = app.state::<AppState>();
-        let mut startup = app_state
-            .startup
-            .write()
-            .map_err(|_| "startup diagnostics lock poisoned".to_string())?;
-        startup.storage = Some(storage);
-    }
-    // Phase 4：浏览器管理器注入主窗口（子 WebView add_child 需要）。
+        .map_err(|error| format!("load workspaces failed: {error}").into())
+}
+
+/// 阶段 5：storage 诊断与路径同时确定（施工文档 §7.4，只暴露模式/脱敏原因）。
+fn setup_install_storage_diagnostics(
+    app: &tauri::App,
+    dirs: &crate::paths::DataDirs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let app_config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    let migration_available =
+        crate::paths::migration_available(dirs, &app_data_dir, &app_config_dir);
+    let storage = crate::startup::StorageDiagnostics::from_dirs(dirs)
+        .with_migration_available(migration_available);
+    let app_state = app.state::<AppState>();
+    let mut startup = app_state
+        .startup
+        .write()
+        .map_err(|_| "startup diagnostics lock poisoned".to_string())?;
+    startup.storage = Some(storage);
+    Ok(())
+}
+
+/// 阶段 6：浏览器管理器注入主窗口（Phase 4，子 WebView add_child 需要）+
+/// issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
+fn setup_register_browser_host(
+    app: &tauri::App,
+    window: &tauri::WebviewWindow,
+    dirs: &crate::paths::DataDirs,
+) {
     app.state::<AppState>()
         .browser
         .register_host(window.as_ref().window(), app.handle().clone());
-    // issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
-    {
-        let state = app.state::<AppState>();
-        state
-            .browser_agent
-            .init_settings_path(crate::paths::browser_agent_settings_path(&dirs));
-        let hub = state.browser_agent.clone();
-        state
-            .browser
-            .register_page_load_hook(std::sync::Arc::new(move |tab_id| {
-                if let Ok(mut registry) = hub.refs().lock() {
-                    registry.invalidate_tab(tab_id);
-                }
-            }));
-    }
-    // 插件基建 v2：启动即创建用户插件目录树（installed/staging），
-    // 让用户无需先安装也能在文件管理器里看到插件目录。
+    let state = app.state::<AppState>();
+    state
+        .browser_agent
+        .init_settings_path(crate::paths::browser_agent_settings_path(dirs));
+    let hub = state.browser_agent.clone();
+    state
+        .browser
+        .register_page_load_hook(std::sync::Arc::new(move |tab_id| {
+            if let Ok(mut registry) = hub.refs().lock() {
+                registry.invalidate_tab(tab_id);
+            }
+        }));
+}
+
+/// 阶段 6b（#371）：文档 Sheet 管理器注入主窗口（子 WebView add_child 需要）。
+fn setup_register_docs_sheet_host(app: &tauri::App, window: &tauri::WebviewWindow) {
+    app.state::<AppState>()
+        .docs_sheet
+        .register_host(window.as_ref().window(), app.handle().clone());
+}
+
+/// 阶段 7：插件基建 v2——启动即创建用户插件目录树（installed/staging），
+/// 让用户无需先安装也能在文件管理器里看到插件目录。
+fn setup_ensure_plugin_dirs(app: &tauri::App) {
     if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {
         tracing::warn!("create plugin dirs failed: {error}");
     }
-    // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
-    {
-        let path = crate::paths::pet_persist_path(&dirs);
-        if let Some(saved) = pet::load_from_file(&path) {
-            let pet_arc = app.state::<AppState>().pet.clone();
-            if let Ok(mut pet) = pet_arc.lock() {
-                pet::restore(&mut pet, saved);
-            };
+}
+
+/// 阶段 8：宠物状态落盘加载。文件缺失/损坏时保持新宠物（静默降级）。
+fn setup_restore_pet(app: &tauri::App, dirs: &crate::paths::DataDirs) {
+    let path = crate::paths::pet_persist_path(dirs);
+    if let Some(saved) = pet::load_from_file(&path) {
+        let pet_arc = app.state::<AppState>().pet.clone();
+        if let Ok(mut pet) = pet_arc.lock() {
+            pet::restore(&mut pet, saved);
+        };
+    }
+}
+
+/// 阶段 9：B4.2 MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
+fn setup_restore_mcp_config(app: &tauri::App, dirs: &crate::paths::DataDirs) {
+    let path = crate::paths::mcp_persist_path(dirs);
+    if let Some(servers) = load_mcp_persisted(&path) {
+        if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
+            *slot = Some(servers);
+            tracing::info!("MCP 配置已从 {} 恢复", path.display());
         }
     }
-    // B4.2：MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
-    {
-        let path = crate::paths::mcp_persist_path(&dirs);
-        if let Some(servers) = load_mcp_persisted(&path) {
-            if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
-                *slot = Some(servers);
-                tracing::info!("MCP 配置已从 {} 恢复", path.display());
-            }
-        }
-    }
-    // Kernel persistence readiness barrier：三个 service 共用同一 SQLite 文件，
-    // 但作为一个启动单元串行 open/migrate 并一次性安装。setup 返回后所有
-    // command/dispatcher 都可依赖 service 已就绪；任一失败则 setup 失败，
-    // 不运行半可用 Kernel，也不回退 localStorage/第二历史权威。
-    {
-        let db_path = crate::paths::message_db_path(&dirs);
-        let services = crate::session::PersistenceServices::open(&db_path)?;
-        let state = app.state::<AppState>();
-        *state
-            .message_service
-            .lock()
-            .map_err(|_| "message service slot lock poisoned".to_string())? =
-            Some(services.message);
-        *state
-            .user_data_service
-            .lock()
-            .map_err(|_| "user-data service slot lock poisoned".to_string())? =
-            Some(services.user_data);
-        *state
-            .event_service
-            .lock()
-            .map_err(|_| "event service slot lock poisoned".to_string())? = Some(services.event);
-        tracing::info!("Kernel persistence services ready: {}", db_path.display());
-    }
+}
+
+/// 阶段 10：Kernel persistence readiness barrier——三个 service 共用同一 SQLite 文件，
+/// 但作为一个启动单元串行 open/migrate 并一次性安装。setup 返回后所有
+/// command/dispatcher 都可依赖 service 已就绪；任一失败则 setup 失败，
+/// 不运行半可用 Kernel，也不回退 localStorage/第二历史权威。
+fn setup_install_persistence_services(
+    app: &tauri::App,
+    dirs: &crate::paths::DataDirs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = crate::paths::message_db_path(dirs);
+    let services = crate::session::PersistenceServices::open(&db_path)?;
+    let state = app.state::<AppState>();
+    *state
+        .message_service
+        .lock()
+        .map_err(|_| "message service slot lock poisoned".to_string())? = Some(services.message);
+    *state
+        .user_data_service
+        .lock()
+        .map_err(|_| "user-data service slot lock poisoned".to_string())? =
+        Some(services.user_data);
+    *state
+        .event_service
+        .lock()
+        .map_err(|_| "event service slot lock poisoned".to_string())? = Some(services.event);
+    tracing::info!("Kernel persistence services ready: {}", db_path.display());
     crate::startup_timing::mark("persistence_ready");
-    // I12-W4：gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
-    // → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按
-    // `enabled && autoStart` 策略显式启动（失败可见，不静默）。损坏/IO 失败
-    // 保留原文件，仅可见报错（不阻断启动、不丢配置）。
-    // I12-W5：同块打开凭据存储（W3）→ 接线 start 凭据解析器 → 加载后刷新
-    // 实例 credential_ref/status（重启不丢凭据引用）。
-    {
-        let state = app.state::<AppState>();
-        let store_path_slot = state.gateway_instance_store_path.clone();
-        let credentials_slot = state.gateway_credentials.clone();
-        let path = crate::paths::gateway_instances_path(&dirs);
-        if let Ok(mut slot) = store_path_slot.lock() {
-            *slot = Some(path.clone());
-        }
-        // I12-W5：打开加密凭据存储（密文/主密钥分目录；失败可见不阻断）。
-        // 施工文档 §7.3：路径解析失败 → credentials 槽位保持 None，禁止
-        // 回退 `PathBuf::new()`（避免相对当前目录误写 pylon-master.key）。
-        let credentials = {
-            let credentials_dir = crate::paths::credentials_dir(&dirs);
-            match crate::gateway::credentials::CredentialStore::open(&credentials_dir) {
-                Ok(store) => Some(Arc::new(store)),
-                Err(error) => {
-                    tracing::error!("凭据存储打开失败（set_credentials 不可用）：{error}");
-                    None
-                }
-            }
-        };
-        if let Ok(mut slot) = credentials_slot.lock() {
-            *slot = credentials.clone();
-        }
-        let service = state.gateway_instances.clone();
-        let path_for_task = path.clone();
-        let credentials_for_refresh = credentials.clone();
-        tokio::spawn(async move {
-            let loaded = tokio::task::spawn_blocking(move || {
-                crate::gateway::instance_store::load_instances(&path_for_task)
-            })
-            .await;
-            match loaded {
-                Ok(Ok(instances)) => {
-                    service.load_instances(instances).await;
-                    tracing::info!("gateway 实例配置已加载：{}", path.display());
-                    // I12-W5：重启恢复凭据引用（secret 不载入内存，仅标记）
-                    if let Some(store) = credentials_for_refresh.as_ref() {
-                        let store = store.clone();
-                        service
-                            .refresh_credential_states(move |platform, id| {
-                                store.has_credentials(platform, id).unwrap_or(false)
-                            })
-                            .await;
-                    }
-                    // AC2：仅 enabled && autoStart 显式启动，失败可见（策略测试见
-                    // instance.rs auto_start_instances）
-                    service.auto_start_instances().await;
-                }
-                Ok(Err(error)) => {
-                    tracing::error!("gateway 实例配置加载失败（保留原文件不覆盖）：{error}")
-                }
-                Err(error) => {
-                    tracing::error!("gateway 实例配置加载 task 失败：{error}");
-                }
-            }
-        });
-        // I12-W5：start 凭据解析器（factory.create 前从 CredentialStore 解析
-        // secret 填入 state；未配置 → None → factory 报 CredentialMissing）
-        {
-            let credentials_slot = state.gateway_credentials.clone();
-            state.gateway_instances.set_credential_resolver(Arc::new(
-                move |platform: &str, instance_id: &str| {
-                    credentials_slot
-                        .lock()
-                        .ok()
-                        .and_then(|slot| slot.clone())
-                        .and_then(|store| {
-                            store.get_credentials(platform, instance_id).ok().flatten()
-                        })
-                        .map(|secret| secret.to_string())
-                },
-            ));
-        }
-        // gateway 共用 HTTP client（平台 factory 连接循环共用；超时参数
-        // 与 legacy env 路径一致）。
-        let qq_http = match reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::warn!("Pylon gateway HTTP client unavailable: {error}");
-                reqwest::Client::new()
-            }
-        };
-        // 平台注册表（P78）：一次注册全部带真实适配器的平台（当前仅 qq）；
-        // auto-start/手动 start 的凭据校验与连接循环入口。新增平台 =
-        // platform_registry.rs 加 entry，本文件零改动。
-        crate::gateway::platform_registry::register_platform_factories(
-            &state.gateway_instances,
-            state.gateway.clone(),
-            qq_http,
-        );
-        // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
-        // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
-        // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
-        // （覆盖侧 warn 留痕）。
-        {
-            let gateway_for_hook = state.gateway.clone();
-            state.gateway_instances.set_adapter_registry(Arc::new(
-                move |key: &str, adapter: &Arc<dyn gateway::PlatformAdapter>, register: bool| {
-                    if register {
-                        if gateway_for_hook.replace(adapter.clone()).is_some() {
-                            tracing::warn!(
-                                "gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）"
-                            );
-                        }
-                    } else if gateway_for_hook.unregister_if(key, adapter) {
-                        tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
-                    }
-                },
-            ));
-        }
-        // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
-        // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
-        {
-            let gateway = state.gateway.clone();
-            state
-                .gateway_instances
-                .set_route_guard(Arc::new(move |instance_id: &str| {
-                    gateway
-                        .routes()
-                        .iter()
-                        .any(|binding| binding.instance_id.as_deref() == Some(instance_id))
-                }));
-        }
+    Ok(())
+}
+
+/// 阶段 11：I12-W4 gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
+/// → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按 `enabled && autoStart`
+/// 策略显式启动（失败可见，不静默）。损坏/IO 失败保留原文件，仅可见报错
+/// （不阻断启动、不丢配置）。I12-W5：同块打开凭据存储（W3）→ 加载后刷新
+/// 实例 credential_ref/status（重启不丢凭据引用）。
+fn setup_restore_gateway_instances(app: &tauri::App, dirs: &crate::paths::DataDirs) {
+    let state = app.state::<AppState>();
+    let store_path_slot = state.gateway_instance_store_path.clone();
+    let credentials_slot = state.gateway_credentials.clone();
+    let path = crate::paths::gateway_instances_path(dirs);
+    if let Ok(mut slot) = store_path_slot.lock() {
+        *slot = Some(path.clone());
     }
+    // I12-W5：打开加密凭据存储（密文/主密钥分目录；失败可见不阻断）。
+    // 施工文档 §7.3：路径解析失败 → credentials 槽位保持 None，禁止
+    // 回退 `PathBuf::new()`（避免相对当前目录误写 pylon-master.key）。
+    let credentials = {
+        let credentials_dir = crate::paths::credentials_dir(dirs);
+        match crate::gateway::credentials::CredentialStore::open(&credentials_dir) {
+            Ok(store) => Some(Arc::new(store)),
+            Err(error) => {
+                tracing::error!("凭据存储打开失败（set_credentials 不可用）：{error}");
+                None
+            }
+        }
+    };
+    if let Ok(mut slot) = credentials_slot.lock() {
+        *slot = credentials.clone();
+    }
+    let service = state.gateway_instances.clone();
+    let path_for_task = path.clone();
+    let credentials_for_refresh = credentials.clone();
+    tokio::spawn(async move {
+        let loaded = tokio::task::spawn_blocking(move || {
+            crate::gateway::instance_store::load_instances(&path_for_task)
+        })
+        .await;
+        match loaded {
+            Ok(Ok(instances)) => {
+                service.load_instances(instances).await;
+                tracing::info!("gateway 实例配置已加载：{}", path.display());
+                // I12-W5：重启恢复凭据引用（secret 不载入内存，仅标记）
+                if let Some(store) = credentials_for_refresh.as_ref() {
+                    let store = store.clone();
+                    service
+                        .refresh_credential_states(move |platform, id| {
+                            store.has_credentials(platform, id).unwrap_or(false)
+                        })
+                        .await;
+                }
+                // AC2：仅 enabled && autoStart 显式启动，失败可见（策略测试见
+                // instance.rs auto_start_instances）
+                service.auto_start_instances().await;
+            }
+            Ok(Err(error)) => {
+                tracing::error!("gateway 实例配置加载失败（保留原文件不覆盖）：{error}")
+            }
+            Err(error) => {
+                tracing::error!("gateway 实例配置加载 task 失败：{error}");
+            }
+        }
+    });
+}
+
+/// 阶段 12：gateway 注册面接线——start 凭据解析器（I12-W5）、共用 HTTP client、
+/// 平台注册表（P78）、适配器注册表挂钩（P78）与 route guard（W1）。均无失败路径；
+/// HTTP client 构建失败降级默认 client。
+fn setup_wire_gateway_registry(app: &tauri::App) {
+    let state = app.state::<AppState>();
+    // I12-W5：start 凭据解析器（factory.create 前从 CredentialStore 解析
+    // secret 填入 state；未配置 → None → factory 报 CredentialMissing）
+    {
+        let credentials_slot = state.gateway_credentials.clone();
+        state.gateway_instances.set_credential_resolver(Arc::new(
+            move |platform: &str, instance_id: &str| {
+                credentials_slot
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone())
+                    .and_then(|store| store.get_credentials(platform, instance_id).ok().flatten())
+                    .map(|secret| secret.to_string())
+            },
+        ));
+    }
+    // gateway 共用 HTTP client（平台 factory 连接循环共用；超时参数
+    // 与 legacy env 路径一致）。
+    let qq_http = match reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!("Pylon gateway HTTP client unavailable: {error}");
+            reqwest::Client::new()
+        }
+    };
+    // 平台注册表（P78）：一次注册全部带真实适配器的平台（当前仅 qq）；
+    // auto-start/手动 start 的凭据校验与连接循环入口。新增平台 =
+    // platform_registry.rs 加 entry，本文件零改动。
+    crate::gateway::platform_registry::register_platform_factories(
+        &state.gateway_instances,
+        state.gateway.clone(),
+        qq_http,
+    );
+    // 适配器注册表挂钩（P78）：实例 start/stop 同步注册/注销
+    // GatewayCore 适配器——出站 deliver_all 按 source 前缀查注册表，
+    // 未注册则平台出站被丢弃。与 legacy env 注册并存时取替换语义
+    // （覆盖侧 warn 留痕）。
+    {
+        let gateway_for_hook = state.gateway.clone();
+        state.gateway_instances.set_adapter_registry(Arc::new(
+            move |key: &str, adapter: &Arc<dyn gateway::PlatformAdapter>, register: bool| {
+                if register {
+                    if gateway_for_hook.replace(adapter.clone()).is_some() {
+                        tracing::warn!("gateway 适配器 {key} 注册覆盖既有注册（legacy env 并存）");
+                    }
+                } else if gateway_for_hook.unregister_if(key, adapter) {
+                    tracing::info!("gateway 适配器 {key} 已注销（实例停止）");
+                }
+            },
+        ));
+    }
+    // route guard（W1 remove 的 route_in_use 检查）：任何 route 绑定引用
+    // 该 instance id → 拒绝 remove（D-04：route 保留 + disabled，不级联删除）。
+    {
+        let gateway = state.gateway.clone();
+        state
+            .gateway_instances
+            .set_route_guard(Arc::new(move |instance_id: &str| {
+                gateway
+                    .routes()
+                    .iter()
+                    .any(|binding| binding.instance_id.as_deref() == Some(instance_id))
+            }));
+    }
+}
+
+/// 阶段 13：通知 dispatcher 与 runtime log dispatcher 启动。返回默认 agent 是否
+/// 处于 Connecting（供阶段 14 判断是否后台初始连接）。
+fn setup_start_dispatchers(app: &tauri::App, window: &tauri::WebviewWindow) -> bool {
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
     // #270：Connecting 状态的默认 agent runtime 由下方后台任务完成初始连接，其
     // 激活路径（replace_agent_client）自会启动 dispatcher；此处跳过，避免对
@@ -1057,274 +1238,315 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
         .unwrap_or(false);
     if let Some(runtime) = handles.active_runtime() {
         if !default_runtime_connecting {
-            start_notification_dispatcher(&handles, &runtime, window.clone());
+            start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
         }
     }
     app.state::<AppState>()
         .inner()
-        .start_runtime_log_dispatcher(window);
-    // #270（ADR-0022）：默认 agent 初始连接后台化——窗口先见。持 switch_lock →
-    // agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
-    // 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
-    // 覆盖新客户端（replace_agent_client 的 epoch 校验兜底）。announce=true 使
-    // Connecting/Connected/失败回落均经 agent-status 事件广播；连接期间前端发送
-    // 被 agentWorkbenchCommands 的 connecting 门控阻断（用户裁定：不做排队、
-    // 不做自动触发连接）。
-    if default_runtime_connecting {
-        let inner = app.state::<AppState>().inner();
-        let active_id = inner
-            .active_agent
-            .lock()
-            .map(|id| id.clone())
-            .unwrap_or_default();
-        let agent = inner
-            .agents
-            .lock()
-            .ok()
-            .and_then(|agents| agents.get(&active_id).cloned());
-        if let Some(agent) = agent {
-            let app_handle = app.handle().clone();
-            let connect_window = app.get_webview_window("main");
-            crate::startup_timing::mark("default_agent_connect_started");
-            tokio::spawn(async move {
-                let state = app_handle.state::<AppState>();
-                // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
-                let _switch_guard = state.inner().switch_lock.lock().await;
-                let runtime = match handles.active_runtime() {
-                    Some(runtime) => runtime,
-                    None => return,
-                };
-                let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
-                let Some(connect_window) = connect_window else {
-                    tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
-                    return;
-                };
-                let result = state
-                    .inner()
-                    .connect_and_replace(
-                        &runtime,
-                        &connect_window,
-                        &agent,
-                        None,
-                        AgentLifecycleStatus::Connecting,
-                        "startup-connect",
-                    )
-                    .await;
-                crate::startup_timing::mark("default_agent_connect_settled");
-                match result {
-                    Ok(()) => tracing::info!("默认 agent 后台初始连接完成"),
-                    Err(error) => tracing::warn!("默认 agent 后台初始连接失败：{error}"),
-                }
-            });
-        }
+        .start_runtime_log_dispatcher(window.as_ref().window());
+    default_runtime_connecting
+}
+
+/// 阶段 14：#270（ADR-0022）默认 agent 初始连接后台化——窗口先见。持 switch_lock →
+/// agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
+/// 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
+/// 覆盖新客户端（replace_agent_client 的 epoch 校验兜底）。announce=true 使
+/// Connecting/Connected/失败回落均经 agent-status 事件广播；连接期间前端发送
+/// 被 agentWorkbenchCommands 的 connecting 门控阻断（用户裁定：不做排队、
+/// 不做自动触发连接）。
+fn setup_spawn_default_agent_connect(app: &tauri::App, default_runtime_connecting: bool) {
+    if !default_runtime_connecting {
+        return;
     }
-    // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
-    // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
-    // （announce=false，不广播 GUI 状态）。
-    {
-        let app_handle = app.handle().clone();
-        let main_webview = app.get_webview_window("main");
-        let main_window = main_webview.as_ref().map(|w| w.as_ref().window());
-        let state = app.state::<AppState>();
-        state.gateway.set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
-        let app = app_handle.clone();
-        let webview = main_webview.clone();
-        let window = main_window.clone();
-        let resolved = resolved.clone();
-        tokio::spawn(async move {
-            let state = app.state::<AppState>();
-            // I12-W4：route 绑定强制（决策纯函数 resolve_ingest_agent，
-            // 正反用例见 route.rs 测试）——instance-bound route 必须指向
-            // 已连接实例：InstanceMissing/InstanceNotConnected → 显式错误
-            // + 丢弃，**禁止 fallback 到 active agent**（来源实例不可用却
-            // 按默认 agent 路由会造成错位回复）。Unbound（legacy 无
-            // instance_id）与无 binding 保持旧 fallback 行为（D-04）。
-            let binding_ref = resolved.binding.as_ref();
-            let bound_instance_id = binding_ref.and_then(|b| b.instance_id.as_deref());
-            let instance_status = match bound_instance_id {
-                Some(instance_id) => state
+    let inner = app.state::<AppState>().inner();
+    let active_id = inner
+        .active_agent
+        .lock()
+        .map(|id| id.clone())
+        .unwrap_or_default();
+    let agent = inner
+        .agents
+        .lock()
+        .ok()
+        .and_then(|agents| agents.get(&active_id).cloned());
+    let Some(agent) = agent else {
+        return;
+    };
+    let app_handle = app.handle().clone();
+    let connect_window = app.get_webview_window("main");
+    let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+    crate::startup_timing::mark("default_agent_connect_started");
+    tokio::spawn(async move {
+        let state = app_handle.state::<AppState>();
+        // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
+        let _switch_guard = state.inner().switch_lock.lock().await;
+        let runtime = match handles.active_runtime() {
+            Some(runtime) => runtime,
+            None => return,
+        };
+        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        let Some(connect_window) = connect_window else {
+            tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
+            return;
+        };
+        let result = state
+            .inner()
+            .connect_and_replace(
+                &runtime,
+                &connect_window.as_ref().window(),
+                &agent,
+                None,
+                AgentLifecycleStatus::Connecting,
+                "startup-connect",
+            )
+            .await;
+        crate::startup_timing::mark("default_agent_connect_settled");
+        match result {
+            Ok(()) => tracing::info!("默认 agent 后台初始连接完成"),
+            Err(error) => tracing::warn!("默认 agent 后台初始连接失败：{error}"),
+        }
+    });
+}
+
+/// 阶段 15：gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
+/// 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
+/// （announce=false，不广播 GUI 状态）。
+fn setup_install_gateway_ingest_handler(app: &tauri::App) {
+    let app_handle = app.handle().clone();
+    let main_webview = app.get_webview_window("main");
+    let main_window = main_webview.as_ref().map(|w| w.as_ref().window());
+    let state = app.state::<AppState>();
+    state
+        .gateway
+        .set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
+            let app = app_handle.clone();
+            let webview = main_webview.clone();
+            let window = main_window.clone();
+            let resolved = resolved.clone();
+            tokio::spawn(async move {
+                let state = app.state::<AppState>();
+                // I12-W4：route 绑定强制（决策纯函数 resolve_ingest_agent，
+                // 正反用例见 route.rs 测试）——instance-bound route 必须指向
+                // 已连接实例：InstanceMissing/InstanceNotConnected → 显式错误
+                // + 丢弃，**禁止 fallback 到 active agent**（来源实例不可用却
+                // 按默认 agent 路由会造成错位回复）。Unbound（legacy 无
+                // instance_id）与无 binding 保持旧 fallback 行为（D-04）。
+                let binding_ref = resolved.binding.as_ref();
+                let bound_instance_id = binding_ref.and_then(|b| b.instance_id.as_deref());
+                let instance_status = match bound_instance_id {
+                    Some(instance_id) => {
+                        state.inner().gateway_instances.status_of(instance_id).await
+                    }
+                    None => None,
+                };
+                let active_agent = state
                     .inner()
-                    .gateway_instances
-                    .status_of(instance_id)
-                    .await,
-                None => None,
-            };
-            let active_agent = state
-                .inner()
-                .active_agent
-                .lock()
-                .map(|v| v.clone())
-                .unwrap_or_default();
-            // I12 W9：unbound_policy 传入决策（reject 时无 binding 消息显式拒绝，
-            // 记录最小元数据，不进入 agent）
-            let unbound_policy = state.inner().gateway.unbound_policy();
-            let agent_id = match crate::gateway::route::resolve_ingest_agent(
-                binding_ref,
-                instance_status,
-                &active_agent,
-                unbound_policy,
-            ) {
-                Ok(id) => id,
-                Err(reason) => {
-                    tracing::error!(
-                        "gateway ingest 拒绝：route {} 绑定实例 {} 状态不可用（{:?}），禁止 fallback",
-                        resolved.source,
-                        bound_instance_id.unwrap_or(""),
-                        reason
+                    .active_agent
+                    .lock()
+                    .map(|v| v.clone())
+                    .unwrap_or_default();
+                // I12 W9：unbound_policy 传入决策（reject 时无 binding 消息显式拒绝，
+                // 记录最小元数据，不进入 agent）
+                let unbound_policy = state.inner().gateway.unbound_policy();
+                let agent_id = match crate::gateway::route::resolve_ingest_agent(
+                    binding_ref,
+                    instance_status,
+                    &active_agent,
+                    unbound_policy,
+                ) {
+                    Ok(id) => id,
+                    Err(reason) => {
+                        tracing::error!(
+                            "gateway ingest 拒绝：route {} 绑定实例 {} 状态不可用（{:?}），禁止 fallback",
+                            resolved.source,
+                            bound_instance_id.unwrap_or(""),
+                            reason
+                        );
+                        return;
+                    }
+                };
+                if agent_id.is_empty() {
+                    tracing::warn!(
+                        "gateway ingest 无路由目标（未绑定且无 active agent）: {}",
+                        resolved.source
                     );
                     return;
                 }
-            };
-            if agent_id.is_empty() {
-                tracing::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
-                return;
-            }
-            let runtime = state.inner().runtimes.get_or_create(&agent_id);
-            if let Some(webview) = webview.as_ref() {
-                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
-                    tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
-                    return;
-                }
-            }
-            // P1-1：平台路由绑定 agent ≠ GUI active agent 时会话 cwd 必须用
-            // 绑定 agent 的 cwd（而非 active agent）；无绑定 agent 定义时回退 None。
-            let agent_cwd = state.inner().agents.lock().ok()
-                .and_then(|agents| agents.get(&agent_id).cloned())
-                .and_then(|agent| agent.cwd);
-            // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
-            // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
-            // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
-            // 既有失败路径的 rollback_seen 语义）；transform → 改写
-            // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
-            let content = match crate::hook_bridge::message_received_hook_outcome(
-                state.inner(),
-                window.as_ref(),
-                &resolved,
-            )
-            .await
-            {
-                crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
-                crate::hook_bridge::MessageReceivedDecision::Drop => return,
-            };
-            if let Err(error) = send_prompt_core(
-                state.inner(),
-                &runtime,
-                window.as_ref(),
-                &state.gateway,
-                &crate::session::PromptContext {
-                    source: resolved.source.clone(),
-                    profile_id: None,
-                    content,
-                    persona: String::new(),
-                    session_prompt: None,
-                    attachments: None,
-                    mcp_servers: None,
-                    cwd: agent_cwd,
-                    known_peri_id: None,
-                },
-            ).await {
-                tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
-                // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
-                // resume 重放可重新 ingest（防故障期消息永久丢失）。
-                // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
-                // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
-                // G4 §3-9（C5）：统一入口 adapter_for_source（空 key 返回
-                // None，与旧 platform_key 判空等价；接入 wechat 等新平台
-                // 自动生效，未注册适配器无操作）。
-                if let Some(msg_id) = resolved.msg_id.as_deref() {
-                    if let Some(adapter) =
-                        state.gateway.adapter_for_source(&resolved.source)
+                let runtime = state.inner().runtimes.get_or_create(&agent_id);
+                if let Some(webview) = webview.as_ref() {
+                    if let Err(error) = state
+                        .inner()
+                        .ensure_runtime_ready(&runtime, &agent_id, &webview.as_ref().window())
+                        .await
                     {
-                        adapter.rollback_seen(msg_id);
+                        tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
+                        return;
                     }
                 }
-            }
-        });
-    }));
-    }
-    // 会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
-    // 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
-    {
-        let app_for_watcher = app.handle().clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                let state = app_for_watcher.state::<AppState>();
-                check_session_expiry(state.inner()).await;
-            }
-        });
-    }
-    // #110 F3：事件库维护 watcher——墓碑事件清扫（兜底历史垃圾）+ WAL checkpoint
-    // （TRUNCATE）。启动即跑一次，此后每 10 分钟一次：流式回合每 chunk 一次事务，
-    // 从不 checkpoint 时 WAL 只增不减（体检实证 WAL 66MB 反超主库 62MB）。
-    {
-        let app_for_maintenance = app.handle().clone();
-        tokio::spawn(async move {
-            loop {
-                let state = app_for_maintenance.state::<AppState>();
-                match crate::session::message_service_of(state.inner()) {
-                    Ok(service) => {
-                        match service
-                            .run_journal_maintenance(crate::session::TOMBSTONE_EVENT_GRACE_DAYS)
-                            .await
-                        {
-                            Ok(outcome) if outcome.events_deleted > 0 => {
-                                tracing::info!(
-                                    tombstones = outcome.tombstones,
-                                    events_deleted = outcome.events_deleted,
-                                    "journal maintenance purged tombstoned events"
-                                );
-                            }
-                            Ok(_) => {}
-                            Err(error) => {
-                                tracing::warn!("journal maintenance skipped: {error}");
-                            }
+                // P1-1：平台路由绑定 agent ≠ GUI active agent 时会话 cwd 必须用
+                // 绑定 agent 的 cwd（而非 active agent）；无绑定 agent 定义时回退 None。
+                let agent_cwd = state
+                    .inner()
+                    .agents
+                    .lock()
+                    .ok()
+                    .and_then(|agents| agents.get(&agent_id).cloned())
+                    .and_then(|agent| agent.cwd);
+                // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
+                // P55-D1 #3：message.received 钩子缝（spawn 内可安全挂起，
+                // 不在 dispatcher 主循环）。gate → 丢弃（helper 已对齐
+                // 既有失败路径的 rollback_seen 语义）；transform → 改写
+                // content 后继续；超时/桥未就绪 → 原文放行（fail-open）。
+                let content = match crate::hook_bridge::message_received_hook_outcome(
+                    state.inner(),
+                    window.as_ref(),
+                    &resolved,
+                )
+                .await
+                {
+                    crate::hook_bridge::MessageReceivedDecision::Continue { content } => content,
+                    crate::hook_bridge::MessageReceivedDecision::Drop => return,
+                };
+                if let Err(error) = send_prompt_core(
+                    state.inner(),
+                    &runtime,
+                    window.as_ref(),
+                    &state.gateway,
+                    &crate::session::PromptContext {
+                        source: resolved.source.clone(),
+                        profile_id: None,
+                        content,
+                        persona: String::new(),
+                        session_prompt: None,
+                        attachments: None,
+                        mcp_servers: None,
+                        cwd: agent_cwd,
+                        known_peri_id: None,
+                    },
+                )
+                .await
+                {
+                    tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
+                    // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
+                    // resume 重放可重新 ingest（防故障期消息永久丢失）。
+                    // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
+                    // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
+                    // G4 §3-9（C5）：统一入口 adapter_for_source（空 key 返回
+                    // None，与旧 platform_key 判空等价；接入 wechat 等新平台
+                    // 自动生效，未注册适配器无操作）。
+                    if let Some(msg_id) = resolved.msg_id.as_deref() {
+                        if let Some(adapter) = state.gateway.adapter_for_source(&resolved.source) {
+                            adapter.rollback_seen(msg_id);
                         }
                     }
-                    Err(error) => {
-                        tracing::warn!("journal maintenance skipped: {error}");
+                }
+            });
+        }));
+}
+
+/// 阶段 16：会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
+/// 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
+fn setup_spawn_session_expiry_watcher(app: &tauri::App) {
+    let app_for_watcher = app.handle().clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let state = app_for_watcher.state::<AppState>();
+            check_session_expiry(state.inner()).await;
+        }
+    });
+}
+
+/// 阶段 17：#110 F3 事件库维护 watcher——墓碑事件清扫（兜底历史垃圾）+ WAL checkpoint
+/// （TRUNCATE）。启动即跑一次，此后每 10 分钟一次：流式回合每 chunk 一次事务，
+/// 从不 checkpoint 时 WAL 只增不减（体检实证 WAL 66MB 反超主库 62MB）。
+fn setup_spawn_journal_maintenance_watcher(app: &tauri::App) {
+    let app_for_maintenance = app.handle().clone();
+    tokio::spawn(async move {
+        loop {
+            let state = app_for_maintenance.state::<AppState>();
+            match crate::session::message_service_of(state.inner()) {
+                Ok(service) => {
+                    match service
+                        .run_journal_maintenance(crate::session::TOMBSTONE_EVENT_GRACE_DAYS)
+                        .await
+                    {
+                        Ok(outcome) if outcome.events_deleted > 0 => {
+                            tracing::info!(
+                                tombstones = outcome.tombstones,
+                                events_deleted = outcome.events_deleted,
+                                "journal maintenance purged tombstoned events"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!("journal maintenance skipped: {error}");
+                        }
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(600)).await;
-            }
-        });
-    }
-    // 权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
-    // permission.resolved terminal 事件——后端唯一计时/应答来源，前端
-    // 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
-    {
-        let app_for_watcher = app.handle().clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                let state = app_for_watcher.state::<AppState>();
-                let outcomes = check_pending_permission_timeouts(state.inner()).await;
-                if outcomes.is_empty() {
-                    continue;
-                }
-                let Some(window) = app_for_watcher.get_webview_window("main") else {
-                    continue;
-                };
-                for outcome in outcomes {
-                    emit_event(
-                        &window,
-                        crate::event_names::INTERACTION,
-                        serde_json::json!({
-                            "eventType": "permission.resolved",
-                            "agentId": outcome.agent_id,
-                            "sessionId": outcome.session_id,
-                            "requestId": outcome.request_id.to_string(),
-                            "clientGeneration": outcome.client_generation,
-                            "optionId": outcome.option_id,
-                            "reason": "timed_out",
-                        }),
-                    );
+                Err(error) => {
+                    tracing::warn!("journal maintenance skipped: {error}");
                 }
             }
-        });
-    }
-    crate::startup_timing::mark("setup_complete");
-    Ok(())
+            tokio::time::sleep(Duration::from_secs(600)).await;
+        }
+    });
+}
+
+/// 阶段 18：权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
+/// permission.resolved terminal 事件——后端唯一计时/应答来源，前端
+/// 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
+/// #356：同一 watcher 附带私有交互（elicitation/ask-user/exit-plan）对等的
+/// deadline drain + 向 agent 回包，并广播 interaction.resolved(timed_out)。
+fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
+    let app_for_watcher = app.handle().clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let state = app_for_watcher.state::<AppState>();
+            let outcomes = check_pending_permission_timeouts(state.inner()).await;
+            // #356：私有交互超时 sweep（死亡 runtime 已由权限 sweep 的死亡分支清理）。
+            let private_outcomes = check_pending_private_interaction_timeouts(state.inner()).await;
+            if outcomes.is_empty() && private_outcomes.is_empty() {
+                continue;
+            }
+            let Some(window) = app_for_watcher.get_webview_window("main") else {
+                continue;
+            };
+            for outcome in outcomes {
+                emit_event(
+                    &window,
+                    crate::event_names::INTERACTION,
+                    serde_json::json!({
+                        "eventType": "permission.resolved",
+                        "agentId": outcome.agent_id,
+                        "sessionId": outcome.session_id,
+                        "requestId": outcome.request_id.to_string(),
+                        "clientGeneration": outcome.client_generation,
+                        "optionId": outcome.option_id,
+                        "reason": "timed_out",
+                    }),
+                );
+            }
+            // #356：形状与断线 drain 的 interaction.resolved 同构（kind + reason），
+            // workbench 交互条目与权限弹卡据此收敛。
+            for outcome in private_outcomes {
+                emit_event(
+                    &window,
+                    crate::event_names::INTERACTION,
+                    serde_json::json!({
+                        "eventType": "interaction.resolved",
+                        "agentId": outcome.agent_id,
+                        "sessionId": outcome.session_id,
+                        "requestId": outcome.request_id.to_string(),
+                        "clientGeneration": outcome.client_generation,
+                        "kind": outcome.kind,
+                        "reason": "timed_out",
+                    }),
+                );
+            }
+        }
+    });
 }
 pub fn run() {
     // issue #82：浏览器 MCP 桥以 `pylon.exe browser-bridge` 子命令形态运行
@@ -1334,6 +1556,11 @@ pub fn run() {
     }
     crate::startup_timing::mark("run_entry");
     install_process_registrations();
+    // #363-3：node 版本管理器 PATH 修复。位置有两条硬约束：① `set_var` 会改**进程级**
+    // PATH，非线程安全，必须在任何多线程工作之前；② 必须早于 agent 探测/preflight
+    // （它们按 PATH 找 CLI，看不到版本管理器的目录就会报「未检测到该 Agent」）。
+    // node 已在 PATH 上时本调用立即返回，不动用户自己配好的环境。
+    pylon_core::node_path::ensure_node_in_path();
     // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
     // （Agent/Gateway 部分成功，互不绑定成败）。
     let loaded = agent_config::load_app_config();
@@ -1345,7 +1572,7 @@ pub fn run() {
         Ok(agents) => agents,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             HashMap::new()
         }
     };
@@ -1354,7 +1581,7 @@ pub fn run() {
         Ok(None) => String::new(),
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon agent configuration error: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon agent configuration error: {error}"));
             String::new()
         }
     };
@@ -1366,7 +1593,7 @@ pub fn run() {
         Ok(client) => client,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon Prism client unavailable: {error}");
+            crate::logging::note_to_stderr(&format!("Pylon Prism client unavailable: {error}"));
             PrismClient::unavailable(error)
         }
     };
@@ -1385,7 +1612,9 @@ pub fn run() {
         Ok(rt) => rt,
         Err(error) => {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon runtime initialization failed: {error}");
+            crate::logging::note_to_stderr(&format!(
+                "Pylon runtime initialization failed: {error}"
+            ));
             return;
         }
     };
@@ -1399,7 +1628,7 @@ pub fn run() {
             Ok(config) => GatewayCore::from_config(config),
             Err(error) => {
                 // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-                eprintln!("Pylon gateway configuration error: {error}");
+                crate::logging::note_to_stderr(&format!("Pylon gateway configuration error: {error}"));
                 GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
             }
         });
@@ -1417,7 +1646,10 @@ pub fn run() {
             }
         } else {
             // 启动失败兜底契约：不依赖 tracing subscriber（init_tracing 的 set_global_default 失败被 let _ = 吞掉），保证任何入口下 stderr 必达。
-            eprintln!("Pylon has no configured Agent; start in disconnected mode");
+            // #326：零 Agent 是合法首跑状态（内嵌兜底即零 Agent），不是异常——故为中性提示。
+            crate::logging::note_to_stderr(
+                    "Pylon has no configured Agent; start in disconnected mode (create one in Settings → Agent)",
+                );
         }
         if !default_agent_id.is_empty() {
             runtimes.insert(default_agent_id.clone(), default_runtime);
@@ -1429,6 +1661,10 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .register_uri_scheme_protocol("pylon-plugin", |context, request| {
                 crate::plugin_cmds::plugin_resource_response(context.app_handle(), request)
+            })
+            // #371：离线文档站（VitePress dist 随包分发，root = bundle 资源目录）。
+            .register_uri_scheme_protocol("pylon-docs", |context, request| {
+                crate::docs_sheet::resource::docs_resource_response(context.app_handle(), request)
             })
             .manage(build_app_state(AppStateParts {
                 runtimes,
@@ -1523,6 +1759,9 @@ pub fn run() {
                 crate::session::evt_append,
                 crate::session::evt_revision,
                 crate::session::evt_list,
+                crate::session::evt_draft_list,
+                crate::session::evt_draft_keep,
+                crate::session::evt_draft_discard,
                 crate::session::evt_export_raw,
                 crate::session::evt_search,
                 crate::session::evt_load_compact,
@@ -1543,8 +1782,11 @@ pub fn run() {
                 crate::runtime_log::cmds::set_runtime_log_live,
                 crate::workspaces::cmds::get_workspace_root,
                 crate::workspaces::cmds::list_workspace_entries,
+                crate::workspaces::cmds::list_workspace_files,
                 crate::workspaces::cmds::read_workspace_text,
                 crate::workspaces::cmds::write_workspace_text,
+                crate::workspaces::cmds::git_show_file,
+                crate::workspaces::cmds::git_sequence_state,
                 crate::workspaces::cmds::git_status,
                 crate::workspaces::cmds::git_status_with_branch,
                 crate::workspaces::cmds::git_diff,
@@ -1627,6 +1869,15 @@ pub fn run() {
                 crate::browser::cmds::browser_set_visible,
                 crate::browser::cmds::browser_set_zoom,
                 crate::browser::cmds::browser_close,
+                crate::docs_sheet::cmds::docs_sheet_status,
+                crate::docs_sheet::cmds::docs_sheet_start,
+                crate::docs_sheet::cmds::docs_sheet_set_bounds,
+                crate::docs_sheet::cmds::docs_sheet_set_visible,
+                crate::docs_sheet::cmds::docs_sheet_back,
+                crate::docs_sheet::cmds::docs_sheet_forward,
+                crate::docs_sheet::cmds::docs_sheet_reload,
+                crate::docs_sheet::cmds::docs_sheet_home,
+                crate::docs_sheet::cmds::docs_sheet_close,
                 crate::browser::agent_cmds::browser_agent_get_settings,
                 crate::browser::agent_cmds::browser_agent_set_settings,
                 crate::browser::agent_cmds::browser_agent_resolve_access,
@@ -1675,4 +1926,142 @@ pub fn run() {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod init_tracing_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_log_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("pylon-init-tracing-{tag}-{}", std::process::id()))
+    }
+
+    fn read_dir_text(dir: &std::path::Path) -> String {
+        let mut text = String::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    text.push_str(&content);
+                }
+            }
+        }
+        text
+    }
+
+    fn messages(hub: &runtime_log::RuntimeLogHub) -> Vec<String> {
+        hub.list(&runtime_log::RuntimeLogQuery {
+            level: None,
+            source: None,
+            session: None,
+            search: None,
+            limit: None,
+        })
+        .into_iter()
+        .map(|entry| entry.message)
+        .collect()
+    }
+
+    /// #383 回归锁：带过滤层的落盘 sink 挂在新基底上必须**构造成功且可用**。
+    /// 修前该断言以 panic 结束（`fmt::Subscriber does not currently support filters`）。
+    #[test]
+    fn file_sink_subscriber_builds_and_routes_without_panicking() {
+        let dir = temp_log_dir("file");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink =
+            logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+                .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) = build_subscriber(
+            runtime_log::RuntimeLogLayer::with_hub(hub.clone()),
+            Some(sink),
+        );
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", session = "s1", "hello-383");
+        });
+        // 不 drop worker 就读不到盘上内容：non_blocking 的 flush 在 guard drop 里。
+        drop(worker);
+
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages
+                .iter()
+                .any(|message| message.contains("hello-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+        let text = read_dir_text(&dir);
+        assert!(text.contains("hello-383"), "落盘文件缺少 INFO 事件：{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 同一栈的级别去重语义：#383 的修复不能把「panic 记录只由 hook 同步落盘」改掉。
+    #[test]
+    fn panic_target_events_stay_out_of_the_file_sink() {
+        let dir = temp_log_dir("panic-target");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink =
+            logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+                .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) = build_subscriber(
+            runtime_log::RuntimeLogLayer::with_hub(hub.clone()),
+            Some(sink),
+        );
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "kept-383");
+            tracing::warn!(target: logging::PANIC_TARGET, "panic-echo-383");
+        });
+        drop(worker);
+
+        let text = read_dir_text(&dir);
+        assert!(text.contains("kept-383"), "落盘文件缺少 INFO 事件：{text}");
+        assert!(
+            !text.contains("panic-echo-383"),
+            "PANIC_TARGET 事件不该进落盘文件（panic hook 是它唯一的落盘者）：{text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 无落盘 sink（日志根不可写）时仍要能起：只挂 hub + stderr，且不交 WorkerGuard。
+    #[test]
+    fn subscriber_without_file_sink_keeps_hub_and_stderr() {
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let (subscriber, guard) =
+            build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub.clone()), None);
+        assert!(guard.is_none(), "无落盘 sink 时不应交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "no-file-383");
+        });
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages
+                .iter()
+                .any(|message| message.contains("no-file-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+    }
+
+    /// 负向对照（#383 的**病因**锁）：把带 `.with_filter(...)` 的层挂到 `fmt::Subscriber`
+    /// 基底上，`tracing-subscriber` 会**在运行时 panic**——这正是修复前 `init_tracing`
+    /// 在「日志根可写」时的行为。这条用例存在是为了让病因本身留在 CI 里：谁若把
+    /// 基底改回 `fmt::Subscriber`，上一条用例会红，而这一条解释了为什么。
+    #[test]
+    #[should_panic(expected = "does not currently support filters")]
+    fn fmt_subscriber_base_panics_on_filtered_layer() {
+        use tracing_subscriber::layer::Layer;
+
+        let base = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::io::stderr)
+            .finish();
+        let filtered = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+        let _ = filtered.with_subscriber(base);
+    }
 }

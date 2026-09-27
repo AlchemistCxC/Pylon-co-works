@@ -371,13 +371,13 @@ fn write_master_key(
 }
 
 /// 原子写：唯一临时文件 + sync + rename（同目录保证原子性）。经 agent_config
-/// 正身 [`crate::agent_config::AtomicWriteOptions`] 收敛（issue #228 批次D）；
+/// 正身 [`pylon_foundations::atomic_write::AtomicWriteOptions`] 收敛（issue #228 批次D）；
 /// 与旧本地实现的差异见批次D 报告（临时名固定 → 唯一，消除并发覆写窗口）。
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), CredentialError> {
-    crate::agent_config::write_file_atomically(
+    pylon_foundations::atomic_write::write_file_atomically(
         path,
         bytes,
-        crate::agent_config::AtomicWriteOptions::synced_data_file(),
+        pylon_foundations::atomic_write::AtomicWriteOptions::synced_data_file(),
     )?;
     Ok(())
 }

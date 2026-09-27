@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cloneCcLayout } from '../../../ccLayoutState.ts'
+import { cloneCcLayout } from '../../cc/ccLayoutState.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../../presets/index.ts'
 import { effectivePresetTheme } from '../../../zones/index.ts'
@@ -311,31 +311,29 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.destroy()
   })
 
-  it('显隐切换后 ccHeight 仍走最小高 clamp（⑰ 后可见状态控件上限 5，满员触发状态行换行）', () => {
+  it('显隐切换后 ccHeight 仍走最小高 clamp（★ 刀9~11：最小高已是常量 64）', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({
-      inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
+      cliHintMode: 'full',
       ccHeight: 20,
       ccHidden: ['tokens'],
     }))
 
     store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false })
 
-    // 20 < 最小高 109（cli + peri + full hint；★ #266 ⑰ 后命令行提示也计入可见数 ⇒ 5 > 4
-    // 触发状态行换行，最小高由 84 变 109 —— 与渲染侧 `--cc-min-height` 从此同源）
-    expect(store.getSnapshot()).toMatchObject({ ccHeight: 109 })
+    // ★ #266 刀9~11：形态固定（命令行 + 独立状态行 + 随内容增高）⇒ 最小高退化为常量 64，
+    //   不再随 peri / 详细档 / 可见控件数走高（改造前 free 形态走的就是这一支）。
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 64 })
     store.destroy()
   })
 
-  it('属性命令切换 CLI 后同步抬高中控高度', () => {
-    const store = createStaticWorkbenchAppearanceStore(theme({
-      inputMode: 'default', inputVariant: 'composer', footerLayout: 'peri', cliHintMode: 'full',
-      ccHeight: 64,
-    }))
+  it('属性命令写入 cc 字段后 ccHeight 仍按最小高 clamp', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({ cliHintMode: 'full', ccHeight: 12 }))
 
-    store.dispatch({ type: 'set-cc-property', key: 'inputMode', value: 'cli' })
+    store.dispatch({ type: 'set-cc-property', key: 'inputHeight', value: 40 })
 
-    // ★ #266 ⑰：可见数 5（含命令行提示）⇒ cli + peri 下最小高 109（原 84）
-    expect(store.getSnapshot()).toMatchObject({ inputMode: 'cli', ccHeight: 109 })
+    // ★ #266 刀9~11：原用例锁「切 CLI 后高度抬到 109」——那两个字段已删除、最小高成常量
+    //   ⇒ 改为锁同一漏斗的另一条路径（属性命令写入后仍收敛到 ≥64）。
+    expect(store.getSnapshot().ccHeight).toBeGreaterThanOrEqual(64)
     store.destroy()
   })
 })

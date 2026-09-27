@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 
 /**
  * AgentConfigEditor — Agent 配置编辑入口（W1-07）。
@@ -29,7 +29,7 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
     setValidationError(null)
     setStatus({ kind: 'saving' })
     try {
-      const client = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      const client = createAgentClient({ invoke: tauriInvokeTransport })
       await client.updateAgentsConfig({ scope: 'agent', agentId, config })
       // 后端事务已原子提交 agents 域；前端刷新 agent 列表与工具字典，保持设置页一致。
       const list = await client.listAgents()
@@ -44,7 +44,6 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
           key: `agent-config:${agentId}`,
           scope: { kind: 'agent', id: agentId },
           source: 'settings.agent-config',
-          recovery: { kind: 'open-runtime-log', agentId },
         })
       }
     }

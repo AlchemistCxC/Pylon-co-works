@@ -1,8 +1,8 @@
 import { RENDERER_SETTINGS_CATEGORIES, resolveRendererSettingsPlacement } from '../../domains/rendererContent/rendererSettingsPlacement.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RendererSettingsPlacement, RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { buildSettingsSearchIndex, RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
-import type { SettingsSearchItem } from '../../settingsDomains.ts'
+import { buildSettingsSearchIndex, RENDERER_KIND_LABELS } from './settingsDomains.ts'
+import type { SettingsSearchItem } from './settingsDomains.ts'
 import { BUILTIN_TOOL_RENDER_KIND_IDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 
 export type RendererSettingsNamespace = 'kind' | 'suite' | 'slot'

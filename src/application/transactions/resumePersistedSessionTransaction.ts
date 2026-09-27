@@ -9,7 +9,7 @@
  * 会话内匹配 source/periId——不同 Agent 的同 source 存档各自成行；若 source 与
  * periId 同时命中但指向不同 Session，判定为冲突（conflict），不静默合并。
  */
-import type { Session } from '../../identityStore'
+import type { Session } from '../../domains/identity/identityStore'
 import type { TransactionResult } from './transactionResult'
 
 export interface ResumeSessionDeps {

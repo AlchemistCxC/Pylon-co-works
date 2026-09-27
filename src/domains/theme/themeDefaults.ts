@@ -6,7 +6,7 @@
  * 完整性由 test-defaults-completeness.mts 运行时断言（Q1：不做类型体操）。
  */
 import { THEME_DEFAULTS } from '../../themeFieldDefs.ts'
-import { cloneCcLayout, DEFAULT_CC_LAYOUT } from '../../ccLayoutState.ts'
+import { cloneCcLayout, DEFAULT_CC_LAYOUT } from '../cc/ccLayoutState.ts'
 import { PRESET_ZONES } from './presetReducer.ts'
 import type { ThemeSettings } from '../../store.ts'
 

@@ -42,17 +42,17 @@ async fn generation_change_during_recovery_rejects_success_and_failure_without_f
                 .with_runtime("recovery-generation", runtime.clone())
                 .build();
             let mut recreated = None;
-            let recover = ensure_session_mapping(
-                &state,
-                &runtime,
-                "local:generation",
-                Some("profile"),
-                "",
-                ".",
-                &[],
-                Some("remote-original"),
-                &mut recreated,
-            );
+            let assembly = SessionAssembly {
+                state: &state,
+                runtime: &runtime,
+                source: "local:generation",
+                profile_id: Some("profile"),
+                persona: "",
+                session_cwd: ".",
+                wire_mcp_servers: &[],
+            };
+            let recover =
+                ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated);
             let change_generation = async {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     while !ready.exists() {
@@ -111,19 +111,18 @@ async fn ensure_session_mapping_revives_via_session_load_before_creating() {
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:revive",
-        Some("profile-r"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-original"),
-        &mut recreated,
-    )
-    .await
-    .expect("revive must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:revive",
+        profile_id: Some("profile-r"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-original"), &mut recreated)
+        .await
+        .expect("revive must succeed");
 
     assert_eq!(
         mapping.peri_id, "peri-original",
@@ -160,19 +159,18 @@ async fn ensure_session_mapping_resumes_without_replay_or_recreation() {
         .with_runtime("resume-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume",
-        Some("profile-r"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-resume"),
-        &mut recreated,
-    )
-    .await
-    .expect("resume must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume",
+        profile_id: Some("profile-r"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-resume"), &mut recreated)
+        .await
+        .expect("resume must succeed");
     assert_eq!(mapping.peri_id, "peri-resume");
     assert!(recreated.is_none());
 }
@@ -193,19 +191,18 @@ async fn ensure_session_mapping_resume_failure_falls_back_to_load() {
         .with_runtime("resume-load-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume-load",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("load fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume-load",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("load fallback must succeed");
     assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
@@ -231,19 +228,18 @@ async fn ensure_session_mapping_resume_and_load_failure_creates_new_session() {
         .with_runtime("resume-new-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:resume-new",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("new fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:resume-new",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("new fallback must succeed");
     assert_eq!(mapping.peri_id, "recreated-session");
     assert_eq!(recreated.as_deref(), Some("recreated-session"));
 }
@@ -264,19 +260,18 @@ async fn ensure_session_mapping_malformed_resume_capability_uses_load() {
         .with_runtime("malformed-resume-agent", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:malformed",
-        Some("profile"),
-        "persona",
-        ".",
-        &[],
-        Some("peri"),
-        &mut recreated,
-    )
-    .await
-    .expect("load fallback must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:malformed",
+        profile_id: Some("profile"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri"), &mut recreated)
+        .await
+        .expect("load fallback must succeed");
     assert_eq!(mapping.peri_id, "peri");
     assert!(recreated.is_none());
 }
@@ -304,19 +299,18 @@ async fn ensure_session_mapping_falls_back_to_new_with_notice_when_load_fails() 
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:fallback",
-        Some("profile-f"),
-        "persona",
-        ".",
-        &[],
-        Some("peri-dead"),
-        &mut recreated,
-    )
-    .await
-    .expect("fallback creation must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:fallback",
+        profile_id: Some("profile-f"),
+        persona: "persona",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-dead"), &mut recreated)
+        .await
+        .expect("fallback creation must succeed");
 
     assert_eq!(mapping.peri_id, "fresh-session");
     assert_eq!(
@@ -344,24 +338,179 @@ async fn ensure_session_mapping_without_peri_id_creates_directly() {
         .build();
 
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:direct",
-        None,
-        "",
-        ".",
-        &[],
-        None,
-        &mut recreated,
-    )
-    .await
-    .expect("direct creation must succeed");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:direct",
+        profile_id: None,
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, None, &mut recreated)
+        .await
+        .expect("direct creation must succeed");
 
     assert_eq!(mapping.peri_id, "direct-new");
     assert!(
         recreated.is_some(),
         "recreation notice is also emitted for the no-peri-id creation path"
+    );
+}
+
+// ── #349 B1：revive 的 session/load 走 replay capture 治理 ──────────────────
+
+/// #349 B1（机制断言）：revive load 在飞期间（barrier 阻塞 agent 响应）
+/// ① loading 槽已预插入（回放帧可立即解析映射，不再逐条 100ms 未知会话等待）；
+/// ② replay capture 已登记（同 owner 二次 capture 被 ReplayLoadInProgress
+/// 确定性拒绝——回放帧将在传输边界被分类为 Replay 而非 Live）；
+/// ③ 成功后临时槽位替换为最终槽位（replay_loading 清位）。
+#[tokio::test]
+async fn revive_load_registers_replay_capture_and_preinserts_loading_slot() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let ready = std::env::temp_dir().join(format!(
+        "pylon-revive-capture-{}-{unique}.ready",
+        std::process::id()
+    ));
+    let release = ready.with_extension("release");
+    let agent = crate::test_utils::fake_acp_agent(
+        "revive-capture-agent",
+        &[
+            "--scenario",
+            "recovery-generation",
+            "--barrier-ready",
+            &ready.to_string_lossy(),
+            "--barrier-release",
+            &release.to_string_lossy(),
+            "--wait-method",
+            "session/load",
+            "--outcome",
+            "success",
+        ],
+    );
+    let runtime = AgentRuntime::new_disconnected();
+    *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+        .await
+        .unwrap();
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("revive-capture-agent")
+        .with_agent(agent)
+        .with_runtime("revive-capture-agent", runtime.clone())
+        .build();
+    let mut recreated = None;
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:generation",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let recover = ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated);
+    let observe_and_release = async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !ready.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("agent must receive session/load");
+        {
+            let sessions = runtime.sessions.lock().unwrap();
+            let slot = sessions
+                .get("local:generation")
+                .expect("loading slot must be pre-inserted before the load RPC");
+            assert_eq!(slot.peri_id, "remote-original");
+            assert!(
+                slot.replay_loading,
+                "pre-inserted slot must carry replay_loading for the load window"
+            );
+        }
+        // 同 owner 二次 capture 必须被拒绝 = revive 的 load 已持有登记。
+        let second = runtime
+            .acp
+            .lock()
+            .await
+            .begin_replay_capture("remote-original");
+        assert!(
+            matches!(second, Err(crate::acp::AcpError::ReplayLoadInProgress)),
+            "revive load must hold the replay capture registration"
+        );
+        drop(second);
+        std::fs::write(&release, b"release").unwrap();
+    };
+    let (result, ()) = tokio::join!(recover, observe_and_release);
+    let mapping = result.expect("revive must succeed after release");
+    assert_eq!(mapping.peri_id, "remote-original");
+    assert!(recreated.is_none());
+    {
+        let sessions = runtime.sessions.lock().unwrap();
+        let slot = sessions.get("local:generation").expect("final slot");
+        assert_eq!(slot.peri_id, "remote-original");
+        assert!(!slot.replay_loading, "final slot clears replay_loading");
+    }
+    std::fs::remove_file(&ready).unwrap();
+    std::fs::remove_file(&release).unwrap();
+}
+
+/// #349 B1（journal 断言）：scenario `new_load` 对 session/load 先发两条回放
+/// chunk（history-1/history-2）再响应——经真实 dispatcher 泵处理后，canonical
+/// journal 不得出现回放帧产生的 durable 事件（journal 是唯一 durable 权威，
+/// revive 对回放内容只丢弃不导入）。
+#[tokio::test]
+async fn revive_replay_frames_never_reach_canonical_journal() {
+    let agent =
+        crate::test_utils::fake_acp_agent("journal-revive-agent", &["--scenario", "new_load"]);
+    let harness = crate::test_harness::TestHarness::boot(
+        crate::test_harness::HarnessConfig::new().with_agent(agent),
+    )
+    .await;
+    let state = harness.state();
+    let runtime = harness
+        .runtime("journal-revive-agent")
+        .expect("harness boots an active runtime");
+    let mut recreated = None;
+    let assembly = SessionAssembly {
+        state: state.inner(),
+        runtime: &runtime,
+        source: "local:journal",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("peri-journal"), &mut recreated)
+        .await
+        .expect("revive via load channel must succeed");
+    assert_eq!(mapping.peri_id, "peri-journal");
+    // 给 dispatcher 泵留出处理回放帧的窗口（分类已固定为 Replay，与处理时机无关）。
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let owner = crate::session::DurableSessionOwner::new(
+        "profile",
+        "journal-revive-agent",
+        "local:journal",
+    );
+    let page = crate::session::event_service_of(state.inner())
+        .expect("harness installs an in-memory event service")
+        .list_events(owner.key().unwrap(), None, 100, false)
+        .await
+        .expect("journal read");
+    let leaked: Vec<String> = page
+        .events
+        .iter()
+        .filter_map(|row| {
+            let text = row.raw_payload.to_string();
+            (text.contains("history-1") || text.contains("history-2")).then_some(text)
+        })
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "replay frames must not be durable-ingested as canonical events: {leaked:?} ({} events total)",
+        page.events.len()
     );
 }
 
@@ -384,19 +533,18 @@ async fn revive_with_changed_remote_identity_rebinds_explicitly() {
         .with_runtime("rebind-identity", runtime.clone())
         .build();
     let mut recreated = None;
-    let mapping = ensure_session_mapping(
-        &state,
-        &runtime,
-        "local:rebind",
-        Some("profile"),
-        "",
-        ".",
-        &[],
-        Some("remote-original"),
-        &mut recreated,
-    )
-    .await
-    .expect("load 通道在交集内，revive 必成功");
+    let assembly = SessionAssembly {
+        state: &state,
+        runtime: &runtime,
+        source: "local:rebind",
+        profile_id: Some("profile"),
+        persona: "",
+        session_cwd: ".",
+        wire_mcp_servers: &[],
+    };
+    let mapping = ensure_session_mapping(&assembly, Some("remote-original"), &mut recreated)
+        .await
+        .expect("load 通道在交集内，revive 必成功");
     assert_eq!(mapping.peri_id, "remote-rebound", "映射绑定远端返回的新 id");
     assert_eq!(
         recreated.as_deref(),

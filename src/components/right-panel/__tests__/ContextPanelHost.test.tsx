@@ -10,7 +10,7 @@ import AgentContextPanel from '../AgentContextPanel.tsx'
 import { createPreviewWorkbenchServices } from '../../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchHostPort } from '../../../renderers/solid-workbench/workbenchHostPort.ts'
 import { publishActiveWorkbenchHostPort } from '../../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
-import { useRightRailStore, RIGHT_RAIL_DEFAULT_WIDTH } from '../../../rightRailStore.ts'
+import { useRightRailStore, RIGHT_RAIL_DEFAULT_WIDTH } from '../rightRailStore.ts'
 
 const registrations: AsyncDisposable[] = []
 

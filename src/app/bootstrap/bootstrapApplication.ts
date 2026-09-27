@@ -6,7 +6,7 @@
  * listener → ready。Agent 列表失败属 degraded：不清空本地工作区，可重试。
  * 纯函数（node 可测）：不直接依赖 Tauri/React，传输与 store 经 deps 注入。
  */
-import type { AgentEntry } from '../../identityStore'
+import type { AgentEntry } from '../../domains/identity/identityStore'
 import type { HydrationStatus } from './hydrationState'
 
 function isPluginServiceUnavailable(error: unknown): boolean {

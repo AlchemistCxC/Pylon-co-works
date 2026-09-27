@@ -62,6 +62,29 @@ afterEach(() => {
 })
 
 describe('canonicalEventFeed（P52 D2）', () => {
+  it('#155 T3：draft 只走临时 seam，正式提交再进入 canonical bus', async () => {
+    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const drafts: string[] = []
+    const commits: string[] = []
+    const canonical: number[] = []
+    const forwards: boolean[] = []
+    feed.onDraftChunk(chunk => { drafts.push(`${chunk.draftId}:${chunk.chunkIndex}`) })
+    feed.onDraftCommit((_owner, draftId) => { commits.push(draftId) })
+    feed.onForward(frame => { forwards.push(frame.kernelCommitted) })
+    subscribePluginEvents(event => { canonical.push((event as CanonicalEventRow).sequence) })
+    await feed.acceptFrame({ event: 'pylon:update', payload: {
+      source: SOURCE, update: { sessionUpdate: 'agent_message_chunk', content: { text: 'a' } },
+      draftChunk: { ownerKey: `["p1","peri","${SOURCE}"]`, draftId: 'd1', chunkIndex: 0, clientGeneration: 1 },
+    } })
+    expect(drafts).toEqual(['d1:0'])
+    expect(canonical).toEqual([])
+    expect(forwards).toEqual([true])
+    await feed.acceptFrame({ event: 'pylon:update', payload: {
+      source: SOURCE, committedDraftId: 'd1', canonicalEvent: canonicalEvent(1, 'assistant.text.delta', 'a'),
+    } })
+    expect(commits).toEqual(['d1'])
+    expect(canonical).toEqual([1])
+  })
   it('kernel-committed 行 publish 恰一次，且转发标记 kernelCommitted=true', async () => {
     const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
     const published: CanonicalEventRow[] = []
@@ -153,6 +176,24 @@ describe('canonicalEventFeed（P52 D2）', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     const handler = listeners.get('pylon:user')
     expect(handler).toBeDefined()
+  })
+
+  it('#310：pylon:update 广播兜底把助手正文帧送进 plugin bus（未注册 Channel 的发送路径）', async () => {
+    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const handler = listeners.get('pylon:update')
+    expect(handler).toBeDefined()
+    // 已 seed 到 2：sequence 3 不是 gap，走正常 publish 路径
+    feed.seed(`["p1","peri","${SOURCE}"]`, 2)
+    const published: CanonicalEventRow[] = []
+    subscribePluginEvents(event => { published.push(event as CanonicalEventRow) })
+
+    // 后端对未注册 per-source Channel 的来源改走窗口广播（与 Channel 互斥）：
+    // 这一帧此前没有任何订阅者，实时投影整段收不到助手正文。
+    handler!({ source: SOURCE, canonicalEvent: canonicalEvent(3, 'assistant.text.delta', 'a') })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(published.map(event => event.sequence)).toEqual([3])
   })
 
   it('discard 与 seed 委托 cursor（seed 只增）', async () => {

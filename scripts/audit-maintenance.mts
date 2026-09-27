@@ -46,6 +46,9 @@ export const moduleDefinitions = [
   // 供 vitest 侧 markdown parity 门禁消费。
   { id: 'rust-markdown', roots: ['src-tauri/pylon-markdown/src/'], responsibility: 'markdown 解析的计算层；整块进/整块（行数组）出' },
   { id: 'markdown-parity-tooling', roots: ['src-tauri/pylon-markdown/parity/'], responsibility: 'markdown 语料与 Rust 快照，供 parity 门禁消费；无 JS 源，故计 0 行' },
+  // #382：测试夹具独立 crate（feature `test-agent` 门控）。主 crate 里的同包 bin 会被
+  // Cargo 的"包内 bin 隐式链接本包 lib"规则拖去编译整棵 Tauri 依赖树，故单独成 crate。
+  { id: 'rust-fake-agent', roots: ['src-tauri/pylon-fake-agent/src/'], responsibility: '测试专用假 ACP agent 夹具；不随发行包发布，不参与生产运行时' },
   { id: 'rust-build', roots: ['src-tauri/*'], responsibility: '原生构建入口脚本；不属于运行时模块' },
   { id: 'tooling', roots: ['scripts/'], responsibility: '开发、校验与发布脚本；不作为产品运行时 import 来源' },
 ] as const

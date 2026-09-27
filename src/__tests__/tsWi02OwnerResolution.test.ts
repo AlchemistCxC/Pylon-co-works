@@ -2,8 +2,8 @@
  * TS-WI02：identityStore unresolved owner 提交集成。
  */
 import { beforeEach, describe, expect, it } from 'vitest'
-import { SESSION_STORAGE_KEY } from '../sessionPersistence'
-import { useIdentityStore } from '../identityStore'
+import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
 
 const legacy = {

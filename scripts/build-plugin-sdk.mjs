@@ -54,7 +54,7 @@ if (!statExists(indexDts) || !statExists(testingDts)) {
 rewriteTsSpecifiers(typesOut)
 writeFileSync(join(normalOut, 'package.json'), JSON.stringify({
   name: '@pylon/plugin-sdk',
-  version: '1.1.0',
+  version: '1.2.0',
   type: 'module',
   main: './pylon-plugin-sdk.js',
   types: './types/sdk/index.d.ts',

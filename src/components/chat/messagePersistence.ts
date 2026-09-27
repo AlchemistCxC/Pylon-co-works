@@ -1,4 +1,5 @@
 import type { Message } from './messageTypes'
+import { wireErrorParts } from '../../infrastructure/tauri/errorPayload'
 
 // 注意：本模块被 legacy Node 脚本直接 import（scripts/*.test.mts，node --experimental-strip-types）。
 // 因此不得有顶层 value import（会触发扩展名缺失的 ESM 解析错误）——只允许 `import type`
@@ -203,11 +204,8 @@ export class MessageRepositoryError extends Error {
 /** Tauri invoke 拒绝值（后端 {code,message} 结构化错误）→ MessageRepositoryError。 */
 export function asRepositoryError(error: unknown): MessageRepositoryError {
   if (error instanceof MessageRepositoryError) return error
-  if (error && typeof error === 'object' && 'message' in error) {
-    const shape = error as { code?: string; message?: unknown }
-    return new MessageRepositoryError(shape.code, String(shape.message ?? error))
-  }
-  return new MessageRepositoryError(undefined, String(error))
+  const parts = wireErrorParts(error)
+  return new MessageRepositoryError(parts.code, parts.message)
 }
 
 /** invoke 失败必须以 reject 传播（asRepositoryError 只是归一化；不得把失败变成功）。 */

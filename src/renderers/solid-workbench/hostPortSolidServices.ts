@@ -85,6 +85,8 @@ function documentMessages(memo: ProjectionMemo, document: WorkbenchDocument | un
   return memoMapped(memo.messages, document.messages, message => ({
     id: message.id, role: message.role, sender: message.source.provider,
     content: message.content, time: message.time, running: message.running,
+    interruptedDraft: message.interruptedDraft,
+    draftId: message.draftId,
   }))
 }
 

@@ -4,7 +4,10 @@ import solid from 'vite-plugin-solid'
 // @tailwindcss/vite 4.x 只有 default 导出（无命名导出 tailwindcss）。
 import tailwindcss from '@tailwindcss/vite'
 
-const SOLID_WORKBENCH_FILES = /src\/renderers\/solid-workbench\/.*\.solid(?:\.test)?\.tsx$/
+// #279 逐梯队 Solid 化：solid 编译面从渲染器套件扩展到 shell 迁移区（sheets /
+// workspace-sheets / components）——凡 `.solid.tsx` 后缀即 solid 编译，React 侧
+// 文件（薄桥）不出现 Solid JSX，两侧编译管线互不沾染。
+const SOLID_WORKBENCH_FILES = /src\/(?:renderers\/solid-workbench|sheets|workspace-sheets|components)\/.*\.solid(?:\.test)?\.tsx$/
 
 /**
  * 开发浏览器的真实页面代理。

@@ -1,7 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore } from '../../identityStore.ts'
-import { useRuntimeStore } from '../../runtimeStore.ts'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore.ts'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import type { SessionCreateInput } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
@@ -9,7 +9,7 @@ import { applySessionStateResponse } from '../../domains/sessionState/sessionSta
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface AgentWorkbenchSessionCreationContext {
   readonly agentId: string
@@ -60,7 +60,7 @@ export async function createAgentWorkbenchSession(
   try {
     const profile = useIdentityStore.getState().profiles.find(item => item.id === session.profileId)
     const response = await requestNewSession(session, createSessionClient({
-      invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+      invoke: tauriInvokeTransport,
     }), () => ({
       persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
       model: request?.model || profile?.model,
@@ -90,7 +90,7 @@ export async function discardAgentWorkbenchSession(sessionId: string): Promise<v
   if (!session) return
   try {
     await createSessionClient({
-      invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+      invoke: tauriInvokeTransport,
     }).closeSession({ agentId: session.agentId, source: session.source })
   } catch (error) {
     reportRuntimeError('回滚空态新会话', error)

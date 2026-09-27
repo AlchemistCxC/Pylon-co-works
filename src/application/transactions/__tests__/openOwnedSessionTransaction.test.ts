@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { openOwnedSessionTransaction, type OpenOwnedSessionDeps } from '../openOwnedSessionTransaction'
-import type { Session } from '../../../identityStore'
+import type { Session } from '../../../domains/identity/identityStore'
 
 /**
  * I01-W4 owner-aware 打开事务测试：owner 解析、切 owner 成功/失败保持原页面、

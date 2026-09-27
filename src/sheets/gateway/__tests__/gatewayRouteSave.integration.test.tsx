@@ -12,10 +12,10 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { FakeInvoke } from '../../../test/fakeInvoke'
-import { useIdentityStore } from '../../../identityStore'
+import { useIdentityStore } from '../../../domains/identity/identityStore'
 import GatewaySheetView from '../GatewaySheetView'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import { clearErrors, getErrors } from '../../../errorCenter.ts'
+import { clearErrors, getErrors } from '../../../app/errorCenter.ts'
 
 const fakeInvoke = new FakeInvoke()
 

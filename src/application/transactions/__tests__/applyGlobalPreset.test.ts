@@ -42,7 +42,6 @@ describe('applyGlobalPreset', () => {
       accent: '#38bdf8',
       globalBgColor: '#08111f',
       msgStyle: 'bubble',
-      inputVariant: 'composer',
       appliedPreset: {
         global: 'agent-command', sidebar: 'agent-command', chat: 'agent-command',
         cc: 'agent-command', right: 'agent-command',

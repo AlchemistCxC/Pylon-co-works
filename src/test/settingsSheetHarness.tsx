@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render } from '@testing-library/react'
 import { vi } from 'vitest'
-import { useWorkspaceStore } from '../workspaceStore.ts'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
 import { openOrFocusSettingsSheet, SETTINGS_SHEET_KIND } from '../sheets/settingsSheetNavigation.ts'
 import { resolveWorkspace } from '../workspace-sheets/workspaceRegistry.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes.ts'

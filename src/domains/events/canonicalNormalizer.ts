@@ -27,6 +27,11 @@ import {
   type CanonicalEventOwner,
   type CanonicalEventType,
 } from './eventSchema.ts'
+import {
+  CANONICAL_TYPE_FOR_WIRE,
+  canonicalTypeForToolCallUpdate,
+  type StandardWireSessionUpdateKind,
+} from './wireSemanticCorrespondence.ts'
 
 /** 各 identity 字段的 wire 别名（单一路径源；禁止在调用方再维护第二套）。
  * 注：wire 的 eventId 属"事件自身 id"概念（§5.10 施工注意 2：eventId/toolCallId/messageId
@@ -150,42 +155,16 @@ export function resolveToolCallId(update: unknown): string | undefined {
   return resolveEventIdentity(update)?.toolCallId
 }
 
-/** wire sessionUpdate → canonical eventType 映射（tool_call_update 按 status 细化）。 */
+/** wire sessionUpdate → canonical eventType 映射。
+ *  #315 P2：映射表单源化至 `wireSemanticCorrespondence.ts`（与 workbench
+ *  acpNormalizer 的 parity 由对应表钉住）；本函数只保留委托与 tool_call_update
+ *  的 status 细化规则。 */
 export function canonicalEventTypeFor(sessionUpdate: unknown, status: unknown): CanonicalEventType {
-  switch (sessionUpdate) {
-    case 'user_message_chunk':
-      return 'user.message'
-    case 'agent_message_chunk':
-      return 'assistant.text.delta'
-    case 'agent_thought_chunk':
-      return 'assistant.thinking.delta'
-    case 'tool_call':
-      return 'tool.call.started'
-    case 'tool_call_update':
-      if (status === 'completed') return 'tool.call.completed'
-      if (status === 'failed' || status === 'error') return 'tool.call.failed'
-      return 'tool.call.updated'
-    case 'done':
-      return 'turn.completed'
-    case 'error':
-      return 'turn.failed'
-    case 'cancelled':
-      return 'turn.failed'
-    case 'usage_update':
-      return 'usage.updated'
-    case 'plan':
-      return 'plan.replaced'
-    case 'current_mode_update':
-      return 'session.mode-updated'
-    case 'session_info_update':
-      return 'session.model-updated'
-    case 'config_option_update':
-      return 'session.config-updated'
-    case 'available_commands_update':
-      return 'session.commands-updated'
-    default:
-      return 'unknown'
-  }
+  if (sessionUpdate === 'tool_call_update') return canonicalTypeForToolCallUpdate(status)
+  const kind = typeof sessionUpdate === 'string' ? sessionUpdate : undefined
+  return kind !== undefined
+    ? CANONICAL_TYPE_FOR_WIRE[kind as StandardWireSessionUpdateKind] ?? 'unknown'
+    : 'unknown'
 }
 
 /**

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useIdentityStore, type Session } from '../../../identityStore.ts'
-import { parseSessions, SESSION_STORAGE_KEY } from '../../../sessionPersistence.ts'
+import { useIdentityStore, type Session } from '../../../domains/identity/identityStore.ts'
+import { parseSessions, SESSION_STORAGE_KEY } from '../../../domains/identity/sessionPersistence.ts'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { createPluginSessionDataApis } from '../pluginSessionDataApi.ts'
 

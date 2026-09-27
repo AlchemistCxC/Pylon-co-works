@@ -102,9 +102,23 @@ impl Default for ProbeSessionRegistry {
     }
 }
 
+pub(crate) struct DraftFlushRequest {
+    pub source: String,
+    pub reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+}
+
+/// #155 T3：prompt 终态 draft 收口请求的发送端槽位（代际 + 发送端）。抽别名是
+/// clippy::type_complexity 的要求，同时给「代际不符即视为无 dispatcher」这条
+/// 语义一个可命名处。
+pub(crate) type DraftFlushSender =
+    Arc<Mutex<Option<(u64, tokio::sync::mpsc::UnboundedSender<DraftFlushRequest>)>>>;
+
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Prompt terminal writes ask the dispatcher to close the preceding
+    /// cross-window draft before allocating the terminal sequence.
+    pub(crate) draft_flush_tx: DraftFlushSender,
     pub session_creation: Arc<tokio::sync::Mutex<()>>,
     pub agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
     pub client_generation: Arc<AtomicU64>,
@@ -150,11 +164,53 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    pub(crate) fn install_draft_flush_channel(
+        &self,
+        generation: u64,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<DraftFlushRequest> {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        if let Ok(mut slot) = self.draft_flush_tx.lock() {
+            *slot = Some((generation, sender));
+        }
+        receiver
+    }
+
+    pub(crate) async fn flush_draft_before_terminal(
+        &self,
+        source: &str,
+        generation: u64,
+    ) -> Result<(), String> {
+        let sender = self
+            .draft_flush_tx
+            .lock()
+            .map_err(|_| "draft flush channel lock poisoned".to_string())?
+            .as_ref()
+            .filter(|(current, _)| *current == generation)
+            .map(|(_, sender)| sender.clone());
+        let Some(sender) = sender else {
+            // There may be no dispatcher for a prompt with no live updates.
+            // A stored draft, if any, is still guarded by draft_pending.
+            return Ok(());
+        };
+        let (reply, received) = tokio::sync::oneshot::channel();
+        sender
+            .send(DraftFlushRequest {
+                source: source.to_owned(),
+                reply,
+            })
+            .map_err(|_| "draft dispatcher is unavailable".to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), received)
+            .await
+            .map_err(|_| "draft dispatcher flush timed out".to_string())?
+            .map_err(|_| "draft dispatcher closed before flush".to_string())?
+    }
+
     /// 以 disconnected 状态新建一个空 runtime（启动/降级路径用）。
     pub fn new_disconnected() -> Arc<Self> {
         Arc::new(Self {
             acp: Arc::new(tokio::sync::Mutex::new(AcpClient::disconnected())),
             notification_task: Arc::new(Mutex::new(None)),
+            draft_flush_tx: Arc::new(Mutex::new(None)),
             session_creation: Arc::new(tokio::sync::Mutex::new(())),
             agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             client_generation: Arc::new(AtomicU64::new(0)),
@@ -172,7 +228,7 @@ impl AgentRuntime {
             instance_guard: Arc::new(Mutex::new(None)),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
             host_tools_policy: Arc::new(Mutex::new(
-                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted,
+                crate::acp::host_tools::HostToolsPolicy::closed(),
             )),
             turn_ledger: crate::acp::TurnLedger::new(),
             probe_sessions: Arc::new(crate::runtime::ProbeSessionRegistry::new()),
@@ -180,12 +236,23 @@ impl AgentRuntime {
         })
     }
 
-    pub fn set_host_tools_policy(&self, runtime_env: &std::collections::BTreeMap<String, String>) {
-        let policy = crate::acp::host_tools::HostToolsPolicy::parse_env(runtime_env)
-            .unwrap_or_else(|error| {
-                tracing::warn!("invalid host tools policy; using agent self-hosted: {error}");
-                crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
-            });
+    /// #316：fs/terminal 分门控策略解析——YAML（`acp.host_tools` /
+    /// `acp.host_terminal`）声明优先，未声明门回退旧环境变量（两门共用）；
+    /// 环境变量非法值 fail-closed（双门全关 + warn）。
+    pub fn set_host_tools_policy(
+        &self,
+        protocol: &pylon_core::agent_config::AcpProtocolConfig,
+        runtime_env: &std::collections::BTreeMap<String, String>,
+    ) {
+        let policy = crate::acp::host_tools::HostToolsPolicy::resolve(
+            protocol.host_tools,
+            protocol.host_terminal,
+            runtime_env,
+        )
+        .unwrap_or_else(|error| {
+            tracing::warn!("invalid host tools policy; using fail-closed gates: {error}");
+            crate::acp::host_tools::HostToolsPolicy::closed()
+        });
         if let Ok(mut current) = self.host_tools_policy.lock() {
             *current = policy;
         }
@@ -408,6 +475,21 @@ impl Default for AgentRuntimeManager {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn prompt_terminal_waits_for_dispatcher_draft_flush_ack() {
+        let runtime = AgentRuntime::new_disconnected();
+        let mut requests = runtime.install_draft_flush_channel(3);
+        let waiting = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.flush_draft_before_terminal("local:s", 3).await })
+        };
+        let request = requests.recv().await.expect("flush request");
+        assert_eq!(request.source, "local:s");
+        assert!(!waiting.is_finished(), "terminal must wait for commit");
+        request.reply.send(Ok(())).unwrap();
+        waiting.await.unwrap().unwrap();
+    }
+
     /// #99（评审 E2 回归锁）：冷挂载快照的真实 wire 形状——本测试钉住
     /// `turn.phase` / `turn.terminal.cause` / `sequence.lastIngressSeq` /
     /// `replayLoading` 的字段名，前端消费按此对接（防止文档与 payload 漂移）。
@@ -590,20 +672,48 @@ mod tests {
     }
 
     #[test]
-    fn host_tools_policy_defaults_closed_and_accepts_explicit_host_mode() {
+    fn host_tools_policy_dual_gates_follow_yaml_and_env_fallback() {
         let runtime = AgentRuntime::new_disconnected();
+        // 未连接初值 = 双门全关（连接时由 YAML/env 解析覆盖）。
         assert_eq!(
             *runtime.host_tools_policy.lock().unwrap(),
-            crate::acp::host_tools::HostToolsPolicy::AgentSelfHosted
+            crate::acp::host_tools::HostToolsPolicy::closed()
         );
+        // #316：缺省（YAML 未声明 + env 未设）= fs Host / terminal Agent。
+        let empty = std::collections::BTreeMap::new();
+        runtime.set_host_tools_policy(&Default::default(), &empty);
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts());
+        assert!(!policy.terminal_hosts());
+        // env 回退：未声明门随 env 开（host 档双开），非法值 fail-closed。
         let env = std::collections::BTreeMap::from([(
             crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
             "host".to_string(),
         )]);
-        runtime.set_host_tools_policy(&env);
+        runtime.set_host_tools_policy(&Default::default(), &env);
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts() && policy.terminal_hosts());
+        runtime.set_host_tools_policy(
+            &pylon_core::agent_config::AcpProtocolConfig {
+                host_terminal: Some(pylon_core::agent_config::HostToolsMode::Agent),
+                ..Default::default()
+            },
+            &env,
+        );
+        let policy = *runtime.host_tools_policy.lock().unwrap();
+        assert!(policy.fs_hosts());
+        assert!(
+            !policy.terminal_hosts(),
+            "YAML terminal 门声明压过 env host"
+        );
+        let invalid = std::collections::BTreeMap::from([(
+            crate::acp::host_tools::HOST_TOOLS_ENV.to_string(),
+            "typo".to_string(),
+        )]);
+        runtime.set_host_tools_policy(&Default::default(), &invalid);
         assert_eq!(
             *runtime.host_tools_policy.lock().unwrap(),
-            crate::acp::host_tools::HostToolsPolicy::HostStrict
+            crate::acp::host_tools::HostToolsPolicy::closed()
         );
     }
 

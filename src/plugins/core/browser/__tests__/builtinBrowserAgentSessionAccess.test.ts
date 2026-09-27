@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '../../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore } from '../../../../identityStore.ts'
+import { useIdentityStore } from '../../../../domains/identity/identityStore.ts'
 import { resetStores } from '../../../../test/resetStores.ts'
 import { BROWSER_AGENT_MCP_ID } from '../builtinBrowserAgentSessionAccess.ts'
 import { runSessionPreflight } from '../../sessionCreation/sessionPreflight.ts'

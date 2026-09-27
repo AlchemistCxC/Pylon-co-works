@@ -1,8 +1,8 @@
 /**
  * workspaceContracts — 工作区 wire 收窄（W2-02）。
  *
- * 从 components/right-panel/workspaceApi 迁入（旧文件保留 compat re-export 供 RightPanel
- * 过渡）：list_workspace_entries / read_workspace_text 响应 normalize + workspace_error
+ * 从 components/right-panel/workspaceApi 迁入（兼容 re-export 已随 #381 清理删除）：
+ * list_workspace_entries / read_workspace_text 响应 normalize + workspace_error
  * 错误按 code 分支（absolute/traversal/outside/not_found/not_readable/not_file/binary/
  * too_many/io）。损坏 DTO/二进制不崩。
  */
@@ -39,6 +39,21 @@ export function normalizeWorkspaceEntries(entries: unknown): WorkspaceEntry[] {
       expandable: value.kind === 'directory' && value.expandable !== false,
     }]
   })
+}
+
+/** 0-C1：quick open 文件名索引页（list_workspace_files 响应）。 */
+export interface WorkspaceFileIndexPage {
+  entries: string[]
+  truncated: boolean
+}
+
+export function normalizeWorkspaceFileIndexPage(value: unknown): WorkspaceFileIndexPage {
+  if (!value || typeof value !== 'object') return { entries: [], truncated: false }
+  const item = value as Partial<WorkspaceFileIndexPage>
+  const entries = Array.isArray(item.entries)
+    ? item.entries.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+    : []
+  return { entries, truncated: item.truncated === true }
 }
 
 export function mergeWorkspaceEntries(

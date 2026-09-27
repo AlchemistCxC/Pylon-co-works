@@ -73,17 +73,109 @@ export function deriveCanonicalTurnDuration(
  * intentionally separate from duration derivation: a restarted session may
  * have a valid completed turn but malformed/missing timestamps.  Callers can
  * still render the terminal footer with an explicit “duration unavailable”
- * state instead of inventing `0s` or hiding the result. */
+ * state instead of inventing `0s` or hiding the result.
+ *
+ * **与 `latestTurnBoundary` 的区别：本函数是回合无关的**（「历史上出现过终态」），
+ * 只可用于「有没有历史耗时可呈现」这类问题。**不得**用它判定「当前回合是否已收敛」
+ * ——那会把上一轮的终态行当成这一轮收敛的证据（见 `latestTurnBoundary`）。 */
 export function hasCanonicalTurnTerminal(
   events: readonly Pick<CanonicalTurnBoundaryEvent, 'eventType'>[],
 ): boolean {
-  return events.some(event => event.eventType === 'turn.completed' || event.eventType === 'turn.failed' || event.eventType === 'turn.unit')
+  return events.some(event => TURN_TERMINAL_EVENT_TYPES.has(event.eventType))
 }
+
+/** 回合开始锚点：`user.message` 之后尚未出现终态边界 ⇒ 该回合（从 journal 视角）仍在途。 */
+const TURN_ANCHOR_EVENT_TYPE = 'user.message'
+
+/**
+ * 终态边界事件集合。`turn.unit` 计入是因为 compact 读会裁剪掉 `turn.completed|failed`
+ * 单行，单元行是同一事务内写的替代证据（`canonicalUnit.ts`：单元行由内核在写入
+ * `turn.completed|failed` 的**同一事务**内追加）
+ *——它只在回合收敛时出现，不会在回合中途出现。
+ */
+const TURN_TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set(['turn.completed', 'turn.failed', 'turn.unit'])
+
+/**
+ * 观测到的**最新**回合边界形态（回合作用域）。
+ *
+ * - `'terminal'`：最新的边界事件是终态边界 ⇒ journal 证明「当前回合已收敛」；
+ * - `'open'`：最新的边界事件是 `user.message` 锚点（其后无终态）⇒ 当前回合未收敛；
+ * - `'unknown'`：没有任何回合边界事件 ⇒ 无证据（不猜）。
+ *
+ * 这是「当前回合是否已终态」的**唯一**合法判据；`hasCanonicalTurnTerminal` 的
+ * 回合无关语义不能用于此（见其文档）。同序号畸形输入取锚点——宁可判「未收敛」
+ * （随后到达的终帧可自愈），也不误判「已收敛」（会不可逆地封存回合时钟）。
+ */
+export function latestTurnBoundary(
+  events: readonly Pick<CanonicalTurnBoundaryEvent, 'sequence' | 'eventType'>[],
+): LatestTurnBoundary {
+  let latest: { readonly sequence: number; readonly kind: 'anchor' | 'terminal' } | undefined
+  for (const event of events) {
+    const kind = event.eventType === TURN_ANCHOR_EVENT_TYPE
+      ? 'anchor' as const
+      : TURN_TERMINAL_EVENT_TYPES.has(event.eventType) ? 'terminal' as const : undefined
+    if (kind === undefined) continue
+    if (latest === undefined
+      || event.sequence > latest.sequence
+      || (event.sequence === latest.sequence && kind === 'anchor')) {
+      latest = { sequence: event.sequence, kind }
+    }
+  }
+  if (latest === undefined) return 'unknown'
+  return latest.kind === 'terminal' ? 'terminal' : 'open'
+}
+
+export type LatestTurnBoundary = 'terminal' | 'open' | 'unknown'
 
 function parseTimestamp(value: string | undefined): number | undefined {
   if (!value) return undefined
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/**
+ * #376-b：分页装载的终态判据累积——把行投影成「推导只需要的那几个标量」。
+ *
+ * **不得**保留行引用或整份 `typedPayload`：unit 行的载荷是整段回合正文，留下它等于没分页。
+ * 投影的形状与 `embeddedUserAnchorAt` 的读点一一对应，故二者同处一个文件，改读点即改这里。
+ */
+export function canonicalBoundaryProjection(rows: readonly unknown[]): CanonicalTurnBoundaryEvent[] {
+  const projected: CanonicalTurnBoundaryEvent[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const candidate = row as {
+      sequence?: unknown
+      eventType?: unknown
+      occurredAt?: unknown
+      receivedAt?: unknown
+      typedPayload?: unknown
+    }
+    if (typeof candidate.sequence !== 'number' || typeof candidate.eventType !== 'string') continue
+    projected.push({
+      sequence: candidate.sequence,
+      eventType: candidate.eventType as CanonicalTurnBoundaryEvent['eventType'],
+      ...(typeof candidate.occurredAt === 'string' ? { occurredAt: candidate.occurredAt } : {}),
+      ...(typeof candidate.receivedAt === 'string' ? { receivedAt: candidate.receivedAt } : {}),
+      ...(candidate.eventType === 'turn.unit' ? { typedPayload: userAnchorOnly(candidate.typedPayload) } : {}),
+    })
+  }
+  return projected
+}
+
+/** 只留 `embeddedUserAnchorAt` 会读的字段（内嵌 event 段里的 user.message 时间戳）。 */
+function userAnchorOnly(typedPayload: unknown): { segments: readonly unknown[] } | undefined {
+  if (!typedPayload || typeof typedPayload !== 'object') return undefined
+  const segments = (typedPayload as { segments?: unknown }).segments
+  if (!Array.isArray(segments)) return undefined
+  const anchors = segments.flatMap(segment => {
+    if (!segment || typeof segment !== 'object') return []
+    const holder = segment as { kind?: unknown; event?: unknown }
+    if (holder.kind !== 'event' || !holder.event || typeof holder.event !== 'object') return []
+    const event = holder.event as { eventType?: unknown; occurredAt?: unknown }
+    if (event.eventType !== 'user.message' || typeof event.occurredAt !== 'string') return []
+    return [{ kind: 'event' as const, event: { eventType: 'user.message', occurredAt: event.occurredAt } }]
+  })
+  return { segments: anchors }
 }
 
 /**

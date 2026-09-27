@@ -50,16 +50,22 @@ Pylon 是一个基于 [Agent Client Protocol（ACP）](https://agentclientprotoc
 
 ### 2.4 任务结束
 - 测试检查：本项目有大量测试，优先进行对应单测，联动面积较广，改动范围大是跑全测，若测试红灯，须同时检查测试是否过时及你代码的逻辑错误，测试需修正时（契约变更/方法转变），修正测试并在最后向用户说明，提交时也附加说明。
+- **clippy 是独立门禁，测试绿 ≠ clippy 绿**：`cargo test`、`check:rust` 都不跑 clippy；clippy 按 crate 与 `artifacts/clippy-baseline.json` 比对，**只判「基线外的新增诊断」**（历史诊断常驻基线）。本地一条命令 `bun run check:clippy`（已并入 `check:all`），提交前必跑——尤其新增/移动模块之后：`clippy::items_after_test_module` 这类布局 lint 只有 clippy 会报（#384）。新增或改动 crate 时，同步 `.github/workflows/ci.yml` 的 crate 循环与 `scripts/check-clippy.mjs` 的 `CRATES`。
 - review：审查时优先派发子agent，派前需询问用户，退而求其次做法是自己重新审核一遍。若你的开发环境包含 rust 工具链，可构建二进制，并利用 `tools/webview2-mcp/`（或发行包下同目录）的 MCP 工具做**实时运行验收**——前置、步骤与本仓特有的坑见 skill [`.agents/skills/webview2-acceptance/SKILL.md`](.agents/skills/webview2-acceptance/SKILL.md)，工具参考见该目录 Readme；是否需要走到这一步由你判断。
 - 若改动涉及 `docs/说明书/` 中的内容，为防漂移，**及时变更对应说明文件的相关表述**。
 - 留下结构化的开发记录文档（模板 `.agents/templates/dev-record.md` → `.agents/records/`）。
-- **完工判据**（缺一不算完；且一律附**证据**，不是结论）：相关单测／门禁**绿并附输出或计数**；开发记录已落 `.agents/records/`；受影响的 `docs/说明书/` 表述已同步；**结论回写 issue 评论区**（含验证证据与遗留）；PR 已开并说明最终行为、权衡与验证限制。
+- **完工判据**（缺一不算完；且一律附**证据**，不是结论）：相关单测／门禁（**含 `bun run check:clippy`**）**绿并附输出或计数**；开发记录已落 `.agents/records/`；受影响的 `docs/说明书/` 表述已同步；**结论回写 issue 评论区**（含验证证据与遗留）；PR 已开并说明最终行为、权衡与验证限制。
 
 ### 2.5 提交与 PR
 
 - commit **只包含**：文档变更 / 对应代码文件。**一律用 pathspec 提交**（`git commit -- <paths>`），禁用 `git add .`、`git add -A`、`git commit -a`——共享 index 上任何一次宽暂存都会连带别人的在途改动；提交前 `git status` 核对 index。commit 时附加简要的提交说明。
 - 优先基于本地既有分支提交pr，无远端分支时，创建远端分支后提交pr，并同步本地与远端，如无必要不创建专为单个issue的分支，优先在单个本地既有的主分支上工作，有严重并行冲突时再开新分支。 
 - pr后不等待ci完成，向用户说明正在进行，使其注意即可。用户反映ci不通过时，抓取详情并修复。
+- 推送 PR 时**必须附带 issue 操作说明**：在 PR 描述或首条评论里逐条写清本 PR 对每个相关 issue 的处置，含**是否彻底关闭**：
+  - 彻底解决 → 写 `Closes #N`（合并后自动关闭），并说明验收证据；
+  - 只评论不关闭 → 列出 issue 号与不关闭的原因（如「留下作决策口」「仅部分达成，剩余项已另行登记」「阻塞于其他在途工作」）；
+  - 本次新增登记 → 列出新 issue 号，避免合并后无追踪。
+  目的是避免合并后 issue 悬空、被误关，或已实际修好却无人关闭。
 
 ## §3 issue 规范
 

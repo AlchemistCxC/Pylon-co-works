@@ -9,8 +9,8 @@
  * applyAgentStatus → setAgentStatus）。事件写入路径对齐 App.tsx listener。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useRuntimeStore } from '../../../runtimeStore'
-import { toAgentContextKey } from '../../../agentContext'
+import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
+import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { switchAgentTransaction } from '../switchAgentTransaction'
 import { selectAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../../components/settings/agentTypes'
 

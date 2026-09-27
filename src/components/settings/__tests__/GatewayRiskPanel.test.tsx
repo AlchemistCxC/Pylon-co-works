@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import GatewayRiskPanel from '../GatewayRiskPanel'
-import { CONFIG_STORAGE_KEYS } from '../../../configExportImport'
+import { CONFIG_STORAGE_KEYS } from '../../../application/configExportImport'
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },

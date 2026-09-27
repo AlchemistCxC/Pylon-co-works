@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import type { Session } from '../../../identityStore.ts'
+import { createCanonicalEvent } from '../../../domains/events/eventSchema.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
+import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
 import { useStore } from '../../../store.ts'
 
@@ -44,6 +46,73 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 }
 
 describe('Agent Workbench canonical session runtime', () => {
+  it('#155 T3：冷挂载恢复中断片段为有标记的临时内容', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      loadDrafts: async () => [{
+        ownerKey, draftId: 'crashed-run', fragmentIndex: 0, clientGeneration: 1,
+        remoteSessionId: 'remote-1', eventType: 'assistant.text.delta', identity: null,
+        rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '未完成的回复' } } }],
+        firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: true,
+      }],
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: '未完成的回复', interruptedDraft: true, draftId: 'crashed-run', running: false }),
+    ]))
+    service.destroy()
+  })
+  it('#155 T3：预算分行后中断的片段继续已有消息时仍可处理', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [canonicalRow(1, 'agent_message_chunk', { content: { text: '已提交前缀' } })],
+      loadDrafts: async () => [{
+        ownerKey, draftId: 'tail-run', fragmentIndex: 0, clientGeneration: 1,
+        remoteSessionId: 'remote-1', eventType: 'assistant.text.delta', identity: null,
+        rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '中断尾部' } } }],
+        firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: true,
+      }],
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: '已提交前缀中断尾部', interruptedDraft: true, draftId: 'tail-run', running: false,
+      }),
+    ]))
+    service.destroy()
+  })
+  it('#155 T3：正式提交替换临时投影，不重复正文', async () => {
+    const ownerKey = toCanonicalOwnerKey({ profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' })
+    let rows: unknown[] = []
+    let fragments = [{
+      ownerKey, draftId: 'handoff-run', fragmentIndex: 0, clientGeneration: 1,
+      remoteSessionId: 'remote-1', eventType: 'assistant.text.delta' as const, identity: null,
+      rawPayload: [{ update: { sessionUpdate: 'agent_message_chunk', content: { text: '同一段正文' } } }],
+      firstReceivedAt: '2026-09-25T00:00:00.000Z', createdAt: 1, interrupted: false,
+    }]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      loadDrafts: async () => fragments,
+      subscribe: () => () => {},
+    })
+    await service.bind(session())
+    expect(service.runtime.getSnapshot().document?.messages[0]?.content).toBe('同一段正文')
+    expect(service.runtime.getSnapshot().document?.messages[0]?.interruptedDraft).toBeUndefined()
+    rows = [canonicalRow(1, 'agent_message_chunk', { content: { text: '同一段正文' } })]
+    fragments = []
+    await getCanonicalEventFeed().acceptFrame({
+      event: 'pylon:update',
+      payload: { source: 'local:a', committedDraftId: 'handoff-run', canonicalEvent: rows[0] },
+    })
+    await vi.waitFor(() => {
+      expect(service.runtime.getSnapshot().document?.messages.map(message => message.content)).toEqual(['同一段正文'])
+      expect(service.runtime.getSnapshot().document?.messages[0]?.source.sourceId).toBe(ownerKey + '#1')
+    })
+    service.destroy()
+  })
   it('重启后 canonical 已完成消息仍显示完成态摘要', async () => {
     const active = session('session-restored', 'local:a')
     const service = createAgentWorkbenchSessionRuntime({
@@ -342,7 +411,7 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
-  it('#204③：refresh 后 foldLog 以 journal 权威集替换——被拒回滚保留 refresh 时代事实', async () => {
+  it('#204③/#380：被拒回滚以 journal 为准——refresh 时代的事实全保留、乐观行消失', async () => {
     const active = session('session-foldlog-replace', 'local:foldlog-replace')
     const userRow = message(1, 'user', 'hello')
     let rows: readonly unknown[] = [userRow]
@@ -365,6 +434,81 @@ describe('Agent Workbench canonical session runtime', () => {
     await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
     // 回滚整页重折源 = refresh 集：被拒乐观行消失，refresh 时代的 journal 事实全保留。
     expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
+  it('#380：被拒回滚的权威源是 journal——重读会把期间落盘的行一并带回来', async () => {
+    const active = session('session-380-reject', 'local:380-reject')
+    const userRow = message(1, 'user', 'hello', 'local:380-reject')
+    // 判据的构造：这份 journal 行**从未**进过任何 fold（bind 时还不存在，也没有 refresh），
+    // 因此它只可能来自「回滚时真的读了一次 journal」——修前整页重折走的是内存里的信封日志，
+    // 这条 assistant 行不会出现（用例会失败）。
+    const laterRow = message(9, 'assistant', 'landed-later', 'local:380-reject')
+    let rows: readonly unknown[] = [userRow]
+    const loadAll = vi.fn(async () => rows)
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-380-reject',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    const readsAfterBind = loadAll.mock.calls.length
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello'])
+
+    rows = [userRow, laterRow]
+    await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
+    // 回滚读了一次 journal（不是内存日志），乐观行消失、两条 journal 行都在。
+    expect(loadAll.mock.calls.length).toBeGreaterThan(readsAfterBind)
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'landed-later'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
+
+  it('#380：在途 refresh 不会把被拒回滚的重建吞掉（rebuild 排队而非合并）', async () => {
+    const active = session('session-rebuild-race', 'local:rebuild-race')
+    let releaseFirstRead: (() => void) | undefined
+    let readCount = 0
+    const loadAll = vi.fn(async () => {
+      readCount += 1
+      if (readCount === 2) {
+        // 第二次读（下面手动发起的「在途 refresh」）挂住不返回，制造合并窗口。
+        await new Promise<void>(resolve => { releaseFirstRead = resolve })
+      }
+      return []
+    })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-rebuild-race',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    expect(readCount).toBe(1)
+
+    const inFlight = service.refresh(active)          // 在途「续折」读，挂住
+    await Promise.resolve()
+    expect(readCount).toBe(2)
+
+    const send = service.commands.send(active.id, { text: '发送失败' })
+    await Promise.resolve()
+    // rebuild 请求不得被在途读合并：它会排队等在途读落地之后再读一次（readCount 停在 2）。
+    expect(readCount).toBe(2)
+    releaseFirstRead?.()
+    await inFlight.catch(() => {})
+    await expect(send).resolves.toMatchObject({ status: 'rejected' })
+
+    // 排队的那次 rebuild 真的跑了（第 3 次读），且乐观行已从文档消失。
+    expect(readCount).toBeGreaterThanOrEqual(3)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([])
     expect(service.runtime.getSnapshot().generating).toBe(false)
     service.destroy()
   })
@@ -569,6 +713,97 @@ describe('Agent Workbench canonical session runtime', () => {
     service.applySessionResponse(response, active.id)
     service.applySessionResponse(response, active.id)
     expect(service.runtime.getSnapshot().document?.timeline.filter(item => item.kind === 'session')).toHaveLength(1)
+    service.destroy()
+  })
+
+  // #358：复活（load_persisted_session）响应对文档而言就是**本会话的协商事实**。此前只有建会话
+  // 路径把它投影成 `session.started`，复活路径只更新会话状态 ⇒ 文档缺前提，
+  // `WorkbenchDocumentSurface` 的守卫失配，回放出来的 model / mode 目录被渲染成会话下方
+  // 那份「配置 / 保存 / select」持久卡片（且每次重启由 journal 回放重建）。
+  it('#358 复活响应投影为 session.started 协商事实，并保留回放出来的目录', async () => {
+    const active = session('revived-config', 'local:revived-config')
+    const catalogue = [
+      { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      { id: 'mode', name: 'mode', category: 'mode', type: 'select', currentValue: 'default', options: [{ value: 'default' }] },
+    ]
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:revived-config' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: catalogue } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(active)
+    const negotiationEntry = () => service.runtime.getSnapshot().document?.timeline
+      .find(entry => entry.kind === 'session' && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')
+    expect(service.runtime.getSnapshot().document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    expect(negotiationEntry()).toBeUndefined()
+
+    service.applySessionResponse({ sessionId: 'remote-1', configOptions: catalogue }, active.id, { syntheticReason: 'session-load-response' })
+
+    expect(negotiationEntry()).toBeDefined()
+    expect((negotiationEntry()?.data as { options?: unknown[] }).options).toHaveLength(2)
+    expect(service.runtime.getSnapshot().document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    expect(service.runtime.getSnapshot().document?.session.status).toBe('ready')
+    service.destroy()
+  })
+
+  // #358 遗留：**已持久化**会话（有 remote id，历史来自 journal 回放）的目录本身就是协商事实。
+  // 现场：冷启动两次 session/load 都 `connection_closed`，load 响应永远不来 —— 若只把 load
+  // 响应当唯一来源，卡片就会常驻。这条合成事实不带 status，不改写会话状态机。
+  it('#358 已持久化会话的 bind 回放补出协商事实（不等 load 响应）', async () => {
+    const persisted = { ...session('revived-fact', 'local:revived-fact'), periId: 'peri-1' }
+    const catalogue = [
+      { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      { id: 'mode', name: 'mode', category: 'mode', type: 'select', currentValue: 'default', options: [{ value: 'default' }] },
+    ]
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:revived-fact' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: catalogue } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(persisted)
+
+    const document = service.runtime.getSnapshot().document
+    const negotiation = document?.timeline.find(entry => entry.kind === 'session'
+      && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')
+    expect(negotiation).toBeDefined()
+    expect((negotiation?.data as { status?: unknown }).status).toBeUndefined()
+    expect((negotiation?.data as { options?: unknown[] }).options).toHaveLength(2)
+    expect(document?.session.options.map(option => option.id)).toEqual(['model', 'mode'])
+    service.destroy()
+  })
+
+  // 反面对照：本进程新建（尚无 remote id）的文档不补事实——「没有启动协商时普通
+  // session.config-updated 保留其编辑器」这条既有契约（mountSolidWorkbench :2156）不动。
+  it('#358 未持久化会话不补协商事实', async () => {
+    const fresh = session('fresh-fact', 'local:fresh-fact')
+    const replayedConfig = createCanonicalEvent({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:fresh-fact' },
+      clientGeneration: 1,
+      sequence: 1,
+      occurredAt: '2026-09-26T04:12:24.341Z',
+      eventType: 'session.config-updated',
+      payloadVersion: 1,
+      rawPayload: { sessionId: 'remote-1', update: { sessionUpdate: 'config_option_update', configOptions: [
+        { id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable', options: [{ value: 'fable' }] },
+      ] } },
+    })
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [replayedConfig], subscribe: () => () => {} })
+    await service.bind(fresh)
+
+    const document = service.runtime.getSnapshot().document
+    expect(document?.timeline.some(entry => entry.kind === 'session'
+      && (entry.data as { type?: unknown } | undefined)?.type === 'session.started')).toBe(false)
+    expect(document?.session.options.map(option => option.id)).toEqual(['model'])
     service.destroy()
   })
 

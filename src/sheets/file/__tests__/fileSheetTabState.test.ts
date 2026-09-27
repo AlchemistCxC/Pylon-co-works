@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_FILE_TAB_STATE,
   fileTabKey,
-  languageFromPath,
   parseFileTabs,
   serializeFileTabs,
 } from '../fileSheetState'
@@ -147,10 +146,5 @@ describe('file tabs v3（迁移自 test-file-tabs.mts）', () => {
       ],
       activeKey: 'file.text:b.ts',
     })
-  })
-
-  it('languageFromPath 按扩展名映射语法语言', () => {
-    expect(languageFromPath('src/a.ts')).toBe('typescript')
-    expect(languageFromPath('a.md')).toBe('markdown')
   })
 })

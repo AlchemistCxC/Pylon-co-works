@@ -1,8 +1,5 @@
 //! 事件仓库结构化错误。
 
-use serde::ser::SerializeMap;
-use serde::Serialize;
-
 /// 事件仓库结构化错误（B1.2：前端按 code 分支，message 展示用）。
 #[derive(Debug, thiserror::Error)]
 pub enum EventError {
@@ -18,6 +15,9 @@ pub enum EventError {
     /// SQLITE_BUSY / SQLITE_LOCKED：并发写锁冲突（可重试）。
     #[error("事件仓库并发锁冲突：{0}")]
     Conflict(String),
+    /// #155 T3：该 owner 有未收口的在途片段；外部 append 稍后重试。
+    #[error("在途消息尚未提交，稍后重试：{0}")]
+    DraftPending(String),
     /// DEL-04：owner 已 tombstone（deleting/deleted）——迟到 append 被拒绝，不复活已删会话。
     #[error("会话已删除（tombstone）：{0}")]
     SessionDeleted(String),
@@ -37,6 +37,7 @@ impl EventError {
             Self::Corrupt(_) => "event_repo_corrupt",
             Self::Constraint(_) => "event_repo_constraint",
             Self::Conflict(_) => "event_repo_conflict",
+            Self::DraftPending(_) => "draft_pending",
             Self::SessionDeleted(_) => "event_session_deleted",
             Self::Unavailable(_) => "event_db_unavailable",
             Self::Invalid(_) => "event_invalid",
@@ -44,15 +45,9 @@ impl EventError {
     }
 }
 
-/// B1.2：结构化错误 wire `{ code, message }`（与 MessageError/UserDataError 同形）。
-impl Serialize for EventError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化错误 wire `{ code, message }`（与 MessageError/UserDataError 同形；
+// #317 批次二：实现单源化到共享宏）。
+crate::impl_wire_code_message_serialize!(EventError);
 
 impl From<rusqlite::Error> for EventError {
     fn from(error: rusqlite::Error) -> Self {

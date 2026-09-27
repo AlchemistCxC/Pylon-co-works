@@ -3,9 +3,9 @@ import {
   hydrateIdentityAndWorkspace,
   resetHydrationCoordinator,
 } from '../hydrateIdentityAndWorkspace.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
-import { useWorkspaceStore } from '../../../workspaceStore.ts'
-import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
+import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
+import { useWorkspaceEntityStore } from '../../../infrastructure/persistence/workspaceEntityStore.ts'
 
 describe('identity/workspace hydration coordinator', () => {
   beforeEach(() => {

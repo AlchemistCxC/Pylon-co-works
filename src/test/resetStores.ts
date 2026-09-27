@@ -6,15 +6,16 @@
  */
 
 import { useStore } from '../store'
-import { useIdentityStore } from '../identityStore'
-import { useRuntimeStore } from '../runtimeStore'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { clearAllSessionUiState } from '../components/chat/sessionUiState'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
-import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
+import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
-import { useRightRailStore } from '../rightRailStore.ts'
+import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import '../app/bootstrap/identityCrossDomainWiring'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)

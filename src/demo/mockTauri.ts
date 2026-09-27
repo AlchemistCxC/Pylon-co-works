@@ -20,7 +20,7 @@ import {
 } from './demoData.ts'
 import { buildVisualQaPluginPackages, buildVisualQaWorkspaces } from './visualQaData.ts'
 import type { InstalledPluginPackage } from '../infrastructure/plugins/pluginPackageClient.ts'
-import type { Workspace } from '../workspaceEntities.ts'
+import type { Workspace } from '../domains/workspace/workspaceEntities.ts'
 
 // 浏览器 mock 有状态网关 routes：gateway 保存后 read-back 一致（浏览器可验 FE-AUD-004 安全写回）
 let mockGatewayRoutes = buildGatewayStatus().routes

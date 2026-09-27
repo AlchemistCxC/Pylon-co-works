@@ -1,17 +1,18 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
-import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../ccLayoutState.ts'
-import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
-import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
+import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../domains/cc/ccLayoutState.ts'
+import { resolveCcMinHeight } from '../../../domains/cc/ccHeightState.ts'
+import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidCcSendButton, SolidModeWidget, SolidModelWidget, SolidReasoningWidget } from './WorkbenchWidgets.solid.tsx'
 import { resolveModeOptionEntries } from './workbenchOptionCatalog.ts'
-import { useIdentityStore } from '../../../identityStore.ts'
-import { useWorkspaceEntityStore } from '../../../workspaceEntityStore.ts'
+import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
+import { useWorkspaceEntityStore } from '../../../infrastructure/persistence/workspaceEntityStore.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
-import { toCssBackgroundImage } from '../../../backgroundImage.ts'
+import { toCssBackgroundImage } from '../../../infrastructure/skin/backgroundImage.ts'
 import { getCcWidgetRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { errorMessage } from '../../../infrastructure/tauri/errorPayload.ts'
 import { parseTranslateOffset, resolveAllowedOffset, shouldBypassCollisionConstraint, type CcOffsetPair, type CcRectLike } from './ccPlacementCollision.ts'
@@ -62,6 +63,7 @@ export function SolidControlCenter() {
   }
   const runtime = () => workbench.runtimeSnapshot()
   const input = () => workbench.input()
+  const [selectorPending] = createSessionUiSignal(workbench.sessionUi, () => input().sessionId, 'selector-pending', '')
   const [selected, setSelected] = createSignal<CcLayoutWidgetId>()
   const [workspaceId, setWorkspaceId] = createSignal('')
   /** Workspace carried by Sidebar's create-session intent. The event is
@@ -286,15 +288,9 @@ export function SolidControlCenter() {
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
   const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
-  const minHeight = () => resolveCcMinHeight({
-    inputMode: appearance().inputMode,
-    footerLayout: appearance().footerLayout,
-    hintMode: appearance().cliHintMode,
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: hiddenWidgetIds(),
-    }),
-    cliOverflowMode: appearance().cliOverflowMode,
-  })
+  // ★ #266 刀9~11：输入固定命令行 / 底部信息固定独立状态行 / 多行输入固定增高
+  //   ⇒ 最小高度不再随形态浮动（常量，见 ccHeightState.resolveCcMinHeight）。
+  const minHeight = () => resolveCcMinHeight()
   // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
   //   进组前过一遍**输入栏落脚处独占守卫**（原「input 槽只准放输入栏」的替代）：
   //   非输入栏若被错标到输入栏容器，退回信息落脚处 —— 宁可换位置，不凭空消失。
@@ -351,8 +347,8 @@ export function SolidControlCenter() {
         // S11 用量控件：按钮型外观、不可点击（无 onClick / 无菜单 / 无 aria-haspopup）。
         // 外观沿用 model 控件的外观字段 —— 本控件不新增属性字段（S11 拍板「光秃秃」），
         // 但必须与 model/reasoning/mode 是同一族按钮，否则会退化成裸文字。
-        const usage = () => runtime().document?.session.usage
-        const limit = () => usage()?.contextLimit
+        const usage = () => resolveContextUsage(runtime().document?.session.usage)
+        const limit = () => usage().limit
         const pillStyle = () => ({
           height: `${appearance().modelHeight ?? 28}px`,
           'border-radius': `${appearance().modelRadius ?? 0}px`,
@@ -365,8 +361,8 @@ export function SolidControlCenter() {
           color: appearance().modelTextColor,
         })
         return <span class="cc-usage-pill" style={pillStyle()}>
-          <span class="cc-usage-count">{formatUsageTokens(usageTokenCount(usage(), runtime().tokenCount))}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
-          <span class="cc-usage-percent">{formatUsagePercent(contextRatio(usage(), runtime().tokenCount))}</span>
+          <span class="cc-usage-count">{usage().used !== undefined ? formatUsageTokens(usage().used!) : '—'}/{limit() && limit()! > 0 ? formatUsageTokens(limit()!) : '—'}</span>
+          <span class="cc-usage-percent">{usage().percent !== undefined ? formatUsagePercent(usage().percent! / 100) : '—'}</span>
         </span>
       }
       case 'model':
@@ -521,9 +517,11 @@ export function SolidControlCenter() {
   const setProperty = (command: CcPropertyCommand) => workbench.appearance.dispatch(command)
   // 注册轨控件（`cc-send-button`）没有 WIDGET_PROPERTY_FIELDS 条目 —— 属性面板只给
   // 布局四项，它的外观字段在设置页编辑。
+  // ★ #266 刀9：原先这里还有一层 `showIf` 过滤（按 `inputMode` 判明）；该字段已删除、
+  //   全表也早已没有任何声明方 ⇒ 属性项一律常态显示。
   const propertyFields = (id: CcLayoutWidgetId) => {
     if (!(id in WIDGET_PROPERTY_FIELDS)) return []
-    return WIDGET_PROPERTY_FIELDS[id as CcWidgetId].filter(field => !field.showIf || field.showIf({ inputMode: appearance().inputMode }))
+    return WIDGET_PROPERTY_FIELDS[id as CcWidgetId]
   }
   const renderPropertyField = (field: WidgetPropertyField, index: number): JSX.Element | null => {
     if (field.kind === 'section') return <div class="cc-prop-sec" data-field-index={index}>{field.title}</div>
@@ -535,8 +533,9 @@ export function SolidControlCenter() {
     }} />{field.suffix && <span>{field.suffix}</span>}</div>
     if (field.kind === 'chips') return <div class="cc-prop-field"><label>{field.label}</label><div class="set-preset-row"><For each={field.options}>{option => (
       <button type="button" class={`set-preset-chip${value() === option.value ? ' active' : ''}`} onClick={() => {
+        // ★ #266 刀9：原先点 chips 还会连带写 `option.sync`（inputMode↔inputVariant 双写）；
+        //   两个字段删除后该机制没有声明方 ⇒ 只写本字段。
         setProperty({ type: 'set-cc-property', key: field.key, value: option.value })
-        if (option.sync) setProperty({ type: 'set-cc-property', key: option.sync.key, value: option.sync.value })
       }}>{option.label}</button>
     )}</For></div></div>
     return null
@@ -578,7 +577,8 @@ export function SolidControlCenter() {
 
   return <div
     ref={node => { controlCenterElement = node }}
-    class={`solid-workbench-control-center-slot control-center${appearance().inputMode === 'cli' ? ' cli-mode' : ''}${appearance().ccEditMode ? ' cc-editing' : ''}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
+    // ★ #266 刀9：`cli-mode` 常量类（原先由 `inputMode === 'cli'` 决定；输入已固定命令行）。
+    class={`solid-workbench-control-center-slot control-center cli-mode${appearance().ccEditMode ? ' cc-editing' : ''}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
     data-control-center="production"
     data-creation-state={sessionEntering() ? 'entering' : submitting() ? 'creating' : undefined}
     role={!input().sessionId ? 'region' : undefined}
@@ -653,18 +653,12 @@ export function SolidControlCenter() {
     <Show when={ccSendButtonRegistered() && sendButtonMode()}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} hidden={sendButtonHidden()} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
-      {appearance().footerLayout === 'peri' ? <div class="cc-footer cc-footer-peri">
-        <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
-        <div class="cc-footer-status">
-          <Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}>
-            <EmptyWorkspaceControl />
-          </Show>
-          <Show when={statusRowContent()}>{statusGroup()}</Show>
-        </div>
-      </div> : <>
-        <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
-        <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show></div>
-      </>}
+      <Show when={selectorPending()}><span role="status" aria-live="polite">{selectorPending()}</span></Show>
+      {/* ★ #266 刀11：`footerLayout` 字段删除 ⇒ 只保留「独立状态行」这一种结构
+          （原 peri 分支的 `.cc-footer-peri` 包装 div 与相关 CSS 一并退场）。
+          元件位置不新增任何机制：仍由定义表的 layout 声明 + 区域预设记的值决定。 */}
+      <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
+      <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show></div>
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (
       <div class="cc-prop-panel" role="dialog" aria-label={`${CC_WIDGET_LABELS[id()]} 属性`}>
@@ -715,22 +709,4 @@ function placementStyle(placement: CcWidgetPlacement): JSX.CSSProperties {
   return placement.offsetX === 0 && placement.offsetY === 0
     ? {}
     : { transform: `translate(${placement.offsetX}px, ${placement.offsetY}px)` }
-}
-
-function usageTokenCount(usage: UsageSnapshot | undefined, fallback: number): number {
-  if (usage?.totalTokens !== undefined) return usage.totalTokens
-  const parts = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
-  return parts > 0 ? parts : Math.max(0, fallback)
-}
-
-function contextRatio(usage: UsageSnapshot | undefined, fallback: number): number {
-  const explicit = usage?.contextPercent
-  if (explicit !== undefined) return clamp01(explicit / 100)
-  const limit = usage?.contextLimit ?? 0
-  const used = usage?.contextUsed ?? usageTokenCount(usage, fallback)
-  return limit > 0 ? clamp01(used / limit) : 0
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }

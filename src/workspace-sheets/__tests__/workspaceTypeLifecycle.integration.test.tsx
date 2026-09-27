@@ -3,7 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TestPluginRuntime as PluginRuntime } from '../../plugin-runtime/testing/pluginRuntimeHarness.ts'
 import { resetStores } from '../../test/resetStores'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import SheetLayout from '../SheetLayout'
 
 describe('Workspace type v2 UI 生命周期', () => {

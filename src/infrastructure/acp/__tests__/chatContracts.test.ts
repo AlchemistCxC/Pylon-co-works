@@ -47,10 +47,9 @@ describe('ACP chat contract extraction', () => {
     expect(response.session_id).toBe('session-1')
     expect(extractModelConfig(response.config_options, response)).toEqual({
       model: 'provider:current',
-      models: ['provider:a', 'provider:b'],
+      models: ['provider:a'],
       modelChoices: [
         { id: 'provider:a', label: 'Model A', provider: 'provider' },
-        { id: 'provider:b', provider: 'provider' },
       ],
     })
     expect(extractModeConfig(response)).toEqual({

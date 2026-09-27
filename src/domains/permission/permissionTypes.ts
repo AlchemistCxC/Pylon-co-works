@@ -38,4 +38,12 @@ export interface PermissionRequest {
   requestedAt?: string | number
   /** ACP-03：后端单一来源的超时 deadline（Unix ms）——前端只用于倒计时展示，不自行判定 */
   deadlineMs?: number
+  /** #316：交互类别（permission 默认 | elicitation 标准 form 请求）——渲染层分派 */
+  interactionKind?: 'permission' | 'elicitation'
+  /** #316 elicitation：form 模式说明文案（wire message 字段原样） */
+  elicitMessage?: string
+  /** #316 elicitation：受限 JSON Schema（后端原样透传；前端仅支持官方原语子集） */
+  requestedSchema?: Record<string, unknown>
+  /** #316 elicitation：URL 模式外带地址（本期不做 url 交互，卡片降级为拒绝/取消） */
+  elicitUrl?: string
 }

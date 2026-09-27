@@ -6,7 +6,7 @@ import { createPreviewWorkbenchRuntime } from '../../../domains/workbench/workbe
 import { createStaticWorkbenchAppearanceStore } from '../../../domains/workbench/workbenchAppearanceStore.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { createSessionUiStore } from '../../../domains/workbench/sessionUiStore.ts'
-import { clearErrors, getDiagnosticErrors, getErrorHistory, getErrors } from '../../../errorCenter.ts'
+import { clearErrors, getDiagnosticErrors, getErrorHistory, getErrors } from '../../../app/errorCenter.ts'
 
 function runtime() {
   return createPreviewWorkbenchRuntime({

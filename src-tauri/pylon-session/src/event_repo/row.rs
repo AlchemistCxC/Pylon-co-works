@@ -111,7 +111,10 @@ pub(super) struct KernelEventInput {
     pub(super) remote_session_id: Option<String>,
     pub(super) client_generation: i64,
     pub(super) received_at: String,
-    pub(super) raw_payload: serde_json::Value,
+    /// #334/P2：dispatcher 逐帧热路径把同一份 payload 以 `Arc<Value>` 共享给
+    /// ingest 与 publish（ingest 先行、publish 随后取回唯一引用），故此处共享
+    /// 传入而非消费式拥有；normalize 取 redact 所有权时才解包（计数非 1 再克隆）。
+    pub(super) raw_payload: std::sync::Arc<serde_json::Value>,
     pub(super) recovery_import: bool,
 }
 
@@ -121,6 +124,15 @@ pub(super) struct KernelEventInput {
 pub struct EventPage {
     pub events: Vec<CanonicalEventRow>,
     pub next_before_sequence: Option<i64>,
+}
+
+/// #376-b：compact 读的一页（升序）。游标是**前向**的（`after_sequence`），因为冷装载按
+/// 「由旧到新」续折；`None` = 已到最新，装载可以收尾。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactEventPage {
+    pub events: Vec<CanonicalEventRow>,
+    pub next_after_sequence: Option<i64>,
 }
 
 /// evt_search 候选 owner（B6）：内容命中 canonical_events 的 owner 三元组 +

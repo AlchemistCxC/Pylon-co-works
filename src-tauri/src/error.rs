@@ -3,8 +3,23 @@
 //! B1.2：错误 DTO 结构化——`{ "code": "...", "message": "..." }`，
 //! 前端按 code 分支处理，message 仅供展示。内部仍以 Display 传播细节。
 
-use serde::ser::SerializeMap;
-use serde::Serialize;
+/// B1.2 结构化错误 wire 形状的单源实现：`{ "code", "message" }` 两键 map。
+/// 命令边界错误类型共用（code 由各类型 `code()` 提供，message 走 Display）；
+/// 序列化输出与既往手写 impl 逐字节一致（error.rs/gateway/pylon-session 六处去重）。
+macro_rules! impl_wire_code_message_serialize {
+    ($ty:ty) => {
+        impl serde::Serialize for $ty {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeMap;
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("code", self.code())?;
+                map.serialize_entry("message", &self.to_string())?;
+                map.end()
+            }
+        }
+    };
+}
+pub(crate) use impl_wire_code_message_serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PylonError {
@@ -60,6 +75,24 @@ pub enum PylonError {
     /// SessionError::code 委派，wire code 与拆分前逐字一致。
     #[error(transparent)]
     Storage(#[from] pylon_session::SessionError),
+    /// 用户数据仓库错误（#317 批次二：原命令直返 UserDataError 收编）——
+    /// 细分 code 经 UserDataError::code 委派，transparent 保 message 逐字不变。
+    #[error(transparent)]
+    UserData(#[from] pylon_session::user_data::UserDataError),
+    /// 保留策略执行错误（#317 批次二：原命令直返 RetentionError 收编）——
+    /// 细分 code 经 RetentionError::code 委派，transparent 保 message 逐字不变。
+    #[error(transparent)]
+    Retention(#[from] pylon_session::retention::RetentionError),
+    /// 边界直述错误（#317 批次二：原 `Result<_, String>` 命令面收编——
+    /// hook/cli 桥、窗口捕获、插件进程管理、MCP 落盘、portable 迁移）。
+    /// message 保留原文案；机器码统一 `command_error`（原裸 String 无码，此为净新增）。
+    #[error("{0}")]
+    Command(String),
+    /// ACP 域错误整包委托（#317 批次二 2c：边界区分度保留）——细分 code 经
+    /// AcpError::code 委派（persist.rs 回放词汇表单源化），message 为 Display 原文；
+    /// ReplayLoadInProgress 仍由 acp/mod.rs 特判折入 Storage（既有契约）。
+    #[error(transparent)]
+    AcpDomain(pylon_acp::AcpError),
 }
 
 impl PylonError {
@@ -84,21 +117,18 @@ impl PylonError {
             Self::Config(error) => error.code(),
             Self::Gateway(error) => error.code(),
             Self::Storage(error) => error.code(),
+            Self::UserData(error) => error.code(),
+            Self::Retention(error) => error.code(),
+            Self::Command(_) => "command_error",
+            Self::AcpDomain(error) => error.code(),
         }
     }
 }
 
 // Display/Error 由 thiserror derive（R2）；错误文案与手写 impl 逐字一致（契约不变）。
 
-/// B1.2：结构化 DTO——`{ "code", "message" }`（前端按 code 分支，message 展示用）。
-impl Serialize for PylonError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化 DTO——`{ "code", "message" }`（前端按 code 分支，message 展示用）。
+impl_wire_code_message_serialize!(PylonError);
 
 /// 内部 String 错误 → Protocol（保持消息，语义细化留待各子系统错误类型）。
 impl From<String> for PylonError {
@@ -167,6 +197,19 @@ mod tests {
     #[test]
     fn error_codes_are_stable_and_machine_readable() {
         assert_eq!(PylonError::Acp("x".into()).code(), "acp_error");
+        assert_eq!(PylonError::Command("x".into()).code(), "command_error");
+        // #317 批次二 2c：AcpDomain 细分码委托（词汇表 = persist.rs 回放契约）。
+        assert_eq!(
+            PylonError::AcpDomain(pylon_acp::AcpError::RpcTimeout).code(),
+            "rpc_timeout"
+        );
+        assert_eq!(
+            PylonError::AcpDomain(pylon_acp::AcpError::Connect(Box::new(
+                pylon_acp::AgentConnectFailure::preflight("preflight", "unavailable".into())
+            )))
+            .code(),
+            "connect_error"
+        );
         assert_eq!(PylonError::AgentCrashed.code(), "agent_crashed");
         assert_eq!(PylonError::NoActiveAgent.code(), "no_active_agent");
         assert_eq!(PylonError::Serialize("x".into()).code(), "serialize_error");

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore, type Session } from '../identityStore.ts'
-import { useRuntimeStore } from '../runtimeStore.ts'
+import { useIdentityStore, type Session } from '../domains/identity/identityStore.ts'
+import { errorCode as wireErrorCode } from '../infrastructure/tauri/errorPayload.ts'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore.ts'
 import {
   createAgentClient,
   type AgentCreateConfig,
@@ -30,12 +31,6 @@ const sessionClient = createSessionClient(transport)
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
-}
-
-function wireErrorCode(error: unknown): string | undefined {
-  return error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    ? (error as { code: string }).code
-    : undefined
 }
 
 function candidateConfig(candidate: AgentRuntimeCandidate, makeDefault: boolean): AgentCreateConfig {

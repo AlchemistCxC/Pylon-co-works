@@ -4,7 +4,7 @@ import type { ThemeSettings } from './store'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_FIELD_OWNERS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
 import { readCollapsed, writeCollapsed, type CollapseMap } from './components/settings/settingsChromeState.ts'
-import { resolveBackgroundImage } from './backgroundImage'
+import { resolveBackgroundImage } from './infrastructure/skin/backgroundImage'
 import { resolveSpinnerFrames } from './components/chat/spinnerFrames'
 import FontContributionPicker from './components/settings/FontContributionPicker.tsx'
 import Select from './components/ui/Select.tsx'
@@ -207,19 +207,10 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
     />
   }
 
-  const emit = (partial: Partial<ThemeSettings>) => {
-    const next: Partial<ThemeSettings> = { ...partial }
-    if (def.syncOnChange && partial[keyName] !== undefined) {
-      for (const syncKey of def.syncOnChange) {
-        if (syncKey === 'inputMode') {
-          next.inputMode = partial[keyName] === 'cli' ? 'cli' : 'default'
-        } else {
-          (next as Record<string, unknown>)[syncKey] = partial[keyName]
-        }
-      }
-    }
-    onChange(next)
-  }
+  // ★ #266 刀9：原先这里有一层 `syncOnChange`（写某字段时连带写它声明的伙伴字段，例如
+  //   `inputVariant` ↔ `inputMode`）。那两个字段已随「固定命令行」删除，机制失去唯一声明方
+  //   与读取者 ⇒ 整段撤掉，控件改动只走 `onChange`（行为零变化：改造前也只有那一对在用它）。
+  const emit = (partial: Partial<ThemeSettings>) => onChange({ ...partial })
 
   switch (def.type) {
     case 'color':
@@ -391,12 +382,14 @@ export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: Zon
           .filter(group => group.fields.length > 0)
         if (groups.length === 0) {
           return section.heading
-            ? <h3 key={section.heading}>{section.heading}</h3>
+            ? <h3 key={section.heading} data-group-anchor={section.heading}>{section.heading}</h3>
             : null
         }
         return (
           <Fragment key={section.heading ?? si}>
-            {section.heading && <h3>{section.heading}</h3>}
+            {/* ★ #266 CC-09：元件标题也挂锚点 —— 左栏「中控台」的二级项是**元件名**，
+                点击要能滚到这里（原先只有组挂锚点，元件标题点了没落点）。 */}
+            {section.heading && <h3 data-group-anchor={section.heading}>{section.heading}</h3>}
             {groups.map(group => (
               <Group key={group.title} zone={zone} title={group.title} defaultOpen={group.defaultOpen} forceOpen={searching}>
                 {group.compact

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useWorkspaceStore, touchedFileVersionKey } from '../workspaceStore'
-import { toAgentContextKey } from '../agentContext'
+import { useWorkspaceStore, touchedFileVersionKey } from '../domains/workspace/workspaceStore'
+import { toAgentContextKey } from '../domains/agent/agentContext'
 
 /**
  * I01-W3 CR-003：recordTouchedFile 生产者键写入 + 双 Agent 同名 source 隔离负例——

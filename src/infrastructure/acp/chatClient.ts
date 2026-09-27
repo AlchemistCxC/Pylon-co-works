@@ -6,10 +6,11 @@
  */
 import { ClientTransport } from './agentClient'
 import type { Channel } from '@tauri-apps/api/core'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from './tauriTransport.ts'
+import type { PylonStreamWireEvent } from '../events/pylonStreamWireEvents.ts'
 
-/** B1：流式帧信封（与 src/components/chat/streamChannel.ts 的 StreamFrame 同构）。 */
-export type StreamFrame = { event: 'pylon:update' | 'pylon:done' | 'pylon:error' | 'pylon:user'; payload: unknown }
+/** B1：流式帧信封（与 src/components/chat/streamChannel.ts 的 StreamFrame 同构；事件名单一来源见 pylonStreamWireEvents）。 */
+export type StreamFrame = { event: PylonStreamWireEvent; payload: unknown }
 
 export interface SendMessagePayload {
   /** OWNER-02：Session owner 显式 agentId（路由到 owner runtime，绝不 fallback active） */
@@ -60,7 +61,7 @@ export function createChatClient(transport: ClientTransport) {
  * infrastructure concern; Workbench hosts consume the typed client only. */
 export function createTauriChatClient() {
   return createChatClient({
-    invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined),
+    invoke: tauriInvokeTransport,
   })
 }
 

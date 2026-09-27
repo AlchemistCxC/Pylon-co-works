@@ -14,7 +14,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import OverviewSheetView from '../sheets/OverviewSheetView'
 import HistorySheetView from '../sheets/history/HistorySheetView'
 import SearchSheetView from '../sheets/search/SearchSheetView'
-import { useIdentityStore } from '../identityStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
 import type { OpenOwnedSessionDeps } from '../application/transactions/openOwnedSessionTransaction'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
@@ -111,7 +111,7 @@ describe('TS-WI02 production addSession owner wiring', () => {
       { id: 'm1', content: '需要定位的消息 hello world', time: '2026-01-01' },
     ]))
     render(<SearchSheetView sheet={searchSheet} ctx={makeCtx()} />)
-    fireEvent.change(screen.getByLabelText('跨会话搜索'), { target: { value: '定位' } })
+    fireEvent.input(screen.getByLabelText('跨会话搜索'), { target: { value: '定位' } })
     fireEvent.click(await screen.findByRole('button', { name: /需要定位的消息 hello world/ }))
     await expectAddSessionPreservesOwner()
   })

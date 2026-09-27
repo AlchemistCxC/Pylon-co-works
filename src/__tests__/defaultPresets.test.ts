@@ -32,12 +32,14 @@ vi.mock('../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const GLASS = GLOBAL_PRESETS.find(preset => preset.name === 'glass')!
-/** 终端契约字段（原「终端补全」层里的同一组字段；刀3 起该层已无）。 */
+/**
+ * 终端契约字段（原「终端补全」层里的同一组字段；刀3 起该层已无）。
+ * ★ #266 刀9：原第 3/4 项 `inputMode` / `inputVariant` 已随「固定命令行」删除
+ *   （形态不再由预设区分），契约只剩这两项。
+ */
 const TERMINAL_CONTRACT = {
   msgStyle: 'terminal',
   messageLayout: 'classic',
-  inputMode: 'cli',
-  inputVariant: 'cli',
 } as const
 const DEFAULT_NAMES: string[] = [DEFAULT_PRESETS.gui.name, DEFAULT_PRESETS.terminal.name]
 /**
@@ -140,7 +142,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     const guiDefault = themeSnapshot()
 
     withInterfaceMode('terminal-like')
-    useStore.setState({ accent: '#000000', msgStyle: 'bubble', inputMode: 'default', inputVariant: 'composer' })
+    useStore.setState({ accent: '#000000', msgStyle: 'bubble' })
     useStore.getState().resetTheme()
 
     expect(themeSnapshot()).toEqual({ ...guiDefault, ...TERMINAL_CONTRACT })

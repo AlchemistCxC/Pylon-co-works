@@ -3120,7 +3120,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "pylon"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "aes-gcm",
  "agent-client-protocol",
@@ -3166,6 +3166,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "url",
  "webview2-com",
@@ -3177,7 +3178,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-acp"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
@@ -3199,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-canonical-types"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "serde",
  "serde_json",
@@ -3207,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-compute"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "serde",
  "serde-wasm-bindgen",
@@ -3221,6 +3222,7 @@ version = "1.0.0"
 dependencies = [
  "futures-util",
  "libc",
+ "pylon-foundations",
  "serde",
  "serde_json",
  "serde_yml",
@@ -3229,6 +3231,13 @@ dependencies = [
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "pylon-fake-agent"
+version = "0.3.0-AUE"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -3241,11 +3250,12 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "pylon-markdown"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "comrak",
  "serde",
@@ -3265,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-session"
-version = "0.2.9-PAC"
+version = "0.3.1-FMF"
 dependencies = [
  "chrono",
  "pylon-canonical-types",
@@ -4302,6 +4312,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5083,6 +5099,19 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.20",
+ "time",
+ "tracing-subscriber",
 ]
 
 [[package]]

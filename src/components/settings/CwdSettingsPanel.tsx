@@ -6,14 +6,14 @@
  * - MCP 选项来自 agent 级暴露列表（get_mcp_servers）；
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { FolderSearch, X } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import type { Workspace } from '../../workspaceEntities'
-import { isAbsolutePath } from '../../workspaceEntities'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
+import type { Workspace } from '../../domains/workspace/workspaceEntities'
+import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
 import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
@@ -84,7 +84,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
 
   useEffect(() => {
     let disposed = false
-    createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    createAgentClient({ invoke: tauriInvokeTransport })
       .getMcpServers()
       .then(list => {
         if (!disposed) {
@@ -95,7 +95,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       .catch(error => {
         if (!disposed) reportRuntimeError('读取 MCP 配置', error, undefined, {
           key: `cwd:${workspace.id}:mcp`, scope: { kind: 'operation', id: `cwd:${workspace.id}:mcp` }, source: 'settings.cwd',
-          recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
         })
       })
     return () => { disposed = true }
@@ -131,7 +130,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       setSaveError('无法打开文件夹选择器，详情见右下角错误中心')
       reportRuntimeError('打开工作区选择器', error, undefined, {
         key: `cwd:${workspace.id}:picker`, scope: { kind: 'operation', id: `cwd:${workspace.id}:picker` }, source: 'settings.cwd',
-        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
       })
     }
   }
@@ -162,7 +160,6 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
       setSaveError('保存工作区设置失败，详情见右下角错误中心')
       reportRuntimeError('保存工作区设置', error, undefined, {
         key: `cwd:${workspace.id}:save`, scope: { kind: 'sheet', id: workspace.id }, source: 'settings.cwd',
-        recovery: { kind: 'open-runtime-log', sheetId: workspace.id },
       })
     } finally {
       setSaving(false)

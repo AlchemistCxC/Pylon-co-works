@@ -5,9 +5,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SessionOwnerRecoveryDialog from '../SessionOwnerRecoveryDialog'
-import { useIdentityStore } from '../../identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
 import { resetStores } from '../../test/resetStores'
-import type { LegacySession } from '../../sessionPersistence'
+import type { LegacySession } from '../../domains/identity/sessionPersistence'
 
 const legacy: LegacySession = {
   id: 'legacy-1', name: '遗留会话', source: 'qq:group:1', profileId: 'profile-a', createdAt: 1,

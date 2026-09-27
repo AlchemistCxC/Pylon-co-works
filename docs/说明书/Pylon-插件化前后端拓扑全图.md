@@ -1,7 +1,7 @@
 # Pylon 插件化前后端拓扑全图
 
 > 状态：当前实现地图 + 明确标注的 Renderer Suite 规划接缝  
-> 核验日期：2026-09-12  
+> 核验日期：2026-09-26  
 > 适用基线：当前 `prism-desktop` 工作副本；规划施工入口见仓库内工作副本外的渲染引擎施工台账（00-唯一入口台账.md）  
 > 阅读纪律：实线节点/边表示当前代码；带 `PLANNED` 且虚线边框的节点表示尚未实现。不得把规划节点写进“当前已支持”说明。
 
@@ -67,6 +67,11 @@ flowchart TB
       FONTREG[FontContributionRegistry]
       SESSIONCREG[SessionCreationRegistry]
       IMODEREG[InterfaceModeRegistry]
+      SHELLRECIPE[ShellRecipeRegistry]
+      TITLEBAR[TitlebarRegistry]
+      CCWIDGET[CcWidgetRegistry]
+      PRESET[PresetRegistry]
+      PROMPTREG[PromptContributionRegistry]
     end
 
     subgraph PRODUCT[七个第一方 Product Plugin 包 + 可选 Kernel Skin]
@@ -158,7 +163,7 @@ flowchart TB
     subgraph AGENTKERNEL[Agent、ACP 与 Session Kernel]
       LIFECYCLE[lifecycle/mod.rs<br/>connect/switch/reconnect/config]
       ARMANAGER[AgentRuntimeManager<br/>per-agent generations]
-      ACP[acp/*<br/>engine/process/replay/instance_registry]
+      ACP[pylon-acp crate<br/>engine/process/replay/client<br/>+ acp/instance_registry 宿主适配]
       DISPATCH[dispatcher/*<br/>normalize/ingest/project runtime]
       SESSION[session/*<br/>create/prompt/load/control/owner]
       AGENTCFG[agent_config + agent_detection + catalog]
@@ -188,16 +193,28 @@ flowchart TB
       PYLONCLI[pylon_cli.rs]
       PRISM[prism / pet / mcp adapters]
     end
+
+    subgraph RUSTCRATES[Rust workspace crates：零 tauri 纯逻辑]
+      PYLONACP[pylon-acp<br/>engine/process/replay/protocol/wire trace]
+      PYLONSESSION[pylon-session<br/>event_repo/msg_repo/turn_rollup<br/>retention/user_data/persistence_bootstrap]
+      PYLONCORE[pylon-core<br/>catalog/detection/diagnostics/launch plan]
+      PYLONMISC[pylon-foundations / canonical-types<br/>compute / markdown / pet-core]
+    end
   end
 
   subgraph STORAGE[持久化与受控文件]
-    SQLITE[(pylon-data-v1.sqlite3<br/>canonical_events / user_data / session_state / tombstones)]
+    SQLITE[(pylon-data-v1.sqlite3<br/>canonical_events / user_data / sessions + session_state<br/>session_state_snapshots / deleted_sessions tombstone / retention_policy)]
     AGENTSYAML[(agents.yaml / MCP config)]
     PKGFILES[(plugin packages/data/runtime/transactions/state.json)]
     GATEWAYFILES[(gateway/workspace/pet/credentials files)]
   end
 
   %% Bootstrap and single runtime
+  %% Rust workspace crates：宿主模块的实体所在（#247/#106 下沉，宿主路径保留 re-export）
+  ACP --> PYLONACP
+  SESSION --> PYLONSESSION
+  PBOOT --> PYLONSESSION
+  AGENTCFG --> PYLONCORE
   MAIN --> KROOT --> KBOOT
   KBOOT --> RECOVERY
   KBOOT --> COMPOSE --> BUILTINBOOT --> PRUNTIME
@@ -250,7 +267,7 @@ flowchart TB
   PWORKSPACE --> SERVREG
   PWORKSPACE --> CMDREG
   PGATEWAY --> WORKREG
-  PSKIN --> HOOKREG
+  PSKIN --> CMDREG
   PMANAGER -->|registerPage 增强面板| SETPAGEREG
   PMANAGER -->|context.management 只读+管理操作| MGMTAPI
 
@@ -417,8 +434,8 @@ flowchart TB
 | canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
 | 外部包 Web 链 | `packageInstallationService.ts` → `packagePluginRuntime.ts` → `src/infrastructure/plugins/pluginPackageClient.ts` |
 | Rust package/process | `src-tauri/src/plugin_cmds/`、`src-tauri/src/plugin_process/mod.rs` |
-| Rust Kernel / IPC | `src-tauri/src/lib.rs`、`lifecycle/*`、`acp/*`、`dispatcher/*`、`session/*` |
-| 唯一持久化事实 | `src-tauri/src/session/event_repo.rs`、`persistence_bootstrap.rs`、`src/infrastructure/events/*` |
+| Rust Kernel / IPC | `src-tauri/src/lib.rs`、`lifecycle/*`、`dispatcher/*`、`session/*`（编排层）；协议引擎核在 `src-tauri/pylon-acp`、存储核在 `src-tauri/pylon-session` |
+| 唯一持久化事实 | `src-tauri/pylon-session/src/event_repo/`、`src-tauri/pylon-session/src/persistence_bootstrap.rs`（宿主 `crate::session::` 保留兼容 re-export）、`src/infrastructure/events/*` |
 
 ## 维护规则
 

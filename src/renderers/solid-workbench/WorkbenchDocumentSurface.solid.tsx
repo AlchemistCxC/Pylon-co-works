@@ -5,7 +5,7 @@ import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import type { SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { fallbackRenderCommands, renderExtensionFallback, sessionSurfaceAppearance } from './solidBuiltinContentRenderer.solid.tsx'
-import { interactionRenderKind, lifecycleRenderKind } from './solidWorkbenchProjectionSupport.ts'
+import { interactionRenderKind, lifecycleRenderKind, visibleDiagnostics } from './solidWorkbenchProjectionSupport.ts'
 import { isControlCenterConfigOption } from './input/workbenchOptionCatalog.ts'
 import { WorkbenchContentSlot } from './WorkbenchContentSlot.solid.tsx'
 
@@ -179,9 +179,4 @@ export function WorkbenchDocumentSurface(props: {
       )}
     </Show>
   )
-}
-
-function visibleDiagnostics(document: WorkbenchDocument) {
-  const errorEventIds = new Set(document.systemErrors.flatMap(error => error.eventId ? [error.eventId] : []))
-  return document.diagnostics.filter(diagnostic => !errorEventIds.has(diagnostic.eventId))
 }

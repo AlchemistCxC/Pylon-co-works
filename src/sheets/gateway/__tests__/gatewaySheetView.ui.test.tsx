@@ -14,7 +14,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import GatewaySheetView from '../GatewaySheetView'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import { clearErrors } from '../../../errorCenter.ts'
+import { clearErrors } from '../../../app/errorCenter.ts'
 
 const fakeInvoke = new FakeInvoke()
 

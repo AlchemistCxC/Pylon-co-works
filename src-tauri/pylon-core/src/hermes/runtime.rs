@@ -285,13 +285,18 @@ fn pack_runtime_roots() -> Vec<(PathBuf, bool)> {
     }
 
     // `CARGO_MANIFEST_DIR` keeps `cargo run`/unit smoke usable when Tauri has
-    // not copied resources to target/debug yet.  It is harmless in release
-    // builds and never outranks the executable-adjacent tree.  A dev-tree hit
-    // must NOT be reported as `bundled` — that is the build machine's
-    // checkout, not something the package carries.
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    roots.push((manifest.join("../resources/runtime/git"), false));
-    roots.push((manifest.join("resources/runtime/git"), false));
+    // not copied resources to target/debug yet.  Debug builds only (#387): a
+    // release binary must neither carry nor probe the build machine's checkout
+    // path — it leaks that path into every user's logs, and on a machine that
+    // still has the tree it would outrank a healthy system Git Bash.  A
+    // dev-tree hit must NOT be reported as `bundled` — that is the build
+    // machine's checkout, not something the package carries.
+    #[cfg(debug_assertions)]
+    {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        roots.push((manifest.join("../resources/runtime/git"), false));
+        roots.push((manifest.join("resources/runtime/git"), false));
+    }
     roots
 }
 
@@ -448,12 +453,9 @@ fn run_probe(bash: &Path, args: &[&str], path: &OsStr, home: Option<&Path>) -> R
     if let Some(home) = home {
         command.env("HOME", home).env("USERPROFILE", home);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW keeps a preflight from flashing a console window.
-        command.creation_flags(0x0800_0000);
-    }
+    // CREATE_NO_WINDOW keeps a preflight from flashing a console window.
+    use pylon_foundations::child_command::HideConsoleWindow;
+    command.hide_console_window();
 
     let mut child = command
         .spawn()

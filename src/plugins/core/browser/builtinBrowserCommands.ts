@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { CommandDefinition } from '../../../plugin-runtime/commands/commandRegistry.ts'
-import { useWorkspaceStore } from '../../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
 import { loadBrowserLibrary } from '../../../domains/browser/browserLibrary.ts'
 import {
   BrowserAgentToolError,

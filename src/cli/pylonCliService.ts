@@ -3,7 +3,7 @@ import type { HotSwapMode, PluginUpdateResult } from '../plugin-runtime/shadowUp
 import type { HookTraceEntry } from '../plugin-runtime/hooks/hookTypes.ts'
 import type { PluginProcessDescriptor, PluginProcessLogEntry } from '../infrastructure/plugins/pluginProcessClient.ts'
 import type { SheetRecord } from '../workspace-sheets/sheetTypes.ts'
-import type { AgentEntry, Session } from '../identityStore.ts'
+import type { AgentEntry, Session } from '../domains/identity/identityStore.ts'
 import type { AgentRuntimeCandidate } from '../domains/agent/agentDetector.ts'
 import cliManifest from '../../shared/pylon-cli-manifest.json' with { type: 'json' }
 

@@ -100,7 +100,7 @@ pub(crate) fn load_instances(path: &Path) -> Result<Vec<StoredInstance>, Instanc
 }
 
 /// 原子写实例配置：唯一临时文件 + sync + rename（经 agent_config 正身
-/// [`crate::agent_config::AtomicWriteOptions`] 收敛，issue #228 批次D）。
+/// [`pylon_foundations::atomic_write::AtomicWriteOptions`] 收敛，issue #228 批次D）。
 /// 失败返回 Err，原文件保持不动（无半写入残留，临时文件已清理）。
 pub(crate) fn persist_instances(
     path: &Path,
@@ -113,10 +113,10 @@ pub(crate) fn persist_instances(
     };
     let serialized = serde_json::to_string_pretty(&snapshot)
         .map_err(|error| InstanceStoreError::Io(format!("序列化失败: {error}")))?;
-    crate::agent_config::write_file_atomically(
+    pylon_foundations::atomic_write::write_file_atomically(
         path,
         serialized.as_bytes(),
-        crate::agent_config::AtomicWriteOptions::synced_data_file(),
+        pylon_foundations::atomic_write::AtomicWriteOptions::synced_data_file(),
     )
     .map_err(|error| InstanceStoreError::Io(format!("原子写实例配置失败: {error}")))
 }

@@ -8,25 +8,58 @@ pub(crate) async fn set_mode(
     agent_id: String,
     source: String,
     mode: String,
-) -> Result<(), PylonError> {
+) -> Result<serde_json::Value, PylonError> {
     // OWNER-02（§5.8）：显式 agentId 正向 owner 路由（会话存在才可 set_mode）。
     let owner = SessionOwner::new(&agent_id, &source);
     let runtime = state.inner().resolve_owner_runtime(&owner)?;
     let generation = state.current_generation(&runtime);
+    let (config_target, legacy_choices) = {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| PylonError::Protocol(e.to_string()))?;
+        let session = sessions
+            .get(&source)
+            .ok_or_else(|| PylonError::SessionNotFound(source.clone()))?;
+        (
+            super::find_config_option(&session.config_options, "mode").cloned(),
+            session.mode_choices.clone(),
+        )
+    };
+    if let Some(option) = config_target {
+        super::validate_advertised_choice(
+            &mode,
+            &super::config_option_choice_ids(&option),
+            "mode_not_advertised",
+        )?;
+        let config_id = super::config_option_identity(&option)
+            .ok_or_else(|| PylonError::Protocol("mode_config_id_missing".into()))?;
+        return set_config_option(state, agent_id, source, config_id, serde_json::json!(mode))
+            .await;
+    }
+    if legacy_choices.is_empty() {
+        return Err(PylonError::Protocol(
+            "mode_switching_unavailable: agent advertises no mode surface".into(),
+        ));
+    }
+    super::validate_advertised_choice(&mode, &legacy_choices, "mode_not_advertised")?;
     let peri_id = state.get_peri_id(&runtime, &source)?;
     state
         .inner()
-        .acp_rpc(
+        .acp_rpc_generation_checked(
             &runtime,
             acp::METHOD_SESSION_SET_MODE,
             acp::session_set_mode_params(&peri_id, &mode)?,
+            generation,
         )
         .await?;
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
-        session.mode = Some(mode);
+        session.mode = Some(mode.clone());
     })?;
-    Ok(())
+    // The legacy method acknowledges the requested mode with an empty response.
+    // Return only that dimension; never fabricate an availableModes catalogue.
+    Ok(serde_json::json!({"modes": {"currentModeId": mode}}))
 }
 
 #[tauri::command]
@@ -120,10 +153,11 @@ pub(crate) async fn set_config_option(
             })?;
             state
                 .inner()
-                .acp_rpc(
+                .acp_rpc_generation_checked(
                     &runtime,
                     acp::METHOD_SESSION_SET_MODEL,
                     acp::session_set_model_params(&peri_id, model_id)?,
+                    generation,
                 )
                 .await?
         }
@@ -133,10 +167,11 @@ pub(crate) async fn set_config_option(
             let config_id = advertised_config_id.unwrap_or_else(|| key.clone());
             state
                 .inner()
-                .acp_rpc(
+                .acp_rpc_generation_checked(
                     &runtime,
                     acp::METHOD_SESSION_SET_CONFIG_OPTION,
                     acp::session_set_config_option_params(&peri_id, &config_id, &value)?,
+                    generation,
                 )
                 .await?
         }
@@ -169,6 +204,21 @@ pub(crate) async fn set_config_option(
             );
         }
         _ => {}
+    }
+    if let Some(options) = response
+        .get("configOptions")
+        .or_else(|| response.get("config_options"))
+        .and_then(serde_json::Value::as_array)
+    {
+        let _ = super::ingest_established_config_options_event(
+            state.inner(),
+            &runtime,
+            &source,
+            &peri_id,
+            generation,
+            options,
+        )
+        .await;
     }
     Ok(response)
 }
@@ -237,8 +287,20 @@ pub(crate) async fn close_session(
     // 降级 + generation-bound 隔离）。close_session 为 RemoteFirst：普通 RPC 错误
     // 上抛（strict=true）；-32601 / stale generation 降级为本地清理。
     close_session_rpc(&state, &runtime, &peri_id, generation, true).await?;
+    // 显式关闭也是消息边界：先把同代际 dispatcher 中已排队的 delta 收口，
+    // 再移除 session 映射。无终态崩溃则仍保留临时片段供用户处理。
+    runtime
+        .flush_draft_before_terminal(&source, generation)
+        .await
+        .map_err(PylonError::Protocol)?;
     // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
+    // #316：回收该 session 名下的宿主终端（terminal registry 按 periId 归属），
+    // 防 agent 会话关闭后终端进程跨代残留。
+    let released = runtime.terminal_registry.release_session(&peri_id).await;
+    if released > 0 {
+        tracing::debug!(peri_id, released, "closed session host terminals released");
+    }
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(PylonError::Protocol(format!(
@@ -292,6 +354,20 @@ pub(crate) async fn cancel_prompt(
         return Err(PylonError::Protocol(format!(
             "stale session mapping for source: {source}"
         )));
+    }
+    // #352：把「用户 cancel 已发出」登记为本会话的一等判死输入——prompt 等待
+    // 循环看到即直接进入 cancel-settle 窗口；不再依赖会被 agent 继续产出无限
+    // 续命的闲置判死。置于发送成功 + 复核之后：发送失败的 cancel 不判死。
+    // generation 随置位键化（镜像 turn_in_flight）：旧代际 cancel 不入新代际。
+    // 锁形态：tauri command 错误边界，按 dev-standards #331 例外一 map_err 入域，
+    // 中毒不得静默跳过置位。
+    let mut sessions = runtime.sessions.lock().map_err(|error| {
+        PylonError::Protocol(format!(
+            "cancel_prompt({source}): sessions 锁不可用: {error}"
+        ))
+    })?;
+    if let Some(session) = sessions.get_mut(&source) {
+        session.mark_cancel_requested(generation, std::time::Instant::now());
     }
     Ok(())
 }

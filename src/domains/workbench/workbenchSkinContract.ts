@@ -1,5 +1,5 @@
-import { toCssBackgroundImage } from '../../backgroundImage.ts'
-import { cloneCcLayout } from '../../ccLayoutState.ts'
+import { toCssBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
+import { cloneCcLayout } from '../cc/ccLayoutState.ts'
 import type { CustomPreset } from '../../customPresets.ts'
 import { DEFAULTS } from '../theme/themeDefaults.ts'
 import { GLOBAL_PRESETS } from '../../presets/index.ts'
@@ -17,23 +17,6 @@ export const WORKBENCH_DATA_ATTRIBUTES = [
   'data-ui-scheme',
   'data-msg-style',
   'data-message-layout',
-  'data-footer-layout',
-  'data-cli-overflow-mode',
-] as const
-
-export const WORKBENCH_DOM_CLASSES = [
-  'chat-view',
-  'term',
-  'term-row',
-  'term-user',
-  'term-assistant',
-  'term-reasoning',
-  'term-tool',
-  'term-code-block',
-  'term-spinner',
-  'control-center',
-  'input-bar',
-  'pet-companion',
 ] as const
 
 const WORKBENCH_THEME_KEYS = new Set<ThemeFieldKey>([
@@ -95,12 +78,12 @@ function cloneTheme(theme: ThemeSettings): ThemeSettings {
 }
 
 function resolveDataAttributes(theme: ThemeSettings): WorkbenchThemeFixture['dataAttributes'] {
+  // ★ #266 刀10/刀11：`data-footer-layout` / `data-cli-overflow-mode` 两个属性随
+  //   `footerLayout` / `cliOverflowMode` 字段删除（形态固定，没有可切的分支）。
   return {
     'data-ui-scheme': theme.uiScheme || 'light',
     'data-msg-style': theme.msgStyle || 'terminal',
     'data-message-layout': theme.messageLayout || 'classic',
-    'data-footer-layout': theme.footerLayout || 'free',
-    'data-cli-overflow-mode': theme.cliOverflowMode || 'fixed-scroll',
   }
 }
 
@@ -197,13 +180,13 @@ function createMixedTheme(): ThemeSettings {
 }
 
 function createDirtyTheme(): ThemeSettings {
+  // ★ #266 刀9：原样本里还有 `inputVariant: 'composer'` / `inputMode: 'default'`（用来制造
+  //   "非命令行的脏态"）；两个字段已删除 ⇒ 样本同步去掉，其余逐字段调整项不变。
   return mergeTheme({
     msgStyle: DEFAULTS.msgStyle === 'terminal' ? 'bubble' : 'terminal',
     messageLayout: 'bubble',
     assistantDot: true,
     assistantDotGlyph: '✦',
-    inputVariant: 'composer',
-    inputMode: 'default',
     ccHidden: ['ekg'],
     showPet: false,
   })

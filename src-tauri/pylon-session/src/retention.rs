@@ -29,11 +29,14 @@ pub enum RetentionMode {
 pub const TIME_DAYS_TIERS: [u32; 5] = [7, 30, 90, 180, 365];
 /// 按数量保留的档位（每 Session 消息条数）。
 pub const COUNT_LIMIT_TIERS: [u32; 5] = [100, 500, 1000, 5000, 10000];
-/// 选择按时间保留时的默认档位（天）。
-#[allow(dead_code)] // 默认档位（UI 预设展示）
+/// 选择按时间保留时的默认档位（天）。Rust 单源定义（#331/U3 裁决）：TS 侧
+/// 同名常量由 scripts/generate-retention-policy.mjs 从本文件生成并经
+/// check:retention-policy 门禁校验；Rust 运行时无直接消费者（UI 展示读 TS 侧），
+/// 保留为单源锚点。
+#[allow(dead_code)]
 pub const DEFAULT_TIME_DAYS: u32 = 30;
-/// 选择按数量保留时的默认档位（条）。
-#[allow(dead_code)] // 默认档位（UI 预设展示）
+/// 选择按数量保留时的默认档位（条）。单源定义（同 DEFAULT_TIME_DAYS）。
+#[allow(dead_code)]
 pub const DEFAULT_COUNT_LIMIT: u32 = 1000;
 
 /// 保留策略：`mode` 为唯一入口；`days`/`count` 仅在对应模式下有意义。
@@ -55,8 +58,9 @@ fn default_true() -> bool {
 }
 
 impl RetentionPolicy {
-    /// D-15 默认：永久保存（不执行自动清理）。
-    #[allow(dead_code)] // 默认策略（UI 预设）
+    /// D-15 默认：永久保存（不执行自动清理）。Rust 生产路径无直接调用：
+    /// 仅被下方 `parse` 的回退分支与测试消费（生产写入走 set_policy）。
+    #[allow(dead_code)]
     pub fn default_policy() -> RetentionPolicy {
         RetentionPolicy {
             mode: RetentionMode::Permanent,
@@ -68,7 +72,9 @@ impl RetentionPolicy {
 
     /// 从 JSON 解析策略；任何非法输入（解析失败 / 未知模式 / 对应档位缺失 /
     /// 档位不在契约档位内）一律回退为永久保存（D-15 回退语义）。
-    #[allow(dead_code)] // 策略 JSON 解析（UI 预设导入）
+    /// 仅测试消费：生产解析路径已由 `RetentionService::set_policy` 的
+    /// serde_json::from_str + is_valid 校验取代（CR-001，见 :159-161 注释）。
+    #[allow(dead_code)]
     pub fn parse(json: &str) -> RetentionPolicy {
         let policy: Result<RetentionPolicy, _> = serde_json::from_str(json);
         match policy {
@@ -102,9 +108,6 @@ impl RetentionPolicy {
 
 use std::sync::Arc;
 
-use serde::ser::SerializeMap;
-use serde::Serialize as SerdeSerialize;
-
 use crate::error::SessionError;
 use crate::msg_repo::{MsgRepo, RetentionPolicyRow, RetentionPreview};
 
@@ -134,14 +137,8 @@ impl RetentionError {
     }
 }
 
-impl SerdeSerialize for RetentionError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// 保留策略执行错误 wire `{ code, message }`（#317 批次二：实现单源化到共享宏）。
+crate::impl_wire_code_message_serialize!(RetentionError);
 
 /// 保留策略 service：spawn_blocking 边界 + 命令层 DTO（与 MessageService 同构）。
 pub struct RetentionService {
@@ -356,13 +353,11 @@ mod tests {
     #[test]
     fn time_tiers_match_contract() {
         assert_eq!(TIME_DAYS_TIERS, [7, 30, 90, 180, 365]);
-        assert_eq!(DEFAULT_TIME_DAYS, 30);
     }
 
     #[test]
     fn count_tiers_match_contract() {
         assert_eq!(COUNT_LIMIT_TIERS, [100, 500, 1000, 5000, 10000]);
-        assert_eq!(DEFAULT_COUNT_LIMIT, 1000);
     }
 
     #[test]

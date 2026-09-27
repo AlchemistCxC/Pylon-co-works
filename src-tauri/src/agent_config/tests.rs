@@ -444,6 +444,23 @@ fn runtime_fingerprint_ignores_display_fields_and_tracks_runtime_fields() {
             });
             value
         },
+        // #316：宿主门入指纹——改开关必须触发 PendingRestart/重连。
+        {
+            let mut value = baseline.clone();
+            value.acp = Some(AcpProtocolConfig {
+                host_tools: Some(crate::agent_config::HostToolsMode::Agent),
+                ..Default::default()
+            });
+            value
+        },
+        {
+            let mut value = baseline.clone();
+            value.acp = Some(AcpProtocolConfig {
+                host_terminal: Some(crate::agent_config::HostToolsMode::Unrestricted),
+                ..Default::default()
+            });
+            value
+        },
     ] {
         assert_ne!(expected, changed.runtime_fingerprint());
     }
@@ -490,6 +507,74 @@ fn close_via_rpc_default_true() {
     assert!(!config.close_via_rpc(), "session_close: false 必须跳过 RPC");
     config.session_close = Some(true);
     assert!(config.close_via_rpc(), "session_close: true 必须尝试 RPC");
+}
+
+/// #316：host_tools/host_terminal 的 serde 路径——合法词表、非法值 fail-closed、
+/// 缺省走访问器默认（fs=host / terminal=agent）。
+#[test]
+fn parses_host_tools_gates_and_rejects_unknown_values() {
+    let yaml = "agents:
+  gates:
+    name: A
+    transport: subprocess
+    exe: a
+    acp:
+      host_tools: unrestricted
+      host_terminal: host
+  default-gates:
+    name: B
+    transport: subprocess
+    exe: b
+";
+    let path = std::env::temp_dir().join(format!(
+        "pylon-agents-hosttools-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&path, yaml).expect("write temp agent config");
+    let agents = load_from_path(&path).expect("load runtime agent config");
+    std::fs::remove_file(&path).ok();
+
+    let gates = agents["gates"].protocol();
+    assert_eq!(
+        gates.host_tools_mode(),
+        crate::agent_config::HostToolsMode::Unrestricted
+    );
+    assert_eq!(
+        gates.host_terminal_mode(),
+        crate::agent_config::HostToolsMode::Host
+    );
+
+    // 缺省：双门走访问器默认（fs=host / terminal=agent）。
+    let defaults = agents["default-gates"].protocol();
+    assert_eq!(
+        defaults.host_tools_mode(),
+        crate::agent_config::HostToolsMode::Host
+    );
+    assert_eq!(
+        defaults.host_terminal_mode(),
+        crate::agent_config::HostToolsMode::Agent
+    );
+
+    // 非法值在反序列化层拒绝（带可选值清单）。
+    let bad = "agents:
+  bad:
+    name: C
+    transport: subprocess
+    exe: c
+    acp:
+      host_tools: typo
+";
+    let bad_path = std::env::temp_dir().join(format!(
+        "pylon-agents-hosttools-bad-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&bad_path, bad).expect("write temp agent config");
+    let error = load_from_path(&bad_path).expect_err("非法 host_tools 值必须 fail-closed");
+    std::fs::remove_file(&bad_path).ok();
+    assert!(
+        error.to_string().contains("host_tools"),
+        "报错必须指明字段与可选值：{error}"
+    );
 }
 
 /// G1-01：D2 双格式反序列化——acp 段内 bool|string 五形态 + 顶层 legacy bool
@@ -570,10 +655,15 @@ fn protocol_defaults_match_current_behavior() {
             "_meta": {
                 "peri.tokenStats": true,
                 "peri.skillNames": true,
-                "peri.replay": true
+                "peri.replay": true,
+                // #315：Peri 扩展通知通道（peri/agent_event 等 Category ③/⑤）。
+                "peri.agentEvent": true,
+                "peri.agentEventDone": true,
+                "peri.unstableEvent": true,
+                "peri.prediction": true
             }
         }),
-        "默认 caps = 现值（tokenStats + _meta.peri.*）"
+        "默认 caps = 现值（tokenStats + _meta.peri.*，含 Peri 扩展通知通道）"
     );
     assert_eq!(
         protocol.client_info(),
@@ -911,9 +1001,13 @@ fn load_and_load_gateway_config_share_read_entry() {
     let gateway_text = load_gateway_config();
     match doc {
         Ok(doc) => {
-            // 有来源 → load 解析成功则 gateway 文本即该内容
+            // 不变量是「两域读同一份文本」，不是「agent 非空」——#326 起零 Agent 合法。
+            // 用独立的 serde 结构对账（而非再跑一遍同一管线比长度，那是同义反复）：
+            // 保证完整管线没有丢掉配置里声明的 agent。
             if let Ok(agents) = agents {
-                assert!(!agents.is_empty());
+                let declared: AgentConfigFile =
+                    serde_yml::from_str(&doc.content).expect("同一文本必须可解析");
+                assert_eq!(agents.len(), declared.agents.len());
             }
             assert_eq!(
                 gateway_text.as_ref().map(|text| text.as_str()),
@@ -925,6 +1019,56 @@ fn load_and_load_gateway_config_share_read_entry() {
             assert!(gateway_text.is_err());
         }
     }
+}
+
+#[test]
+fn embedded_source_serves_the_zero_agent_sample() {
+    // #326 回归锁：内嵌兜底必须**接线**到 `agent_config/embedded_agents.yaml`。只断言
+    // 「那个文件是零 Agent」会在 load.rs 被改回仓库根示例时照样绿——本用例从来源解析
+    // 一路走到文本比对面。
+    if !matches!(resolve_config_source().0, ConfigSource::Embedded) {
+        // 开发机可能配了 PYLON_AGENTS_CONFIG 或 exe 旁 agents.yaml（外置来源优先）。
+        // 环境变量是进程级的，改动它有并发风险，故外置来源下跳过；CI 无外置配置时必跑。
+        return;
+    }
+    let doc = read_config_document().expect("内嵌兜底必须可读");
+    assert_eq!(doc.content, include_str!("embedded_agents.yaml"));
+    assert!(
+        doc.base_dir.is_none(),
+        "内嵌来源无 base_dir（不做相对路径绝对化）"
+    );
+    assert!(
+        parse_agents(&doc.content, None)
+            .expect("内嵌兜底必须可解析")
+            .is_empty(),
+        "内嵌兜底不得注册任何 Agent"
+    );
+}
+
+#[test]
+fn parse_accepts_zero_agents_but_requires_the_key() {
+    // #326：显式空映射是合法的「零 Agent」状态（内嵌兜底即零 Agent，首跑干净空态）。
+    let agents = parse("agents: {}\n").expect("零 Agent 必须合法");
+    assert!(agents.is_empty());
+    // 但 `agents` 键本身仍必需：拼错的键名不得被静默当成「零 Agent」。
+    let missing = parse("agentss: {}\n");
+    assert!(missing.is_err(), "缺 agents 键必须报错，而不是降级为空表");
+}
+
+#[test]
+fn embedded_fallback_registers_no_agent_and_keeps_gateway_parsable() {
+    // #326 回归守卫：内嵌兜底是**零 Agent 的注释样例**。裸启动首屏必须是干净空态 +
+    // 引导，不得预置占位 Agent——占位 exe（<PERI_EXE_PATH> 一类）必然启动失败，
+    // 会盖掉引导（issue 原文「两个必然启动失败的 Agent」）。
+    // 仓库根 agents.example.yaml 是开发模板 + 测试夹具，不属于内嵌兜底。
+    let content = include_str!("embedded_agents.yaml");
+    let (agents, gateway) = parse_domains(content, None);
+    let agents = agents.expect("内嵌兜底必须可解析");
+    assert!(agents.is_empty(), "内嵌兜底不得预置任何 Agent");
+    assert!(gateway.is_ok(), "内嵌兜底必须让 gateway 域照常解析");
+    // 也不得用空的 tool_dictionary 覆盖前端内置 fallback（保持「未配置」语义）。
+    let config: AgentConfigFile = serde_yml::from_str(content).expect("解析");
+    assert!(config.tool_dictionary.is_empty());
 }
 
 // ── Phase 3 配置写入纯函数层（§5.5）──

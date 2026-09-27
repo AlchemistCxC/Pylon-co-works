@@ -1,4 +1,4 @@
-import { useWorkspaceStore } from '../workspaceStore.ts'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
 import { openWorkspace } from '../workspace-sheets/workspaceController.ts'
 import { normalizeSettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 

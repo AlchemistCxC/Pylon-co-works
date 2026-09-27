@@ -1,21 +1,21 @@
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
-import { useIdentityStore } from '../identityStore'
-import { useRuntimeStore } from '../runtimeStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
 import { isCustomZonePresetEntry, resolveZonePresetEntryTheme, zonePresetsFor, type ZonePresetEntry } from '../zones/index.ts'
-import { useWorkspaceStore } from '../workspaceStore'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../customPresets'
 import type { PresetApplyResult } from '../domains/theme/presetBundle.ts'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
-import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../runtimeError'
+import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { reloadAgentsTransaction } from '../application/transactions/reloadAgentsTransaction.ts'
@@ -43,17 +43,17 @@ import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
-import { useRightRailStore } from '../rightRailStore.ts'
+import { useRightRailStore } from './right-panel/rightRailStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from './settings/settingsDomains'
 import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import { useSettingsContributionCatalog } from './settings/useSettingsContributionCatalog.ts'
 import SidebarModulesPanel from './settings/SidebarModulesPanel.tsx'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
-const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
 
 // ── helpers ──
 
@@ -220,12 +220,14 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const [reloading, setReloading] = useState(false)
   const [dictFeedback, setDictFeedback] = useState<string | null>(null)
   const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
+  // #326：零 Agent 是合法首跑状态。此前这里回落硬编码 'peri'——会在没有该 Agent 时
+  // 显示一个不存在的名字/ID（与「预置必然失败的占位 Agent」同一类病），改为如实空态。
+  const activeAgentEntry = agents.find(agent => agent.id === activeAgent)
 
   const reportSettingsError = (action: string, error: unknown, agentId?: string) => reportRuntimeError(action, error, agentId, {
     key: `settings:${action}:${agentId ?? 'app'}`,
     scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
     source: 'settings',
-    recovery: { kind: 'open-runtime-log', agentId },
   })
   const resolveSettingsError = (action: string, agentId?: string) => resolveRuntimeErrors({
     key: `settings:${action}:${agentId ?? 'app'}`,
@@ -457,7 +459,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     void settingsContributionCatalog.revision
     return settingsContributionCatalog.searchItems
   }, [quickSearchOpen, rendererRegistrySnapshot.revision, settingsContributionCatalog])
-  const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+  const navigateToField = (item: import('./settings/settingsDomains').SettingsSearchItem) => {
     if (item.contextPanelId) {
       navigate({ domain: 'appearance', section: 'right', pluginPageId: null })
       useRightRailStore.getState().setActivePanel(item.contextPanelId)
@@ -650,13 +652,15 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
                 <span className={`agent-status-indicator is-${currentStatus.status}`} aria-hidden="true" />
                 <div>
                   <span className="agent-settings-kicker">当前 Agent</span>
-                  <strong>{agents.find(agent => agent.id === activeAgent)?.name || activeAgent || 'peri'}</strong>
-                  <span>{activeAgent || 'peri'}</span>
-                  <span className="agent-settings-status-copy">状态：{statusLabel(currentStatus.status)}</span>
+                  <strong>{activeAgentEntry?.name || activeAgent || '尚未配置 Agent'}</strong>
+                  {activeAgent
+                    ? <span>{activeAgent}</span>
+                    : <span>在下方「发现与管理 Agent」新建后即可连接</span>}
+                  <span className="agent-settings-status-copy">状态：{activeAgent ? statusLabel(currentStatus.status) : '未配置'}</span>
                 </div>
               </div>
               <div className="agent-settings-actions">
-                <button type="button" className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
+                <button type="button" className="ps-btn sm primary" disabled={reconnectPending || !activeAgent} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
                 <button type="button" className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
               </div>
               <dl className="agent-settings-facts">

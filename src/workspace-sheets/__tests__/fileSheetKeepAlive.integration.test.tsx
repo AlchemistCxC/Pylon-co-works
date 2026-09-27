@@ -3,7 +3,7 @@ import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import SheetLayout from '../SheetLayout.tsx'
-import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 describe('FileSheet editor keep-alive', () => {

@@ -12,16 +12,16 @@
  * - transport        切换 owner Agent 失败
  * - mismatch         复查时 Session 已变化（删除/owner 变更）
  */
-import { invoke } from '@tauri-apps/api/core'
-import type { Session } from '../../identityStore'
-import { useIdentityStore } from '../../identityStore'
-import { useRuntimeStore } from '../../runtimeStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import type { Session } from '../../domains/identity/identityStore'
+import { useIdentityStore } from '../../domains/identity/identityStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { switchAgentTransaction } from './switchAgentTransaction'
 import type { TransactionResult } from './transactionResult'
 import { resumePersistedSessionTransaction } from './resumePersistedSessionTransaction'
-import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
+import { ARCHIVED_OWNER_CONFLICT_MESSAGE, resolveArchivedSessionOwner } from './archiveOwnerResolver'
 
 /**
  * 标准 owner 切换实现：复用 switchAgentTransaction 完整流程（invoke → reset runtime →
@@ -31,16 +31,15 @@ import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
 export function createStandardSwitchAgent(getAgentName: (agentId: string) => string | undefined): (agentId: string) => Promise<TransactionResult<string>> {
   const operationKey = (agentId: string, action: string) => `agent-switch:${agentId}:${action}`
   return (agentId: string) => switchAgentTransaction(agentId, getAgentName(agentId) ?? agentId, {
-    switchAgent: id => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).switchAgent(id),
+    switchAgent: id => createAgentClient({ invoke: tauriInvokeTransport }).switchAgent(id),
     resetRuntime: () => useRuntimeStore.getState().resetAll(),
     setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
-    fetchAgentStatus: () => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).agentStatus(),
+    fetchAgentStatus: () => createAgentClient({ invoke: tauriInvokeTransport }).agentStatus(),
     applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
     reportError: (action, error) => reportRuntimeError(action, error, agentId, {
       key: operationKey(agentId, action),
       scope: { kind: 'agent', id: agentId },
       source: 'agent.switch',
-      recovery: { kind: 'open-runtime-log', agentId },
     }),
     resolveError: action => resolveRuntimeErrors({
       key: operationKey(agentId, action),
@@ -87,10 +86,10 @@ export async function openOwnedSessionTransaction(
     if (!target) return { ok: false, kind: 'validation', message: '会话不存在' }
     ownerAgentId = target.agentId
   } else {
-    // 存档恢复：预查与实际恢复共用同一 resolver，避免 either-match 与 conflict 语义漂移。
+    // 存档恢复：预查与实际恢复共用同一 resolver；conflict 文案由 ARCHIVED_OWNER_CONFLICT_MESSAGE 单源，杜绝语义漂移。
     const resolution = resolveArchivedSessionOwner(input, deps.getSessions())
     if (resolution.kind === 'conflict') {
-      return { ok: false, kind: 'conflict', message: '存档会话归属冲突：source/periId 指向多个本地会话' }
+      return { ok: false, kind: 'conflict', message: ARCHIVED_OWNER_CONFLICT_MESSAGE }
     }
     ownerAgentId = input.ownerAgentId ?? (resolution.kind === 'resolved' ? resolution.agentId : undefined)
     if (!ownerAgentId) {

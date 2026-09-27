@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Command } from 'cmdk'
-import type { SettingsSearchItem } from '../../settingsDomains.ts'
+import type { SettingsSearchItem } from './settingsDomains.ts'
 
 /**
  * O-3 速搜定位态（设计书 07 §4.3，拍板 D2-A）：

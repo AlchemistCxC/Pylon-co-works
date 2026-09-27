@@ -9,9 +9,11 @@ use std::time::UNIX_EPOCH;
 pub const DEFAULT_PREVIEW_BYTES: usize = 256 * 1024;
 pub const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 1000;
-/// I08-A-FE-02：可编辑保存的文件大小上限——与 DEFAULT_PREVIEW_BYTES 一致：
-/// 能完整预览（未 truncated）的文本文件才可编辑保存；更大的文件保持只读。
-pub const MAX_SAVE_BYTES: usize = DEFAULT_PREVIEW_BYTES;
+/// 0-A4（issue #286 / ADR 无关的量级抬升）：可编辑保存的文件大小上限——与
+/// MAX_PREVIEW_BYTES 对齐：CM6 单内核视口渲染兜住 1MB，「<=1MB 即可写」；>1MB
+/// 仍走截断预览保持只读。前端 FileSheet 读取显式传 maxBytes=MAX_PREVIEW_BYTES，
+/// DEFAULT_PREVIEW_BYTES（256KB）继续作为未指定时的保守默认（右栏预览等）。
+pub const MAX_SAVE_BYTES: usize = MAX_PREVIEW_BYTES;
 
 /// R5b：Display/Error 改 thiserror derive（与手写 impl 文案逐字一致——
 /// 每个变体输出 `code: message`，`Io` 变体**保留原行为**：内部 String 不参与
@@ -69,6 +71,73 @@ pub fn is_safe_relative_path(path: &str) -> bool {
         }
     }
     true
+}
+
+/// 单段路径名（文件/目录名）合法性——供 create/rename 等以「名字」而非「路径」为
+/// 输入的命令使用（0-C1：quick open 索引与文件树写命令的共用谓词）。与
+/// `is_safe_relative_path`（整条相对路径）互补：这里拒绝的是任何平台上都不该
+/// 新建的 segment。读取既有路径仍走 resolve_workspace_path 的 canonical 校验，
+/// 本谓词只把守「新建名字」入口，因此比读取侧更严（冒号无条件拒绝）。
+pub fn is_safe_segment(name: &str) -> bool {
+    // 长度按 UTF-16 单位计（NTFS 上限口径），不按 chars()——星面字符 1 char =
+    // 2 units，chars() 口径会放进超出 FS 上限的名字。
+    if name.is_empty() || name.encode_utf16().count() > 255 {
+        return false;
+    }
+    // Windows 会吞掉尾随空白与尾点；首尾空白在 UI 层也几乎必然是误输入。
+    if name != name.trim() || name.ends_with('.') {
+        return false;
+    }
+    // 控制字符（含 NUL）与 bidi 方向控制符（U+202A–202E、U+2066–2069、LRM/RLM）
+    // 一律拒绝——后者在文件列表 UI 上有伪装欺骗面。
+    if name.chars().any(|c| {
+        (c as u32) < 0x20 || matches!(c as u32, 0x202A..=0x202E | 0x2066..=0x2069 | 0x200E | 0x200F)
+    }) {
+        return false;
+    }
+    // 路径分隔符与 Windows 保留符号。
+    if name
+        .chars()
+        .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
+        return false;
+    }
+    if name == "." || name == ".." {
+        return false;
+    }
+    // Windows 保留设备名（含带扩展名形态：CON.txt、CON .txt 同样保留——stem
+    // 先去尾空白再比对，防 "CON " 借扩展名形态绕过）。
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
 }
 
 fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
@@ -263,6 +332,87 @@ pub fn list_entries(
     Ok(entries)
 }
 
+/// 0-C1：quick open 文件名索引的硬上限（条数）。前端匹配在本地做，索引新鲜度
+/// 靠打开/刷新时重建，因此这里只保证有界返回，不做 watch。
+pub const MAX_FILE_INDEX_ENTRIES: usize = 10_000;
+
+/// 0-C1：quick open 文件名索引页——entries 为 root 相对路径（`/` 分隔），按
+/// 小写不敏感字典序排序；truncated = 枚举在触及上限后仍有余量。
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileIndexPage {
+    pub entries: Vec<String>,
+    pub truncated: bool,
+}
+
+/// 0-C1：全仓文件名枚举（quick open 索引）。只列文件（含 symlink 文件，不落
+/// 内容读取）；目录不进索引。忽略清单与隐藏过滤与 `list_entries` 同源；symlink
+/// 目录一律不下钻（防环、防 root 外逃逸）。单个目录读取失败跳过（锁定的目录
+/// 不应让整个索引失败），仅 root 本身不可解析视为致命。条数触及
+/// `max_entries`（钳制到 MAX_FILE_INDEX_ENTRIES）即停并置 truncated。
+pub fn list_workspace_files(
+    root: &Path,
+    max_entries: Option<usize>,
+) -> Result<WorkspaceFileIndexPage, WorkspaceError> {
+    let canonical_root = root.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            WorkspaceError::NotFound
+        } else {
+            WorkspaceError::Io(e.to_string())
+        }
+    })?;
+    let limit = max_entries
+        .unwrap_or(MAX_FILE_INDEX_ENTRIES)
+        .min(MAX_FILE_INDEX_ENTRIES);
+    let mut entries: Vec<String> = Vec::new();
+    let mut truncated = false;
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(canonical_root.clone());
+    'walk: while let Some(dir) = queue.pop_front() {
+        let read = match fs::read_dir(&dir) {
+            Ok(read) => read,
+            // 不可读目录跳过，不整体失败。
+            Err(_) => continue,
+        };
+        // 前缀每目录算一次（队列不变式：dir 恒为 canonical_root 后代）。
+        let prefix = match dir.strip_prefix(&canonical_root) {
+            Ok(prefix) => prefix.to_path_buf(),
+            Err(e) => return Err(WorkspaceError::Io(e.to_string())),
+        };
+        let prefix_text = prefix.to_string_lossy().replace('\\', "/");
+        for item in read.flatten() {
+            let name = item.file_name().to_string_lossy().into_owned();
+            if is_ignored(&name) || name.starts_with('.') {
+                continue;
+            }
+            // file_type() 不跟随 symlink：symlink 目录不下钻（防环/防逃逸）。
+            let Ok(file_type) = item.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                queue.push_back(item.path());
+                continue;
+            }
+            if entries.len() >= limit {
+                truncated = true;
+                break 'walk;
+            }
+            let relative = if prefix_text.is_empty() {
+                name
+            } else {
+                format!("{prefix_text}/{name}")
+            };
+            entries.push(relative);
+        }
+    }
+    entries.sort_by(|a, b| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    });
+    Ok(WorkspaceFileIndexPage { entries, truncated })
+}
+
 /// R23：统一的 workspace 内文件打开通道——resolve → metadata 校验 → open →
 /// canonicalize 复核（TOCTOU：resolve 与 open 之间路径可能被替换为指向 root 外
 /// 的链接）。返回 (已打开文件, canonical 路径)；root 外一律 OutsideRoot。
@@ -387,36 +537,15 @@ fn decode_text(bytes: &[u8]) -> Result<(String, &'static str), WorkspaceError> {
 // - 编码 round-trip：UTF-8 BOM 保留；GBK 文件按 GBK 重新编码写回（不悄悄转码）。
 // - > MAX_SAVE_BYTES 的文件/内容拒绝（TooLarge）——大文件本轮保持只读。
 
-/// 原子写：同目录临时文件 + rename。Windows rename 不覆盖已存在目标时先移除
-/// 再重命名（小窗口，基线冲突守卫已在前置）；失败清理临时文件。
+/// 原子写（#317 批次二 ③：改调本 crate 正身 [`atomic_write::write_file_atomically`]）。
+/// 此前本处是无 fsync 的弱实现（`.{name}.pylon-save-{pid}` 临时名 + rename 失败时
+/// remove+rename，有丢窗口），正身以 MoveFileExW(WRITE_THROUGH)/fsync 消除之；
+/// 档位取 best_effort_data_file（保留历史「不 fsync」语义，父目录 create_dir_all
+/// 对既有目标为 no-op）。
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), WorkspaceError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| WorkspaceError::Io("无法定位文件目录".into()))?;
-    let file_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = parent.join(format!(".{file_name}.pylon-save-{}", std::process::id()));
-    fs::write(&tmp, bytes).map_err(|e| WorkspaceError::Io(e.to_string()))?;
-    match fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(first)
-            if first.kind() == std::io::ErrorKind::AlreadyExists
-                || first.kind() == std::io::ErrorKind::PermissionDenied =>
-        {
-            fs::remove_file(path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
-            if let Err(e) = fs::rename(&tmp, path) {
-                let _ = fs::remove_file(&tmp);
-                return Err(WorkspaceError::Io(e.to_string()));
-            }
-            Ok(())
-        }
-        Err(first) => {
-            let _ = fs::remove_file(&tmp);
-            Err(WorkspaceError::Io(first.to_string()))
-        }
-    }
+    use crate::atomic_write::{write_file_atomically, AtomicWriteOptions};
+    write_file_atomically(path, bytes, AtomicWriteOptions::best_effort_data_file())
+        .map_err(|e| WorkspaceError::Io(e.to_string()))
 }
 
 pub fn write_text(
@@ -1313,6 +1442,177 @@ mod tests {
         assert_eq!(
             write_text(&root, "big.txt", "y", Some("y"), false),
             Err(WorkspaceError::TooLarge)
+        );
+    }
+
+    // ── 0-C1：is_safe_segment（新建名字谓词）─────────────────────────────────
+
+    #[test]
+    fn safe_segment_accepts_plain_names() {
+        assert!(is_safe_segment("a.txt"));
+        assert!(is_safe_segment("中文.md"));
+        assert!(is_safe_segment("a b.txt"));
+        // 前导点是隐藏文件形态（.gitignore 必须可创建），仅尾点拒绝。
+        assert!(is_safe_segment(".gitignore"));
+        assert!(is_safe_segment("v1.2.3"));
+    }
+
+    #[test]
+    fn safe_segment_rejects_separators_traversal_and_edge_whitespace() {
+        assert!(!is_safe_segment(""));
+        assert!(!is_safe_segment("  "));
+        assert!(!is_safe_segment("a "));
+        assert!(!is_safe_segment(" a"));
+        assert!(!is_safe_segment("a."));
+        assert!(!is_safe_segment("."));
+        assert!(!is_safe_segment(".."));
+        assert!(!is_safe_segment("a/b"));
+        assert!(!is_safe_segment("a\\b"));
+        assert!(!is_safe_segment("a:b"));
+        assert!(!is_safe_segment("a*b"));
+        assert!(!is_safe_segment("a?b"));
+        assert!(!is_safe_segment("a\"b"));
+        assert!(!is_safe_segment("a<b"));
+        assert!(!is_safe_segment("a>b"));
+        assert!(!is_safe_segment("a|b"));
+        assert!(!is_safe_segment("a\nb"));
+        assert!(!is_safe_segment("a\0b"));
+    }
+
+    #[test]
+    fn safe_segment_rejects_windows_reserved_device_names() {
+        for name in [
+            "CON", "con", "Con.txt", "PRN", "AUX", "NUL", "com1", "LPT9", "lpt4.bak",
+        ] {
+            assert!(!is_safe_segment(name), "{name} 应被拒绝");
+        }
+        // 保留名仅在 stem 命中时拒绝；".con" 的 stem 为空，是合法隐藏名。
+        assert!(is_safe_segment(".con"));
+    }
+
+    #[test]
+    fn safe_segment_rejects_overlong_names() {
+        assert!(is_safe_segment(&"a".repeat(255)));
+        assert!(!is_safe_segment(&"a".repeat(256)));
+        // UTF-16 口径：127 个星面字符 = 254 units 放行，128 个 = 256 units 拒绝。
+        assert!(is_safe_segment(&"\u{1F600}".repeat(127)));
+        assert!(!is_safe_segment(&"\u{1F600}".repeat(128)));
+    }
+
+    #[test]
+    fn safe_segment_rejects_bidi_direction_controls() {
+        assert!(!is_safe_segment("a\u{202E}b")); // RLO
+        assert!(!is_safe_segment("\u{200F}a")); // RLM
+        assert!(!is_safe_segment("a\u{2066}b")); // LRI
+    }
+
+    #[test]
+    fn safe_segment_rejects_reserved_stem_with_trailing_space_before_extension() {
+        assert!(!is_safe_segment("CON .txt"));
+        assert!(!is_safe_segment("nul  .md"));
+    }
+
+    // ── 0-C1：list_workspace_files（quick open 索引）────────────────────────
+
+    fn index_fixture() -> (TempDir, PathBuf) {
+        let dir = unique_workspace_temp("index");
+        let root = dir.join("root");
+        fs::create_dir_all(root.join("src/deep")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::write(root.join("src/main.ts"), "x").unwrap();
+        fs::write(root.join("src/deep/util.ts"), "x").unwrap();
+        fs::write(root.join("README.md"), "x").unwrap();
+        fs::write(root.join("node_modules/pkg/index.js"), "x").unwrap();
+        fs::write(root.join(".hidden/secret.txt"), "x").unwrap();
+        (TempDir(dir), root)
+    }
+
+    #[test]
+    fn list_files_enumerates_files_skipping_ignored_and_hidden_dirs() {
+        let (_dir, root) = index_fixture();
+        let page = list_workspace_files(&root, None).unwrap();
+        assert_eq!(
+            page.entries,
+            vec!["README.md", "src/deep/util.ts", "src/main.ts"]
+        );
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn list_files_does_not_follow_symlink_directories() {
+        let (_dir, root) = index_fixture();
+        // Windows 无开发者模式/特权时 symlink 创建失败——该环境直接跳过（断言
+        // 在有特权环境与 CI 上生效）。
+        #[cfg(unix)]
+        {
+            if std::os::unix::fs::symlink(root.join("node_modules"), root.join("link")).is_err() {
+                return;
+            }
+        }
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(root.join("node_modules"), root.join("link"))
+                .is_err()
+            {
+                return;
+            }
+        }
+        let page = list_workspace_files(&root, None).unwrap();
+        // symlink 目录本身不进索引（只列文件），也不下钻出 node_modules 内容。
+        assert_eq!(
+            page.entries,
+            vec!["README.md", "src/deep/util.ts", "src/main.ts"]
+        );
+    }
+
+    #[test]
+    fn list_files_caps_at_limit_and_reports_truncated() {
+        let (_dir, root) = index_fixture();
+        let page = list_workspace_files(&root, Some(2)).unwrap();
+        assert_eq!(page.entries.len(), 2);
+        assert!(page.truncated);
+        // 上限钳制：超过 MAX_FILE_INDEX_ENTRIES 的请求也被压回硬上限。
+        let clamped = list_workspace_files(&root, Some(MAX_FILE_INDEX_ENTRIES + 500)).unwrap();
+        assert!(!clamped.truncated);
+        assert_eq!(clamped.entries.len(), 3);
+    }
+
+    #[test]
+    fn list_files_exact_limit_is_not_truncated() {
+        let (_dir, root) = index_fixture();
+        // 恰好等于 limit（fixture 恒 3 个文件）：truncated 必须为 false。
+        let page = list_workspace_files(&root, Some(3)).unwrap();
+        assert_eq!(page.entries.len(), 3);
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn list_files_zero_limit_yields_empty_truncated_page() {
+        let (_dir, root) = index_fixture();
+        let page = list_workspace_files(&root, Some(0)).unwrap();
+        assert!(page.entries.is_empty());
+        assert!(page.truncated);
+    }
+
+    #[test]
+    fn list_files_filters_hidden_files_in_root() {
+        let (_dir, root) = index_fixture();
+        fs::write(root.join(".env"), "x").unwrap();
+        let page = list_workspace_files(&root, None).unwrap();
+        assert_eq!(
+            page.entries,
+            vec!["README.md", "src/deep/util.ts", "src/main.ts"]
+        );
+    }
+
+    #[test]
+    fn list_files_missing_root_is_not_found() {
+        let (dir, _root) = index_fixture();
+        let missing = dir.0.join("root").join("nope");
+        assert_eq!(
+            list_workspace_files(&missing, None),
+            Err(WorkspaceError::NotFound)
         );
     }
 }

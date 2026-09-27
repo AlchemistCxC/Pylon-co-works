@@ -1,4 +1,4 @@
-import { reportRuntimeDiagnostic } from '../../runtimeError.ts'
+import { reportRuntimeDiagnostic } from '../../app/runtimeError.ts'
 import type { PylonPluginCapability } from '../packageManifest.ts'
 
 /**

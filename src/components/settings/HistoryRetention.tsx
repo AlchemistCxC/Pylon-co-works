@@ -22,8 +22,8 @@ import {
   saveRetentionPolicy,
   type RetentionPolicySnapshot,
   type RetentionPreview,
-} from '../../retentionPolicyRepository'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
+} from '../../infrastructure/persistence/retentionPolicyRepository'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 
 /**
  * HistoryRetention — 消息历史保留策略设置（I13-A-FE-02，D-03/D-15）。
@@ -78,7 +78,6 @@ export default function HistoryRetention() {
         setLoadError(retentionErrorMessage(error))
         reportRuntimeError('读取历史保留策略', error, undefined, {
           key: 'settings:history-retention:load', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
-          recovery: { kind: 'open-runtime-log' },
         })
       })
       .finally(() => { if (mountedRef.current) setLoading(false) })
@@ -110,7 +109,6 @@ export default function HistoryRetention() {
         setSaveError('保存失败，详情见右下角错误中心')
         reportRuntimeError('保存历史保留策略', error, undefined, {
           key: 'settings:history-retention:save', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
-          recovery: { kind: 'open-runtime-log' },
         })
       }
       return
@@ -132,7 +130,6 @@ export default function HistoryRetention() {
         }
         reportRuntimeError('保存历史保留策略', error, undefined, {
           key: 'settings:history-retention:save', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
-          recovery: { kind: 'open-runtime-log' },
         })
       })
       .finally(() => setSaving(false))
@@ -168,7 +165,6 @@ export default function HistoryRetention() {
       setCleanError(`预览失败：${retentionErrorMessage(error)}`)
       reportRuntimeError('预览历史清理', error, undefined, {
         key: 'settings:history-retention:preview', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
-        recovery: { kind: 'open-runtime-log' },
       })
     } finally {
       setPreviewing(false)
@@ -198,7 +194,6 @@ export default function HistoryRetention() {
       }
       reportRuntimeError('清理历史记录', error, undefined, {
         key: 'settings:history-retention:prune', scope: { kind: 'app', id: 'settings-history-retention' }, source: 'settings.history-retention',
-        recovery: { kind: 'open-runtime-log' },
       })
     } finally {
       setPruning(false)

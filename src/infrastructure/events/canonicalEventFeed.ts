@@ -17,7 +17,8 @@
  */
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../tauri/env.ts'
-import { reportRuntimeError } from '../../runtimeError.ts'
+import { reportRuntimeError } from '../../app/runtimeError.ts'
+import { PYLON_STREAM_WIRE_EVENTS } from './pylonStreamWireEvents.ts'
 import { CanonicalEventCursor } from './canonicalEventCursor.ts'
 import {
   createCanonicalEventSink,
@@ -26,6 +27,7 @@ import {
 } from './canonicalEventSink.ts'
 import { tauriCanonicalEventRepository, type CanonicalEventRow } from './canonicalEventRepository.ts'
 import { publishPluginEvent } from './pluginEventBus.ts'
+import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 
 export type CanonicalTerminalKind = 'done' | 'error'
 
@@ -50,6 +52,16 @@ export interface CanonicalFeedForward {
 export type CanonicalFeedRowListener = (event: CanonicalEventRow) => void
 export type CanonicalFeedForwardListener = (forward: CanonicalFeedForward) => void | Promise<void>
 export type CanonicalFeedTerminalListener = (signal: CanonicalTerminalSignal) => void
+export interface CanonicalDraftChunkNotification {
+  ownerKey: string
+  draftId: string
+  chunkIndex: number
+  clientGeneration: number
+  source: string
+  raw: unknown
+}
+export type CanonicalFeedDraftListener = (chunk: CanonicalDraftChunkNotification) => void
+export type CanonicalFeedDraftCommitListener = (ownerKey: string, draftId: string) => void
 /** 帧归属源门（迁移前 controller 的 isActiveSource 前置过滤）：false = 整帧丢弃（含 cursor/publish）。 */
 export type CanonicalFeedSourceGate = (source: string | undefined) => boolean
 
@@ -69,6 +81,8 @@ export interface CanonicalEventFeed {
   onRecoveredRow(listener: CanonicalFeedRowListener): () => void
   onForward(listener: CanonicalFeedForwardListener): () => void
   onTerminal(listener: CanonicalFeedTerminalListener): () => void
+  onDraftChunk(listener: CanonicalFeedDraftListener): () => void
+  onDraftCommit(listener: CanonicalFeedDraftCommitListener): () => void
 }
 
 export interface CanonicalEventFeedDeps {
@@ -95,9 +109,27 @@ function extractSource(payload: unknown): string | undefined {
   return typeof source === 'string' ? source : undefined
 }
 
+function extractDraftChunk(payload: unknown): CanonicalDraftChunkNotification | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
+  const record = payload as Record<string, unknown>
+  const draft = record.draftChunk
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return undefined
+  const value = draft as Record<string, unknown>
+  if (typeof value.ownerKey !== 'string' || typeof value.draftId !== 'string'
+    || !Number.isSafeInteger(value.chunkIndex) || !Number.isSafeInteger(value.clientGeneration)
+    || typeof record.source !== 'string') return undefined
+  const { draftChunk: _marker, ...raw } = record
+  return {
+    ownerKey: value.ownerKey, draftId: value.draftId,
+    chunkIndex: value.chunkIndex as number,
+    clientGeneration: value.clientGeneration as number,
+    source: record.source, raw,
+  }
+}
+
 /** 帧事件名 → 终帧类目（非终帧返回 undefined）。 */
 export function canonicalTerminalKindFromEvent(event: string): CanonicalTerminalKind | undefined {
-  return event === 'pylon:done' ? 'done' : event === 'pylon:error' ? 'error' : undefined
+  return event === PYLON_STREAM_WIRE_EVENTS.done ? 'done' : event === PYLON_STREAM_WIRE_EVENTS.error ? 'error' : undefined
 }
 
 /** 终帧载荷 → 归属源（非字符串或缺省一律 undefined，调用方据此丢弃）。 */
@@ -131,7 +163,7 @@ export function subscribeWindowTerminalFrames(listener: CanonicalFeedTerminalLis
   if (!IS_TAURI) return () => {}
   const stops: Array<() => void> = []
   let disposed = false
-  for (const event of ['pylon:done', 'pylon:error'] as const) {
+  for (const event of [PYLON_STREAM_WIRE_EVENTS.done, PYLON_STREAM_WIRE_EVENTS.error] as const) {
     void listen(event, payload => {
       const signal = canonicalTerminalSignalFromFrame({ event, payload: payload.payload })
       if (signal) listener(signal)
@@ -156,6 +188,8 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
   const recoveredRowListeners = new Set<CanonicalFeedRowListener>()
   const forwardListeners = new Set<CanonicalFeedForwardListener>()
   const terminalListeners = new Set<CanonicalFeedTerminalListener>()
+  const draftListeners = new Set<CanonicalFeedDraftListener>()
+  const draftCommitListeners = new Set<CanonicalFeedDraftCommitListener>()
   let sourceGate: CanonicalFeedSourceGate | null = null
 
   const forward = async (frame: CanonicalFeedFrame, kernelCommitted: boolean): Promise<void> => {
@@ -177,6 +211,12 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
         // cursor/publish），与迁移前 handler 入口语义一致。
         const source = extractSource(frame.payload)
         if (sourceGate && !sourceGate(source)) return
+        const draftChunk = extractDraftChunk(frame.payload)
+        if (draftChunk) {
+          for (const listener of draftListeners) listener(draftChunk)
+          await forward(frame, true)
+          return
+        }
         const value = extractCanonicalNotification(frame.payload)
         if (value === undefined) {
           await forward(frame, false)
@@ -186,6 +226,13 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
         // 与迁移前 processCommittedOrLegacy 同构：投影在 cursor consume 回调内
         // await，保持 per-owner tail 串行（cursor → publish → 投影 → 推进）。
         await cursor.accept(value, async (event, isCurrentNotification) => {
+          const committedDraftId = frame.payload && typeof frame.payload === 'object'
+            ? (frame.payload as { committedDraftId?: unknown }).committedDraftId
+            : undefined
+          if (isCurrentNotification && typeof committedDraftId === 'string') {
+            for (const listener of draftCommitListeners) listener(toCanonicalOwnerKey(event.owner), committedDraftId)
+            sink.flushAll()
+          }
           publishPluginEvent(event)
           for (const listener of rowListeners) listener(event)
           if (isCurrentNotification) {
@@ -230,15 +277,37 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
       terminalListeners.add(listener)
       return () => terminalListeners.delete(listener)
     },
+    onDraftChunk(listener) {
+      draftListeners.add(listener)
+      return () => draftListeners.delete(listener)
+    },
+    onDraftCommit(listener) {
+      draftCommitListeners.add(listener)
+      return () => draftCommitListeners.delete(listener)
+    },
   }
 
   // B1：user echo 后端已 Channel 优先（send_update_frame 单轨）；本广播兜底
   // 服务未注册 Channel 的来源（平台 ingest / 非 Tauri 环境）。feed 为应用级
   // 单例，监听随 feed 生命周期注册一次；失败仅上报（Channel 主轨不受影响）。
-  void listen('pylon:user', event => {
-    void feed.acceptFrame({ event: 'pylon:user', payload: event.payload })
+  void listen(PYLON_STREAM_WIRE_EVENTS.user, event => {
+    void feed.acceptFrame({ event: PYLON_STREAM_WIRE_EVENTS.user, payload: event.payload })
   }).catch(error => {
     reportRuntimeError('注册 canonical feed user 兜底监听', error)
+  })
+
+  // #310：`pylon:update` 同样需要广播兜底。后端对**未注册 per-source Channel** 的来源
+  // 整回合改走 `emit_event_all` 广播（与 Channel 互斥，见 dispatcher 的
+  // `send_update_frame`/`emit_event_all` 分叉）——FileSheet 发令（`send_message`）、
+  // 平台 ingest、`pylon_cli session send` 都属这一类，且它们从不注册 Channel。
+  // 缺这条兜底时，整回合的助手正文/思考帧进不了 feed（不 publish、不投影），只有
+  // `pylon:done` 的兜底轨到得了 → 界面只剩「处理耗时」页脚，正文要等重启冷装载
+  // 读 journal 才出现（issue #310 实机复现：回合内 DOM 4 行／重载后 6 行）。
+  // 与 `pylon:user` 兜底同形：重复投递由 cursor 的 sequence 去重与投影器幂等吸收。
+  void listen(PYLON_STREAM_WIRE_EVENTS.update, event => {
+    void feed.acceptFrame({ event: PYLON_STREAM_WIRE_EVENTS.update, payload: event.payload })
+  }).catch(error => {
+    reportRuntimeError('注册 canonical feed update 兜底监听', error)
   })
 
   return feed

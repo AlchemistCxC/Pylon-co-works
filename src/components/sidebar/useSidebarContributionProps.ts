@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { save } from '@tauri-apps/plugin-dialog'
-import { refreshSessionsBackend, useIdentityStore } from '../../identityStore'
-import { useRuntimeStore } from '../../runtimeStore'
-import { useWorkspaceEntityStore } from '../../workspaceEntityStore'
-import { reportRuntimeError } from '../../runtimeError'
+import { refreshSessionsBackend, useIdentityStore } from '../../domains/identity/identityStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
+import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
+import { reportRuntimeError } from '../../app/runtimeError'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../../application/transactions/removeSessionTransaction'
 import { runSessionNotificationHook } from '../../application/transactions/sessionHookTransactions'
@@ -54,7 +55,7 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('删除会话？')) return
-    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
     const result = await removeSessionTransaction(id, {
       findSession: sessionId => sessions.find(s => s.id === sessionId),
       deleteSessionLocal: s => invoke('user_session_delete', {
@@ -111,7 +112,7 @@ export function useSidebarContributionProps(ctx: SheetContext): AgentSidebarShar
       if (!outputPath) return
       const validation = validateExportPath(outputPath)
       if (validation) { reportRuntimeError('导出会话', validation); return }
-      await createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).exportSession({ agentId: target.agentId, periId: target.periId, format: 'markdown', outputPath })
+      await createSessionClient({ invoke: tauriInvokeTransport }).exportSession({ agentId: target.agentId, periId: target.periId, format: 'markdown', outputPath })
     } catch (error) { reportRuntimeError('导出会话', error) }
   }
 

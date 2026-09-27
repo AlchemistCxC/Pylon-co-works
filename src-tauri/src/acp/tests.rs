@@ -167,7 +167,63 @@ fn session_update_variant_wire_strings_are_stable() {
         SessionUpdateVariant::from_str("current_mode_update"),
         Some(SessionUpdateVariant::CurrentModeUpdate)
     );
+    // #316：官方 agent_thought_chunk + Peri 私有别名 + plan 入契约表。
+    assert_eq!(
+        SessionUpdateVariant::from_str("agent_thought_chunk"),
+        Some(SessionUpdateVariant::AgentThoughtChunk)
+    );
+    assert_eq!(
+        SessionUpdateVariant::from_str("agent_reasoning_chunk"),
+        Some(SessionUpdateVariant::AgentThoughtChunk)
+    );
+    assert_eq!(
+        SessionUpdateVariant::from_str("plan"),
+        Some(SessionUpdateVariant::Plan)
+    );
     assert_eq!(SessionUpdateVariant::from_str("unknown_variant"), None);
+}
+
+#[test]
+fn prompt_stop_outcome_rejects_malformed_stop_reasons() {
+    // #316 审查边界：空白 stopReason 归畸形（不享宽松降级）；非字符串归畸形。
+    let error = prompt_stop_outcome(&serde_json::json!({"stopReason": "   "}))
+        .expect_err("blank stop reason must be rejected");
+    assert!(error
+        .to_string()
+        .contains("invalid session/prompt response"));
+    let error = prompt_stop_outcome(&serde_json::json!({"stopReason": 42}))
+        .expect_err("non-string stop reason must be rejected");
+    assert!(error
+        .to_string()
+        .contains("invalid session/prompt response"));
+}
+
+#[test]
+fn validate_protocol_version_accepts_numeric_string_and_rejects_mismatch() {
+    // 数字字符串 = 同一信息的非合规格式：比对不放过（可过则过，不合即 fail）。
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": "1"}), 1),
+        Ok(())
+    );
+    assert!(validate_protocol_version(&serde_json::json!({"protocolVersion": "2"}), 1).is_err());
+    assert!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": "abc"}), 1).is_err(),
+        "不可解析的 protocolVersion 必须 fail-closed"
+    );
+}
+
+#[test]
+fn classify_session_update_tolerates_peri_lenient_usage_shape() {
+    // Peri 残缺 usage：typed（used 必填 size 缺失）失败 → fallback 仍归
+    // UsageUpdate——fallback 设计的存在理由（#316 审查点名用例）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "usage_update",
+            "used": 123,
+            "value": 456
+        })),
+        Some(SessionUpdateVariant::UsageUpdate)
+    );
 }
 
 #[test]
@@ -270,38 +326,90 @@ fn accepts_valid_session_id_after_trimming_whitespace() {
 
 #[test]
 fn validates_prompt_stop_reasons() {
+    // #316：typed 判定表——max_tokens 转正为合法终态，未知值 warn 降级 end_turn。
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "end_turn"})),
-        Ok("end_turn")
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "end_turn"})),
+        Ok(PromptStopOutcome::EndTurn)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "max_turn_requests"})),
-        Ok("max_turn_requests")
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "max_turn_requests"})),
+        Ok(PromptStopOutcome::MaxTurnRequests)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "cancelled"}))
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "max_tokens"})),
+        Ok(PromptStopOutcome::MaxTokens)
+    );
+    assert_eq!(
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "cancelled"}))
             .expect_err("cancelled must not complete normally")
             .to_string(),
         "prompt cancelled"
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "refusal"}))
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "refusal"}))
             .expect_err("refusal must not complete normally")
             .to_string(),
         "prompt refused by agent"
     );
+    // 行为变化（#316 已批准）：未知 stopReason 不再硬错——宽松降级 end_turn。
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({"stopReason": "paused"}))
-            .expect_err("unknown stop reason must be rejected")
-            .to_string(),
-        "unsupported prompt stopReason: paused"
+        prompt_stop_outcome(&serde_json::json!({"stopReason": "paused"})),
+        Ok(PromptStopOutcome::EndTurn)
     );
     assert_eq!(
-        prompt_stop_reason(&serde_json::json!({}))
+        prompt_stop_outcome(&serde_json::json!({}))
             .expect_err("missing stop reason must be rejected")
             .to_string(),
         "invalid session/prompt response: {}"
     );
+}
+
+#[test]
+fn validates_initialize_protocol_version_echo() {
+    // 一致 → 放行；缺字段 → lenient 放行（存量 agent 兼容）；不一致 → fail-closed。
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"protocolVersion": 1}), 1),
+        Ok(())
+    );
+    assert_eq!(
+        validate_protocol_version(&serde_json::json!({"agentCapabilities": {}}), 1),
+        Ok(())
+    );
+    let mismatch = validate_protocol_version(&serde_json::json!({"protocolVersion": 2}), 1)
+        .expect_err("version mismatch must fail");
+    assert!(mismatch.contains("requested 1"), "{mismatch}");
+    assert!(mismatch.contains("answered 2"), "{mismatch}");
+}
+
+#[test]
+fn classify_session_update_prefers_typed_and_falls_back_to_aliases() {
+    use crate::acp::SessionUpdateVariant as V;
+    // typed-first：官方形状（含未消费字段）直接命中。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "thinking"}
+        })),
+        Some(V::AgentThoughtChunk)
+    );
+    assert_eq!(
+        classify_session_update(&serde_json::json!({
+            "sessionUpdate": "plan",
+            "entries": [{"content": "step", "priority": "high", "status": "pending"}]
+        })),
+        Some(V::Plan)
+    );
+    // raw-fallback：Peri 私有别名（typed 解析不认识 agent_reasoning_chunk）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({"sessionUpdate": "agent_reasoning_chunk"})),
+        Some(V::AgentThoughtChunk)
+    );
+    // 未知变体 → None（raw 照常 publish，与旧 `_ => {}` 一致）。
+    assert_eq!(
+        classify_session_update(&serde_json::json!({"sessionUpdate": "banana"})),
+        None
+    );
+    assert_eq!(classify_session_update(&serde_json::json!({})), None);
 }
 
 #[test]
@@ -453,6 +561,7 @@ async fn timeout_sends_cancel_and_waits_for_final_response() {
         std::time::Duration::from_millis(10),
         std::time::Duration::from_millis(10),
         || None,
+        || false,
         move || async move {
             cancel_called_for_task.store(true, Ordering::SeqCst);
             tx.send(response())
@@ -501,6 +610,7 @@ async fn recovery_callback_runs_only_when_cancel_does_not_settle() {
         std::time::Duration::from_millis(5),
         std::time::Duration::from_millis(5),
         || None,
+        || false,
         || async { Ok(()) },
         move || async move {
             force_called_for_task.store(true, Ordering::SeqCst);
@@ -528,6 +638,7 @@ async fn response_before_timeout_does_not_send_cancel() {
         std::time::Duration::from_secs(1),
         std::time::Duration::from_secs(1),
         || None,
+        || false,
         move || async move {
             cancel_called_for_task.store(true, Ordering::SeqCst);
             Ok(())
@@ -551,6 +662,7 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         // A real dispatcher updates this value for every thinking/tool/output step.
         // Returning now on every poll models an indefinitely active turn.
         || Some(std::time::Instant::now()),
+        || false,
         || async { Ok(()) },
         || async {},
     );
@@ -563,6 +675,114 @@ async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
         "持续活动不得受 prompt total timeout 截断，实际结果: {result:?}"
     );
 }
+
+// #352：用户 cancel 是一等判死输入——即使 agent 在 cancel 后持续产出（liveness
+// 不断刷新、闲置判死被无限续命），flag 命中后也必须在一个轮询周期内判死并进入
+// settle 窗口。以下三例分别钉：flag 初始置位直接判死、窗口内终态胜出、flag 迟到
+// 置位仍能收敛（对修复前「永不收敛」的回归）。
+#[tokio::test]
+async fn user_cancel_flag_fires_immediately_despite_sustained_activity() {
+    let (_tx, mut rx) = tokio::sync::oneshot::channel();
+    let outcome = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(40),
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(30),
+        || Some(std::time::Instant::now()),
+        || true,
+        || async { Ok(()) },
+        || async {},
+    )
+    .await;
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            timeout_kind,
+            timeout_bound,
+            settle,
+            elapsed,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            // 判死边界 = settle 窗口配置（flag 路径没有墙钟边界）。
+            assert_eq!(timeout_bound, std::time::Duration::from_millis(40));
+            assert_eq!(settle, crate::acp::CancelSettleResolution::SettleTimeout);
+            assert!(
+                elapsed < std::time::Duration::from_secs(5),
+                "flag 初始置位必须立即判死，实际 elapsed = {elapsed:?}"
+            );
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn user_cancel_settle_window_terminal_wins() {
+    let (tx, mut rx) = oneshot::channel();
+    let outcome = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(500),
+        std::time::Duration::from_millis(50),
+        std::time::Duration::from_millis(50),
+        || Some(std::time::Instant::now()),
+        || true,
+        move || async move {
+            tx.send(response())
+                .map_err(|_| "receiver closed".to_string())
+        },
+        || async {},
+    )
+    .await;
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            response,
+            timeout_kind,
+            settle,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            assert_eq!(settle, crate::acp::CancelSettleResolution::Responded);
+            assert!(response.and_then(|raw| raw.result).is_some());
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn user_cancel_flag_converges_sustained_turn_after_late_set() {
+    let (_tx, mut rx) = tokio::sync::oneshot::channel();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_flag_for_task = cancel_flag.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancel_flag_for_task.store(true, Ordering::SeqCst);
+    });
+    let wait = wait_prompt_with_recovery(
+        &mut rx,
+        std::time::Duration::from_millis(60),
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_millis(20),
+        // 持续活动：没有 cancel 输入时该回合不会被闲置/首 token 判死。
+        || Some(std::time::Instant::now()),
+        || cancel_flag.load(Ordering::SeqCst),
+        || async { Ok(()) },
+        || async {},
+    );
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), wait)
+        .await
+        .expect("用户 cancel 后回合必须收敛（不被持续活动续命拖住）");
+    match outcome {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            timeout_kind,
+            settle,
+            ..
+        } => {
+            assert_eq!(timeout_kind, PromptTimeoutKind::UserCancel);
+            assert_eq!(settle, crate::acp::CancelSettleResolution::SettleTimeout);
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
     let agent = crate::test_utils::fake_acp_agent("fake-acp", &["--scenario", "alive"]);
@@ -603,8 +823,8 @@ async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
         "prompt response must carry a wire id"
     );
     assert_eq!(
-        prompt_stop_reason(&response.result.unwrap()).unwrap(),
-        "end_turn"
+        prompt_stop_outcome(&response.result.unwrap()).unwrap(),
+        crate::acp::PromptStopOutcome::EndTurn
     );
 
     client.kill().expect("explicit child cleanup must succeed");
@@ -653,8 +873,8 @@ async fn wire_trace_preserves_id_kinds_and_full_sequence() {
         .expect("fake ACP prompt response must arrive")
         .expect("fake ACP prompt pending must settle");
     assert_eq!(
-        prompt_stop_reason(&response.result.unwrap()).unwrap(),
-        "end_turn"
+        prompt_stop_outcome(&response.result.unwrap()).unwrap(),
+        crate::acp::PromptStopOutcome::EndTurn
     );
 
     // 轮询等待 writer/reader 线程把全部 wire 记录落进 ring buffer。
@@ -844,14 +1064,28 @@ async fn malformed_capabilities_have_capability_stage() {
 
 #[test]
 fn rpc_failure_kind_distinguishes_missing_session_from_method_and_transient_errors() {
+    // #354 契约修正：文本/data 启发式的载体改用非保留码——-32000 已是协议级
+    // authRequired（按结构化 code 一票判定，见下方 AuthRequired 断言）。
     for raw in [
         r#"{"code":-32602,"message":"session not found: s-1"}"#,
-        r#"{"code":-32000,"message":"invalid session: s-1"}"#,
-        r#"{"code":-32000,"message":"request rejected","data":{"kind":"session_missing"}}"#,
+        r#"{"code":-32602,"message":"invalid session: s-1"}"#,
+        r#"{"code":-32602,"message":"request rejected","data":{"kind":"session_missing"}}"#,
     ] {
         assert_eq!(
             AcpError::Rpc(raw.into()).rpc_failure_kind(),
             Some(RpcFailureKind::SessionMissing),
+            "{raw}"
+        );
+    }
+    // #354：协议级 authRequired 先于文本启发式——即使 message 像 session 缺失，
+    // -32000 的协议语义（需要登录）优先。
+    for raw in [
+        r#"{"code":-32000,"message":"authentication required"}"#,
+        r#"{"code":-32000,"message":"invalid session: s-1"}"#,
+    ] {
+        assert_eq!(
+            AcpError::Rpc(raw.into()).rpc_failure_kind(),
+            Some(RpcFailureKind::AuthRequired),
             "{raw}"
         );
     }
@@ -1231,6 +1465,7 @@ async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response()
         std::time::Duration::from_millis(20),
         std::time::Duration::from_millis(20),
         || None,
+        || false,
         || async {
             client
                 .cancel_session("fake-session-timeout")
@@ -1379,6 +1614,7 @@ async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
         std::time::Duration::from_millis(20),
         std::time::Duration::from_millis(20),
         || None,
+        || false,
         || async {
             client
                 .cancel_session("fake-session-cancel-response")
@@ -1591,6 +1827,9 @@ async fn fake_acp_initialize_defaults_to_unified_capabilities() {
 }
 
 /// G1-03：声明 protocol_version/client_info 后按声明进 wire（覆盖路径）。
+/// #348 A6 白名单（`SUPPORTED_PROTOCOL_VERSIONS = &[1]`）落地后，版本这一半
+/// 的声明值只能取 1——与缺省同值，**不再具备区分度**；本用例真正区分缺省的
+/// 是 client_info（9.9.9）。集合外值（如 2）的拒绝见下一条 connect 级用例。
 #[tokio::test]
 async fn custom_protocol_version_and_client_info_reach_wire() {
     let trace_path =
@@ -1618,7 +1857,7 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
         hermes_profile: None,
         acp_args: Vec::new(),
         acp: Some(crate::agent_config::AcpProtocolConfig {
-            protocol_version: Some(2),
+            protocol_version: Some(1),
             client_info: Some(serde_json::json!({"name": "Pylon", "version": "9.9.9"})),
             ..Default::default()
         }),
@@ -1637,9 +1876,10 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
             value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
         })
         .expect("initialize must be traced");
+    // 与缺省同值（白名单内仅 1），此断言只守「声明值原样进 wire」的通路。
     assert_eq!(
         request["params"]["protocolVersion"],
-        serde_json::json!(2),
+        serde_json::json!(1),
         "声明的 protocol_version 必须进 wire"
     );
     assert_eq!(
@@ -1652,6 +1892,76 @@ async fn custom_protocol_version_and_client_info_reach_wire() {
         request["params"]["clientCapabilities"]["tokenStats"],
         serde_json::json!(true)
     );
+}
+
+/// #348 A6：集合外 protocol_version（2）在真实 connect 级 fail-closed——
+/// `build_initialize_plan` 在发送 initialize **之前**拒绝，错误码为
+/// `agent_client_capabilities_invalid`，且该次运行的 trace 里不出现
+/// `initialize` 行（声明值未落 wire）。
+#[tokio::test]
+async fn unsupported_protocol_version_fails_connect_before_wire() {
+    let trace_path =
+        std::env::temp_dir().join(format!("pylon-acp-pv2-reject-{}.jsonl", std::process::id()));
+    let agent = crate::agent_config::AgentDef {
+        name: "fake-acp-pv2-reject".to_string(),
+        provider: None,
+        transport: "subprocess".to_string(),
+        exe: crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned(),
+        args: vec![
+            "--scenario".to_string(),
+            "trace-all".to_string(),
+            "--trace-file".to_string(),
+            trace_path.to_string_lossy().into_owned(),
+            "--trace-mode".to_string(),
+            "all".to_string(),
+        ],
+        cwd: None,
+        env: HashMap::new(),
+        default: false,
+        set_model_api: false,
+        model: None,
+        hermes_profile: None,
+        acp_args: Vec::new(),
+        acp: Some(crate::agent_config::AcpProtocolConfig {
+            protocol_version: Some(2),
+            ..Default::default()
+        }),
+    };
+    let error = AcpClient::connect_with_logs(&agent, None)
+        .await
+        .err()
+        .expect("protocol_version 2 must fail connect");
+    let AcpError::Connect(failure) = error else {
+        panic!("expected typed connect failure for protocol_version 2")
+    };
+    assert_eq!(failure.code, "agent_client_capabilities_invalid");
+    assert!(!failure.retryable);
+    // fake agent 启动即创建 trace 文件；给子进程留出落盘时间。
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let initialize_reached_wire = std::fs::read_to_string(&trace_path)
+        .map(|trace| {
+            trace.lines().any(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("method")
+                            .and_then(|m| m.as_str())
+                            .map(str::to_string)
+                    })
+                    .as_deref()
+                    == Some(METHOD_INITIALIZE)
+            })
+        })
+        // 文件不存在同样证明 initialize 未发出（fake agent 未收到任何帧）。
+        .unwrap_or(false);
+    assert!(
+        !initialize_reached_wire,
+        "被拒绝的 initialize 不得出现在 wire trace 中"
+    );
+    std::fs::remove_file(&trace_path).ok();
 }
 
 /// 方案 G 演进：hermes_profile 绝对路径 → 子进程 HERMES_HOME 注入。
@@ -1912,4 +2222,51 @@ async fn claude_wrapper_puts_declared_client_capabilities_on_the_wire() {
     );
     assert!(!hermes_meta.contains_key("jetbrains.air"));
     assert!(hermes_meta.contains_key("peri.replay"));
+}
+
+#[test]
+fn acp_kind_classifies_elicitation_complete_notification() {
+    // #316：elicitation/complete 归控制帧通知（URL 模式外带交互完成）。
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("elicitation/complete")),
+        crate::acp::AcpKind::ElicitationComplete
+    );
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("session/update")),
+        crate::acp::AcpKind::SessionUpdate
+    );
+    assert_eq!(
+        crate::acp::AcpKind::from_method(Some("peri/agent_event")),
+        crate::acp::AcpKind::ProviderExtension
+    );
+}
+
+#[test]
+fn prompt_image_attachment_block_matches_official_wire_shape() {
+    // #316 审查 P2：typed ContentBlock::Image 的 mimeType rename 是幂等批次
+    // 最脆的一环——钉住官方形状 {"type":"image","mimeType","data"}。
+    use base64::Engine as _;
+    let dir = crate::test_utils::unique_temp("attachment-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("pixel.png");
+    // 最小合法 PNG：8 字节签名 + IHDR（infer 按签名识别，无需完整解码）。
+    // 字节串字面量：无数组折行宽度歧义（rustfmt 跨版本稳定）。
+    let bytes: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89";
+    std::fs::write(&path, bytes).unwrap();
+    let blocks = prompt_blocks(
+        "看图".to_string(),
+        &[path.to_string_lossy().into_owned()],
+        crate::agent_config::AttachmentLimits::default(),
+    )
+    .expect("png attachment must serialize");
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(
+        blocks[1],
+        serde_json::json!({
+            "type": "image",
+            "mimeType": "image/png",
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+        })
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

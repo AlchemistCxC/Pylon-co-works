@@ -1,12 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
-import { useRuntimeStore } from '../../runtimeStore'
+import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
-import { invoke } from '@tauri-apps/api/core'
+import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../runtimeError.ts'
-import type { AgentContext } from '../../agentContext'
-import { toAgentContextKey } from '../../agentContext'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
+import type { AgentContext } from '../../domains/agent/agentContext'
+import { toAgentContextKey } from '../../domains/agent/agentContext'
 
 export default function ConfigOptionsPanel({ context }: { context?: AgentContext }) {
   const config = useRuntimeStore(state => context ? state.sessionConfig[toAgentContextKey(context)] : undefined)
@@ -37,7 +37,7 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
     })
     patch(value)
     try {
-      await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setConfigOption({ agentId: context.agentId, source: context.source, key: id, value })
+      await createChatClient({ invoke: tauriInvokeTransport }).setConfigOption({ agentId: context.agentId, source: context.source, key: id, value })
       resolveRuntimeErrors({ key: `session-config:${toAgentContextKey(context)}:${id}` })
     } catch (error) {
       if (latestReqRef.current[id] !== seq) return
@@ -46,7 +46,6 @@ export default function ConfigOptionsPanel({ context }: { context?: AgentContext
         key: `session-config:${toAgentContextKey(context)}:${id}`,
         scope: { kind: 'operation', id: `session-config:${toAgentContextKey(context)}:${id}` },
         source: 'chat.config-option',
-        recovery: { kind: 'open-runtime-log', sessionId: context.source },
       })
       setErrors(state => ({ ...state, [id]: '保存失败，详情见右下角错误中心' }))
     } finally {

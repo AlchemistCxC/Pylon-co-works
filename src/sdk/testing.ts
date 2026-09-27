@@ -4,7 +4,9 @@
  * 仅供插件的测试文件 import —— 不进入插件生产 bundle：
  * - 引用了宿主 PluginScope 真实类，保留真实的资源回收纪律；
  * - 记录式 mock：命令可执行、Hook 可分发、设置/存储/会话为内存实现、
- *   其余 13 个 API 面以 Proxy 记录调用（调用即记录，返回 undefined）。
+ *   其余 API 面以 Proxy 记录调用（调用即记录，返回 undefined）；
+ * - management（API 1.2 capability 面）默认不装配（对齐宿主 C3 门控语义），
+ *   `createMockContext({ management: true })` 时装配内存实现。
  */
 import { PluginScope } from '../plugin-runtime/pluginScope.ts'
 import type { BuiltinPluginActivationContext } from '../plugin-runtime/pluginActivationContext.ts'
@@ -19,6 +21,7 @@ import type { PluginSettingValue } from '../plugin-runtime/settings/pluginSettin
 import type { PluginStorageApi } from '../plugin-runtime/storage/pluginStorageTypes.ts'
 import { PLUGIN_STORAGE_BUDGET_BYTES, PluginStorageError } from '../plugin-runtime/storage/pluginStorageContract.ts'
 import { validatePluginKey } from '../plugin-runtime/settings/pluginKeyValidation.ts'
+import type { PluginManagementApi } from '../plugin-runtime/management/pluginManagementTypes.ts'
 import type { PluginUiApi } from '../plugin-runtime/ui/pluginUiApi.ts'
 import type { PluginUiSurface, PluginUiUnmount } from '../plugin-runtime/ui/pluginUiTypes.ts'
 import type { AsyncDisposable } from '../plugin-runtime/registry/types.ts'
@@ -36,6 +39,12 @@ export interface MockContextOptions {
   settingsValues?: Record<string, PluginSettingValue>
   /** 预置 storage 值（按 PluginStorageApi 语义隔离） */
   storageValues?: Record<string, unknown>
+  /**
+   * 装配内存 management mock（API 1.2 capability 面）。缺省 `false`——对齐宿主
+   * C3 门控语义（未声明 `plugin.management` / 未授权时 `context.management`
+   * 属性不存在）。开启后 `context.management` 存在且管理操作被记录到 `__recorded`。
+   */
+  management?: boolean
 }
 
 export interface MockSurfaceDriver {
@@ -294,6 +303,57 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     registerSurface: (surface: PluginUiSurface) => { surfaces.push(surface) },
   }
 
+  // management（API 1.2 capability 面）：只读投影返回空结构、管理操作记录后
+  // resolve——授权/守卫语义（self_locked / product_required / 现查 grant）属于
+  // 宿主 grant 检查，mock 不复刻；需要测守卫语义时用真实宿主或集成测试。
+  const recordManagement = (method: string, args: readonly unknown[]): void => {
+    recorded.push({ member: 'management', method, args: Object.freeze([...args]) })
+  }
+  const recordAsync = <T>(method: string, args: readonly unknown[], value: T): Promise<T> => {
+    recordManagement(method, args)
+    return Promise.resolve(value)
+  }
+  const management: PluginManagementApi = {
+    listInstalled: () => recordAsync('listInstalled', [], []),
+    runtimeOverview: () => {
+      recordManagement('runtimeOverview', [])
+      return { revision: 0, activePluginIds: [], instances: [], switches: [] }
+    },
+    bootstrapOverview: () => {
+      recordManagement('bootstrapOverview', [])
+      return { state: 'idle', activePluginIds: [], failures: [], skippedPluginIds: [] }
+    },
+    contractDiagnostics: () => {
+      recordManagement('contractDiagnostics', [])
+      return { revision: 0, eligibleIds: [], diagnostics: [] }
+    },
+    contributionOverview: () => {
+      recordManagement('contributionOverview', [])
+      return []
+    },
+    capabilityGrants: () => {
+      recordManagement('capabilityGrants', [])
+      return []
+    },
+    processOverview: () => recordAsync('processOverview', [], []),
+    storageUsage: () => {
+      recordManagement('storageUsage', [])
+      return []
+    },
+    dependencyGraph: () => recordAsync('dependencyGraph', [], []),
+    terminatePluginProcess: processId => recordAsync('terminatePluginProcess', [processId], undefined),
+    retryCleanup: runtimeInstanceId => recordAsync('retryCleanup', [runtimeInstanceId], { complete: true }),
+    clearPluginStorage: pluginId => recordManagement('clearPluginStorage', [pluginId]),
+    enterSafeMode: () => recordAsync('enterSafeMode', [], undefined),
+    setEnabled: (pluginId, enabled) => recordAsync('setEnabled', [pluginId, enabled], undefined),
+    reload: pluginId => recordAsync('reload', [pluginId], undefined),
+    uninstall: pluginId => recordAsync('uninstall', [pluginId], undefined),
+    installOrUpdate: sourcePath => recordAsync('installOrUpdate', [sourcePath], undefined),
+    installOrUpdateFromZip: zipPath => recordAsync('installOrUpdateFromZip', [zipPath], undefined),
+    installOrUpdateFromUrl: url => recordAsync('installOrUpdateFromUrl', [url], undefined),
+    setBuiltinEnabled: (pluginId, enabled) => recordAsync('setBuiltinEnabled', [pluginId, enabled], undefined),
+  }
+
   const context = {
     identity,
     scope,
@@ -320,6 +380,8 @@ export function createMockContext(options: MockContextOptions = {}): MockPluginA
     storage: storageHarness.api,
     ccWidget: recordingApi('ccWidget', recorded),
     presets: recordingApi('presets', recorded),
+    // C3 门控语义：未开启 management 选项时属性不存在（不是空实现）。
+    ...(options.management ? { management } : {}),
   } satisfies BuiltinPluginActivationContext
 
   const mock = context as MockPluginActivationContext

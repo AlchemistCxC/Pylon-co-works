@@ -1,9 +1,10 @@
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
-import { reportRuntimeError } from '../runtimeError'
+import { refreshSessionsBackend, useIdentityStore } from '../domains/identity/identityStore'
+import { reportRuntimeError } from '../app/runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
 import { runSessionNotificationHook } from '../application/transactions/sessionHookTransactions'
@@ -71,7 +72,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const del = async () => {
     if (!window.confirm(`删除会话“${session.name}”？此操作无法撤销。`)) return
-    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
     const result = await removeSessionTransaction(sessionId, {
       findSession: id => useIdentityStore.getState().sessions.find(s => s.id === id),
       // DEL-03（§5.13 本地优先）：OwnerKey = [profileId, agentId, localSessionId]（与 eventSchema 同纪律）

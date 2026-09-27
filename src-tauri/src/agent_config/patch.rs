@@ -2,6 +2,9 @@ use super::*;
 use std::collections::HashMap;
 use std::path::Path;
 
+// #317 批次二 ③：原子写原语正身已下沉 pylon-foundations（原经 atomic_write::* glob 重导出）。
+use pylon_foundations::atomic_write::{replace_file, sync_parent, write_synced_temp};
+
 /// 应用 agent 补丁（§5.3.A）：patch 为 agent 整块 YAML 字符串（前端 AgentConfigEditor
 /// 形态）；仅替换目标 agent，默认禁止创建不存在 agent（产品拍板项，默认禁止）。
 pub(crate) fn apply_agent_patch(
@@ -337,6 +340,15 @@ pub(crate) fn validate_candidate(
     let (agents, gateway) = parse_domains(content, base_dir);
     let agents = agents?;
     gateway?;
+    // 写入路径守卫，与读取路径**故意相反**：#326 起「零 Agent」是合法的读取状态
+    // （裸启动首跑空态 + 引导），但配置**变更**不得把用户删到没有任何 Agent——
+    // 删到空表是操作失误而非意图。故此断言只在这里，不放进 parse()，否则首跑空态
+    // 会被判非法。
+    if agents.is_empty() {
+        return Err(ConfigError::Invalid(
+            "配置变更不得清空 agents 表：至少保留一个 Agent".to_string(),
+        ));
+    }
     Ok(agents)
 }
 

@@ -9,12 +9,18 @@
  * - evt_append(events, expected_revision)：owner_key 由后端从 event.owner 推导，
  *   批量必须同 owner；eventId 必须等于 owner_key#sequence；重复 event_id 幂等跳过。
  * - evt_revision(owner_key)：owner 当前 MAX(sequence)，空=0。
- * - evt_list(owner_key, before_sequence, limit)：升序页 + 下一页游标。
+ * - evt_list(owner_key, before_sequence, limit, cap_typed_payload)：升序页 + 下一页游标。
+ *   #376 起读出口对 `typed_payload` 的字符串叶子按 64 KiB 线收口（`cap_typed_payload`
+ *   缺省 true）；`turn.unit` 豁免（单元行是历史正文的唯一副本）。
+ * - evt_load_compact(owner_key, after_sequence, limit, cap_typed_payload)：compact 读的
+ *   **一页**（升序、前向游标；#376-b 起不再一次取回整库）。
  * - 结构化错误 { code, message }：event_revision_conflict / event_repo_corrupt /
  *   event_repo_constraint / event_repo_conflict / event_db_unavailable / event_invalid /
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
  */
 import { invoke } from '@tauri-apps/api/core'
+import { wireErrorParts } from '../tauri/errorPayload'
+import { typedPayloadCapDisabled } from './readPathSwitches'
 import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
 import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
@@ -31,6 +37,15 @@ export interface CanonicalEventPage {
   nextBeforeSequence: number | null
 }
 
+/**
+ * #376-b：`evt_load_compact` 的一页（升序；`nextAfterSequence` 为**前向**游标，
+ * null = 已到最新）。冷装载按「由旧到新」续折，所以游标方向与 `evt_list` 相反。
+ */
+export interface CanonicalCompactPage {
+  events: CanonicalEventRow[]
+  nextAfterSequence: number | null
+}
+
 export interface CanonicalEventRawExport {
   eventId: string
   ownerKey: string
@@ -39,6 +54,36 @@ export interface CanonicalEventRawExport {
   identityJson: string | null
   typedPayloadJson: string | null
   rawPayloadJson: string
+}
+
+/** #155 T3：独立于 canonical revision 的持久化在途片段。 */
+export interface CanonicalDraftFragment {
+  ownerKey: string
+  draftId: string
+  fragmentIndex: number
+  clientGeneration: number
+  remoteSessionId: string | null
+  eventType: 'assistant.text.delta' | 'assistant.thinking.delta'
+  identity: Record<string, unknown> | null
+  rawPayload: unknown[]
+  firstReceivedAt: string
+  createdAt: number
+  interrupted: boolean
+}
+
+export async function loadCanonicalDraftFragments(ownerKey: string): Promise<CanonicalDraftFragment[]> {
+  return invoke<CanonicalDraftFragment[]>('evt_draft_list', { ownerKey })
+    .catch(rejectCanonicalEventRepositoryError)
+}
+
+export async function keepInterruptedDraft(ownerKey: string, draftId: string): Promise<CanonicalEventAppendResult> {
+  return invoke<CanonicalEventAppendResult>('evt_draft_keep', { ownerKey, draftId })
+    .catch(rejectCanonicalEventRepositoryError)
+}
+
+export async function discardInterruptedDraft(ownerKey: string, draftId: string): Promise<boolean> {
+  return invoke<boolean>('evt_draft_discard', { ownerKey, draftId })
+    .catch(rejectCanonicalEventRepositoryError)
 }
 
 /** 事件仓库结构化错误（前端按 code 分支；message 展示用）。 */
@@ -54,11 +99,8 @@ export class CanonicalEventRepositoryError extends Error {
 /** invoke 拒绝值（后端 {code,message}）→ CanonicalEventRepositoryError。 */
 export function asCanonicalEventRepositoryError(error: unknown): CanonicalEventRepositoryError {
   if (error instanceof CanonicalEventRepositoryError) return error
-  if (error && typeof error === 'object' && 'message' in error) {
-    const shape = error as { code?: string; message?: unknown }
-    return new CanonicalEventRepositoryError(shape.code, String(shape.message ?? error))
-  }
-  return new CanonicalEventRepositoryError(undefined, String(error))
+  const parts = wireErrorParts(error)
+  return new CanonicalEventRepositoryError(parts.code, parts.message)
 }
 
 /** invoke 失败必须以 reject 传播（不把失败变成功）。 */
@@ -79,6 +121,9 @@ export interface CanonicalEventRepository {
   /** #81 L2：compact 读——「turn.unit 单元 + 未覆盖行」升序（投影/搜索入口；
    * 被单元覆盖的行不传输不解析，读放大随单元粒度下降）。 */
   loadAllPreferUnits(ownerKey: string): Promise<CanonicalEventRow[]>
+  /** #376-b：compact 读**分页**（升序、前向游标）。冷装载据此逐页续折，
+   * 装载期不再「整库行 + 整库信封 + 文档」三份并存。 */
+  listCompact(ownerKey: string, afterSequence: number | null, limit?: number): Promise<CanonicalCompactPage>
   /** 单行取证导出：不解析损坏 JSON，返回数据库中的原始文本。 */
   exportRaw(eventId: string): Promise<CanonicalEventRawExport | null>
   /** B6：跨 owner 内容搜索候选 owner（payload/eventType LIKE）；前端再做消息级过滤。 */
@@ -87,6 +132,16 @@ export interface CanonicalEventRepository {
 
 const DEFAULT_PAGE_LIMIT = 100
 const RANGE_PAGE_LIMIT = 1000
+/**
+ * #376-b：compact 读单页行数。比 `evt_list` 的 1000 小一档——页内行数直接决定一次
+ * invoke 的载荷上界（最坏 = 页行数 × 单行 64 KiB），冷装载按页折完即回收，页越小
+ * 装载期峰值越低；代价只是多几次 invoke。
+ */
+const COMPACT_PAGE_LIMIT = 256
+
+function typedPayloadCapEnabled(): boolean {
+  return !typedPayloadCapDisabled()
+}
 
 /**
  * Read one inclusive forward sequence range through the existing backward cursor.
@@ -160,6 +215,7 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
         ownerKey,
         beforeSequence,
         limit,
+        capTypedPayload: typedPayloadCapEnabled(),
       }).catch(rejectCanonicalEventRepositoryError)
       return {
         events: page.events.map(normalizeCanonicalEventRow),
@@ -178,9 +234,26 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       return rows
     },
     async loadAllPreferUnits(ownerKey) {
-      const rows = await invoke<CanonicalEventRow[]>('evt_load_compact', { ownerKey })
-        .catch(rejectCanonicalEventRepositoryError)
-      return rows.map(normalizeCanonicalEventRow)
+      const rows: CanonicalEventRow[] = []
+      let afterSequence: number | null = null
+      do {
+        const page = await this.listCompact(ownerKey, afterSequence, COMPACT_PAGE_LIMIT)
+        rows.push(...page.events)
+        afterSequence = page.nextAfterSequence
+      } while (afterSequence !== null)
+      return rows
+    },
+    async listCompact(ownerKey, afterSequence, limit = COMPACT_PAGE_LIMIT) {
+      const page = await invoke<CanonicalCompactPage>('evt_load_compact', {
+        ownerKey,
+        afterSequence,
+        limit,
+        capTypedPayload: typedPayloadCapEnabled(),
+      }).catch(rejectCanonicalEventRepositoryError)
+      return {
+        events: page.events.map(normalizeCanonicalEventRow),
+        nextAfterSequence: page.nextAfterSequence,
+      }
     },
     async exportRaw(eventId) {
       return invoke<CanonicalEventRawExport | null>('evt_export_raw', { eventId })

@@ -37,7 +37,8 @@ fn kernel_input(raw_payload: serde_json::Value) -> KernelEventInput {
         remote_session_id: Some("remote-1".to_string()),
         client_generation: 5,
         received_at: "2026-08-20T00:00:00.000Z".to_string(),
-        raw_payload,
+        // #334/P2：KernelEventInput.raw_payload 归一为 Arc 共享语义，测试直传 Value。
+        raw_payload: std::sync::Arc::new(raw_payload),
         recovery_import: false,
     }
 }
@@ -957,7 +958,7 @@ async fn local_journal_authority_never_imports_replay_or_snapshot() {
     assert_eq!(result.revision, 1);
 
     let page = service
-        .list_events(owner.key().expect("owner key"), None, 100)
+        .list_events(owner.key().expect("owner key"), None, 100, false)
         .await
         .expect("list local journal");
     assert_eq!(page.events.len(), 1);
@@ -1006,7 +1007,7 @@ async fn untrusted_existing_rows_never_trigger_snapshot_reconciliation() {
     assert!(result.events.is_empty());
 
     let page = service
-        .list_events(owner.key().expect("owner key"), None, 100)
+        .list_events(owner.key().expect("owner key"), None, 100, false)
         .await
         .expect("list journal");
     assert_eq!(page.events.len(), 1);
@@ -1986,4 +1987,636 @@ fn compact_read_cuts_run_at_fold_budget_without_losing_rows() {
         expected_start = row.sequence + 1;
     }
     assert_eq!(folded, total, "切断不丢行");
+}
+
+// ============================================================================
+// #376：读出口 typed 载荷收口（只在 service 层；repo 层与 turn_rollup 保持全文）
+// ============================================================================
+
+/// 400 KB 量级的工具载荷行——`typed.tool.rawOutput` 远超 64 KiB 线，标量面齐全。
+fn oversized_tool_payload() -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": "remote-1",
+        "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call-1",
+            "title": "Bash",
+            "kind": "execute",
+            "status": "in_progress",
+            "rawOutput": { "text": "x".repeat(400_000) },
+        }
+    })
+}
+
+fn typed_bytes(value: &serde_json::Value) -> usize {
+    value.to_string().len()
+}
+
+#[test]
+fn typed_payload_cap_is_byte_identical_within_budget() {
+    let typed = serde_json::json!({
+        "text": "small",
+        "tool": {
+            "title": "Bash",
+            "status": "completed",
+            "rawOutput": { "text": "ok" },
+        },
+    });
+    let encoded = typed.to_string();
+    assert!(encoded.len() <= redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed.clone());
+    assert_eq!(capped, typed, "预算内必须逐字节不变（含键序与标量）");
+    assert_eq!(capped.to_string(), encoded);
+}
+
+#[test]
+fn typed_payload_cap_lands_within_budget_keeping_structure_and_scalars() {
+    let typed = serde_json::json!({
+        "text": "y".repeat(200_000),
+        "count": 7,
+        "ratio": 1.5,
+        "flag": true,
+        "absent": null,
+        "tool": {
+            "title": "Bash",
+            "status": "in_progress",
+            "rawOutput": { "text": "z".repeat(300_000), "truncated": false },
+            "contentBlocks": [{ "type": "text", "text": "w".repeat(100_000) }],
+        },
+    });
+    let original = typed_bytes(&typed);
+    assert!(original > redaction::MAX_CANONICAL_RAW_BYTES);
+
+    let capped = redaction::retain_typed_payload(typed);
+    let retained = typed_bytes(&capped);
+    assert!(
+        retained <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "超预算必须落回 64 KiB 内，实测 {retained}"
+    );
+
+    // 结构与标量逐字节不动。
+    assert_eq!(capped["count"], serde_json::json!(7));
+    assert_eq!(capped["ratio"], serde_json::json!(1.5));
+    assert_eq!(capped["flag"], serde_json::json!(true));
+    assert!(capped["absent"].is_null());
+    assert_eq!(capped["tool"]["title"], "Bash");
+    assert_eq!(capped["tool"]["status"], "in_progress");
+    assert_eq!(capped["tool"]["rawOutput"]["truncated"], false);
+    assert_eq!(capped["tool"]["contentBlocks"][0]["type"], "text");
+    assert!(
+        capped["tool"]["contentBlocks"].as_array().unwrap().len() == 1,
+        "数组长度与元素数不变，只收缩叶子"
+    );
+
+    // 截断事实可见（与 raw 的 `_pylonTruncated` 同取证口径）。
+    let marker = &capped[redaction::TYPED_TRUNCATION_KEY];
+    assert_eq!(marker["payloadOriginalBytes"], original as i64);
+    assert_eq!(marker["reason"], "read-path-typed-cap");
+    assert!(
+        marker["trimmedStringLeaves"].as_i64().unwrap() >= 1,
+        "至少收缩了一个字符串叶子"
+    );
+    // 载荷字符串被收缩，标量级字符串不收缩（低于 floor 的标题/状态不在收缩面内）。
+    assert!(capped["text"].as_str().unwrap().len() < 200_000);
+}
+
+#[test]
+fn typed_payload_cap_keeps_utf8_boundaries() {
+    let typed = serde_json::json!({
+        "text": "中文载荷".repeat(60_000),
+        "tool": { "title": "标题", "rawOutput": { "text": "漢字かな".repeat(30_000) } },
+    });
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "多字节载荷同样必须落回预算内"
+    );
+    let retained = capped["text"].as_str().expect("retained text");
+    assert!(
+        retained
+            .chars()
+            .all(|character| "中文载荷".contains(character)),
+        "截断必须落在字符边界上，不得从多字节字符中间切开"
+    );
+    assert_eq!(capped["tool"]["title"], "标题", "短标量字符串不参与收缩");
+}
+
+#[tokio::test]
+async fn read_exit_cap_shrinks_tool_rows_but_exempts_turn_unit() {
+    let service = EventService::in_memory().expect("event service");
+    let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+    let owner_key = owner.key().expect("owner key");
+    let mut events = vec![
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": { "text": "hi" },
+            }
+        })),
+        Arc::new(oversized_tool_payload()),
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "done", "stopReason": "end_turn" },
+        })),
+    ];
+    events.insert(1, events[1].clone());
+    service
+        .ingest_events(owner, Some("remote-1".to_string()), 5, events)
+        .await
+        .expect("ingest");
+
+    let stored = service
+        .list_events(owner_key.clone(), None, 100, false)
+        .await
+        .expect("uncapped read")
+        .events;
+    let capped = service
+        .list_events(owner_key, None, 100, true)
+        .await
+        .expect("capped read")
+        .events;
+    assert_eq!(stored.len(), capped.len(), "收口不改行数与顺序");
+
+    let mut saw_tool = false;
+    let mut saw_unit = false;
+    for (before, after) in stored.iter().zip(capped.iter()) {
+        assert_eq!(before.sequence, after.sequence);
+        assert_eq!(before.event_type, after.event_type);
+        assert_eq!(
+            before.raw_payload, after.raw_payload,
+            "raw 一份都不动（收口只作用于 typed）"
+        );
+        if before.event_type == "tool.call.started" {
+            saw_tool = true;
+            assert!(
+                typed_bytes(before.typed_payload.as_ref().unwrap())
+                    > redaction::MAX_CANONICAL_RAW_BYTES
+            );
+            assert!(
+                typed_bytes(after.typed_payload.as_ref().unwrap())
+                    <= redaction::MAX_CANONICAL_RAW_BYTES
+            );
+        }
+        if before.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
+            saw_unit = true;
+            assert!(
+                typed_bytes(before.typed_payload.as_ref().unwrap())
+                    > redaction::MAX_CANONICAL_RAW_BYTES,
+                "单元行的载荷就是整段历史，必须超预算"
+            );
+            assert_eq!(
+                before.typed_payload, after.typed_payload,
+                "turn.unit 豁免：单元行是历史正文的唯一副本，收口即丢历史"
+            );
+        }
+        if before.event_type == "user.message" {
+            assert_eq!(
+                before.typed_payload, after.typed_payload,
+                "预算内行逐字节不变"
+            );
+        }
+    }
+    assert!(saw_tool && saw_unit, "语料必须同时含工具行与单元行");
+}
+
+// ============================================================================
+// #376-b：compact 读分页（升序前向游标；页边界落在 delta run 边界上）
+// ============================================================================
+
+/// 语料：一个已终结回合（含 10 条 delta run + 工具行）+ 一个进行中回合的尾部 delta run。
+fn paged_compact_fixture(repo: &EventRepo, delta: impl Fn(&str) -> serde_json::Value) -> String {
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    for index in 0..10 {
+        repo.ingest_kernel_event(kernel_input(delta(&format!("a{index}"))))
+            .unwrap();
+    }
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "tool_call", "toolCallId": "tool-1", "title": "Read", "kind": "read" }
+    })))
+    .unwrap();
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "done", "stopReason": "end_turn" }
+    })))
+    .unwrap();
+    for index in 0..7 {
+        repo.ingest_kernel_event(kernel_input(delta(&format!("b{index}"))))
+            .unwrap();
+    }
+    owner_key
+}
+
+fn compact_delta(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": text } }
+    })
+}
+
+/// 逐页走完整库，行集合（事件类型 + sequence + 折叠跨度）与一次性读逐位相同。
+#[test]
+fn compact_page_walk_equals_one_shot_read() {
+    let repo = repo();
+    let owner_key = paged_compact_fixture(&repo, compact_delta);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+
+    for limit in [1u32, 2, 3, 4, 7] {
+        let mut paged: Vec<CanonicalEventRow> = Vec::new();
+        let mut cursor: Option<i64> = None;
+        let mut pages = 0usize;
+        loop {
+            let page = repo
+                .load_events_compact_page(&owner_key, cursor, limit)
+                .expect("page");
+            pages += 1;
+            // 页长契约：**至少**取到 limit 行（除非 journal 到头），必要时为「页尾 run 收口」
+            // 多带一点（上限 = 折叠预算 MAX_FOLDED_CHUNKS + 2）。断言下界，是因为页边界必须
+            // 落在 run 边界上——这比「页不超过 limit」重要。
+            let page_len = page.events.len();
+            let folded_extra = page_len.max(
+                page.events
+                    .iter()
+                    .map(|row| {
+                        row.typed_payload
+                            .as_ref()
+                            .and_then(|typed| typed.get("foldedCount"))
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(1)
+                    })
+                    .sum::<i64>() as usize,
+            );
+            assert!(
+                folded_extra >= usize::try_from(limit).unwrap_or(1).max(1),
+                "页至少要覆盖 limit 行的量（limit={limit}, got={folded_extra}）"
+            );
+            paged.extend(page.events);
+            match page.next_after_sequence {
+                Some(next) => {
+                    assert!(cursor.is_none_or(|current| next > current), "游标必须前进");
+                    cursor = Some(next)
+                }
+                None => break,
+            }
+            assert!(pages < 200, "limit={limit} 时游标不收敛");
+        }
+        let shape = |rows: &[CanonicalEventRow]| {
+            rows.iter()
+                .map(|row| {
+                    (
+                        row.event_type.clone(),
+                        row.sequence,
+                        row.rollup_seq_start,
+                        row.rollup_seq_end,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shape(&paged),
+            shape(&one_shot),
+            "limit={limit} 时逐页装载必须与一次性读逐位等价"
+        );
+    }
+}
+
+/// 页边界不得切进 delta run 中间：未被单元覆盖的 run 折叠出的跨度必须与一次性读相同
+/// （切进 run 中间会让读侧折叠的切点随页边界漂移）。
+#[test]
+fn compact_page_keeps_delta_runs_whole_across_page_boundaries() {
+    let repo = repo();
+    let owner_key = paged_compact_fixture(&repo, compact_delta);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    let span_of = |row: &CanonicalEventRow| -> Option<(i64, i64)> {
+        let typed = row.typed_payload.as_ref()?;
+        let span = typed.get("seqSpan")?.as_array()?;
+        Some((span.first()?.as_i64()?, span.get(1)?.as_i64()?))
+    };
+    let one_shot_spans: Vec<_> = one_shot.iter().filter_map(span_of).collect();
+    assert_eq!(one_shot_spans.len(), 1, "语料只有一个未覆盖 delta run");
+    assert_eq!(
+        one_shot_spans[0],
+        (14, 20),
+        "run span 覆盖 7 条尾部 delta（终态单元占 seq 13）"
+    );
+
+    // limit=3 必然落在 run 内部；折叠切点仍须与一次性读一致。
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 3)
+            .expect("page");
+        spans.extend(page.events.iter().filter_map(span_of));
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(spans, one_shot_spans, "页边界不得把 run 切碎");
+}
+
+/// 分页读同样只在 service 层收口 typed 载荷（单元行仍豁免）。
+#[tokio::test]
+async fn compact_page_caps_tool_rows_and_exempts_unit_rows() {
+    let service = EventService::in_memory().expect("event service");
+    let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+    let owner_key = owner.key().unwrap();
+    let mut events = vec![
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "user_message_chunk", "content": { "text": "hi" } },
+        })),
+        Arc::new(oversized_tool_payload()),
+        Arc::new(serde_json::json!({
+            "sessionId": "remote-1",
+            "update": { "sessionUpdate": "done", "stopReason": "end_turn" },
+        })),
+    ];
+    events.insert(1, events[1].clone());
+    service
+        .ingest_events(owner, Some("remote-1".to_string()), 5, events)
+        .await
+        .expect("ingest");
+
+    let mut capped: Vec<CanonicalEventRow> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = service
+            .load_events_compact_page(owner_key.clone(), cursor, 1, true)
+            .await
+            .expect("capped page");
+        capped.extend(page.events);
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    let unit = capped
+        .iter()
+        .find(|row| row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE)
+        .expect("turn.unit row");
+    assert!(
+        typed_bytes(unit.typed_payload.as_ref().unwrap()) > redaction::MAX_CANONICAL_RAW_BYTES,
+        "单元行是历史正文的唯一副本，分页收口同样必须豁免它"
+    );
+    assert!(
+        capped
+            .iter()
+            .filter(|row| row.event_type != crate::turn_rollup::TURN_UNIT_EVENT_TYPE)
+            .all(|row| typed_bytes(
+                row.typed_payload
+                    .as_ref()
+                    .unwrap_or(&serde_json::Value::Null)
+            ) <= redaction::MAX_CANONICAL_RAW_BYTES),
+        "非单元行必须落回 64 KiB 内（limit=1 逐行走完每一页）"
+    );
+}
+
+// ============================================================================
+// #376-b 评审回归：游标落在长覆盖区前时不得静默截断；覆盖区不得把 run 切断
+// ============================================================================
+
+/// 语料：一个已终结回合把 **3900 行**（远超 `limit=64` 的扫描预算 64*8+1024=1536）覆盖掉，
+/// 单元行落在这段之后。游标从最前面出发时，第一页的扫描预算会在覆盖区里用尽、一行都不产出。
+fn long_covered_stretch_fixture(repo: &EventRepo) -> String {
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    for index in 0..3900 {
+        repo.ingest_kernel_event(kernel_input(compact_delta(&format!("c{index}"))))
+            .unwrap();
+    }
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "done", "stopReason": "end_turn" }
+    })))
+    .unwrap();
+    owner_key
+}
+
+/// 评审发现：`collect_until` 的扫描预算被**被覆盖行**吃光 ⇒ 空页 + `next_after_sequence=None`
+/// ⇒ 前端与 repo 的循环都判定「到底」而停住，整段历史静默丢失（标志性会话形状：单元覆盖
+/// 数千行）。本用例断言逐页走完必须与一次性读逐位等价，且游标永不返回 None 到中途。
+#[test]
+fn compact_page_walk_survives_scan_budget_exhausted_by_covered_rows() {
+    let repo = repo();
+    let owner_key = long_covered_stretch_fixture(&repo);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    assert_eq!(one_shot.len(), 1, "语料只有一个单元行可见");
+    assert_eq!(
+        one_shot[0].event_type,
+        crate::turn_rollup::TURN_UNIT_EVENT_TYPE
+    );
+
+    let mut paged: Vec<CanonicalEventRow> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    let mut pages = 0usize;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 64)
+            .expect("page");
+        pages += 1;
+        paged.extend(page.events);
+        match page.next_after_sequence {
+            Some(next) => {
+                assert!(
+                    cursor.is_none_or(|current| next > current),
+                    "游标必须前进（page {pages}）"
+                );
+                cursor = Some(next)
+            }
+            None => break,
+        }
+        assert!(
+            pages < 100,
+            "游标不收敛：覆盖区前被卡住（{pages} 页仍未到头）"
+        );
+    }
+    let shape = |rows: &[CanonicalEventRow]| {
+        rows.iter()
+            .map(|row| (row.event_type.clone(), row.sequence))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        shape(&paged),
+        shape(&one_shot),
+        "扫描预算被覆盖行用尽时不得丢行（评审 BLOCKER 回归）"
+    );
+}
+
+/// 评审发现：扫描预算用尽会连带切断 run（paged 折出两条 batch 行，一次性折出一条）。
+/// 语料刻意让「覆盖区 + 未覆盖 run」跨过预算边界。
+#[test]
+fn compact_page_keeps_run_whole_when_budget_exhausts_before_it() {
+    let repo = repo();
+    let owner_key = long_covered_stretch_fixture(&repo);
+    let tail: Vec<_> = (0..400)
+        .map(|index| compact_delta(&format!("t{index}")))
+        .collect();
+    for wire in tail {
+        repo.ingest_kernel_event(kernel_input(wire)).unwrap();
+    }
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    let span_of = |row: &CanonicalEventRow| -> Option<(i64, i64)> {
+        let typed = row.typed_payload.as_ref()?;
+        let span = typed.get("seqSpan")?.as_array()?;
+        Some((span.first()?.as_i64()?, span.get(1)?.as_i64()?))
+    };
+    let one_shot_spans: Vec<_> = one_shot.iter().filter_map(span_of).collect();
+    assert_eq!(one_shot_spans.len(), 1, "尾部 400 行应折成一条 batch 行");
+
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 64)
+            .expect("page");
+        spans.extend(page.events.iter().filter_map(span_of));
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(spans, one_shot_spans, "覆盖区之后的 run 不得被页边界切断");
+}
+
+/// 评审发现（#376-a）：`retain_typed_payload` 的 ≤64 KiB 保证在「把所有字符串清空也减不够」
+/// 时会漏——超预算的部分在键名与结构本身。收不动必须整体退回 `retain_raw_payload`。
+#[test]
+fn typed_payload_cap_holds_when_structure_alone_exceeds_budget() {
+    let huge_key = "k".repeat(80_000);
+    let typed = serde_json::json!({ huge_key.clone(): "x" });
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "键名撑爆预算时必须整体退回截断，实测 {}",
+        typed_bytes(&capped)
+    );
+
+    // 结构（大量小对象）自己就超预算、字符串只有几 KB
+    let mut object = serde_json::Map::new();
+    for index in 0..30_000 {
+        object.insert(
+            format!("n{index}"),
+            serde_json::json!({ "a": index, "b": index }),
+        );
+    }
+    object.insert("text".to_string(), serde_json::json!("y".repeat(5_000)));
+    let typed = serde_json::Value::Object(object);
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "结构撑爆预算时必须整体退回截断，实测 {}",
+        typed_bytes(&capped)
+    );
+}
+
+/// 评审发现：#4 的预览按字符切 ⇒ 非 ASCII 载荷「保留值 ≤ 64 KiB」失效。收口的两条退回支路
+/// 都经过 `retain_raw_payload`，故这里一并钉住多字节形状。
+#[test]
+fn payload_retention_holds_for_multibyte_payloads() {
+    let typed = serde_json::json!({ "text": "中".repeat(70_000) });
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "多字节 typed 载荷收口后必须 ≤ 64 KiB，实测 {}",
+        typed_bytes(&capped)
+    );
+    let oversized_raw = serde_json::json!({ "text": "中".repeat(70_000) });
+    let (retained, encoded, truncated, ..) = redaction::retain_raw_payload(oversized_raw);
+    assert!(truncated);
+    assert!(
+        encoded.len() <= redaction::MAX_CANONICAL_RAW_BYTES
+            && typed_bytes(&retained) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "raw 保留值必须按字节 ≤ 64 KiB（原实现按字符切 ⇒ 汉字放大 3×），实测 {}",
+        encoded.len()
+    );
+}
+
+/// #380-b：L3 裁剪必须按**单元自己记录的方案**重折。
+///
+/// 方案 v2 起，同一批累积式工具拍在 v1 下折不出 `tool-run`（字节不同）——若裁剪一律用当前
+/// 方案重折，v1 单元会永远 `ShaMismatch`（保留行、永久跳过 ⇒ 迁移停摆）。这条用例锁两件事：
+/// ①记 v1 + 按 v1 算的 sha ⇒ 正常裁剪；②记 v1 却拿着 v2 的 sha ⇒ mismatch 保行（不误删）。
+#[test]
+fn rollup_trim_refolds_with_the_scheme_recorded_on_the_unit() {
+    let repo = repo();
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    let tool_beat = |sequence: i64, text: &str| {
+        parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            sequence,
+            "tool.call.updated",
+            serde_json::json!({ "update": { "sessionUpdate": "tool_call_update", "toolCallId": "call-1",
+                "content": [{ "type": "text", "text": text }] } }),
+        ))
+        .unwrap()
+    };
+    let rows = vec![
+        tool_beat(1, "aaa"),
+        tool_beat(2, "aaaaaa"),
+        parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            3,
+            "turn.completed",
+            serde_json::json!({ "update": { "sessionUpdate": "done" } }),
+        ))
+        .unwrap(),
+    ];
+    repo.append_events(&rows, None).unwrap();
+
+    let v1 = crate::turn_rollup::fold_turn_rows_with_scheme(&rows, Some("adjacent-delta-fold-v1"));
+    let v2 = crate::turn_rollup::fold_turn_rows_with_scheme(&rows, Some("adjacent-delta-fold-v2"));
+    assert_ne!(
+        v1.content_sha256, v2.content_sha256,
+        "该语料在两个方案下必须折出不同字节"
+    );
+
+    let unit_row = |sequence: i64, sha: &str, segments: serde_json::Value| {
+        let mut unit_value = event_json(
+            "peri",
+            "local:s1",
+            sequence,
+            "turn.unit",
+            serde_json::json!({ "kind": "turn-unit" }),
+        );
+        unit_value["typedPayload"] = serde_json::json!({
+            "aggregateKind": "turn-rollup",
+            "seqStart": 1,
+            "seqEnd": 3,
+            "foldedCount": 3,
+            "foldScheme": "adjacent-delta-fold-v1",
+            "contentSha256": sha,
+            "terminal": { "eventType": "turn.completed", "occurredAt": "2026-08-14T00:00:00.000Z" },
+            "segments": segments,
+        });
+        parse_canonical_event(&unit_value).unwrap()
+    };
+
+    // ②记 v1 但 sha 来自 v2 ⇒ 不匹配，保行（证明不是「认识 v1 就无脑放行」）
+    repo.append_events(
+        &[unit_row(4, v2.content_sha256.as_str(), v2.segments.clone())],
+        Some(3),
+    )
+    .unwrap();
+    let mismatched = repo.rollup_trim(None).unwrap();
+    assert_eq!(mismatched.mismatch_units, 1, "方案与 sha 不符必须保行");
+
+    // ①记 v1 且 sha 按 v1 算 ⇒ 按记录的方案重折通过，行被裁剪
+    repo.append_events(
+        &[unit_row(5, v1.content_sha256.as_str(), v1.segments.clone())],
+        Some(4),
+    )
+    .unwrap();
+    let report = repo.rollup_trim(None).unwrap();
+    assert_eq!(report.trimmed_units, 1, "v1 单元按 v1 重折必须通过并裁剪");
+    let remaining = repo.list_events(&owner_key, None, 100).unwrap();
+    let plain_rows = remaining
+        .events
+        .iter()
+        .filter(|e| e.event_type != "turn.unit")
+        .count();
+    assert_eq!(plain_rows, 0, "覆盖行已删除");
 }

@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { reportRuntimeDiagnostic, resolveRuntimeErrors } from '../runtimeError.ts'
+import { reportRuntimeDiagnostic, resolveRuntimeErrors } from '../app/runtimeError.ts'
 
 interface Props { children: ReactNode; sheetId: string }
 interface State { error: Error | null }
@@ -23,7 +23,6 @@ export default class SheetErrorBoundary extends Component<Props, State> {
       key: `sheet-render:${this.props.sheetId}`,
       scope: { kind: 'sheet', id: this.props.sheetId },
       source: 'sheet.boundary',
-      recovery: { kind: 'open-runtime-log', sheetId: this.props.sheetId },
     })
   }
 

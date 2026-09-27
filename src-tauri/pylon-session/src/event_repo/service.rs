@@ -1,29 +1,174 @@
 //! 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use super::draft::{DraftCommitChunk, DraftFragment, DraftFragmentInput};
 use super::normalize::{mark_replay_import, normalize_kernel_event, parse_canonical_event};
 use super::repo::{EventRepo, RollupTrimReport};
 use super::row::{
-    CanonicalEventRawExport, CanonicalEventRow, EventAppendResult, EventPage, EventSearchOwner,
-    KernelEventInput, ReplayJournalIngestResult,
+    CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult, EventPage,
+    EventSearchOwner, KernelEventInput, ReplayJournalIngestResult,
 };
 use super::EventError;
 use crate::owner::DurableSessionOwner;
 
+/// #376：读出口收口——IPC 边界专用。`turn.unit` **豁免**：单元行的载荷是整段历史
+/// 的**唯一**副本（入库 raw 只是占位对象），收口即丢正文；被它覆盖的行本就已不下发，
+/// 收口等于把这一回合从历史上抹掉。
+fn cap_typed_payload_row(row: &mut CanonicalEventRow, enabled: bool) {
+    if !enabled || row.event_type == crate::turn_rollup::TURN_UNIT_EVENT_TYPE {
+        return;
+    }
+    if let Some(typed) = row.typed_payload.take() {
+        row.typed_payload = Some(super::redaction::retain_typed_payload(typed));
+    }
+}
+
 /// 事件仓库 service：spawn_blocking 边界 + DTO 透传（镜像 MessageService）。
 pub struct EventService {
     pub(super) repo: Arc<EventRepo>,
+    active_drafts: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl EventService {
+    pub async fn keep_interrupted_draft(
+        &self,
+        owner_key: String,
+        draft_id: String,
+    ) -> Result<EventAppendResult, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            if active.contains(&(owner_key.clone(), draft_id.clone())) {
+                return Err(EventError::DraftPending(owner_key));
+            }
+            repo.keep_interrupted_draft(&owner_key, &draft_id)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft keep task failed: {error}")))?
+    }
+
+    pub async fn discard_interrupted_draft(
+        &self,
+        owner_key: String,
+        draft_id: String,
+    ) -> Result<bool, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            if active.contains(&(owner_key.clone(), draft_id.clone())) {
+                return Err(EventError::DraftPending(owner_key));
+            }
+            repo.discard_interrupted_draft(&owner_key, &draft_id)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft discard task failed: {error}")))?
+    }
+
+    /// 已存 draft 前缀与同 run 的内存尾部一起收口；正式历史和片段清理同事务。
+    pub async fn commit_draft_events(
+        &self,
+        owner: DurableSessionOwner,
+        remote_session_id: Option<String>,
+        client_generation: u64,
+        draft_id: String,
+        chunks: Vec<DraftCommitChunk>,
+    ) -> Result<EventAppendResult, EventError> {
+        let client_generation = i64::try_from(client_generation)
+            .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
+        let inputs = chunks
+            .into_iter()
+            .map(|chunk| KernelEventInput {
+                owner: owner.clone(),
+                remote_session_id: remote_session_id.clone(),
+                client_generation,
+                received_at: chunk.received_at,
+                raw_payload: chunk.raw_payload,
+                recovery_import: false,
+            })
+            .collect();
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let owner_key = owner
+                .key()
+                .map_err(|error| EventError::Invalid(error.to_string()))?;
+            let result = repo.commit_draft_events(inputs, &draft_id)?;
+            active.remove(&(owner_key, draft_id));
+            Ok(result)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft commit task failed: {error}")))?
+    }
+
+    /// 在途片段独立持久化；返回经过落盘同款脱敏的片段供成功后发布。
+    pub async fn append_draft_fragment(
+        &self,
+        input: DraftFragmentInput,
+    ) -> Result<DraftFragment, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let mut fragment = repo.append_draft_fragment(input)?;
+            active.insert((fragment.owner_key.clone(), fragment.draft_id.clone()));
+            fragment.interrupted = false;
+            Ok(fragment)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft append task failed: {error}")))?
+    }
+
+    /// 专用冷挂载 seam；调用方不得把结果混进 evt_* 历史游标。
+    pub async fn list_draft_fragments(
+        &self,
+        owner_key: String,
+    ) -> Result<Vec<DraftFragment>, EventError> {
+        let repo = self.repo.clone();
+        let active = self.active_drafts.clone();
+        tokio::task::spawn_blocking(move || {
+            let active = active
+                .lock()
+                .map_err(|_| EventError::Unavailable("draft registry lock poisoned".into()))?;
+            let mut fragments = repo.list_draft_fragments(&owner_key)?;
+            for fragment in &mut fragments {
+                fragment.interrupted =
+                    !active.contains(&(fragment.owner_key.clone(), fragment.draft_id.clone()));
+            }
+            Ok(fragments)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("draft read task failed: {error}")))?
+    }
+
+    /// Dispatcher exited without committing this run (crash, generation switch).
+    /// The stored fragments remain durable and become user-resolvable.
+    pub fn abandon_draft(&self, owner_key: &str, draft_id: &str) {
+        if let Ok(mut active) = self.active_drafts.lock() {
+            active.remove(&(owner_key.to_owned(), draft_id.to_owned()));
+        }
+    }
+
     /// 打开（或创建）生产仓库并迁移到最新 schema。调用方须先创建 DB 父目录；
     /// 失败返回 Err——启动路径不得静默回退。
     pub fn open_db(path: &Path) -> Result<EventService, EventError> {
         let repo = EventRepo::open(path)?;
         Ok(EventService {
             repo: Arc::new(repo),
+            active_drafts: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -33,6 +178,7 @@ impl EventService {
         let repo = EventRepo::open_in_memory()?;
         Ok(EventService {
             repo: Arc::new(repo),
+            active_drafts: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -58,18 +204,21 @@ impl EventService {
 
     /// Kernel ingest boundary：sequence/revision 在 repository transaction 内分配，
     /// 返回 committed row，供 dispatcher 在 durable append 后发布 projection。
+    ///
+    /// #334/P2：payload 归一为 `Arc<Value>` 共享语义（`impl Into` 收口——dispatcher
+    /// 热路径传 `Arc` 与发布侧共享同一份，冷路径调用方传 `Value` 原地包装）。
     pub async fn ingest_event(
         &self,
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
         client_generation: u64,
-        raw_payload: serde_json::Value,
+        raw_payload: impl Into<std::sync::Arc<serde_json::Value>>,
     ) -> Result<EventAppendResult, EventError> {
         self.ingest_events(
             owner,
             remote_session_id,
             client_generation,
-            vec![raw_payload],
+            vec![raw_payload.into()],
         )
         .await
     }
@@ -83,7 +232,7 @@ impl EventService {
         owner: DurableSessionOwner,
         remote_session_id: Option<String>,
         client_generation: u64,
-        raw_payloads: Vec<serde_json::Value>,
+        raw_payloads: Vec<std::sync::Arc<serde_json::Value>>,
     ) -> Result<EventAppendResult, EventError> {
         let client_generation = i64::try_from(client_generation)
             .map_err(|_| EventError::Invalid("client generation exceeds i64".into()))?;
@@ -159,7 +308,8 @@ impl EventService {
                         remote_session_id: remote_session_id.clone(),
                         client_generation,
                         received_at: received_at.clone(),
-                        raw_payload,
+                        // 回放导入为冷路径，共享包装仅为对齐 KernelEventInput 契约。
+                        raw_payload: std::sync::Arc::new(raw_payload),
                         recovery_import: true,
                     },
                     i64::try_from(index + 1).map_err(|_| {
@@ -220,18 +370,27 @@ impl EventService {
     }
 
     /// 游标分页读取（最新页 before_seq=null；limit 缺省 100）。
+    ///
+    /// `cap_typed_payload` 为 #376 的读出口收口开关：true 时把 typed 载荷的字符串
+    /// 叶子按 `MAX_CANONICAL_RAW_BYTES` 同一条线收缩（IPC 边界专用）。宿主内部读
+    /// （证据回读、prompt 断言）传 false——它们要与入库行逐字段比对，且不经 IPC。
     pub async fn list_events(
         &self,
         owner_key: String,
         before_sequence: Option<i64>,
         limit: u32,
+        cap_typed_payload: bool,
     ) -> Result<EventPage, EventError> {
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.list_events(&owner_key, before_sequence, limit))
-            .await
-            .map_err(|error| {
-                EventError::Unavailable(format!("event repo list task failed: {error}"))
-            })?
+        tokio::task::spawn_blocking(move || {
+            let mut page = repo.list_events(&owner_key, before_sequence, limit)?;
+            for row in &mut page.events {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(page)
+        })
+        .await
+        .map_err(|error| EventError::Unavailable(format!("event repo list task failed: {error}")))?
     }
 
     /// #51 收口：写入侧幂等判定的读支撑——owner journal 里最新一条指定类型事件。
@@ -248,17 +407,48 @@ impl EventService {
             })?
     }
 
-    /// #81 L2：compact 读（单元 + 未覆盖行；文档投影/搜索的读取入口）。
+    /// #81 L2 / #376-b：compact 读**分页**（单元 + 未覆盖行；升序、前向游标）。
+    /// `cap_typed_payload` 语义同 `list_events`。
+    pub async fn load_events_compact_page(
+        &self,
+        owner_key: String,
+        after_sequence: Option<i64>,
+        limit: u32,
+        cap_typed_payload: bool,
+    ) -> Result<CompactEventPage, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut page = repo.load_events_compact_page(&owner_key, after_sequence, limit)?;
+            for row in &mut page.events {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(page)
+        })
+        .await
+        .map_err(|error| {
+            EventError::Unavailable(format!("event repo compact task failed: {error}"))
+        })?
+    }
+
+    /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
+    /// `cap_typed_payload` 语义同 `list_events`。
     pub async fn load_events_compact(
         &self,
         owner_key: String,
+        cap_typed_payload: bool,
     ) -> Result<Vec<CanonicalEventRow>, EventError> {
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.load_events_compact(&owner_key))
-            .await
-            .map_err(|error| {
-                EventError::Unavailable(format!("event repo compact task failed: {error}"))
-            })?
+        tokio::task::spawn_blocking(move || {
+            let mut rows = repo.load_events_compact(&owner_key)?;
+            for row in &mut rows {
+                cap_typed_payload_row(row, cap_typed_payload);
+            }
+            Ok(rows)
+        })
+        .await
+        .map_err(|error| {
+            EventError::Unavailable(format!("event repo compact task failed: {error}"))
+        })?
     }
 
     /// #81 L3：裁剪迁移（应用关闭时调用；budget_ms 控制单次预算，可续跑）。
@@ -308,5 +498,58 @@ impl EventService {
             .map_err(|error| {
                 EventError::Unavailable(format!("event repo search task failed: {error}"))
             })?
+    }
+}
+
+#[cfg(test)]
+mod draft_status_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn live_draft_cannot_be_resolved_until_dispatcher_abandons_it() {
+        let service = EventService::in_memory().unwrap();
+        let owner = DurableSessionOwner::new("p", "a", "local:s");
+        let owner_key = owner.key().unwrap();
+        service.append_draft_fragment(DraftFragmentInput {
+            owner, draft_id: "run-1".into(), fragment_index: 0,
+            client_generation: 1, remote_session_id: Some("remote-s".into()),
+            event_type: "assistant.text.delta".into(), identity: None,
+            raw_payload: vec![serde_json::json!({
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "partial"}}
+            })],
+            first_received_at: "2026-09-25T00:00:00.000Z".into(),
+        }).await.unwrap();
+        assert!(
+            !service
+                .list_draft_fragments(owner_key.clone())
+                .await
+                .unwrap()[0]
+                .interrupted
+        );
+        assert_eq!(
+            service
+                .keep_interrupted_draft(owner_key.clone(), "run-1".into())
+                .await
+                .unwrap_err()
+                .code(),
+            "draft_pending",
+        );
+        service.abandon_draft(&owner_key, "run-1");
+        assert!(
+            service
+                .list_draft_fragments(owner_key.clone())
+                .await
+                .unwrap()[0]
+                .interrupted
+        );
+        assert_eq!(
+            service
+                .keep_interrupted_draft(owner_key, "run-1".into())
+                .await
+                .unwrap()
+                .events
+                .len(),
+            1
+        );
     }
 }

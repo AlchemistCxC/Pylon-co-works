@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createPluginLogger,
   createSettingsSurface,
+  defineManifest,
   definePlugin,
   PYLON_PLUGIN_API_VERSION,
   validatePluginManifest,
@@ -21,7 +22,7 @@ const manifest = {
   hotSwap: { mode: 'parallel' as const },
 }
 
-describe('Pylon API 1.0 SDK', () => {
+describe('Pylon plugin SDK', () => {
   it('defines the package lifecycle without old contribution or trust declarations', async () => {
     const activate = vi.fn()
     const module = definePlugin({ activate })
@@ -42,12 +43,21 @@ describe('Pylon API 1.0 SDK', () => {
     })).toThrow(/trust.*API 1\.0/)
   })
 
-  it('api 按 allowlist 接受 1.0/1.1/1.2/1.3，拒绝未知更高版本', () => {
+  it('api 按 allowlist 接受 1.0–1.3 与 2.0–2.4，拒绝未知更高版本', () => {
     const base = { ...manifest }
-    expect(validatePluginManifest({ ...base, api: '1.1' }).api).toBe('1.1')
-    expect(validatePluginManifest({ ...base, api: '1.2' }).api).toBe('1.2')
-    expect(validatePluginManifest({ ...base, api: '1.3' }).api).toBe('1.3')
-    expect(() => validatePluginManifest({ ...base, api: '1.4' })).toThrow(/api 仅支持 1\.0\/1\.1\/1\.2\/1\.3/)
+    for (const accepted of ['1.1', '1.2', '1.3', '2.0', '2.1', '2.2', '2.3', '2.4'] as const) {
+      expect(validatePluginManifest({ ...base, api: accepted }).api).toBe(accepted)
+    }
+    expect(() => validatePluginManifest({ ...base, api: '1.4' })).toThrow(/api 仅支持/)
+    expect(() => validatePluginManifest({ ...base, api: '2.5' })).toThrow(/api 仅支持/)
+  })
+
+  it('defineManifest 声明即校验并冻结 manifest', () => {
+    const defined = defineManifest(manifest)
+    expect(defined).toEqual(manifest)
+    expect(Object.isFrozen(defined)).toBe(true)
+    expect(() => defineManifest({ ...manifest, api: '2.5' } as never)).toThrow(/api 仅支持/)
+    expect(() => defineManifest({ ...manifest, kind: 'nope' } as never)).toThrow(/kind/)
   })
 
   it('creates a plugin logger with the id prefix', () => {

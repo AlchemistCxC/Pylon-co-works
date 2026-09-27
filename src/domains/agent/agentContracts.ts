@@ -70,10 +70,11 @@ export interface InteractionResponseIdentity {
   clientGeneration: number
 }
 
-/** interaction 应答（approval 用 optionId；clarify/ask-user 未来用 text/values）。 */
+/** interaction 应答（approval 用 optionId；ask-user/elicitation 用 text/values）。
+ * #316：values 放宽到 JSON 标量——elicitation form 的 number/boolean 字段原样进 content。 */
 export interface InteractionResponseAnswer {
   optionId?: string
-  values?: Record<string, string | string[]>
+  values?: Record<string, string | number | boolean | string[]>
   text?: string
 }
 

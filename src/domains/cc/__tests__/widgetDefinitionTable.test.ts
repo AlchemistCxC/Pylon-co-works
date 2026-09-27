@@ -25,8 +25,8 @@ import {
   CC_LAYOUT_SCHEMA_VERSION,
   DEFAULT_CC_LAYOUT,
   type CcLayoutWidgetId,
-} from '../../../ccLayoutState.ts'
-import { resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
+} from '../ccLayoutState.ts'
+import { resolveVisibleStatusWidgetCount } from '../ccHeightState.ts'
 import { ZONE_FIELDS, CC_MEMBER_FIELDS, type ThemeFieldKey } from '../../../themeFieldDefs.ts'
 
 /**
@@ -66,9 +66,13 @@ function fieldOwners(): Map<string, string[]> {
 }
 
 describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () => {
-  it('79 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
+  // ★ #266 CC-07：`sendVariant` / `inputShowPlaceholder` / `prismOnColor` / `pillText` 四字段删除
+  //   ⇒ cc 字段 79 → 75（`tokens` 元件的两个字段全删、输入栏少一项、发送按钮少一项）。
+  // ★ #266 刀7~13：再删 7 项（`cliLinePadding` / `cliContentOffsetY` / `inputMode` / `inputVariant` /
+  //   `cliOverflowMode` / `footerLayout` / `inputMinHeight`）⇒ cc 字段 75 → **68**。
+  it('68 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(79)
+    expect(ccFields).toHaveLength(68)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -83,23 +87,25 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       group.members.reduce((sum, member) => sum + fieldsOf(member).length, 0),
     ]))
     expect(counts).toEqual({
-      'cc-surface': 8,
-      input: 33,
+      'cc-surface': 7,
+      input: 26,
       model: 7,
       reasoning: 7,
       mode: 9,
-      tokens: 2,
+      tokens: 0,
       'cc-command-hint': 2,
-      'cc-send-button': 9,
+      'cc-send-button': 8,
     })
     // ★ #238 刀3：`footerLayout` 由系统桶转入容器行（归属转移，字段与实现不动）⇒ 系统桶 7 → 6
     // ★ #238 刀5：桶里三项（ccStatusFontSize / statusBg / statusBgImage）删除 ⇒ 6 → 3；
     //   命令行提示的字号 `ccHintFontSize` 由 `cc-command-hint` 成员自己认领（成员计数 1 → 2）。
     // ★ #238 刀7：`ccScale`（缩放）整体删除 ⇒ 系统桶 3 → 2；它原本就**不属于任何成员**（跨元件系统字段）。
     // ★ #238 刀8：`ccVariant`（整体风格）整体删除 ⇒ 容器行成员计数 9 → **8**（它属「中控本体面」成员）。
+    // ★ #266 CC-07：四字段删除 ⇒ 输入栏 33 → 32、用量 2 → 0、发送按钮 9 → 8；cc 总数 79 → 75。
+    // ★ #266 刀7~13：容器行 8 → 7（`footerLayout`）、输入栏 32 → 26（六项）、总数 75 → **68**。
     expect(CC_SYSTEM_FIELDS).toHaveLength(2)
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(79)
+    expect(total).toBe(68)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -114,18 +120,18 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
       Object.fromEntries(Object.entries(entries).map(([member, keys]) => [member, [...keys].sort()]))
     const map = asSet(Object.fromEntries(memberRows.map(({ group, member }) => [`${group.id}/${member.id}`, fieldsOf(member)])))
     expect(map).toEqual(asSet({
-      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage', 'footerLayout'],
+      'cc-surface/surface-body': ['ccHeight', 'ccMarginX', 'ccMarginBottom', 'ccRadius', 'ccBg', 'ccSurfaceOpacity', 'ccBgImage'],
       'input/textarea': [
         'inputOffsetTop', 'inputHeight', 'inputMarginX',
         'inputSurfaceBg', 'inputSurfaceOpacity', 'inputFocusRingEnabled', 'inputFocusRingColor',
         'inputHighlightOpacity', 'inputShadowEnabled', 'inputBg', 'inputBgImage',
-        'inputTextColor', 'inputPlaceholder', 'inputShowPlaceholder',
+        'inputTextColor', 'inputPlaceholder',
         'inputBorderColor', 'inputFocusBorder', 'inputBorder', 'inputBorderWidth', 'inputBorderOpacity',
-        'inputRadius', 'inputFontSize', 'inputLineHeight', 'inputMinHeight',
-        'inputMode', 'inputVariant', 'cliTextColor', 'cliContentOffsetY', 'cliOverflowMode',
+        'inputRadius', 'inputFontSize', 'inputLineHeight',
+        'cliTextColor',
       ],
       'input/cli-prefix': ['cliPromptColor'],
-      'input/cli-lines': ['cliLineWidth', 'cliLineColor', 'cliLinePadding'],
+      'input/cli-lines': ['cliLineWidth', 'cliLineColor'],
       'input/command-palette': [],
       'input/history-hint': ['inputShowHistoryHint'],
       'input/prediction': [],
@@ -141,9 +147,9 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
         'permissionRadius', 'permissionFontSize', 'permissionTextColor', 'modeAutoColor', 'modeEditColor',
       ],
       'mode/menu': [],
-      'tokens/pill': ['pillText', 'prismOnColor'],
+      'tokens/pill': [],
       'cc-command-hint/hint-line': ['cliHintMode', 'ccHintFontSize'],
-      'cc-send-button/button': ['inputSubmitButtonMode', 'sendButtonColor', 'sendButtonRadius', 'sendButtonBorderColor', 'sendVariant'],
+      'cc-send-button/button': ['inputSubmitButtonMode', 'sendButtonColor', 'sendButtonRadius', 'sendButtonBorderColor'],
       'cc-send-button/icon': ['sendButtonIcon', 'sendButtonIconGenerating', 'sendButtonIconRound', 'sendButtonIconColor'],
     }))
   })
@@ -372,10 +378,12 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
   it('每个控件的属性表单字段集与顺序逐条不变', () => {
     const strip = (id: string) => WIDGET_PROPERTY_FIELDS[id as keyof typeof WIDGET_PROPERTY_FIELDS]
       .map(field => field.kind === 'section' ? `section:${field.title}` : `${field.kind}:${field.key}`)
+    // ★ #266 刀7/刀9/刀13：`number:cliLinePadding` / `chips:inputMode` / `number:inputMinHeight`
+    //   三项已随字段删除退场（顺序不变，仍是表里的声明序）。
     expect(strip('input')).toEqual([
       'section:输入栏设置', 'color:inputBg', 'color:inputTextColor',
-      'number:inputFontSize', 'number:inputMinHeight', 'chips:inputMode',
-      'number:cliLineWidth', 'color:cliLineColor', 'number:cliLinePadding',
+      'number:inputFontSize',
+      'number:cliLineWidth', 'color:cliLineColor',
     ])
     expect(strip('model')).toEqual([
       'section:模型控件', 'chips:modelSwitchMode', 'color:modelBgColor',
@@ -395,21 +403,20 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
     expect(strip('tokens')).toEqual([])
   })
 
-  it('命令行边框三项不再带 showIf（两模式常态显示）', () => {
+  it('命令行边框两项仍在表里，且属性项一律常态显示（条件显示机制已整体退场）', () => {
     // ★ 2026-09-23 用户口径：「不要这个判明条件，常态显示，预设里我手动改」
-    //   ⇒ 原三条 `showIf: t => t.inputMode === 'cli'` 删除。这条断言的**靶子反了过来**：
-    //   原先锁"仍带 showIf"，现在锁"还在表里、且一个条件都没有"。
+    //   ⇒ 原三条 `showIf: t => t.inputMode === 'cli'` 删除。
+    // ★ #266 刀9：`inputMode` 字段删除后，属性表单的 `showIf` **属性本身**也一并撤掉
+    //   （它的上下文类型就是 `Pick<ThemeSettings,'inputMode'>`）⇒ 本用例改成锁两件事：
+    //   ① 两项仍在表里（撤条件 ≠ 删项）；② 表里任何一项都不带条件显示（机制不存在了）。
     const fields = WIDGET_PROPERTY_FIELDS.input.filter(field => field.kind !== 'section')
-    for (const key of ['cliLineWidth', 'cliLineColor', 'cliLinePadding'] as const) {
-      const field = fields.find(candidate => candidate.key === key)
-      expect(field, `${key} 不该从属性表单里消失（撤条件 ≠ 删项）`).toBeDefined()
-      expect(field && 'showIf' in field ? field.showIf : undefined, `${key} 不该再带条件显示`).toBeUndefined()
+    for (const key of ['cliLineWidth', 'cliLineColor'] as const) {
+      expect(fields.find(candidate => candidate.key === key), `${key} 不该从属性表单里消失`).toBeDefined()
     }
-    // 全表零 showIf：这条路已撤，防回摆（有人再挂一条即红）
     const withShowIf = Object.values(WIDGET_PROPERTY_FIELDS)
       .flat()
-      .filter(field => field.kind !== 'section' && field.showIf)
-    expect(withShowIf).toEqual([])
+      .filter(field => field.kind !== 'section' && 'showIf' in field)
+    expect(withShowIf, '属性项不该再有条件显示（机制已删，防回摆）').toEqual([])
   })
 
   it('属性表单指向的字段必须由本组的某个成员拥有（挂错成员即红）', () => {
@@ -419,11 +426,9 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
       for (const field of group.propertyFields ?? []) {
         if (field.kind === 'section') continue
         if (!owned.has(field.key)) violations.push(`${group.id}: ${field.key}`)
-        if (field.kind === 'chips') {
-          for (const option of field.options) {
-            if (option.sync && !owned.has(option.sync.key)) violations.push(`${group.id}: sync ${option.sync.key}`)
-          }
-        }
+        // ★ #266 刀9：chips 选项上的 `sync`（inputMode↔inputVariant 双写）已随字段删除；
+        //   此处不再校验 sync 目标归属（属性已不存在 ⇒ 校验无从谈起）。
+        if (field.kind === 'chips' && 'sync' in field) violations.push(`${group.id}: chips 不该再带 sync`)
       }
     }
     expect(violations).toEqual([])

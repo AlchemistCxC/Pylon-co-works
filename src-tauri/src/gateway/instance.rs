@@ -102,7 +102,6 @@ impl InstanceState {
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 use tokio::task::JoinHandle;
@@ -153,17 +152,10 @@ impl GatewayInstanceError {
     }
 }
 
-/// B1.2：结构化错误 wire `{ code, message }`（typed IPC——Tauri command 直接返回
-/// `Result<T, GatewayInstanceError>`，前端按 code 分支，message 仅展示）。
-/// 与 MessageError/UserDataError 同形。
-impl Serialize for GatewayInstanceError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("code", self.code())?;
-        map.serialize_entry("message", &self.to_string())?;
-        map.end()
-    }
-}
+// B1.2：结构化错误 wire `{ code, message }`（typed IPC——Tauri command 直接返回
+// `Result<T, GatewayInstanceError>`，前端按 code 分支，message 仅展示）。
+// 与 MessageError/UserDataError 同形（#317 批次二：实现单源化到共享宏）。
+crate::error::impl_wire_code_message_serialize!(GatewayInstanceError);
 
 /// 内部生命周期状态机：在 wire [`InstanceStatus`]（4 态）之上补充 `Stopping`
 /// 中间态。wire 由 [`Self::to_wire`] 折叠（Stopping → Stopped），前端契约不变。

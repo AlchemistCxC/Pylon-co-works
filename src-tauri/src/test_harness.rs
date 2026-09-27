@@ -326,7 +326,7 @@ impl TestHarness {
                 crate::dispatcher::start_notification_dispatcher(
                     &handles,
                     &runtime,
-                    webview.clone(),
+                    webview.as_ref().window(),
                 );
             }
         }
@@ -513,7 +513,7 @@ impl TestHarness {
             .clone();
         let service = service.expect("boot installed in-memory event service");
         service
-            .list_events(owner_key.to_string(), None, 100)
+            .list_events(owner_key.to_string(), None, 100, false)
             .await
             .expect("journal readback")
             .events
@@ -598,7 +598,7 @@ impl TestHarness {
         crate::lifecycle::do_connect_and_replace(
             &handles,
             &runtime,
-            &self.window,
+            &self.window.as_ref().window(),
             &agent,
             None,
             crate::agent::runtime::AgentLifecycleStatus::Reconnecting,
@@ -860,6 +860,17 @@ impl TestHarness {
         .map_err(|error| error.to_string())
     }
 
+    /// 驱动 `cancel_prompt` 命令（#324 中性结算切片：停止按钮的真实产品路径）。
+    pub async fn cancel_prompt(&self, agent_id: &str, source: &str) -> Result<(), String> {
+        crate::session::cancel_prompt(
+            self.app.state::<crate::AppState>(),
+            agent_id.to_string(),
+            source.to_string(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
+
     /// 驱动 `new_session` 命令，返回会话创建响应 JSON。
     pub async fn new_session(
         &self,
@@ -931,7 +942,7 @@ impl TestHarness {
             .clone()
             .expect("boot installed in-memory event service");
         service
-            .list_events(owner_key.to_string(), None, limit)
+            .list_events(owner_key.to_string(), None, limit, false)
             .await
             .expect("journal readback")
             .events
@@ -1007,13 +1018,15 @@ impl TestHarness {
             .expect("active runtime for mapping");
         let mut recreated = None;
         let mapping = crate::session::ensure_session_mapping(
-            state.inner(),
-            &runtime,
-            source,
-            profile_id,
-            persona,
-            session_cwd,
-            &[],
+            &crate::session::SessionAssembly {
+                state: state.inner(),
+                runtime: &runtime,
+                source,
+                profile_id,
+                persona,
+                session_cwd,
+                wire_mcp_servers: &[],
+            },
             known_peri_id,
             &mut recreated,
         )

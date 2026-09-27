@@ -12,13 +12,44 @@ import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/s
 import { fallbackRenderCommands } from './solidBuiltinContentRenderer.solid.tsx'
 import type { SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { WorkbenchContentSlot } from './WorkbenchContentSlot.solid.tsx'
+import { createEntryMotion } from './entryMotion.solid.tsx'
 
 function safeDomId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, character => `%${character.charCodeAt(0).toString(16).padStart(4, '0')}%`)
 }
 
+/** Display-only receipt for the first result of a tool observed during a live turn. */
+function createResultReceipt(hasOutput: () => boolean, armAtMount: boolean): () => boolean {
+  const [visible, setVisible] = createSignal(false)
+  let previousOutput = untrack(hasOutput)
+  let armed = armAtMount && !previousOutput
+  let clearReceipt: ReturnType<typeof setTimeout> | undefined
+  createEffect(() => {
+    const output = hasOutput()
+    if (armed && !previousOutput && output) {
+      armed = false
+      setVisible(true)
+      clearReceipt = setTimeout(() => {
+        clearReceipt = undefined
+        setVisible(false)
+      }, 760)
+    }
+    previousOutput = output
+  })
+  onCleanup(() => { if (clearReceipt !== undefined) clearTimeout(clearReceipt) })
+  return visible
+}
+
+function hasToolOutput(snapshot: ReturnType<typeof toolInvocationSnapshot>): boolean {
+  const result = snapshot?.result
+  return result !== undefined && (
+    result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
+  )
+}
+
 function CanonicalActivitySlot(props: {
   activity: WorkbenchActivityNode
+  entering?: () => boolean
   document: WorkbenchDocument
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
@@ -27,6 +58,13 @@ function CanonicalActivitySlot(props: {
   let unregisterTool = () => {}
   let observer: MutationObserver | undefined
   const toolSnapshot = () => props.activity.kind === 'tool' ? toolInvocationSnapshot(props.document, props.activity.id) : null
+  const resultReceipt = createResultReceipt(
+    () => hasToolOutput(toolSnapshot()),
+    untrack(() => props.activity.kind === 'tool'
+      && props.context.runtimeSnapshot().generating
+      && !props.context.input().replayReadonly
+      && !props.context.input().reducedMotion),
+  )
   const kind = () => activityRenderKind(props.activity, props.context)
   createEffect(() => {
     unregisterTool()
@@ -54,6 +92,8 @@ function CanonicalActivitySlot(props: {
       ref={root}
       class={`solid-workbench-activity-slot term-row ${props.activity.kind === 'tool' ? 'term-row-tool' : 'term-row-activity'}`}
       data-activity-id={props.activity.id}
+      data-entry={props.entering?.() ? 'new' : undefined}
+      data-result-receipt={resultReceipt() ? 'new' : undefined}
     >
       <WorkbenchContentSlot
         nodeId={`${props.document.sessionId}:${props.activity.id}`}
@@ -96,17 +136,23 @@ export function CanonicalActivityList(props: {
     const activities = props.activities
     if (!document) {
       setRows([])
+      expandedSessionId = undefined
       return
     }
-    if (expandedSessionId !== document.sessionId) {
+    const newSession = expandedSessionId !== document.sessionId
+    if (newSession) {
       expandedSessionId = document.sessionId
       setExpandedGroups({})
     }
     const previous = new Map(untrack(rows).map(row => [row.key, row]))
+    const animateNew = untrack(() => !newSession
+      && props.context.runtimeSnapshot().generating
+      && !props.context.input().replayReadonly
+      && !props.context.input().reducedMotion)
     setRows(activities.map(activity => {
       const key = `${document.sessionId}:${activity.id}`
       const existing = previous.get(key)
-      if (!existing) return createStableActivityRow(key, activity)
+      if (!existing) return createStableActivityRow(key, activity, animateNew && activity.kind === 'tool')
       existing.update(activity)
       return existing
     }))
@@ -163,6 +209,7 @@ export function CanonicalActivityList(props: {
         }
         return <CanonicalActivitySlot
           activity={unit.activity}
+          entering={unit.entering}
           document={document()}
           context={props.context}
           connectorPort={props.connectorPort}
@@ -191,12 +238,11 @@ function CanonicalActivityGroup(props: {
     const snapshot = lastSnapshot()
     return normalizeToolStatus(snapshot?.status ?? snapshot?.result?.status ?? lastActivity().status)
   }
-  const hasOutput = () => {
-    const result = lastSnapshot()?.result
-    return result !== undefined && (
-      result.parts !== undefined || result.rawOutput !== undefined || result.error !== undefined
-    )
-  }
+  const hasOutput = () => hasToolOutput(lastSnapshot())
+  const resultReceipt = createResultReceipt(hasOutput, untrack(() =>
+    props.context.runtimeSnapshot().generating
+    && !props.context.input().replayReadonly
+    && !props.context.input().reducedMotion))
   const presentation = () => toolStatePresentation(state(), hasOutput())
   const label = () => {
     const snapshot = lastSnapshot()
@@ -233,6 +279,7 @@ function CanonicalActivityGroup(props: {
     }}
     data-group-status={group().status}
     data-last-tool-status={lastActivity().status}
+    data-result-receipt={resultReceipt() ? 'new' : undefined}
   >
     <button
       class="term-tool-head solid-workbench-activity-group-head"
@@ -314,14 +361,17 @@ function resolveActivitySlotId(kind: string, context: SolidWorkbenchContextValue
 interface StableActivityRow {
   readonly key: string
   readonly activity: WorkbenchActivityNode
+  entering(): boolean
   update(activity: WorkbenchActivityNode): void
 }
 
-function createStableActivityRow(key: string, initialActivity: WorkbenchActivityNode): StableActivityRow {
+function createStableActivityRow(key: string, initialActivity: WorkbenchActivityNode, entering: boolean): StableActivityRow {
   const [current, setCurrent] = createSignal(initialActivity)
+  const entry = createEntryMotion(entering)
   return {
     key,
     get activity() { return current() },
+    entering: entry,
     update: setCurrent,
   }
 }

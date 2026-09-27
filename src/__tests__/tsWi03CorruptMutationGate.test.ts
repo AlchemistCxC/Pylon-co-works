@@ -2,8 +2,8 @@
  * TS-WI03 RED：corrupt Session envelope 在用户确认修复前必须只读，普通 mutation 不得覆盖现场。
  */
 import { beforeEach, describe, expect, it } from 'vitest'
-import { SESSION_STORAGE_KEY } from '../sessionPersistence'
-import { useIdentityStore } from '../identityStore'
+import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
+import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
 
 const corruptRaw = JSON.stringify({ version: 99, sessions: [{ id: 'diagnostic-original' }] })

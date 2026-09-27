@@ -327,7 +327,7 @@ async fn build_pending_fixture(provider: &str, id_case: &IdCase, params: &str) -
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
     PendingFixture {
         app,
         runtime,
@@ -735,7 +735,7 @@ async fn case_a_number_id_pends_and_resolves_with_consistent_id_value() {
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
 
     wait_pending_id(
         &runtime,
@@ -833,7 +833,7 @@ async fn case_b_string_id_round_trip_echoes_original_variant() {
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
 
     // 证据 #2：string id 的 request_permission 被 wire 记录（窄化前原文保留）。
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -941,7 +941,7 @@ async fn case_e_string_id_invalid_params_answers_jsonrpc_error() {
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
 
     // 证据 #2：string id 的 request_permission 被 wire 记录（窄化前原文保留）。
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -1025,7 +1025,7 @@ async fn case_e2_number_id_invalid_params_answers_jsonrpc_error() {
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
 
     // 证据 #5：解析失败 = protocol error（number id 与 string id 语义一致）。
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -1090,7 +1090,7 @@ async fn case_f_number_id_pending_cancel_converges_to_cancelled() {
     let (app, window) = mock_app_with(state);
     let events = capture_events(&window, crate::event_names::INTERACTION);
     let _guard = install_log_layer(&logs);
-    start_notification_dispatcher(&handles, &runtime, window);
+    start_notification_dispatcher(&handles, &runtime, window.as_ref().window());
 
     // 挂起（session 映射源 source-f ↔ peri_id fake-session-f，cancel_prompt 依赖）。
     wait_pending_id(

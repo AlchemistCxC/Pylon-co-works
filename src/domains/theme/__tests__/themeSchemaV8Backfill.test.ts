@@ -3,7 +3,7 @@ import { DEFAULTS } from '../themeDefaults.ts'
 import { THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from '../migration.ts'
-import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT } from '../../../ccLayoutState.ts'
+import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 
 const defaults = {
   base: DEFAULTS,
@@ -110,8 +110,10 @@ describe('theme schema v11：中控名单换代（刀4）', () => {
       expect(migrated).not.toHaveProperty(key)
     }
     // 保留项不受牵连
-    expect(migrated.pillText).toBe(DEFAULTS.pillText)
-    expect(migrated.prismOnColor).toBe(DEFAULTS.prismOnColor)
+    // ★ #266 CC-07：原样本 `pillText` / `prismOnColor` 已随「用量胶囊」两字段删除
+    //   ⇒ 换成仍在的中控字段锁同一件事（保留下来的值原样穿过、不被这次删键牵连）。
+    expect(migrated.inputShowHistoryHint).toBe(DEFAULTS.inputShowHistoryHint)
+    expect(migrated.ccBg).toBe(DEFAULTS.ccBg)
   })
 
   it('legacy `send` 的 ccHidden 键迁移到注册轨 id；已删的 `ccScale` 不再被改名', () => {

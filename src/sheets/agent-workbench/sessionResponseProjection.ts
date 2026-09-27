@@ -4,7 +4,7 @@
  * ordering and deduplication; persisted field names and provenance stay intact.
  */
 import { createWorkbenchEnvelope, type JsonValue, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
-import { extractChoiceId, extractChoiceLabel, extractConfigOptionId, extractModeConfig, extractModelConfig, type SessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
+import { extractChoiceId, extractChoiceLabel, extractConfigOptionId, extractModeConfig, extractModelConfig, findConfigOption, type SessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -96,6 +96,7 @@ function mergeSessionResponseOptions(response: SessionResponseObject): readonly 
     .filter((item): item is JsonValue => item !== undefined)
   for (const synthetic of [syntheticSessionOption('model', response), syntheticSessionOption('mode', response)]) {
     if (!synthetic) continue
+    if (findConfigOption(options, synthetic.id === 'model' ? 'model' : 'mode')) continue
     const syntheticId = String(synthetic.id).toLowerCase()
     const index = options.findIndex(item => optionId(item)?.toLowerCase() === syntheticId)
     if (index < 0) {
@@ -139,18 +140,27 @@ function shortHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
+/**
+ * 一份会话响应（`new_session` / `load_persisted_session`）→ 工作台信封。
+ *
+ * `kind` 决定事件语义：建会话与复活都用 `session.started`（协商 + 就绪），中控写回执
+ * 用 `session.config-updated`。`syntheticReason` 是给事后取证看的**如实标注**——同一形状
+ * 的信封来自两条路径，混用一个理由会让溯源认错来源（#358）。
+ */
 export function createSessionResponseEnvelope(
   sessionId: string,
   provider: string,
   response: SessionResponseObject,
   sequence: number,
+  kind: 'session.started' | 'session.config-updated' = 'session.started',
+  syntheticReason = 'session-new-response',
 ): WorkbenchEventEnvelope {
   const model = extractModelConfig(response.configOptions, response).model
   const mode = extractModeConfig(response).mode
   const options = mergeSessionResponseOptions(response)
   const fingerprint = shortHash(sessionResponseProjectionKey(response))
   return createWorkbenchEnvelope({
-    eventId: `session-response:${sessionId}:${fingerprint}`,
+    eventId: `session-response:${sessionId}:${sequence}:${fingerprint}`,
     sessionId,
     sequence: Math.max(1, sequence),
     recordedAt: new Date().toISOString(),
@@ -161,11 +171,11 @@ export function createSessionResponseEnvelope(
       trust: 'authoritative',
       provider: provider || 'acp',
       orderConfidence: 'observed',
-      synthetic: { reason: 'session-new-response' },
+      synthetic: { reason: syntheticReason },
     },
     event: {
-      type: 'session.started',
-      status: 'ready',
+      type: kind,
+      ...(kind === 'session.started' ? { status: 'ready' } : {}),
       ...(model ? { model } : {}),
       ...(mode ? { mode } : {}),
       ...(options.length > 0 ? { options } : {}),

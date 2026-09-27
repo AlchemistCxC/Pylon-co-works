@@ -6,7 +6,7 @@
  * `connected` 早 ~2.4s，恢复必然失败并留下错误条；叠加 F4 即 #56 的完整现场。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Session } from '../../../identityStore.ts'
+import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const store = vi.hoisted(() => {
   const listeners = new Set<() => void>()
@@ -56,10 +56,10 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, isBrowserMockRuntime: () => false }))
-vi.mock('../../../runtimeStore.ts', () => ({
+vi.mock('../../../domains/runtime/runtimeStore.ts', () => ({
   useRuntimeStore: { getState: store.getState, subscribe: store.subscribe },
 }))
-vi.mock('../../../runtimeError.ts', () => ({
+vi.mock('../../../app/runtimeError.ts', () => ({
   reportRuntimeError: mocks.reportError,
   reportRuntimeDiagnostic: mocks.reportDiagnostic,
   resolveRuntimeErrors: mocks.resolveErrors,
@@ -87,7 +87,7 @@ vi.mock('../../../components/chat/chatReplayTrace.ts', () => ({
   replayErrorCode: () => 'replay-error',
   safeContentEvidence: () => ({}),
 }))
-vi.mock('../../../identityStore.ts', () => ({
+vi.mock('../../../domains/identity/identityStore.ts', () => ({
   useIdentityStore: {
     getState: () => ({
       profiles: [{ id: 'profile', name: 'profile', persona: 'persona', model: 'profile-model' }],
@@ -112,7 +112,8 @@ let loadResults: Array<() => Promise<unknown>>
 function makeInvoke(): Invoke {
   return async (cmd) => {
     calls.push(cmd)
-    if (cmd === 'evt_load_compact') return []
+    // #376-b：evt_load_compact 改成「一页」形态（前向游标；null = 已到最新）。
+    if (cmd === 'evt_load_compact') return { events: [], nextAfterSequence: null }
     if (cmd === 'evt_revision') return 0
     if (cmd === 'load_persisted_session') {
       const next = loadResults.shift()
@@ -193,6 +194,28 @@ describe('#110 F1 恢复等待 owner runtime 就绪', () => {
 
     await new AgentWorkbenchLifecycle().activate(session, { isCurrent: () => true })
     expect(calls.filter(cmd => cmd === 'load_persisted_session')).toHaveLength(1)
+  })
+
+  // #358：复活路径的协商目录必须交宿主投影进工作台文档（否则文档缺 `session.started`，
+  // 会话下方的持久配置卡在复活会话上消不掉）。未接线时（默认）静默跳过——其余用例即覆盖。
+  it('#358：load 成功把协商响应交给 onSessionLoadResponse', async () => {
+    store.setStatus('owner', { status: 'connected' })
+    loadResults.push(async () => ({
+      ...(await validLoadResult()),
+      response: { sessionId: 'peri-1', configOptions: [{ id: 'model', name: 'model', category: 'model', type: 'select', currentValue: 'fable' }] },
+    }))
+    const { AgentWorkbenchLifecycle } = await importLifecycle()
+    const lifecycle = new AgentWorkbenchLifecycle()
+    const onSessionLoadResponse = vi.fn()
+    lifecycle.onSessionLoadResponse = onSessionLoadResponse
+
+    await lifecycle.activate(session, { isCurrent: () => true })
+
+    expect(mocks.applyResponse).toHaveBeenCalledTimes(1)
+    expect(onSessionLoadResponse).toHaveBeenCalledTimes(1)
+    expect(onSessionLoadResponse).toHaveBeenCalledWith(session, expect.objectContaining({
+      configOptions: [expect.objectContaining({ id: 'model' })],
+    }))
   })
 
   it('会话切换（isCurrent 转假）时放弃等待，不发恢复请求也不报错', async () => {

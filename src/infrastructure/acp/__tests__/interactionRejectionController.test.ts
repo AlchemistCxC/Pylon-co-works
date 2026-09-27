@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearErrors, getErrors } from '../../../errorCenter.ts'
+import { clearErrors, getErrors } from '../../../app/errorCenter.ts'
 import {
   createInteractionRejectionController,
   normalizeInteractionRejection,
