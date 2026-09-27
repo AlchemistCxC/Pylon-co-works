@@ -221,13 +221,14 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
     /** #409：按 MutationRecord 增量维护观察集（added/removed 覆盖子树插入与移除）。 */
     const applyMutations = (records: MutationRecord[]) => {
       if (!resizeObserver) return
+      const ro = resizeObserver
       const observeIfFresh = (element: Element) => {
         if (observed.has(element)) return
-        resizeObserver.observe(element)
+        ro.observe(element)
         observed.add(element)
       }
       const unobserveIfKnown = (element: Element) => {
-        if (observed.delete(element)) resizeObserver.unobserve(element)
+        if (observed.delete(element)) ro.unobserve(element)
       }
       for (const record of records) {
         for (const node of record.addedNodes) {
