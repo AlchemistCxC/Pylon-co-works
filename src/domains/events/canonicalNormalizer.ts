@@ -200,6 +200,14 @@ export function normalizeRawEvent(raw: unknown, context: CanonicalNormalizeConte
       if (update?.[field] !== undefined) typedPayload[field] = update[field]
     }
   }
+  if (sessionUpdate === 'session_info_update') {
+    // 与内核 `event_repo::normalize` 同源：ACP `SessionInfoUpdate.title/updatedAt`
+    // 是 `MaybeUndefined`，键存在即落 typed（`null` 原样保留 = 显式清空），缺席不落。
+    // 压平任一侧都会让两栈对「Agent 要求清空标题」给出不同事实。
+    for (const field of ['title', 'updatedAt'] as const) {
+      if (update !== undefined && field in update) typedPayload[field] = update[field]
+    }
+  }
   const event = createCanonicalEvent({
     owner: context.owner,
     clientGeneration: context.clientGeneration,

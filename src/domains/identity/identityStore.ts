@@ -78,12 +78,30 @@ export interface Session {
   hooks: string[]
   /** M2：启用的 agent.commandSet 插件 id；缺省 = 全部已激活命令集插件（旧数据兼容）。 */
   commandSetPlugins?: string[]
+  /** Agent 给的会话标题（ACP `session_info_update.title` 投影）。存储以 Agent 为准：
+   *  每次收到标题都覆盖写，Agent 清空时回落到 `''`。显示见 `resolveSessionDisplayName`。 */
   autoName: string
+  /** 用户是否亲手改过 `name`。置真后显示恒以 `name` 为准，Agent 后续标题只更新
+   *  `autoName` 不再改显示（#393 裁决：显示优先用户、存储以 Agent 为主）。 */
+  renamedByUser?: boolean
   /** 插件只能经 scope-bound API 写自己的 key。 */
   metadata?: PluginNamespaceRoot
   context?: PluginNamespaceRoot
   /** 插件会话创建贡献在本地 Session 建立时编译出的不可变、可持久化快照。 */
   creationSnapshot?: SessionCreationSnapshot
+}
+
+/**
+ * 会话显示名（#393）：用户改过名 → `name`；否则 Agent 标题 `autoName` 优先；
+ * 都没有才回落到 `name`（本地生成的 `session-<base36>`）。
+ *
+ * 显示与存储是两个口径：`autoName` 始终以 Agent 为准（每帧覆盖写），用户改名只
+ * 置 `renamedByUser` 而不影响存储，Agent 也不会知道被改名（ACP 无 client→agent
+ * 改标题的方法，这条不对称已裁决接受）。
+ */
+export function resolveSessionDisplayName(session: Pick<Session, 'name' | 'autoName' | 'renamedByUser'>): string {
+  if (session.renamedByUser === true) return session.name
+  return session.autoName || session.name
 }
 
 export interface Turn {

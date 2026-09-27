@@ -190,6 +190,9 @@ export interface WorkbenchSessionSurface {
   readonly stopReason?: string
   readonly model?: string
   readonly mode?: string
+  /** Agent 给的会话标题（ACP `session_info_update.title`）。缺省 = 当前无名——
+   *  Agent 推 `title: null` 会被投影删键，所以这里不存在「空标题」中间态。 */
+  readonly title?: string
   readonly commands: readonly SessionCommand[]
   readonly options: readonly SessionConfigOption[]
   readonly usage?: UsageSnapshot
@@ -820,6 +823,7 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'session.model-updated':
     case 'session.mode-updated':
     case 'session.status-updated':
+    case 'session.title-updated':
     case 'session.completed':
       return reduceSession(document, envelope, event)
     case 'assist.prediction':
@@ -1407,6 +1411,11 @@ function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       ...(event.stopReason ? { stopReason: event.stopReason } : {}),
       ...(event.model ? { model: event.model } : {}),
       ...(event.mode ? { mode: event.mode } : {}),
+      // ACP `SessionInfoUpdate.title`：Agent 明确清空（null）时必须**删掉**这个键，
+      // 否则界面上的标题会一直挂着 Agent 已收回的名字。带值则覆盖。
+      ...(event.type === 'session.title-updated'
+        ? (event.title ? { title: event.title } : { title: undefined })
+        : {}),
       ...(event.commands ? { commands: normalizeSessionCommands(event.commands) } : {}),
       // An empty list advertises nothing, so it must not wipe the surface the
       // selectors read: this line replaces the whole list rather than merging into

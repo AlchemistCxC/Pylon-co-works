@@ -110,6 +110,8 @@ function normalizeLegacySession(value: unknown, profiles: PersistedProfile[]): L
     // 旧数据缺省 = 不落字段（resolver 按"全部 active"处理）；显式空数组不写回。
     ...(commandSetPlugins.length > 0 ? { commandSetPlugins } : {}),
     autoName: text(raw.autoName),
+    // 旧数据没有这个键 → 不落字段（缺省 = 用户没改过名，显示让位给 Agent 标题）。
+    ...(raw.renamedByUser === true ? { renamedByUser: true } : {}),
     ...(raw.metadata !== undefined ? { metadata: normalizePluginNamespaceRoot(raw.metadata) } : {}),
     ...(raw.context !== undefined ? { context: normalizePluginNamespaceRoot(raw.context) } : {}),
     ...(creationSnapshot ? { creationSnapshot } : {}),

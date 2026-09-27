@@ -46,6 +46,10 @@ export function resumePersistedSessionTransaction(
   deps.updateSession(id, {
     ...(source ? { source } : {}),
     ...(periId ? { periId } : {}),
+    // #393：存档 title 是 Agent 给的会话名（ACP `session/list` 的 `SessionInfo.title`），
+    // 落 `autoName` 而不是只当显示名——存储始终以 Agent 为准，用户改名只置
+    // `renamedByUser`，两条口径各走各的。
+    ...(title ? { autoName: title } : {}),
     lastActiveAt: updatedAt || Date.now(),
   })
   return { ok: true, value: id }

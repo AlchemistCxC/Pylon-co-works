@@ -229,6 +229,71 @@ fn kernel_ingest_session_info_update_carries_model_fact() {
     }
 }
 
+/// ACP `SessionInfoUpdate.title/updatedAt` 的三态（`MaybeUndefined`）必须原样进
+/// typed_payload：缺席 = 不改（键不落）、null/空白 = 清空（落 null）、值 = 设置。
+/// 压平任一侧都会让界面撤不回标题或把「不改」误当成「清空」。
+#[test]
+fn kernel_ingest_session_info_update_carries_title_tri_state() {
+    for (payload, expected) in [
+        (
+            serde_json::json!({"sessionUpdate": "session_info_update", "title": "Riccati 助手介绍"}),
+            Some(serde_json::json!("Riccati 助手介绍")),
+        ),
+        // 官方语义：显式 null = 清空。必须落键（落 null），不能被当成缺席。
+        (
+            serde_json::json!({"sessionUpdate": "session_info_update", "title": null}),
+            Some(serde_json::Value::Null),
+        ),
+        // 空白标题当清空处理——空标题不是标题。
+        (
+            serde_json::json!({"sessionUpdate": "session_info_update", "title": "   "}),
+            Some(serde_json::Value::Null),
+        ),
+        // 缺席 = 不修改：键不落。
+        (
+            serde_json::json!({"sessionUpdate": "session_info_update", "mode": "build"}),
+            None,
+        ),
+    ] {
+        let event = repo()
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "source": "local:s1",
+                "update": payload
+            })))
+            .expect("ingest")
+            .events
+            .remove(0);
+        let title = event
+            .typed_payload
+            .as_ref()
+            .and_then(|typed| typed.get("title"))
+            .cloned();
+        assert_eq!(title, expected, "payload {payload}");
+    }
+}
+
+/// `updatedAt` 与 `title` 同一口径（都是 `MaybeUndefined`），单独钉一条防只改一半。
+#[test]
+fn kernel_ingest_session_info_update_carries_updated_at() {
+    let event = repo()
+        .ingest_kernel_event(kernel_input(serde_json::json!({
+            "source": "local:s1",
+            "update": {
+                "sessionUpdate": "session_info_update",
+                "updatedAt": "2026-09-27T11:08:35.935003600+00:00"
+            }
+        })))
+        .expect("ingest")
+        .events
+        .remove(0);
+    let updated_at = event
+        .typed_payload
+        .as_ref()
+        .and_then(|typed| typed.get("updatedAt"))
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(updated_at, Some("2026-09-27T11:08:35.935003600+00:00"));
+}
+
 /// #110 F7：体检时库内 31 行 `unknown` 的真实 raw 形状（camelCase `{sessionId,
 /// update:{sessionUpdate}}` 通知包）必须被当前分类器正确识别——证明残留是旧构建的
 /// 历史错标，而不是现行分类缺口。用例形状逐字节取自只读取证样本。
