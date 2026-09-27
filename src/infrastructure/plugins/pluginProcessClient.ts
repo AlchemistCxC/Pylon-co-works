@@ -217,6 +217,8 @@ export function createPluginProcessClient(options: PluginProcessClientOptions) {
     async dispose(): Promise<void> {
       await this.terminate()
       handles.delete(this.processId)
+      // #409：进程消亡后早到事件缓冲不再有意义，不清则按 processId 只增不减。
+      earlyEvents.delete(this.processId)
       this.stdoutListeners.clear()
       this.stderrListeners.clear()
       this.exitListeners.clear()

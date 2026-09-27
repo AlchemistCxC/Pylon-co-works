@@ -6,7 +6,7 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { useDiagnosticErrors, useErrorHistory, type ErrorEntry } from '../app/errorCenter.ts'
 import { createRuntimeClient } from '../infrastructure/tauri/runtimeClient'
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
-import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
+import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, RUNTIME_LOG_RENDER_WINDOW, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 
 /**
@@ -75,6 +75,13 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
   const { levels, sources } = useMemo(() => collectRuntimeLogFacets(entries), [entries])
   const filtered = useMemo(() => filterRuntimeLogs(entries, filter), [entries, filter])
   const recentErrorHistory = useMemo(() => errorHistory.slice(0, 20), [errorHistory])
+  // #409：渲染窗口。过滤后的列表上限仍是 1000，错误风暴时每条增量都会全量
+  // reconcile 整个 <ul>；DOM 只物化最近 RENDER_WINDOW 条，更早的按需展开。
+  const [renderLimit, setRenderLimit] = useState(RUNTIME_LOG_RENDER_WINDOW)
+  const renderedEntries = useMemo(
+    () => filtered.length > renderLimit ? filtered.slice(0, renderLimit) : filtered,
+    [filtered, renderLimit],
+  )
 
   const clear = async () => {
     try {
@@ -148,7 +155,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
           <span>{filtered.length} 条</span>
         </div>
         <ul className="runtime-log-list list-none m-0 p-0 overflow-y-auto flex-1 bg-[color-mix(in_srgb,var(--global-bg-color)_16%,transparent)]">
-          {filtered.map(entry => (
+          {renderedEntries.map(entry => (
             <li key={entry.id} className="border-b border-b-[color-mix(in_srgb,var(--border)_64%,transparent)]">
               <button
                 type="button"
@@ -203,6 +210,15 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
             </li>
           ))}
         </ul>
+        {filtered.length > renderedEntries.length && (
+          <button
+            type="button"
+            className="flex-none mx-[var(--ui-space-3)] mb-[var(--ui-space-2)] py-[var(--ui-space-1)] px-[var(--ui-space-3)] text-[11px] text-text-dim bg-transparent border border-border rounded-none cursor-pointer hover:border-border-focus hover:text-text"
+            onClick={() => setRenderLimit(limit => limit + RUNTIME_LOG_RENDER_WINDOW)}
+          >
+            显示更早日志（还有 {filtered.length - renderedEntries.length} 条）
+          </button>
+        )}
       </main>
     </div>
   )

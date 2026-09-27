@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
@@ -56,7 +56,6 @@ function CanonicalActivitySlot(props: {
 }) {
   let root: HTMLDivElement | undefined
   let unregisterTool = () => {}
-  let observer: MutationObserver | undefined
   const toolSnapshot = () => props.activity.kind === 'tool' ? toolInvocationSnapshot(props.document, props.activity.id) : null
   const resultReceipt = createResultReceipt(
     () => hasToolOutput(toolSnapshot()),
@@ -77,13 +76,10 @@ function CanonicalActivitySlot(props: {
       return measureToolAnchor(head ?? undefined, indicator ?? undefined)
     })
   })
-  onMount(() => {
-    if (typeof MutationObserver === 'undefined' || !root) return
-    observer = new MutationObserver(() => props.connectorPort.invalidate('items-changed'))
-    observer.observe(root, { childList: true, subtree: true })
-  })
+  // #409：本槽位的 childList 变化由 SolidToolConnectorLayer 的 `.term` 级
+  // MutationObserver（childList+subtree）覆盖——它是本观察器的超集，逐槽位一份
+  // MutationObserver 只会把同一失效源放大 N 份。
   onCleanup(() => {
-    observer?.disconnect()
     unregisterTool()
   })
 

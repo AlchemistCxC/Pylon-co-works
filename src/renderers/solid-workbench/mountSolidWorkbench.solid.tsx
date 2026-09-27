@@ -16,6 +16,7 @@ import { canonicalTokenCount } from './solidWorkbenchProjectionSupport.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 import { createStreamingDisplayPublishCostRecorder, registerStreamingDisplayDiagnostics } from './streamingDiagnostics.ts'
+import { clearMarkdownRenderModelCache } from './chat/markdownRenderModel.ts'
 import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
 
 /** #212 判据 C 的初值：没有行被观察到增长（冻结实例，避免每次 setSignal 造新对象）。 */
@@ -193,6 +194,10 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
       host.replaceChildren()
       if (ownsHostPort) hostPort.diagnostics.destroy?.()
       listeners.clear()
+      // #409：工作台实例销毁（页签关闭）时释放 markdown 渲染模型缓存。缓存本有
+      // 2M 字符预算，但会话切换不清、AST 实际驻留是键字符的数倍——实例消亡即清，
+      // 跨会话驻留窗口归零（多页签保活下其余实例随用随重建，只付一次解析）。
+      clearMarkdownRenderModelCache()
     },
     on(event, listener) {
       if (event === 'ready' && ready) listener({ suiteId: 'builtin.solid' })

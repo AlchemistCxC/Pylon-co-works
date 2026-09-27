@@ -29,6 +29,13 @@ function safeBackground(value: string | undefined): string | undefined {
 export function SolidAnsiBlock(props: SolidAnsiBlockProps) {
   const spans = createMemo(() => stripAnsiControlSequences(props.text))
   const plainText = () => spans().map(span => span.text).join('')
+  // #409：title/aria-label 各持一份全文 = 大输出块的 3-4 倍文本驻留。属性只服务
+  // 悬停预览与块级摘要，截断到 2k 字符；正文渲染不走这里。
+  const ATTRIBUTE_TEXT_LIMIT = 2_000
+  const attributeText = () => {
+    const text = plainText()
+    return text.length > ATTRIBUTE_TEXT_LIMIT ? `${text.slice(0, ATTRIBUTE_TEXT_LIMIT)}…` : text
+  }
 
   return (
     <div
@@ -37,8 +44,8 @@ export function SolidAnsiBlock(props: SolidAnsiBlockProps) {
       data-wrap={props.wrap ?? 'soft'}
       data-palette={props.palette ?? 'terminal'}
       role="img"
-      aria-label={plainText()}
-      title={plainText()}
+      aria-label={attributeText()}
+      title={attributeText()}
       style={{
         'white-space': props.wrap === 'none' ? 'pre' : 'pre-wrap',
         'max-height': `${props.maxLines ?? 800}em`,

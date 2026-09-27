@@ -52,9 +52,31 @@ export interface RuntimeLogFilter {
 }
 
 export const RUNTIME_LOG_LIMIT = 1000
+/**
+ * #409：RuntimeSheet 的 DOM 渲染窗口。存储上限（LIMIT）不变；列表只物化最近
+ * WINDOW 条，其余经「显示更早」分页展开——错误风暴时不再每条增量全量 reconcile。
+ */
+export const RUNTIME_LOG_RENDER_WINDOW = 300
 
 /** list 回放 + 增量合并：按 id 去重（同一日志 id 不重复），id 倒序，固定上限 */
 export function mergeRuntimeLogs(existing: RuntimeLogEntry[], incoming: RuntimeLogEntry[], limit = RUNTIME_LOG_LIMIT): RuntimeLogEntry[] {
+  // #409：live 增量的主形态是「incoming 全新于 existing」（id 单调递增，list 回放
+  // 亦按倒序给出）。此时免掉整表 Set 重建 + 全量 sort，直接前插即可；形状不一致
+  // （回放/乱序/混合）回落原全量路径，语义逐条一致。
+  if (existing.length === 0 || incoming.length === 0) {
+    return mergeRuntimeLogsFull(existing, incoming, limit)
+  }
+  const oldestExistingId = existing[existing.length - 1]!.id
+  const allFresh = incoming.every((entry, index) =>
+    entry.id > oldestExistingId && (index === 0 || incoming[index - 1]!.id > entry.id))
+  if (!allFresh) {
+    return mergeRuntimeLogsFull(existing, incoming, limit)
+  }
+  const merged = [...incoming.slice().reverse(), ...existing]
+  return merged.length > limit ? merged.slice(0, limit) : merged
+}
+
+function mergeRuntimeLogsFull(existing: RuntimeLogEntry[], incoming: RuntimeLogEntry[], limit: number): RuntimeLogEntry[] {
   const seen = new Set(existing.map(entry => entry.id))
   const merged = [...existing]
   for (const entry of incoming) {
