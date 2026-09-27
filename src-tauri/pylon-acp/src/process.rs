@@ -47,10 +47,14 @@ pub(crate) fn set_utf8_env(command: &mut std::process::Command) {
         .env("LC_ALL", "C.UTF-8");
 }
 
-/// agent 侧子进程的统一启动收口：隐藏控制台窗口 + UTF-8 环境。
+/// agent 侧 terminal 子进程的启动收口：隐藏控制台窗口 + UTF-8 环境。
+///
+/// agent 本体不走这里：#386 起 plan（argv/cwd/env）的应用与这两个默认项的先后
+/// 顺序由 `windows_launch::agent_command` 一处承载（agent 子进程 `Command` 的
+/// 唯一构造口）。本函数只服务非 plan 通道的 spawn（agent 侧 terminal）及其单测。
 ///
 /// 两个关注点各自独立（`hide_console_window` 还要给 taskkill 这类不经本函数的
-/// spawn 用），这里只是把「agent 子进程」这一类调用点的两件一次做齐。
+/// spawn 用），这里只是把这一类调用点的两件一次做齐。
 pub(crate) fn configure_agent_child(command: &mut std::process::Command) {
     set_utf8_env(command);
     hide_console_window(command);

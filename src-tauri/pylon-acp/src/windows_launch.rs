@@ -28,28 +28,38 @@ use pylon_core::agent_launch_plan::LaunchPlan;
 /// 照设，cwd 静默回落 `C:\Windows` 的原 bug 原样存活（审查返工修的正是这个
 /// 复合缺口）。
 ///
-/// 绕行条件不满足时走直启：`apply_launch_plan` 仍一次应用 argv/cwd/env，
-/// 与既有行为零差异。绕行路径下 argv 与 cwd 都由批行承载（`pushd` 即 cwd），
-/// **不得**再 `current_dir(UNC)`——把 UNC 交给 `CreateProcess` 正是 `cmd.exe`
-/// 拒绝并回落 `C:\Windows` 的形状；env 仍从 plan 通道应用。
+/// plan（argv/cwd/env）**在本函数内恰好应用一次**（#386）：直启分支经
+/// `apply_launch_plan` 全量应用；绕行路径下 argv 与 cwd 都由批行承载
+/// （`pushd` 即 cwd），**不得**再 `current_dir(UNC)`——把 UNC 交给
+/// `CreateProcess` 正是 `cmd.exe` 拒绝并回落 `C:\Windows` 的形状，env 仍从
+/// plan 通道应用。调用方不得再对产物 `apply_launch_plan`，否则 argv 翻倍。
+///
+/// #363-1 的顺序约束也由本函数承载：UTF-8 四项是默认值，先于 plan env 钉入，
+/// agents.yaml 里的显式同名 env 仍然赢。#348 A3 的控制台隐藏在此一并完成。
 pub(crate) fn agent_command(plan: &LaunchPlan) -> std::process::Command {
+    use pylon_foundations::child_command::HideConsoleWindow;
+
     let program = direct_program(&plan.executable);
     #[cfg(windows)]
     {
         if let Some(detour) = unc_batch_detour(&program, plan.cwd.as_deref(), &plan.args) {
             use std::os::windows::process::CommandExt;
             let mut command = std::process::Command::new(detour.program);
+            super::process::set_utf8_env(&mut command);
             for (name, value) in &plan.env {
                 command.env(name, value);
             }
             // raw_arg：批行已自带完整引号方案，std 的通用 quoting 会把整行再包
             // 一层双引号，cmd 的 /s 剥引号规则因此失效。
             command.raw_arg(detour.command_line);
+            command.hide_console_window();
             return command;
         }
     }
     let mut command = std::process::Command::new(program);
+    super::process::set_utf8_env(&mut command);
     super::launch_plan::apply_launch_plan(&mut command, plan);
+    command.hide_console_window();
     command
 }
 
@@ -468,7 +478,9 @@ mod tests {
     }
 
     /// 非 Windows 也可判定：绕行条件不满足时构造结果与直启逐字段一致——
-    /// 程序名就是 plan.executable，env 仍从 plan 应用。
+    /// 程序名就是 plan.executable，args 恰好应用一次（#386 回归钉：曾因
+    /// engine 层二次 apply 翻倍成 `acp acp`），cwd/env 由 plan 通道应用，
+    /// UTF-8 四项作为默认值先于 plan env 钉入。
     #[test]
     fn non_detour_launch_is_untouched() {
         let plan = LaunchPlan {
@@ -483,7 +495,19 @@ mod tests {
         };
         let command = agent_command(&plan);
         assert_eq!(command.get_program().to_string_lossy(), plan.executable);
-        let env: Vec<_> = command
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+            vec!["acp"],
+            "#386：args 段必须恰好等于 plan.args，不得翻倍"
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::path::Path::new(r"C:\Users\user\repo"))
+        );
+        let mut env: Vec<(String, String)> = command
             .get_envs()
             .filter_map(|(k, v)| {
                 v.map(|v| {
@@ -494,12 +518,23 @@ mod tests {
                 })
             })
             .collect();
-        assert_eq!(env, vec![("HERMES_HOME".into(), "F:/home".into())]);
+        env.sort();
+        assert_eq!(
+            env,
+            vec![
+                ("HERMES_HOME".into(), "F:/home".into()),
+                ("LANG".into(), "C.UTF-8".into()),
+                ("LC_ALL".into(), "C.UTF-8".into()),
+                ("PYTHONIOENCODING".into(), "utf-8".into()),
+                ("PYTHONUTF8".into(), "1".into()),
+            ]
+        );
     }
 
-    /// 绕行构造（Windows 实机）：程序换成系统 cmd.exe，env 仍从 plan 应用。
-    /// 批行本身的形状由 `unc_batch_command_uses_pushd_and_escapes_cmd_metacharacters`
-    /// 逐字符钉死；`raw_arg` 不进 `get_args`，故这里只验证程序与 env 视图。
+    /// 绕行构造（Windows 实机）：程序换成系统 cmd.exe，argv 与 cwd 由批行承载
+    /// （`pushd` 即 cwd，`get_current_dir` 必须为 None），env 仍从 plan 通道应用
+    /// 且 UTF-8 默认在前。批行本身的形状由
+    /// `unc_batch_command_uses_pushd_and_escapes_cmd_metacharacters` 逐字符钉死。
     #[cfg(windows)]
     #[test]
     fn detour_command_targets_the_system_cmd_exe() {
@@ -516,7 +551,20 @@ mod tests {
         let command = agent_command(&plan);
         let program = command.get_program().to_string_lossy().to_lowercase();
         assert!(program.ends_with(r"\system32\cmd.exe"), "actual: {program}");
-        let env: Vec<_> = command
+        // `raw_arg` 的批行经 `get_args` 可见（std 把 Raw 参数一并产出）——
+        // 断言它就是唯一参数：std 通道不得再追加任何 argv（#386）。
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args.len(), 1, "actual args: {args:?}");
+        assert!(
+            args[0].starts_with("/e:ON"),
+            "唯一参数必须是批行本身，actual: {}",
+            args[0]
+        );
+        assert_eq!(command.get_current_dir(), None, "cwd 交由 pushd 承载");
+        let mut env: Vec<(String, String)> = command
             .get_envs()
             .filter_map(|(k, v)| {
                 v.map(|v| {
@@ -527,7 +575,17 @@ mod tests {
                 })
             })
             .collect();
-        assert_eq!(env, vec![("HERMES_HOME".into(), "F:/home".into())]);
+        env.sort();
+        assert_eq!(
+            env,
+            vec![
+                ("HERMES_HOME".into(), "F:/home".into()),
+                ("LANG".into(), "C.UTF-8".into()),
+                ("LC_ALL".into(), "C.UTF-8".into()),
+                ("PYTHONIOENCODING".into(), "utf-8".into()),
+                ("PYTHONUTF8".into(), "1".into()),
+            ]
+        );
     }
 
     /// 实机端到端（Windows）：绕行的批行走真 cmd.exe——`raw_arg` 管线、/s 剥引号、
