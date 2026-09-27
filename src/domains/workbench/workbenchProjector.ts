@@ -829,11 +829,12 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'assist.prediction':
     case 'assist.file-suggestions':
     case 'assist.queued-command':
-      return reduceAssist(document, event)
+      return reduceAssist(document, envelope, event)
     case 'extension.event':
       return reduceExtension(document, envelope, event)
     case 'event.unknown':
-      return addDiagnostic(document, envelope, 'event.unknown', event.summary, 'warning', event)
+      // #405：卡片标题给变体名（可读一行），原始载荷仍留在「事件详情」里（诊断携带 event）。
+      return addDiagnostic(document, envelope, 'event.unknown', `未识别的 ${event.originalType} 事件`, 'warning', event)
     default:
       // assist.* 等未接 slice 的事件：只保留 timeline 条目，不产生副作用
       return document
@@ -1446,11 +1447,14 @@ function settleUnsettledTools(
     : node)
 }
 
-function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
+function reduceAssist(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: AssistEvent): WorkbenchDocument {
   if (event.type === 'assist.prediction') {
+    // #394：预测是**一次性实例**——带 eventId 才可被接受/拒绝消费（renderer 侧按 eventId 写
+    // 消费标记，幽灵与卡片同时收敛；新预测带新 eventId 自然重现）。
     return { ...document, assist: { ...document.assist, prediction: {
       ...(event.placeholder ? { placeholder: event.placeholder } : {}),
       actions: Object.freeze([...(event.actions ?? [])]),
+      eventId: envelope.eventId,
     } } }
   }
   if (event.type === 'assist.file-suggestions') {

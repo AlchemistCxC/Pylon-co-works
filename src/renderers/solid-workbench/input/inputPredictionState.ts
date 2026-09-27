@@ -1,8 +1,10 @@
-export type PredictionSource = 'history' | 'llm'
+export type PredictionSource = 'history' | 'llm' | 'native'
 
 export interface PredictionCandidate {
   readonly text: string
   readonly source: PredictionSource
+  /** 原生（Agent 推送）源的一次性实例键——接受/拒绝按它消费（#394）。 */
+  readonly instanceKey?: string
 }
 
 /** Return the newest prior message that extends the current prefix. */

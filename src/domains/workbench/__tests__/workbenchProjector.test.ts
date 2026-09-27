@@ -78,8 +78,13 @@ describe('WorkbenchProjector', () => {
     ])
     expect(selectTimeline(document).map(item => item.kind)).toEqual(['message', 'message', 'unknown'])
     expect(document.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'event.unknown', eventId: events[2].eventId }),
+      // #405：卡片标题给**变体名**（可读一行）；原始载荷留在诊断携带的 event 里（「事件详情」）。
+      // 此前标题取 `summary`，于是未知变体在会话流里呈现为 120 字符截断的原始 JSON。
+      expect.objectContaining({ code: 'event.unknown', eventId: events[2].eventId, message: '未识别的 future_event 事件' }),
     ]))
+    expect(document.diagnostics.find(item => item.code === 'event.unknown')?.data).toMatchObject({
+      type: 'event.unknown', originalType: 'future_event', raw: { value: 1 },
+    })
   })
 
   it('is idempotent for duplicate event ids and keeps tool orphan relation until parent arrives', () => {

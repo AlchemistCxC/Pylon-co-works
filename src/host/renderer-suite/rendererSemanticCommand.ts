@@ -1,6 +1,7 @@
 import type { RenderSemanticCommand } from '../../contracts/messageRenderer.ts'
 import type { WorkbenchCapabilityReader, WorkbenchHostPort, WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import { dispatchPylonEvent } from '../../domains/events/pylonCustomEvents.ts'
+import { consumeAssistPrediction } from '../../domains/workbench/session/assistPrediction.ts'
 
 export function isRenderSemanticCommand(value: unknown): value is RenderSemanticCommand {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
@@ -61,6 +62,8 @@ export async function executeRendererSemanticCommand(input: {
     const text = record?.text
     if (typeof text !== 'string' || !text.trim()) { reject('renderer_action_invalid', 'assist.accept 缺少 text'); return }
     host.sessionUi.set('draft', text)
+    // #394：接受＝消费该预测实例——否则同一张预测横在会话流里不走（此前「点了不清」）。
+    consumeAssistPrediction(host.sessionUi, host.document.getSnapshot()?.assist.prediction)
     host.diagnostics.report({
       code: 'assist.accepted', message: '输入建议已接受到当前 Session 草稿', phase: 'action', recoverability: 'none',
       slotId: input.slotId, kind: input.kind, actionType: command.type,
@@ -68,6 +71,8 @@ export async function executeRendererSemanticCommand(input: {
     return
   }
   if (command.type === 'assist.reject') {
+    // #394：忽略＝消费该预测实例（此前只留一条诊断，卡片原样留存）。
+    consumeAssistPrediction(host.sessionUi, host.document.getSnapshot()?.assist.prediction)
     host.diagnostics.report({
       code: 'assist.rejected', message: '输入建议已忽略', phase: 'action', recoverability: 'none',
       slotId: input.slotId, kind: input.kind, actionType: command.type,

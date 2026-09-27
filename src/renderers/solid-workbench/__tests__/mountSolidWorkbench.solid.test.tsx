@@ -1993,7 +1993,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     const lifecycle = mountSolidWorkbenchFromHostPort({
       host,
       input: {
-        sheetId: 'sheet-a', sessionOwnerKey: 'owner-preview', sessionId: 'preview-session',
+        sheetId: 'sheet-a', sessionOwnerKey: 'owner-preview', sessionId: 'preview-session', sessionSource: null,
         replayReadonly: false, reducedMotion: true,
         visibility: 'active', rightInset: 0, preview: true,
       },
@@ -2132,7 +2132,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     const suiteHost = new RendererSuiteHost({
       container: host, hostPort: hostPort as never,
       input: {
-        sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'preview-session',
+        sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'preview-session', sessionSource: null,
         replayReadonly: false, reducedMotion: false, visibility: 'active', rightInset: 0, preview: false,
       },
     })
@@ -2206,6 +2206,45 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(usagePill?.style.fontSize).toBe(`${services.appearance.getSnapshot().modelFontSize}px`)
     expect(usagePill?.style.fontSize).not.toContain('calc(')
     expect(screen.getByText('canonical warning')).toBeInTheDocument()
+  })
+
+  // #394：预测卡的呈现判据与输入框 ghost 同一条口径——空文本帧不渲卡（Peri 用
+  // `prediction_ready` 的 set_title 动作发会话标题，此前渲成一张「只有标题 + 两个按钮」的空卡）；
+  // 消费过的实例也不渲卡（接受/拒绝后卡片与 ghost 同时收敛）。
+  it('#394 预测卡：空文本不渲染，消费后的实例不渲染', async () => {
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']): WorkbenchEventEnvelope => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-21T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `solid-${sequence}` }, provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+
+    // ① 空文本帧：事实在文档里（下面先断言它在），但不该渲卡。
+    const textless = mountPreview()
+    const textlessProjection = projectWorkbench([
+      envelope(1, { type: 'assist.prediction', placeholder: '', actions: [{ kind: 'set_title', title: '与 Riccati 打招呼' }] }),
+    ]).document
+    textless.services.runtime.replaceDocument(textlessProjection, { ownerKey: 'owner-preview', generation: 1 })
+    await waitFor(() => expect(textless.services.runtime.getSnapshot().document?.assist.prediction).toBeDefined())
+    expect(textless.host.querySelector('[data-content-kind="assist.prediction"]')).toBeNull()
+
+    // ② 有文本但已消费：先渲卡，写消费标记后消失（与输入框 ghost 同一标记）。
+    const consumed = mountPreview()
+    const projected = projectWorkbench([
+      envelope(1, { type: 'assist.prediction', placeholder: '继续审计', actions: [] }),
+    ]).document
+    const eventId = projected.assist.prediction?.eventId
+    expect(eventId).toBeTruthy()
+    consumed.services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
+    expect(await screen.findByLabelText('输入预测')).toHaveTextContent('继续审计')
+
+    consumed.services.sessionUi.set('preview-session', 'assist-prediction-consumed', eventId!)
+    await waitFor(() => expect(consumed.host.querySelector('[data-content-kind="assist.prediction"]')).toBeNull())
+
+    // ③ `queuedCommand` 是另一件事实：没有预测时卡片仍要为它出现（门控不得把它一并吞掉）。
+    const queued = mountPreview()
+    queued.services.runtime.replaceDocument(projectWorkbench([
+      envelope(1, { type: 'assist.queued-command', command: '/compact' }),
+    ]).document, { ownerKey: 'owner-preview', generation: 1 })
+    expect(await screen.findByLabelText('输入预测')).toHaveTextContent('排队命令：/compact')
   })
 
   it('同一 error 事实只渲染一个可见错误 surface', async () => {

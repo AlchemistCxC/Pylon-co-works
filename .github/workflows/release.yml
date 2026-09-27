@@ -87,12 +87,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-pc-windows-msvc
+          # wasm32 是 build:wasm（前端计算核 glue）的目标三元组；只给 MSVC 会在打包链第一步死
+          targets: x86_64-pc-windows-msvc, wasm32-unknown-unknown
           components: clippy
 
       # 项目锁 MSVC；runner 自带 MSVC，显式覆盖确保链接。
       - name: 使用 MSVC 工具链
         run: rustup override set stable-x86_64-pc-windows-msvc
+
+      # #406：release 链的 `bun run build` 以 build:wasm 起步，runner 缺 wasm 工具链时
+      # 打包第一步即死——v0.2.7 起 tag 触发的发行 run 因此五连败。步骤与 ci.yml 同名步骤一致。
+      - name: 安装 wasm-pack（#220 前端构建前置）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 别把 $RUNNER_TEMP 交给 tar：Windows runner 上它是 `D:\a\_temp`，GNU tar 把
+          # `D:` 当远端主机说明，报 "Cannot connect to D: resolve failed"（实测
+          # run 35534781451）。mktemp 给的是冒号无关的 POSIX 路径，绕开这一层。
+          work="$(mktemp -d)"
+          curl -fsSL -o "$work/wasm-pack.tar.gz" \
+            https://github.com/rustwasm/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz
+          tar xzf "$work/wasm-pack.tar.gz" -C "$work"
+          mkdir -p "$USERPROFILE/.cargo/bin"
+          cp "$work/wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe" "$USERPROFILE/.cargo/bin/"
 
       - name: 安装依赖
         run: bun install --frozen-lockfile

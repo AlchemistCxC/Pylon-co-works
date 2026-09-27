@@ -135,8 +135,10 @@ describe('C14 normalized session and assist projection', () => {
     ]
     const live = events.reduce(reduceWorkbenchEvent, createWorkbenchDocument('session-c14-review'))
 
+    // #394：预测是**一次性实例**——文档里的 `eventId` 是接受/拒绝的消费身份，必须随投影保留
+    // （renderer 侧按它写消费标记，ghost 与卡片据此同时收敛）。
     expect(selectAssist(live)).toEqual({
-      prediction: { placeholder: '继续修复', actions: [{ id: 'accept', label: '接受' }] },
+      prediction: { placeholder: '继续修复', actions: [{ id: 'accept', label: '接受' }], eventId: events[0].eventId },
       files: ['src/a.ts', 'src/b.ts'],
       queuedCommand: '/compact',
     })

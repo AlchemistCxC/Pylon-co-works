@@ -28,8 +28,9 @@ export default function InputPredictionSettingsPanel() {
   return <div className="input-prediction-settings settings-surface">
     <div className="agent-settings-heading"><div><h3>输入预测服务</h3><p>独立于 ACP Agent 的 OpenAI 兼容 Chat Completions 服务。配置后，输入栏会按低频策略请求下一句预测。</p></div></div>
     <div className="set-hint">密钥仅用于请求该服务，保存在本机设置中；不开启或配置不完整时不会发起网络请求。</div>
+    <div className="set-hint">Agent 自带预测（如 Peri）优先于本服务：它在场时不会发起这里的网络请求，预测直接显示在输入框（Tab 接受、退格或改输入即拒绝）。</div>
     <section className="set-group"><div className="set-group-title">连接</div>
-      <Field label="预测来源"><select className="set-select" value={settings.mode} onChange={event => update('mode', event.target.value as InputPredictionSettings['mode'])}><option value="auto">自动（优先 ACP Fork）</option><option value="fork">仅 ACP Fork</option><option value="standalone">仅独立模型</option><option value="off">关闭预测</option></select></Field>
+      <Field label="预测来源"><select className="set-select" value={settings.mode} onChange={event => update('mode', event.target.value as InputPredictionSettings['mode'])}><option value="auto">自动（优先 Agent 原生，其次 ACP Fork）</option><option value="fork">仅 ACP Fork（不请求独立模型）</option><option value="standalone">仅独立模型（忽略 Agent 原生）</option><option value="off">关闭预测</option></select></Field>
       <Field label="启用独立服务"><input type="checkbox" checked={settings.enabled} onChange={event => update('enabled', event.target.checked)} /></Field>
       <Field label="基础地址（Base URL）" hint="例如 https://api.openai.com/v1 或本地 sidecar 地址"><input className="set-input set-input-wide" value={settings.baseUrl} onChange={event => update('baseUrl', event.target.value)} placeholder="https://api.openai.com/v1" /></Field>
       <Field label="密钥（API Key）"><input className="set-input set-input-wide" type="password" value={settings.apiKey} onChange={event => update('apiKey', event.target.value)} placeholder="sk-…" autoComplete="off" /></Field>

@@ -174,6 +174,48 @@ describe('Peri extension channel mapping (#315)', () => {
     })
   })
 
+  // #394：Peri 也用 prediction 通道发会话标题（`set_title` 动作 + 空 text）。空文本帧不是预测：
+  // 归一后没有 placeholder，呈现面（ghost / 卡片）据「无可显示文本」不渲染。
+  it('keeps the set_title-only prediction frame textless (not a prediction)', () => {
+    const result = normalizePeriEvent(extensionInput({
+      sessionUpdate: 'peri/prediction_ready',
+      text: '',
+      actions: [{ kind: 'set_title', title: '与 Riccati 打招呼' }],
+    }), base)
+    const event = result.events[0]?.event
+    expect(event).toMatchObject({ type: 'assist.prediction', actions: [{ kind: 'set_title', title: '与 Riccati 打招呼' }] })
+    expect(event && 'placeholder' in event).toBe(false)
+  })
+
+  // #405：回合簿记类已知变体（实测 goal_snapshot 全字段 null）此前走 unknown 兜底，渲成一张
+  // 「标题 = 120 字符原始 JSON」的 warning 卡。现在按静默策略收口：不产事件、只留 info 诊断
+  //（info 级不进时间轴），raw 仍在 canonical 行里。
+  it('mutes known bookkeeping variants instead of rendering raw-JSON cards', () => {
+    const goal = normalizePeriEvent(extensionInput({
+      sessionUpdate: 'peri/agent_event',
+      eventJson: JSON.stringify({
+        type: 'goal_snapshot',
+        value: {
+          objective: null, status: null, token_budget: null, tokens_used: 0,
+          time_used_seconds: 0, continuation_count: 0, blocked_reason: null,
+        },
+      }),
+    }), base)
+    expect(goal.events).toEqual([])
+    expect(goal.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'peri.agent-event-muted', recoverable: true }),
+    ]))
+
+    for (const variant of ['turn_committed', 'state_snapshot']) {
+      const muted = normalizePeriEvent(extensionInput({
+        sessionUpdate: 'peri/agent_event',
+        eventJson: JSON.stringify({ type: variant, value: { messages: [] } }),
+      }), base)
+      expect(muted.events, variant).toEqual([])
+      expect(muted.diagnostics[0], variant).toMatchObject({ code: 'peri.agent-event-muted' })
+    }
+  })
+
   it('never maps peri/agent_event_done to session.completed (kernel ledger owns terminal)', () => {
     const result = normalizePeriEvent(extensionInput({
       sessionUpdate: 'peri/agent_event_done',
