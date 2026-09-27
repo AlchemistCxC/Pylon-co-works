@@ -102,6 +102,14 @@ bun run prepare:hermes-runtime
 python scripts/pack_release.py --with-runtime
 ```
 
+「版本号落位 → 本地构建」可用打包脚本的发行编排一键串起（#402）：
+`python scripts/pack_release.py --bump X.Y.Z-SUF --build`。`--bump` 把新版本落位到
+`package.json`、`src-tauri/tauri.conf.json`、根与成员 crate 的 `Cargo.toml` 及
+`Cargo.lock`（先例 `6e7a22d3` 的 9 文件域；成员清单从 `[workspace] members` 动态发现，
+独立版本号的 crate 不动），任一文件计数不对即整体中止不写盘，随后按 pathspec 只提交
+这些文件；`--build` 跑的就是上面的 `release:portable` 全链，启动前检查构建目标盘余量
+（< 10 GiB 拒绝，#228/#399 的 os error 112 教训）。
+
 发行包自 2026-09-19 起不再携带 WebView2 bootstrapper（`--without-webview2` 选项随之移除，
 见 ADR-0014）：Runtime 按 Windows 自带处理；包内 `tools/install-webview2.bat` 在系统缺
 WebView2 时联网下载安装器，发布说明无需再区分常规/降级包。
@@ -115,6 +123,11 @@ WebView2 时联网下载安装器，发布说明无需再区分常规/降级包�
 承担发布步骤。
 
 `workflow_dispatch` 保留为预演/重试入口：在分支上 dispatch 只构建、不发布。
+
+打 tag 这一步可由 `python scripts/pack_release.py --upload` 代劳（#402）：脚本先校验
+工作树版本一致、tag 尚不存在、HEAD 是远端 main 的祖先（即版本提交已经 PR 合并），通过后
+打 `v<version>` 并推送触发发行。agent 侧的完整操作路径（含先问版本号与是否上传的约定）
+见 `.agents/skills/release/SKILL.md`。
 
 ## 5. 打包前后验收
 
