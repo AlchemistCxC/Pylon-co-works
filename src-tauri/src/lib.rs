@@ -692,6 +692,12 @@ fn build_subscriber(
 ) {
     use tracing_subscriber::layer::{Layer, SubscriberExt};
 
+    // #383 的一处**已知语义差异**（评审实测，接受）：修前 stderr 是 `fmt::Subscriber` 自带的
+    // 订阅者级 `LevelFilter::INFO`，全局 max level hint = INFO；换 registry 后各层各自过滤，
+    // 全局 hint 落到 TRACE（`LevelFilter::current()` 实测 TRACE）。**可记录的可见输出不变**
+    // （hub 层内部仍有 `level > INFO` 守卫、落盘层有 INFO 过滤、stderr 层也有），差别只是
+    // debug!/trace! 调用不再被全局短路、每次多一次 enabled 走查（全仓 20 处、均在罕见错误分支）。
+    // 若将来要把 hint 收紧回 INFO，在 registry 上再加一层 `LevelFilter::INFO` 即可。
     let base = tracing_subscriber::registry().with(hub_layer).with(
         tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
