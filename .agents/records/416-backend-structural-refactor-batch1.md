@@ -86,6 +86,18 @@
 - #417 决策口新增两条：InteractionLedger 合一（含快照面单源）的施工形态；private_ext + 注册表合并的归位裁决（R1 证据：方言信封终局归宿宿主适配层，待 dispatcher 稳定后一步翻转）。
 - 磁盘：G: 施工中再次写满（os error 112），已按 L.md #401 先例清 `target/debug/incremental`（6.3G）+ 陈旧变体 exe/pdb，得 9.6G。后续大批次施工前建议先查 `df -h G:`。
 
+## 审查轮与返工（2026-09-28，四独立审查员对抗式）
+
+| 块 | verdict | 说明 |
+| --- | --- | --- |
+| pylon-acp（Q1） | **pass** | 38 顶层项+8 impl+14 测试逐符号字节级比对等价；pub use 面逐字不变；queue 严格边界；无越界、无 B 类混入；190/0 |
+| dispatcher（Q2） | **fail → 返工后 pass** | 唯一 fail 项：`prompt/hooks.rs` `PrismTurnHooks::log` 把运行日志条目 source 字面量（inject/persist）换成会话 source（可观察漂移）。返工：log 增 session 参数分离两维度，5 调用点字面量逐字还原；复跑 session::prompt 12/0 + dispatcher/permission/protocol_adapter 70/0。其余（370 行审批正身、三文案、三表征、publish_route、6c 等价性、跳过项论证）全部通过 |
+| session（Q3） | **pass** | 逐符号 -w diff 全过；finalize 5 差异簇逐条核对保留；persist/revive 错误策略两侧保持；181/0 + 155/0。两处 docs 旧路径小疵已随手修正（维护地图 #324/#352 句 → settle.rs/ledger.rs；模块枚举补 hooks） |
+| lifecycle（Q4） | **pass** | 检测拆分归一化多重集比对无语义残差；do_connect_and_replace 与 switch 系 diff exit 0（锁序逐字）；FNV 用独立 Python 参考实现复算吻合；137+36、host 924、lifecycle 29 全绿 |
+
+- 审查确认跳过项论证属实：步7 注册表合并会使 peri 的 `adapter_registered` 诊断翻假（method 表 last-writer-wins 已坍缩 per-provider 事实）；步6 Ledger 合一零行为中间态不可达。
+- **flake 观察（未解）**：`cargo test --workspace --lib` 在重编译后首跑出现过两次 1295/1 瞬态失败（wave2 施工中一次、返工后终验一次），紧随的全量复跑均 1586/0 且无失败输出可定位。非本批确定性回归（返工前后同签名），若 CI 复现建议单测重跑确认并定位用例。
+
 ## 并行交集
 
 本批触及的共享面（他人在途 #410 为前端 CSS/TSX，与本批零交集，工作树对方 hunk 未触碰）：`src-tauri/src/lib.rs`（Q3 + 6c 集成）、`src-tauri/src/test_utils.rs`（依赖随迁）。git 提交全部 pathspec，未动他人任何文件。

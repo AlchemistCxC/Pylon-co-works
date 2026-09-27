@@ -65,12 +65,14 @@ impl PrismTurnHooks {
         }
     }
 
-    /// 与 AppState::log_runtime_summary 同一落点（runtime_logs.push 原样复刻，
-    /// session 字段恒为当前 source）。
+    /// 与 AppState::log_runtime_summary 同一落点（runtime_logs.push 原样复刻）：
+    /// `source` 是条目分类字面量（inject/persist，旧 log_runtime_summary 第 2 参，
+    /// 运行日志面板按它过滤），`session` 恒为当前会话 source。
     fn log(
         &self,
         level: &str,
         source: &str,
+        session: &str,
         message: &str,
         fields: serde_json::Map<String, serde_json::Value>,
     ) {
@@ -78,7 +80,7 @@ impl PrismTurnHooks {
             crate::time::Timestamp::now(),
             level,
             source,
-            Some(source.to_string()),
+            Some(session.to_string()),
             message,
             fields,
         );
@@ -116,6 +118,7 @@ impl PromptTurnHooks for PrismTurnHooks {
                     if result.activated.is_empty() {
                         self.log(
                             "info",
+                            "inject",
                             source,
                             "Prism inject returned empty context",
                             serde_json::Map::from_iter([(
@@ -126,6 +129,7 @@ impl PromptTurnHooks for PrismTurnHooks {
                     } else {
                         self.log(
                             "info",
+                            "inject",
                             source,
                             "Prism inject activated",
                             serde_json::Map::from_iter([
@@ -149,6 +153,7 @@ impl PromptTurnHooks for PrismTurnHooks {
                     tracing::warn!("Prism inject failed: {error}");
                     self.log(
                         "warn",
+                        "inject",
                         source,
                         "Prism inject failed; sent without injection",
                         serde_json::Map::new(),
@@ -188,6 +193,7 @@ impl PromptTurnHooks for PrismTurnHooks {
                     }
                     self.log(
                         "info",
+                        "persist",
                         source,
                         if ok {
                             "Prism round persisted"
@@ -201,6 +207,7 @@ impl PromptTurnHooks for PrismTurnHooks {
                     tracing::warn!("Prism persist failed: {error}");
                     self.log(
                         "warn",
+                        "persist",
                         source,
                         "Prism persist failed",
                         serde_json::Map::new(),
