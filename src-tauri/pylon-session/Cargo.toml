@@ -14,3 +14,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time"] }
 rusqlite = { version = "0.40", default-features = false, features = ["bundled", "cache"] }
 pylon-canonical-types = { path = "../pylon-canonical-types" }
 pylon-foundations = { path = "../pylon-foundations" }
+
+# #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
+[lints]
+workspace = true

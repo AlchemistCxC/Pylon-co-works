@@ -933,7 +933,6 @@ pub fn spawn_sdk_client(
             )
             .on_close(move |_cx| {
                 let crashed = crashed.clone();
-                let crashed_watch = crashed_watch.clone();
                 async move {
                     crashed.store(true, Ordering::Release);
                     let _ = crashed_watch.send(true);
@@ -1109,7 +1108,7 @@ pub fn spawn_sdk_engine(
     let join = spawn_sdk_client(
         SdkEngineConfig {
             name: agent.name.clone(),
-            wire: wire.clone(),
+            wire,
         },
         relay,
         outbound_rx,

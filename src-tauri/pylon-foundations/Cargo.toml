@@ -21,3 +21,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 # 这份 UI 绑定。
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
+
+# #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
+[lints]
+workspace = true

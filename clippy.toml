@@ -1,0 +1,19 @@
+# Clippy 工作区配置（#414）。scripts/check-clippy.mjs 与 ci.yml 的 rust-clippy job
+# 都从仓库根跑 `cargo clippy`，clippy 自当前目录向上查找本文件。
+#
+# await-holding-invalid-types：这些类型的值存活跨过 .await 即告警
+# （clippy::await_holding_invalid_type，属 clippy::all 组）。与默认 warn 的
+# await_holding_lock（std::sync 家族）、await_holding_refcell_ref 合起来把
+# 「持锁 await」全家族纳入门禁。tokio 的异步锁虽然语法上允许跨 await 持有，
+# 但持有期间会让其它任务排队（读锁饿死写者、写锁/Mutex 串行化全部任务），
+# 属性能反模式：确需跨 await 传递数据时，先克隆出所需字段或缩短临界区，
+# 而不是让守卫活着穿过 await 点。执行语义是基线棘轮「相对
+# artifacts/clippy-baseline.json 零新增」（AGENTS.md §2.4）。
+await-holding-invalid-types = [
+  { path = "tokio::sync::MutexGuard", reason = "持 tokio Mutex 跨 .await 会串行化其它任务；先克隆数据或缩短临界区" },
+  { path = "tokio::sync::OwnedMutexGuard", reason = "同 MutexGuard：不要跨 .await 持有" },
+  { path = "tokio::sync::RwLockReadGuard", reason = "读锁跨 .await 会饿死写者" },
+  { path = "tokio::sync::RwLockWriteGuard", reason = "写锁跨 .await 会串行化全部任务" },
+  { path = "tokio::sync::OwnedRwLockReadGuard", reason = "同 RwLockReadGuard：读锁不要跨 .await" },
+  { path = "tokio::sync::OwnedRwLockWriteGuard", reason = "同 RwLockWriteGuard：写锁不要跨 .await" },
+]

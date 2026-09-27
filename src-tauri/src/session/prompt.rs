@@ -1004,6 +1004,7 @@ pub(crate) fn cancel_requested_probe(
     }
 }
 
+#[allow(clippy::await_holding_invalid_type)] // prompt_lock/prompt_gate 单飞（B3）：同 source/同实例同时刻最多一个 prompt；cancel 闭包同持 acp 锁（方案 5）
 async fn send_prompt_core_impl<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,

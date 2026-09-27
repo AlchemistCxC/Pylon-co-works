@@ -441,7 +441,7 @@ impl BrowserManager {
             let Some(tab) = inner.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
                 return;
             };
-            tab.url = Some(url.clone());
+            tab.url = Some(url);
             if let Some(title) = title {
                 if !title.is_empty() {
                     tab.title = Some(title);

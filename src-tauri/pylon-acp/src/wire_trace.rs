@@ -992,7 +992,7 @@ mod tests {
             );
         }
         let snap = hub.snapshot();
-        let mut shuffled = snap.clone();
+        let mut shuffled = snap;
         shuffled.reverse(); // 模拟乱序落序
         let sorted = order_snapshot(shuffled);
         let seqs: Vec<u64> = sorted.iter().map(|record| record.monotonic_seq).collect();

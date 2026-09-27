@@ -1270,7 +1270,7 @@ fn tombstoned_owner_append_rejected_events_kept() {
     .unwrap();
     repo.append_events(std::slice::from_ref(&first), None)
         .expect("first append");
-    let owner_key = first.owner_key.clone();
+    let owner_key = first.owner_key;
     {
         let conn = repo.conn.lock().unwrap();
         conn.execute(
@@ -1372,7 +1372,7 @@ fn search_owners_matches_content_case_insensitive_and_dedupes() {
         serde_json::json!({"text": "nothing here"}),
     ))
     .unwrap();
-    repo.append_events(&[hit.clone(), hit.clone()], None)
+    repo.append_events(&[hit.clone(), hit], None)
         .expect("append hit");
     repo.append_events(&[miss], None).expect("append miss");
 
@@ -2548,7 +2548,7 @@ fn compact_page_keeps_run_whole_when_budget_exhausts_before_it() {
 #[test]
 fn typed_payload_cap_holds_when_structure_alone_exceeds_budget() {
     let huge_key = "k".repeat(80_000);
-    let typed = serde_json::json!({ huge_key.clone(): "x" });
+    let typed = serde_json::json!({ (huge_key): "x" });
     assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
     let capped = redaction::retain_typed_payload(typed);
     assert!(

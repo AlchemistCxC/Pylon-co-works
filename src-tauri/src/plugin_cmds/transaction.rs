@@ -31,6 +31,7 @@ pub(crate) async fn write_lock() -> tokio::sync::MutexGuard<'static, ()> {
 /// JoinHandle 的意外终止（后台任务 panic / runtime 关停取消）在此映射为
 /// `PluginError::Transaction` 上抛——不允许 panic 穿透 command 线程，
 /// 前端只会见到结构化 PylonError。
+#[allow(clippy::await_holding_invalid_type)] // 插件写事务骨架：写锁跨 spawn_blocking await，install/uninstall 整体串行（#261 设计）
 async fn run_plugin_write<T, F>(app: &AppHandle, op: F) -> Result<T, PylonError>
 where
     F: FnOnce(PathBuf) -> Result<T, PluginError> + Send + 'static,

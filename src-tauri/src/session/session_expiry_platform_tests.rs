@@ -179,6 +179,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
 }
 
 /// #363-4：prompt 闸门被占用时，该连接的全部会话本轮跳过。
+#[allow(clippy::await_holding_invalid_type)] // 测试本体：持 prompt_gate 模拟在途 prompt
 #[tokio::test]
 async fn sessions_of_a_busy_prompt_gate_are_exempt() {
     let state = state_with_initial_acp().await;

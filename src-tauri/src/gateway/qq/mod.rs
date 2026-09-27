@@ -566,9 +566,8 @@ impl PlatformAdapter for QqAdapter {
             let dead = self.dead_targets.clone();
             let base_url = self.base_url.clone();
             let senders = self.senders.clone();
-            let key_owned = key.clone();
             runtime.spawn(async move {
-                Self::send_loop(http, auth, dead, base_url, senders, key_owned, rx, token).await;
+                Self::send_loop(http, auth, dead, base_url, senders, key, rx, token).await;
             });
         }
         Ok(())

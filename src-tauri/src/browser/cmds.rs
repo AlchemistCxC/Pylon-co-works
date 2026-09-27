@@ -9,20 +9,14 @@ pub(crate) async fn browser_start(
     state: tauri::State<'_, AppState>,
     bounds: BrowserBounds,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .start(bounds)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.start(bounds).map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_new_tab(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .new_tab()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.new_tab().map_err(PylonError::Protocol)
 }
 
 /// 创建并激活指定 URL 的内部标签。与点击 target=_blank 的路径共用同一 manager，
@@ -32,10 +26,7 @@ pub(crate) async fn browser_open_tab(
     state: tauri::State<'_, AppState>,
     url: String,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .open_tab(&url)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.open_tab(&url).map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -46,7 +37,7 @@ pub(crate) async fn browser_select_tab(
     state
         .browser
         .select_tab(tab_id)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -57,17 +48,14 @@ pub(crate) async fn browser_close_tab(
     state
         .browser
         .close_tab(tab_id)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .snapshot()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.snapshot().map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -75,40 +63,28 @@ pub(crate) async fn browser_navigate(
     state: tauri::State<'_, AppState>,
     url: String,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .navigate(&url)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.navigate(&url).map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_back(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .go_back()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.go_back().map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_forward(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .go_forward()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.go_forward().map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) async fn browser_reload(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .reload()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.reload().map_err(PylonError::Protocol)
 }
 
 /// 读取活动页面的有限文本/链接快照（不包含 cookie、存储或请求头）。
@@ -120,7 +96,7 @@ pub(crate) async fn browser_snapshot(
         .browser
         .page_snapshot()
         .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 /// Start an explicit download from the active Browser WebView.  The manager repeats
@@ -135,7 +111,7 @@ pub(crate) async fn browser_download(
         .browser
         .download(&url, filename)
         .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -155,7 +131,7 @@ pub(crate) async fn browser_click(
         .browser
         .click(selector, text)
         .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -171,7 +147,7 @@ pub(crate) async fn browser_type(
         .browser
         .type_text(text, selector)
         .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -182,11 +158,7 @@ pub(crate) async fn browser_press(
     if key.trim().is_empty() {
         return Err(PylonError::Protocol("key 不能为空".to_string()));
     }
-    state
-        .browser
-        .press(key)
-        .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.press(key).await.map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -199,7 +171,7 @@ pub(crate) async fn browser_scroll(
         .browser
         .scroll(delta_x.unwrap_or(0), delta_y.unwrap_or(600))
         .await
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -210,7 +182,7 @@ pub(crate) async fn browser_set_zoom(
     state
         .browser
         .set_zoom(zoom_percent)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -221,7 +193,7 @@ pub(crate) async fn browser_set_bounds(
     state
         .browser
         .set_bounds(bounds)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 /// 同步 Browser Sheet keep-alive 的原生 WebView 可见性。
@@ -233,7 +205,7 @@ pub(crate) async fn browser_set_visible(
     state
         .browser
         .set_visible(visible)
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+        .map_err(PylonError::Protocol)
 }
 
 /// 关 sheet=关进程：销毁子 WebView（WebView2 子进程树随之退出）。
@@ -241,8 +213,5 @@ pub(crate) async fn browser_set_visible(
 pub(crate) async fn browser_close(
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserSnapshot, PylonError> {
-    state
-        .browser
-        .close()
-        .map_err(|e| PylonError::Protocol(e.to_string()))
+    state.browser.close().map_err(PylonError::Protocol)
 }

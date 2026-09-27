@@ -503,7 +503,7 @@ impl SessionInfo {
             // D97-2：权威回显到达——requested 与 settled 不同即钳制（Agent 实际值
             // 胜出，回显 choices/catalog 已同步刷新）；一致即确认。pending 只在
             // 响应确实携带 model 维度时清除（权威列表但无 model 选项 ≠ model 确认）。
-            let settled = acknowledged_model.clone().or_else(|| {
+            let settled = acknowledged_model.or_else(|| {
                 find_config_option(&self.config_options, "model")
                     .and_then(config_option_current_machine_id)
             });

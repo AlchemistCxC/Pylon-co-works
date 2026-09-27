@@ -565,7 +565,6 @@ mod tests {
             calls.clone(),
             move |state, _cancel, notifier| {
                 *seen_clone.lock().unwrap() = state.credential_secret.clone();
-                let notifier = notifier.clone();
                 let run: crate::gateway::instance::BoxRunFuture = Box::pin(async move {
                     notifier.connected().await;
                     std::future::pending::<()>().await;

@@ -526,6 +526,7 @@ impl GatewayInstanceService {
 
     /// remove：route 占用 → route_in_use；运行中（Starting/Connected/Stopping）
     /// → invalid_transition（须先 stop）；Stopped/Error 直接移除（残余 runtime 取消）。
+    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：实例生命周期迁移必须整体串行
     pub(crate) async fn remove(&self, id: &str) -> Result<(), GatewayInstanceError> {
         let _guard = self.lifecycle_lock.lock().await;
         let in_use = self
@@ -555,6 +556,7 @@ impl GatewayInstanceService {
     }
 
     /// start：Starting/Connected 幂等返回；Stopping 拒绝；Stopped/Error 启动新任务。
+    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：start 序列整体串行
     pub(crate) async fn start(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
         let _guard = self.lifecycle_lock.lock().await;
         self.start_impl(id, false).await
@@ -562,6 +564,7 @@ impl GatewayInstanceService {
 
     /// restart：Stopped/Connected/Error 重启（取消旧 runtime、递增 generation）；
     /// Starting/Stopping 拒绝。
+    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：restart 序列整体串行
     pub(crate) async fn restart(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
         let _guard = self.lifecycle_lock.lock().await;
         self.start_impl(id, true).await
@@ -730,6 +733,7 @@ impl GatewayInstanceService {
     /// stop：Stopped/Stopping 幂等返回；其余状态取消 runtime 后落 Stopped。
     /// W1 不 await join（收敛验证属 W2）；后台 task 退出经 finalize 清理，
     /// generation guard 防旧覆盖。
+    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：stop 序列整体串行
     pub(crate) async fn stop(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
         let _guard = self.lifecycle_lock.lock().await;
         let mut registry = self.registry.write().await;
@@ -1530,7 +1534,6 @@ pub(crate) mod tests {
         }));
         let calls = Arc::new(AtomicUsize::new(0));
         service.register_factory(factory_with(calls, |_state, _cancel, notifier| {
-            let notifier = notifier.clone();
             let run: BoxRunFuture = Box::pin(async move {
                 notifier.connected().await;
                 std::future::pending::<()>().await;
@@ -1576,7 +1579,6 @@ pub(crate) mod tests {
         let service = GatewayInstanceService::new();
         let calls = Arc::new(AtomicUsize::new(0));
         service.register_factory(factory_with(calls.clone(), |_state, _cancel, notifier| {
-            let notifier = notifier.clone();
             // run 挂起不退出：实例保持 Connected（退出即 finalize 回 Stopped）
             let run: BoxRunFuture = Box::pin(async move {
                 notifier.connected().await;
@@ -1635,7 +1637,6 @@ pub(crate) mod tests {
                     "测试无凭据".to_string(),
                 ));
             }
-            let notifier = notifier.clone();
             // run 挂起不退出：good 保持 Connected
             let run: BoxRunFuture = Box::pin(async move {
                 notifier.connected().await;

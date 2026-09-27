@@ -264,6 +264,7 @@ pub(crate) async fn close_session_rpc(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // session_creation 串行 close 与 create；cancel 在 acp 锁内发送（方案 5，防写入新 ACP）
 pub(crate) async fn close_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -409,6 +410,7 @@ pub(crate) async fn agent_session_delete(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // ACP-05：acp 锁内判 generation 再发 cancel，replacement 持同锁无法插入
 pub(crate) async fn cancel_prompt(
     state: tauri::State<'_, AppState>,
     agent_id: String,

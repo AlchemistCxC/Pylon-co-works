@@ -395,7 +395,6 @@ pub(crate) async fn detect_agent_runtimes(
     let hit = snapshot_store()
         .refresh(key, force.unwrap_or(false), Instant::now(), move || {
             let options = options.clone();
-            let scan_configured = scan_configured.clone();
             async move {
                 detection_core::detect_agent_runtime_candidates_inner(options, &scan_configured)
                     .await
@@ -572,7 +571,6 @@ mod store_tests {
             tokio::spawn(async move {
                 store
                     .refresh(slow_key, false, Instant::now(), move || {
-                        let started_signal = started_signal.clone();
                         Box::pin(async move {
                             started_signal.notify_one();
                             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -618,7 +616,6 @@ mod store_tests {
             tokio::spawn(async move {
                 store
                     .refresh(cancel_key, false, Instant::now(), move || {
-                        let started_signal = started_signal.clone();
                         Box::pin(async move {
                             started_signal.notify_one();
                             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -653,8 +650,6 @@ mod store_tests {
                 store
                     .refresh(join_key, false, Instant::now(), move || {
                         scans.fetch_add(1, Ordering::SeqCst);
-                        let started = started.clone();
-                        let release = release.clone();
                         Box::pin(async move {
                             started.notify_one();
                             release.notified().await;
