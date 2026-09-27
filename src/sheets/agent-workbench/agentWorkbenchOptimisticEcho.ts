@@ -30,28 +30,30 @@ export interface AgentWorkbenchBindingState {
   selectorRequestInFlight: boolean
 }
 
-/** 折叠日志与 journal 迁移诊断计数（原工厂散落闭包态的单源化）。 */
-export interface AgentWorkbenchFoldState {
-  log: WorkbenchEventEnvelope[]
-  ids: Set<string>
-  journalDiagnosticCount: number
-}
-
 export interface AgentWorkbenchOptimisticEchoDeps {
   runtime: WorkbenchRuntime
   binding: AgentWorkbenchBindingState
-  fold: AgentWorkbenchFoldState
   clock: AgentWorkbenchTurnClock
   updateRuntimeState: (patch: RuntimeStatePatch) => void
   foldPage(envelopes: readonly WorkbenchEventEnvelope[], base?: WorkbenchDocument): WorkbenchDocument
   foldEvent(envelope: WorkbenchEventEnvelope, base?: WorkbenchDocument): WorkbenchDocument
+  /**
+   * #380：按 canonical journal 重读并重建当前绑定的文档（宿主侧 `refresh`：异步、按
+   * binding/generation/epoch 守卫、与 bind 共用同一条发布路径）。
+   */
+  reloadFromJournal: () => Promise<void> | void
 }
 
 export interface AgentWorkbenchOptimisticEcho {
   /** 发送入口的乐观投影（回合起点记账也在这里）。 */
   project(targetSource: string, content: string, clientMessageId: string): void
-  /** 发送被拒：撤销乐观行（整页重折）与时钟。 */
-  reject(targetSource: string, clientMessageId: string): void
+  /**
+   * 发送被拒：撤销乐观行与时钟。
+   *
+   * #380 起**异步**（回滚走 canonical 重读，语义见 `reject` 实现处的注释）：需要「回滚已落地」
+   * 时序保证的调用方要 await 它——`send` 命令就是这么做的。
+   */
+  reject(targetSource: string, clientMessageId: string): Promise<void>
   /** bind/refresh 重建投影核后补折仍 pending 的乐观信封。 */
   withPending(targetSource: string, base: WorkbenchDocument): WorkbenchDocument
   /** canonical echo 到达：匹配 pending 条目，必要时回写 clientMessageId。 */
@@ -69,7 +71,7 @@ interface PendingOptimisticEntry {
 }
 
 export function createAgentWorkbenchOptimisticEcho(deps: AgentWorkbenchOptimisticEchoDeps): AgentWorkbenchOptimisticEcho {
-  const { runtime, binding, fold, clock, updateRuntimeState, foldPage, foldEvent } = deps
+  const { runtime, binding, clock, updateRuntimeState, foldPage, foldEvent, reloadFromJournal } = deps
   const pendingOptimisticBySource = new Map<string, PendingOptimisticEntry[]>()
 
   const echo: AgentWorkbenchOptimisticEcho = {
@@ -125,7 +127,7 @@ export function createAgentWorkbenchOptimisticEcho(deps: AgentWorkbenchOptimisti
       })
     },
 
-    reject(targetSource, clientMessageId) {
+    async reject(targetSource, clientMessageId) {
       const pending = pendingOptimisticBySource.get(targetSource) ?? []
       const rejected = pending.find(item => item.clientMessageId === clientMessageId)
       if (!rejected) {
@@ -144,19 +146,26 @@ export function createAgentWorkbenchOptimisticEcho(deps: AgentWorkbenchOptimisti
       if (binding.source !== targetSource) return
       const current = runtime.getSnapshot().document
       if (!current) return
-      // 折叠状态在 wasm 投影核里，没有「就地删除已入账事件」的出口：按「从未发送」
-      // 语义从折叠日志剔除被拒乐观信封后整页重折（一帧过界），重建出的文档替换展示。
-      // 注意这与旧的手工 filter 有一个已登记的角落差异：乐观 user 行在到达序里
-      // settle 过的 running 行不会被还原（重建视角里它从未发生）。
-      const remainingLog = fold.log.filter(item => item !== rejected.envelope)
-      fold.log = []
-      fold.ids.clear()
-      const document = foldPage(remainingLog, createWorkbenchDocument(binding.source ?? ''))
-      runtime.replaceDocument(document, { ownerKey: binding.ownerKey, generation: binding.generation, sessionId: binding.boundSessionId ?? null })
+      // #380：回滚不再从「整会话信封日志」整页重折——那份日志是载荷的第二份常驻持有
+      // （合成语料下 ≈Σ载荷），而 journal 本来就是权威源。改为请宿主做一次 canonical
+      // 重读：`publishCanonicalRead → withPending` 只会补折**仍 pending** 的乐观行，
+      // 被拒这条刚从这里移除，自然不在重建结果里；journal 事实一条不少。
+      //
+      // 两条如实的语义变化（原同步整页重折没有）：
+      // 1. 时间上是**异步**的：乐观行在重读落地前仍在屏上（调用方 await 本次 reject 可拿到
+      //    「已回滚」的时序保证，`send` 命令就这么做）；
+      // 2. 重建视角改为 journal 为准：尚未落盘（sink debounce 窗口内）的 live 行按既有
+      //    refresh 语义处理（`binding.buffered` 覆盖读期间到达的行），不在本次重建里则由
+      //    下一次 canonical 读回补。
+      await reloadFromJournal()
+      if (binding.destroyed) return
       // P52 D3：发送被拒 = 回合回滚；若无其它在途乐观回合，时钟一并撤销，
       // 后续迟到帧不得经 updateRuntimeState 复活指示器（原 controller 侧由
-      // reject-optimistic-user reducer 承担）。
+      // reject-optimistic-user reducer 承担）。时钟按 source 归档，切走也照撤。
       if (remaining.length === 0) clock.rollback(targetSource)
+      // 重读期间可能已切到别的会话（异步化引入的窗口）：那时不要再拿旧 source 的剩余 pending
+      // 去写当前 UI 的生成态——新会话的生成态归它自己的时钟/绑定管。
+      if (binding.source !== targetSource) return
       const existingActivity = runtime.getSnapshot().generationActivity
       updateRuntimeState({
         // #213：回滚后的活性只认"是否还有未撤销的乐观回合"——**不得**再看文档里有没有

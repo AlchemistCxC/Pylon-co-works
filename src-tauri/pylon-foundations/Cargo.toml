@@ -15,3 +15,9 @@ tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros
 # #317 批次二 ③：原子写正身（MoveFileExW 替换）下沉本 crate 所需的 Windows 原语。
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+# #361 的差分验收要给子进程读 `GetConsoleWindow()`（证明 CREATE_NO_WINDOW 真的
+# 让控制台窗口句柄变成 NULL）。只测试需要，所以放 dev-dependencies——发行构建不带
+# 这份 UI 绑定。
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }

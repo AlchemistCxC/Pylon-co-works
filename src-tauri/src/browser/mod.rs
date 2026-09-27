@@ -129,8 +129,9 @@ pub(crate) fn is_allowed_browser_url(url: &url::Url) -> bool {
 ///
 /// 按窗口 label 取对应配置；取不到时退回第一条窗口配置（本应用单窗口），都没有就
 /// 返回 `None`，调用方照旧不指定参数（宁可保持现状，也不凭空造一串参数）。
+/// `pub(crate)`：Docs Sheet（#371）的子 WebView 受同一约束，共用本函数。
 #[cfg(windows)]
-fn host_additional_browser_args(window: &tauri::Window) -> Option<String> {
+pub(crate) fn host_additional_browser_args(window: &tauri::Window) -> Option<String> {
     use tauri::Manager;
     let config = window.app_handle().config();
     config

@@ -18,6 +18,7 @@
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../tauri/env.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
+import { PYLON_STREAM_WIRE_EVENTS } from './pylonStreamWireEvents.ts'
 import { CanonicalEventCursor } from './canonicalEventCursor.ts'
 import {
   createCanonicalEventSink,
@@ -128,7 +129,7 @@ function extractDraftChunk(payload: unknown): CanonicalDraftChunkNotification | 
 
 /** 帧事件名 → 终帧类目（非终帧返回 undefined）。 */
 export function canonicalTerminalKindFromEvent(event: string): CanonicalTerminalKind | undefined {
-  return event === 'pylon:done' ? 'done' : event === 'pylon:error' ? 'error' : undefined
+  return event === PYLON_STREAM_WIRE_EVENTS.done ? 'done' : event === PYLON_STREAM_WIRE_EVENTS.error ? 'error' : undefined
 }
 
 /** 终帧载荷 → 归属源（非字符串或缺省一律 undefined，调用方据此丢弃）。 */
@@ -162,7 +163,7 @@ export function subscribeWindowTerminalFrames(listener: CanonicalFeedTerminalLis
   if (!IS_TAURI) return () => {}
   const stops: Array<() => void> = []
   let disposed = false
-  for (const event of ['pylon:done', 'pylon:error'] as const) {
+  for (const event of [PYLON_STREAM_WIRE_EVENTS.done, PYLON_STREAM_WIRE_EVENTS.error] as const) {
     void listen(event, payload => {
       const signal = canonicalTerminalSignalFromFrame({ event, payload: payload.payload })
       if (signal) listener(signal)
@@ -289,8 +290,8 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
   // B1：user echo 后端已 Channel 优先（send_update_frame 单轨）；本广播兜底
   // 服务未注册 Channel 的来源（平台 ingest / 非 Tauri 环境）。feed 为应用级
   // 单例，监听随 feed 生命周期注册一次；失败仅上报（Channel 主轨不受影响）。
-  void listen('pylon:user', event => {
-    void feed.acceptFrame({ event: 'pylon:user', payload: event.payload })
+  void listen(PYLON_STREAM_WIRE_EVENTS.user, event => {
+    void feed.acceptFrame({ event: PYLON_STREAM_WIRE_EVENTS.user, payload: event.payload })
   }).catch(error => {
     reportRuntimeError('注册 canonical feed user 兜底监听', error)
   })
@@ -303,8 +304,8 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
   // `pylon:done` 的兜底轨到得了 → 界面只剩「处理耗时」页脚，正文要等重启冷装载
   // 读 journal 才出现（issue #310 实机复现：回合内 DOM 4 行／重载后 6 行）。
   // 与 `pylon:user` 兜底同形：重复投递由 cursor 的 sequence 去重与投影器幂等吸收。
-  void listen('pylon:update', event => {
-    void feed.acceptFrame({ event: 'pylon:update', payload: event.payload })
+  void listen(PYLON_STREAM_WIRE_EVENTS.update, event => {
+    void feed.acceptFrame({ event: PYLON_STREAM_WIRE_EVENTS.update, payload: event.payload })
   }).catch(error => {
     reportRuntimeError('注册 canonical feed update 兜底监听', error)
   })

@@ -27,7 +27,11 @@ export interface AgentWorkbenchCommandDependencies {
   optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
   rejectOptimisticUser(source: string, clientMessageId: string): void
   optimisticDocument(source: string, content: string, clientMessageId: string): void
-  rejectOptimisticDocument(source: string, clientMessageId: string): void
+  /**
+   * #380：被拒回滚走 canonical 重读，因此可能是异步的。`send` 会 await 它，好让
+   * `send()` 的 promise 落地时「乐观行已撤销」成立（其余调用方可以不管返回值）。
+   */
+  rejectOptimisticDocument(source: string, clientMessageId: string): void | Promise<void>
   nextClientMessageId(source: string): string
   /** P52 D4：cancel 状态机由 facade 持有（原 controller requestCancel 迁入）。 */
   requestCancel(source: string, agentId: string): void
@@ -136,7 +140,9 @@ export function createAgentWorkbenchCommandFacade(
       return { status: 'sent', messageId: clientMessageId }
     } catch (error) {
       dependencies.rejectOptimisticUser(session.source, clientMessageId)
-      dependencies.rejectOptimisticDocument(session.source, clientMessageId)
+      // #380：回滚要等 canonical 重读落地——这样 `send()` 返回 rejected 时文档里已经
+      // 没有那条乐观行（修前是同步整页重折，同样是「返回时已撤销」的时序）。
+      await dependencies.rejectOptimisticDocument(session.source, clientMessageId)
       return { status: 'rejected', messageId: clientMessageId, error: commandError(error) }
     }
   }

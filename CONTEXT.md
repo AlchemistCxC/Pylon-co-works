@@ -26,6 +26,10 @@ _Avoid_: Agent Profile, runtime candidate
 Native 受控探测发现但尚未导入为 Agent Instance 的临时结果。
 _Avoid_: detected Agent, auto-imported Agent
 
+**periId**:
+ACP 会话的 remote binding ID（vendor 侧会话句柄）；只记录最近一次 remote binding，**不参与 Session identity**——durable owner 身份由 `(profileId, agentId, source)` 判定。Rust 侧拼写 `peri_id`；域代码注释中出现的 `remoteSessionId` 为同物别名，新代码统一用 `periId` 对齐 wire 契约。
+_Avoid_: remoteSessionId, session external id
+
 ## Rendering language
 
 渲染引擎长程施工的唯一入口为 `G:\Project\prism-team-workdir\Docs\Archive\渲染引擎施工\00-唯一入口台账.md`；架构、WI 状态和代码施工方式不得从已失效的仓内旧方案重新推导。

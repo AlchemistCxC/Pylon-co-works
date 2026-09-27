@@ -10,8 +10,6 @@
 export const APPROVAL_MODE_VALUES = ['bypass', 'auto', 'edit', 'default'] as const
 export type ApprovalMode = (typeof APPROVAL_MODE_VALUES)[number]
 
-const FALLBACK_APPROVAL_MODE: ApprovalMode = 'default'
-
 /** 跨应用重启保留全局审批模式；仅保存枚举值，不保存任何会话/凭据。 */
 export const APPROVAL_MODE_STORAGE_KEY = 'pylon-approval-mode'
 
@@ -38,33 +36,4 @@ export function persistApprovalMode(mode: ApprovalMode, storage: ApprovalModeSto
 
 export function normalizeApprovalMode(mode: string): ApprovalMode | null {
   return (APPROVAL_MODE_VALUES as readonly string[]).includes(mode) ? mode as ApprovalMode : null
-}
-
-export function nextApprovalMode(current: string): ApprovalMode {
-  const normalized = normalizeApprovalMode(current) || FALLBACK_APPROVAL_MODE
-  const index = APPROVAL_MODE_VALUES.indexOf(normalized)
-  return APPROVAL_MODE_VALUES[(index + 1) % APPROVAL_MODE_VALUES.length]
-}
-
-export interface ApprovalModeChangeOptions {
-  nextMode: ApprovalMode
-  previousMode: ApprovalMode
-  writeMode: (mode: ApprovalMode) => void
-  invokeSet: (mode: ApprovalMode) => Promise<unknown>
-}
-
-/** 先写显示值再 invoke；失败回滚显示值并抛出（错误中心由调用方处理） */
-export async function applyApprovalModeChange({
-  nextMode,
-  previousMode,
-  writeMode,
-  invokeSet,
-}: ApprovalModeChangeOptions): Promise<void> {
-  writeMode(nextMode)
-  try {
-    await invokeSet(nextMode)
-  } catch (error) {
-    writeMode(previousMode)
-    throw error
-  }
 }

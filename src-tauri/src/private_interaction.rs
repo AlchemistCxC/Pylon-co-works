@@ -10,14 +10,17 @@ use crate::acp::RequestId;
 pub(crate) struct PendingPrivateInteraction {
     pub provider: String,
     pub agent_id: String,
+    /// 会话内 elicitation/ask-user 携带会话 id；#356：request-scoped
+    /// elicitation（会话外 auth/config 阶段）合法地持有**空串**——身份由
+    /// requestId+agentId 收口，前后端对显式空串按「无会话」处理。
     pub session_id: String,
     pub method: String,
     pub bridge: crate::acp::adapter::private_ext::PrivateBridge,
     pub params: serde_json::Value,
     pub question_specs: Option<Vec<crate::acp::question_policy::QuestionSpec>>,
     pub client_generation: u64,
-    /// 到达时刻（#230：interaction_list 投影 requestedAt 用；私有交互不参与
-    /// 超时结算，仅作展示时间戳）。
+    /// 到达时刻（#230：interaction_list 投影 requestedAt 用；#356 起同时是
+    /// 私有交互超时结算的 deadline 起点，对等 pending_permissions）。
     pub enqueued_at: crate::time::Timestamp,
 }
 

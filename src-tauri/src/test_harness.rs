@@ -513,7 +513,7 @@ impl TestHarness {
             .clone();
         let service = service.expect("boot installed in-memory event service");
         service
-            .list_events(owner_key.to_string(), None, 100)
+            .list_events(owner_key.to_string(), None, 100, false)
             .await
             .expect("journal readback")
             .events
@@ -942,7 +942,7 @@ impl TestHarness {
             .clone()
             .expect("boot installed in-memory event service");
         service
-            .list_events(owner_key.to_string(), None, limit)
+            .list_events(owner_key.to_string(), None, limit, false)
             .await
             .expect("journal readback")
             .events

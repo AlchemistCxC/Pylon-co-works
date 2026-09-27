@@ -448,12 +448,9 @@ fn run_probe(bash: &Path, args: &[&str], path: &OsStr, home: Option<&Path>) -> R
     if let Some(home) = home {
         command.env("HOME", home).env("USERPROFILE", home);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW keeps a preflight from flashing a console window.
-        command.creation_flags(0x0800_0000);
-    }
+    // CREATE_NO_WINDOW keeps a preflight from flashing a console window.
+    use pylon_foundations::child_command::HideConsoleWindow;
+    command.hide_console_window();
 
     let mut child = command
         .spawn()

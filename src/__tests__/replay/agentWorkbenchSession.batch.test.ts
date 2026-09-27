@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch'
-import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
+import { createCanonicalEvent, toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
 import type { Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
@@ -370,5 +370,54 @@ describe('agentWorkbenchSession turn.unit 生产形状（#81 回归修复）', (
     const bareSnapshot = await bindWith([bare])
     expect(messagesOf(bareSnapshot)?.map(message => message.content)).toEqual(['答案'])
     expect(bareSnapshot.document?.diagnostics.some(item => item.code === 'event.unknown')).toBe(true)
+  })
+})
+
+describe('#380-b tool-run 段的工作台展开（评审阻塞项回归锁）', () => {
+  const rawToolUpdate = (toolCallId: string, text: string): unknown => ({
+    source: 'local:a',
+    update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', content: [{ type: 'text', text }] },
+  })
+
+  it('压缩段展开出的工具活动与逐拍路径逐字段相同，且不产出幽灵 reasoning 行', async () => {
+    const beats = chunkRows([
+      rawUser('问'), rawToolStart('call-1'),
+      rawToolUpdate('call-1', 'aaa'), rawToolUpdate('call-1', 'aaaaaa'), rawToolUpdate('call-1', 'aaaaaabbb'),
+      rawDone(),
+    ])
+    const last = beats[4]
+    const unit = createCanonicalEvent({
+      owner, clientGeneration: 1, sequence: 7, occurredAt: last.occurredAt, receivedAt: last.occurredAt,
+      eventType: 'turn.unit', payloadVersion: 1,
+      typedPayload: {
+        aggregateKind: 'turn-rollup', seqStart: 1, seqEnd: 6, foldedCount: beats.length,
+        foldScheme: 'adjacent-delta-fold-v2', contentSha256: 'x',
+        terminal: { eventType: 'turn.completed', occurredAt: beats[5].occurredAt },
+        segments: [
+          { kind: 'event', event: beats[0] },
+          { kind: 'event', event: beats[1] },
+          {
+            kind: 'tool-run', eventType: 'tool.call.updated', seqStart: 3, seqEnd: 5, foldedCount: 3,
+            occurredAt: last.occurredAt, identity: { toolCallId: 'call-1' }, event: last,
+          },
+          { kind: 'event', event: beats[5] },
+        ],
+      },
+      rawPayload: { kind: 'turn-unit' },
+    })
+
+    const fromBeats = await bindWith(beats)
+    const fromUnit = await bindWith([unit])
+    const toolOf = (document: WorkbenchDocument | undefined) => document?.activities.find(item => item.kind === 'tool')
+    const pick = (node: ReturnType<typeof toolOf>) => node === undefined ? undefined : ({
+      id: node.id, title: node.title, status: node.status, toolKindWire: node.toolKindWire,
+      displayName: node.displayName, sequence: node.sequence, parts: node.parts,
+    })
+    expect(pick(toolOf(fromUnit.document))).toBeDefined()
+    expect(pick(toolOf(fromUnit.document))).toEqual(pick(toolOf(fromBeats.document)))
+    // 评审阻塞项的回归锁：tool-run 段曾被 delta-run 兜底分支吃掉，展开成 parts 为空的
+    // reasoning 幽灵行、末拍工具事件整行丢失。
+    expect(fromUnit.document?.timeline.some(entry => entry.kind === 'reasoning')).toBe(false)
+    expect(comparableMessages(fromUnit.document)).toEqual(comparableMessages(fromBeats.document))
   })
 })

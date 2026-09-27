@@ -411,7 +411,7 @@ describe('Agent Workbench canonical session runtime', () => {
     service.destroy()
   })
 
-  it('#204③：refresh 后 foldLog 以 journal 权威集替换——被拒回滚保留 refresh 时代事实', async () => {
+  it('#204③/#380：被拒回滚以 journal 为准——refresh 时代的事实全保留、乐观行消失', async () => {
     const active = session('session-foldlog-replace', 'local:foldlog-replace')
     const userRow = message(1, 'user', 'hello')
     let rows: readonly unknown[] = [userRow]
@@ -434,6 +434,81 @@ describe('Agent Workbench canonical session runtime', () => {
     await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
     // 回滚整页重折源 = refresh 集：被拒乐观行消失，refresh 时代的 journal 事实全保留。
     expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'world'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
+  it('#380：被拒回滚的权威源是 journal——重读会把期间落盘的行一并带回来', async () => {
+    const active = session('session-380-reject', 'local:380-reject')
+    const userRow = message(1, 'user', 'hello', 'local:380-reject')
+    // 判据的构造：这份 journal 行**从未**进过任何 fold（bind 时还不存在，也没有 refresh），
+    // 因此它只可能来自「回滚时真的读了一次 journal」——修前整页重折走的是内存里的信封日志，
+    // 这条 assistant 行不会出现（用例会失败）。
+    const laterRow = message(9, 'assistant', 'landed-later', 'local:380-reject')
+    let rows: readonly unknown[] = [userRow]
+    const loadAll = vi.fn(async () => rows)
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-380-reject',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    const readsAfterBind = loadAll.mock.calls.length
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello'])
+
+    rows = [userRow, laterRow]
+    await expect(service.commands.send(active.id, { text: '发送失败' })).resolves.toMatchObject({ status: 'rejected' })
+    // 回滚读了一次 journal（不是内存日志），乐观行消失、两条 journal 行都在。
+    expect(loadAll.mock.calls.length).toBeGreaterThan(readsAfterBind)
+    expect(service.runtime.getSnapshot().document?.messages.map(item => item.content)).toEqual(['hello', 'landed-later'])
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+    service.destroy()
+  })
+
+
+  it('#380：在途 refresh 不会把被拒回滚的重建吞掉（rebuild 排队而非合并）', async () => {
+    const active = session('session-rebuild-race', 'local:rebuild-race')
+    let releaseFirstRead: (() => void) | undefined
+    let readCount = 0
+    const loadAll = vi.fn(async () => {
+      readCount += 1
+      if (readCount === 2) {
+        // 第二次读（下面手动发起的「在途 refresh」）挂住不返回，制造合并窗口。
+        await new Promise<void>(resolve => { releaseFirstRead = resolve })
+      }
+      return []
+    })
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll,
+      subscribe: () => () => {},
+      commands: {
+        resolveSession: id => id === active.id ? active : undefined,
+        resolvePersona: () => '', nextClientMessageId: () => 'client-rebuild-race',
+        optimisticUser: () => {}, sendMessage: async () => { throw new Error('offline') },
+      },
+    })
+    await service.bind(active)
+    expect(readCount).toBe(1)
+
+    const inFlight = service.refresh(active)          // 在途「续折」读，挂住
+    await Promise.resolve()
+    expect(readCount).toBe(2)
+
+    const send = service.commands.send(active.id, { text: '发送失败' })
+    await Promise.resolve()
+    // rebuild 请求不得被在途读合并：它会排队等在途读落地之后再读一次（readCount 停在 2）。
+    expect(readCount).toBe(2)
+    releaseFirstRead?.()
+    await inFlight.catch(() => {})
+    await expect(send).resolves.toMatchObject({ status: 'rejected' })
+
+    // 排队的那次 rebuild 真的跑了（第 3 次读），且乐观行已从文档消失。
+    expect(readCount).toBeGreaterThanOrEqual(3)
+    expect(service.runtime.getSnapshot().document?.messages).toEqual([])
     expect(service.runtime.getSnapshot().generating).toBe(false)
     service.destroy()
   })

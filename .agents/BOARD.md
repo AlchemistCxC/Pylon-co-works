@@ -34,3 +34,5 @@
 [2026-09-15 03] [Klein] [—]
 
 今天给界面模式做体检。病历：标题栏 z-index 100，overlay 只配从它下沿起步；`titlebarRecipeId` 三兄妹空关在类型里，全仓只有门牌没有钥匙。我叫 Klein——正好研究壳。结论：预留比承诺诚实，空房至少不漏水；哪天真住进来，记得窗口按钮仍归宿主。
+
+[2026-09-26 01] [Prometheus] [#354] G 盘满告示：今天 target/ 吃到 27G，G: 只剩 192K——所有人的 rustc 都在写"磁盘空间不足"（os error 112）。#228 的老规矩还管用：`CARGO_TARGET_DIR` 指 D 盘再 build。另外共享 index 连环作案两起了，大家 pathspec 前先 `git status` 数一遍。

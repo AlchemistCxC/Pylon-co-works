@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig, type Plugin } from 'vitepress'
 
 // 篇目文件不搬移不改名：路由经 rewrites 映射为 ASCII 路径。中文文件名直出的
 // 百分号编码路径会触发 vitepress 1.6.4 缺陷——直链加载时正文空白（客户端
@@ -16,13 +16,40 @@ const rewrites = {
   '说明书/Pylon-模块维护地图.md': 'dev/module-map.md',
 }
 
+// #371 离线变体：发行包内嵌文档站（pylon-docs:// scheme + 专用 Sheet）走
+// `PYLON_DOCS_OFFLINE=1` 构建，在线站点（CI/Pages）不设该变量、行为零变化。
+// - base 回根：scheme 源自带「每源根目录」语义，根绝对路径在 `pylon-docs://localhost/`
+//   内正确解析；issue 里设想过的相对 base `./` 不可行——VitePress 要求 base 以 `/`
+//   起止，且相对链接在嵌套路由下会解析到错误层级。
+// - 裁 Web 字体：fontsource 的 CSS 经虚拟空模块短路，woff/woff2 整体不进 dist
+//   （26MB → 约 4MB）；custom.css 字体栈已含系统 CJK 衬线回退，无需改样式。
+const offline = process.env.PYLON_DOCS_OFFLINE === '1'
+
+// enforce: 'pre' 抢在内建解析之前命中裸说明符，短路整个 fontsource 子树
+// （woff/woff2 引用都在这些 CSS 的 url() 里），两个构建束（client/SSG）同效。
+const stripWebfonts: Plugin = {
+  name: 'pylon-docs-offline-strip-webfonts',
+  enforce: 'pre',
+  resolveId(id) {
+    if (offline && id.startsWith('@fontsource/')) return '\0pylon-docs-empty-font.css'
+    return null
+  },
+  load(id) {
+    if (id === '\0pylon-docs-empty-font.css') return ''
+    return null
+  },
+}
+
 export default defineConfig({
   lang: 'zh-CN',
   title: 'Pylon 文档',
   description:
     '基于 Agent Client Protocol（ACP）的桌面 Agent 工作台——发行包、CLI 与插件系统说明。',
   // GitHub Pages 项目页：https://alchemistcxc.github.io/Pylon-co-works/
-  base: '/Pylon-co-works/',
+  base: offline ? '/' : '/Pylon-co-works/',
+  vite: {
+    plugins: offline ? [stripWebfonts] : [],
+  },
   rewrites,
   // tactical-blue/ 是内部验收记录，不进公开站点
   srcExclude: ['tactical-blue/**'],

@@ -9,8 +9,12 @@
 //! 确定性：响应体一律 serde_json::Value 序列化（键序稳定），输出顺序即处理
 //! 顺序（逐行阻塞读），无随机数、无真实时钟依赖（屏障用文件存在性）。
 //!
-//! 构建：`cargo build --bin pylon-fake-agent --features test-agent`
-//! 单测：`cargo test --bin pylon-fake-agent --features test-agent`
+//! 构建：`cargo build -p pylon-fake-agent --features test-agent`
+//! 单测：`cargo test -p pylon-fake-agent --features test-agent`
+//!
+//! #382：本文件原为主 crate 的 `src/bin/pylon-fake-agent.rs`（`[[bin]]` + feature
+//! 门控）。Cargo 的包内 bin 会隐式链接本包 lib，编它等于编整个 app 依赖图（CI
+//! 实测 405 crate / 5m26s），故迁为独立 crate，依赖面只剩 serde_json + std。
 
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};

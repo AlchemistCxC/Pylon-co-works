@@ -20,6 +20,84 @@ use crate::session::DurableSessionOwner;
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
+use pylon_acp::fs_policy::FsFailure;
+
+/// #354：fs 请求错误面——runtime 分类错误（NotFound/Denied/Other）与参数/
+/// 序列化错误分开承载，wire 映射见 `host_fs_error_response`。
+enum FsToolError {
+    Runtime(FsFailure),
+    Message(String),
+    UnsupportedMethod,
+}
+
+/// #354：fs 负路径 → wire 三元组（code, data, message）。`NotFound` → 官方
+/// `resource_not_found`（-32002）+ `data:{uri}`；沙箱拒绝 → 保持 `-32602` 但
+/// message 加 `sandbox:` 稳定前缀（agent 可区分「参数本身坏」与「沙箱拒绝」）；
+/// 参数缺失/序列化失败维持 `-32602` 裸消息（wire 逐字不变）；不支持的方法按
+/// 官方基线回 `-32601`（host 工具门按前缀放行，未知子方法会到达该臂）。
+fn host_fs_error_response(
+    error: &FsToolError,
+) -> (WireErrorCode, Option<serde_json::Value>, String) {
+    match error {
+        FsToolError::Runtime(FsFailure::NotFound { uri }) => (
+            WireErrorCode::ResourceNotFound,
+            Some(serde_json::json!({ "uri": uri })),
+            format!("resource not found: {uri}"),
+        ),
+        FsToolError::Runtime(FsFailure::SandboxDenied { message }) => (
+            WireErrorCode::InvalidParams,
+            None,
+            format!("sandbox: {message}"),
+        ),
+        FsToolError::Runtime(FsFailure::Other(message)) => {
+            (WireErrorCode::InvalidParams, None, message.clone())
+        }
+        FsToolError::Message(message) => (WireErrorCode::InvalidParams, None, message.clone()),
+        FsToolError::UnsupportedMethod => (
+            WireErrorCode::MethodNotFound,
+            None,
+            "unsupported filesystem method".to_string(),
+        ),
+    }
+}
+
+/// #354：terminal 负路径 → wire 三元组。registry（`pylon-acp`，#363 在途域）
+/// 返回裸 `String`，这里按其稳定文案做最小分类：`terminal {id} not found` →
+/// `-32002`（终端是资源，无 uri 载荷）；不支持的方法 → `-32601`；其余（如
+/// `does not belong to session`）维持 `-32602` 裸消息。
+fn host_terminal_error_response(error: &str) -> (WireErrorCode, Option<serde_json::Value>, String) {
+    if error.contains(" not found") {
+        (WireErrorCode::ResourceNotFound, None, error.to_string())
+    } else if error == "unsupported terminal method" {
+        (WireErrorCode::MethodNotFound, None, error.to_string())
+    } else {
+        (WireErrorCode::InvalidParams, None, error.to_string())
+    }
+}
+
+/// #354：带 `data` 的 wire 错误应答（官方 `resource_not_found` 携带 `data:{uri}`）。
+/// `ResponderHandle::respond_error` 不携带 data；经 pub 的 `pending_requests`
+/// 取官方 SDK `Responder` 直发，不为单个调用点扩 pylon-acp 引擎面（#363 在途，
+/// engine.rs 避让）。
+async fn respond_tool_error(
+    acp: &AcpLock,
+    request_id: crate::acp::RequestId,
+    (code, data, message): (WireErrorCode, Option<serde_json::Value>, String),
+) {
+    let responder = { acp.lock().await.responder() };
+    let pending = responder
+        .pending_requests
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.remove(&request_id));
+    let mut wire_error = agent_client_protocol::Error::new(i32::from(code), message);
+    if let Some(data) = data {
+        wire_error = wire_error.data(data);
+    }
+    if let Some(pending) = pending {
+        let _ = pending.respond_with_error(wire_error);
+    }
+}
 
 mod routing;
 
@@ -573,10 +651,7 @@ async fn handle_terminal_request(
             let _ = responder.respond(request_id, value).await;
         }
         Err(error) => {
-            let responder = { acp.lock().await.responder() };
-            let _ = responder
-                .respond_error(request_id, WireErrorCode::InvalidParams, &error)
-                .await;
+            respond_tool_error(acp, request_id, host_terminal_error_response(&error)).await;
         }
     }
 }
@@ -589,7 +664,7 @@ async fn handle_filesystem_request(
     runtime: crate::acp::file_system_runtime::FileSystemRuntime,
 ) {
     let object = params.and_then(serde_json::Value::as_object);
-    let result: Result<serde_json::Value, String> = match method {
+    let result: Result<serde_json::Value, FsToolError> = match method {
         "fs/read_text_file" => {
             match object
                 .and_then(|p| p.get("path"))
@@ -598,13 +673,20 @@ async fn handle_filesystem_request(
                 Some(path) => runtime
                     .read_text_file(std::path::Path::new(path))
                     .await
+                    .map_err(FsToolError::Runtime)
                     .and_then(|content| {
                         serde_json::to_value(
                             agent_client_protocol_schema::v1::ReadTextFileResponse::new(content),
                         )
-                        .map_err(|error| format!("serialize fs/read_text_file response: {error}"))
+                        .map_err(|error| {
+                            FsToolError::Message(format!(
+                                "serialize fs/read_text_file response: {error}"
+                            ))
+                        })
                     }),
-                None => Err("fs/read_text_file requires path".to_string()),
+                None => Err(FsToolError::Message(
+                    "fs/read_text_file requires path".to_string(),
+                )),
             }
         }
         "fs/write_text_file" => {
@@ -619,17 +701,26 @@ async fn handle_filesystem_request(
                 (Some(path), Some(content)) => runtime
                     .write_text_file(std::path::Path::new(path), content)
                     .await
+                    .map_err(FsToolError::Runtime)
                     .and_then(|_| {
                         serde_json::to_value(
                             agent_client_protocol_schema::v1::WriteTextFileResponse::new(),
                         )
-                        .map_err(|error| format!("serialize fs/write_text_file response: {error}"))
+                        .map_err(|error| {
+                            FsToolError::Message(format!(
+                                "serialize fs/write_text_file response: {error}"
+                            ))
+                        })
                     }),
-                (None, _) => Err("fs/write_text_file requires path".to_string()),
-                (_, None) => Err("fs/write_text_file requires content".to_string()),
+                (None, _) => Err(FsToolError::Message(
+                    "fs/write_text_file requires path".to_string(),
+                )),
+                (_, None) => Err(FsToolError::Message(
+                    "fs/write_text_file requires content".to_string(),
+                )),
             }
         }
-        _ => Err("unsupported filesystem method".to_string()),
+        _ => Err(FsToolError::UnsupportedMethod),
     };
     let responder = { acp.lock().await.responder() };
     match result {
@@ -637,9 +728,8 @@ async fn handle_filesystem_request(
             let _ = responder.respond(request_id, value).await;
         }
         Err(error) => {
-            let _ = responder
-                .respond_error(request_id, WireErrorCode::InvalidParams, &error)
-                .await;
+            drop(responder);
+            respond_tool_error(acp, request_id, host_fs_error_response(&error)).await;
         }
     }
 }
@@ -2168,7 +2258,70 @@ fn crash_reason_from_params(params: Option<&serde_json::Value>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{host_fs_error_response, host_terminal_error_response, FsToolError};
     use crate::private_interaction::PendingPrivateInteraction;
+    use pylon_acp::fs_policy::FsFailure;
+
+    /// #354：fs 负路径 → 官方 wire 语义（纯函数映射）。
+    #[test]
+    fn host_fs_errors_map_to_official_wire_semantics() {
+        let (code, data, message) =
+            host_fs_error_response(&FsToolError::Runtime(FsFailure::NotFound {
+                uri: r"C:\w\missing.txt".into(),
+            }));
+        assert_eq!(i32::from(code), -32002);
+        assert_eq!(
+            data,
+            Some(serde_json::json!({ "uri": r"C:\w\missing.txt" }))
+        );
+        assert_eq!(message, r"resource not found: C:\w\missing.txt");
+
+        let (code, data, message) =
+            host_fs_error_response(&FsToolError::Runtime(FsFailure::SandboxDenied {
+                message: "path is outside allowed write roots: X".into(),
+            }));
+        assert_eq!(i32::from(code), -32602);
+        assert!(data.is_none());
+        assert!(message.starts_with("sandbox: "));
+
+        // 其余失败 wire 逐字不变：-32602 裸消息、无 data。
+        for error in [
+            FsToolError::Runtime(FsFailure::Other("filesystem read timed out".into())),
+            FsToolError::Message("fs/read_text_file requires path".into()),
+        ] {
+            let (code, data, message) = host_fs_error_response(&error);
+            assert_eq!(i32::from(code), -32602);
+            assert!(data.is_none());
+            assert!(!message.starts_with("sandbox: "));
+        }
+
+        let (code, data, message) = host_fs_error_response(&FsToolError::UnsupportedMethod);
+        assert_eq!(i32::from(code), -32601);
+        assert!(data.is_none());
+        assert_eq!(message, "unsupported filesystem method");
+    }
+
+    /// #354：terminal 负路径映射——registry 稳定文案的最小分类。
+    #[test]
+    fn host_terminal_errors_map_not_found_and_unsupported_method() {
+        let (code, data, message) = host_terminal_error_response("terminal t-1 not found");
+        assert_eq!(i32::from(code), -32002);
+        assert!(data.is_none());
+        assert_eq!(message, "terminal t-1 not found");
+
+        let (code, _, _) = host_terminal_error_response("unsupported terminal method");
+        assert_eq!(i32::from(code), -32601);
+
+        for raw in [
+            "terminal t-1 does not belong to session s-1",
+            "serialize terminal/output response: x",
+        ] {
+            let (code, data, message) = host_terminal_error_response(raw);
+            assert_eq!(i32::from(code), -32602, "{raw}");
+            assert!(data.is_none(), "{raw}");
+            assert_eq!(message, raw);
+        }
+    }
 
     fn pending_elicitation(elicitation_id: &str) -> PendingPrivateInteraction {
         PendingPrivateInteraction {

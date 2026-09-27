@@ -28,7 +28,7 @@ bunx vitest run scripts/code-stats.test.mts   # 口径回归用例
 - **测试判据**：
   - TS/JS 文件级：`__tests__`/`__fixtures__`/`__mocks__`/`test`/`tests`/`test-utils` 目录、`*.test.*`/`*.spec.*`。注意 `mockBlocks.tsx` 这类 **mock/demo 数据不是测试**，算生产；
   - Rust **行级**：`#[cfg(test)]`（含 any/all/not 组合求值）标注的 item 区域用词法器从生产文件里切出——词法器处理 raw string（可跨行）、嵌套块注释、char 与生命周期歧义；
-  - Rust 测试专属文件：父模块 `#[cfg(test)] mod x;` 声明的文件（如 `*_tests.rs`、`test_utils.rs`）、`tests/` 集成测试、`src-tauri/src/bin/pylon-fake-agent.rs`（test-agent 门控）。
+  - Rust 测试专属文件：父模块 `#[cfg(test)] mod x;` 声明的文件（如 `*_tests.rs`、`test_utils.rs`）、`tests/` 集成测试、`src-tauri/pylon-fake-agent/**`（#382 起为独立 crate，test-agent 门控）。
 - **行类型**：代码行 = 非空非纯注释；注释行 = 整行均为注释；空行 = 纯空白；行内尾注计入代码行。跨行字符串（含 raw string）与块注释的**内部行按内容归类**——有内容算 code/comment，内部纯空行仍是空行（#259 前内部行一律被误计为空行，注释行因此被大幅低估）。
 
 ## 解读与坑

@@ -37,14 +37,14 @@ import {
   type WorkbenchSemanticEvent,
 } from '../events/workbenchEventSchema.ts'
 import type { NormalizeContext, NormalizeDiagnostic } from './agentEventNormalizer.ts'
+
+/** wire 对象判型的 normalizers 共享出口：单一实现在 utils/wireGuards。 */
+import { isRecord } from '../../../utils/wireGuards.ts'
+export { isRecord }
+
 // 校验辅助：undefined 视为通过；仅接受非空字符串（保持原单行三连访问的语义）
 function isMissingOrNonEmptyString(v: unknown): boolean {
   return v === undefined || (typeof v === 'string' && v.trim().length > 0)
-}
-
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 const MAX_CANONICAL_OUTPUT_ENTRIES = 20_000

@@ -36,10 +36,13 @@ export function resolveArchivedSessionOwner(
   return { kind: 'resolved', agentId: target.agentId, sessionId: target.id }
 }
 
+/** 存档归属冲突的唯一文案：预查（openOwnedSession）与实际恢复共用，勿内联手抄。 */
+export const ARCHIVED_OWNER_CONFLICT_MESSAGE = '存档会话归属冲突：source/periId 指向多个本地会话'
+
 export function archivedOwnerResultToTransaction(
   result: ArchivedOwnerResolution,
 ): TransactionResult<{ agentId: string; sessionId: string }> {
   if (result.kind === 'resolved') return { ok: true, value: { agentId: result.agentId, sessionId: result.sessionId } }
   if (result.kind === 'missing') return { ok: false, kind: 'validation', message: '存档会话不存在对应本地归属' }
-  return { ok: false, kind: 'conflict', message: '存档会话归属冲突：source/periId 指向多个本地会话' }
+  return { ok: false, kind: 'conflict', message: ARCHIVED_OWNER_CONFLICT_MESSAGE }
 }

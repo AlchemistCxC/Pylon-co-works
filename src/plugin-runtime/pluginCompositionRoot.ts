@@ -1,9 +1,9 @@
 /** API 1.0 plugin composition root: the only product runtime and package owner. */
-import { invoke } from '@tauri-apps/api/core'
 import {
   applicationRuntime,
   requestApplicationSoftRemount,
 } from '../application/applicationRuntimeServices.ts'
+import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { createPluginPackageClient, type PluginPackageClient } from '../infrastructure/plugins/pluginPackageClient.ts'
 import type { PluginProcessClient } from '../infrastructure/plugins/pluginProcessClient.ts'
 import { createSkinHostPorts } from '../infrastructure/skin/skinHostPorts.ts'
@@ -146,9 +146,7 @@ let packageInstallationService: PackageInstallationService | undefined
 export function getPluginPackageClient(): PluginPackageClient {
   if (!pluginPackageClient) {
     pluginPackageClient = createPluginPackageClient({
-      transport: {
-        invoke: (cmd: string, args?: unknown) => invoke(cmd, args as Record<string, unknown> | undefined),
-      },
+      transport: { invoke: tauriInvokeTransport },
     })
   }
   return pluginPackageClient

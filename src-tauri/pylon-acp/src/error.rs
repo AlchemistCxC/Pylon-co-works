@@ -132,6 +132,11 @@ impl AgentConnectFailure {
         if let AcpError::Rpc(raw) = &error {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
                 failure.remote_code = value.get("code").and_then(serde_json::Value::as_i64);
+                if failure.remote_code == Some(-32000) {
+                    // #354：协议级 authRequired → 稳定码（cause 词表与前端码表
+                    // 已登记 `agent_auth_required`）。
+                    failure.code = "agent_auth_required".to_string();
+                }
                 if let Some(message) = value.get("message").and_then(serde_json::Value::as_str) {
                     failure.message = format!(
                         "initialize RPC error{}: {}",
@@ -221,6 +226,9 @@ pub enum AcpError {
 pub enum RpcFailureKind {
     SessionMissing,
     MethodMissing,
+    /// #354：agent 回协议级 `-32000 authRequired`——需要登录/认证后才可继续，
+    /// 宿主据此给稳定码 `agent_auth_required`（用户可见「去登录」语义）。
+    AuthRequired,
     Other,
 }
 
@@ -296,6 +304,11 @@ impl AcpError {
             .map(|marker| marker.to_ascii_lowercase());
         let kind = if code == Some(-32601) {
             RpcFailureKind::MethodMissing
+        } else if code == Some(-32000) {
+            // #354：协议级 authRequired 按结构化 code 一票判定，置于文本启发式
+            // 之前——协议已定义该码的语义，agent 误用它表其它含义属协议违规，
+            // 不做文本竞猜。
+            RpcFailureKind::AuthRequired
         } else if data_marker.as_deref().is_some_and(|marker| {
             matches!(
                 marker,
@@ -423,7 +436,60 @@ mod resume_failure_tests {
 
 #[cfg(test)]
 mod wire_code_tests {
-    use super::AcpError;
+    use super::{AcpError, AgentConnectFailure, RpcFailureKind};
+
+    /// #354：协议级 `-32000 authRequired` 按结构化 code 一票判定（置于文本
+    /// 启发式之前）；非 `-32000` 的既有文本启发式（session_missing 等）不变。
+    #[test]
+    fn rpc_failure_kind_classifies_auth_required_by_wire_code_before_text_heuristics() {
+        for raw in [
+            r#"{"code":-32000,"message":"authentication required"}"#,
+            r#"{"code":-32000,"message":"please login via the agent CLI"}"#,
+            // 即使文本像 session 缺失，-32000 的协议语义优先。
+            r#"{"code":-32000,"message":"session not found: s-1"}"#,
+        ] {
+            assert_eq!(
+                AcpError::Rpc(raw.into()).rpc_failure_kind(),
+                Some(RpcFailureKind::AuthRequired),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32602,"message":"session not found: s-1"}"#.into())
+                .rpc_failure_kind(),
+            Some(RpcFailureKind::SessionMissing)
+        );
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32601,"message":"Method not found"}"#.into())
+                .rpc_failure_kind(),
+            Some(RpcFailureKind::MethodMissing)
+        );
+        assert_eq!(
+            AcpError::Rpc(r#"{"code":-32001,"message":"rate limited"}"#.into()).rpc_failure_kind(),
+            Some(RpcFailureKind::Other)
+        );
+    }
+
+    /// #354：initialize 对远端 `-32000` 产出稳定码 `agent_auth_required`
+    /// （cause 词表与前端码表已登记）；其它远端码不触发。
+    #[test]
+    fn initialize_maps_remote_auth_required_to_a_stable_code() {
+        let failure = AgentConnectFailure::initialize(
+            AcpError::Rpc(r#"{"code":-32000,"message":"authentication required"}"#.into()),
+            None,
+        );
+        assert_eq!(failure.code, "agent_auth_required");
+        assert_eq!(failure.remote_code, Some(-32000));
+        assert!(!failure.retryable);
+        assert!(failure.message.contains("authentication required"));
+
+        let other = AgentConnectFailure::initialize(
+            AcpError::Rpc(r#"{"code":-32602,"message":"bad params"}"#.into()),
+            None,
+        );
+        assert_eq!(other.code, "agent_initialize_failed");
+        assert_eq!(other.remote_code, Some(-32602));
+    }
 
     /// #317 批次二 2c：边界码表稳定性——词汇表与宿主 persist.rs 回放契约逐字一致，
     /// 前端 replayErrorCode 按 code 透传，拼写不得漂移。

@@ -87,12 +87,12 @@ describe('sheetState reducer legacy compat', () => {
     expect(closeOthersWithPinned.sheets.map(sheet => sheet.id)).toEqual(['pinned', 'middle'])
   })
 
-  it('10 kind 注册表与 createSheetState 容错', () => {
+  it('11 kind 注册表与 createSheetState 容错', () => {
     expect(resolveSheetSingletonKey({ kind: 'prism' })).toBe('prism')
     expect(getSheetRegistryEntry('unknown')).toBeUndefined()
     // W1-01：9 kind 注册表（删 diff/changes/git-history，增 overview/search/history/browser/gateway）；
-    // #154 阶段 4：增 settings（设置迁入 sheet 体系）
-    expect(getWorkspaceRegistrySnapshot().workspaces.length, 'W1-01 + #154：10 kind 注册表').toBe(10)
+    // #154 阶段 4：增 settings（设置迁入 sheet 体系）；#371：增 docs（离线文档站）
+    expect(getWorkspaceRegistrySnapshot().workspaces.length, 'W1-01 + #154 + #371：11 kind 注册表').toBe(11)
     expect(getSheetRegistryEntry('diff')).toBeUndefined()
     expect(getSheetRegistryEntry('changes')).toBeUndefined()
     expect(getSheetRegistryEntry('git-history')).toBeUndefined()

@@ -28,6 +28,28 @@ fn hub() -> Option<Arc<RuntimeLogHub>> {
     HUB.get().cloned()
 }
 
+/// #362：把一条**不由 tracing 产生**的记录直接推进已注册的 hub。
+///
+/// 用途是日志子系统自己的通报（每日额度用尽 / 跨日重开）：那些代码跑在 subscriber
+/// 的 file sink 内部，经 `tracing` 回灌会形成回路，所以出口必须绕过 tracing。它同时
+/// 是 release（GUI 子系统，stderr 不可见）下唯一还看得见的地方。
+///
+/// hub 尚未注册（测试装配、或 `run()` 之前的早期阶段）时静默丢弃——通报不是正确性
+/// 的一部分，不能反过来让调用点失败。
+pub(crate) fn push_synthetic_warn(target: &str, message: &str) {
+    let Some(hub) = hub() else {
+        return;
+    };
+    hub.push(
+        crate::time::Timestamp::now(),
+        "warn",
+        target,
+        None,
+        message.to_string(),
+        Map::new(),
+    );
+}
+
 pub const DEFAULT_CAPACITY: usize = 2000;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 #[cfg(test)]
@@ -320,6 +342,13 @@ where
         if event.metadata().target() == AGENT_STDERR_ECHO_TARGET {
             return;
         }
+        // #362：日志子系统自身的事件不进 hub（跨线程自反馈回路的兜底）。file sink 的
+        // 通报已经在 `push_synthetic_warn` 里绕过 tracing 直接落 hub，所以这里再挡一层
+        // 不会丢掉它们；挡住的是「记录日志这件事本身又产生日志」——消费者一慢就永远
+        // 排不空的那类回路。panic 记录走专用 target（刻意不在这个命名空间下），仍进 hub。
+        if crate::logging::is_self_target(event.metadata().target()) {
+            return;
+        }
         let Some(hub) = self.hub.clone().or_else(hub) else {
             return;
         };
@@ -562,6 +591,54 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))
             .collect()
+    }
+
+    /// #362：日志子系统自身的事件不进 hub（跨线程自反馈回路的兜底）。
+    ///
+    /// file sink 的通报已经绕过 tracing 直接落 hub，所以这一层挡掉的只是「记录日志
+    /// 这件事本身又产生日志」——panic 专用 target 是刻意留在命名空间之外的，
+    /// 它必须仍然进 hub（用户要在 RuntimeSheet 里看到崩溃）。
+    #[test]
+    fn layer_skips_logging_self_targets_but_keeps_the_panic_target() {
+        let hub = RuntimeLogHub::new(16);
+        tracing::subscriber::with_default(layer_subscriber(hub.clone()), || {
+            tracing::warn!(
+                target: "prism_desktop_lib::logging::file_sink",
+                "日志今日额度用尽"
+            );
+            tracing::error!(target: crate::logging::PANIC_TARGET, "panic: boom");
+            tracing::warn!(target: crate::logging::STARTUP_TARGET, "启动兜底：无 Agent");
+        });
+        let entries = hub.list(&RuntimeLogQuery::default());
+        let messages: Vec<&str> = entries.iter().map(|entry| entry.message.as_str()).collect();
+        assert!(
+            !messages.iter().any(|message| message.contains("额度用尽")),
+            "日志子系统自身 target 不得进 hub：{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("panic: boom")),
+            "panic 记录必须进 hub：{messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| message.contains("启动兜底")),
+            "启动兜底必须进 hub（release 下唯一可见出口）：{messages:?}"
+        );
+    }
+
+    /// #362：合成的 WARN 直接落 hub——这是「无落盘 sink / release 无 stderr」时
+    /// 日志子系统唯一还能说话的地方。
+    #[test]
+    fn synthetic_warn_lands_in_a_registered_hub() {
+        let hub = RuntimeLogHub::new(16);
+        register_hub(hub.clone());
+        push_synthetic_warn(crate::logging::STARTUP_TARGET, "落盘 sink 关闭");
+        let entries = hub.list(&RuntimeLogQuery::default());
+        assert_eq!(entries.len(), 1, "合成记录必须落 hub");
+        assert_eq!(entries[0].level, "warn");
+        assert_eq!(entries[0].source, crate::logging::STARTUP_TARGET);
+        assert_eq!(entries[0].message, "落盘 sink 关闭");
     }
 
     fn layer_subscriber(
