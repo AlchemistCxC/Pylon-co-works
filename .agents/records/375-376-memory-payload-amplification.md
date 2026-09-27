@@ -220,11 +220,23 @@ repo 层与 `turn_rollup` 的 trim 重折校验必须保持全文，否则 #81 L
 
 | 验收项 | 阈值 | 改前（同尺对照） | 改后 | 判 |
 | --- | --- | --- | --- | --- |
-| 冷装载文档驻留 / Σ逻辑载荷 | ≤ 1.2× | 4.051× | **0.432×** | PASS |
-| 拍数敏感性（同终值内容，绝对驻留）5→40 拍 | ≤ 1.5× | 6.82× | **1.20×** | PASS |
-| 同内容元数据快照（500 行 / 单份 16 KB） | ≤ 2× | 500×（不做 intern） | **1.11×** | PASS |
+| **文档**驻留 / Σ逻辑载荷 | ≤ 1.2× | 2.046× | **0.235×** | PASS |
+| 拍数敏感性（同终值内容，绝对驻留）5→40 拍 | ≤ 1.5× | 6.81× | **1.34×** | PASS |
+| 同内容元数据快照（500 行独立对象） | ≤ 2× | 500.15×（注释掉 intern） | **1.15×** | PASS |
 
-对照档的 6.82× 与调查报告的实机 6.3× 吻合，说明这把尺子对得上当时的读数。
+三点必须连着读（评审后校准与纠正）：
+
+1. **只量「文档」，不含 `fold.log`。** 会话级稳态驻留 = 文档 + fold.log（reject 回滚用的整会话
+   信封日志）。本批只把 `raw` 从日志剥掉，信封的 `event` 仍带完整载荷 ⇒ **日志读取后的会话级
+   驻留与拍数敏感性并未被本批解决**（评审 M2 用同一估值器量得 fold.log 的 `event` 驻留 ≈ Σ载荷，
+   会话总量≈1.4× 且拍数敏感性≈6.8× 仍在）。这一项归 #380「fold.log 只留 eventId + 回滚按需重读」。
+   此前文里「拍数敏感性已解决」的措辞据此收窄为**文档口径**。
+2. **分子分母同一把尺子。** 语料 Σ载荷是字符数（ASCII ⇒ 1 字符 1 字节），故估值器对字符串按 V8
+   实际表示计（Latin1 1 字节/单位、非 Latin1 2 字节/单位）。早期版本一律按 UTF-16 两字节算分子，
+   把比值抬高约 2×（0.432× 实为 ~0.22 份载荷、1.2× 阈值实为 ~2.4 份）——评审 M3 指出后已校准，
+   表中是校准后读数；`PERF_MEMORY_LEGACY=1` 只关 #375-a 的 timeline 收窄，是**部分反事实**
+   （批次前还会额外克隆活动载荷），不是完整的批次前文档。
+3. 对照档的 6.81× 与调查报告的实机 6.3× 同量级（差 8%），这把尺子对得上当时的读数。
 
 | 验收项 | 结果 |
 | --- | --- |
@@ -247,12 +259,16 @@ repo 层与 `turn_rollup` 的 trim 重折校验必须保持全文，否则 #81 L
 | `canonicalEventDoubleWrite.test.ts`（`evt_list` 参数断言） | 加 `capTypedPayload: true` | 同上 |
 | `agentWorkbenchLifecycle.recoveryRace.test.ts`（`evt_load_compact` mock） | 返回 `{ events, nextAfterSequence }` | 同上（旧 mock 返回裸数组，会静默走成空页） |
 
+| `src/__tests__/replay/canonicalEventSink.batch.test.ts`·`src/infrastructure/events/__tests__/canonicalEventSink.test.ts` | 替身补 `listCompact` 成员 | #376-b 给 repository 接口加了成员，缺它 TS2741 整块不满足（`62568e39`） |
+| `src-tauri/src/session/revive_tests.rs` | `list_events` 增 `false` 实参 | #376-a 的签名变更（`97a09f38`） |
+
 **未修改**：`agentWorkbenchSession.batch.test.ts` 等 30 余处注入 `loadAll` 的行为测试**逐字未动**
 （装载缝优先级保证它们仍走一次性读）。
 
-**两条既有红灯（与本批无关，供核）**：`scripts/sheetRegistry.compat.test.mts` 与
-`scripts/sheetState.compat.test.mts` 断言 sheet 注册表为 10 类，实际 11 类——第 11 类是
-`f959b48c`（#371 Docs Sheet）新增的 `docs`，两处断言未随迁。
+**既有红灯（与本批无关，供核）**：编写本记录时为 `scripts/sheetRegistry.compat.test.mts` /
+`scripts/sheetState.compat.test.mts`（断言 sheet 注册表 10 类、实际 11 类，第 11 类是 `f959b48c`
+#371 Docs Sheet 的 `docs`）；其后 #371 的审查修复（`088a5096`）已把它们修绿，随后又出现
+`sheetRegistrySidebarMode` 一条（同一注册表形状的 `sidebarMode` 完整性），归属相同。
 
 ## 证据
 
@@ -295,12 +311,17 @@ hunk）。中途观测到共享 index 被外部操作置为陈旧（一度把我
 
 1. **#375-b 工具拍折叠（未做）**：要动 `turn.unit` 的 segment 形状或新增一种 batch 行展开路径，
    落进「不动 `turn.unit` wire 形状」与「不新增事件类型」的禁区夹缝里；而它要治的**驻留**问题
-   已由本批的 #375-a/c/e 解决（拍数敏感性 6.82× → 1.20×），剩下的收益是 IPC 行数与折叠耗时。
-   已按 AGENTS §2.5 在 PR 描述里登记为后续 issue，不关闭 #375。
+   已由本批的 #375-a/c/d/e 在**文档口径**上解决（拍数敏感性 6.81× → 1.34×）。但**会话口径
+   （文档 + fold.log）没有解决**：fold.log 仍持有每个拍次的信封 `event`（含完整载荷），
+   日志读取后的会话级驻留与拍数敏感性因此仍在（评审 M2 的定量）。这一项与下面的遗留 5 是同
+   一件事，同归 #380。已按 AGENTS §2.5 在 PR 描述里登记为后续 issue，不关闭 #375。
 2. ~~#375-d 同内容元数据快照去重（未做）~~ → **已做**（`1b6478f2`）：落在
    `createWorkbenchEnvelope`（live 与 journal 两条路的唯一信封出口），对
    `session.commands-updated` / `session.config-updated` 按内容复用同一事件对象，缓存有界（8 份）。
-   判据进 memory 域：500 行同内容快照折完后 **1.11×**（阈值 ≤2×；不做 intern 时是 500×）。
+   判据进 memory 域：500 行**独立对象**的同内容快照折完后 **1.15×**（阈值 ≤2×；把
+   `internMetadataSnapshotEvent` 那行注释掉重跑立刻变 **500.15×** FAIL）。注意早期语料把同一个
+   对象引用传了 500 次，天然去重成一个，判据无论 intern 在不在都 PASS——评审 M1 指出后已改成
+   每行一个独立对象，这条门禁现在**会失败**。
 3. **`timeline.data` 收窄的白名单范围需仓库主裁决**（spec 未决问题 2）：本批先按「长度 ≤512 的
    标量 + 一层内嵌对象的短标量」定档，并给出 `data-timeline-payload="full"` 逃生口。渲染引擎那条
    唯一入口台账（`CONTEXT.md` 指向仓外 `Docs/Archive/渲染引擎施工/00-唯一入口台账.md`）里
@@ -327,3 +348,72 @@ hunk）。中途观测到共享 index 被外部操作置为陈旧（一度把我
    「工具输出经 `tool_call_update` 流式回传」的 provider 上出现，本机 provider 不在其中）。
    实机复跑用 `scripts/perf-bench/proc-tree.ps1` + README 的隔离副本/注入配方。
 7. **V8 支配树归因未补**：本批给出的是纯函数分桶（见「证据」），仍不是 V8 支配树证据。
+
+---
+
+## 评审轮（三个独立子 agent，对抗式）与修复
+
+派了三个互不知情的子 agent，各自带「证伪」任务：① Rust 读路径（#376-a/b）；② 前端投影层载荷
+所有权（#375）；③ 证据可信度（读数含义、等价性是否真被测、记录与代码是否一致）。它们的结论
+与处置如下——**发现的缺陷都已修**，并逐条补了会失败的回归测试。
+
+### 阻塞级（已修，附「测试会失败」验证）
+
+| 发现 | 后果 | 处置 |
+| --- | --- | --- |
+| `load_events_compact_page` 的扫描预算**被被覆盖行吃光** ⇒ 空页 + `next_after_sequence=None` | 前端与 repo 的循环都判定「到底」而停住：游标落在一段比预算更长的覆盖区之前时，**整段历史静默丢失**。评审实测 3900 行覆盖区 + `limit=64` ⇒ 0/3901 行交付；标志性会话（单元覆盖 5211 行）同样触发 | `next_after_sequence` 不再由 `rows.last()` 决定：未扫到 journal 末尾就**必须**返回 `Some`，空页退回「最后一个被扫描过的 sequence」；并把「收 run 用」的预算与「限扫描量」的预算分开（见下条）。回归测试 `compact_page_walk_survives_scan_budget_exhausted_by_covered_rows`——**把退回分支去掉即 FAIL**（已实测） |
+| 同一根因第二面：预算用尽也会**切断 delta run** | 同一语料分页折出两条 batch 行、一次性折出一条（跨度不同 ⇒ 「页边界落在 run 边界」不成立） | run 收口用独立预算 `extend_budget`，不受覆盖区多寡影响；回归测试 `compact_page_keeps_run_whole_when_budget_exhausts_before_it`（同样实测会 FAIL） |
+| `retain_typed_payload` 的 ≤64 KiB 保证在「把所有字符串清空也减不够」时漏 | 超预算的部分在**键名与结构本身**：实测 `{"<80KB 的键>":"x"}` 收完 80 116 B、3 万小对象 + 5 KB 字符串收完 349 032 B | 新增分支：`all_strings < excess` 时整体退回 `retain_raw_payload`。回归测试 `typed_payload_cap_holds_when_structure_alone_exceeds_budget`（修前实测 78 310 B→修后过线） |
+| `retain_raw_payload` 的预览**按字符切、按字节限**（既有缺陷，被新的退回支路放大） | 非 ASCII 载荷下「保留值 ≤ 64 KiB」失效：70 000 个汉字实测 196 379 B | 预览改按**字节**切并**迭代收敛**（预览要作为 JSON 字符串再转义一次，`"`/`\` 各涨一倍，故单次按字节切仍可能越线）。回归测试 `payload_retention_holds_for_multibyte_payloads` |
+| `proc-tree.ps1` 用 `$pid`（PowerShell **只读**自动变量） | 赋值抛非终止错误 ⇒ 采样器量的是 PowerShell 自己，输出静默错误的数据（评审实测：`-RootName explorer.exe` 只报一行 `other`） | 改名 `$currentId`；并在实测里确认现在量到真实进程树 |
+| 同文件非 ASCII 注释在 Windows PowerShell（无 BOM + CP936）下**吞掉换行**，把 `$tailCount` 注释掉 | 稳态/峰值计算级联崩溃（评审用 `ReadAllLines(936)` 复现） | 全文件改为**纯 ASCII**（注释改英文并写明为什么必须保持 ASCII）；`Parser::ParseFile` 通过；实跑 `-RootName powershell.exe` 得到正确的 steady/peak/比值 |
+
+### 重要级（已修）
+
+| 发现 | 处置 |
+| --- | --- |
+| 元数据快照判据是**同义反复**：语料把同一个事件对象引用传了 500 次，`envelopes.map(e => e.event)` 天然去重成一个，**删掉 intern 也 PASS** | 语料改为每行一个独立对象（内容相同、引用不同），并把「注释掉 intern 立刻 FAIL 500.15×」写进 README 作为它会失败的证据（已实测） |
+| 读数**分子分母单位不一致**（分子 UTF-16 两字节/字符，分母是字符数）⇒ 比值虚高约 2×（0.432× 实为 ~0.22 份载荷，1.2× 阈值实为 ~2.4 份） | 估值器按 V8 实际表示计（Latin1 1 字节/单位、非 Latin1 2 字节/单位）；表中数字改为校准后读数（0.235× / 1.34× / 1.15×），并把这条写进 README「别读错」 |
+| 判据**只量文档、不含 fold.log**，而记录用它的数据声称「驻留问题已解决」 | 记录与 README 都把措辞收窄到**文档口径**，并写明会话口径（文档 + fold.log）**未解决**、归 #380；这是本批最需要防误读的一处 |
+| `data-timeline-payload="full"` 逃生口只在 `bind` 求值一次 ⇒ 对会话中途挂上的属性不可达（与提交信息里「现场抢救」的说法不符） | 改为**每次折页**求值（一次 `querySelector` 相对整页投影可忽略）；`data-typed-payload-cap` 本来就是每次 invoke 求值 |
+
+### 轻微级（已修 / 已在代码里写明）
+
+- `narrowTimelineData` 对显式 `null` 的嵌套值改走「省略」分支（`Object.entries(null)` 会抛）。
+- 分页装载与一次性装载的已知差异（`binding.buffered` 走第二次 foldPage、按到达序）写进代码注释。
+- `withoutEnvelopeRaw` 的**恒等不变量**写进文档注释：reject 用 `item !== rejected.envelope` 剔除，
+  依赖它原样返回同一对象（若乐观信封将来带 `raw`，那边会静默漏删）。
+- `listJournalPages` 的契约（按序 await、**恰好最后一页**传 `lastPage: true`、空 journal 也要传）
+  写进接口注释——自定义实现漏掉它等于静默丢草稿并把半份文档发布成 ready。
+- `proc-tree.ps1`：根进程中途退出不再丢弃整轮（记缺口样本继续）；多实例匹配时打印
+  pids 警告并提示用 `-RootPid` 隔离。
+- 记录的「测试处置」表补齐三处签名/替身适配（两个 sink 测试 + `revive_tests.rs`）；
+  「既有红灯」条目更新（#371 的审查修复已把当时那两条修绿，另有一条同源的 `sidebarMode`）。
+
+### 评审确认无法证伪的（对抗后仍成立）
+
+- 「就地冻结安全」：评审在整个 `src/` 里搜遍载荷字段的写入点（`push/splice/sort/reverse/Object.assign/索引写`）、
+  时间轴/活动全部消费者、运行时冻结与快照路径、echo/乐观路径、`upsertActivity`/`mergeToolActivity`/
+  `refreshOrphans`/`withOptionValue`，未找到写入点；别名检查也确认规范化器一律重建容器，没有把
+  规范行/wire 对象别名进冻结载荷。
+- 「`timeline.data` 收窄不丢被读的字段」：穷举 `entry.data` 的生产读者只有三种 session 族读法
+  （`workbenchProjector` 终态判定、`WorkbenchDocumentSurface.solid.tsx` 协商守卫、会话宿主
+  replay 守卫），tool/activity 族无读者；`payloadKeys` 无消费者。
+- 「收口只在 service 层 ⇒ L3 trim 的 sha256 重折不受影响」：`rollup_trim → trim_one_unit →
+  query_event_rows → fold_turn_rows` 全程走 repo 层全文；`latest_event_of_type`、`export_raw_event`、
+  ingest 各路径均不经过收口出口。
+- 「`fold::DeltaRun` 重构行为等价」：评审逐行比对旧实现（identity 与 run 首行比较的传递性、
+  预算记账、`flush_delta_run` 实参、单行 run、`.batch` 不二次折叠）均一致。
+- 「intern 正确性」：无 `WeakMap`/引用相等的快速路径会因共享事件对象而分叉；事件不含 owner/sequence
+  信息；缓存 `clear()` 驱逐只降低去重率、不影响正确性。
+- 「reject 重建仍正确」：`fold.log` 只有一个推入点且包着 `withoutEnvelopeRaw`，重置点四处齐备，
+  echo.reject 只读 event/identity/sequence/coverage/provenance。
+
+### 评审未能独立复现的（如实登记）
+
+`cargo test -p pylon-session --lib` 的 167 passed、`bun run test` 的 654 文件 / 5030 passed、
+`check:ipc` 的 228↔159：评审为避免往共享树写构建产物而未重跑；本记录里的这些数字来自本机实跑。
+本轮的修复改动之后本机重跑：`cargo test -p pylon-session --lib` **171 passed**（新增 6 条：
+分页两条 + 收口两条 + 既有的分页/收口各若干），`bun run test` **656 文件 / 5041 passed 全绿**
+（评审时那两条 #371 注册表红灯已由 `088a5096` 修绿），`bun run perf-bench:memory` 四条判据全过
+（0.235× / 1.34× / 1.15×）。

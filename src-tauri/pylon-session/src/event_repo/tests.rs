@@ -2230,10 +2230,25 @@ fn compact_page_walk_equals_one_shot_read() {
                 .load_events_compact_page(&owner_key, cursor, limit)
                 .expect("page");
             pages += 1;
+            // 页长契约：**至少**取到 limit 行（除非 journal 到头），必要时为「页尾 run 收口」
+            // 多带一点（上限 = 折叠预算 MAX_FOLDED_CHUNKS + 2）。断言下界，是因为页边界必须
+            // 落在 run 边界上——这比「页不超过 limit」重要。
+            let page_len = page.events.len();
+            let folded_extra = page_len.max(
+                page.events
+                    .iter()
+                    .map(|row| {
+                        row.typed_payload
+                            .as_ref()
+                            .and_then(|typed| typed.get("foldedCount"))
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(1)
+                    })
+                    .sum::<i64>() as usize,
+            );
             assert!(
-                page.events.len() <= usize::try_from(limit).unwrap_or(1).max(1),
-                "页不得超过 limit（limit={limit}, got={}）",
-                page.events.len()
+                folded_extra >= usize::try_from(limit).unwrap_or(1).max(1),
+                "页至少要覆盖 limit 行的量（limit={limit}, got={folded_extra}）"
             );
             paged.extend(page.events);
             match page.next_after_sequence {
@@ -2355,5 +2370,165 @@ async fn compact_page_caps_tool_rows_and_exempts_unit_rows() {
                     .unwrap_or(&serde_json::Value::Null)
             ) <= redaction::MAX_CANONICAL_RAW_BYTES),
         "非单元行必须落回 64 KiB 内（limit=1 逐行走完每一页）"
+    );
+}
+
+// ============================================================================
+// #376-b 评审回归：游标落在长覆盖区前时不得静默截断；覆盖区不得把 run 切断
+// ============================================================================
+
+/// 语料：一个已终结回合把 **3900 行**（远超 `limit=64` 的扫描预算 64*8+1024=1536）覆盖掉，
+/// 单元行落在这段之后。游标从最前面出发时，第一页的扫描预算会在覆盖区里用尽、一行都不产出。
+fn long_covered_stretch_fixture(repo: &EventRepo) -> String {
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    for index in 0..3900 {
+        repo.ingest_kernel_event(kernel_input(compact_delta(&format!("c{index}"))))
+            .unwrap();
+    }
+    repo.ingest_kernel_event(kernel_input(serde_json::json!({
+        "update": { "sessionUpdate": "done", "stopReason": "end_turn" }
+    })))
+    .unwrap();
+    owner_key
+}
+
+/// 评审发现：`collect_until` 的扫描预算被**被覆盖行**吃光 ⇒ 空页 + `next_after_sequence=None`
+/// ⇒ 前端与 repo 的循环都判定「到底」而停住，整段历史静默丢失（标志性会话形状：单元覆盖
+/// 数千行）。本用例断言逐页走完必须与一次性读逐位等价，且游标永不返回 None 到中途。
+#[test]
+fn compact_page_walk_survives_scan_budget_exhausted_by_covered_rows() {
+    let repo = repo();
+    let owner_key = long_covered_stretch_fixture(&repo);
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    assert_eq!(one_shot.len(), 1, "语料只有一个单元行可见");
+    assert_eq!(
+        one_shot[0].event_type,
+        crate::turn_rollup::TURN_UNIT_EVENT_TYPE
+    );
+
+    let mut paged: Vec<CanonicalEventRow> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    let mut pages = 0usize;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 64)
+            .expect("page");
+        pages += 1;
+        paged.extend(page.events);
+        match page.next_after_sequence {
+            Some(next) => {
+                assert!(
+                    cursor.is_none_or(|current| next > current),
+                    "游标必须前进（page {pages}）"
+                );
+                cursor = Some(next)
+            }
+            None => break,
+        }
+        assert!(
+            pages < 100,
+            "游标不收敛：覆盖区前被卡住（{pages} 页仍未到头）"
+        );
+    }
+    let shape = |rows: &[CanonicalEventRow]| {
+        rows.iter()
+            .map(|row| (row.event_type.clone(), row.sequence))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        shape(&paged),
+        shape(&one_shot),
+        "扫描预算被覆盖行用尽时不得丢行（评审 BLOCKER 回归）"
+    );
+}
+
+/// 评审发现：扫描预算用尽会连带切断 run（paged 折出两条 batch 行，一次性折出一条）。
+/// 语料刻意让「覆盖区 + 未覆盖 run」跨过预算边界。
+#[test]
+fn compact_page_keeps_run_whole_when_budget_exhausts_before_it() {
+    let repo = repo();
+    let owner_key = long_covered_stretch_fixture(&repo);
+    let tail: Vec<_> = (0..400)
+        .map(|index| compact_delta(&format!("t{index}")))
+        .collect();
+    for wire in tail {
+        repo.ingest_kernel_event(kernel_input(wire)).unwrap();
+    }
+    let one_shot = repo.load_events_compact(&owner_key).unwrap();
+    let span_of = |row: &CanonicalEventRow| -> Option<(i64, i64)> {
+        let typed = row.typed_payload.as_ref()?;
+        let span = typed.get("seqSpan")?.as_array()?;
+        Some((span.first()?.as_i64()?, span.get(1)?.as_i64()?))
+    };
+    let one_shot_spans: Vec<_> = one_shot.iter().filter_map(span_of).collect();
+    assert_eq!(one_shot_spans.len(), 1, "尾部 400 行应折成一条 batch 行");
+
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    let mut cursor: Option<i64> = None;
+    loop {
+        let page = repo
+            .load_events_compact_page(&owner_key, cursor, 64)
+            .expect("page");
+        spans.extend(page.events.iter().filter_map(span_of));
+        match page.next_after_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(spans, one_shot_spans, "覆盖区之后的 run 不得被页边界切断");
+}
+
+/// 评审发现（#376-a）：`retain_typed_payload` 的 ≤64 KiB 保证在「把所有字符串清空也减不够」
+/// 时会漏——超预算的部分在键名与结构本身。收不动必须整体退回 `retain_raw_payload`。
+#[test]
+fn typed_payload_cap_holds_when_structure_alone_exceeds_budget() {
+    let huge_key = "k".repeat(80_000);
+    let typed = serde_json::json!({ huge_key.clone(): "x" });
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "键名撑爆预算时必须整体退回截断，实测 {}",
+        typed_bytes(&capped)
+    );
+
+    // 结构（大量小对象）自己就超预算、字符串只有几 KB
+    let mut object = serde_json::Map::new();
+    for index in 0..30_000 {
+        object.insert(
+            format!("n{index}"),
+            serde_json::json!({ "a": index, "b": index }),
+        );
+    }
+    object.insert("text".to_string(), serde_json::json!("y".repeat(5_000)));
+    let typed = serde_json::Value::Object(object);
+    assert!(typed_bytes(&typed) > redaction::MAX_CANONICAL_RAW_BYTES);
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "结构撑爆预算时必须整体退回截断，实测 {}",
+        typed_bytes(&capped)
+    );
+}
+
+/// 评审发现：#4 的预览按字符切 ⇒ 非 ASCII 载荷「保留值 ≤ 64 KiB」失效。收口的两条退回支路
+/// 都经过 `retain_raw_payload`，故这里一并钉住多字节形状。
+#[test]
+fn payload_retention_holds_for_multibyte_payloads() {
+    let typed = serde_json::json!({ "text": "中".repeat(70_000) });
+    let capped = redaction::retain_typed_payload(typed);
+    assert!(
+        typed_bytes(&capped) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "多字节 typed 载荷收口后必须 ≤ 64 KiB，实测 {}",
+        typed_bytes(&capped)
+    );
+    let oversized_raw = serde_json::json!({ "text": "中".repeat(70_000) });
+    let (retained, encoded, truncated, ..) = redaction::retain_raw_payload(oversized_raw);
+    assert!(truncated);
+    assert!(
+        encoded.len() <= redaction::MAX_CANONICAL_RAW_BYTES
+            && typed_bytes(&retained) <= redaction::MAX_CANONICAL_RAW_BYTES,
+        "raw 保留值必须按字节 ≤ 64 KiB（原实现按字符切 ⇒ 汉字放大 3×），实测 {}",
+        encoded.len()
     );
 }

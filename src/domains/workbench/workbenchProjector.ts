@@ -1566,6 +1566,12 @@ function narrowTimelineData(event: unknown): unknown {
       continue
     }
     const nested: Record<string, unknown> = {}
+    // `Object.entries(undefined)` 会抛——非 JSON 载荷（规范化器理论上不发，但这里是投影
+    // 热路径的守卫成本极低）显式挡住；此时该键按载荷省略。
+    if (value === null) {
+      omitted.push(key)
+      continue
+    }
     for (const [innerKey, innerValue] of Object.entries(value as Record<string, unknown>)) {
       // 只再进一层：`tool` 的身份标量在这一层，再深的复合值一律算载荷。
       if (!keepScalar(nested, innerKey, innerValue, `${key}.${innerKey}`)) {

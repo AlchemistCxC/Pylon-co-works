@@ -73,6 +73,11 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
    */
   listJournalPages?(
     ownerKey: string,
+    /**
+     * 必须**按序**逐页 await，且**恰好在最后一页**传 `lastPage: true`——终态判据收尾、草稿与
+     * 浏览器快照都挂在那一次调用上（漏掉它等于静默丢草稿并把半份文档发布成 ready）。
+     * 页为空也要调用（空 journal 也要有 `lastPage: true` 的那一次）。
+     */
     onPage: (rows: readonly CanonicalEventRow[], lastPage: boolean) => Promise<void>,
   ): Promise<void>
   loadDrafts?(ownerKey: string): Promise<readonly CanonicalDraftFragment[]>
@@ -241,6 +246,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     envelopes: readonly WorkbenchEventEnvelope[],
     base?: WorkbenchDocument,
   ): WorkbenchDocument => {
+    // #375-a：逃生口按**每次折页**求值（不是在 bind 时求一次）——工作台内部的皮肤/插件在
+    // 挂载后挂上的属性才算「现场抢救」；只在 bind 求值会让它对会话中途挂上的属性不可达。
+    // 一次 querySelector 相对整页投影可忽略。
+    setTimelinePayloadNarrowing(!timelinePayloadNarrowingDisabled())
     const initial = base ?? runtime.getSnapshot().document ?? createWorkbenchDocument(binding.source ?? '')
     const projected = projectWorkbench(envelopes, { initialDocument: initial }).document
     for (const envelope of envelopes) {
@@ -1065,6 +1074,10 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           return
         }
         // 分页：行/信封只在页内存在。终态判据与首屏事实都必须**跨页累积**——
+        // 与一次性路径的唯一已知差异：`binding.buffered`（装载期间到达的实时帧）在这里走
+        // 第二次 foldPage，按到达序折；一次性路径把它们并进同一个批次按 sequence 排序折。
+        // 两者只在「缓冲帧的 sequence 低于尚未读到的后续页」这种乱序角落里分叉，而缓冲帧
+        // 恒为瞬态/会话响应（sequence > revision），故实际等价（评审 R2 已核）。
         // 只按末页算会把早先页里的终态行判丢（summary / 时钟封存随之错）。
         const boundaryRows: ReturnType<typeof canonicalBoundaryProjection> = []
         let maxSequence = 0

@@ -207,6 +207,11 @@ function isOptimisticUserEvent(raw: unknown): boolean {
  * `activities[]` 那一份（#375-e 起与这里的 `event` 共享同一批对象）。
  *
  * 注意：只影响**日志副本**——信封本身仍按 normalize 契约带 `raw`（那份在投影后即回收）。
+ *
+ * **恒等不变量**：不带 `raw`/`rawMetadata` 的信封必须**原样返回同一个对象**（不复制）。
+ * `agentWorkbenchOptimisticEcho.reject` 用 `fold.log.filter(item => item !== rejected.envelope)`
+ * 剔除被拒信封——它依赖的正是这个恒等性；若将来乐观信封也开始带 `raw`，那边会静默漏删，
+ * 被拒的乐观行会在重建里存活（fold.ids 已被清空，还会被重新记一遍）。
  */
 export function withoutEnvelopeRaw(envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope {
   if (envelope.raw === undefined && envelope.rawMetadata === undefined) return envelope

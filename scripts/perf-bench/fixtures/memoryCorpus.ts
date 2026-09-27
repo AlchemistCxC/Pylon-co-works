@@ -91,7 +91,10 @@ export function buildMetadataSnapshotEnvelopes(count = 500): {
     description: `第 ${index} 条目录项，用于把单份快照撑到真机量级（16 KB 上下）`,
     input: { hint: 'x'.repeat(120) },
   }))
-  const event = { type: 'session.commands-updated', commands } as unknown as WorkbenchSemanticEvent
+  const template = { type: 'session.commands-updated', commands }
+  // 每行一个**独立**的对象（内容相同、引用不同）——这正是真实日志的形状。若像早期版本那样
+  // 把同一个对象引用传给 500 次调用，`envelopes.map(e => e.event)` 会天然去重成一个，
+  // 判据无论 intern 在不在都 PASS（门禁成同义反复，评审 M1）。
   const envelopes = Array.from({ length: count }, (_, index) => createWorkbenchEnvelope({
     provider: 'peri',
     sourceId: `wire-${index}`,
@@ -101,7 +104,7 @@ export function buildMetadataSnapshotEnvelopes(count = 500): {
     source: { provider: 'peri', sourceId: `wire-${index}` },
     identity: {},
     provenance: { origin: 'local-observed', trust: 'authoritative' },
-    event,
+    event: JSON.parse(JSON.stringify(template)) as WorkbenchSemanticEvent,
   }))
-  return { envelopes, singleBytes: JSON.stringify(event).length }
+  return { envelopes, singleBytes: JSON.stringify(template).length }
 }

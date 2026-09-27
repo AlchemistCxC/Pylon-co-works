@@ -80,13 +80,30 @@ pub(super) fn retain_raw_payload(
     if encoded.len() <= MAX_CANONICAL_RAW_BYTES {
         return (raw, encoded, false, original, original, 0);
     }
-    let preview_len = MAX_CANONICAL_RAW_BYTES.saturating_sub(96);
-    let preview = encoded.chars().take(preview_len).collect::<String>();
-    let retained = serde_json::json!({
-        "_pylonTruncated": true,
-        "preview": preview,
-        "originalBytes": original,
-    });
+    // 预览按**字节**切并**迭代收敛**，两道都是必须的：
+    // - 原实现是 `chars().take(preview_len)`，非 ASCII 输入下 65536 个字符可以是 196 KB
+    //   （每个汉字 3 字节）⇒「保留值 ≤ 64 KiB」这条线对多字节载荷直接失效；
+    // - 预览要作为 JSON **字符串**再序列化一次，其中的 `"`/`\` 会被转义（每个涨到 2 字节），
+    //   故「按字节切」仍可能超线（实测含大量引号的 80 KB JSON 切完是 78 KB）。这里量一次
+    //   实际序列化长度，超线就折半重切，最多 17 轮，最终预览可以为空——但线一定守住。
+    let mut preview_budget = MAX_CANONICAL_RAW_BYTES.saturating_sub(96);
+    let (retained, preview) = loop {
+        let preview = encoded
+            .char_indices()
+            .take_while(|(offset, _)| *offset < preview_budget)
+            .map(|(_, character)| character)
+            .collect::<String>();
+        let candidate = serde_json::json!({
+            "_pylonTruncated": true,
+            "preview": preview,
+            "originalBytes": original,
+        });
+        if candidate.to_string().len() <= MAX_CANONICAL_RAW_BYTES || preview_budget == 0 {
+            break (candidate, preview);
+        }
+        preview_budget /= 2;
+    };
+    let _ = preview;
     let retained_encoded = retained.to_string();
     let retained_bytes = retained_encoded.len() as i64;
     (
@@ -223,8 +240,12 @@ pub(super) fn retain_typed_payload(typed: serde_json::Value) -> serde_json::Valu
     } else {
         (all_strings.saturating_sub(excess), all_strings, 0)
     };
-    if target == 0 {
-        // 没有字符串可收缩却仍超预算（键本身就有 64 KiB）——无可收口面，退回整体截断。
+    if target == 0 || all_strings < excess {
+        // 收不动的时候必须整体退回，否则「超预算必落在 64 KiB 内」这条硬要求会漏：
+        // - `target == 0`：没有字符串可收缩（纯标量/键）；
+        // - `all_strings < excess`：把**所有**字符串清空也减不够——超预算的部分在键名与
+        //   结构本身（实测 `{"<80KB 的键>":"x"}` 收完仍是 80 116 B；3 万个小对象 + 5 KB
+        //   字符串收完 349 032 B）。评分支路对「按比例收缩字符串」是收敛的，对全局不是。
         return retain_raw_payload(typed).0;
     }
     let serde_json::Value::Object(mut object) = typed else {

@@ -680,7 +680,13 @@ impl EventRepo {
         // 2) 元数据扫描状态：只读 (sequence, event_type)，按跨度指针剪掉被覆盖行。
         let mut cursor = after_sequence;
         let mut pointer = 0usize;
+        // 两个计数各管一件事，别混：
+        // - `scan_budget` 限的是**本次 invoke 的扫描量**（含被覆盖行），用尽只意味着「本页到此
+        //   为止」，游标必须继续前进——绝不能因此返回 None（那等于静默截断装载，见下方守卫）；
+        // - `extend_budget` 只给「页尾 run 收口」那次延长用，与被覆盖行的多寡无关，否则一段
+        //   长覆盖区就能把 run 切断（分页折叠的切点随之与一次性折叠分叉）。
         let mut scan_budget: usize = limit * 8 + 1024;
+        let mut extend_budget: usize = MAX_FOLDED_CHUNKS + 2;
         let mut scan_exhausted = false;
         let mut stmt = conn
             .prepare_cached(
@@ -697,10 +703,10 @@ impl EventRepo {
                                  rows: &mut Vec<CanonicalEventRow>,
                                  cursor: &mut Option<i64>,
                                  pointer: &mut usize,
-                                 scan_budget: &mut usize,
+                                 budget: &mut usize,
                                  scan_exhausted: &mut bool|
          -> Result<(), EventError> {
-            while rows.len() < target && !*scan_exhausted && *scan_budget > 0 {
+            while rows.len() < target && !*scan_exhausted && *budget > 0 {
                 let window = i64::try_from(target.saturating_sub(rows.len()) + 1).unwrap_or(1);
                 let batch: Vec<(i64, String)> = stmt
                     .query_map(params![owner_key, *cursor, window], |row| {
@@ -714,7 +720,7 @@ impl EventRepo {
                     break;
                 }
                 let short_window = batch.len() < usize::try_from(window).unwrap_or(1);
-                *scan_budget = scan_budget.saturating_sub(batch.len());
+                *budget = budget.saturating_sub(batch.len());
                 let mut wanted: Vec<i64> = Vec::new();
                 for (sequence, event_type) in batch {
                     *cursor = Some(sequence);
@@ -747,35 +753,43 @@ impl EventRepo {
             &mut scan_budget,
             &mut scan_exhausted,
         )?;
-        // 3) 页尾 run 未闭合（页内前瞻行仍在同一 run）⇒ 延长本页直到它闭合。
-        //    折叠预算保证 run 在 `MAX_FOLDED_CHUNKS` 行内必然闭合，故这里只需一次延长。
+        // 3) 页尾可能仍在 delta run 中（最后一行可折叠）⇒ 用**独立**预算把 run 收到闭合为止。
+        //    独立是关键：覆盖区的多寡不得影响 run 的切点，否则「分页折 == 一次性折」不成立。
+        //    这里不做前瞻判定（`rows[limit]` 在短页上不存在）；多收一点无害——切点由
+        //    `last_run_boundary_index` 决定，收不齐就整页交付。
         if !scan_exhausted
-            && rows.len() > limit
-            && fold::continues_run(&rows[limit - 1], &rows[limit])
+            && rows
+                .last()
+                .is_some_and(|row| fold::foldable_delta_base(row).is_some())
         {
             collect_until(
-                limit + 1 + MAX_FOLDED_CHUNKS + 2,
+                rows.len() + MAX_FOLDED_CHUNKS + 2,
                 &mut rows,
                 &mut cursor,
                 &mut pointer,
-                &mut scan_budget,
+                &mut extend_budget,
                 &mut scan_exhausted,
             )?;
         }
-        // 4) 定页长：到头 → 整份交付（无游标）；否则取窗口内最后一个已闭合 run 的末行
-        //    （闭合点落在本页起点之前时退回 limit —— 形状异常下的防御，游标必须前进）。
+        // 4) 定页长：到头 → 整份交付（无游标）；否则取窗口内最后一个已闭合 run 的末行。
+        //    短页（扫描预算所限）整页交付，不再切；闭合点落在本页起点之前时退回 limit。
         let mut page_len = rows.len();
-        let mut next_after_sequence = None;
         if !scan_exhausted {
             page_len = match fold::last_run_boundary_index(&rows) {
                 Some(boundary) if boundary + 1 >= limit => boundary + 1,
+                _ if rows.len() <= limit => rows.len(),
                 _ => limit,
             };
         }
         rows.truncate(page_len);
-        if !scan_exhausted {
-            next_after_sequence = rows.last().map(|row| row.sequence);
-        }
+        // 游标：只要没扫到 journal 末尾就必须是 `Some`。空页时退回「最后一个被扫描过的
+        // sequence」（含被覆盖行）——那是本页唯一可用的前进点。写成 `rows.last()` 会让空页
+        // 拿到 `None`，前端与 repo 的循环都判定「到底」而停住，整段历史静默丢失。
+        let next_after_sequence = if scan_exhausted {
+            None
+        } else {
+            rows.last().map(|row| row.sequence).or(cursor)
+        };
         Ok(CompactEventPage {
             events: fold::fold_adjacent_delta_runs(rows),
             next_after_sequence,
