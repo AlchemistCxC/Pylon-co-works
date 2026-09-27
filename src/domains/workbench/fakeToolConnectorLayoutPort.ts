@@ -39,6 +39,15 @@ export function createFakeToolConnectorLayoutPort(): FakeToolConnectorLayoutPort
     invalidate(reason) {
       if (!destroyed) invalidations.push(reason)
     },
+    hasToolAnchor(messageId) {
+      return tools.has(messageId)
+    },
+    membershipRevision() {
+      return tools.size + connectors.size
+    },
+    onMembershipChange() {
+      return () => {}
+    },
     destroy() {
       if (destroyed) return
       destroyed = true

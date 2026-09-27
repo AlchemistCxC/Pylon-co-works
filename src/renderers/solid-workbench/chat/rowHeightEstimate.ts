@@ -35,8 +35,26 @@ const REASONING_FOLDED_CAP_PX = 160
 /** 最小行高（空消息/占位语义也不低于一行外壳）。 */
 const MIN_ROW_HEIGHT_PX = 40
 
+/**
+ * #409：估算按消息对象 memo。引擎 `measure()` 清缓存后会对全部 item 重跑
+ * `estimateSize` ⇒ 每次全量失效都要对每条消息重扫整段正文（换行 + 围栏两次线性扫）。
+ * 消息对象冻结且跨 revision 引用稳定（P57 S2-R3），WeakMap 即天然失效语义：
+ * 内容变化 = 新对象 = 重算，旧对象被 GC 时条目一并回收。
+ */
+const estimateCache = new WeakMap<object, number>()
+
 export function estimateRowHeight(item: MessageListItem): number {
   if (item.estimatedHeight !== undefined) return item.estimatedHeight
+  const renderMessage = item.descriptor.renderMessage
+  const message = renderMessage.message
+  const cached = estimateCache.get(message)
+  if (cached !== undefined) return cached
+  const estimated = computeRowHeightEstimate(item)
+  estimateCache.set(message, estimated)
+  return estimated
+}
+
+function computeRowHeightEstimate(item: MessageListItem): number {
   const renderMessage = item.descriptor.renderMessage
   const message = renderMessage.message
   const base = BASE_HEIGHT_BY_TYPE[renderMessage.type] ?? FALLBACK_BASE_HEIGHT_PX

@@ -5,6 +5,10 @@ import { isRecord } from '../../../../utils/wireGuards.ts'
 
 const LONG_STRING_LENGTH = 220
 
+/** #409：根层条目窗口——大数组/大对象的行 DOM 与快照更新频率成正比，超限只渲染
+ * 前 N 条并给出计数；子层（递归）不受此限，展开行为不变。 */
+const ROOT_ENTRY_RENDER_LIMIT = 200
+
 export function ToolObjectInspector(props: {
   value: unknown
   commands?: RenderCommandPort
@@ -14,9 +18,20 @@ export function ToolObjectInspector(props: {
   const path = () => props.path ?? []
   const depth = () => props.depth ?? 0
   const entries = () => objectEntryNames(props.value)
+  const capped = () => {
+    const items = entries()
+    if (items === undefined || depth() > 0 || items.length <= ROOT_ENTRY_RENDER_LIMIT) return items
+    return items.slice(0, ROOT_ENTRY_RENDER_LIMIT)
+  }
+  const overflow = () => {
+    const items = entries()
+    return items !== undefined && depth() === 0 && items.length > ROOT_ENTRY_RENDER_LIMIT
+      ? items.length - ROOT_ENTRY_RENDER_LIMIT
+      : 0
+  }
 
   return <div class="tool-object-inspector" data-value-type={valueType(props.value)}>
-    <Show when={entries()} fallback={<ToolPrimitive value={props.value} path={path()} commands={props.commands} />}>
+    <Show when={capped()} fallback={<ToolPrimitive value={props.value} path={path()} commands={props.commands} />}>
       {items => <div class="tool-object-children">
         <For each={items()}>{name => <ToolObjectEntry
           name={name}
@@ -25,6 +40,9 @@ export function ToolObjectInspector(props: {
           depth={depth()}
           commands={props.commands}
         />}</For>
+        <Show when={overflow() > 0}>
+          <div class="tool-object-more text-text-dim">… 还有 {overflow()} 条未显示</div>
+        </Show>
       </div>}
     </Show>
   </div>
