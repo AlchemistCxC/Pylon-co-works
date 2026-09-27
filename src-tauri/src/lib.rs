@@ -657,49 +657,189 @@ pub(crate) fn prompt_lock_for(
 /// hub 由 `run()` 创建后经 `register_hub` 注册，Layer 按事件惰性读取，注册前的
 /// event 直接丢弃（此前 log 宏本就无 sink）。
 pub fn init_tracing() -> LogGuard {
-    use tracing_subscriber::layer::Layer;
+    let file_sink = crate::paths::resolve_log_root().and_then(|root| {
+        logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(root))
+    });
+    let (subscriber, worker) = build_subscriber(runtime_log::RuntimeLogLayer::new(), file_sink);
+    // `set_global_default` 失败（例如同一进程里已装过 subscriber）不致命：日志链降级，
+    // 应用照常启动。
+    let _ = tracing::subscriber::set_global_default(subscriber);
+    logging::panic_hook::install();
+    LogGuard { _worker: worker }
+}
 
-    let base = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(std::io::stderr)
-        .finish();
-    let base = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
+/// #383：构造三个 sink 的 subscriber——**基底必须是 `Registry`**。
+///
+/// 曾经的写法把带 `.with_filter(...)` 的落盘层挂到 `fmt::Subscriber` 上
+/// （`file_layer.with_subscriber(base)`）。`tracing-subscriber` 给 `fmt::Subscriber`
+/// 实现的 `LookupSpan::register_filter` 是**默认实现、直接 panic**
+/// （`registry/mod.rs`：`"{type} does not currently support filters"`），于是这条分支
+/// 一被走到进程就启动即崩——触发条件只是「日志根可写」，portable 与 AppData 两条路
+/// 都满足，**与 debug/release 无关**，于是从源码构建的发行包 100% 起不来。`Registry`
+/// 支持 per-layer filtering，三个 sink 平铺挂上去即可（各层的级别/目标过滤语义不变）。
+///
+/// 抽成独立函数是为了能被测试直接驱动：`set_global_default` 每进程只成功一次，而
+/// 「构造这条订阅栈不 panic」正是 #383 的回归点。
+fn build_subscriber(
+    hub_layer: runtime_log::RuntimeLogLayer,
+    file_sink: Option<(
+        tracing_appender::non_blocking::NonBlocking,
+        tracing_appender::non_blocking::WorkerGuard,
+    )>,
+) -> (
+    Box<dyn tracing::Subscriber + Send + Sync>,
+    Option<tracing_appender::non_blocking::WorkerGuard>,
+) {
+    use tracing_subscriber::layer::{Layer, SubscriberExt};
 
-    let guard = match crate::paths::resolve_log_root() {
-        Some(root) => {
-            let spec = logging::file_sink::LogFileSpec::new(root);
-            match logging::file_sink::build_file_sink(spec) {
-                Some((writer, worker_guard)) => {
-                    // 文件 sink 也限 INFO：debug/trace 只留在 stderr，不写盘也不冲 ring。
-                    // panic 记录由 hook 同步写过同一个文件（且带完整 backtrace），这里按
-                    // target 等值去重，避免每个 panic 在文件里出现两遍。
-                    let file_layer = tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_writer(writer)
-                        .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-                            metadata.target() != logging::PANIC_TARGET
-                        }))
-                        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
-                    let _ =
-                        tracing::subscriber::set_global_default(file_layer.with_subscriber(base));
-                    LogGuard {
-                        _worker: Some(worker_guard),
-                    }
-                }
-                None => {
-                    let _ = tracing::subscriber::set_global_default(base);
-                    LogGuard { _worker: None }
+    let base = tracing_subscriber::registry().with(hub_layer).with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+    );
+    match file_sink {
+        Some((writer, worker_guard)) => {
+            // 文件 sink 也限 INFO：debug/trace 只留在 stderr，不写盘也不冲 ring。
+            // panic 记录由 hook 同步写过同一个文件（且带完整 backtrace），这里按
+            // target 等值去重，避免每个 panic 在文件里出现两遍。
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer)
+                .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                    metadata.target() != logging::PANIC_TARGET
+                }))
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+            (Box::new(base.with(file_layer)), Some(worker_guard))
+        }
+        None => (Box::new(base), None),
+    }
+}
+
+#[cfg(test)]
+mod init_tracing_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_log_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("pylon-init-tracing-{tag}-{}", std::process::id()))
+    }
+
+    fn read_dir_text(dir: &std::path::Path) -> String {
+        let mut text = String::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    text.push_str(&content);
                 }
             }
         }
-        None => {
-            // 没有任何可写目录：退回 stderr + hub，日志链降级但应用照常启动。
-            let _ = tracing::subscriber::set_global_default(base);
-            LogGuard { _worker: None }
-        }
-    };
-    logging::panic_hook::install();
-    guard
+        text
+    }
+
+    fn messages(hub: &runtime_log::RuntimeLogHub) -> Vec<String> {
+        hub.list(&runtime_log::RuntimeLogQuery {
+            level: None,
+            source: None,
+            session: None,
+            search: None,
+            limit: None,
+        })
+        .into_iter()
+        .map(|entry| entry.message)
+        .collect()
+    }
+
+    /// #383 回归锁：带过滤层的落盘 sink 挂在新基底上必须**构造成功且可用**。
+    /// 修前该断言以 panic 结束（`fmt::Subscriber does not currently support filters`）。
+    #[test]
+    fn file_sink_subscriber_builds_and_routes_without_panicking() {
+        let dir = temp_log_dir("file");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink = logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+            .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) =
+            build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub.clone()), Some(sink));
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", session = "s1", "hello-383");
+        });
+        // 不 drop worker 就读不到盘上内容：non_blocking 的 flush 在 guard drop 里。
+        drop(worker);
+
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages.iter().any(|message| message.contains("hello-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+        let text = read_dir_text(&dir);
+        assert!(text.contains("hello-383"), "落盘文件缺少 INFO 事件：{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 同一栈的级别去重语义：#383 的修复不能把「panic 记录只由 hook 同步落盘」改掉。
+    #[test]
+    fn panic_target_events_stay_out_of_the_file_sink() {
+        let dir = temp_log_dir("panic-target");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let sink = logging::file_sink::build_file_sink(logging::file_sink::LogFileSpec::new(dir.clone()))
+            .expect("系统临时目录必须可写");
+
+        let (subscriber, guard) =
+            build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub.clone()), Some(sink));
+        let worker = guard.expect("带落盘 sink 时必须交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "kept-383");
+            tracing::warn!(target: logging::PANIC_TARGET, "panic-echo-383");
+        });
+        drop(worker);
+
+        let text = read_dir_text(&dir);
+        assert!(text.contains("kept-383"), "落盘文件缺少 INFO 事件：{text}");
+        assert!(
+            !text.contains("panic-echo-383"),
+            "PANIC_TARGET 事件不该进落盘文件（panic hook 是它唯一的落盘者）：{text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 无落盘 sink（日志根不可写）时仍要能起：只挂 hub + stderr，且不交 WorkerGuard。
+    #[test]
+    fn subscriber_without_file_sink_keeps_hub_and_stderr() {
+        let hub = runtime_log::RuntimeLogHub::new(64);
+        let (subscriber, guard) = build_subscriber(runtime_log::RuntimeLogLayer::with_hub(hub.clone()), None);
+        assert!(guard.is_none(), "无落盘 sink 时不应交出 WorkerGuard");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "pylon.init_tracing.test", "no-file-383");
+        });
+        let hub_messages = messages(&hub);
+        assert!(
+            hub_messages.iter().any(|message| message.contains("no-file-383")),
+            "RuntimeLogLayer 未收到 INFO 事件：{hub_messages:?}"
+        );
+    }
+
+    /// 负向对照（#383 的**病因**锁）：把带 `.with_filter(...)` 的层挂到 `fmt::Subscriber`
+    /// 基底上，`tracing-subscriber` 会**在运行时 panic**——这正是修复前 `init_tracing`
+    /// 在「日志根可写」时的行为。这条用例存在是为了让病因本身留在 CI 里：谁若把
+    /// 基底改回 `fmt::Subscriber`，上一条用例会红，而这一条解释了为什么。
+    #[test]
+    #[should_panic(expected = "does not currently support filters")]
+    fn fmt_subscriber_base_panics_on_filtered_layer() {
+        use tracing_subscriber::layer::Layer;
+
+        let base = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(std::io::stderr)
+            .finish();
+        let filtered = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+        let _ = filtered.with_subscriber(base);
+    }
 }
 
 /// #362：落盘 sink 的存活守卫。
