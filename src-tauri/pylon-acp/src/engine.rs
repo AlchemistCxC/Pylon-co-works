@@ -593,7 +593,7 @@ pub async fn spawn_agent_child(
     agent: &pylon_core::agent_config::AgentDef,
     base_dir: Option<&std::path::Path>,
 ) -> Result<super::ManagedChild, AcpError> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     if (agent.exe.contains('/') || agent.exe.contains('\\'))
         && !std::path::Path::new(&agent.exe).is_file()
@@ -628,7 +628,9 @@ pub async fn spawn_agent_child(
             diagnostic.message
         );
     }
-    let mut cmd = Command::new(&plan.executable);
+    // #353：plan→Command 的 Windows 特调（`.cmd`/`.bat` ∧ UNC cwd 的 pushd 绕行、
+    // spawn 期裸名解析）收在 windows_launch 一处；条件不满足时与直启逐字节一致。
+    let mut cmd = super::windows_launch::agent_command(&plan);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

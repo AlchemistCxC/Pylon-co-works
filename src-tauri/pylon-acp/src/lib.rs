@@ -36,6 +36,7 @@ mod process;
 pub use process::ManagedChild;
 mod protocol;
 mod replay;
+mod windows_launch;
 pub use engine::RequestId;
 pub mod stderr;
 mod stderr_tail;
