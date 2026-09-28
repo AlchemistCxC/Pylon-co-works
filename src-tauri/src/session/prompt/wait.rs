@@ -564,11 +564,11 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             "duplicate turn begin in ledger; keeping original registration"
         );
     }
-    // ADR-0017/#217：出站成功 = 本进程回合在途——一等事实随账本登记同点置位；
-    // 终态清理由 report_settle / publish_prompt_failure 的汇聚路径无条件承担。
+    // #420/ADR-0034：在途事实由上方 ledger.begin 单源承载（SessionInfo 不再镜像）；
+    // 此处只保留 mark 的幸存职责——#352 新回合起点清除旧回合的 cancel 判死输入。
     if let Ok(mut sessions) = runtime.sessions.lock() {
         if let Some(session) = sessions.get_mut(source) {
-            session.mark_turn_in_flight(flow.generation, flow.request_id);
+            session.clear_cancel_requested_for_new_turn();
         }
     }
     let acp_for_cancel = runtime.acp.clone();

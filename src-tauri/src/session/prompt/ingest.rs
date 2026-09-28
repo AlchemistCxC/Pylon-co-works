@@ -171,19 +171,30 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
     error: &PylonError,
     failure: Option<&PromptFailureMetadata>,
 ) -> Result<(), PylonError> {
-    // ADR-0017/#217：错误终态路径的防御纵深——在途回合标记无条件清理。
-    // 正常时 report_settle 已按键清理（此处 no-op）；覆盖等待 future 被取消等
-    // 未经终态臂的残余。返回 true = 清掉了滞留标记（诊断）。
-    if let Ok(mut sessions) = runtime.sessions.lock() {
-        if let Some(session) = sessions.get_mut(&ctx.source) {
-            if session.force_clear_turn_in_flight() {
-                tracing::warn!(
-                    source = %ctx.source,
-                    code = %error.code(),
-                    "prompt failure path cleared a residual in-flight turn mark; \
-                     settle path should have cleared it (diagnostic)"
-                );
-            }
+    // #420/ADR-0034：错误终态路径的防御纵深——无条件收敛该会话的在途 turn。
+    // 正常时终态臂的 report_settle 已结算（active 为空，此处 no-op）；覆盖等待
+    // future 被取消等未经终态臂的残余。Published = 真结算了滞留在途（诊断）；
+    // cause 取 ProtocolError（RPC error 族），detail 携带错误原文。
+    let defensive_settle = runtime.sessions.lock().ok().and_then(|sessions| {
+        sessions
+            .get(&ctx.source)
+            .map(|session| (session.peri_id.clone(), session.generation))
+    });
+    if let Some((peri_id, generation)) = defensive_settle {
+        if let crate::acp::SettleOutcome::Published = runtime.turn_ledger.settle_active_for_session(
+            &ctx.source,
+            &peri_id,
+            generation,
+            crate::acp::TurnTerminalCause::ProtocolError,
+            super::ledger::now_ms(),
+            Some(error.to_string()),
+        ) {
+            tracing::warn!(
+                source = %ctx.source,
+                code = %error.code(),
+                "prompt failure path defensively settled a residual in-flight turn; \
+                 a terminal arm should have settled it (diagnostic)"
+            );
         }
     }
     let mut error_payload = serde_json::json!({

@@ -359,23 +359,29 @@ async fn send_prompt_core_success_has_one_authoritative_user_row() {
         user.identity, None,
         "client correlation is not canonical identity"
     );
-    // ADR-0017/#217：成功终态后，在途回合标记必须已清（settle 汇聚清理）。
-    let sessions = runtime.sessions.lock().expect("sessions");
-    let session = sessions
-        .get("local:prompt-success")
-        .expect("session mapping");
+    // #420/ADR-0034：成功终态后，在途回合必须已收敛（settle 是账本单源的唯一
+    // 终态出口）。
+    let (peri_id, generation) = {
+        let sessions = runtime.sessions.lock().expect("sessions");
+        let session = sessions
+            .get("local:prompt-success")
+            .expect("session mapping");
+        (session.peri_id.clone(), session.generation)
+    };
     assert!(
-        !session.turn_in_flight(),
-        "success terminal must clear the in-flight turn mark"
+        !runtime
+            .turn_ledger
+            .turn_in_flight("local:prompt-success", &peri_id, generation),
+        "success terminal must converge the in-flight turn in the ledger"
     );
 }
 
-/// ADR-0017/#217：在途回合标记的完整生命周期——`prompt-silent` agent 对
-/// session/prompt 永不响应（回合挂起窗口可观测）；挂起期间标记为真，
+/// #420/ADR-0034：在途回合的完整生命周期（账本单源）——`prompt-silent` agent
+/// 对 session/prompt 永不响应（回合挂起窗口可观测）；挂起期间账本在途为真，
 /// first-token 超时走 cancel 收敛（CancelledAfterTimeout 臂 → report_settle）
-/// 后标记必清。
+/// 后账本必清。
 #[tokio::test]
-async fn in_flight_turn_mark_tracks_hanging_prompt_until_timeout() {
+async fn in_flight_turn_ledger_tracks_hanging_prompt_until_timeout() {
     let mut agent = crate::test_utils::fake_acp_agent(
         "prompt-hang-agent",
         &[
@@ -414,7 +420,7 @@ async fn in_flight_turn_mark_tracks_hanging_prompt_until_timeout() {
         send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &context);
     tokio::pin!(send_fut);
 
-    // 轮询等待置位：出站成功（账本 begin 同点）即标记，此时回合仍挂起。
+    // 轮询等待置位：出站成功即账本 begin，此时回合仍挂起。
     let mark_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut marked = false;
     loop {
@@ -427,7 +433,11 @@ async fn in_flight_turn_mark_tracks_hanging_prompt_until_timeout() {
                     .lock()
                     .expect("sessions")
                     .get("local:prompt-hang")
-                    .map(|session| session.turn_in_flight())
+                    .map(|session| {
+                        runtime
+                            .turn_ledger
+                            .turn_in_flight("local:prompt-hang", &session.peri_id, session.generation)
+                    })
                     .unwrap_or(false);
                 if marked_now {
                     marked = true;
@@ -441,42 +451,48 @@ async fn in_flight_turn_mark_tracks_hanging_prompt_until_timeout() {
     }
     assert!(
         marked,
-        "hanging prompt must expose the in-flight turn mark before its terminal"
+        "hanging prompt must expose the in-flight turn in the ledger before its terminal"
     );
 
     // 等待超时终态收敛（first-token 1s → cancel settle 窗口内失败返回）。
     let outcome = send_fut.await;
     assert!(outcome.is_err(), "hang must converge to a timeout failure");
-    // 终态后标记必清——两条形态都合法：settle 窗口内收敛则按键清理；
-    // 窗口超时则映射整体移除（标记随条目结构性消失）。
+    // 终态后账本必清——两条形态都合法：settle 窗口内收敛则结算；窗口超时则
+    // publish_prompt_failure 的防御结算收敛（或映射整体移除，会话级查询无从命中）。
     let mark_cleared = runtime
         .sessions
         .lock()
         .expect("sessions")
         .get("local:prompt-hang")
-        .map(|session| !session.turn_in_flight())
-        // 映射被移除同样是清理形态（标记随条目结构性消失）。
+        .map(|session| {
+            !runtime.turn_ledger.turn_in_flight(
+                "local:prompt-hang",
+                &session.peri_id,
+                session.generation,
+            )
+        })
+        // 映射被移除同样是清理形态（在途随条目结构性消失）。
         .unwrap_or(true);
     assert!(
         mark_cleared,
-        "cancel/timeout terminal must clear the in-flight turn mark unconditionally"
+        "cancel/timeout terminal must converge the in-flight turn unconditionally"
     );
 }
 
-/// ADR-0017/#217：诊断读数——settle 路径（report_settle）按键清理标记；
-/// 滞留标记由 cold_mount_turn_snapshot 的 anomaly 读数显形（契约测试见
-/// runtime.rs）。
+/// #420/ADR-0034：settle 路径（report_settle）即账本在途的唯一收敛点——结算后
+/// active 不再有该回合、终态记录落 terminal 表；同会话在途查询必为假。滞留
+/// （未经终态臂的残余）由 publish_prompt_failure 的防御结算与快照 anomaly
+/// 读数显形（契约测试见 runtime.rs）。
 #[test]
-fn report_settle_clears_keyed_in_flight_mark() {
+fn report_settle_converges_ledger_in_flight() {
     let runtime = AgentRuntime::new_disconnected();
-    let mut session = crate::session::SessionInfo::new(
-        "local:mark-clear".to_string(),
+    let session = crate::session::SessionInfo::new(
+        "peri-mark-clear".to_string(),
         String::new(),
         ".".to_string(),
         true,
-        0,
+        4,
     );
-    session.mark_turn_in_flight(4, 11);
     runtime
         .sessions
         .lock()
@@ -489,21 +505,33 @@ fn report_settle_clears_keyed_in_flight_mark() {
         turn_id: 11,
     };
     runtime.turn_ledger.begin(turn_key.clone(), 0);
+    assert!(
+        runtime
+            .turn_ledger
+            .turn_in_flight("local:mark-clear", "peri-mark-clear", 4),
+        "begin must register the in-flight turn in the ledger"
+    );
     report_settle(&runtime, &turn_key, TurnTerminalCause::Completed, None);
     assert!(
         !runtime
-            .sessions
-            .lock()
-            .expect("sessions")
-            .get("local:mark-clear")
-            .expect("session mapping")
-            .turn_in_flight(),
-        "report_settle must clear the keyed in-flight mark"
+            .turn_ledger
+            .turn_in_flight("local:mark-clear", "peri-mark-clear", 4),
+        "report_settle must converge the in-flight turn in the ledger"
+    );
+    assert!(
+        runtime
+            .turn_ledger
+            .snapshot(&turn_key)
+            .expect("settled turn must remain in the ledger")
+            .terminal
+            .is_some(),
+        "settled turn must carry a terminal record"
     );
 }
 
 /// #352：用户 cancel 判死输入的载体语义——置位可见（键化 generation）；
-/// 新回合起点（mark_turn_in_flight）清除，旧回合的 cancel 不继承到新回合。
+/// 新回合起点（clear_cancel_requested_for_new_turn）清除，旧回合的 cancel
+/// 不继承到新回合。
 #[test]
 fn cancel_requested_mark_is_set_and_cleared_on_new_turn() {
     let mut session = crate::session::SessionInfo::new(
@@ -520,10 +548,10 @@ fn cancel_requested_mark_is_set_and_cleared_on_new_turn() {
     session.mark_cancel_requested(3, std::time::Instant::now());
     let mark = session.cancel_requested.expect("置位后判死输入必须可见");
     assert_eq!(mark.generation, 3, "标记必须携带置位时的会话代际");
-    session.mark_turn_in_flight(4, 2);
+    session.clear_cancel_requested_for_new_turn();
     assert!(
         session.cancel_requested.is_none(),
-        "mark_turn_in_flight 必须清除旧回合的 cancel 判死输入"
+        "回合起点必须清除旧回合的 cancel 判死输入"
     );
 }
 
