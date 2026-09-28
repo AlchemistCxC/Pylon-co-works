@@ -587,7 +587,8 @@ async fn resolve_permission_responds_and_clears_pending() {
     })))
     .expect("parse");
     runtime
-        .pending_permissions
+        .ledger
+        .permissions()
         .lock()
         .unwrap()
         .insert(crate::acp::RequestId::Number(7), permission);
@@ -611,7 +612,8 @@ async fn resolve_permission_responds_and_clears_pending() {
     assert!(result.is_err(), "disconnected client 发送应失败");
     // 失败后 pending 保留（可重试）
     assert!(runtime
-        .pending_permissions
+        .ledger
+        .permissions()
         .lock()
         .unwrap()
         .contains_key(&crate::acp::RequestId::Number(7)));

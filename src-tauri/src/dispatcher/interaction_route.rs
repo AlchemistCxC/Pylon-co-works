@@ -135,19 +135,13 @@ pub(crate) async fn route_elicitation_complete<R: tauri::Runtime>(
         tracing::debug!(elicitation_id, "elicitation/complete: no runtime; ignored");
         return;
     };
-    let matched =
-        match_pending_elicitation(&runtime.private_interactions.snapshot(), elicitation_id);
+    let matched = match_pending_elicitation(&runtime.ledger.private().snapshot(), elicitation_id);
     if let Some((request_id, pending)) = matched {
         // P2-2（#316 审查）：take 成功（Some）才 settle+emit——
         // 并发 respond_interaction 抢先收口时不再发 spurious 事件。
-        if runtime
-            .private_interactions
-            .take(&request_id)
-            .map(|taken| taken.is_some())
-            .unwrap_or(false)
-        {
+        if runtime.ledger.take_private(&request_id).is_some() {
             let request_id_text = request_id.to_string();
-            let _ = runtime.interactions.settle(
+            let _ = runtime.ledger.settle(
                 &request_id_text,
                 crate::acp::interaction_queue::InteractionTerminalReason::Answered,
             );
@@ -181,7 +175,6 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
     window: &tauri::Window<R>,
     acp: &AcpLock,
     agents: &std::sync::Mutex<std::collections::HashMap<String, crate::agent_config::AgentDef>>,
-    private_interactions: &crate::private_interaction::PrivateInteractionOwner,
     runtimes: &AgentRuntimeManager,
     agent_id: &str,
     generation: u64,
@@ -284,54 +277,45 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                     Admission::Session(session_id) => session_id,
                     Admission::RequestScoped => String::new(),
                 };
-                let arrived_at = crate::time::Timestamp::now();
-                let _ = private_interactions.insert(
-                    request_id.clone(),
-                    crate::private_interaction::PendingPrivateInteraction {
-                        provider: provider.clone(),
-                        agent_id: agent_id.to_string(),
-                        session_id: admitted_session_id.clone(),
-                        method: method.to_string(),
-                        bridge,
-                        params: params.clone(),
-                        question_specs,
-                        client_generation: generation,
-                        enqueued_at: arrived_at,
-                    },
-                );
-                let interaction_event = serde_json::json!({
-                    "provider": provider, "agentId": agent_id, "sessionId": admitted_session_id,
-                    "eventType": match bridge {
-                        crate::protocol_adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
-                        crate::protocol_adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
-                        _ => "ask-user",
-                    }, "requestId": request_id.to_string(),
-                    "clientGeneration": generation, "payload": params,
-                });
-                // #98: unified interaction queue admission (drain
-                // terminal states + cold-mount snapshot source).
+                let pending = crate::private_interaction::PendingPrivateInteraction {
+                    provider: provider.clone(),
+                    agent_id: agent_id.to_string(),
+                    session_id: admitted_session_id,
+                    method: method.to_string(),
+                    bridge,
+                    params: params.clone(),
+                    question_specs,
+                    client_generation: generation,
+                    enqueued_at: crate::time::Timestamp::now(),
+                };
+                // #423：登记面单点——store 写 + queue admit（deadline 注入 +
+                // 问题桥 specs id 回写事件 payload）+ 事件 json 一次完成
+                //（#98: unified interaction queue admission——drain 终态与冷挂载
+                // 快照数据源）。
                 if let Some(runtime) = runtimes.get(agent_id) {
-                    if let Err(error) = runtime.interactions.admit(
-                        crate::acp::interaction_queue::InteractionQueueEntry {
-                            request_id: request_id.to_string(),
-                            method: method.to_string(),
-                            kind: bridge.queue_kind().to_string(),
-                            session_id: admitted_session_id,
-                            agent_id: agent_id.to_string(),
-                            client_generation: generation,
-                            enqueued_at: arrived_at,
-                            // #356：私有交互对等参与超时结算——deadline 与权限请求同源同值。
-                            deadline_ms: Some(crate::permission::permission_deadline_ms(
-                                arrived_at,
-                            )),
-                            event: interaction_event.clone(),
-                            state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
-                        },
+                    match runtime.ledger.admit_private(
+                        &provider,
+                        agent_id,
+                        &request_id,
+                        &pending,
+                        method,
                     ) {
-                        tracing::warn!("interaction queue admit failed: {error}");
+                        Ok((_, interaction_event)) => {
+                            emit_event(window, crate::event_names::INTERACTION, interaction_event);
+                        }
+                        Err(error) => {
+                            tracing::warn!("interaction queue admit failed: {error}");
+                        }
                     }
+                } else {
+                    // runtime 缺席（结构性不可达）——整体不登记（store 与 queue
+                    // 恒一致，杜绝单边写入）。
+                    tracing::warn!(
+                        agent_id = %agent_id,
+                        request_id = %request_id,
+                        "private interaction admit skipped: runtime not found"
+                    );
                 }
-                emit_event(window, crate::event_names::INTERACTION, interaction_event);
                 return;
             }
         }
@@ -385,7 +369,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use crate::acp::RawMessage;
-    use crate::private_interaction::{PendingPrivateInteraction, PrivateInteractionOwner};
+    use crate::private_interaction::PendingPrivateInteraction;
     use crate::runtime::AgentRuntime;
     use std::collections::HashMap;
 
@@ -459,8 +443,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = elicitation_request(
             7,
             serde_json::json!({
@@ -470,18 +454,8 @@ mod tests {
                 "requestId": 7
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
-        let snapshot = private_interactions.snapshot();
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
+        let snapshot = runtime.ledger.private().snapshot();
         assert_eq!(
             snapshot.len(),
             1,
@@ -507,8 +481,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = elicitation_request(
             7,
             serde_json::json!({
@@ -517,19 +491,9 @@ mod tests {
                 "requestedSchema": {"type": "object"}
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
         assert!(
-            private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "scope-less elicitation must not be enqueued"
         );
         let event = rx
@@ -546,8 +510,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = elicitation_request(
             7,
             serde_json::json!({
@@ -557,19 +521,9 @@ mod tests {
                 "requestedSchema": {"type": "object"}
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
         assert!(
-            private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "empty-string session scope must not be enqueued"
         );
         let event = rx
@@ -587,8 +541,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = raw_request(
             11,
             "_x.ai/ask_user_question",
@@ -600,19 +554,9 @@ mod tests {
                 }]
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
         assert!(
-            private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "sessionless ask-user must not be enqueued"
         );
         let event = rx
@@ -628,8 +572,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = elicitation_request(
             8,
             serde_json::json!({
@@ -638,18 +582,8 @@ mod tests {
                 "requestedSchema": {"type": "object"}
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
-        let snapshot = private_interactions.snapshot();
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
+        let snapshot = runtime.ledger.private().snapshot();
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].1.session_id, "peri-s1");
         let event = rx
@@ -665,8 +599,8 @@ mod tests {
         let (window, _webview, _app, rx) = mock_window_with_events();
         let runtime = AgentRuntime::new_disconnected();
         let agents = empty_agents();
-        let private_interactions = PrivateInteractionOwner::default();
         let runtimes = crate::runtime::AgentRuntimeManager::new();
+        runtimes.insert("a1".to_string(), runtime.clone());
         let raw = elicitation_request(
             9,
             serde_json::json!({
@@ -676,19 +610,9 @@ mod tests {
                 "url": "https://example.com/auth"
             }),
         );
-        route_private_interaction(
-            &window,
-            &runtime.acp,
-            &agents,
-            &private_interactions,
-            &runtimes,
-            "a1",
-            3,
-            raw,
-        )
-        .await;
+        route_private_interaction(&window, &runtime.acp, &agents, &runtimes, "a1", 3, raw).await;
         assert!(
-            private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "url-mode elicitation must not be enqueued"
         );
         let event = rx
@@ -756,23 +680,23 @@ mod tests {
         let runtime = crate::test_utils::connected_runtime();
         let request_id = crate::acp::RequestId::Number(31);
         runtime
-            .private_interactions
+            .ledger
+            .private()
             .insert(request_id.clone(), pending_elicitation("el-9"))
             .expect("insert 必须成功");
-        let matched = match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9")
+        let matched = match_pending_elicitation(&runtime.ledger.private().snapshot(), "el-9")
             .expect("inserted pending must match");
         assert_eq!(matched.0, request_id);
         assert!(
             runtime
-                .private_interactions
+                .ledger
+                .private()
                 .take(&request_id)
                 .map(|taken| taken.is_some())
                 .unwrap_or(false),
             "take 成功才 settle+emit（P2-2 守卫的数据前提）"
         );
-        assert!(
-            match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9").is_none()
-        );
+        assert!(match_pending_elicitation(&runtime.ledger.private().snapshot(), "el-9").is_none());
     }
 
     /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。

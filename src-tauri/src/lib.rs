@@ -24,6 +24,8 @@ mod gateway;
 pub(crate) use pylon_core::hermes;
 /// P55：kernel hook 桥（Rust 锚点 → 前端 dispatcher 应答回路）。
 pub mod hook_bridge;
+/// #423：审批线三 store（queue + 权限 store + 私有交互 store）单一登记面。
+mod interaction_ledger;
 mod lifecycle;
 /// #362：崩溃取证的落盘日志链（每日轮转 + 每日预算 + 同步 panic hook）。
 /// 对 crate 内可见即可；`is_self_target` 供 `runtime_log` 的自反馈隔离复用。
@@ -86,8 +88,7 @@ use session::SessionInfo;
 // cfg(test) 显式导入——测试模块实际引用集中在下列被保留的名字上）。
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::load_mcp_persisted;
-use crate::permission::check_pending_permission_timeouts;
-use crate::permission::check_pending_private_interaction_timeouts;
+use crate::permission::sweep_interaction_timeouts;
 use crate::pet::cmds::persist_pet_if_possible;
 use crate::session::{check_session_expiry, send_prompt_core};
 
@@ -414,7 +415,7 @@ impl AppStateHandles {
         // + generation 即可恢复 active 卡与 queued 深度，不依赖一次性 live event。
         let pending_interactions =
             runtime.and_then(|runtime| {
-                runtime.interactions.snapshot().ok().map(|entries| {
+                runtime.ledger.queue().snapshot().ok().map(|entries| {
                     crate::acp::interaction_queue::pending_interactions_wire(&entries)
                 })
             });
@@ -559,20 +560,16 @@ impl AppStateHandles {
             }
             // 审查修复：客户端替换（switch/重连/自动重连）后旧进程的挂起权限请求
             // 全部失效——清空，避免 300s 超时把 reject 写到新进程（且可能撞新 id）。
-            if let Ok(mut pending) = runtime.pending_permissions.lock() {
-                let stale = pending.len();
-                pending.clear();
-                if stale > 0 {
-                    tracing::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
-                }
-            }
-            runtime.private_interactions.cancel_all();
+            // #423：三 store 清理经 Ledger 单点（drain_disconnected）。
             // #98：断线/替换 drain——每个 waiter 拿到 Disconnected 终态（AC10），
             // 并向前端广播终态事件：permission 卡不再悬挂到 300s 超时。
-            let drained_interactions = runtime
-                .interactions
-                .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected)
-                .unwrap_or_default();
+            let (stale, stale_private, drained_interactions) = runtime.ledger.drain_disconnected();
+            if stale > 0 {
+                tracing::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
+            }
+            if stale_private > 0 {
+                tracing::warn!("客户端替换：清理 {stale_private} 个挂起的私有交互（旧进程已失效）");
+            }
             for entry in drained_interactions {
                 let reason = if entry.kind == "approval" {
                     serde_json::json!({
@@ -1501,11 +1498,10 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let state = app_for_watcher.state::<AppState>();
-            let outcomes = check_pending_permission_timeouts(state.inner()).await;
-            // #356：私有交互超时 sweep。死亡清理已收口至
-            // clear_dead_runtime_interactions 单点（两条 sweep 各自幂等调用），
-            // 本处两条 sweep 的先后次序不再承载清理契约。
-            let private_outcomes = check_pending_private_interaction_timeouts(state.inner()).await;
+            // #423：两条超时 sweep 合一为 sweep_interaction_timeouts 单点
+            // （deadline 归队列权威，判定经 drain_expired；广播次序不变：
+            // 先 permission.resolved 后 interaction.resolved）。
+            let (outcomes, private_outcomes) = sweep_interaction_timeouts(state.inner()).await;
             if outcomes.is_empty() && private_outcomes.is_empty() {
                 continue;
             }

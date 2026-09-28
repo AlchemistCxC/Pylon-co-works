@@ -210,10 +210,7 @@ impl InteractionQueue {
     /// 条目（严格大于；deadline 恰好到达当刻**不**算超时，与宿主 sweep 现行
     /// `elapsed_since(enqueued_at) > 300_000ms` 边界逐 ms 等价）。宿主以
     /// admit 注入的 `deadline_ms` 为唯一判据来源；watcher 轮询粒度（5s）不变。
-    #[allow(
-        dead_code,
-        reason = "§4.3.3 机制先落；宿主 sweep 的 store 级判定合一归后续 Ledger 步骤"
-    )]
+    /// #423 起经宿主 `InteractionLedger` 超时 sweep 接线（deadline 归队列权威）。
     pub fn drain_expired(
         &self,
         now_ms: u64,
@@ -272,7 +269,9 @@ fn promote_next(order: &mut VecDeque<InteractionQueueEntry>) {
 
 /// agent_status / 冷挂载投影：pending 交互摘要（含事件 payload 全文，前端
 /// 仅凭 snapshot + generation 即可恢复 active 卡与 queued 深度，不依赖一次性
-/// live event）。
+/// live event）。#423 快照面单源：`interaction_list`（CLI）消费同一形状——
+/// 条目另带 `provider`（事件信封原样，可为空串，调用方按需反查回填）与
+/// `deadlineMs`（admit 注入值；无 deadline 为 null）。
 pub fn pending_interactions_wire(entries: &[InteractionQueueEntry]) -> serde_json::Value {
     serde_json::Value::Array(
         entries
@@ -292,6 +291,12 @@ pub fn pending_interactions_wire(entries: &[InteractionQueueEntry]) -> serde_jso
                         InteractionEntryState::Terminal(ref reason) => reason.as_str(),
                     },
                     "payload": entry.event,
+                    "provider": entry
+                        .event
+                        .get("provider")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    "deadlineMs": entry.deadline_ms,
                 })
             })
             .collect(),
@@ -447,6 +452,7 @@ mod tests {
     }
 
     /// 冷挂载投影：snapshot 含身份、状态与事件 payload 全文。
+    /// #423：条目另带 provider（事件信封原样）与 deadlineMs（None → null）。
     #[test]
     fn wire_projection_carries_enough_for_cold_mount() {
         let queue = InteractionQueue::default();
@@ -460,6 +466,21 @@ mod tests {
         assert_eq!(items[1].get("state"), Some(&json!("waiting")));
         assert_eq!(items[0].pointer("/payload/title"), Some(&json!("1")));
         assert!(items[0].get("clientGeneration").is_some());
+        // #423 快照面单源：provider/deadlineMs 进 wire 形状。
+        assert_eq!(items[0].get("provider"), Some(&json!("")));
+        assert_eq!(items[0].get("deadlineMs"), Some(&json!(null)));
+        let mut with_deadline = entry("3", "approval");
+        with_deadline.deadline_ms = Some(1_722_500_300_000);
+        with_deadline.event = json!({"provider": "peri", "title": "3"});
+        let _ = queue.admit(with_deadline);
+        let wire = pending_interactions_wire(&queue.snapshot().unwrap());
+        let items = wire.as_array().unwrap();
+        let third = items
+            .iter()
+            .find(|item| item["requestId"] == json!("3"))
+            .unwrap();
+        assert_eq!(third.get("provider"), Some(&json!("peri")));
+        assert_eq!(third.get("deadlineMs"), Some(&json!(1_722_500_300_000_u64)));
     }
 
     /// §4.3.3 边界钉住：drain_expired 只终结 `now > deadline` 的条目——deadline

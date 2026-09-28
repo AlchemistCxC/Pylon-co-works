@@ -117,7 +117,8 @@ struct SessionSnapshot {
 /// 条目都是 Active 或 Waiting，没有终态残留）。
 fn sessions_with_pending_interaction(runtime: &Arc<crate::runtime::AgentRuntime>) -> Vec<String> {
     runtime
-        .interactions
+        .ledger
+        .queue()
         .snapshot()
         .map(|entries| entries.into_iter().map(|entry| entry.session_id).collect())
         .unwrap_or_default()

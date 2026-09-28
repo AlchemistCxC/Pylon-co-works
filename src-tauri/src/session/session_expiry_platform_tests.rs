@@ -166,7 +166,8 @@ async fn session_with_a_pending_interaction_is_exempt() {
         sessions.insert("local".to_string(), local);
     }
     runtime
-        .interactions
+        .ledger
+        .queue()
         .admit(crate::acp::interaction_queue::InteractionQueueEntry {
             request_id: "req-1".into(),
             method: "session/request_permission".into(),
@@ -336,7 +337,8 @@ async fn idle_connection_with_a_pending_interaction_is_exempt() {
         agent_state.last_connected_at = Some(Timestamp::new(1));
     }
     runtime
-        .interactions
+        .ledger
+        .queue()
         .admit(crate::acp::interaction_queue::InteractionQueueEntry {
             request_id: "conn-req".into(),
             method: "session/request_permission".into(),

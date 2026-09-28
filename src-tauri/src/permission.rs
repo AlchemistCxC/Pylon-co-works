@@ -186,38 +186,37 @@ async fn resolve_pending(
     option_id: &str,
 ) -> bool {
     // 锁内复核 + 取 write_tx 克隆 + claim（发送全部在锁外）。
+    // #423：复核谓词与移除收进 Ledger 单临界区（canonical 键 + C4 generation
+    // + tool_call_id + 选项契约，通过才 remove）。
+    let current_generation = runtime.client_generation.load(Ordering::Acquire);
     let (responder, claimed, canonical_id) = {
         let acp = runtime.acp.lock().await;
-        let mut pending = match runtime.pending_permissions.lock() {
-            Ok(guard) => guard,
-            Err(_) => return false,
-        };
-        let Some(canonical_id) = canonical_pending_key(&pending, &request_id) else {
+        let Some((canonical_id, permission)) =
+            runtime.ledger.claim_permission(&request_id, |permission| {
+                // C4：身份复核——客户端替换（generation 前进）后不误写新进程同 id 请求。
+                if permission.client_generation != current_generation {
+                    return false;
+                }
+                // tool_call_id 复核（cancel 路径用）。
+                if let Some(expected) = expected_tool_call_id {
+                    if permission.tool_call_id != expected {
+                        return false;
+                    }
+                }
+                // C5 选项契约：空 option_id = Cancelled；非空必须 ∈ options（option_id 原值）。
+                if option_id.is_empty() {
+                    true
+                } else {
+                    permission
+                        .options
+                        .iter()
+                        .any(|option| option.option_id == option_id)
+                }
+            })
+        else {
             return false;
         };
-        let Some(permission) = pending.get(&canonical_id) else {
-            return false;
-        };
-        // C4：身份复核——客户端替换（generation 前进）后不误写新进程同 id 请求。
-        if permission.client_generation != runtime.client_generation.load(Ordering::Acquire) {
-            return false;
-        }
-        // tool_call_id 复核（cancel 路径用）。
-        if let Some(expected) = expected_tool_call_id {
-            if permission.tool_call_id != expected {
-                return false;
-            }
-        }
-        // C5 选项契约：空 option_id = Cancelled；非空必须 ∈ options（option_id 原值）。
-        if !option_id.is_empty()
-            && !permission
-                .options
-                .iter()
-                .any(|option| option.option_id == option_id)
-        {
-            return false;
-        }
-        (acp.responder(), pending.remove(&canonical_id), canonical_id)
+        (acp.responder(), permission, canonical_id)
     };
     // 锁外发送（G3 §2.2.2 收敛）：构造应答 → send_agent_response（信封 + 序列化 +
     // 10s 超时 + crashed 预检/置位）。失败恢复 pending（保留可重试）；原 :190-194
@@ -228,12 +227,12 @@ async fn resolve_pending(
         permission_response(option_id)
     };
     if !responder.respond(canonical_id.clone(), outcome).await {
-        restore_pending(runtime, canonical_id, claimed);
+        runtime.ledger.restore_permission(&canonical_id, claimed);
         return false;
     }
     // #98：统一交互队列终态——成功送达即 settle（Answered/Cancelled）并晋升
     // 下一个 waiter（FIFO single-visible）。发送失败路径不入队终态（保留可重试）。
-    let _ = runtime.interactions.settle(
+    let _ = runtime.ledger.settle(
         &canonical_id.to_string(),
         if option_id.is_empty() {
             crate::acp::interaction_queue::InteractionTerminalReason::Cancelled
@@ -244,7 +243,8 @@ async fn resolve_pending(
     // The pending entry carries the only reliable session binding.  Update the
     // reducer only after the wire response commits, so a failed send remains
     // retryable and cannot prematurely drain state.
-    if let Some(permission) = claimed.as_ref() {
+    {
+        let permission = &claimed;
         if let Ok(mut sessions) = runtime.sessions.lock() {
             if let Some(session) = sessions.get_mut(&permission.session_id) {
                 let _ = session
@@ -256,72 +256,16 @@ async fn resolve_pending(
     true
 }
 
-/// 发送失败后恢复已 claim 的挂起条目（O9：保留 pending 供重试/超时/客户端替换
-/// 清理）。同 id 已有更新条目时保留更新条目（不覆盖新请求）。
-fn restore_pending(
-    runtime: &AgentRuntime,
-    request_id: RequestId,
-    claimed: Option<PendingPermission>,
-) {
-    if let Some(permission) = claimed {
-        let inserted = runtime
-            .pending_permissions
-            .lock()
-            .map(|mut pending| {
-                pending
-                    .insert(request_id.clone(), permission.clone())
-                    .is_none()
-            })
-            .unwrap_or(false);
-        // #98（P2-1 评审修复）：发送失败恢复 pending 时同步回灌交互队列——
-        // 否则超时路径的 settle(TimedOut) 先行移除后，重试中的请求会从
-        // pendingInteractions 冷挂载快照消失（队列与 pending store 失配）。
-        // 回灌事件载荷与 dispatcher admit 同构重建。
-        if inserted {
-            // provider 在 restore 路径不可得（pending store 不持有）——置空串；
-            // 事件消费方（冷挂载 normalize→receive）不依赖该字段做归属。
-            let event = serde_json::json!({
-                "provider": "",
-                "agentId": "",
-                "sessionId": permission.session_id,
-                "eventType": "permission.request",
-                "requestId": request_id.to_string(),
-                "toolCallId": permission.tool_call_id,
-                "clientGeneration": permission.client_generation,
-                "payload": {
-                    "title": permission.title,
-                    "prompt": permission.prompt,
-                    "options": permission.options,
-                    "requestedAt": permission.requested_at,
-                    "deadlineMs": permission_deadline_ms(permission.requested_at),
-                },
-            });
-            let _ =
-                runtime
-                    .interactions
-                    .admit(crate::acp::interaction_queue::InteractionQueueEntry {
-                        request_id: request_id.to_string(),
-                        method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
-                        kind: "approval".to_string(),
-                        session_id: permission.session_id,
-                        agent_id: String::new(),
-                        client_generation: permission.client_generation,
-                        enqueued_at: permission.requested_at,
-                        deadline_ms: Some(permission_deadline_ms(permission.requested_at)),
-                        event,
-                        state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
-                    });
-        }
-    }
-}
-
 /// 应答并移除指定 session 的全部挂起权限请求（Cancelled）——cancel/close 路径调用。
+/// （发送失败恢复已 claim 条目的语义收口在 `InteractionLedger::restore_permission`
+/// 单点：O9 重试保留 + #98 P2-1 队列回灌 + provider/agentId 置空串的事件重建。）
 pub(crate) async fn respond_pending_permissions_cancelled(
     runtime: &AgentRuntime,
     session_id: &str,
 ) {
     let pending: Vec<(RequestId, String)> = runtime
-        .pending_permissions
+        .ledger
+        .permissions()
         .lock()
         .map(|pending| {
             pending
@@ -341,8 +285,8 @@ pub(crate) async fn respond_pending_permissions_cancelled(
     // elicitation/ask-user 等非 approval 条目不经 resolve_pending，若不在此
     // 终结会滞留队列并被冷挂载快照复活成死交互（spec §6：cancel 必须 drain
     // 并给每个 waiter 一个终态）。
-    let _ = runtime.interactions.drain_where(
-        |entry| entry.session_id == session_id,
+    let _ = runtime.ledger.drain_where_session(
+        session_id,
         crate::acp::interaction_queue::InteractionTerminalReason::Cancelled,
     );
 }
@@ -422,11 +366,7 @@ pub(crate) async fn respond_interaction(
         PylonError::Protocol(format!("agent runtime not found: {}", identity.agent_id))
     })?;
     let request_id = crate::acp::RequestId::from_echo_string(&identity.request_id);
-    if let Some(pending) = runtime
-        .private_interactions
-        .get(&request_id)
-        .map_err(PylonError::Protocol)?
-    {
+    if let Some(pending) = runtime.ledger.private().get(&request_id).ok().flatten() {
         if pending.session_id != identity.session_id
             || pending.provider != identity.provider
             || pending.agent_id != identity.agent_id
@@ -519,9 +459,9 @@ pub(crate) async fn respond_interaction(
                 "private interaction response failed".into(),
             ));
         }
-        let _ = runtime.private_interactions.take(&request_id);
+        let _ = runtime.ledger.take_private(&request_id);
         // #98：队列终态——私有桥/elicitation 应答同样 settle 并晋升下一个 waiter。
-        let _ = runtime.interactions.settle(
+        let _ = runtime.ledger.settle(
             &request_id.to_string(),
             crate::acp::interaction_queue::InteractionTerminalReason::Answered,
         );
@@ -570,15 +510,14 @@ pub(crate) async fn get_approval_mode(
         .map_err(|e| PylonError::Protocol(format!("approval mode lock poisoned: {e}")))
 }
 
-/// CLI 增强：遍历全部 runtime 的挂起权限请求快照（含应答所需完整 identity）。
-/// provider 由 agent_id 反查 agents 配置（与 dispatcher emit 同源）。
-/// 条目携带 `kind`（respond 必传词项）：pending_permissions 只存
-/// request_permission 条目（协议适配层归一为 "approval"），故恒为该值——
-/// CLI 侧透传，不自行硬编码（#36：`permission` 是漂移词项，会被门禁拒绝）。
-/// #230：同时投影私有交互（elicitation / ask-user / exit-plan）——identity
-/// 取 private_interactions store（respond 复核真源），options 为应答动作
-/// 虚拟投影（fail-closed 白名单见 respond_interaction）。#356：私有交互与
-/// pending_permissions 对等参与超时结算，deadlineMs 为真实 deadline。
+/// CLI 增强：遍历全部 runtime 的挂起交互快照（含应答所需完整 identity）。
+/// #423 快照面单源：不再遍历 pending_permissions / private_interactions 两
+/// store，改读统一队列 `snapshot()` 输出 **wire 形状**（与 agent_status 的
+/// `pendingInteractions` 同一投影 `pending_interactions_wire`，条目另含
+/// `provider`/`deadlineMs`）。展示字段（title 虚拟值 / options 白名单 /
+/// prompt 截断 / ask-user 摘要）与 respond 所需 identity 由 CLI 消费侧
+/// normalize 重建（`src/cli/pylonCliService.ts`，配 parity 测试）——
+/// provider 空串（restore 回灌条目）在此处反查回填。
 #[tauri::command]
 pub(crate) async fn interaction_list(
     state: tauri::State<'_, AppState>,
@@ -592,127 +531,26 @@ pub(crate) async fn interaction_list(
                 .map_err(|e| PylonError::Protocol(format!("agents lock poisoned: {e}")))?;
             resolve_agent_provider(&agents, &agent_id).unwrap_or_else(|| agent_id.clone())
         };
-        let pending = runtime
-            .pending_permissions
-            .lock()
-            .map_err(|e| PylonError::Protocol(format!("pending permissions lock poisoned: {e}")))?;
-        for (request_id, permission) in pending.iter() {
-            items.push(serde_json::json!({
-                "provider": provider,
-                "agentId": agent_id,
-                "kind": "approval",
-                "requestId": request_id.to_string(),
-                "sessionId": permission.session_id,
-                "toolCallId": permission.tool_call_id,
-                "clientGeneration": permission.client_generation,
-                "title": permission.title,
-                "prompt": permission.prompt,
-                "options": permission.options.iter().map(|option| serde_json::json!({
-                    "optionId": option.option_id,
-                    "kind": option.kind,
-                    "name": option.name,
-                })).collect::<Vec<_>>(),
-                "requestedAt": permission.requested_at.to_string(),
-                "deadlineMs": permission_deadline_ms(permission.requested_at),
-            }));
-        }
-        for (request_id, pending_private) in runtime.private_interactions.snapshot() {
-            items.push(private_interaction_item(
-                &provider,
-                &agent_id,
-                request_id,
-                &pending_private,
-            ));
+        let entries = runtime
+            .ledger
+            .queue()
+            .snapshot()
+            .map_err(PylonError::Protocol)?;
+        let mut wire = crate::acp::interaction_queue::pending_interactions_wire(&entries);
+        let Some(list) = wire.as_array_mut() else {
+            continue;
+        };
+        for entry in list {
+            // restore 回灌条目的 provider 为空串——反查回填（应答 identity 复核用）。
+            if entry.get("provider").and_then(serde_json::Value::as_str) == Some("") {
+                if let Some(object) = entry.as_object_mut() {
+                    object.insert("provider".to_string(), serde_json::json!(provider));
+                }
+            }
+            items.push(entry.take());
         }
     }
     Ok(serde_json::json!({ "items": items }))
-}
-
-/// #230：CLI 投影展示文本上限——prompt 摘要截断，防超长 plan/question 撑爆列表。
-const PRIVATE_PROMPT_MAX_CHARS: usize = 400;
-
-fn truncate_prompt(text: &str) -> String {
-    if text.chars().count() <= PRIVATE_PROMPT_MAX_CHARS {
-        return text.to_string();
-    }
-    let mut truncated: String = text.chars().take(PRIVATE_PROMPT_MAX_CHARS).collect();
-    truncated.push('…');
-    truncated
-}
-
-/// #230：单条私有交互的 CLI 投影（identity + kind + 应答动作虚拟 options）。
-fn private_interaction_item(
-    provider: &str,
-    agent_id: &str,
-    request_id: crate::acp::RequestId,
-    pending: &crate::private_interaction::PendingPrivateInteraction,
-) -> serde_json::Value {
-    use crate::protocol_adapter::private_ext::PrivateBridge;
-    let (title, prompt, tool_call_id, options) = match pending.bridge {
-        PrivateBridge::Elicitation => (
-            "Elicitation".to_string(),
-            pending
-                .params
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            String::new(),
-            vec!["accept", "declined", "cancel"],
-        ),
-        PrivateBridge::GrokExitPlan => {
-            let (plan, tool_call) = crate::protocol_adapter::private_ext::parse_exit_plan(
-                pending.bridge,
-                &pending.params,
-            )
-            .unwrap_or_default();
-            (
-                "Exit plan".to_string(),
-                plan,
-                tool_call,
-                vec!["approved", "abandoned", "keep_planning"],
-            )
-        }
-        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
-            // 问题以 id + 题面摘要进 prompt；应答走 values（questionId → label）
-            // 或 declined，options 不适用（留空 + prompt 说明）。
-            let summary = pending
-                .question_specs
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .map(|spec| format!("{}:{}", spec.id, spec.question))
-                .collect::<Vec<_>>()
-                .join("；");
-            (
-                "Ask user".to_string(),
-                if summary.is_empty() {
-                    pending.method.clone()
-                } else {
-                    summary
-                },
-                String::new(),
-                Vec::new(),
-            )
-        }
-    };
-    serde_json::json!({
-        "provider": if pending.provider.is_empty() { provider } else { &pending.provider },
-        "agentId": agent_id,
-        "kind": pending.queue_kind(),
-        "requestId": request_id.to_string(),
-        "sessionId": pending.session_id,
-        "toolCallId": tool_call_id,
-        "clientGeneration": pending.client_generation,
-        "title": title,
-        "prompt": truncate_prompt(&prompt),
-        "options": options.iter().map(|option_id| serde_json::json!({
-            "optionId": option_id,
-        })).collect::<Vec<_>>(),
-        "requestedAt": pending.enqueued_at.to_string(),
-        // #356：私有交互对等参与超时结算——deadline 与权限请求同源同值。
-        "deadlineMs": permission_deadline_ms(pending.enqueued_at),
-    })
 }
 
 /// ACP-03（§5.6）：权限请求的展示截止时刻——deadline 由后端单一来源
@@ -732,135 +570,6 @@ pub(crate) struct TimeoutOutcome {
     pub request_id: RequestId,
     pub client_generation: u64,
     pub option_id: String,
-}
-
-/// O37/#98/#316：dead runtime 三处交互存储的统一清理单点——pending_permissions
-/// 清空 + 统一队列 Disconnected 全量 drain + private_interactions 撤销。
-/// #416 W2 wave2（§4.3.3 合一）：权限 sweep 与私有 sweep 的死亡分支共用本函数，
-/// 清理幂等（先到者清空并告警，后到者空转）——两条 sweep 的执行次序不再承载
-/// 清理契约，lib.rs watcher 的调用序仅剩事件广播次序。
-fn clear_dead_runtime_interactions(runtime: &AgentRuntime) {
-    // O37：已死 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
-    // 崩溃/主动停后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
-    // #163：判定用 is_dead（崩溃 ∨ 主动停）——被切走的 agent 同样送不达。
-    let dropped = runtime
-        .pending_permissions
-        .lock()
-        .map(|pending| pending.len())
-        .unwrap_or(0);
-    if dropped > 0 {
-        tracing::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
-    }
-    let _ = runtime
-        .pending_permissions
-        .lock()
-        .map(|mut pending| pending.clear());
-    // #98：崩溃 = 连接已死——队列全量 drain，每个 waiter 拿到 Disconnected
-    // 终态（不悬挂）。
-    let _ = runtime
-        .interactions
-        .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
-    // #316：私有交互（elicitation/ask-user）同批收敛——崩溃后 store 残留
-    // 条目会在 interaction_list 里悬挂到下次 generation 替换。
-    let stale_private = runtime.private_interactions.snapshot().len();
-    if stale_private > 0 {
-        tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
-    }
-    runtime.private_interactions.cancel_all();
-}
-
-/// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
-/// C5：默认拒绝选项按请求提供的选项选择（reject 优先），不再硬编码 reject_once。
-/// O37：已崩溃 runtime 的 pending 永久悬挂（写通道已死，任何应答都不可能送达）
-/// ——直接清空并 log；多条超时应答 join_all 并行（不再逐条 await 串行）。
-pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<TimeoutOutcome> {
-    let now = Timestamp::now();
-    let mut outcomes = Vec::new();
-    for (agent_id, runtime) in state.runtimes.all_with_ids() {
-        let dead = runtime
-            .acp
-            .try_lock()
-            .map(|acp| acp.is_dead())
-            .unwrap_or(false);
-        if dead {
-            clear_dead_runtime_interactions(&runtime);
-            continue;
-        }
-        let expired: Vec<(RequestId, String, String, u64, Vec<PermissionOption>)> = runtime
-            .pending_permissions
-            .lock()
-            .map(|pending| {
-                pending
-                    .iter()
-                    .filter(|(_, permission)| {
-                        now.elapsed_since(permission.requested_at)
-                            > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
-                    })
-                    .map(|(id, permission)| {
-                        (
-                            id.clone(),
-                            permission.tool_call_id.clone(),
-                            permission.session_id.clone(),
-                            permission.client_generation,
-                            permission.options.clone(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        if expired.is_empty() {
-            continue;
-        }
-        // O37：多条超时应答互不依赖——join_all 并行，避免写通道阻塞时逐条串行
-        // 放大整体耗时。R34：统一走 resolve_pending（锁内复核 + 锁外发送，
-        // 防客户端替换竞态）；发送失败恢复 pending，下轮 watcher 重试或客户端
-        // 替换清理。超时日志无条件保留（记录本次判定）。
-        // ACP-03：仅成功结算（应答送达）的请求收集 outcome——后端据此发出
-        // permission.resolved terminal 事件，前端 settle 该请求（不自行宣称超时）。
-        let responses = expired
-            .into_iter()
-            .map(|(request_id, tool_call_id, session_id, client_generation, options)| {
-                let runtime = runtime.clone();
-                let agent_id = agent_id.clone();
-                async move {
-                    // ACP-04（§5.6 invariant 4）：超时只能选原 options 中的合法
-                    // option——解析层保证 pending 恒非空、pick_option 必 Some；
-                    // 防御分支不得伪造 optionId（旧 unwrap_or("reject_once") 是
-                    // OBS-03 登记的伪造路径），如异常出现则跳过结算并告警。
-                    let Some(option_id) = pick_option(&options, true).map(str::to_string) else {
-                        tracing::error!(
-                            "权限请求 {request_id} 超时但 options 为空（不应发生），跳过结算，不伪造 optionId"
-                        );
-                        return None;
-                    };
-                    // #98：队列先以 TimedOut 终结（超时事实先于默认拒绝应答成立；
-                    // resolve_pending 内部的 settle 对已终结条目幂等让位）。
-                    let _ = runtime.interactions.settle(
-                        &request_id.to_string(),
-                        crate::acp::interaction_queue::InteractionTerminalReason::TimedOut,
-                    );
-                    let resolved =
-                        resolve_pending(&runtime, request_id.clone(), None, &option_id).await;
-                    tracing::warn!(
-                        "权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）"
-                    );
-                    resolved.then_some(TimeoutOutcome {
-                        agent_id,
-                        session_id,
-                        request_id,
-                        client_generation,
-                        option_id,
-                    })
-                }
-            });
-        outcomes.extend(
-            futures_util::future::join_all(responses)
-                .await
-                .into_iter()
-                .flatten(),
-        );
-    }
-    outcomes
 }
 
 /// #356：私有交互超时结算的 outcome（watcher 据此广播
@@ -890,19 +599,29 @@ fn private_interaction_timeout_response(
     .map_err(PylonError::Protocol)
 }
 
-/// #356：挂起私有交互的超时检查——与 `check_pending_permission_timeouts`
-/// 对等的 deadline drain + 向 agent 回包（超时前 agent 会挂等一个永不来的
-/// 响应，可能阻塞其 auth/config 流程）。#416 W2 wave2：死亡 runtime 由本
-/// sweep 自行调 `clear_dead_runtime_interactions` 清理（不再依赖权限 sweep
-/// 先行的隐式次序）。claim 顺序与并发用户应答竞态的裁决：**take() 原子
-/// 抢先**——用户应答先到则本 sweep 拿 None 跳过；本 sweep 先 take 则用户
-/// 侧拿到 not found 由前端 settle（与 route_elicitation_complete 的 P2-2
-/// 语义一致）。发送失败回插 pending，下轮 watcher 重试。
-pub(crate) async fn check_pending_private_interaction_timeouts(
+/// #423 超时 sweep 合一：原 `check_pending_permission_timeouts` 与
+/// `check_pending_private_interaction_timeouts` 两条 sweep 的单点替代——
+/// watcher 每 5s 调用一次（轮询粒度与广播次序不变：先 permission.resolved
+/// 后 interaction.resolved，由调用方按返回二元组分序广播）。
+///
+/// - **deadline 归队列权威**：判定经 `InteractionLedger::drain_expired`
+///   （#416 下沉的 `now > deadline` 严格边界，与原 store 级
+///   `elapsed > 300_000ms` 判据逐 ms 等价）；admit 时注入的 `deadline_ms`
+///   是唯一判据来源。
+/// - 死亡 runtime（O37/#163：崩溃 ∨ 主动停）：`drain_disconnected` 单点清理
+///   三 store（幂等），不出 outcome。
+/// - 过期条目按 method 分流，各走原应答序：
+///   - `session/request_permission`：队列先以 TimedOut 终结（drain 已完成），
+///     `resolve_pending`（锁内复核 + 锁外发送 + 失败 restore——序不变），
+///     多条 join_all 并行；仅成功结算收集 outcome（ACP-03 invariant 5）。
+///   - 其余（私有桥）：take() 原子抢先 claim → 默认回包构造 → 锁外发送 →
+///     失败 `restore_private` 回插重试；claim 落空 = 用户应答已抢先收口。
+pub(crate) async fn sweep_interaction_timeouts(
     state: &AppState,
-) -> Vec<PrivateInteractionTimeoutOutcome> {
-    let now = Timestamp::now();
+) -> (Vec<TimeoutOutcome>, Vec<PrivateInteractionTimeoutOutcome>) {
+    let now_ms = Timestamp::now().as_u64();
     let mut outcomes = Vec::new();
+    let mut private_outcomes = Vec::new();
     for (agent_id, runtime) in state.runtimes.all_with_ids() {
         let dead = runtime
             .acp
@@ -910,62 +629,121 @@ pub(crate) async fn check_pending_private_interaction_timeouts(
             .map(|acp| acp.is_dead())
             .unwrap_or(false);
         if dead {
-            // #416 W2 wave2（§4.3.3 合一）：死亡清理收口到
-            // clear_dead_runtime_interactions 单点——本 sweep 不再依赖权限 sweep
-            // 先行的隐式次序（幂等：权限 sweep 已清则此处空转）。
-            clear_dead_runtime_interactions(&runtime);
+            // O37：已死 runtime 的挂起请求永久无法应答——三 store 单点清理。
+            let (dropped, stale_private, _) = runtime.ledger.drain_disconnected();
+            if dropped > 0 {
+                tracing::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
+            }
+            if stale_private > 0 {
+                tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
+            }
             continue;
         }
-        let expired: Vec<(
-            RequestId,
-            crate::private_interaction::PendingPrivateInteraction,
-        )> = runtime
-            .private_interactions
-            .snapshot()
-            .into_iter()
-            .filter(|(_, pending)| {
-                now.elapsed_since(pending.enqueued_at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
-            })
-            .collect();
-        // 只需要 request_id：超时判据已在 collect 的 filter 里用掉快照值，真正的
-        // claim 是下面的 `take()`（它拿到的 `claimed` 才是权威值）。
-        for (request_id, _) in expired {
+        // deadline 权威 drain：一次队列操作终结全部过期条目（TimedOut）。
+        let expired: Vec<crate::acp::interaction_queue::InteractionQueueEntry> = runtime
+            .ledger
+            .drain_expired(
+                now_ms,
+                crate::acp::interaction_queue::InteractionTerminalReason::TimedOut,
+            )
+            .unwrap_or_default();
+        if expired.is_empty() {
+            continue;
+        }
+        let mut permission_expired = Vec::new();
+        let mut private_expired = Vec::new();
+        for entry in expired {
+            if entry.method == crate::acp::METHOD_SESSION_REQUEST_PERMISSION {
+                permission_expired.push(entry);
+            } else {
+                private_expired.push(entry);
+            }
+        }
+        if !permission_expired.is_empty() {
+            // O37：多条超时应答互不依赖——join_all 并行，避免写通道阻塞时逐条
+            // 串行放大整体耗时。R34：统一走 resolve_pending（锁内复核 + 锁外
+            // 发送，防客户端替换竞态）；发送失败恢复 pending（restore 回灌
+            // queue，deadline 已过线，下轮 drain_expired 重试或客户端替换清理）。
+            // ACP-03：仅成功结算（应答送达）的请求收集 outcome。
+            let responses = permission_expired.into_iter().map(|entry| {
+                let runtime = runtime.clone();
+                let agent_id = agent_id.clone();
+                async move {
+                    let request_id = crate::acp::RequestId::from_echo_string(&entry.request_id);
+                    // 条目身份/选项从 store 只读复核取（claim 在 resolve_pending 内）；
+                    // 查不到 = store 与队列失配（结构性不可达，防御告警跳过）。
+                    let Some((_canonical, permission)) =
+                        runtime.ledger.pending_permission(&request_id)
+                    else {
+                        tracing::warn!(
+                            "权限请求 {} 超时但 store 无条目（队列与 store 失配），跳过结算",
+                            entry.request_id
+                        );
+                        return None;
+                    };
+                    // ACP-04（§5.6 invariant 4）：超时只能选原 options 中的合法
+                    // option——解析层保证 pending 恒非空、pick_option 必 Some；
+                    // 防御分支不得伪造 optionId（旧 unwrap_or("reject_once") 是
+                    // OBS-03 登记的伪造路径），如异常出现则跳过结算并告警。
+                    let Some(option_id) = pick_option(&permission.options, true).map(str::to_string)
+                    else {
+                        tracing::error!(
+                            "权限请求 {} 超时但 options 为空（不应发生），跳过结算，不伪造 optionId",
+                            entry.request_id
+                        );
+                        return None;
+                    };
+                    // 队列已由 drain_expired 以 TimedOut 终结（超时事实先于默认
+                    // 拒绝应答成立；resolve_pending 内部的 settle 对已终结条目
+                    // 幂等让位）。
+                    let resolved =
+                        resolve_pending(&runtime, request_id.clone(), None, &option_id).await;
+                    tracing::warn!(
+                        "权限请求 {} 超时默认拒绝 {option_id}（{}）",
+                        entry.request_id, permission.tool_call_id
+                    );
+                    resolved.then_some(TimeoutOutcome {
+                        agent_id,
+                        session_id: permission.session_id,
+                        request_id,
+                        client_generation: permission.client_generation,
+                        option_id,
+                    })
+                }
+            });
+            outcomes.extend(
+                futures_util::future::join_all(responses)
+                    .await
+                    .into_iter()
+                    .flatten(),
+            );
+        }
+        for entry in private_expired {
+            let request_id = crate::acp::RequestId::from_echo_string(&entry.request_id);
             // take() 即原子 claim：None = 用户应答已抢先收口，跳过。
-            let Some(claimed) = runtime
-                .private_interactions
-                .take(&request_id)
-                .ok()
-                .flatten()
-            else {
+            let Some(claimed) = runtime.ledger.take_private(&request_id) else {
                 continue;
             };
-            let kind = claimed.queue_kind().to_string();
+            let kind = entry.kind;
             let response = match private_interaction_timeout_response(&claimed) {
                 Ok(response) => response,
                 Err(error) => {
                     tracing::error!("私有交互 {request_id} 超时应答构造失败：{error}；回插重试");
-                    let _ = runtime
-                        .private_interactions
-                        .insert(request_id.clone(), claimed);
+                    runtime.ledger.restore_private(&request_id, claimed);
                     continue;
                 }
             };
             let responder = { runtime.acp.lock().await.responder() };
             if !responder.respond(request_id.clone(), response).await {
                 tracing::warn!("私有交互 {request_id} 超时回包发送失败；回插 pending 下轮重试");
-                let _ = runtime.private_interactions.insert(request_id, claimed);
+                runtime.ledger.restore_private(&request_id, claimed);
                 continue;
             }
-            // #98：队列 TimedOut 终结——超时事实与回包一并成立，waiter 不悬挂。
-            let _ = runtime.interactions.settle(
-                &request_id.to_string(),
-                crate::acp::interaction_queue::InteractionTerminalReason::TimedOut,
-            );
             tracing::warn!(
                 "私有交互 {request_id}（{kind}）超时，已按默认动作回包（session={}）",
                 claimed.session_id
             );
-            outcomes.push(PrivateInteractionTimeoutOutcome {
+            private_outcomes.push(PrivateInteractionTimeoutOutcome {
                 agent_id: agent_id.clone(),
                 session_id: claimed.session_id,
                 request_id,
@@ -974,7 +752,7 @@ pub(crate) async fn check_pending_private_interaction_timeouts(
             });
         }
     }
-    outcomes
+    (outcomes, private_outcomes)
 }
 
 #[cfg(test)]
@@ -997,6 +775,7 @@ mod tests {
 
     /// #316：runtime 死亡分支必须连 private_interactions 一起清——否则崩溃后
     /// 残留条目会在 interaction_list 里悬挂到下次 generation 替换。
+    /// #423：登记经 ledger admit（三 store 双写单点），sweep 走合一入口。
     #[tokio::test]
     async fn dead_runtime_clears_private_interactions() {
         let state = crate::test_utils::TestStateBuilder::bare()
@@ -1005,37 +784,30 @@ mod tests {
         let runtime = state.runtimes.get("a1").expect("runtime 已注入");
         let request_id = crate::acp::RequestId::Number(41);
         runtime
-            .private_interactions
-            .insert(request_id.clone(), private_elicitation_pending())
-            .expect("insert 必须成功");
-        let _ = runtime
-            .interactions
-            .admit(crate::acp::interaction_queue::InteractionQueueEntry {
-                request_id: "41".into(),
-                method: "elicitation/create".into(),
-                kind: "elicitation".into(),
-                session_id: "peri-s1".into(),
-                agent_id: "a1".into(),
-                client_generation: 1,
-                enqueued_at: crate::time::Timestamp::now(),
-                deadline_ms: None,
-                event: serde_json::json!({}),
-                state: crate::acp::interaction_queue::InteractionEntryState::Active,
-            });
+            .ledger
+            .admit_private(
+                "peri",
+                "a1",
+                &request_id,
+                &private_elicitation_pending(),
+                "elicitation/create",
+            )
+            .expect("admit 必须成功");
 
         // 置死：主动 stop 标记（disconnected client 的 kill 只置位、无真实子进程）。
         let _ = runtime.acp.lock().await.kill();
         assert!(runtime.acp.lock().await.is_dead());
 
-        let outcomes = check_pending_permission_timeouts(&state).await;
+        let (outcomes, _) = sweep_interaction_timeouts(&state).await;
         let _ = outcomes;
         assert!(
-            runtime.private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "死亡分支必须清空私有交互残留"
         );
         assert!(
             runtime
-                .interactions
+                .ledger
+                .queue()
                 .snapshot()
                 .ok()
                 .map(|entries| entries.is_empty())
@@ -1047,22 +819,23 @@ mod tests {
     use super::*;
     use crate::runtime::AgentRuntime;
 
-    /// #36：interaction_list 投影 `kind` 恒为 "approval"——CLI respond 透传该
-    /// 字段（不再硬编码 'permission'）；该字段被移除时此测试必红（防契约回退）。
+    /// #36/#423：interaction_list 输出 wire 形状（queue snapshot 单源）——
+    /// `kind` 恒为 "approval"（CLI respond 透传词项）；该字段被移除时此测试
+    /// 必红（防契约回退）。
     #[test]
     fn interaction_list_projects_kind_for_cli_respond_passthrough() {
         use tauri::Manager;
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_runtime("a1", AgentRuntime::new_disconnected())
             .build();
+        let permission = parsed(2);
         state
             .runtimes
             .get("a1")
             .expect("runtime 已注入")
-            .pending_permissions
-            .lock()
-            .expect("pending 锁必须可用")
-            .insert(crate::acp::RequestId::Number(7), parsed(2));
+            .ledger
+            .admit_permission("peri", "a1", &crate::acp::RequestId::Number(7), &permission)
+            .expect("admit 必须成功");
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -1075,16 +848,34 @@ mod tests {
         assert_eq!(item["kind"], "approval");
         assert_eq!(item["requestId"], "7");
         assert_eq!(item["clientGeneration"], 2);
+        // wire 形状（快照面单源）：method/state/payload 全文 + provider/deadlineMs。
+        assert_eq!(
+            item["method"],
+            crate::acp::METHOD_SESSION_REQUEST_PERMISSION
+        );
+        assert_eq!(item["state"], "active");
+        assert_eq!(item["provider"], "peri");
+        assert_eq!(
+            item["deadlineMs"],
+            serde_json::json!(permission_deadline_ms(permission.requested_at))
+        );
+        assert_eq!(item["payload"]["eventType"], "permission.request");
+        assert_eq!(item["payload"]["toolCallId"], "call-1");
     }
 
-    /// #230：私有交互（elicitation / exit-plan）投影进 interaction_list——
-    /// kind 沿队列 canonical 值、identity 取 store 真源、options 为应答动作
-    /// 虚拟白名单。#356：deadlineMs 为真实 deadline（对等权限请求）。
+    /// #230/#423：私有交互（elicitation / exit-plan）进 interaction_list 的
+    /// wire 输出——kind 沿队列 canonical 值、payload 为事件信封原文
+    /// （eventType/原始 params）；provider 空串回退配置反查值由 CLI normalize
+    /// 消费（详测见 `src/cli/__tests__/interactionWireNormalize.test.ts`）。
     #[test]
-    fn interaction_list_projects_private_interactions_for_cli() {
-        use crate::private_interaction::{PendingPrivateInteraction, PrivateInteractionOwner};
+    fn interaction_list_projects_private_interactions_wire_for_cli() {
         use crate::protocol_adapter::private_ext::PrivateBridge;
-        let base = PendingPrivateInteraction {
+        use tauri::Manager;
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_runtime("a1", AgentRuntime::new_disconnected())
+            .build();
+        let runtime = state.runtimes.get("a1").expect("runtime 已注入");
+        let elicitation = PendingPrivateInteraction {
             provider: String::new(),
             agent_id: "a1".into(),
             session_id: "s1".into(),
@@ -1095,56 +886,68 @@ mod tests {
             client_generation: 4,
             enqueued_at: Timestamp::now(),
         };
-        let elicitation = base.clone();
         let exit_plan = PendingPrivateInteraction {
             provider: "peri".into(),
             method: "_x.ai/exit_plan_mode".into(),
             bridge: PrivateBridge::GrokExitPlan,
             params: serde_json::json!({"sessionId": "s1", "planContent": "step 1", "toolCallId": "tc-9"}),
             client_generation: 5,
-            ..base
+            ..elicitation.clone()
         };
-        let owner = PrivateInteractionOwner::default();
-        owner
-            .insert(crate::acp::RequestId::Number(11), elicitation)
+        runtime
+            .ledger
+            .admit_private(
+                "",
+                "a1",
+                &crate::acp::RequestId::Number(11),
+                &elicitation,
+                "elicitation/create",
+            )
             .unwrap();
-        owner
-            .insert(crate::acp::RequestId::String("e2".into()), exit_plan)
+        runtime
+            .ledger
+            .admit_private(
+                "peri",
+                "a1",
+                &crate::acp::RequestId::String("e2".into()),
+                &exit_plan,
+                "_x.ai/exit_plan_mode",
+            )
             .unwrap();
-        for (request_id, pending) in owner.snapshot() {
-            let item = private_interaction_item("peri-fallback", "a1", request_id, &pending);
-            let option_ids = || {
-                item["options"]
-                    .as_array()
-                    .expect("options 数组")
-                    .iter()
-                    .map(|o| o["optionId"].as_str().expect("optionId"))
-                    .collect::<Vec<_>>()
-            };
-            match pending.bridge {
-                PrivateBridge::Elicitation => {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let items = tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(interaction_list(app.state::<crate::AppState>()))
+            .expect("interaction_list 必须成功");
+        let items = items["items"].as_array().expect("items 数组");
+        assert_eq!(items.len(), 2);
+        for item in items {
+            let payload = &item["payload"];
+            match payload["eventType"].as_str() {
+                Some("elicitation.request") => {
                     assert_eq!(item["kind"], "elicitation");
-                    assert_eq!(item["title"], "Elicitation");
-                    assert_eq!(item["prompt"], "issue230 验收");
-                    // store provider 缺省时回退配置反查值。
-                    assert_eq!(item["provider"], "peri-fallback");
-                    assert_eq!(option_ids(), vec!["accept", "declined", "cancel"]);
-                    // #356：deadline = enqueued_at + 300s（对等权限请求）。
+                    assert_eq!(item["method"], "elicitation/create");
+                    assert_eq!(item["clientGeneration"], 4);
+                    // store provider 缺省（空串）→ 反查回填。
+                    assert_eq!(item["provider"], "a1");
+                    assert_eq!(payload["payload"]["message"], "issue230 验收");
                     assert_eq!(
                         item["deadlineMs"],
-                        serde_json::json!(permission_deadline_ms(pending.enqueued_at))
+                        serde_json::json!(permission_deadline_ms(elicitation.enqueued_at))
                     );
-                    assert_eq!(item["clientGeneration"], 4);
                 }
-                PrivateBridge::GrokExitPlan => {
+                Some("approval.request") => {
                     assert_eq!(item["kind"], "approval");
-                    assert_eq!(item["toolCallId"], "tc-9");
+                    assert_eq!(item["method"], "_x.ai/exit_plan_mode");
                     assert_eq!(item["provider"], "peri");
-                    assert_eq!(item["prompt"], "step 1");
-                    assert_eq!(option_ids(), vec!["approved", "abandoned", "keep_planning"]);
                     assert_eq!(item["clientGeneration"], 5);
+                    assert_eq!(payload["payload"]["toolCallId"], "tc-9");
+                    assert_eq!(payload["payload"]["planContent"], "step 1");
                 }
-                _ => panic!("本测试只覆盖 elicitation 与 exit-plan"),
+                other => panic!("未知 eventType：{other:?}"),
             }
         }
     }
@@ -1322,7 +1125,8 @@ mod tests {
         let runtime = AgentRuntime::new_disconnected();
         // 客户端替换场景：pending 记录的是旧 generation（1），当前 generation 为 0
         runtime
-            .pending_permissions
+            .ledger
+            .permissions()
             .lock()
             .unwrap()
             .insert(RequestId::Number(7), parsed(1));
@@ -1332,7 +1136,8 @@ mod tests {
         );
         assert!(
             runtime
-                .pending_permissions
+                .ledger
+                .permissions()
                 .lock()
                 .unwrap()
                 .contains_key(&RequestId::Number(7)),
@@ -1345,13 +1150,15 @@ mod tests {
         // A1c: SDK responder 只为真实 agent request 登记；代际拒绝保持 pending。
         let runtime = AgentRuntime::new_disconnected();
         runtime
-            .pending_permissions
+            .ledger
+            .permissions()
             .lock()
             .unwrap()
             .insert(RequestId::Number(7), parsed(1));
         assert!(!resolve_pending(&runtime, RequestId::Number(7), None, "allow_once").await);
         assert!(runtime
-            .pending_permissions
+            .ledger
+            .permissions()
             .lock()
             .unwrap()
             .contains_key(&RequestId::Number(7)));
@@ -1445,17 +1252,17 @@ mod tests {
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_runtime(agent_id, runtime.clone())
             .build();
-        // requested_at 早于 300s——超时命中。
+        // requested_at 早于 300s——超时命中。#423：登记经 ledger admit
+        //（deadline admit 时注入，超时判定归队列权威）。
         let old = Timestamp::new(Timestamp::now().as_u64().saturating_sub(301_000));
         let mut pending = parsed(0);
         pending.requested_at = old;
         runtime
-            .pending_permissions
-            .lock()
-            .unwrap()
-            .insert(RequestId::Number(7), pending);
+            .ledger
+            .admit_permission("peri", agent_id, &RequestId::Number(7), &pending)
+            .expect("admit 必须成功");
 
-        let outcomes = check_pending_permission_timeouts(&state).await;
+        let (outcomes, _) = sweep_interaction_timeouts(&state).await;
 
         assert_eq!(outcomes.len(), 1, "超时请求必须结算并报告 outcome");
         let outcome = &outcomes[0];
@@ -1465,7 +1272,7 @@ mod tests {
         assert_eq!(outcome.client_generation, 0);
         assert_eq!(outcome.option_id, "reject_once");
         assert!(
-            runtime.pending_permissions.lock().unwrap().is_empty(),
+            runtime.ledger.permissions().lock().unwrap().is_empty(),
             "结算后 pending 必须清空"
         );
         let _ = runtime.acp.lock().await.kill();
@@ -1571,29 +1378,22 @@ mod tests {
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_runtime(agent_id, runtime.clone())
             .build();
-        // enqueued_at 早于 300s——超时命中。
+        // enqueued_at 早于 300s——超时命中。#423：登记经 ledger admit
+        //（deadline 归队列权威，判定走 drain_expired）。
         let mut pending = private_elicitation_pending();
         pending.enqueued_at = Timestamp::new(Timestamp::now().as_u64().saturating_sub(301_000));
         runtime
-            .private_interactions
-            .insert(RequestId::Number(71), pending.clone())
-            .unwrap();
-        let _ = runtime
-            .interactions
-            .admit(crate::acp::interaction_queue::InteractionQueueEntry {
-                request_id: "71".into(),
-                method: "elicitation/create".into(),
-                kind: "elicitation".into(),
-                session_id: pending.session_id.clone(),
-                agent_id: agent_id.into(),
-                client_generation: 1,
-                enqueued_at: pending.enqueued_at,
-                deadline_ms: Some(permission_deadline_ms(pending.enqueued_at)),
-                event: serde_json::json!({}),
-                state: crate::acp::interaction_queue::InteractionEntryState::Active,
-            });
+            .ledger
+            .admit_private(
+                "peri",
+                agent_id,
+                &RequestId::Number(71),
+                &pending,
+                "elicitation/create",
+            )
+            .expect("admit 必须成功");
 
-        let outcomes = check_pending_private_interaction_timeouts(&state).await;
+        let (_, outcomes) = sweep_interaction_timeouts(&state).await;
 
         assert_eq!(outcomes.len(), 1, "到期私有交互必须结算并报告 outcome");
         let outcome = &outcomes[0];
@@ -1602,10 +1402,10 @@ mod tests {
         assert_eq!(outcome.request_id, RequestId::Number(71));
         assert_eq!(outcome.kind, "elicitation");
         assert!(
-            runtime.private_interactions.snapshot().is_empty(),
+            runtime.ledger.private().snapshot().is_empty(),
             "回包送达后 store 必须清空"
         );
-        let entries = runtime.interactions.snapshot().expect("queue snapshot");
+        let entries = runtime.ledger.queue().snapshot().expect("queue snapshot");
         assert!(
             entries.is_empty(),
             "队列条目必须被 settle 收敛（settle = 移除 + 终态返回），不残留悬挂 waiter"
@@ -1614,7 +1414,9 @@ mod tests {
     }
 
     /// #356：未到期不动；到期但发送失败（disconnected client）→ 条目回插
-    /// 供下轮重试，队列不终结、不产出 outcome。
+    /// 供下轮重试，队列不终结、不产出 outcome。#423：回插经
+    /// `restore_private`（store + queue 回灌——deadline 已过线，下轮
+    /// drain_expired 可再命中）。
     #[tokio::test]
     async fn private_interaction_timeout_retains_entry_when_send_fails() {
         let runtime = AgentRuntime::new_disconnected();
@@ -1626,18 +1428,30 @@ mod tests {
         let mut expired = private_elicitation_pending();
         expired.enqueued_at = Timestamp::new(Timestamp::now().as_u64().saturating_sub(301_000));
         runtime
-            .private_interactions
-            .insert(RequestId::Number(81), expired)
+            .ledger
+            .admit_private(
+                "peri",
+                agent_id,
+                &RequestId::Number(81),
+                &expired,
+                "elicitation/create",
+            )
             .unwrap();
         runtime
-            .private_interactions
-            .insert(RequestId::Number(82), fresh)
+            .ledger
+            .admit_private(
+                "peri",
+                agent_id,
+                &RequestId::Number(82),
+                &fresh,
+                "elicitation/create",
+            )
             .unwrap();
 
-        let outcomes = check_pending_private_interaction_timeouts(&state).await;
+        let (_, outcomes) = sweep_interaction_timeouts(&state).await;
 
         assert!(outcomes.is_empty(), "发送失败不得产出 outcome");
-        let snapshot = runtime.private_interactions.snapshot();
+        let snapshot = runtime.ledger.private().snapshot();
         assert_eq!(
             snapshot.len(),
             2,
@@ -1645,5 +1459,10 @@ mod tests {
         );
         assert!(snapshot.iter().any(|(id, _)| *id == RequestId::Number(81)));
         assert!(snapshot.iter().any(|(id, _)| *id == RequestId::Number(82)));
+        // 回灌后的 queue：81（回插）与 82（未动）都在——下轮 sweep 可再命中 81。
+        let entries = runtime.ledger.queue().snapshot().expect("queue snapshot");
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|entry| entry.request_id == "81"));
+        assert!(entries.iter().any(|entry| entry.request_id == "82"));
     }
 }
