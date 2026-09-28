@@ -108,10 +108,10 @@ pub(super) fn settle_turn_from_response(
 }
 
 /// #352：构造「用户 cancel 已发出」判死探针——只认 generation 一致的置位
-/// （载体键化 generation，镜像 turn_in_flight：客户端替换后旧代际的迟到置位
-/// 不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按 dev-standards #331
-/// 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，就地恢复——判死输入
-/// 不得因锁中毒静默消失。
+/// （载体键化 generation，与账本 TurnKey 的代际隔离同纪律：客户端替换后
+/// 旧代际的迟到置位不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按
+/// dev-standards #331 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，
+/// 就地恢复——判死输入不得因锁中毒静默消失。
 pub(crate) fn cancel_requested_probe(
     runtime: Arc<AgentRuntime>,
     source: String,
