@@ -484,8 +484,9 @@ pub(super) async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
     let error = format!(
         "timed out after {timeout_secs}s ({timeout_label} timeout; elapsed {actual_elapsed_ms}ms)"
     );
-    // M5 感知：超时 → 发呆（区别于普通失败）
-    let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
+    // M5 感知：超时 → 发呆（区别于普通失败）。#425 件6：超时位点经 sink
+    // （原 `pet::on_timeout` 直呼点）。
+    PetReactionSink::new(state.pet.clone()).on_timeout();
     // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
     state.log_runtime_summary(
         "error",

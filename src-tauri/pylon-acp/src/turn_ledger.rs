@@ -258,8 +258,9 @@ impl TurnLedger {
 
     /// 迟到终态计数（诊断：任何 >0 都意味着竞态路径被 CAS 拦截过）。
     ///
-    /// 仅测试消费（#228）：生产诊断出口（冷挂载快照/日志）尚未读取该计数，
-    /// 接入时摘除 `#[cfg(test)]`。
+    /// 仅测试消费（#228）：生产出口是 settle Late 分支处的 `tracing::warn`
+    /// （#425 件3 接线，逐条打点）——本 getter 不进生产读取面；若将来需要
+    /// 快照式聚合读数再摘除 `#[cfg(test)]`。
     #[cfg(test)]
     pub fn late_terminal_events(&self) -> u64 {
         self.late_terminal_events.load(Ordering::Relaxed)
@@ -382,13 +383,21 @@ impl TurnLedger {
             None => match tables.terminal.get(key) {
                 Some(record) => {
                     self.late_terminal_events.fetch_add(1, Ordering::Relaxed);
+                    let existing = record.terminal.as_ref().expect("terminal 表内记录必已收敛");
+                    // #425 件3：CAS 拦截计数的生产出口——迟到终态是竞态路径的
+                    // 诊断信号，每命中一条打一条 warn（计数 getter 保持仅测试
+                    // 消费，见其方法文档）。
+                    tracing::warn!(
+                        target: "turn_ledger",
+                        local_session_id = %key.local_session_id,
+                        remote_session_id = %key.remote_session_id,
+                        generation = key.generation,
+                        turn_id = key.turn_id,
+                        existing_cause = ?existing.cause,
+                        "late terminal event intercepted by CAS settle"
+                    );
                     SettleOutcome::Late {
-                        existing: record
-                            .terminal
-                            .as_ref()
-                            .expect("terminal 表内记录必已收敛")
-                            .cause
-                            .clone(),
+                        existing: existing.cause.clone(),
                     }
                 }
                 None => SettleOutcome::UnknownTurn,

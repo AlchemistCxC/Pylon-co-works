@@ -193,7 +193,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
         .and_then(|agents| resolve_agent_provider(&agents, agent_id))
         .unwrap_or_else(|| "unknown".to_string());
     let private_validation = raw.method.as_deref().map(|method| {
-        crate::acp::adapter::private_ext::validate_request(
+        crate::protocol_adapter::private_ext::validate_request(
             method,
             raw.params.as_ref().unwrap_or(&serde_json::Value::Null),
         )
@@ -205,28 +205,30 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
     ) {
         let bridge = match method {
             "_x.ai/ask_user_question" => {
-                Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions)
+                Some(crate::protocol_adapter::private_ext::PrivateBridge::GrokExtQuestions)
             }
-            "pi/select_ask" => Some(crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk),
+            "pi/select_ask" => {
+                Some(crate::protocol_adapter::private_ext::PrivateBridge::PiSelectAsk)
+            }
             "_x.ai/exit_plan_mode" => {
-                Some(crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan)
+                Some(crate::protocol_adapter::private_ext::PrivateBridge::GrokExitPlan)
             }
             // #98: elicitation/create generic protocol bridge - routed
             // by method name, no provider match required (AC11).
             "elicitation/create" => {
-                Some(crate::acp::adapter::private_ext::PrivateBridge::Elicitation)
+                Some(crate::protocol_adapter::private_ext::PrivateBridge::Elicitation)
             }
             _ => None,
         };
         if let Some(bridge) = bridge {
             let params = raw.params.clone().unwrap_or(serde_json::Value::Null);
             let question_specs = match bridge {
-                crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
-                | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
-                    crate::acp::adapter::private_ext::parse_questions(bridge, &params).ok()
+                crate::protocol_adapter::private_ext::PrivateBridge::GrokExtQuestions
+                | crate::protocol_adapter::private_ext::PrivateBridge::PiSelectAsk => {
+                    crate::protocol_adapter::private_ext::parse_questions(bridge, &params).ok()
                 }
-                crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan
-                | crate::acp::adapter::private_ext::PrivateBridge::Elicitation => None,
+                crate::protocol_adapter::private_ext::PrivateBridge::GrokExitPlan
+                | crate::protocol_adapter::private_ext::PrivateBridge::Elicitation => None,
             };
             let session_id = params
                 .get("sessionId")
@@ -247,14 +249,16 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
             }
             let admission = if !session_id.is_empty() {
                 Some(Admission::Session(session_id))
-            } else if bridge == crate::acp::adapter::private_ext::PrivateBridge::Elicitation {
-                match crate::acp::adapter::private_ext::project_elicitation_scope(&params) {
-                    Ok(crate::acp::adapter::private_ext::ElicitationScopeProjection::Session {
-                        session_id,
-                    }) => Some(Admission::Session(session_id)),
-                    Ok(crate::acp::adapter::private_ext::ElicitationScopeProjection::Request) => {
-                        Some(Admission::RequestScoped)
-                    }
+            } else if bridge == crate::protocol_adapter::private_ext::PrivateBridge::Elicitation {
+                match crate::protocol_adapter::private_ext::project_elicitation_scope(&params) {
+                    Ok(
+                        crate::protocol_adapter::private_ext::ElicitationScopeProjection::Session {
+                            session_id,
+                        },
+                    ) => Some(Admission::Session(session_id)),
+                    Ok(
+                        crate::protocol_adapter::private_ext::ElicitationScopeProjection::Request,
+                    ) => Some(Admission::RequestScoped),
                     Err(error) => {
                         reject_interaction_request(
                             window,
@@ -298,8 +302,8 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                 let interaction_event = serde_json::json!({
                     "provider": provider, "agentId": agent_id, "sessionId": admitted_session_id,
                     "eventType": match bridge {
-                        crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
-                        crate::acp::adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
+                        crate::protocol_adapter::private_ext::PrivateBridge::GrokExitPlan => "approval.request",
+                        crate::protocol_adapter::private_ext::PrivateBridge::Elicitation => "elicitation.request",
                         _ => "ask-user",
                     }, "requestId": request_id.to_string(),
                     "clientGeneration": generation, "payload": params,
@@ -702,7 +706,7 @@ mod tests {
             agent_id: "a1".into(),
             session_id: "peri-s1".into(),
             method: "elicitation/create".into(),
-            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
+            bridge: crate::protocol_adapter::private_ext::PrivateBridge::Elicitation,
             params: serde_json::json!({
                 "sessionId": "peri-s1",
                 "elicitationId": elicitation_id,

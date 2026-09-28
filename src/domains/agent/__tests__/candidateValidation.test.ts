@@ -41,17 +41,15 @@ const failed: AgentCandidateValidationState = {
 }
 
 describe('Agent 候选导入门禁', () => {
-  it('exact/high 验证失败后允许未验证导入，但未验证前仍不可导入', () => {
-    expect(candidateImportMode(candidate('exact'), failed)).toBe('unverified')
+  it('high 验证失败后允许未验证导入，但未验证前仍不可导入', () => {
     expect(candidateImportMode(candidate('high'), failed)).toBe('unverified')
     expect(candidateImportMode(candidate('high'), undefined)).toBe('blocked')
     expect(candidateImportMode(candidate('high'), { status: 'testing' })).toBe('blocked')
   })
 
-  it('medium/low 验证失败时继续阻止导入，所有置信度验证成功后均可导入', () => {
+  it('medium 验证失败时继续阻止导入，所有置信度验证成功后均可导入', () => {
     expect(candidateImportMode(candidate('medium'), failed)).toBe('blocked')
-    expect(candidateImportMode(candidate('low'), failed)).toBe('blocked')
-    for (const confidence of ['exact', 'high', 'medium', 'low'] as const) {
+    for (const confidence of ['high', 'medium'] as const) {
       expect(candidateImportMode(candidate(confidence), {
         status: 'ok',
         result: { ok: true, agentId: 'test', durationMs: 25, error: null },

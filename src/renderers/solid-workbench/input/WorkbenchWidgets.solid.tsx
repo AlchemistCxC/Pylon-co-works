@@ -106,7 +106,7 @@ export function SolidReasoningWidget(props: { draftValue?: () => string; onDraft
 
 /** First-batch host renderer: the registered send block includes its icon layer;
  * the effect layer (highlight/shadow) is still pending. */
-export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 'external'; hidden?: boolean }) {
+export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 'external' }) {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
@@ -132,7 +132,7 @@ export function SolidCcSendButton(props: { disabled?: boolean; mode: 'inline' | 
   }
   return <button
     type="button"
-    class={`cc-send-button${props.hidden ? ' cc-hidden' : ''}`}
+    class="cc-send-button"
     // ★ #238 刀4：把元件 id 写到节点上 —— 它声明为**悬浮件**（`floating`），
     //   「占区不叠加」的豁免判据与几何测量都按这个 id 找它（之前节点上没有 id，
     //   豁免逻辑测不到、也就是测不实）。纯属性，不影响样式与布局。

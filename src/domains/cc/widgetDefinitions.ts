@@ -580,8 +580,6 @@ export const CC_SYSTEM_FIELDS = [
 export interface WidgetVisibilityCtx {
   /** 预设里的**值**（`ccHidden` 经 `resolveCcHiddenWidgetIds` 组装后的隐藏名单） */
   hidden: readonly string[]
-  /** 编辑模式：全显（隐藏名单豁免 —— 编辑时要把藏起来的元件露出来才好操作） */
-  editMode?: boolean
 }
 
 /** 命令行提示的 id（详细档折叠要用；`CcWidgetId` 联合里也有，此处给个可读名字） */
@@ -611,11 +609,12 @@ export function resolveCcHiddenWidgetIds({ ccHidden, cliHintMode }: {
  * widget 可见性单一真值（C2）：渲染（ControlCenter.renderWidget）与高度计数
  * （resolveVisibleStatusWidgetCount）消费同一谓词，杜绝"计数多算不渲染的 widget"。
  *
- * ★ 判据（#266 ⑰ 收口）：**只剩「隐藏名单」一件事**，外加编辑态豁免。
+ * ★ 判据（#266 ⑰ 收口）：**只剩「隐藏名单」一件事**。
+ *   ★ #266 刀1：编辑态豁免已撤 —— 编辑态下被藏件与常态一样**不在场**，工具栏清单才是它唯一的入口。
  *   名单里的东西 = 预设的**值**（`ccHidden` + 详细档折叠）+ **语境侧名单**（空态那一侧），
  *   由调用方组装好传进来 —— 元件自己不申明显隐，谓词里也**不出现任何元件特例**
  *   （旧 `id === 'input'` 那类特例已随 ⑰ 清掉）。
  */
 export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
-  return ctx.editMode === true || !ctx.hidden.includes(id)
+  return !ctx.hidden.includes(id)
 }

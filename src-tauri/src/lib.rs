@@ -747,6 +747,7 @@ pub(crate) fn install_process_registrations() {
     // P0-3（R2-WI03）+ R2-WI06：注册协议适配器——Peri 与 Hermes 的审批 wire 逐字段
     // 一致（均走 ACP session/request_permission + RequestPermissionResponse，已源码实证），
     // 同一 request_permission 实现按 provider 注册；clarify/ask-user 无真实 wire 不注册。
+    // #424：method 表 per-provider 槽保留这组双注册事实（诊断位据此投影为真值）。
     protocol_adapter::register_protocol_adapter(std::sync::Arc::new(
         protocol_adapter::RequestPermissionAdapter { provider: "peri" },
     ));

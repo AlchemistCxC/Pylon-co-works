@@ -3,6 +3,8 @@
 //! W3 重构批次 S1 纯搬移自 session/prompt.rs（行为零变化）。
 
 use super::*;
+// #425 件6：发起路径两位点（ensure 失败 / 用户消息送出）经感知 sink。
+use crate::dispatcher::reactions::KernelReactionSink;
 
 #[tauri::command(rename_all = "camelCase")]
 // clippy 2026-08-02：8 参含 2 个 Tauri 注入（state/window）+ 6 个业务参数（source/content/
@@ -367,7 +369,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             Ok(mapping) => mapping,
             Err(error) => {
                 let message = error.to_string();
-                let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
+                // #425 件6：发起路径错误位点经 sink（原 `pet::on_error` 直呼点）。
+                crate::dispatcher::reactions::PetReactionSink::new(state.pet.clone())
+                    .on_prompt_error();
                 state.log_runtime_summary(
                     "error",
                     "prompt",
@@ -456,11 +460,8 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         }),
     );
 
-    state
-        .pet
-        .lock()
-        .map(|mut p| crate::pet::on_user_sent(&mut p))
-        .ok();
+    // #425 件6：用户消息已送出位点经 sink（原 `pet::on_user_sent` 直呼点）。
+    crate::dispatcher::reactions::PetReactionSink::new(state.pet.clone()).on_user_sent();
     {
         let mut user_payload = serde_json::json!({ "source": source, "content": content });
         if !flow.inject_activated.is_empty() {

@@ -93,6 +93,19 @@ pub(crate) trait KernelReactionSink: Send + Sync {
     /// 崩溃感知（crash_reconnect 原 `pet::on_agent_crashed` 直呼点）。独立方法
     /// 而非 PetEvent 变体——崩溃不是一条 session/update 派生事件（R2 修正）。
     fn on_agent_crashed(&self);
+    /// prompt 发起路径·错误位点（session ensure 失败处，turn 尚未 begin——
+    /// 与收尾位点的 [`Self::on_turn_failed`] 语义不同，故独立命名）。
+    /// 调用点：session/prompt/wait.rs ensure_session_mapping 失败臂
+    /// （#425 件6 补缝，原 `pet::on_error` 直呼点）。
+    fn on_prompt_error(&self);
+    /// prompt 发起·用户消息已送出位点（after-build hook 之后、user payload
+    /// 构造之前）。调用点：session/prompt/wait.rs（#425 件6 补缝，原
+    /// `pet::on_user_sent` 直呼点）。
+    fn on_user_sent(&self);
+    /// prompt 等待·超时判死位点（first-token/idle/user-cancel 判定处）。
+    /// 调用点：session/prompt/settle.rs（#425 件6 补缝，原 `pet::on_timeout`
+    /// 直呼点；M5 感知：超时 → 发呆，区别于普通失败）。
+    fn on_timeout(&self);
     /// 是否收集该类帧的实时感知事件。取代 `RoutingDecision.apply_pet`（决策面
     /// 回归纯协议语义）。门控必须钉在 class==Live：Replay 与 Boundary 一律
     /// 不产感知（C11 回放门 + 终态边界帧；R2 修正——只丢 Replay 会改变终态
@@ -142,6 +155,27 @@ impl KernelReactionSink for PetReactionSink {
             .pet
             .lock()
             .map(|mut state| crate::pet::on_agent_crashed(&mut state));
+    }
+
+    fn on_prompt_error(&self) {
+        let _ = self
+            .pet
+            .lock()
+            .map(|mut state| crate::pet::on_error(&mut state));
+    }
+
+    fn on_user_sent(&self) {
+        let _ = self
+            .pet
+            .lock()
+            .map(|mut state| crate::pet::on_user_sent(&mut state));
+    }
+
+    fn on_timeout(&self) {
+        let _ = self
+            .pet
+            .lock()
+            .map(|mut state| crate::pet::on_timeout(&mut state));
     }
 
     fn wants_live_reactions(&self, class: RoutingClass) -> bool {
@@ -373,5 +407,28 @@ mod tests {
         assert!(sink.wants_live_reactions(RoutingClass::Live));
         assert!(!sink.wants_live_reactions(RoutingClass::Replay));
         assert!(!sink.wants_live_reactions(RoutingClass::Boundary));
+    }
+
+    /// #425 件6：prompt 域三处补缝位点的「sink ≡ 直呼」等价锁——同一初始
+    /// 状态分别经 [`PetReactionSink`] 与既有 pet 函数族推进，终态 Debug 快照
+    /// 必须全等（补缝是纯接缝扩展，行为不变；PetState 无 PartialEq，比较
+    /// Debug 字符串）。
+    #[test]
+    fn prompt_path_sink_methods_match_direct_pet_calls() {
+        let drive = |sink_method: fn(&PetReactionSink), pet_fn: fn(&mut PetState)| {
+            let shared = Arc::new(std::sync::Mutex::new(PetState::default()));
+            sink_method(&PetReactionSink::new(shared.clone()));
+            let mut direct = PetState::default();
+            pet_fn(&mut direct);
+            let via_sink = shared.lock().expect("pet lock").clone();
+            assert_eq!(
+                format!("{via_sink:?}"),
+                format!("{direct:?}"),
+                "sink 位点必须与直呼 pet 函数行为全等"
+            );
+        };
+        drive(|sink| sink.on_prompt_error(), crate::pet::on_error);
+        drive(|sink| sink.on_user_sent(), crate::pet::on_user_sent);
+        drive(|sink| sink.on_timeout(), crate::pet::on_timeout);
     }
 }
