@@ -150,9 +150,11 @@ describe('#266 CC-07 · 被删的中控字段不得回归', () => {
     const text = statusBarCssText!
     const hits = PRUNED_CSS_TOKENS.filter(token => text.includes(token))
     expect(hits, `StatusBar.css 里又出现了悬空规则的残留：${hits.join(', ')}`).toEqual([])
-    // 正控：同一文件里**不该删的**两段仍在（防"整段被误删"）
-    expect(text).toContain('.pill-mono')
+    // 正控：同一文件里**不该删的**两段仍在（防"整段被误删"）—— 基础规则 + 语义色四条中的一段。
+    // ★ #266 CC-29：原来第二条正控是 StatusBar.css 里那段等宽 pill（pill-mono），
+    //   而它是**死规则**（类名零命中），等于让守卫"保护"一条死规则 ⇒ 已换成真活的那段语义色选择器。
     expect(text).toContain('.cc-permission-trigger')
+    expect(text).toContain('.cc-permission-trigger[data-mode="bypass"]')
   })
 
   it('字段表里 `用量胶囊` 名下已无字段（tokens 元件据此退出设置页与导航）', () => {

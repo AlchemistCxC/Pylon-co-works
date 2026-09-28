@@ -1,6 +1,7 @@
 /* ── StatusBar ── */
 
-.pill-mono { font-size:inherit; color:var(--text-dim); padding:0; border-radius: 0; background:transparent; font-family:var(--mono); border:0; flex-shrink:0; }
+/* ★ #266 CC-29：等宽 pill 那段已删 —— 类名在生产代码里零命中（CC-07 刀12 曾把它当正控保住，是错的；
+   该正控已在本单换成下面那条真活的规则）。 */
 
 /* 权限模式控件（S10 重构）：本体只显示后端机器值（不翻译）。
    颜色＝[data-mode] 语义色；当 permissionTextColor 不是 'mode' 时，

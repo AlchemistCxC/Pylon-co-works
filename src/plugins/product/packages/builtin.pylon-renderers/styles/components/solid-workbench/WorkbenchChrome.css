@@ -423,7 +423,6 @@
 }
 .solid-workbench-control-center-slot.is-empty .cc-input-slot,
 .solid-workbench-control-center-slot.is-empty .cc-status-row,
-.solid-workbench-control-center-slot.is-empty .cc-footer-status-row,
 .solid-workbench-control-center-slot.is-empty .cc-widget { width: 100%; }
 .solid-workbench-control-center-slot.is-empty .cc-widget.cc-natural { width: max-content !important; }
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='workspace'],
@@ -697,7 +696,6 @@
 .app[data-interface-mode="tactical-blue"] .input-bar .input-row { display:flex; width:100%; min-width:0; align-items:flex-end; }
 .app[data-interface-mode="tactical-blue"] .input-editor-stack { flex:1 1 0; min-width:0; }
 .app[data-interface-mode="tactical-blue"] .input-editor-stack .input-textarea { display:block; box-sizing:border-box; min-height:48px; line-height:1.6; padding:10px 12px; }
-.app[data-interface-mode="tactical-blue"] .cc-footer-status-row { flex-wrap:wrap; gap:6px 0; font-size:12px; }
-.app[data-interface-mode="tactical-blue"] .cc-footer-status-row :is(.cc-status-group) { flex-wrap:wrap; max-width:100%; }
+/* ★ #266 CC-29：tactical-blue 下那两条悬空的「footer 状态行」规则已删（类名在生产代码里零命中）。 */
 .app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .control-center { min-height:140px; height:auto; }
 .app[data-interface-mode="tactical-blue"] .solid-workbench-control-center-slot.is-empty .cc-body { height:auto; min-height:140px; }
