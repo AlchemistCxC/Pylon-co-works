@@ -124,3 +124,4 @@
   - ⚠️ **基于同主 #440-449 批次的未提交在途 hunks 之上施工**（chatRowPipeline/messagePipeline/messageLookups/codeHighlight/workbenchProjector/workbenchRuntime/WorkbenchContent.solid/agentWorkbenchSession/perf-bench 等，01:25 后无新编辑观测）：这些 hunks 将随文件迁移/提交一并入库并在 PR 描述披露；若你正继续该批次，请先 `git status` 对齐新落点（chat 逻辑已在 `src/domains/chat/`）。
   - 门禁：`bun run test`（基线 661 文件/5116 用例绿）+ `bun run lint` + `check:solid` 全绿后分批 pathspec 提交。规格 `.agents/spec/frontend-structure-overhaul.md`。
   - **进展（2026-09-29）**：全修批已落 14+ 个提交（死代码/迁移主批/plugin-runtime 端口化/appearance 拆域/破环/微域合并/devtools 收敛/layoutRailsStore/常量单源/分层门禁+越界真修/keep-alive 槽位表/projector 开关参数化/mode 常量单源）；check:frontend:static exit 0、check-layer-boundaries 814 文件零越界、全量 vitest 绿、tsc 0 错。遗留清单见 `.agents/records/2026-09-29-frontend-structure-overhaul.md`「遗留」节。审查 R1 进行中，合入后撤本条。
+  - **提审（2026-09-29）**：随 **PR #455** 走（R1/R2 两轮复审终审可 PR）。**合入后撤本条**；审查报告在 `_research/frontend-structure-review-{A-view,B-logic,R1,R2}.md`。
