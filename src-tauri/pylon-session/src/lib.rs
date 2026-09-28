@@ -17,7 +17,8 @@ pub mod user_data;
 
 pub use error::SessionError;
 // #205 折叠预算 Rust 侧单源：宿主写侧（dispatcher）预算应改引此处，不再各写一份；
-// 数值与前端 `canonicalEventBatch.CANONICAL_BATCH_LIMITS` 同口径（TS 拷贝独立存在）。
+// #439 起前端 `CANONICAL_BATCH_LIMITS` 已随自写轨退役，本处是唯一单源
+// （TS 侧仅测试本地硬拷贝期望值，不构成漂移面）。
 pub use event_repo::{MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES};
 pub use owner::DurableSessionOwner;
 
