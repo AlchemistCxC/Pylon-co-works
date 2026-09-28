@@ -15,7 +15,7 @@ pub(crate) struct PendingPrivateInteraction {
     /// requestId+agentId 收口，前后端对显式空串按「无会话」处理。
     pub session_id: String,
     pub method: String,
-    pub bridge: crate::acp::adapter::private_ext::PrivateBridge,
+    pub bridge: crate::protocol_adapter::private_ext::PrivateBridge,
     pub params: serde_json::Value,
     pub question_specs: Option<Vec<crate::acp::question_policy::QuestionSpec>>,
     pub client_generation: u64,
@@ -93,7 +93,7 @@ mod tests {
             agent_id: "a".into(),
             session_id: "s".into(),
             method: "pi/select_ask".into(),
-            bridge: crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk,
+            bridge: crate::protocol_adapter::private_ext::PrivateBridge::PiSelectAsk,
             params: serde_json::json!({}),
             question_specs: None,
             client_generation: 3,
