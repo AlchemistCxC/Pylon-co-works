@@ -14,12 +14,12 @@ import {
   defaultPresetForInterfaceMode,
   fallbackPresetChip,
   presetsForInterfaceMode,
-} from '../presets/index.ts'
+} from '../domains/theme/presets/index.ts'
 import { PRESET_ZONES, deriveGlobalStatus, filterPresetTheme } from '../domains/theme/presetReducer.ts'
-import { THEME_PRESET_KEYS } from '../themeFieldDefs.ts'
+import { THEME_PRESET_KEYS } from '../domains/theme/themeFieldDefs.ts'
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
-import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, zonePresetsFor } from '../zones/index.ts'
-import { useStore } from '../store.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, zonePresetsFor } from '../domains/theme/zones/index.ts'
+import { useStore } from '../domains/theme/themeStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { activateInterfaceMode, resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { lastSettingWriter } from '../domains/theme/settingProvenance.ts'

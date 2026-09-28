@@ -6,7 +6,7 @@ import {
   decorateSuggestions,
   selectUserTier,
   type CommandSuggestion,
-} from '../../../components/chat/commandRegistry.ts'
+} from '../../../domains/chat/commandRegistry.ts'
 import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'

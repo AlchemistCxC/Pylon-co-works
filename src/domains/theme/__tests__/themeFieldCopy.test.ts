@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { WIDGET_PROPERTY_FIELDS } from '../../cc/widgetDefinitions.ts'
-import { GROUP_ORDER, THEME_FIELD_DEFS, type ThemeFieldDef } from '../../../themeFieldDefs.ts'
+import { GROUP_ORDER, THEME_FIELD_DEFS, type ThemeFieldDef } from '../themeFieldDefs.ts'
 
 const IMPLEMENTATION_TERMS = /AgentSheet|FileSheet|Spinner|Placeholder|Footer|Diff|\bCLI\b|\bCC\b|\s&\s/
 

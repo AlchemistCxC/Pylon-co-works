@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
-import type { FontRole } from '../../plugin-runtime/fonts/fontContributionTypes.ts'
+import type { FontRole } from '../../contracts/fonts.ts'
 import { getFontContributionRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { resolveFontToken } from '../../domains/theme/themeCssSnapshot.ts'
 import Select from '../ui/Select.tsx'

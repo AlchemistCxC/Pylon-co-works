@@ -1,5 +1,5 @@
 import { Show, onCleanup } from 'solid-js'
-import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
+import type { RenderMessage } from '../../../domains/chat/messageTypes.ts'
 import type { ToolVisualState } from '../../../domains/tool/status.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { SolidMessageRow } from './MessageRow.solid.tsx'

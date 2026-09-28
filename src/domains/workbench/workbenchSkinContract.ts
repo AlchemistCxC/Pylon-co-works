@@ -1,17 +1,17 @@
 import { toCssBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
 import { cloneCcLayout } from '../cc/ccLayoutState.ts'
-import type { CustomPreset } from '../../customPresets.ts'
+import type { CustomPreset } from '../theme/customPresets.ts'
 import { DEFAULTS } from '../theme/themeDefaults.ts'
-import { GLOBAL_PRESETS } from '../../presets/index.ts'
-import { effectivePresetTheme } from '../../zones/index.ts'
+import { GLOBAL_PRESETS } from '../theme/presets/index.ts'
+import { effectivePresetTheme } from '../theme/zones/index.ts'
 import {
   THEME_CSS_VAR_MAP,
   THEME_FIELD_DEFS,
   THEME_SETTING_KEYS,
   type ThemeFieldKey,
-} from '../../themeFieldDefs.ts'
+} from '../theme/themeFieldDefs.ts'
 import { resolveFontToken } from '../theme/themeCssSnapshot.ts'
-import type { ThemeSettings } from '../../store.ts'
+import type { ThemeSettings } from '../theme/themeStore.ts'
 
 export const WORKBENCH_DATA_ATTRIBUTES = [
   'data-ui-scheme',

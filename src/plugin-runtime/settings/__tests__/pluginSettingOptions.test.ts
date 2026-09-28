@@ -5,7 +5,7 @@ import { PluginSettingsPageRegistry } from '../pluginSettingsRegistry.ts'
 import { PluginSettingsStore } from '../pluginSettingsStore.ts'
 import { createPluginSettingsApi } from '../pluginSettingsApi.ts'
 import { PluginSettingOptionsRegistry, resolvePluginSettingOptions } from '../pluginSettingOptionsRegistry.ts'
-import { normalizeThemeState } from '../../../themeFieldDefs.ts'
+import { normalizeThemeState } from '../../../domains/theme/themeFieldDefs.ts'
 
 const BASE = [
   { value: 'terminal', label: '终端记录流' },

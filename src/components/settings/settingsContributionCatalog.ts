@@ -1,4 +1,4 @@
-import { THEME_FIELD_DEFS, THEME_FIELD_OWNERS } from '../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, THEME_FIELD_OWNERS } from '../../domains/theme/themeFieldDefs.ts'
 import { RENDERER_SETTINGS_CATEGORIES } from '../../domains/rendererContent/rendererSettingsPlacement.ts'
 import { projectRendererSettingsCatalog, type RendererSettingsCatalogProjection } from './rendererSettingsCatalog.ts'
 import { domainOfSection, SECTION_ZONES, SETTINGS_DOMAIN_BY_ID, SETTINGS_SECTION_LABELS, type SettingsSectionId, type SettingsSearchItem } from './settingsDomains.ts'

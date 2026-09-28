@@ -28,7 +28,7 @@
  * 只在"逐 chunk 形态"上断言游标推进，聚合形态游标断言留给 todo。
  */
 import { expect } from 'vitest'
-import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
 import { isCanonicalBatchDeltaType, canonicalBatchSpanOf } from '../../infrastructure/events/canonicalEventBatch.ts'
 import { parseTurnUnitPayload } from '../../domains/events/canonicalUnit.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'

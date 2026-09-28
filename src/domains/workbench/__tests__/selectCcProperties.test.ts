@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ThemeSettings } from '../../../store.ts'
+import type { ThemeSettings } from '../../theme/themeStore.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
 import { selectCcProperties } from '../appearance.ts'
 

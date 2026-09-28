@@ -2,7 +2,7 @@ import type { CommandDefinition } from '../../../plugin-runtime/commands/command
 import { getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { applyPresentationProfile } from '../../../application/transactions/applyPresentationProfile.ts'
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../../domains/theme/themeStore.ts'
 import type { PresentationProfileRegistryEntry } from '../../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import { record } from '../../../utils/wireGuards.ts'
 

@@ -6,7 +6,7 @@
  */
 import { SkinRuntime } from '../../plugin-runtime/skin/skinRuntime.ts'
 import { DEFAULTS } from '../../domains/theme/themeDefaults.ts'
-import { THEME_SETTING_KEYS } from '../../themeFieldDefs.ts'
+import { THEME_SETTING_KEYS } from '../../domains/theme/themeFieldDefs.ts'
 import {
   loadSkinState,
   persistSkinState,

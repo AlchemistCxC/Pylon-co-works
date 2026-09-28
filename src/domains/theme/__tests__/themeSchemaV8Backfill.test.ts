@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULTS } from '../themeDefaults.ts'
-import { THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS } from '../themeFieldDefs.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from '../migration.ts'
 import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'

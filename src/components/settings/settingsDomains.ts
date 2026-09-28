@@ -15,8 +15,8 @@
  *   所属路径（T13-1）。
  */
 
-import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from '../../themeFieldDefs'
-import type { ZoneName } from '../../themeFieldDefs'
+import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from '../../domains/theme/themeFieldDefs'
+import type { ZoneName } from '../../domains/theme/themeFieldDefs'
 import type { ContextPanelSettingsContribution } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
 
 export type SettingsDomainId = 'appearance' | 'workspace' | 'agents-connections' | 'plugins'

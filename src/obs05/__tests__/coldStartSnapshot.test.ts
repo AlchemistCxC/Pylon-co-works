@@ -19,7 +19,7 @@ import {
   IPC_TRACE_MAX_EXPORTED,
   type ColdStartSources,
 } from '../coldStartSnapshot'
-import type { AgentStatus } from '../../components/settings/agentTypes'
+import type { AgentStatus } from '../../contracts/agentTypes'
 import type { Session } from '../../domains/identity/identityStore'
 
 const SESSION: Session = {

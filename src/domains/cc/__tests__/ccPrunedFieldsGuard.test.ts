@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from '../../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from '../../theme/themeFieldDefs.ts'
 
 /**
  * #266 CC-07（设置页「中控台」多余项清理）的**防回归守卫**。
@@ -55,8 +55,8 @@ const read = (path: string) => ({ path, text: stripComments(readFileSync(path, '
 const sources = productionFiles(SRC_ROOT).map(read)
 /** 出厂数据面（`zones/factory/**` + `presets/**`）—— 专项保留，便于报错定位。 */
 const factorySources = [
-  ...productionFiles(join(SRC_ROOT, 'zones')),
-  ...productionFiles(join(SRC_ROOT, 'presets')),
+  ...productionFiles(join(SRC_ROOT, 'domains/theme/zones')),
+  ...productionFiles(join(SRC_ROOT, 'domains/theme/presets')),
 ].map(read)
 
 /**
@@ -117,7 +117,7 @@ describe('#266 CC-07 · 被删的中控字段不得回归', () => {
     expect(factorySources.length, '出厂数据扫描面为空').toBeGreaterThan(5)
     // 正控：两条主扫描路径都真的落进了集合（路径漂了会在这里露头）
     const paths = new Set(sources.map(source => relative(source.path)))
-    expect(paths.has('presets/builtin.ts')).toBe(true)
+    expect(paths.has('domains/theme/presets/builtin.ts')).toBe(true)
     expect(paths.has('domains/theme/migration.ts')).toBe(true)
     // 正控：`__tests__` / `__fixtures__` 确实被排除了（否则本文件自己的字面量就会让它常红）
     expect([...paths].some(path => path.includes('__tests__')), '测试目录没被排除').toBe(false)
@@ -141,7 +141,7 @@ describe('#266 CC-07 · 被删的中控字段不得回归', () => {
   it('出厂数据（zones/factory/** + presets/**）里这些键零命中', () => {
     expect(hitsOf(factorySources), '出厂预设数据里又出现了被删字段（手改过的地方被回滚）').toEqual([])
     // 正控：出厂数据本体仍在（防"文件被清空 ⇒ 上面恒绿"）
-    expect(factorySources.some(({ path }) => relative(path) === 'presets/builtin.ts')).toBe(true)
+    expect(factorySources.some(({ path }) => relative(path) === 'domains/theme/presets/builtin.ts')).toBe(true)
     expect(factorySources.every(({ text }) => text.length > 0)).toBe(true)
   })
 

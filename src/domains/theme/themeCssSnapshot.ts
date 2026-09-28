@@ -4,7 +4,7 @@
  * 由 defs 驱动普通字段（THEME_CSS_VAR_MAP 循环），仅保留背景转换/字体选择/
  * 布局宽度等显式派生。App 主布局与独立 ThemeRuntimeBridge 共用同一快照源。
  */
-import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from '../../themeFieldDefs.ts'
+import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs.ts'
 import { toCssBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
 import { VISUAL_SEMANTIC_ROLE_TOKENS, type VisualSemanticRole } from './visualSemantics.ts'

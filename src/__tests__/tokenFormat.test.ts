@@ -1,6 +1,6 @@
 // 迁移自 scripts/test-token-format.mts（P91 A1）
 import { describe, expect, it } from 'vitest'
-import { formatCacheReadTokens, formatTokenCount, formatUsagePercent, formatUsageTokens } from '../tokenFormat.ts'
+import { formatCacheReadTokens, formatTokenCount, formatUsagePercent, formatUsageTokens } from '../domains/theme/tokenFormat.ts'
 
 describe('tokenFormat 格式化（迁移自 scripts/test-token-format.mts，P91 A1）', () => {
   it('formatTokenCount：K/M 进位', () => {

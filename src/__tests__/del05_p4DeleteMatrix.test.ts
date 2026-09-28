@@ -11,7 +11,7 @@
  *    discard 后不复活）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { MessageRepositoryError } from '../components/chat/messagePersistence'
+import { MessageRepositoryError } from '../domains/chat/messagePersistence'
 import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
 import type { Session } from '../domains/identity/identityStore'
 

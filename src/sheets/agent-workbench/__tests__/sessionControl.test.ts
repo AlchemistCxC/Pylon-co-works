@@ -3,7 +3,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
 import { extractModeConfig, extractModelConfig } from '../../../infrastructure/acp/chatContracts.ts'
-import { normalizeSessionMode } from '../../../components/chat/sessionModeState.ts'
+import { normalizeSessionMode } from '../../../domains/chat/sessionModeState.ts'
 
 const session: Session = {
   id: 'control', source: 'local:control', agentId: 'fixture', profileId: 'profile', name: 'control',

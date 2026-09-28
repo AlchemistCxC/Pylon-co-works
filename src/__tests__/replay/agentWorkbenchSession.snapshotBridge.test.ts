@@ -3,8 +3,8 @@ import { createWorkbenchDocument, projectWorkbench } from '../../domains/workben
 import { normalizeSessionConfigOptions } from '../../domains/workbench/session/sessionSurface.ts'
 import { createCanonicalEvent } from '../../domains/events/eventSchema.ts'
 import { messageSnapshotToWorkbenchEnvelopes } from '../../sheets/agent-workbench/messageSnapshotProjection.ts'
-import type { Message } from '../../components/chat/messageTypes.ts'
-import { persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import type { Message } from '../../domains/chat/messageTypes.ts'
+import { persistMessageSnapshot } from '../../domains/chat/messagePersistence.ts'
 import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
 

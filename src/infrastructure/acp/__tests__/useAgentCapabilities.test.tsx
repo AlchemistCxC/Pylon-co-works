@@ -9,7 +9,7 @@ import { renderHook } from '@testing-library/react'
 import { useAgentCapabilities } from '../useAgentCapabilities'
 import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
-import type { AgentStatus } from '../../../components/settings/agentTypes'
+import type { AgentStatus } from '../../../contracts/agentTypes'
 
 function status(partial: Partial<AgentStatus>): AgentStatus {
   return {

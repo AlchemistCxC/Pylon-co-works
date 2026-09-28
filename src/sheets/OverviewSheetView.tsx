@@ -13,11 +13,11 @@ import { switchAgentTransaction } from '../application/transactions/switchAgentT
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../application/transactions/openOwnedSessionTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
 import PylonMark from '../components/PylonMark'
-import { statusLabel } from '../components/settings/agentTypes.ts'
+import { statusLabel } from '../contracts/agentTypes.ts'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
-import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
+import { isAgentInvocationConfigured } from '../contracts/agentEntry.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
 

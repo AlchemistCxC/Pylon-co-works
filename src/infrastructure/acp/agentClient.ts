@@ -4,8 +4,8 @@
  * command/payload/response normalize 收口；不吞业务错误（reject 原样上抛，
  * 由 UI transaction/调用方分类）。transport 可注入，测试不依赖真实 Tauri。
  */
-import type { AgentEntry } from '../../domains/identity/identityStore'
-import type { AgentStatusPayload } from '../../components/settings/agentTypes'
+import type { AgentEntry } from '../../contracts/agentEntry.ts'
+import type { AgentStatusPayload } from '../../contracts/agentTypes'
 import { normalizeAgentDetectionReport, type AgentDetectionReport } from '../../domains/agent/agentDetector.ts'
 import { normalizeAgentCandidateValidationResult, type AgentCandidateValidationResult } from '../../domains/agent/candidateValidation.ts'
 import type { DurableSessionOwner } from '../../domains/session/owner.ts'

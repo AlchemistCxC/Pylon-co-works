@@ -1,6 +1,6 @@
 import { Show, createEffect, createResource, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { findOversizeFoldPoint } from '../../../domains/rendererContent/textContentContracts.ts'
-import { highlightCode } from '../../../components/chat/codeHighlight.ts'
+import { highlightCode } from '../../../domains/chat/codeHighlight.ts'
 import { scheduleHighlightJob, trackCodeBlockVisibility } from './codeBlockDomLifecycle.ts'
 
 export interface SolidCodeBlockProps {

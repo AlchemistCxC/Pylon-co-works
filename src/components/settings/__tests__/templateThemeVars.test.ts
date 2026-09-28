@@ -1,8 +1,8 @@
 // 迁移自 scripts/test-template-library.mts（P91 A1）；组件接线段（TemplateLibrary.tsx / Settings.tsx 源码 token 断言）不迁——已被 TemplateLibrary.globalPresets.test.tsx 行为级 UI 测试锁定。
 import { describe, expect, it } from 'vitest'
 import { themeToCssVars } from '../templateThemeVars.ts'
-import { THEME_CSS_VAR_MAP, THEME_DEFAULTS } from '../../../themeFieldDefs.ts'
-import { GLOBAL_PRESETS } from '../../../presets/index.ts'
+import { THEME_CSS_VAR_MAP, THEME_DEFAULTS } from '../../../domains/theme/themeFieldDefs.ts'
+import { GLOBAL_PRESETS } from '../../../domains/theme/presets/index.ts'
 
 // W2-14：模板库——预览局部 cssVars 不触全局 store；点击才应用；恢复重应用 delta
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@solidjs/testing-library'
-import SearchSheetView from '../SearchSheetView.solid'
+import SearchSheetView from '../SearchSheetView.solid.tsx'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 import { resetStores } from '../../../test/resetStores'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'

@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../domains/agent/agentEntry.ts'
+import type { AgentEntry } from '../../contracts/agentEntry.ts'
 import {
   replaceAgentInstances,
   registerAgentDescriptor,

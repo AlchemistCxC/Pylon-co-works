@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { applyPresentationProfile } from '../../application/transactions/applyPresentationProfile.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { useStore } from '../../store.ts'
+import { useStore } from '../../domains/theme/themeStore.ts'
 import { presentationProfileInterfaceMode } from '../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 

@@ -7,7 +7,7 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'
-import { useReplayPostureStore } from '../../components/chat/replayPostureStore'
+import { useReplayPostureStore } from '../../domains/chat/replayPostureStore'
 import { pagePersistedSessions, validateExportPath } from '../../domains/history/persistedHistory.ts'
 import { type PersistedSessionSummary } from '../../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'

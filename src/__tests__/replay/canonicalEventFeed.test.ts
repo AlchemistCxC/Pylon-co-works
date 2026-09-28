@@ -23,7 +23,7 @@ vi.mock('@tauri-apps/api/core', async () => {
 
 import { createCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { subscribePluginEvents, clearPluginEventListenersForTests } from '../../infrastructure/events/pluginEventBus.ts'
-import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
 
 const SOURCE = 'local:feed-unit'
 

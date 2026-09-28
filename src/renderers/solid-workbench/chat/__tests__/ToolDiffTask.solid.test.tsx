@@ -2,7 +2,7 @@
 import { createSignal } from 'solid-js'
 import { cleanup, fireEvent, render } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Message } from '../../../../components/chat/messageTypes.ts'
+import type { Message } from '../../../../domains/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
 import { SolidDiffCard } from '../DiffCard.solid.tsx'
 import { SolidTaskTree } from '../TaskTree.solid.tsx'

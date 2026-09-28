@@ -4,7 +4,7 @@ import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from './rightRailStore.ts'
 import ContextPanelHost from './ContextPanelHost.tsx'
-import { useStore } from '../../store.ts'
+import { useStore } from '../../domains/theme/themeStore.ts'
 import { createBackgroundPresentation } from '../../infrastructure/skin/backgroundImage.ts'
 
 const registry = getContextPanelRegistry()

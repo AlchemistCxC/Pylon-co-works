@@ -1,4 +1,4 @@
-import { useStore } from '../../store.ts'
+import { useStore } from '../theme/themeStore.ts'
 import { useWorkspaceStore } from '../workspace/workspaceStore.ts'
 import type { AppearanceCommand, WorkbenchAppearanceStore } from './appearance.ts'
 import { createVanillaWorkbenchAppearanceStore } from './workbenchAppearanceStore.ts'

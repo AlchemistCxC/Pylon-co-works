@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS } from '../../../presets/index.ts'
-import { effectivePresetTheme } from '../../../zones/index.ts'
-import { THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
+import { GLOBAL_PRESETS } from '../presets/index.ts'
+import { effectivePresetTheme } from '../zones/index.ts'
+import { THEME_SETTING_KEYS } from '../themeFieldDefs.ts'
 
 const terminal = GLOBAL_PRESETS.filter(preset =>
   ['claude', 'nord', 'tokyo', 'solarized', 'amber'].includes(preset.name),

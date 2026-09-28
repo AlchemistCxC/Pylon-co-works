@@ -32,9 +32,9 @@
 import type { Session } from '../domains/identity/identityStore'
 import type { SheetRecord } from '../workspace-sheets/sheetTypes'
 import type { SheetWorkspaceState } from '../workspace-sheets/sheetPersistence'
-import type { AgentStatus } from '../components/settings/agentTypes'
+import type { AgentStatus } from '../contracts/agentTypes'
 import type { SessionConfig } from '../domains/runtime/runtimeStore'
-import type { SessionLiveStats } from '../components/chat/sessionRuntime'
+import type { SessionLiveStats } from '../domains/chat/sessionRuntime'
 import type { AgentEntry } from '../domains/identity/identityStore'
 import { sanitizeExportValue, redactAbsolutePath } from '../domains/export/threeSourceExport'
 

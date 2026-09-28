@@ -2,7 +2,7 @@
 // test-tool-indicator-visual.mts 的 CSS 源码正则断言段不迁（结构守卫，非行为证据）。
 import { describe, expect, it } from 'vitest'
 import { assertNeverToolStatus, normalizeToolStatus, resolveToolPresentationState } from '../status.ts'
-import { resolveToolIndicatorMotion, toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
+import { resolveToolIndicatorMotion, toolIndicatorMotionClass } from '../../chat/toolIndicatorMotion.ts'
 
 describe('toolIndicatorMotion 状态动画映射（迁移自 scripts/test-tool-indicator-visual.mts，P91 A1）', () => {
   it('7 态 → 动画映射；class 后缀拼接', () => {

@@ -1,7 +1,7 @@
 /** Tool connector projection: edge identity, precedence and appearance only.
  * DOM registration and layout subscriptions remain owned by the mounted workbench.
  */
-import { isToolRenderMessage } from '../../components/chat/chatRowPipeline.ts'
+import { isToolRenderMessage } from '../../domains/chat/chatRowPipeline.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import type { WorkbenchActivityNode, WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'

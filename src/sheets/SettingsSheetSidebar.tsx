@@ -11,8 +11,8 @@ import {
   type SettingsDomainId,
   type SettingsSectionId,
 } from '../components/settings/settingsDomains.ts'
-import { GROUP_ORDER } from '../themeFieldDefs'
-import { useStore } from '../store'
+import { GROUP_ORDER } from '../domains/theme/themeFieldDefs'
+import { useStore } from '../domains/theme/themeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
 import { readPinned, writePinned, PINNED_LIMIT, safeStorage } from '../components/settings/settingsChromeState.ts'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'

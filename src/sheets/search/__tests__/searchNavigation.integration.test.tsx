@@ -12,7 +12,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import SearchSheetView from '../SearchSheetView'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 import { resetStores } from '../../../test/resetStores'
-import { sessionUiStateGet } from '../../../components/chat/sessionUiState'
+import { sessionUiStateGet } from '../../../domains/chat/sessionUiState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
 function seedLocalSnapshot(): void {

@@ -1,6 +1,6 @@
 import { Index, Match, Show, Switch, createMemo, createSignal } from 'solid-js'
 import { normalizeToolVisualState } from './toolConnectorProjection.ts'
-import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
+import type { Message, RenderMessage } from '../../domains/chat/messageTypes.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'

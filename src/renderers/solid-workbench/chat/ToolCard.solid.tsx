@@ -1,13 +1,13 @@
 import { Show, createMemo, onCleanup, onMount } from 'solid-js'
-import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
-import { toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
+import { resolveToolIndicatorAssetForTone } from '../../../domains/chat/toolIndicatorAssets.ts'
+import { toolIndicatorMotionClass } from '../../../domains/chat/toolIndicatorMotion.ts'
 import {
   buildToolPresentationModel,
   capitalizeToolName,
   truncateToolSummary,
   type ToolPresentationModel,
-} from '../../../components/chat/toolPresentationModel.ts'
-import type { Message } from '../../../components/chat/messageTypes.ts'
+} from '../../../domains/chat/toolPresentationModel.ts'
+import type { Message } from '../../../domains/chat/messageTypes.ts'
 import { toolStatePresentation, type ToolVisualState } from '../../../domains/tool/status.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'

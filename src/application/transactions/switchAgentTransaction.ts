@@ -7,7 +7,7 @@
  * connected；失败不改变 activeAgent（transport 错误返回判别结果，由调用方决定展示与重置 pending 状态）。
  */
 import type { TransactionResult } from './transactionResult'
-import { normalizeAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../components/settings/agentTypes.ts'
+import { normalizeAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../contracts/agentTypes.ts'
 
 export interface SwitchAgentDeps {
   switchAgent: (agentId: string) => Promise<unknown>

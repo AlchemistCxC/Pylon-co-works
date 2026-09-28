@@ -14,7 +14,7 @@
  */
 
 import { captureComputedStyleBaseline, buildTypographyBaselineArtifact, type TypographyBaselineArtifact } from './typographyBaseline'
-import { THEME_FIELD_DEFS } from '../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS } from '../domains/theme/themeFieldDefs.ts'
 
 export interface Css01ConsoleApi {
   __pylonTypographyBaseline: (phase?: string) => Promise<TypographyBaselineArtifact>

@@ -2,8 +2,8 @@
 import { fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
-import type { RenderMessage } from '../../../../components/chat/messageTypes.ts'
-import type { Message } from '../../../../components/chat/messageTypes.ts'
+import type { RenderMessage } from '../../../../domains/chat/messageTypes.ts'
+import type { Message } from '../../../../domains/chat/messageTypes.ts'
 import { BuiltinSolidContentSlot } from '../BuiltinSolidContentSlot.solid.tsx'
 import { SolidMessageRow } from '../MessageRow.solid.tsx'
 

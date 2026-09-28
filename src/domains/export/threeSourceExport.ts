@@ -33,12 +33,13 @@
  *   replay       = arrivalSeq（canonicalNormalizer 的 sequence = index+1）
  */
 
-import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
-import type { Message } from '../../components/chat/messageTypes.ts'
-import { readChatReplayTrace } from '../../components/chat/chatReplayTrace.ts'
+import { messageStorageKey, parseMessageSnapshot } from '../chat/messagePersistence.ts'
+import type { Message } from '../chat/messageTypes.ts'
+import { readChatReplayTrace } from '../chat/chatReplayTrace.ts'
 import { normalizeRawEvent, type CanonicalNormalizeResult } from '../events/canonicalNormalizer.ts'
 import { toCanonicalOwnerKey } from '../events/eventSchema.ts'
-import type { CanonicalEventPage, CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventPage } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../events/canonicalEventRow.ts'
 import type { ExportSource } from '../../contracts/exportSource.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 

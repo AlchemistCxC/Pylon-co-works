@@ -20,10 +20,10 @@ import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { toAgentContextKey } from '../domains/agent/agentContext'
 import { createSheetState } from '../workspace-sheets/sheetState'
-import { buildSendMessagePayload } from '../components/chat/sessionRuntime'
+import { buildSendMessagePayload } from '../domains/chat/sessionRuntime'
 import { resetStores } from '../test/resetStores'
 import { resolveBindingState, refineBindingGeneration, isBindingLocked, bindingStatusText } from '../domains/binding/bindingState'
-import type { AgentStatus } from '../components/settings/agentTypes'
+import type { AgentStatus } from '../contracts/agentTypes'
 import type { Session } from '../domains/identity/identityStore'
 
 function session(id: string, agentId: string, source: string, periId?: string): Session {

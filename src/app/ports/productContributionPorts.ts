@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../domains/agent/agentEntry.ts'
+import type { AgentEntry } from '../../contracts/agentEntry.ts'
 import type { PluginServiceRegistry } from '../../plugin-runtime/services/pluginServiceRegistry.ts'
 
 export const AGENT_INSTANCE_SINK_ID = 'pylon.agent-instances'

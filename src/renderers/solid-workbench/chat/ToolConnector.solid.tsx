@@ -1,6 +1,6 @@
 import { For, createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../../../domains/tool/toolPresentation.ts'
-import { toolConnectorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
+import { toolConnectorMotionClass } from '../../../domains/chat/toolIndicatorMotion.ts'
 import type { ToolVisualState } from '../../../domains/tool/status.ts'
 import type { SolidToolConnectorEdge, ToolConnectorAppearance } from '../toolConnectorContracts.ts'
 import type {

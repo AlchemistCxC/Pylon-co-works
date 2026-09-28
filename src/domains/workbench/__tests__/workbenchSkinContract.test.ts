@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS } from '../../../presets/index.ts'
-import { THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
+import { GLOBAL_PRESETS } from '../../theme/presets/index.ts'
+import { THEME_SETTING_KEYS } from '../../theme/themeFieldDefs.ts'
 import {
   WORKBENCH_CSS_VARIABLES,
   WORKBENCH_DATA_ATTRIBUTES,

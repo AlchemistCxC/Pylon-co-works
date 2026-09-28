@@ -1,5 +1,5 @@
 import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
-import type { ThemeSettings } from '../../store.ts'
+import type { ThemeSettings } from '../theme/themeStore.ts'
 import { clampCcHeight, clampInputTypography } from '../cc/ccHeightState.ts'
 import {
   areWorkbenchAppearancesEqual,

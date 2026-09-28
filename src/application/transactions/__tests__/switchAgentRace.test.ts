@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { switchAgentTransaction } from '../switchAgentTransaction'
-import { selectAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../../components/settings/agentTypes'
+import { selectAgentStatus, type AgentStatus, type AgentStatusPayload } from '../../../contracts/agentTypes'
 
 function deferred<T>() {
   let resolve!: (value: T) => void

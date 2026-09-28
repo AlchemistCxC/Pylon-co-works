@@ -9,7 +9,7 @@ import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspac
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import FileCodeEditor from './FileCodeEditor.solid'
+import FileCodeEditor from './FileCodeEditor.solid.tsx'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 
 export interface FileSaveReceipt {

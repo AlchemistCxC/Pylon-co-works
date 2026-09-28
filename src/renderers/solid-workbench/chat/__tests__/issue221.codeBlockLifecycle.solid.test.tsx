@@ -20,13 +20,13 @@ import {
 } from '../codeBlockDomLifecycle.ts'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
 import SolidCodeBlock from '../CodeBlock.solid.tsx'
-import { highlightCode } from '../../../../components/chat/codeHighlight.ts'
-import { sanitizeHtml } from '../../../../components/chat/htmlSanitizer.ts'
+import { highlightCode } from '../../../../domains/chat/codeHighlight.ts'
+import { sanitizeHtml } from '../../../../domains/chat/htmlSanitizer.ts'
 
 const highlightSpy = vi.hoisted(() => vi.fn())
 
-vi.mock('../../../../components/chat/codeHighlight.ts', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../../../components/chat/codeHighlight.ts')>()
+vi.mock('../../../../domains/chat/codeHighlight.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../../domains/chat/codeHighlight.ts')>()
   return { ...actual, highlightCode: (...args: Parameters<typeof actual.highlightCode>) => highlightSpy(...args) }
 })
 

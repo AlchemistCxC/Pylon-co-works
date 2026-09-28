@@ -11,13 +11,8 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((...args: unknown[]) => invokeMock(...args))
 })
 
-import {
-  asCanonicalEventRepositoryError,
-  loadCanonicalEventRange,
-  loadCanonicalEventsIncremental,
-  tauriCanonicalEventRepository,
-  type CanonicalEventRow,
-} from '../canonicalEventRepository'
+import { asCanonicalEventRepositoryError, loadCanonicalEventRange, loadCanonicalEventsIncremental, tauriCanonicalEventRepository } from '../canonicalEventRepository'
+import type { CanonicalEventRow } from '../../../domains/events/canonicalEventRow.ts'
 import type { CanonicalEventType } from '../../../domains/events/eventSchema'
 
 const OWNER_KEY = '["p1","peri","local:s1"]'

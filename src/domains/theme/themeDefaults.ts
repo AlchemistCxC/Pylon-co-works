@@ -5,10 +5,10 @@
  * 加标量字段：defs 加声明 + THEME_DEFAULTS 加默认值即可。
  * 完整性由 test-defaults-completeness.mts 运行时断言（Q1：不做类型体操）。
  */
-import { THEME_DEFAULTS } from '../../themeFieldDefs.ts'
+import { THEME_DEFAULTS } from './themeFieldDefs.ts'
 import { cloneCcLayout, DEFAULT_CC_LAYOUT } from '../cc/ccLayoutState.ts'
 import { PRESET_ZONES } from './presetReducer.ts'
-import type { ThemeSettings } from '../../store.ts'
+import type { ThemeSettings } from './themeStore.ts'
 
 export const DEFAULTS: ThemeSettings = {
   ...THEME_DEFAULTS,

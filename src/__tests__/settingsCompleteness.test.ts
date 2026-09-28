@@ -7,7 +7,7 @@
  *   ⇒ 连同本文件里那条「引用存在的字段」断言一并删除（断言对象已不存在，留着是空转）。
  */
 import { describe, expect, it } from 'vitest'
-import { THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONES, type ThemeFieldDef } from '../themeFieldDefs'
+import { THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONES, type ThemeFieldDef } from '../domains/theme/themeFieldDefs'
 import { DEFAULTS } from '../domains/theme/themeDefaults'
 
 const VALID_TYPES = ['color', 'number', 'select', 'boolean', 'text']
