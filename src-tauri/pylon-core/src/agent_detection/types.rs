@@ -44,13 +44,13 @@ pub struct AgentDetectionReport {
     pub truncated: bool,
 }
 
+/// 候选身份可信度（#425 件5：`Exact`/`Low` 无产生点已裁除——探测面
+/// 只产出 High/Medium 两档，词表与实际产出对齐）。
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentityConfidence {
-    Exact,
     High,
     Medium,
-    Low,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
