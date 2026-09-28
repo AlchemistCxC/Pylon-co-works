@@ -59,7 +59,7 @@ import { usePresentationPreferenceStore } from './domains/presentation/presentat
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
-import { useRightRailStore } from './components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
 import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
@@ -152,11 +152,11 @@ export default function App() {
   }, [interfaceMode])
   useEffect(() => { ensureInterfaceModeProfile() }, [interfaceMode, interfaceModeSnapshot])
   const [activeSession, setActiveSession] = useState<string | null>(null)
-  // W2-12：右栏折叠迁 workspaceStore（右栏按 sheet 声明挂载），旧 RightPanel 退役
+  // W2-12：右栏折叠随 sheet 声明挂载（layoutRailsStore.rightCollapsed），旧 RightPanel 退役
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
-  // W1-03（F2-B）：折叠/宽度状态迁入 workspaceStore（预设不覆盖布局），App 只读
+  // W1-03（F2-B）：左栏折叠/宽度真值源是 domains/workspace/layoutRailsStore（预设不覆盖布局），App 只读
   const sidebarWidth = useRightRailStore(s => s.leftRailWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。

@@ -15,7 +15,7 @@ import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
 import { toAgentContextKey } from '../agent/agentContext.ts'
 import { normalizeFilePath } from '../file/fileRelations.ts'
 import { resolveWorkspace } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
-import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from './layoutRailsStore.ts'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 /** I01-W3：touchedFiles 刷新版本戳 key——context key + normalized path 二元（禁止冒号 split）。 */

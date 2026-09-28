@@ -1,3 +1,11 @@
+/**
+ * layoutRailsStore — 左右栏布局真值源（原 components/right-panel/rightRailStore.ts）。
+ *
+ * 结构审查 A-V8：该 store 同时持有左栏宽度/折叠与右栏面板态，目录名却叫 right-panel、
+ * 文件名却叫 rightRailStore——名从实改为 layoutRailsStore 并落位 domains/workspace
+ * （domains/workspace/workspaceStore 原本反向依赖组件目录，一并归正）。
+ * 公开钩子名 useRightRailStore 暂保留以控本次扰动面。
+ */
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'

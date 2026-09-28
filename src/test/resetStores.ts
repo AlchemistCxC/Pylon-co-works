@@ -14,7 +14,7 @@ import { usePresentationPreferenceStore } from '../domains/presentation/presenta
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
-import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import '../app/bootstrap/identityCrossDomainWiring'
 
 export function resetStores(): void {

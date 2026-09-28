@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampRightRailWidth, RIGHT_RAIL_DEFAULT_WIDTH, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from './rightRailStore.ts'
+import { clampRightRailWidth, RIGHT_RAIL_DEFAULT_WIDTH, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from '../layoutRailsStore.ts'
 
 describe('rightRailStore', () => {
   it('clamps persisted and drag widths to the shell contract', () => {

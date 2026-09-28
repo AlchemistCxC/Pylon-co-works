@@ -1,5 +1,5 @@
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
-import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../../domains/workspace/layoutRailsStore.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
 
 export interface WorkspaceLayoutPatch {

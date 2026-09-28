@@ -15,7 +15,7 @@ import type { SheetContext, SheetRecord } from './sheetTypes'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
-import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 
 /**

@@ -43,7 +43,7 @@ import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
 import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
-import { useRightRailStore } from './right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from './settings/settingsDomains'
