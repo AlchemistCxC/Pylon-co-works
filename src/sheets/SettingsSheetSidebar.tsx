@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
+import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import { normalizeSettingsSheetState, type SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import {
   SETTINGS_DOMAINS,

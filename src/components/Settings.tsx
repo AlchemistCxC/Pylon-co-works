@@ -47,7 +47,7 @@ import { useRightRailStore } from './right-panel/rightRailStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, HOSTED_PLUGIN_MANAGER_PAGE_ID, sectionZone, type SettingsDomainId, type SettingsSectionId } from './settings/settingsDomains'
-import type { WorkspaceViewProps } from '../workspace-sheets/workspaceTypes.ts'
+import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import { useSettingsContributionCatalog } from './settings/useSettingsContributionCatalog.ts'
 import SidebarModulesPanel from './settings/SidebarModulesPanel.tsx'

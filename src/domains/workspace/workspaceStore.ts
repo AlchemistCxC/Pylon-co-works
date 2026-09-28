@@ -14,7 +14,7 @@ import type { SheetInput, SheetId } from '../../workspace-sheets/sheetTypes.ts'
 import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
 import { toAgentContextKey } from '../agent/agentContext.ts'
 import { normalizeFilePath } from '../file/fileRelations.ts'
-import { resolveWorkspace } from '../../workspace-sheets/workspaceRegistry.ts'
+import { resolveWorkspace } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
 import { useRightRailStore } from '../../components/right-panel/rightRailStore.ts'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 

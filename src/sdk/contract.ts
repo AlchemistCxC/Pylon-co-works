@@ -106,7 +106,7 @@ export type {
 export type { PluginUiApi } from '../plugin-runtime/ui/pluginUiApi.ts'
 
 // ── 工作区类型定义 / 渲染器（API 1.0）──
-export type { WorkspaceTypeDefinition } from '../workspace-sheets/workspaceTypes.ts'
+export type { WorkspaceTypeDefinition } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 export type {
   CodeHighlighterDefinition,
   RendererApi,

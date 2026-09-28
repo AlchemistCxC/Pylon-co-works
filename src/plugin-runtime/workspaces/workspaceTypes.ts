@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { SheetContext, SheetInput, SheetRecord, SidebarMode } from './sheetTypes.ts'
+import type { SheetContext, SheetInput, SheetRecord, SidebarMode } from '../../contracts/sheets.ts'
 
 export interface WorkspaceLaunchOption {
   kind: string

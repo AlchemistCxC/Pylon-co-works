@@ -51,7 +51,7 @@ import {
   getShellRecipeRegistry,
 } from './plugin-runtime/runtimeServices.ts'
 import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
-import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './plugin-runtime/workspaces/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'

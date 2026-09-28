@@ -6,8 +6,8 @@ import {
   type PersistedSheetState,
 } from '../../../workspace-sheets/sheetPersistence'
 import { DEFAULT_SHEET_LAYOUT } from '../../../workspace-sheets/sheetPersistence'
-import { resolveWorkspace } from '../../../workspace-sheets/workspaceRegistry'
-import type { WorkspaceTypeDefinition } from '../../../workspace-sheets/workspaceTypes'
+import { resolveWorkspace } from '../workspaceRegistry'
+import type { WorkspaceTypeDefinition } from '../workspaceTypes'
 import { TestPluginRuntime as PluginRuntime } from '../../testing/pluginRuntimeHarness.ts'
 import type { PluginWorkspaceApi } from '../pluginWorkspaceApi'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'

@@ -4,12 +4,12 @@
  * 单一真值：完整 WorkspaceTypeDefinition（metadata + component + state codec）。
  * v2 plugin 经 PluginScope 注册/注销；revision 驱动 React 响应式消费。
  */
-import type { PluginIdentity } from '../plugin-runtime/pluginIdentity.ts'
-import type { AsyncDisposable } from '../plugin-runtime/registry/types.ts'
-import type { SheetInput } from './sheetTypes.ts'
+import type { PluginIdentity } from '../pluginIdentity.ts'
+import type { AsyncDisposable } from '../registry/types.ts'
+import type { SheetInput } from '../../contracts/sheets.ts'
 import type { WorkspaceLaunchOption, WorkspaceTypeDefinition } from './workspaceTypes.ts'
-import { notifyRegistryListener } from '../plugin-runtime/registry/registryBatch.ts'
-import { createDeferrableDisposable } from '../utils/deferrableDisposable.ts'
+import { notifyRegistryListener } from '../registry/registryBatch.ts'
+import { createDeferrableDisposable } from '../../utils/deferrableDisposable.ts'
 
 export interface WorkspaceRegistryEntry {
   readonly ownerPluginId: string
