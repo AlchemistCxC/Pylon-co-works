@@ -309,19 +309,20 @@ describe('mountSolidWorkbench', () => {
     expect(group.querySelectorAll('.solid-workbench-activity-slot')).toHaveLength(2)
   })
 
-  it('让输入字号继承聊天字号，并保持助手正文与圆点处于同一布局行', async () => {
+  it('助手正文与圆点处于同一布局行（assistantDot 开启时）', async () => {
     const { host, services } = mountPreview()
     const theme = structuredClone(DEFAULTS)
     theme.assistantDot = true
     services.appearance.setTheme(theme)
-    const workbench = host.querySelector<HTMLElement>('.solid-agent-workbench')!
     const assistant = await waitFor(() => {
       const value = host.querySelector<HTMLElement>('.term-assistant.has-dot')
       expect(value).not.toBeNull()
       return value!
     })
 
-    expect(workbench.style.getPropertyValue('--input-font-size')).toBe('var(--chat-font-size)')
+    // ★ #266 CC-29：原来这里还断言工作台根节点注入了 `--input-font-size`（让输入字号继承聊天字号）。
+    //   那条注入被中控无条件内联的 `--cc-input-font-size` 恒挡住 ⇒ 逻辑上够不着，已随本单删除，
+    //   断言一并移出（用例名同步收窄）。
     expect(assistant.querySelector(':scope > .term-assistant-dot, :scope > .term-assistant-dot-img')).not.toBeNull()
     expect(assistant.querySelector(':scope > .term-assistant-body')).not.toBeNull()
   })
@@ -1445,11 +1446,12 @@ describe('mountSolidWorkbench', () => {
     expect(last.args[0]).not.toHaveProperty('workspaceId')
   })
 
-  it('空态不挂载 composer 快捷键提示，并在创建后标记进入过渡态', async () => {
+  it('空态创建后标记进入过渡态', async () => {
     const { host, lifecycle } = mountPreview()
     lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true })
     await screen.findByRole('region', { name: 'Agent 工作台空态' })
-    expect(host.querySelector('.input-composer-meta')).toBeNull()
+    // ★ #266 CC-29：原来这里还断言空态不挂载 composer 的快捷键提示段。该段在生产代码里
+    //   零渲染（已随本单删掉其悬空 CSS）⇒ 断言恒真、失去靶子，已移出；用例名同步收窄。
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'preview-session', preview: true })
     await waitFor(() => expect(host.querySelector('.control-center')?.className).toContain('is-session-entering'))
   })

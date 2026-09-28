@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-27T04:19:30.692Z",
+  "generatedAt": "2026-09-28T10:45:29.535Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -15,7 +15,7 @@
     ],
     "customPresetIds": [],
     "themeSettingCount": 176,
-    "cssVariableCount": 89
+    "cssVariableCount": 88
   },
   "fixtures": [
     {
@@ -4928,7 +4928,6 @@
         "--input-bg": "#abcdef",
         "--cc-input-text": "#abcdef",
         "--cc-input-placeholder": "#abcdef",
-        "--input-border-color": "#abcdef",
         "--cc-input-border": "#abcdef",
         "--cc-input-border-width": "8px",
         "--cc-input-border-opacity": "1",

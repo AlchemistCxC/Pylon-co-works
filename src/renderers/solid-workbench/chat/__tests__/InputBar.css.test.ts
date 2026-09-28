@@ -14,9 +14,10 @@ describe('input message-rail typography contract', () => {
     expect(css).not.toContain('font-family:var(--msg-font,var(--mono)) !important')
   })
 
-  it('keeps composer and queued-message prose on the same fallback rail', () => {
+  it('keeps queued-message prose on the shared fallback rail', () => {
     expect(css).toMatch(/\.queued-message-editor\s*\{[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
-    expect(css).toMatch(/\.input-composer-meta[\s\S]*?font:600 10px var\(--msg-font,var\(--chat-font,var\(--mono\)\)\);/s)
+    // ★ #266 CC-29：原来这里还锁了 composer meta 那段 `font:600 10px …`。该规则是悬空规则
+    //   （类名在生产代码里零命中），已随本单删除 ⇒ 断言失去靶子，移出本用例。
     expect(css).not.toMatch(/\.input-textarea[^}]*font-family:var\(--msg-font,var\(--chat-font,var\(--font\)\)\)/s)
   })
 })

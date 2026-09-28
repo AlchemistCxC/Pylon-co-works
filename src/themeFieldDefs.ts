@@ -264,7 +264,11 @@ export const THEME_FIELD_DEFS = {
   sendButtonIconGenerating: { ...S('cc', '生成中图标', ['square', 'cross']), optionLabels: { square: '方块', cross: '叉' }, default: 'square', group: '图标层', noCssVar: true },
   sendButtonIconRound: { ...S('cc', '图标圆角', ['on', 'off']), optionLabels: { on: '圆角', off: '直角' }, default: 'on', group: '图标层', noCssVar: true },
   sendButtonIconColor: { ...C('cc', '图标颜色'), default: '#ffffff', group: '图标层', noCssVar: true },
-  inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入框本体", semanticRole: 'stroke.default', semanticSource: true },
+  // ★ #266 CC-29 连带：边框色的**派生变量** `--input-border-color`（缺省派生名）唯一第一方消费者
+  //   是输入栏那层"被恒有值的内联 `--cc-input-border` 挡住"的兜底 ⇒ CC-29 删掉那层后它成为死注入。
+  //   字段本身照旧生效：它是 `stroke.default` 角色的源（经角色 token 落地），角色解析读的是字段值、
+  //   不是这个直投变量 ⇒ 这里只是不再经 THEME_CSS_VAR_MAP 重复注入（同上方 inputFocusBorder 一手）。
+  inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入框本体", noCssVar: true, semanticRole: 'stroke.default', semanticSource: true },
   // ★ #266 刀12 连带：焦点边框的**别名变量** `--input-focus-border` 唯一第一方消费者是已删除的
   //   replay 只读条 ⇒ 它成为死注入。字段本身照旧生效：它是 `state.focusRing` 角色的源
   //   （经角色 token `--border-focus` 落地），且该别名仍由 `themeCssSnapshot` 的兼容别名表
