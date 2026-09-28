@@ -71,25 +71,110 @@ export function buildChatRowDescriptors(
   messageLookups: MessageLookups,
   searchMatchId: string | undefined,
 ): ChatRowDescriptor[] {
-  return preparedMessages.map((renderMessage, index) => {
-    const previous = preparedMessages[index - 1]
-    const isToolRow = isToolRenderMessage(renderMessage)
-    const hasPreviousTool = isToolRow && isToolRenderMessage(previous)
-    const currentVisualState = resolveRowToolVisualState(renderMessage.message, messageLookups)
-    const previousConnectorStatus = hasPreviousTool
-      ? resolveRowToolConnectorStatus(previous.message)
-      : undefined
-    const previousConnectorVisualState = hasPreviousTool
-      ? resolveRowToolVisualState(previous.message, messageLookups)
-      : undefined
-    return {
-      key: renderMessage.message.id,
-      renderMessage,
-      toolVisualState: currentVisualState,
-      showConnector: hasPreviousTool,
-      connectorStatus: previousConnectorStatus,
-      connectorVisualState: previousConnectorVisualState,
-      isSearchMatch: searchMatchId === renderMessage.message.id,
-    }
-  })
+  return preparedMessages.map((renderMessage, index) =>
+    chatRowDescriptorAt(renderMessage, index, preparedMessages, messageLookups, searchMatchId))
+}
+
+function chatRowDescriptorAt(
+  renderMessage: RenderMessage,
+  index: number,
+  preparedMessages: readonly RenderMessage[],
+  messageLookups: MessageLookups,
+  searchMatchId: string | undefined,
+): ChatRowDescriptor {
+  const previous = preparedMessages[index - 1]
+  const isToolRow = isToolRenderMessage(renderMessage)
+  const hasPreviousTool = isToolRow && isToolRenderMessage(previous)
+  const currentVisualState = resolveRowToolVisualState(renderMessage.message, messageLookups)
+  const previousConnectorStatus = hasPreviousTool
+    ? resolveRowToolConnectorStatus(previous.message)
+    : undefined
+  const previousConnectorVisualState = hasPreviousTool
+    ? resolveRowToolVisualState(previous.message, messageLookups)
+    : undefined
+  return {
+    key: renderMessage.message.id,
+    renderMessage,
+    toolVisualState: currentVisualState,
+    showConnector: hasPreviousTool,
+    connectorStatus: previousConnectorStatus,
+    connectorVisualState: previousConnectorVisualState,
+    isSearchMatch: searchMatchId === renderMessage.message.id,
+  }
+}
+
+function lookupsEmpty(messageLookups: MessageLookups): boolean {
+  return messageLookups.resolvedToolIds.size === 0
+    && messageLookups.failedToolIds.size === 0
+    && messageLookups.runningToolIds.size === 0
+}
+
+export interface PreviousDescriptors {
+  /** 上一次构建的 prepared 数组（元素引用由 toRenderMessage WeakMap 保证稳定）。 */
+  readonly renderMessages: readonly RenderMessage[]
+  readonly descriptors: readonly ChatRowDescriptor[]
+  readonly lookups: MessageLookups
+  readonly searchMatchId: string | undefined
+}
+
+/**
+ * #441-B：descriptors 的前缀增量构建。文本 delta 只动尾行（尾部行 renderMessage 引用
+ * 换代，前缀行经 toRenderMessage WeakMap 保持引用稳定），于是按下标对齐：前缀沿用
+ * 上一次的 descriptor **对象**（零分配），首个失配下标起整段重建（connector 字段依赖
+ * 前一行，重建段天然取新前驱）。
+ *
+ * 安全阀：lookups 任一非空（legacy 预览宿主有工具行）或 searchMatchId 变化时整段回退
+ * 全量构建——工具行的视觉状态可被**别的**消息（同 toolId 的 result 行）改写，引用稳定
+ * 推不出内容稳定，那里不复用。canonical 生产路径三 Set 恒空 ⇒ 恒走增量。
+ */
+export function buildChatRowDescriptorsIncremental(
+  preparedMessages: readonly RenderMessage[],
+  messageLookups: MessageLookups,
+  searchMatchId: string | undefined,
+  previous: PreviousDescriptors | undefined,
+): readonly ChatRowDescriptor[] {
+  if (previous === undefined || searchMatchId !== previous.searchMatchId
+    || !lookupsEmpty(messageLookups) || !lookupsEmpty(previous.lookups)) {
+    return buildChatRowDescriptors(preparedMessages as RenderMessage[], messageLookups, searchMatchId)
+  }
+  const out: ChatRowDescriptor[] = new Array(preparedMessages.length)
+  const limit = Math.min(preparedMessages.length, previous.descriptors.length)
+  let index = 0
+  while (index < limit && preparedMessages[index] === previous.renderMessages[index]) {
+    out[index] = previous.descriptors[index]!
+    index += 1
+  }
+  for (let rest = index; rest < preparedMessages.length; rest += 1) {
+    out[rest] = chatRowDescriptorAt(preparedMessages[rest]!, rest, preparedMessages, messageLookups, searchMatchId)
+  }
+  return out
+}
+
+/**
+ * #441-A：`buildChatRowDescriptors` 的单槽引用门，键是三元组（prepared / lookups /
+ * searchMatchId）。上游 `prepareMessagesOf` 与 `messageLookupsOf` 在 messages 引用未变时
+ * 返回同引用 ⇒ 本门随之命中，descriptors 不再每发布分配 N 个对象。中段行变更时上游引用
+ * 必然换代，门自动失效——「只有尾部变」不必成立，这里不依赖任何尾部不变式。
+ * 门未命中时走 #441-B 的增量构建（memo 携带上一次的 prepared/descriptors/lookups）。
+ */
+let descriptorsMemo: {
+  readonly prepared: readonly RenderMessage[]
+  readonly lookups: MessageLookups
+  readonly searchMatchId: string | undefined
+  readonly out: readonly ChatRowDescriptor[]
+} | undefined
+
+export function chatRowDescriptorsOf(
+  preparedMessages: readonly RenderMessage[],
+  messageLookups: MessageLookups,
+  searchMatchId: string | undefined,
+): readonly ChatRowDescriptor[] {
+  const memo = descriptorsMemo
+  if (memo !== undefined && memo.prepared === preparedMessages && memo.lookups === messageLookups
+    && memo.searchMatchId === searchMatchId) return memo.out
+  const out = buildChatRowDescriptorsIncremental(preparedMessages, messageLookups, searchMatchId, memo === undefined
+    ? undefined
+    : { renderMessages: memo.prepared, descriptors: memo.out, lookups: memo.lookups, searchMatchId: memo.searchMatchId })
+  descriptorsMemo = { prepared: preparedMessages, lookups: messageLookups, searchMatchId, out }
+  return out
 }

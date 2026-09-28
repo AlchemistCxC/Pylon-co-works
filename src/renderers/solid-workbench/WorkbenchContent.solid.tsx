@@ -1,9 +1,11 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
-import { buildChatRowDescriptors, isSameChatRowDescriptor } from '../../components/chat/chatRowPipeline.ts'
-import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
-import { prepareMessages } from '../../components/chat/messagePipeline.ts'
+import { chatRowDescriptorsOf } from '../../components/chat/chatRowPipeline.ts'
+import { messageLookupsOf } from '../../components/chat/messageLookups.ts'
+import { prepareMessagesOf } from '../../components/chat/messagePipeline.ts'
 import type { Message } from '../../components/chat/messageTypes.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
+import { reuseMessageListItems } from '../../domains/workbench/messageListPort.ts'
+import type { WorkbenchMessage } from '../../domains/workbench/workbenchProjector.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
 import { classifyScrollEvent, HYDRATING_MS, INSTANT_LOCK_MS, scrollTraceThreshold, SMOOTH_LOCK_MS, type ScrollWriteTrace } from '../../components/chat/scrollFollowModel.ts'
 import { createScrollUserIntent } from '../../components/chat/scrollUserIntent.ts'
@@ -174,49 +176,61 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
   })
   // P52 D5：transient 流字段已死（D3 后无生产写入者）——canonical running 行
   // 是唯一流式显示；此前的 transient 兜底 memo 与 appendTransient 注入随之退役。
+  // #441-A：canonical/legacy 数组引用都未变时直接复用上次结果（tool/usage 等事件的
+  // 发布不改 messages 引用，`reduceTool` 只换 activities/timeline）。安全性前提与
+  // `prepareMessagesOf` 同：快照冻结数组 + COW 纪律。
+  let lastViewInputs: {
+    readonly canonical: readonly WorkbenchMessage[] | undefined
+    readonly legacy: readonly Message[]
+  } | undefined
+  let lastView: readonly Message[] = []
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
     const projected = displayDocument()?.messages
+    const inputs = lastViewInputs
+    if (inputs !== undefined && inputs.canonical === projected && inputs.legacy === legacy) return lastView
     // Canonical document messages are the sole owner whenever available. The
     // legacy list remains only as a compatibility fallback for preview hosts
     // that have not mounted a WorkbenchDocument yet (including legacy tool
     // rows); mixing the two lists would reintroduce duplicate stream owners.
     const canonical = projected ?? []
-    if (canonical.length === 0 && legacy.length > 0) return legacy
-    const legacyToolIds = new Set(legacy.filter(message => message.role === 'tool').map(message => message.id))
-    const base = canonical
-      .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
-      .map(toSolidMessage)
-    // Legacy preview hosts still expose tool rows before their activity
-    // projection is available. Preserve those non-text rows without merging
-    // legacy assistant/reasoning rows back into the canonical stream.
-    // (P57 S2-R3：base 是本 memo 新建数组，直接追加 legacy tool 行，省一次展开拷贝。)
-    for (const message of legacy) {
-      if (message.role === 'tool') base.push(message)
-    }
+    const base = canonical.length === 0 && legacy.length > 0
+      ? legacy
+      : (() => {
+        const legacyToolIds = new Set(legacy.filter(message => message.role === 'tool').map(message => message.id))
+        const mapped = canonical
+          .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
+          .map(toSolidMessage)
+        // Legacy preview hosts still expose tool rows before their activity
+        // projection is available. Preserve those non-text rows without merging
+        // legacy assistant/reasoning rows back into the canonical stream.
+        // (P57 S2-R3：mapped 是本 memo 新建数组，直接追加 legacy tool 行，省一次展开拷贝。)
+        for (const message of legacy) {
+          if (message.role === 'tool') mapped.push(message)
+        }
+        return mapped
+      })()
+    lastViewInputs = { canonical: projected, legacy }
+    lastView = base
     return base
   })
-  const renderMessages = createMemo(() => prepareMessages(viewMessages()))
+  const renderMessages = createMemo(() => prepareMessagesOf(viewMessages()))
   const searchMatches = createMemo(() => {
     if (!searchQuery().trim()) return []
     return viewMessages().filter(message => messageMatchesQuery(message, searchQuery()))
   })
   const activeSearchMessageId = createMemo(() => searchMatches()[searchIndex()]?.id)
-  const descriptors = createMemo(() => buildChatRowDescriptors(
+  const descriptors = createMemo(() => chatRowDescriptorsOf(
     renderMessages(),
-    buildMessageLookups(viewMessages()),
+    messageLookupsOf(viewMessages()),
     activeSearchMessageId(),
   ))
   // P57 S2-R3：items per-key 复用——descriptor 全字段相等时沿用上个 MessageListItem
   // 引用，PlainMessageList 的引用相等门随之跳过行 update 与测量失效。
+  // 复用循环在 `reuseMessageListItems`（#441 起抽出：显示链基准的接线出口，行为不变）。
   let lastItems: readonly MessageListItem[] = []
   const items = createMemo<readonly MessageListItem[]>(() => {
-    const previousByKey = new Map(lastItems.map(item => [item.key, item]))
-    const next = descriptors().map(descriptor => {
-      const previous = previousByKey.get(descriptor.key)
-      if (previous && isSameChatRowDescriptor(previous.descriptor, descriptor)) return previous
-      return { key: descriptor.key, descriptor }
-    })
+    const next = reuseMessageListItems(lastItems, descriptors())
     lastItems = next
     return next
   })

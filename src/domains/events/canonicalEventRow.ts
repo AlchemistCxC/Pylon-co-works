@@ -43,8 +43,8 @@ export interface CanonicalEventWireRow {
   createdAt?: number
   owner?: CanonicalEventOwner
   schemaVersion?: number
-  provenanceOrigin?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { origin: infer O } ? O : never : never
-  provenanceTrust?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { trust: infer T } ? T : never : never
+  provenanceOrigin?: NonNullable<CanonicalConversationEvent['provenance']>['origin']
+  provenanceTrust?: NonNullable<CanonicalConversationEvent['provenance']>['trust']
   provenanceProvider?: string | null
   provenanceImportId?: string | null
   rawTruncated?: boolean

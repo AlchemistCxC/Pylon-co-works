@@ -14,7 +14,7 @@ import { WorkbenchContentSlot } from './WorkbenchContentSlot.solid.tsx'
 
 export function WorkbenchRow(props: {
   descriptor: MessageListItem['descriptor']
-  appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
+  appearance: ReturnType<SolidWorkbenchContextValue['appearanceSnapshot']>
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
   context: SolidWorkbenchContextValue
   children?: import('solid-js').JSX.Element
@@ -101,7 +101,7 @@ export function WorkbenchRow(props: {
 
 function WorkbenchDefaultMessage(props: {
   renderMessage: RenderMessage
-  appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
+  appearance: ReturnType<SolidWorkbenchContextValue['appearanceSnapshot']>
   highlighted: boolean
   context: SolidWorkbenchContextValue
 }) {

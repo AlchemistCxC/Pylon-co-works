@@ -526,7 +526,19 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
 
   const applyLive = (incoming: WorkbenchEventEnvelope) => {
     const currentBefore = runtime.getSnapshot().document
-    const priorUser = [...(currentBefore?.messages ?? [])].reverse().find(message => message.role === 'user')
+    // live 每信封热点（#440）：这里只要「末条 user 行」，原写法 [...messages].reverse().find
+    // 是每帧 O(N) 整表拷贝+反转；倒序下标扫描引用级等价（events 突发率无批上限）。
+    const messagesBefore = currentBefore?.messages
+    let priorUser: WorkbenchDocument['messages'][number] | undefined
+    if (messagesBefore !== undefined) {
+      for (let index = messagesBefore.length - 1; index >= 0; index -= 1) {
+        const candidate = messagesBefore[index]
+        if (candidate !== undefined && candidate.role === 'user') {
+          priorUser = candidate
+          break
+        }
+      }
+    }
     const isUserStart = incoming.event.type === 'message.delta' && incoming.event.role === 'user'
       && !(priorUser?.running === true)
     const content = isUserStart ? (incoming.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('') : ''

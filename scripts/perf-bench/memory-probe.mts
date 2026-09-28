@@ -45,13 +45,31 @@ function main(): void {
     + `${beats.highBeats} 拍 ${mib(beats.highBytes)}，增长 ${beats.growth.toFixed(2)}×`
     + `（阈值 ≤ ${beats.threshold}×）→ ${beats.pass ? 'PASS' : 'FAIL'}`,
   )
+  const text = suite.text
+  lines.push('')
+  lines.push(
+    `text/thinking 驻留（#449）：${mib(text.residency.logicalPayloadBytes)} 载荷 → `
+    + `${mib(text.residency.retained.bytes)}，比值 ${text.residency.ratio.toFixed(3)}×`
+    + `（判据挂起，待 M2 裁决）→ ${text.residency.pass ? '读数' : 'FAIL'}`,
+  )
+  lines.push(
+    `text 拍数敏感性（同一终值 thinking，chunk 5 → 40）：${mib(text.beat.lowBytes)} → `
+    + `${mib(text.beat.highBytes)}，增长 ${text.beat.growth.toFixed(2)}×`
+    + `（阈值 ≤ ${text.beat.threshold}×）→ ${text.beat.pass ? 'PASS' : 'FAIL'}`,
+  )
+  lines.push(
+    `text 粒度对照（信息读数，50k 文本）：batch ${text.granularity.batchRows} 行 ${mib(text.granularity.batchBytes)}`
+    + ` vs 逐 delta ${text.granularity.perDeltaRows} 行 ${mib(text.granularity.perDeltaBytes)}`
+    + `，放大 ${text.granularity.amplification.toFixed(2)}×`,
+  )
   lines.push('')
   lines.push('注：驻留是**估算**（唯一对象去重后按字符串/对象头记账），只用于比值；')
   lines.push('    绝对进程峰值见 README「memory 域」的实机探针（proc-tree.ps1 + CDP）。')
   lines.push('')
   for (const line of lines) console.log(line)
 
-  const failed = suite.cases.filter(item => !item.pass).length + (beats.pass ? 0 : 1) + (snapshots.pass ? 0 : 1)
+  const failed = suite.cases.filter(item => !item.pass).length + (beats.pass ? 0 : 1)
+    + (snapshots.pass ? 0 : 1) + (text.residency.pass ? 0 : 1) + (text.beat.pass ? 0 : 1)
   if (failed > 0) {
     console.error(`memory 域判据未过：${failed} 项`)
     process.exitCode = 1
