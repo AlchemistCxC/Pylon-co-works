@@ -4,7 +4,7 @@
  * 职责（从 chatEventController 迁入，语义逐条保留）：
  * - 持有唯一的 CanonicalEventCursor（per-owner 串行、gap 回填、去重），
  *   kernel-committed 行在投影之前逐条 publishPluginEvent（durable-before-project）；
- * - 持有唯一的 canonical sink（browser no-op / 测试工厂注入缝随迁）；
+ *   #439 起前端自写轨（canonical sink）已退役，journal 写路径严格归 kernel；
  * - 持有 `pylon:user` window 广播兜底（未注册 Channel 的来源，如平台 ingest）；
  * - 对外转发原始帧给消费方（过渡期 = legacy ChatController 的 handleStreamFrame），
  *   kernelCommitted 标记随帧传递——消费方据此跳过自写 canonical；
@@ -20,11 +20,6 @@ import { IS_TAURI } from '../tauri/env.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
 import { PYLON_STREAM_WIRE_EVENTS } from './pylonStreamWireEvents.ts'
 import { CanonicalEventCursor } from './canonicalEventCursor.ts'
-import {
-  createCanonicalEventSink,
-  type CanonicalEventOfferContext,
-  type CanonicalEventSink,
-} from './canonicalEventSink.ts'
 import { tauriCanonicalEventRepository, type CanonicalEventRow } from './canonicalEventRepository.ts'
 import { publishPluginEvent } from './pluginEventBus.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
@@ -68,11 +63,7 @@ export type CanonicalFeedSourceGate = (source: string | undefined) => boolean
 export interface CanonicalEventFeed {
   /** Channel 帧唯一入口：先 source gate，再 cursor/publish，再转发；终帧附送 terminal 信号。 */
   acceptFrame(frame: CanonicalFeedFrame): Promise<void>
-  /** 自写轨（kernel 未提交的 live wire 归一落盘）。kernelCommitted 帧由调用方跳过本入口。 */
-  offer(context: CanonicalEventOfferContext, raw: unknown, force?: boolean): void
-  flush(): void
-  flushAsync(): Promise<void>
-  /** sink.discard + cursor.forget（owner 级清理，prune/删除会话共用）。 */
+  /** cursor.forget（owner 级清理，prune/删除会话共用）。#439 起 sink.discard 随自写轨退役。 */
   discard(ownerKey: string): void
   seed(ownerKey: string, sequence: number): void
   /** 帧源门（controller 注入 isActiveSource；null = 接受全部——D4 controller 退役后的终态）。 */
@@ -83,19 +74,6 @@ export interface CanonicalEventFeed {
   onTerminal(listener: CanonicalFeedTerminalListener): () => void
   onDraftChunk(listener: CanonicalFeedDraftListener): () => void
   onDraftCommit(listener: CanonicalFeedDraftCommitListener): () => void
-}
-
-export interface CanonicalEventFeedDeps {
-  /** 测试可注入 fake sink；生产 Tauri 用真实 sink，非 Tauri no-op。 */
-  sinkFactory?: () => CanonicalEventSink
-}
-
-const noopCanonicalEventSink: CanonicalEventSink = {
-  offer: () => {},
-  flushAll: () => {},
-  flushAllAsync: async () => {},
-  discard: () => {},
-  dispose: () => {},
 }
 
 function extractCanonicalNotification(payload: unknown): unknown {
@@ -181,8 +159,7 @@ export function subscribeWindowTerminalFrames(listener: CanonicalFeedTerminalLis
   }
 }
 
-export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): CanonicalEventFeed {
-  const sink = (deps.sinkFactory ?? (() => (IS_TAURI ? createCanonicalEventSink() : noopCanonicalEventSink)))()
+export function createCanonicalEventFeed(): CanonicalEventFeed {
   const cursor = new CanonicalEventCursor(tauriCanonicalEventRepository())
   const rowListeners = new Set<CanonicalFeedRowListener>()
   const recoveredRowListeners = new Set<CanonicalFeedRowListener>()
@@ -231,7 +208,6 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
             : undefined
           if (isCurrentNotification && typeof committedDraftId === 'string') {
             for (const listener of draftCommitListeners) listener(toCanonicalOwnerKey(event.owner), committedDraftId)
-            sink.flushAll()
           }
           publishPluginEvent(event)
           for (const listener of rowListeners) listener(event)
@@ -250,11 +226,7 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
         reportRuntimeError('消费 Kernel committed 事件', error)
       }
     },
-    offer: (context, raw, force) => sink.offer(context, raw, force),
-    flush: () => sink.flushAll(),
-    flushAsync: () => sink.flushAllAsync(),
     discard: ownerKey => {
-      sink.discard(ownerKey)
       cursor.forget(ownerKey)
     },
     seed: (ownerKey, sequence) => cursor.seed(ownerKey, sequence),
@@ -314,24 +286,15 @@ export function createCanonicalEventFeed(deps: CanonicalEventFeedDeps = {}): Can
 }
 
 // ---------------------------------------------------------------------------
-// 应用级单例：App 关窗 flush、Sidebar/SessionSettings discard、streamingSend
+// 应用级单例：App 关窗 drain、Sidebar/SessionSettings discard、streamingSend
 // 帧入口都经此访问，不再穿透 legacy controller。
 // ---------------------------------------------------------------------------
 
 let canonicalEventFeedSingleton: CanonicalEventFeed | null = null
-let canonicalEventSinkFactory: (() => CanonicalEventSink) | null = null
 
 export function getCanonicalEventFeed(): CanonicalEventFeed {
   if (!canonicalEventFeedSingleton) {
-    canonicalEventFeedSingleton = createCanonicalEventFeed(
-      canonicalEventSinkFactory ? { sinkFactory: canonicalEventSinkFactory } : {},
-    )
+    canonicalEventFeedSingleton = createCanonicalEventFeed()
   }
   return canonicalEventFeedSingleton
-}
-
-/** 测试注入缝（自 chatEventController 迁入）：须在首次 getCanonicalEventFeed() 前调用。 */
-export function setCanonicalEventSinkFactoryForTests(factory: (() => CanonicalEventSink) | null): void {
-  canonicalEventSinkFactory = factory
-  canonicalEventFeedSingleton = null
 }

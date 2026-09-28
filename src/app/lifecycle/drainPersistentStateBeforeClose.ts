@@ -1,5 +1,4 @@
 export interface PersistentStateDrains {
-  flushCanonical: () => Promise<void>
   flushIdentity: () => Promise<void>
 }
 
@@ -19,15 +18,14 @@ export class PersistenceDrainTimeoutError extends Error {
 }
 
 /**
- * 关闭前的持久化 join：两条链并行 drain，且使用 allSettled 保证一条失败不会阻止
- * 另一条完成。任一失败都向窗口生命周期传播，由上层保持窗口并展示错误。
+ * 关闭前的持久化 join。#439 起 canonical 自写轨退役（kernel 严格单写者），
+ * 前端 pending 恒空，只剩 identity 写穿一条链；失败向窗口生命周期传播，
+ * 由上层保持窗口并展示错误。
  */
 export async function drainPersistentStateBeforeClose({
-  flushCanonical,
   flushIdentity,
 }: PersistentStateDrains, { timeoutMs = 15_000 }: PersistentDrainOptions = {}): Promise<void> {
   const drain = Promise.allSettled([
-    Promise.resolve().then(flushCanonical),
     Promise.resolve().then(flushIdentity),
   ]).then(results => {
     const failures = results

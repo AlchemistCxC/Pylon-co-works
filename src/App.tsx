@@ -27,7 +27,6 @@ import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
-import { getCanonicalEventFeed } from './infrastructure/events/canonicalEventFeed.ts'
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
@@ -436,10 +435,9 @@ export default function App() {
 
   const appWindow = appWindowSingleton
   const drainBeforeClose = async () => {
-    await drainPersistentStateBeforeClose({
-      flushCanonical: () => getCanonicalEventFeed().flushAsync(),
-      flushIdentity: flushIdentityBackend,
-    })
+    // #439：canonical 自写轨退役（kernel 严格单写者，前端 pending 恒空），
+    // 关窗 drain 只剩 identity 写穿一条链。
+    await drainPersistentStateBeforeClose({ flushIdentity: flushIdentityBackend })
     // #81 L3：前端 pending 已清空（kernel 单写者）→ 安全窗口内运行裁剪迁移
     // （可暂停/续跑；超时不阻塞关窗；trim_rolledup 策略关闭时后端只报告）。
     await runRollupTrimBeforeClose()
