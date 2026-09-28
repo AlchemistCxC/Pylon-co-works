@@ -18,7 +18,7 @@ vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({
     subscribe: subscribeSpy,
   }),
 }))
-vi.mock('../../../infrastructure/events/pluginEventBus.ts', () => ({
+vi.mock('../../../infrastructure/events/pluginEventBusHost.ts', () => ({
   subscribePluginEvents: (...args: unknown[]) => subscribeSpy(...(args as [])),
   publishPluginEvent: vi.fn(),
 }))
