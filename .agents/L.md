@@ -123,3 +123,6 @@
   - #449 基准 → `scripts/perf-bench/{index.ts,harness.ts?}`、新 `suites/displayChainSuite.ts`、`suites/{memorySuite,projectorSuite}.ts`、`fixtures/memoryCorpus.ts`、`README.md`（**避让 #439 的 `eventsSuite.ts`**）。
   - ⚠️ **#447（canonicalEventSink seeding 队列 cap）避让顺延**：canonicalEventSink.ts 在 #439 在途域内，待其合入后再动。issue 已登记，仅文档化部分届时一并做。
   - **不碰**：`src-tauri/**`（本批零 Rust 改动）、`src/infrastructure/events/**`（#439 域；只 import 其纯函数不改文件）、`src/workspace-sheets/**`、⧖ 三条待裁决项（text 族 timeline 收窄扩 K20 / event.unknown data 收窄（#405 冲突）/ interactions（C11））。规格 `.agents/spec/440-449-perf-mem-hotspots.md`，记录落 `.agents/records/`。提交一律 pathspec。
+  - **进展（2026-09-29）——#439 三批次已提交待合并**：批次①（#444 parity 门禁）`9da72d00`、批次 1（前端摘写入链，hunk 分账）`7ab6a3c3`、批次 2（删 sink/scheduler + 后端 evt_append）批次 3（batch 常量退役）`8811adb8`。check:ipc 绿（228/159 双向一致）、tsc 绿、lint 0 error、replay+events 504 绿。记录 `.agents/records/439-sink-retirement.md`。
+  - ⚠️ **#449 随迁提示（3b 顺延）**：`mergeAdjacentDeltaChunks` 与 `CANONICAL_BATCH_LIMITS` 已无生产语义（预算常量已删、函数降级测试造数器），但**函数本体暂留** `canonicalEventBatch.ts`——#449 的 memorySuite 在途新增依赖它。#449 合入后由我搬迁到 `src/test-utils/` 并改 replay 10 文件 + fixtures.ts + memorySuite 的 import。#449 若见此条：import 路径可先用现位置，勿自行迁移。
+  - **#447 建议关闭**：canonicalEventSink seeding 队列 cap 随 sink 退役失去对象。
