@@ -18,12 +18,9 @@
 .input-binding-status--error {
   color:var(--danger,#FF6B80); background:rgba(255,107,128,0.1); border:1px solid rgba(255,107,128,0.3);
 }
-.input-reconnect-btn {
-  margin-left:var(--ui-space-2); padding:var(--ui-space-1) var(--ui-space-2);
-  font-size:var(--font-size-xs); color:var(--accent);
-  background:transparent; border:var(--line-width-1) solid var(--accent); border-radius:0; cursor:pointer;
-}
-.input-reconnect-btn:disabled { opacity:0.55; cursor:default; }
+/* ★ #266 CC-29：会话重连按钮那两条规则已删 —— 类名在生产代码里零命中；
+   重连入口不属输入栏（位置另议，见待办「会话绑定状态提示接线与重连入口」）。
+   上面那两段绑定状态浮层**保留**：它背后有状态机，只是整段尚未接线。 */
 .command-palette { position:absolute; bottom:100%; left:0; right:0; background:var(--command-bg,#fff); color:var(--text); border:1px solid var(--border); border-radius: 0; margin-bottom:8px; overflow-x:hidden; overflow-y:auto; max-height:min(52vh,480px); backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.18); z-index:10; }
 .cmd-item {
   display:flex; min-width:0; width:100%; justify-content:space-between; align-items:center;
@@ -58,14 +55,14 @@
    注册轨，见 `WorkbenchWidgets.solid.tsx`；类名字面量见开发记录，此处不留）。 */
 
 .input-textarea {
-  flex:1; min-width:0; background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent); border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent);
+  flex:1; min-width:0; background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent); border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--border)) var(--cc-input-border-opacity,100%),transparent);
   background-image:var(--input-bg-image,none); background-size:cover; background-position:center;
-  border-radius:var(--cc-input-radius,var(--input-radius,0)); padding:12px var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%)) 12px var(--cc-input-text-inset-x,5%); color:var(--cc-input-text,var(--input-text-color,var(--text)));
+  border-radius:var(--cc-input-radius,0); padding:12px var(--cc-input-text-right-inset,var(--cc-input-text-inset-x,5%)) 12px var(--cc-input-text-inset-x,5%); color:var(--cc-input-text,var(--text));
   /* Conversation copy and the composer share the message-font role. Code,
      command names and paths opt into --mono below. */
-  font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--cc-input-font-size,var(--input-font-size,15px)); line-height:var(--cc-input-line-height,var(--msg-line-height,var(--chat-line-height,1.35)));
+  font-family:var(--msg-font,var(--chat-font,var(--mono))); font-size:var(--cc-input-font-size,15px); line-height:var(--cc-input-line-height,var(--msg-line-height,var(--chat-line-height,1.35)));
   resize:none; outline:none; overflow-y:hidden; scrollbar-width:none;
-  min-height:calc(var(--cc-input-font-size,var(--input-font-size,15px)) * (1 + var(--cc-input-line-height,1)) + 18px); max-height:240px;
+  min-height:calc(var(--cc-input-font-size,15px) * (1 + var(--cc-input-line-height,1)) + 18px); max-height:240px;
 }
 .input-textarea::-webkit-scrollbar { display:none; }
 .input-editor-stack {
@@ -90,18 +87,17 @@
 }
 /* 输入焦点由插入光标表达；不要因为输入而改变整栏边框或投射焦点光环。
    焦点光环由 .input-bar 级的 hover/focus-within 光环机制（--cc-input-focus-ring-shadow）承担。 */
-.input-textarea:focus { border-color:color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent); }
-.input-textarea::placeholder { color:var(--cc-input-placeholder,var(--input-placeholder,var(--text-placeholder))); }
+.input-textarea:focus { border-color:color-mix(in srgb,var(--cc-input-border,var(--border)) var(--cc-input-border-opacity,100%),transparent); }
+.input-textarea::placeholder { color:var(--cc-input-placeholder,var(--text-placeholder)); }
 
-.input-command-kicker { position:absolute; bottom:calc(100% + 5px); left:0; color:var(--accent); font:600 10px var(--mono); letter-spacing:0.12em; }
-
-/* 新一代 composer：只服务非经典 Presentation；经典 CLI 选择器保持原状。 */
-.input-composer-meta { display:none; }
+/* ★ #266 CC-29：命令面板标题（kicker）与「新一代 composer」三段的规则已删
+   —— 它们是已退场的「输入栏外观」两档残骸，类名在生产代码里零命中。
+   下面这组 `.input-bar:not(.cli-mode)` 规则仍在服役（非经典版式的输入栏本体）。 */
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) {
   box-sizing:border-box;
   padding:7px 8px 8px;
-  border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--input-border-color,var(--border))) var(--cc-input-border-opacity,100%),transparent);
-  border-radius:var(--cc-input-radius,var(--input-radius,12px));
+  border:var(--cc-input-border-width,1px) solid color-mix(in srgb,var(--cc-input-border,var(--border)) var(--cc-input-border-opacity,100%),transparent);
+  border-radius:var(--cc-input-radius,12px);
   background:color-mix(in srgb,var(--cc-input-surface,var(--input-bg,var(--bg-input))) var(--cc-input-surface-opacity,100%),transparent);
   box-shadow:none;
   transition:border-color 160ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -125,7 +121,7 @@
   .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode)::before {
     content:'';
     position:absolute; inset:calc(-1 * var(--cc-input-border-width,1px)); box-sizing:border-box; pointer-events:none; z-index:2;
-    border-radius:var(--cc-input-radius,var(--input-radius,12px));
+    border-radius:var(--cc-input-radius,12px);
     background:linear-gradient(to bottom,#fff 0%,#fff 30%,rgba(255,255,255,0) 50%,rgba(255,255,255,0) 100%);
     opacity:var(--cc-input-highlight-opacity,0);
     padding:calc(var(--cc-input-height,40px) * 0.05);
@@ -136,20 +132,10 @@
 /* hover/聚焦光环（A6-1-FIX 1.3）：经典版式的可视盒是 .input-row，光环挂在行上；
    fallback 链为 光环 → 常态投影，光环关闭时 hover 不变色，常态阴影开关不影响光环。 */
 /* Composer 也保持静态外框；键盘焦点仍在 textarea 内，可见的是 caret。 */
-.app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-composer-meta {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  min-height:20px;
-  padding:0 5px 4px;
-  color:var(--text-dim);
-  font:600 10px var(--msg-font,var(--chat-font,var(--mono)));
-  letter-spacing:.025em;
-}
-.input-composer-kind,.input-composer-shortcut { display:inline-flex; align-items:center; gap:5px; }
-.input-composer-kind { color:color-mix(in srgb,var(--accent) 82%,var(--text)); }
+/* ★ #266 CC-29：composer 的 meta / kind / glyph 三段规则已删（类名在生产代码里零命中）。
+   composer 的 shortcut 一段**不在本单清单内**，原样保留（见报告「清单外同类残留」）。 */
+.input-composer-shortcut { display:inline-flex; align-items:center; gap:5px; }
 .input-composer-shortcut { font-weight:450; opacity:.74; }
-.input-composer-glyph { color:var(--accent); }
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-row {
   align-items:center;
   gap:5px;
@@ -173,7 +159,7 @@
   border:0;
   border-radius:0;
   background:transparent;
-  font-size:var(--cc-input-font-size,var(--input-font-size,14px));
+  font-size:var(--cc-input-font-size,14px);
   line-height:var(--cc-input-line-height,1);
   box-shadow:none;
 }
@@ -183,14 +169,12 @@
   background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 10%,var(--bg-input)),var(--bg-input) 42%);
   box-shadow:inset 3px 0 0 color-mix(in srgb,var(--accent) 70%,transparent),0 8px 22px rgba(0,0,0,.08);
 }
-.app[data-presentation-profile="builtin.presentation.terminal-modern"] .input-composer-meta,
 .app[data-presentation-profile="builtin.presentation.terminal-modern"] .input-textarea { font-family:var(--msg-font,var(--chat-font,var(--mono))) !important; }
 .app[data-presentation-profile="builtin.presentation.paper-low-contrast"] .input-bar:not(.cli-mode) {
   border-radius:5px;
   background:color-mix(in srgb,var(--input-bg,var(--bg-input)) 94%,#b88b50 6%);
   box-shadow:0 5px 16px rgba(92,68,39,.06),inset 0 1px 0 rgba(255,255,255,.25);
 }
-.app[data-presentation-profile="builtin.presentation.paper-low-contrast"] .input-composer-meta { font-family:var(--msg-font,var(--chat-font,var(--mono))); letter-spacing:.01em; }
 .app[data-presentation-profile="builtin.presentation.console-glass"] .input-bar:not(.cli-mode) {
   border-radius:18px;
   background:linear-gradient(135deg,rgba(255,255,255,.12),rgba(255,255,255,.035)),color-mix(in srgb,var(--input-bg,var(--bg-input)) 76%,transparent);
@@ -212,7 +196,7 @@
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
   color:var(--cc-input-text,var(--cli-text-color,var(--text))); font-family:var(--msg-font,var(--chat-font,var(--mono)));
-  font-size:var(--cc-input-font-size,var(--input-font-size,17px)); padding:0; line-height:1.4;
+  font-size:var(--cc-input-font-size,17px); padding:0; line-height:1.4;
   caret-color:var(--cli-text-color,var(--text));
   width:100%; flex:1; max-height:200px;
 }
@@ -222,7 +206,7 @@
    高度由 `InputBar.solid.tsx` 的 `resizeInput()` 写内联样式（底边不动、上边延伸）。 */
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; }
 .input-bar.cli-mode .cli-prefix {
-  color:var(--cli-prompt-color,var(--cli-text-color,#999)); font-family:var(--mono); font-size:var(--cc-input-font-size,var(--input-font-size,17px));
+  color:var(--cli-prompt-color,var(--cli-text-color,#999)); font-family:var(--mono); font-size:var(--cc-input-font-size,17px);
   font-weight:400; padding:0 8px 0 4px; line-height:1.4;
 }
 

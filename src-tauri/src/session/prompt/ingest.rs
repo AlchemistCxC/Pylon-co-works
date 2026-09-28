@@ -217,7 +217,13 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
                 (
                     session
                         .durable_owner(&agent_id, &ctx.source)?
-                        .expect("profile-backed prompt must have durable owner"),
+                        .ok_or_else(|| {
+                            PylonError::Protocol(format!(
+                                "profile-backed prompt for source {} has no durable owner \
+                                 (session profile binding missing)",
+                                ctx.source
+                            ))
+                        })?,
                     Some(session.peri_id.clone()),
                 )
             } else {

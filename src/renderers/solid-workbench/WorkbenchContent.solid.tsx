@@ -555,7 +555,6 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
       data-creation-state={sessionCreation().phase}
       style={{
         '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px`,
-        '--input-font-size': 'var(--chat-font-size)',
       }}
       aria-label="Solid Agent Workbench"
     >

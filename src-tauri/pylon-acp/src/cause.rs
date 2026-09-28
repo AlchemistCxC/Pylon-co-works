@@ -55,7 +55,6 @@ pub fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
             "Agent 进程管道通信失败（stdin 写 / stdout 读物理 IO 错误），连接已按崩溃收敛"
         }
         CrashReason::StdoutClosed => "Agent 进程已退出（stdout 关闭）",
-        CrashReason::PendingLockPoisoned => "内部 pending 状态锁中毒，连接已按崩溃收敛",
         CrashReason::Overloaded => "Agent 入站事件速率超过背压上限，连接已按过载收敛（显式 gap）",
     };
     DiagnosticCause {
@@ -72,7 +71,6 @@ pub fn crash_reason_from_code(code: &str) -> Option<CrashReason> {
     match code {
         "writer_failed" => Some(CrashReason::WriterFailed),
         "stdout_closed" => Some(CrashReason::StdoutClosed),
-        "pending_lock_poisoned" => Some(CrashReason::PendingLockPoisoned),
         "overloaded" => Some(CrashReason::Overloaded),
         _ => None,
     }
@@ -135,13 +133,14 @@ mod tests {
     }
 
     /// 崩溃 cause 的 code 词表 = CrashReason 的封闭集，且全部 fail 级。
-    /// #348 A1：`writer_timeout` 死变体已裁除（无写超时语义即无产生点）。
+    /// #348 A1：`writer_timeout` 死变体已裁除（无写超时语义即无产生点）；
+    /// #425 件4：`PendingLockPoisoned` 豁免解除同轮摘除（Rust + 前端词条 +
+    /// acp-vocabulary 门禁三处一轮，豁免背景见 #348 返工裁定）。
     #[test]
     fn crash_cause_uses_the_crash_reason_vocabulary() {
         let codes: Vec<String> = [
             CrashReason::WriterFailed,
             CrashReason::StdoutClosed,
-            CrashReason::PendingLockPoisoned,
             CrashReason::Overloaded,
         ]
         .iter()
@@ -149,18 +148,12 @@ mod tests {
         .collect();
         assert_eq!(
             codes,
-            vec![
-                "writer_failed",
-                "stdout_closed",
-                "pending_lock_poisoned",
-                "overloaded",
-            ],
+            vec!["writer_failed", "stdout_closed", "overloaded",],
             "崩溃 cause code 必须与 CrashReason::as_str 一一对应"
         );
         for reason in [
             CrashReason::WriterFailed,
             CrashReason::StdoutClosed,
-            CrashReason::PendingLockPoisoned,
             CrashReason::Overloaded,
         ] {
             let cause = crash_reason_cause(reason);

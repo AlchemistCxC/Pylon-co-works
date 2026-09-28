@@ -409,8 +409,8 @@ pub(crate) struct InteractionAnswerInput {
 /// 统一 Interaction response transport 的后端入口。
 /// P0-3（R2-WI03）：协议适配器 dispatch。#98：私有桥/elicitation 先按
 /// request id 路由（方法驱动，不要求 provider 名称匹配）；兜底路径按
-/// method 查适配器（provider 键控表仅剩诊断用途）——未注册 provider 的
-/// 合法 ACP 交互不再被拒。
+/// method 查适配器（注册面是 method 表 per-provider 槽，#424——诊断投影
+/// 自同表派生）——未注册 provider 的合法 ACP 交互不再被拒。
 #[tauri::command]
 pub(crate) async fn respond_interaction(
     state: tauri::State<'_, AppState>,
@@ -436,8 +436,8 @@ pub(crate) async fn respond_interaction(
             return Err(PylonError::Protocol("stale interaction identity".into()));
         }
         let response = match pending.bridge {
-            crate::acp::adapter::private_ext::PrivateBridge::GrokExtQuestions
-            | crate::acp::adapter::private_ext::PrivateBridge::PiSelectAsk => {
+            crate::protocol_adapter::private_ext::PrivateBridge::GrokExtQuestions
+            | crate::protocol_adapter::private_ext::PrivateBridge::PiSelectAsk => {
                 let questions = pending.question_specs.ok_or_else(|| {
                     PylonError::Protocol("private question request lost validated specs".into())
                 })?;
@@ -465,15 +465,15 @@ pub(crate) async fn respond_interaction(
                     answers,
                     declined: answer.option_id.as_deref() == Some("declined"),
                 };
-                crate::acp::adapter::private_ext::build_question_response(
+                crate::protocol_adapter::private_ext::build_question_response(
                     pending.bridge,
                     &questions,
                     &answer,
                 )
                 .map_err(PylonError::Protocol)?
             }
-            crate::acp::adapter::private_ext::PrivateBridge::GrokExitPlan => {
-                let _ = crate::acp::adapter::private_ext::parse_exit_plan(
+            crate::protocol_adapter::private_ext::PrivateBridge::GrokExitPlan => {
+                let _ = crate::protocol_adapter::private_ext::parse_exit_plan(
                     pending.bridge,
                     &pending.params,
                 )
@@ -483,7 +483,7 @@ pub(crate) async fn respond_interaction(
                     answer.text.as_deref().unwrap_or(""),
                 )
             }
-            crate::acp::adapter::private_ext::PrivateBridge::Elicitation => {
+            crate::protocol_adapter::private_ext::PrivateBridge::Elicitation => {
                 // #98：elicitation 应答 = ESM 风格 action 三值。decline/cancel
                 // 由前端 optionId 表达；accept 携带 values/text 原样 content。
                 // P2-3（评审修复）：optionId 白名单 fail-closed——未知值显式
@@ -506,7 +506,7 @@ pub(crate) async fn respond_interaction(
                     }
                     _ => None,
                 };
-                crate::acp::adapter::private_ext::build_elicitation_response(
+                crate::protocol_adapter::private_ext::build_elicitation_response(
                     action,
                     content.as_ref(),
                 )
@@ -647,7 +647,7 @@ fn private_interaction_item(
     request_id: crate::acp::RequestId,
     pending: &crate::private_interaction::PendingPrivateInteraction,
 ) -> serde_json::Value {
-    use crate::acp::adapter::private_ext::PrivateBridge;
+    use crate::protocol_adapter::private_ext::PrivateBridge;
     let (title, prompt, tool_call_id, options) = match pending.bridge {
         PrivateBridge::Elicitation => (
             "Elicitation".to_string(),
@@ -661,9 +661,11 @@ fn private_interaction_item(
             vec!["accept", "declined", "cancel"],
         ),
         PrivateBridge::GrokExitPlan => {
-            let (plan, tool_call) =
-                crate::acp::adapter::private_ext::parse_exit_plan(pending.bridge, &pending.params)
-                    .unwrap_or_default();
+            let (plan, tool_call) = crate::protocol_adapter::private_ext::parse_exit_plan(
+                pending.bridge,
+                &pending.params,
+            )
+            .unwrap_or_default();
             (
                 "Exit plan".to_string(),
                 plan,
@@ -875,13 +877,13 @@ pub(crate) struct PrivateInteractionTimeoutOutcome {
 }
 
 /// #356：私有交互超时的默认回包（产品裁决落在这一处）。
-/// 语义基准与各桥非承诺值表见引擎侧正身
-/// `pylon-acp/src/adapter/interaction_bridge.rs::timeout_default_response`
-/// （#416 W2 wave2 步骤 6 下沉；本包装仅承担宿主错误类型映射）。
+/// 语义基准与各桥非承诺值表见同域正身
+/// `protocol_adapter/interaction_bridge.rs::timeout_default_response`
+/// （#416 下沉、#424 随 private_ext 迁宿主 protocol_adapter 域）。
 fn private_interaction_timeout_response(
     pending: &crate::private_interaction::PendingPrivateInteraction,
 ) -> Result<serde_json::Value, PylonError> {
-    pylon_acp::adapter::interaction_bridge::timeout_default_response(
+    crate::protocol_adapter::interaction_bridge::timeout_default_response(
         pending.bridge,
         pending.question_specs.as_deref(),
     )
@@ -985,7 +987,7 @@ mod tests {
             agent_id: "a1".into(),
             session_id: "peri-s1".into(),
             method: "elicitation/create".into(),
-            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
+            bridge: crate::protocol_adapter::private_ext::PrivateBridge::Elicitation,
             params: serde_json::json!({"sessionId": "peri-s1", "elicitationId": "el-1"}),
             question_specs: None,
             client_generation: 1,
@@ -1080,8 +1082,8 @@ mod tests {
     /// 虚拟白名单。#356：deadlineMs 为真实 deadline（对等权限请求）。
     #[test]
     fn interaction_list_projects_private_interactions_for_cli() {
-        use crate::acp::adapter::private_ext::PrivateBridge;
         use crate::private_interaction::{PendingPrivateInteraction, PrivateInteractionOwner};
+        use crate::protocol_adapter::private_ext::PrivateBridge;
         let base = PendingPrivateInteraction {
             provider: String::new(),
             agent_id: "a1".into(),
@@ -1484,7 +1486,7 @@ mod tests {
     /// 产品裁决集中在本函数——改语义只动一处。
     #[test]
     fn private_timeout_response_picks_the_non_committal_value_per_bridge() {
-        use crate::acp::adapter::private_ext::PrivateBridge;
+        use crate::protocol_adapter::private_ext::PrivateBridge;
         let mut elicitation = private_elicitation_pending();
         assert_eq!(
             private_interaction_timeout_response(&elicitation).unwrap(),

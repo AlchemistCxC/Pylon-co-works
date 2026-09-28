@@ -754,3 +754,47 @@ async fn before_send_hook_transform_rewrites_wire_but_journal_keeps_original() {
     );
     assert!(!trace.contains("用户原始消息"), "wire 不应再出现用户原文");
 }
+
+/// #425 件1：profile-backed prompt 的 durable owner 前提不成立（session 存在但
+/// profile 未绑定）时，错误边界必须返回领域错误上抛，而不是 `expect` panic
+/// （release `panic=abort` 下会直接杀进程）。原 panic 点见 ingest.rs owner 分支。
+#[tokio::test]
+async fn publish_prompt_failure_returns_domain_error_when_durable_owner_missing() {
+    let runtime = AgentRuntime::new_disconnected();
+    // SessionInfo::new 默认 profile_id=None——正是「durable owner 缺失」形态。
+    let session = crate::session::SessionInfo::new(
+        "peri-no-owner".to_string(),
+        String::new(),
+        ".".to_string(),
+        true,
+        4,
+    );
+    runtime
+        .sessions
+        .lock()
+        .expect("sessions")
+        .insert("local:no-owner".to_string(), session);
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("agent-no-owner")
+        .with_agent(crate::test_utils::fake_acp_agent("agent-no-owner", &[]))
+        .with_runtime("agent-no-owner", runtime.clone())
+        .build();
+    let gateway = Arc::new(GatewayCore::new());
+    let ctx = PromptContext {
+        source: "local:no-owner".to_string(),
+        profile_id: Some("profile-x".to_string()),
+        ..Default::default()
+    };
+    let error = PylonError::Protocol("synthetic failure".to_string());
+    let outcome = publish_prompt_failure::<tauri::test::MockRuntime>(
+        &state, &runtime, None, &gateway, &ctx, &error, None,
+    )
+    .await;
+    match outcome {
+        Err(PylonError::Protocol(message)) => assert!(
+            message.contains("durable owner"),
+            "unexpected protocol message: {message}"
+        ),
+        other => panic!("expected durable-owner domain error, got {other:?}"),
+    }
+}

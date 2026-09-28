@@ -267,10 +267,8 @@ pub async fn detect_agent_runtime_candidates_inner(
     let mut ranked_candidates = merge_candidates_by_identity(ranked_candidates);
     fn confidence_rank(confidence: IdentityConfidence) -> u8 {
         match confidence {
-            IdentityConfidence::Exact => 0,
-            IdentityConfidence::High => 1,
-            IdentityConfidence::Medium => 2,
-            IdentityConfidence::Low => 3,
+            IdentityConfidence::High => 0,
+            IdentityConfidence::Medium => 1,
         }
     }
     ranked_candidates.sort_by(|left, right| {

@@ -436,7 +436,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     const candidate = {
       candidateId: 'detected:hermes', detectorId: 'detector.test', provider: 'hermes',
       suggestedAgentId: 'hermes', name: 'Hermes Detected', executable: 'hermes', args: ['acp'], evidence: [],
-      identityConfidence: 'exact', protocolAvailability: 'verified', alreadyImportedAgentId: 'hermes', warnings: [],
+      identityConfidence: 'high', protocolAvailability: 'verified', alreadyImportedAgentId: 'hermes', warnings: [],
     }
     fakeInvoke = new NullFallbackFakeInvoke()
     fakeInvoke.registerMany({
@@ -462,7 +462,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       executable: 'C:\\Agents\\quick-start.exe',
       args: ['acp'],
       evidence: [{ kind: 'path', detail: 'PATH' }],
-      identityConfidence: 'exact',
+      identityConfidence: 'high',
       protocolAvailability: 'not_tested',
       warnings: [],
     }
@@ -510,7 +510,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     const candidate = {
       candidateId: 'detected:ready', detectorId: 'detector.test', provider: 'peri',
       suggestedAgentId: 'ready-agent', name: 'Ready Agent', executable: 'C:\\Agents\\ready.exe',
-      args: ['acp'], evidence: [], identityConfidence: 'exact', protocolAvailability: 'not_tested', warnings: [],
+      args: ['acp'], evidence: [], identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
     }
     fakeInvoke = new NullFallbackFakeInvoke()
     fakeInvoke.registerMany({

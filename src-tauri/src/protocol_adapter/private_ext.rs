@@ -1,6 +1,6 @@
 //! Closed provider-specific parser/builder boundary.
-use crate::{plan_policy, question_policy};
 use agent_client_protocol_schema::v1::{CreateElicitationRequest, ElicitationScope};
+use pylon_acp::{plan_policy, question_policy};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -13,8 +13,8 @@
 //      （单向覆盖：这些码在前端表中散布多节且与其它词表源共用，无法精确切节）。
 //
 // 纪律语义：前端镜像 Rust **封闭词表本身**，而非产生频率——`#[allow(dead_code)]`
-// 预留变体（firstTokenTimeout 等）保留映射；无产生点但被裁定豁免保留的变体
-// （pending_lock_poisoned，见 engine/prompt_wait.rs 文档注释）两侧同轮摘除，谁先动谁红灯。
+// 预留变体（firstTokenTimeout 等）保留映射；无产生点变体不留前端词条（先例：
+// #425 摘除 pending_lock_poisoned——#348 返工裁定的临时豁免解除，两侧同轮）。
 //
 // 只读解析 Rust 源文本，不要求 rust 工具链；解析器自带合成输入自测（对齐
 // check-ipc-contract 的 --self-test 精神）。Rust 侧重构了枚举/匹配臂的书写
