@@ -531,8 +531,19 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     })))
   return Object.freeze({
     ...document,
-    appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
-    appliedRanges: document.appliedRanges === previous?.appliedRanges && Object.isFrozen(document.appliedRanges) ? document.appliedRanges : Object.freeze(document.appliedRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number])),
+    // #440-b：这两处曾是 #204③ 的漏网——live 每个 coverage 事件投影器都新建数组
+    // （`mergeCoverage` / `[...appliedEventIds, id]`）⇒ 引用必失配 ⇒ 这里整表拷贝 +
+    // 逐项冻结（O(R)，live-l 实测 12.7ms/事件的大头）。改与 messages 同款：引用相等
+    // 沿用；引用不同时小数组维持整体冻结原契约，大数组走 #204③ 的解冻基线——
+    // 数组可变性由投影器 COW 纪律承担（折完即弃的工作数组，无第二写入者）。
+    appliedEventIds: document.appliedEventIds === previous?.appliedEventIds
+      ? document.appliedEventIds
+      : freezeLargeAware(document.appliedEventIds),
+    appliedRanges: document.appliedRanges === previous?.appliedRanges
+      ? document.appliedRanges
+      : document.appliedRanges.length <= FROZEN_ARRAY_ELEMENT_LIMIT
+        ? Object.freeze(document.appliedRanges.map(range => Object.freeze([range[0], range[1]]) as readonly [number, number]))
+        : document.appliedRanges,
     timeline: freezeItems(document.timeline, previous?.timeline),
     messages: freezeItems(document.messages, previous?.messages, freezeDeepSnapshot),
     activities: freezeItems(document.activities, previous?.activities, freezeDeepSnapshot),
