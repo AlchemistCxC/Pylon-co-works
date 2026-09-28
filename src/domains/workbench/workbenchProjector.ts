@@ -439,7 +439,7 @@ export function reduceWorkbenchEvent(
   const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
     ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
     : envelope
-  const timeline = insertBySequence(document.timeline, timelineEntry(effective))
+  const timeline = insertBySequence(document.timeline, timelineEntry(effective, narrowingEnabled(undefined)))
   let next: WorkbenchDocument = {
     ...document,
     revision: Math.max(document.revision, envelope.sequence),
@@ -454,7 +454,7 @@ export function reduceWorkbenchEvent(
 
 export function projectWorkbench(
   events: readonly WorkbenchEventEnvelope[],
-  options: { readonly initialDocument?: WorkbenchDocument } = {},
+  options: { readonly initialDocument?: WorkbenchDocument; readonly narrowTimelinePayload?: boolean } = {},
 ): ProjectionResult {
   // #205：冷重放的 journal 行本就有序（SQL ORDER BY sequence）——已升序时直接用入参，
   // 省掉一份整集合拷贝 + 一次排序；乱序输入（live 缓冲折入）仍走同一排序语义。
@@ -529,7 +529,7 @@ export function projectWorkbench(
     const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
       ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
       : envelope
-    const entry = timelineEntry(effective)
+    const entry = timelineEntry(effective, narrowingEnabled(options.narrowTimelinePayload))
     const tail = timeline.at(-1)
     // 升序输入下恒走 push（入口已排序 ⇒ 不中插）；乱序兜底仍是同一插入语义。
     if (!tail || tail.sequence <= entry.sequence) timeline.push(entry)
@@ -1708,11 +1708,22 @@ function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<s
  */
 const NARROWED_TIMELINE_KINDS: readonly WorkbenchTimelineKind[] = ['tool', 'activity']
 
-/** #375-a 的全局开关：默认收窄；宿主在 bind 时按逃生口置位（投影核本身保持纯函数）。 */
-let narrowTimelinePayload = true
+/** #375-a 的宿主默认开关：默认收窄；宿主（agentWorkbenchSession）按 DOM 逃生口置位。
+ * 投影核的确定性以「显式 options 优先」保证——同一入参 + 同一 options ⇒ 同一输出；
+ * 未传 options 时沿用宿主默认（结构审查 B-8：全局可变状态改为默认值语义）。 */
+let hostNarrowTimelinePayloadDefault = true
 
 export function setTimelinePayloadNarrowing(enabled: boolean): void {
-  narrowTimelinePayload = enabled
+  hostNarrowTimelinePayloadDefault = enabled
+}
+
+/** 投影 options：narrowTimelinePayload 显式传入时覆盖宿主默认（测试/工具不再依赖进程级状态）。 */
+export interface WorkbenchReduceOptions {
+  readonly narrowTimelinePayload?: boolean
+}
+
+function narrowingEnabled(explicit?: boolean): boolean {
+  return explicit ?? hostNarrowTimelinePayloadDefault
 }
 
 /**
@@ -1772,7 +1783,7 @@ function narrowTimelineData(event: unknown): unknown {
   return freezeDeepSnapshot(narrowed)
 }
 
-function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {
+function timelineEntry(envelope: WorkbenchEventEnvelope, narrowTimelinePayload: boolean): WorkbenchTimelineEntry {
   const event = envelope.event
   const kind: WorkbenchTimelineKind = event.type.startsWith('message.') ? 'message'
     : event.type.startsWith('reasoning.') ? 'reasoning'

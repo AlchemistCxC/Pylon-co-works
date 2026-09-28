@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createWorkbenchDocument,
+  projectWorkbench,
   reduceWorkbenchEvent,
   setTimelinePayloadNarrowing,
   toolInvocationSnapshot,
@@ -96,6 +97,22 @@ describe('#375-a timeline.data 收窄（tool / activity 族）', () => {
     ])
     const entry = document.timeline.find(item => item.kind === 'session')
     expect((entry!.data as { options?: unknown }).options).toEqual([{ id: 'model', value: 'm' }])
+  })
+
+  it('批量回放入口的显式 options 覆盖宿主默认，不触碰进程级状态（结构审查 B-8）', () => {
+    // 宿主默认保持收窄（true）；批量入口传显式 false ⇒ 整份事件，且不污染后续用例
+    const bigParts = [{ kind: 'text' as const, text: 'y'.repeat(1024) }]
+    const env = envelope(1, { type: 'tool.started', tool: { name: 'Bash', parts: bigParts } } as unknown as WorkbenchSemanticEvent, 'call-opt')
+    const initial = createWorkbenchDocument(base.sessionId)
+    const result = projectWorkbench([env], { narrowTimelinePayload: false })
+    const data = result.document.timeline.find(item => item.kind === 'tool')!.data as Record<string, unknown>
+    expect((data.tool as Record<string, unknown>).parts).toEqual(bigParts)
+    expect(data.payloadKeys).toBeUndefined()
+    // 全局默认未被这次显式选项改动
+    const narrowed = reduce([env])
+    const narrowedData = narrowed.timeline.find(item => item.kind === 'tool')!.data as Record<string, unknown>
+    expect(narrowedData.payloadKeys).toBeDefined()
+    void initial
   })
 
   it('逃生口关掉收窄后 timeline.data 回到整份语义事件', () => {
