@@ -5,6 +5,16 @@
 //! `parse_permission_request_with_generation` / `resolve_pending` 完全一致）；
 //! 未注册 provider 由调用方明确返回 unsupported、
 //! runtime-log 可观察，不生成 RPC（交接纪律：不生成未经实证的 Hermes/新 Agent response）。
+//!
+//! #424：注册面单一真源是下方 method 键控表（值 = per-provider 槽）；
+//! [`private_ext`]（provider 方言信封：私有方法名映射 / PrivateBridge /
+//! queue_kind / 应答构造 / elicitation 解析投影）与 [`interaction_bridge`]
+//! （私有交互超时裁决表）自 pylon-acp 迁入本域——引擎 crate 不携带 vendor
+//! 方言，通用 wire 解析正身仍在 pylon-acp（`adapter::permission_wire` 与
+//! `question_policy`/`plan_policy`）。
+
+pub(crate) mod interaction_bridge;
+pub(crate) mod private_ext;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
@@ -251,17 +261,21 @@ async fn respond_request_permission(
 
 type AdapterRef = Arc<dyn AgentProtocolAdapter>;
 
-static PROTOCOL_ADAPTERS: OnceLock<Mutex<HashMap<String, AdapterRef>>> = OnceLock::new();
-/// #98：方法键控 dispatch 注册表——core dispatch（请求受理与应答路由）按 ACP
-/// method 查找适配器，provider 名称不再是 gate。provider 键控表仅保留给
-/// 诊断 catalog 投影（build_protocol_adapter_catalog）。
-static PROTOCOL_METHOD_ADAPTERS: OnceLock<Mutex<HashMap<String, AdapterRef>>> = OnceLock::new();
+/// per-provider 槽：同 method 下 provider（normalized）→ adapter。
+type ProviderSlots = BTreeMap<String, AdapterRef>;
+/// method 键控注册表：method → per-provider 槽。
+type MethodAdapterTable = HashMap<String, ProviderSlots>;
 
-fn registry() -> &'static Mutex<HashMap<String, AdapterRef>> {
-    PROTOCOL_ADAPTERS.get_or_init(|| Mutex::new(HashMap::new()))
-}
+/// #98/#424：method 键控 dispatch 注册表——**单一注册面**。值是 per-provider
+/// 槽（method → provider → adapter），保留同 method 多 provider 注册事实
+/// （run() 里 peri/hermes 双注册 `session/request_permission`，旧
+/// last-writer-wins 形态会把它坍缩成一条）。core dispatch（请求受理与应答
+/// 路由）按 ACP method 查找，provider 名称不是 gate；catalog 诊断投影与
+/// provider 视图（`get_protocol_adapter`）自本表反向派生——#416 时反向投影
+/// 因坍缩翻假而被搁置，per-provider 槽使其还原为无损。
+static PROTOCOL_METHOD_ADAPTERS: OnceLock<Mutex<MethodAdapterTable>> = OnceLock::new();
 
-fn method_registry() -> &'static Mutex<HashMap<String, AdapterRef>> {
+fn method_registry() -> &'static Mutex<MethodAdapterTable> {
     PROTOCOL_METHOD_ADAPTERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -345,35 +359,46 @@ pub(crate) fn looks_like_interaction_method(method: Option<&str>) -> bool {
     .any(|needle| words.iter().any(|word| word == needle))
 }
 
-/// 注册协议适配器（应用启动时；同 provider / 同 method 重复注册覆盖）。
-/// 同时登记 provider 键控（诊断视图）与方法键控（dispatch 真源）两张表。
+/// 注册协议适配器（应用启动时；同 method 同 provider 重复注册覆盖，幂等）。
+/// 注册面是 method 表 per-provider 槽：适配器按其 `interaction_methods()`
+/// 逐 method 占槽；`interaction_methods()` 为空的适配器无协议面、不占任何槽
+/// （现状生产无此类适配器，trait 默认值仅为第三方源兼容保留）。
 pub(crate) fn register_protocol_adapter(adapter: AdapterRef) {
-    let _ = registry().lock().map(|mut adapters| {
-        adapters.insert(normalize_provider(adapter.provider()), adapter.clone())
-    });
     if let Ok(mut by_method) = method_registry().lock() {
+        let provider = normalize_provider(adapter.provider());
         for method in adapter.interaction_methods() {
-            by_method.insert((*method).to_string(), adapter.clone());
+            by_method
+                .entry((*method).to_string())
+                .or_default()
+                .insert(provider.clone(), adapter.clone());
         }
     }
 }
 
 /// 按 provider 取适配器（诊断/catalog 视图与测试用；dispatch 不再经此路径）。
+/// 自 method 表槽扫描派生：provider 持有任何 method 槽即视为已注册。
 #[allow(dead_code)] // dispatch 已方法键控（#98）；provider 视图保留给测试与诊断
 pub(crate) fn get_protocol_adapter(provider: &str) -> Option<AdapterRef> {
-    registry()
-        .lock()
-        .ok()
-        .and_then(|adapters| adapters.get(&normalize_provider(provider)).cloned())
+    let provider = normalize_provider(provider);
+    method_registry().lock().ok().and_then(|registry| {
+        registry
+            .values()
+            .flat_map(|slots| slots.get(&provider))
+            .next()
+            .cloned()
+    })
 }
 
 /// #98：按 ACP method 取适配器——dispatch 真源。任何 agent 的请求只要方法
-/// 已注册即受理，与 provider 名称无关。
+/// 已注册即受理，与 provider 名称无关。#424 起同 method 多 provider 槽并存，
+/// 取键序首槽确定性应答——现网 peri/hermes 审批 wire 逐字段一致（R2-WI06
+/// 源码实证），槽选择不进入 wire；provider 键序同时保证 catalog 投影可复现。
 pub(crate) fn get_protocol_adapter_for_method(method: &str) -> Option<AdapterRef> {
-    method_registry()
-        .lock()
-        .ok()
-        .and_then(|adapters| adapters.get(method).cloned())
+    method_registry().lock().ok().and_then(|adapters| {
+        adapters
+            .get(method)
+            .and_then(|slots| slots.values().next().cloned())
+    })
 }
 
 /// Stable list used by both the dispatcher probe and the diagnostics command.
@@ -441,34 +466,40 @@ pub(crate) fn build_protocol_adapter_catalog(
         .map(|profile| (normalize_provider(&profile.provider), profile))
         .collect::<BTreeMap<_, _>>();
 
-    let registered = registry()
-        .lock()
-        .map_err(|error| error.to_string())?
-        .values()
-        .map(|adapter| {
-            (
-                normalize_provider(adapter.provider()),
-                (
-                    adapter.provider().to_string(),
-                    adapter
-                        .interaction_methods()
-                        .iter()
-                        .map(|method| (*method).to_string())
-                        .collect::<Vec<_>>(),
-                    adapter
-                        .response_methods()
-                        .iter()
-                        .map(|method| (*method).to_string())
-                        .collect::<Vec<_>>(),
-                    adapter
-                        .interaction_kinds()
-                        .iter()
-                        .map(|kind| (*kind).to_string())
-                        .collect::<Vec<_>>(),
-                ),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    // #424：注册源反向投影——provider 视图自 method 表 per-provider 槽派生。
+    // adapter_methods = 该 provider 持槽 method 全集（旧 provider 键控表只留
+    // 该 provider 最后注册的适配器，多适配器时先前声明的 method 会丢）；
+    // response_methods / interaction_kinds 取其各槽适配器并集；display 名
+    // 兜底用槽内适配器 `provider()` 原名。对现网 peri/hermes 单 method 适配器，
+    // 投影结果与旧 provider 键控表逐字段一致。
+    #[derive(Default)]
+    struct RegisteredProviderView {
+        display_name: String,
+        methods: BTreeSet<String>,
+        response_methods: BTreeSet<String>,
+        interaction_kinds: BTreeSet<String>,
+    }
+    let mut registered: BTreeMap<String, RegisteredProviderView> = BTreeMap::new();
+    {
+        let by_method = method_registry()
+            .lock()
+            .map_err(|error| error.to_string())?;
+        for (method, slots) in by_method.iter() {
+            for (provider_key, adapter) in slots {
+                let entry = registered.entry(provider_key.clone()).or_default();
+                if entry.display_name.is_empty() {
+                    entry.display_name = adapter.provider().to_string();
+                }
+                entry.methods.insert(method.clone());
+                entry
+                    .response_methods
+                    .extend(adapter.response_methods().iter().map(|m| (*m).to_string()));
+                entry
+                    .interaction_kinds
+                    .extend(adapter.interaction_kinds().iter().map(|k| (*k).to_string()));
+            }
+        }
+    }
 
     let mut configured_by_provider = BTreeMap::<String, Vec<String>>::new();
     if let Some(agents) = configured_agents {
@@ -509,13 +540,13 @@ pub(crate) fn build_protocol_adapter_catalog(
             let baseline = baseline_by_provider.get(&provider).cloned();
             let registered_entry = registered.get(&provider);
             let adapter_methods = registered_entry
-                .map(|entry| dedup_sorted(entry.1.clone()))
+                .map(|entry| dedup_sorted(entry.methods.clone()))
                 .unwrap_or_default();
             let adapter_response_methods = registered_entry
-                .map(|entry| dedup_sorted(entry.2.clone()))
+                .map(|entry| dedup_sorted(entry.response_methods.clone()))
                 .unwrap_or_default();
             let adapter_kinds = registered_entry
-                .map(|entry| dedup_sorted(entry.3.clone()))
+                .map(|entry| dedup_sorted(entry.interaction_kinds.clone()))
                 .unwrap_or_default();
             let response_methods = dedup_sorted(
                 baseline
@@ -536,7 +567,7 @@ pub(crate) fn build_protocol_adapter_catalog(
             let display_name = baseline
                 .as_ref()
                 .map(|profile| profile.display_name.clone())
-                .or_else(|| registered_entry.map(|entry| entry.0.clone()))
+                .or_else(|| registered_entry.map(|entry| entry.display_name.clone()))
                 .unwrap_or_else(|| provider.clone());
             let configured_agent_ids = configured_by_provider
                 .get(&provider)
@@ -722,6 +753,42 @@ mod tests {
             .recognized_methods
             .iter()
             .any(|method| method == "fs/write_text_file"));
+    }
+
+    /// #424：注册面单一真源在 method 表（per-provider 槽）后，peri/hermes 对
+    /// `session/request_permission` 的双注册事实不再被 last-writer-wins 坍缩，
+    /// catalog 反向投影对两 provider 的 adapter_registered 均为真值——#416
+    /// 时曾因坍缩翻假而搁置反向投影，本用例钉住其不再回退。
+    #[test]
+    fn catalog_reverse_projection_keeps_both_providers_registered() {
+        register_protocol_adapter(Arc::new(RequestPermissionAdapter { provider: "peri" }));
+        register_protocol_adapter(Arc::new(RequestPermissionAdapter { provider: "hermes" }));
+        let catalog = build_protocol_adapter_catalog(None).expect("catalog must build");
+        for provider in ["peri", "hermes"] {
+            let entry = catalog
+                .providers
+                .iter()
+                .find(|entry| entry.provider == provider)
+                .unwrap_or_else(|| panic!("{provider} must be present in catalog"));
+            assert!(
+                entry.adapter_registered,
+                "{provider} adapter_registered must be true"
+            );
+            assert!(
+                entry
+                    .adapter_methods
+                    .iter()
+                    .any(|method| method == "session/request_permission"),
+                "{provider} adapter_methods must keep session/request_permission"
+            );
+            assert!(entry
+                .interaction_kinds
+                .iter()
+                .any(|kind| kind == "approval"));
+        }
+        // method 表本身保留双槽（分派真源与诊断同表，不再互相坍缩）。
+        assert!(get_protocol_adapter("peri").is_some());
+        assert!(get_protocol_adapter("hermes").is_some());
     }
 
     #[test]

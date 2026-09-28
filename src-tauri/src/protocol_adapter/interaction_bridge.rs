@@ -1,12 +1,13 @@
-//! 交互桥知识收敛缝（#416 W2 wave2 步骤 6，§4.3.1 A 档起步）：桥的裁决类纯
-//! 知识从宿主 permission.rs 下沉至引擎 crate，与 private_ext（解析/构造）同域。
-//! 本模块先行落位「超时默认动作」裁决表（`InteractionBridge::timeout_response`
-//! 的函数形态种子）；桥的应答构造（build_response）与准入投影（admit）涉及
-//! 宿主应答输入类型与 store 生命周期，按 §4.3 后续步骤迁移。
+//! 交互桥知识收敛缝（#416 W2 wave2 步骤 6 起步，#424 随 private_ext 迁宿主
+//! protocol_adapter 域）：私有交互「超时默认动作」裁决表。本模块与
+//! private_ext（解析/构造）同域，唯一生产消费者是宿主 permission.rs 的超时
+//! sweep——跨 crate 留在引擎侧即 vendor 方言泄漏，故随迁。桥的应答构造
+//! （build_response）与准入投影（admit）涉及宿主应答输入类型与 store 生命
+//! 周期，按 #416 §4.3 后续步骤迁移。
 
 use super::private_ext::PrivateBridge;
-use crate::plan_policy;
-use crate::question_policy;
+use pylon_acp::plan_policy;
+use pylon_acp::question_policy;
 
 /// #356：私有交互超时的默认回包（产品裁决落在这一处）。
 /// 语义基准：**超时 = 用户未应答**，回包必须取各桥的**非承诺值**——

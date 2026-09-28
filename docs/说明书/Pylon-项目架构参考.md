@@ -104,7 +104,7 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：`engine/`（mod/inbound/outbound/prompt_wait，#416 拆分）/client/negotiated/replay/wire trace/policies/`adapter/`（private_ext 方言信封 + permission_wire + interaction_bridge）；spawn 入口在 `process.rs`；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine/mod.rs`、`client.rs`、`negotiated.rs` |
+| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：`engine/`（mod/inbound/outbound/prompt_wait，#416 拆分）/client/negotiated/replay/wire trace/policies/`adapter/`（permission_wire 官方审批 wire 解析正身；provider 方言信封 private_ext 与超时裁决 interaction_bridge 已随 #424 迁宿主 `src-tauri/src/protocol_adapter/`）；spawn 入口在 `process.rs`；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine/mod.rs`、`client.rs`、`negotiated.rs` |
 | `src-tauri/src/agent_config` | agents.yaml 读取/补丁/config 域原子事务编排（AgentDef 值类型在 pylon-core）；通用原子写正身在 `pylon-foundations/src/atomic_write.rs`（#317 批次二） | Rust Kernel | `load.rs`、`patch.rs`、`atomic_write.rs` |
 | `src-tauri/pylon-session` | 会话存储核：canonical event / message / user_data 仓库、retention、turn 聚合（rusqlite，零 tauri） | 可复用 Kernel library | `event_repo/`、`msg_repo/`、`error.rs`（SessionError） |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
