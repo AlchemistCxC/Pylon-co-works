@@ -398,6 +398,71 @@ impl Drop for ManagedChild {
     }
 }
 
+/// 启动子进程（两后端共用）：preflight + `LaunchPlan` + `ManagedChild`。
+///
+/// A2：exe/args/cwd/env 全部来自 `plan_launch` 产出的 `LaunchPlan`，本函数不再
+/// 内联拼装任何 provider 差异；唯一保留的 provider 侧步骤是托管运行时适配器
+/// （需现查 PATH/Git Bash，无法离线进 plan），它在 plan 应用之后以显式适配器
+/// 形式运行，不再是 spawn 代码内散落的 provider 分支。
+///
+/// 进程归属不变（Windows Job Object / taskkill / Drop 均在 `ManagedChild`）。
+pub async fn spawn_agent_child(
+    agent: &pylon_core::agent_config::AgentDef,
+    base_dir: Option<&std::path::Path>,
+) -> Result<super::ManagedChild, AcpError> {
+    use std::process::Stdio;
+
+    if (agent.exe.contains('/') || agent.exe.contains('\\'))
+        && !std::path::Path::new(&agent.exe).is_file()
+    {
+        return Err(super::error::AgentConnectFailure::preflight(
+            "agent_executable_missing",
+            format!(
+                "agent {} 的 exe 路径不存在：{}（请在 设置 → Agent 中修改 agents.yaml 配置）",
+                agent.name, agent.exe
+            ),
+        )
+        .into());
+    }
+    let hermes_runtime = pylon_core::hermes::runtime::prepare(agent)
+        .await
+        .map_err(|error| super::error::AgentConnectFailure::preflight(error.code, error.message))?;
+    // 托管运行时要现查 PATH 与 Git Bash，无法离线进入 plan；它作为显式的运行时
+    // 适配器在 plan 之后应用。plan 仍拥有 argv/cwd/per-agent env/HERMES_HOME。
+    let plan = super::launch_plan::plan_for_agent(agent, base_dir, &Default::default(), Vec::new())
+        .map_err(|error| {
+            super::error::AgentConnectFailure::preflight(
+                "agent_launch_plan_invalid",
+                error.to_string(),
+            )
+        })?;
+    for diagnostic in &plan.diagnostics {
+        tracing::debug!(
+            provider = %plan.provider,
+            owner_key = %plan.owner_key,
+            code = %diagnostic.code,
+            "agent launch plan: {}",
+            diagnostic.message
+        );
+    }
+    // #353：plan→Command 的 Windows 特调（`.cmd`/`.bat` ∧ UNC cwd 的 pushd 绕行、
+    // spawn 期裸名解析）收在 windows_launch 一处。plan（argv/cwd/env）在该处恰好
+    // 应用一次，UTF-8 默认先于 plan env、控制台隐藏也由它承载——#386 曾因此处
+    // 再 apply 一次把 argv 翻倍（hermes 收到 `acp acp` 连不上）。
+    let mut cmd = super::windows_launch::agent_command(&plan);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(selection) = hermes_runtime.as_ref() {
+        pylon_core::hermes::runtime::apply_to_command(&mut cmd, agent, selection);
+    }
+    // #363-2：另线程 fork→exec 窗口内的 ETXTBSY 在预算内重试；其余错误一次即返。
+    let child = super::process::spawn_retrying_exec_busy(|| cmd.spawn())
+        .await
+        .map_err(|error| super::error::AgentConnectFailure::spawn(&agent.exe, error))?;
+    Ok(super::ManagedChild::new(child))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

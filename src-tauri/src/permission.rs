@@ -11,65 +11,22 @@ use crate::acp::RequestId;
 use crate::dispatcher::resolve_agent_provider;
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
-use crate::runtime_log;
 use crate::time::Timestamp;
 use crate::AppState;
 
-/// 权限请求事件中 prompt 的安全上限（B9.4：事件不含完整 secret 载荷）。
-const PERMISSION_PROMPT_MAX_CHARS: usize = 500;
+// #416 W2 wave2 步骤 5（§4.4.4 第一步）：request_permission 的 wire 纯函数
+// （parse/build 正身与 PendingPermission/PermissionOption 类型）已下沉引擎
+// crate `pylon-acp/src/adapter/permission_wire.rs`——本模块经 `pub(crate) use`
+// 再导出，全部既有 `crate::permission::` 消费路径不变（脱敏/时间戳经
+// pylon-foundations 同一实现，逐字节同行为）。
+pub(crate) use pylon_acp::adapter::permission_wire::{
+    parse_permission_request_with_generation, permission_response, permission_response_cancelled,
+    PendingPermission, PermissionOption,
+};
+
 /// 挂起的权限请求超时（B9.2：超时默认拒绝）。
 const PERMISSION_REQUEST_TIMEOUT_SECS: u64 = 300;
 
-/// ACP-02（§5.5）：wire option 项的后端保留形态。
-///
-/// `option_id` 是唯一协议值（response 必须回写原值，禁止正规化/小写化）；
-/// `kind`/`name` 仅供 UI 分类与展示，不参与应答；`raw` 保留原文供前端宽容读取。
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PermissionOption {
-    pub option_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub raw: Option<serde_json::Value>,
-}
-
-impl PermissionOption {
-    /// 仅携带 optionId 的选项（测试与精简构造）。
-    #[allow(dead_code)] // 测试便捷构造器（permission/protocol_adapter 测试使用）
-    pub(crate) fn plain(option_id: impl Into<String>) -> Self {
-        Self {
-            option_id: option_id.into(),
-            kind: None,
-            name: None,
-            raw: None,
-        }
-    }
-}
-
-/// 挂起的权限请求（B9，Peri agent 实证方向：agent 主动 request_permission，客户端应答）。
-#[derive(Clone)]
-pub(crate) struct PendingPermission {
-    pub session_id: String,
-    pub tool_call_id: String,
-    pub title: String,
-    /// raw_input 脱敏摘要（事件安全字段，不含完整载荷）。
-    pub prompt: String,
-    /// 可用选项 option_id（allow_once/reject_once/...），应答时校验。
-    pub options: Vec<PermissionOption>,
-    /// C4：应答身份复核——解析时记录的 client_generation。客户端替换
-    /// （generation 前进）后，旧进程的应答决策不得误写新进程同 id 请求。
-    pub client_generation: u64,
-    /// R4：Timestamp（事件 payload 序列化为字符串，契约不变）。
-    pub requested_at: Timestamp,
-}
-
-/// 解析 agent 的 request_permission 请求参数（B9）：
-/// `{ sessionId, toolCall: { toolCallId, title?, rawInput? }, options: [{ optionId, ... }] }`。
-/// 解析失败（缺字段/无选项）返回 None——调用方按 protocol error 处理（ACP-04
-/// §5.6：JSON-RPC error 应答，不伪造 optionId）。
 /// 兼容入口（仅 lib.rs 测试调用，无 runtime 上下文）：client_generation 置 0——
 /// 生产路径（dispatcher）必须走 [`parse_permission_request_with_generation`]。
 #[cfg(test)]
@@ -77,85 +34,6 @@ pub(crate) fn parse_permission_request(
     params: Option<&serde_json::Value>,
 ) -> Option<PendingPermission> {
     parse_permission_request_with_generation(params, 0)
-}
-
-/// C4：带 client_generation 的解析入口——记录请求到达时的身份 generation，
-/// 应答时复核（见 [`respond_permission`]）。
-pub(crate) fn parse_permission_request_with_generation(
-    params: Option<&serde_json::Value>,
-    client_generation: u64,
-) -> Option<PendingPermission> {
-    let params = params?;
-    let session_id = params.get("sessionId")?.as_str()?.to_string();
-    let tool_call = params.get("toolCall")?;
-    let tool_call_id = tool_call.get("toolCallId")?.as_str()?.to_string();
-    let title = tool_call
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let raw_input = tool_call
-        .get("rawInput")
-        .map(serde_json::Value::to_string)
-        .unwrap_or_default();
-    let prompt: String = runtime_log::sanitize_message(&raw_input)
-        .chars()
-        .take(PERMISSION_PROMPT_MAX_CHARS)
-        .collect();
-    // ACP-02（§5.5）：typed options——optionId 原值保留（禁止正规化），
-    // kind/name 宽容保留（未知 kind 不丢弃，交前端显示），raw 原样透传。
-    let options: Vec<PermissionOption> = params
-        .get("options")?
-        .as_array()?
-        .iter()
-        .filter_map(|option| {
-            let option_id = option.get("optionId")?.as_str()?.to_string();
-            Some(PermissionOption {
-                option_id,
-                kind: option
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                name: option
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                raw: option.get("raw").cloned(),
-            })
-        })
-        .collect();
-    if options.is_empty() {
-        return None;
-    }
-    Some(PendingPermission {
-        session_id,
-        tool_call_id,
-        title,
-        prompt,
-        options,
-        client_generation,
-        requested_at: Timestamp::now(),
-    })
-}
-
-/// 构造 request_permission 应答（官方 schema 类型保证 wire 格式）。
-pub(crate) fn permission_response(option_id: &str) -> serde_json::Value {
-    use agent_client_protocol_schema::v1::{
-        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
-    };
-    serde_json::to_value(RequestPermissionResponse::new(
-        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id.to_string())),
-    ))
-    .unwrap_or_else(|_| serde_json::json!({"outcome": {"selected": {"optionId": option_id}}}))
-}
-
-/// request_permission 应答：Cancelled（session/cancel 时必须应答所有挂起请求）。
-pub(crate) fn permission_response_cancelled() -> serde_json::Value {
-    use agent_client_protocol_schema::v1::{RequestPermissionOutcome, RequestPermissionResponse};
-    serde_json::to_value(RequestPermissionResponse::new(
-        RequestPermissionOutcome::Cancelled,
-    ))
-    .unwrap_or_else(|_| serde_json::json!({"outcome": "cancelled"}))
 }
 
 /// C5：按请求提供选项选择应答 option_id（协议合规）——自动批准/超时默认拒绝不再
@@ -429,6 +307,7 @@ fn restore_pending(
                         agent_id: String::new(),
                         client_generation: permission.client_generation,
                         enqueued_at: permission.requested_at,
+                        deadline_ms: Some(permission_deadline_ms(permission.requested_at)),
                         event,
                         state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                     });
@@ -853,6 +732,41 @@ pub(crate) struct TimeoutOutcome {
     pub option_id: String,
 }
 
+/// O37/#98/#316：dead runtime 三处交互存储的统一清理单点——pending_permissions
+/// 清空 + 统一队列 Disconnected 全量 drain + private_interactions 撤销。
+/// #416 W2 wave2（§4.3.3 合一）：权限 sweep 与私有 sweep 的死亡分支共用本函数，
+/// 清理幂等（先到者清空并告警，后到者空转）——两条 sweep 的执行次序不再承载
+/// 清理契约，lib.rs watcher 的调用序仅剩事件广播次序。
+fn clear_dead_runtime_interactions(runtime: &AgentRuntime) {
+    // O37：已死 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
+    // 崩溃/主动停后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
+    // #163：判定用 is_dead（崩溃 ∨ 主动停）——被切走的 agent 同样送不达。
+    let dropped = runtime
+        .pending_permissions
+        .lock()
+        .map(|pending| pending.len())
+        .unwrap_or(0);
+    if dropped > 0 {
+        tracing::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
+    }
+    let _ = runtime
+        .pending_permissions
+        .lock()
+        .map(|mut pending| pending.clear());
+    // #98：崩溃 = 连接已死——队列全量 drain，每个 waiter 拿到 Disconnected
+    // 终态（不悬挂）。
+    let _ = runtime
+        .interactions
+        .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
+    // #316：私有交互（elicitation/ask-user）同批收敛——崩溃后 store 残留
+    // 条目会在 interaction_list 里悬挂到下次 generation 替换。
+    let stale_private = runtime.private_interactions.snapshot().len();
+    if stale_private > 0 {
+        tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
+    }
+    runtime.private_interactions.cancel_all();
+}
+
 /// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
 /// C5：默认拒绝选项按请求提供的选项选择（reject 优先），不再硬编码 reject_once。
 /// O37：已崩溃 runtime 的 pending 永久悬挂（写通道已死，任何应答都不可能送达）
@@ -861,39 +775,13 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) -> Vec<T
     let now = Timestamp::now();
     let mut outcomes = Vec::new();
     for (agent_id, runtime) in state.runtimes.all_with_ids() {
-        // O37：已死 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
-        // 崩溃/主动停后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
-        // #163：判定用 is_dead（崩溃 ∨ 主动停）——被切走的 agent 同样送不达。
         let dead = runtime
             .acp
             .try_lock()
             .map(|acp| acp.is_dead())
             .unwrap_or(false);
         if dead {
-            let dropped = runtime
-                .pending_permissions
-                .lock()
-                .map(|pending| pending.len())
-                .unwrap_or(0);
-            if dropped > 0 {
-                tracing::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
-            }
-            let _ = runtime
-                .pending_permissions
-                .lock()
-                .map(|mut pending| pending.clear());
-            // #98：崩溃 = 连接已死——队列全量 drain，每个 waiter 拿到 Disconnected
-            // 终态（不悬挂）。
-            let _ = runtime
-                .interactions
-                .drain(crate::acp::interaction_queue::InteractionTerminalReason::Disconnected);
-            // #316：私有交互（elicitation/ask-user）同批收敛——崩溃后 store 残留
-            // 条目会在 interaction_list 里悬挂到下次 generation 替换。
-            let stale_private = runtime.private_interactions.snapshot().len();
-            if stale_private > 0 {
-                tracing::warn!("runtime 已崩溃，清空 {stale_private} 条挂起私有交互");
-            }
-            runtime.private_interactions.cancel_all();
+            clear_dead_runtime_interactions(&runtime);
             continue;
         }
         let expired: Vec<(RequestId, String, String, u64, Vec<PermissionOption>)> = runtime
@@ -987,47 +875,24 @@ pub(crate) struct PrivateInteractionTimeoutOutcome {
 }
 
 /// #356：私有交互超时的默认回包（产品裁决落在这一处）。
-/// 语义基准：**超时 = 用户未应答**，回包必须取各桥的**非承诺值**——
-/// - elicitation → `cancel`（用户未作答；`decline` 会断言用户明确拒绝，不成立）；
-/// - grok/pi 问题桥 → 既有 declined 映射（`skip_interview` / `cancelled:true`）；
-/// - exit_plan → `keep_planning`（超时绝不批准，也不代替用户放弃计划）。
-///
-/// 与 `pending_permissions` 的超时默认拒绝（pick_option prefer_reject）同一
-/// 「不悬挂、不批准」取向。
+/// 语义基准与各桥非承诺值表见引擎侧正身
+/// `pylon-acp/src/adapter/interaction_bridge.rs::timeout_default_response`
+/// （#416 W2 wave2 步骤 6 下沉；本包装仅承担宿主错误类型映射）。
 fn private_interaction_timeout_response(
     pending: &crate::private_interaction::PendingPrivateInteraction,
 ) -> Result<serde_json::Value, PylonError> {
-    use crate::acp::adapter::private_ext::PrivateBridge;
-    match pending.bridge {
-        PrivateBridge::Elicitation => {
-            crate::acp::adapter::private_ext::build_elicitation_response("cancel", None)
-        }
-        PrivateBridge::GrokExtQuestions | PrivateBridge::PiSelectAsk => {
-            let questions = pending.question_specs.clone().ok_or_else(|| {
-                PylonError::Protocol("private question request lost validated specs".into())
-            })?;
-            crate::acp::adapter::private_ext::build_question_response(
-                pending.bridge,
-                &questions,
-                &crate::acp::question_policy::QuestionAnswer {
-                    answers: Vec::new(),
-                    declined: true,
-                },
-            )
-        }
-        PrivateBridge::GrokExitPlan => Ok(crate::acp::plan_policy::approval_response(
-            "keep_planning",
-            "",
-        )),
-    }
+    pylon_acp::adapter::interaction_bridge::timeout_default_response(
+        pending.bridge,
+        pending.question_specs.as_deref(),
+    )
     .map_err(PylonError::Protocol)
 }
 
 /// #356：挂起私有交互的超时检查——与 `check_pending_permission_timeouts`
 /// 对等的 deadline drain + 向 agent 回包（超时前 agent 会挂等一个永不来的
-/// 响应，可能阻塞其 auth/config 流程）。同一 watcher 每轮先跑权限 sweep，
-/// 死亡 runtime 的 store 残留已由其死亡分支 `cancel_all` 清理，此处跳过
-/// dead runtime 即可。claim 顺序与并发用户应答竞态的裁决：**take() 原子
+/// 响应，可能阻塞其 auth/config 流程）。#416 W2 wave2：死亡 runtime 由本
+/// sweep 自行调 `clear_dead_runtime_interactions` 清理（不再依赖权限 sweep
+/// 先行的隐式次序）。claim 顺序与并发用户应答竞态的裁决：**take() 原子
 /// 抢先**——用户应答先到则本 sweep 拿 None 跳过；本 sweep 先 take 则用户
 /// 侧拿到 not found 由前端 settle（与 route_elicitation_complete 的 P2-2
 /// 语义一致）。发送失败回插 pending，下轮 watcher 重试。
@@ -1043,6 +908,10 @@ pub(crate) async fn check_pending_private_interaction_timeouts(
             .map(|acp| acp.is_dead())
             .unwrap_or(false);
         if dead {
+            // #416 W2 wave2（§4.3.3 合一）：死亡清理收口到
+            // clear_dead_runtime_interactions 单点——本 sweep 不再依赖权限 sweep
+            // 先行的隐式次序（幂等：权限 sweep 已清则此处空转）。
+            clear_dead_runtime_interactions(&runtime);
             continue;
         }
         let expired: Vec<(
@@ -1147,6 +1016,7 @@ mod tests {
                 agent_id: "a1".into(),
                 client_generation: 1,
                 enqueued_at: crate::time::Timestamp::now(),
+                deadline_ms: None,
                 event: serde_json::json!({}),
                 state: crate::acp::interaction_queue::InteractionEntryState::Active,
             });
@@ -1716,6 +1586,7 @@ mod tests {
                 agent_id: agent_id.into(),
                 client_generation: 1,
                 enqueued_at: pending.enqueued_at,
+                deadline_ms: Some(permission_deadline_ms(pending.enqueued_at)),
                 event: serde_json::json!({}),
                 state: crate::acp::interaction_queue::InteractionEntryState::Active,
             });

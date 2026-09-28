@@ -48,7 +48,7 @@ pub use draft::{
     draft_candidate, DraftCandidate, DraftCommitChunk, DraftFragment, DraftFragmentInput,
 };
 pub use error::EventError;
-pub use fold::row_input_span_width;
+pub use fold::{row_input_span_width, MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES};
 pub use normalize::{canonical_event_wire, parse_canonical_event};
 // `EventRepo` 的 crate 内直接消费者（del01/03/05 审计模块）均为 cfg(test)，
 // 非 test 构建下本 re-export 无使用点，属预期。
@@ -61,8 +61,6 @@ pub use row::{
 };
 pub use service::EventService;
 
-#[cfg(test)]
-use fold::MAX_FOLDED_CHUNKS;
 #[cfg(test)]
 use normalize::{mark_replay_import, now_millis};
 #[cfg(test)]

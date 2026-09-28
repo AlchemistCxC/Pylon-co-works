@@ -8,17 +8,21 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use super::reactions::KernelReactionSink;
 use crate::agent::runtime::AgentLifecycleStatus;
 use crate::runtime::AgentRuntime;
 use crate::{emit_event, AppStateHandles};
 
 /// 崩溃处理 + 自动重连权威。字段与原闭包捕获一一对应（见 mod.rs setup 克隆段）。
+/// `reactions` 为产品反应订阅缝（#416 W2 步骤③）——原 `pet::on_agent_crashed`
+/// 直呼点改经 sink（独立方法，非 PetEvent 变体；R2 修正）。
 pub(crate) struct CrashReconnectHandler<R: tauri::Runtime> {
     handles: AppStateHandles,
     agent_runtime: Arc<std::sync::Mutex<crate::agent::runtime::AgentRuntimeState>>,
     window: tauri::Window<R>,
     runtime_for_reconnect: Arc<AgentRuntime>,
     reconnect_epoch: Arc<AtomicU64>,
+    reactions: Arc<dyn KernelReactionSink>,
 }
 
 impl<R: tauri::Runtime> CrashReconnectHandler<R> {
@@ -28,6 +32,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
         window: tauri::Window<R>,
         runtime_for_reconnect: Arc<AgentRuntime>,
         reconnect_epoch: Arc<AtomicU64>,
+        reactions: Arc<dyn KernelReactionSink>,
     ) -> Self {
         Self {
             handles,
@@ -35,6 +40,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
             window,
             runtime_for_reconnect,
             reconnect_epoch,
+            reactions,
         }
     }
 
@@ -74,11 +80,10 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
             runtime_state.status = AgentLifecycleStatus::Crashed;
             runtime_state.last_error = Some(last_error);
         }
-        let _ = self
-            .handles
-            .pet
-            .lock()
-            .map(|mut p| crate::pet::on_agent_crashed(&mut p));
+        // 崩溃感知经订阅缝（原 `pet::on_agent_crashed` 直呼点；调用位置不变——
+        // 状态置 Crashed 之后、AGENT_STATUS 事件之前；sink 实现内单次锁 +
+        // 中毒吸收，与原 `let _ = pet.lock()` 逐位一致）。
+        self.reactions.on_agent_crashed();
         // P2-4：崩溃 payload 复用 agent_status_payload（状态已置 Crashed，
         // 读出的形状与旧手工构造一致：status=crashed/available=false/
         // crashed=true/lastError 注入），不再双份维护同一形状。

@@ -2,7 +2,9 @@
 //!
 //! This module deliberately owns decisions, not side-effect adapters.  The
 //! dispatcher remains responsible for holding the session lock and invoking
-//! Channel/Gateway/Pet adapters after a committed result is available.
+//! Channel/Gateway/reaction-sink adapters after a committed result is available
+//! （#416 W2：产品感知门控不在本决策面——`apply_pet` 字段已删，改由
+//! `KernelReactionSink::wants_live_reactions(class)` 承接）.
 
 use std::sync::Arc;
 
@@ -45,12 +47,13 @@ pub(crate) struct RoutingDecision {
     pub(crate) mutate_session: bool,
     /// Whether an agent message chunk belongs to the current live response.
     pub(crate) collect_response: bool,
-    /// Whether Pet events may be emitted for this event.
-    pub(crate) apply_pet: bool,
     /// Whether the event may enter the durable canonical journal.
     pub(crate) persist_canonical: bool,
     /// Whether the event may be sent to Channel/Gateway after commit.
     pub(crate) publish: bool,
+    // #416 W2：原 `apply_pet: is_live` 产品面字段已删——感知门控改由
+    // `KernelReactionSink::wants_live_reactions(decision.class)` 承接
+    // （门控语义钉在 class==Live：Replay 与 Boundary 均不产感知）。
 }
 
 pub(crate) fn classification_is_replay(classification: ReplayClassification) -> bool {
@@ -74,7 +77,6 @@ pub(crate) fn decide(input: &RoutingInput) -> RoutingDecision {
         variant: input.variant,
         mutate_session: !is_user_chunk && (is_live || (is_replay && !suppressed_during_load)),
         collect_response: is_live && input.variant == Some(SessionUpdateVariant::AgentMessageChunk),
-        apply_pet: is_live,
         persist_canonical: is_live && input.owner.is_some() && !is_user_chunk,
         publish: (is_live || is_replay && !suppressed_during_load) && !is_user_chunk,
     }
@@ -207,7 +209,10 @@ mod tests {
         assert_eq!(decision.class, RoutingClass::Replay);
         assert!(decision.mutate_session);
         assert!(!decision.collect_response);
-        assert!(!decision.apply_pet);
+        // 原 `assert!(!decision.apply_pet)`（#416 W2 字段已删）：Replay 类非
+        // Live，感知门控 `wants_live_reactions(class)` 恒 false（reactions.rs
+        // reaction_gate_drops_replay_and_boundary_frames 钉住）。
+        assert_ne!(decision.class, RoutingClass::Live);
         assert!(!decision.persist_canonical);
         assert!(decision.publish);
     }
@@ -223,7 +228,9 @@ mod tests {
         assert_eq!(decision.class, RoutingClass::Live);
         assert!(decision.mutate_session);
         assert!(decision.collect_response);
-        assert!(decision.apply_pet);
+        // 原 `assert!(decision.apply_pet)`（#416 W2 字段已删）：Live 类下感知
+        // 门控由 sink 的 wants_live_reactions(Live)=true 承接。
+        assert_eq!(decision.class, RoutingClass::Live);
         assert!(decision.persist_canonical);
         assert!(decision.publish);
     }
@@ -264,7 +271,9 @@ mod tests {
         assert_eq!(decision.class, RoutingClass::Boundary);
         assert!(!decision.mutate_session);
         assert!(!decision.collect_response);
-        assert!(!decision.apply_pet);
+        // 原 `assert!(!decision.apply_pet)`（#416 W2 字段已删）：Boundary 类非
+        // Live，感知门控恒 false（R2 修正：终态边界帧同样不产感知）。
+        assert_ne!(decision.class, RoutingClass::Live);
         assert!(!decision.persist_canonical);
         assert!(!decision.publish);
     }

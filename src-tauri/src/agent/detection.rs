@@ -345,12 +345,7 @@ fn configured_fingerprint(configured: &ConfiguredRuntimes) -> String {
         })
         .collect();
     lines.sort();
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in lines.join("\n").as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("fnv1a-{hash:016x}")
+    pylon_core::fnv1a::fnv1a_64_prefixed(lines.join("\n").as_bytes())
 }
 
 #[tauri::command]
@@ -726,5 +721,21 @@ mod store_tests {
             ("hermes".into(), "C:/bin/hermes.exe".into(), vec![]),
         );
         assert_ne!(base, configured_fingerprint(&configured));
+    }
+
+    /// L8 FNV 收编保值断言：哈希值进入 DetectionCacheKey（进而影响缓存命中），
+    /// `fnv1a-` 前缀 + 16 位十六进制是既有输出契约；本字面量与收编前手写循环
+    /// 的输出逐位一致（独立参考实现复核）。
+    #[test]
+    fn configured_fingerprint_keeps_the_verbatim_fnv1a_output() {
+        let mut configured = ConfiguredRuntimes::new();
+        configured.insert(
+            "a".into(),
+            ("peri".into(), "C:/bin/peri.exe".into(), vec!["acp".into()]),
+        );
+        assert_eq!(
+            configured_fingerprint(&configured),
+            "fnv1a-03141af6f159a796"
+        );
     }
 }

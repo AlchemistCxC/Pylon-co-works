@@ -386,12 +386,13 @@ impl AppStateHandles {
             .ok()
             .and_then(|agents| agents.get(&active_agent_id).cloned());
         let crashed = matches!(status, AgentLifecycleStatus::Crashed) || acp_is_crashed(runtime);
-        let status = if crashed {
-            AgentLifecycleStatus::Crashed
-        } else {
-            status
-        };
-        let available = agent.is_some() && status == AgentLifecycleStatus::Connected;
+        // L7 共享判定（W4 R.6 步5，#416 W2 wave2 步骤 9）：「crashed 压过
+        // Connected / available 只看有效 Connected」与 agent_summary_payload
+        // 同一纯函数（lifecycle/summary.rs）；json! 构造与字段序保持本侧原样。
+        let (effective_status, effective_connected) =
+            crate::lifecycle::summary::effective_status_and_connected(crashed, Some(status));
+        let status = effective_status.expect("输入恒为 Some——折叠不产出 None");
+        let available = agent.is_some() && effective_connected;
         let generation = runtime
             .map(|runtime| runtime.client_generation.load(Ordering::Acquire))
             .unwrap_or(0);
@@ -403,19 +404,11 @@ impl AppStateHandles {
         // #98：结构化能力快照（advertised/negotiated/usable 三层 + 诊断）。
         // 与 session 建立/重连探针消费同一矩阵（negotiated.rs from_parts）——
         // 前端只消费 usable，不再自行解析 raw capabilities（fail-closed 一致）。
+        // W1 R.4 PR-2（#416 W2 wave2 步骤 8）：拼装经 acp/mod.rs 共享辅助；
+        // generation 复用上方单次装载（原闭包内二次 Acquire 收敛为一）。
         let capability_snapshot = runtime.and_then(|runtime| {
-            let generation = runtime.client_generation.load(Ordering::Acquire);
             let acp = runtime.acp.try_lock().ok()?;
-            let declared: Vec<String> = acp.establishment_order().to_vec();
-            Some(
-                crate::acp::NegotiatedCapabilitySnapshot::from_parts(
-                    acp.capabilities(),
-                    &declared,
-                    generation,
-                    &crate::acp::negotiated::registered_capability_consumers(),
-                )
-                .wire_value(),
-            )
+            Some(crate::acp::negotiated_snapshot_from_client(&acp, generation).wire_value())
         });
         // #98：pending 交互摘要（含事件载荷全文）——前端冷挂载/刷新只凭本快照
         // + generation 即可恢复 active 卡与 queued 深度，不依赖一次性 live event。
@@ -1508,7 +1501,9 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let state = app_for_watcher.state::<AppState>();
             let outcomes = check_pending_permission_timeouts(state.inner()).await;
-            // #356：私有交互超时 sweep（死亡 runtime 已由权限 sweep 的死亡分支清理）。
+            // #356：私有交互超时 sweep。死亡清理已收口至
+            // clear_dead_runtime_interactions 单点（两条 sweep 各自幂等调用），
+            // 本处两条 sweep 的先后次序不再承载清理契约。
             let private_outcomes = check_pending_private_interaction_timeouts(state.inner()).await;
             if outcomes.is_empty() && private_outcomes.is_empty() {
                 continue;

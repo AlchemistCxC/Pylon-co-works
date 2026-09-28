@@ -9,7 +9,7 @@ use crate::agent_config::AgentDef;
 use crate::error::PylonError;
 use crate::AppState;
 
-pub(super) const AGENT_VALIDATION_TIMEOUT_SECS: u64 = 15;
+use super::budgets::AGENT_VALIDATION_TIMEOUT_SECS;
 
 pub(crate) fn connection_test_error_payload_with_diagnostics(
     error: &AcpError,

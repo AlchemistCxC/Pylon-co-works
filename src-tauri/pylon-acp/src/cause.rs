@@ -49,7 +49,7 @@ pub fn connect_failure_cause(failure: &AgentConnectFailure) -> DiagnosticCause {
 /// 运行时退出 → 统一 cause。code 词表 = `CrashReason::as_str` 的封闭集。
 pub fn crash_reason_cause(reason: CrashReason) -> DiagnosticCause {
     let summary = match reason {
-        // 覆盖双向物理 IO 错误（engine.rs transport_failure_reason：stdin 写
+        // 覆盖双向物理 IO 错误（engine/inbound.rs transport_failure_reason：stdin 写
         // EPIPE 与 stdout 读 IO 错误都归本变体），措辞不写死「写入」。
         CrashReason::WriterFailed => {
             "Agent 进程管道通信失败（stdin 写 / stdout 读物理 IO 错误），连接已按崩溃收敛"

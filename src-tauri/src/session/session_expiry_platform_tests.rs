@@ -166,6 +166,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
             agent_id: String::new(),
             client_generation: 0,
             enqueued_at: Timestamp::now(),
+            deadline_ms: None,
             event: serde_json::json!({}),
             state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
         })
@@ -335,6 +336,7 @@ async fn idle_connection_with_a_pending_interaction_is_exempt() {
             agent_id: String::new(),
             client_generation: 0,
             enqueued_at: Timestamp::now(),
+            deadline_ms: None,
             event: serde_json::json!({}),
             state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
         })

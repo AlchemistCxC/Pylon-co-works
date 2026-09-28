@@ -87,6 +87,10 @@ Rust 侧性能反模式按「clippy 能否机械判定」分两半。执行语�
 6. **无缓冲 IO**：小粒度多次读/写包 `BufReader`/`BufWriter`；一次性 `read_to_end` 不需要。`.bytes()` 已有 lint 拦。
 7. **循环内编译正则**：`Regex::new` 提到 `OnceLock` 静态（#258 先例，`stderr_tail.rs`/`sanitize.rs` 为范式）。
 
+## Rust 时间预算常量（#416 成文）
+
+检测/连接/探测类预算常量归口 `src-tauri/src/lifecycle/budgets.rs`，按三形状词法命名并写明语义：`TotalDeadline`（端到端硬限）、`StageBudget`（阶段预算）、`Ttl`（缓存/快照时效）。新增预算不散落硬编码；改动任何预算**数值**属行为变更，需独立 spec 与 issue（如生产 connect 总预算，见 issue #417）。
+
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。

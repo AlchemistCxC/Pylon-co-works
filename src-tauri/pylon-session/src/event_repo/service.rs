@@ -430,8 +430,11 @@ impl EventService {
         })?
     }
 
-    /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
+    /// #81 L2：compact 读**一次性**（分页读的循环封装）。生产调用方为零
+    /// （`evt_load_compact` 命令走 `load_events_compact_page`），随仓库侧一并
+    /// `#[cfg(test)]` 化（W3 重构批次 P9 清偿；行为零变化）。
     /// `cap_typed_payload` 语义同 `list_events`。
+    #[cfg(test)]
     pub async fn load_events_compact(
         &self,
         owner_key: String,

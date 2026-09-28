@@ -350,6 +350,10 @@ fn get_session_state_for_owner_inner(
 /// localSessionId]——与 event_repo/eventSchema toCanonicalOwnerKey 同纪律，禁止冒号拼接
 /// 与任意字符串污染 tombstone owner）。仅当前端显式传 owner_key 时校验（legacy 调用
 /// None 走哨兵不校验）。
+///
+/// 双入口互引（W3 重构批次）：本函数是**核心校验**（上抛 `SessionError`）；命令层
+/// 包装见 [`validate_delete_owner`]（Option 语义 + 错误映射为
+/// `UserDataError::InvalidOwnerKey`）。两入口语义有意区分，不合并为单函数。
 pub fn validate_owner_key(owner_key: &str) -> Result<(), SessionError> {
     let parsed: serde_json::Value = serde_json::from_str(owner_key)
         .map_err(|error| SessionError::from(format!("owner_key 不是合法 JSON：{error}")))?;
@@ -1057,6 +1061,10 @@ impl MessageService {
 /// DEL-03（§5.13 步骤 1）：命令层 owner_key 校验——Some 时校验格式（3 元素 JSON 数组），
 /// 非法 → `UserDataError::InvalidOwnerKey`（B1.2 code=invalid_owner_key，前端可分支）；
 /// None（legacy 调用）直接放行，走会话作用域 legacy owner。
+///
+/// 双入口互引（W3 重构批次）：本函数是 [`validate_owner_key`] 的**命令层 Option 包装**
+/// （错误类型映射 + None 放行语义）；核心校验规则单点在彼处。两入口语义有意区分，
+/// 不合并为单函数。
 pub fn validate_delete_owner(owner_key: Option<String>) -> Result<Option<String>, UserDataError> {
     if let Some(ref key) = owner_key {
         crate::msg_repo::validate_owner_key(key)
