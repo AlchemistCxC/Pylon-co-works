@@ -13,7 +13,7 @@
  *
  * 纪律（方案书 §2 阶段 M0）：
  * - 只读取证：不修改任何业务语义；三源全部经只读路径采集。
- * - 脱敏导出：镜像 Rust `sanitize.rs` 的 Strip 语义——敏感 key（rawInput/rawOutput/
+ * - 脱敏导出：镜像 Rust `pylon-foundations/src/sanitize.rs` 的 Strip 语义——敏感 key（rawInput/rawOutput/
  *   prompt/persona/headers/env/authorization/password/cookie/credential，以及含
  *   token/apikey/api_key/secret 的键名）整体剔除；字符串值含 secret 形态（分隔符变体 /
  *   sk-、ghp_、xoxb-、akia、eyj 前缀）整体 [REDACTED]。保留工具身份字段（toolCallId/
@@ -51,7 +51,9 @@ function resolveExportSource(sourceName: ExportSource['sourceName']): ExportSour
 }
 
 // ============================================================================
-// 脱敏（镜像 src-tauri/src/sanitize.rs：is_export_sensitive_key + sanitize_value_content）
+// 脱敏（镜像 src-tauri/pylon-foundations/src/sanitize.rs：
+// is_export_sensitive_key + sanitize_value_content；一致性由
+// scripts/sanitize-vocabulary.test.mts 门禁看守）
 // ============================================================================
 
 const REDACTED = '[REDACTED]'
