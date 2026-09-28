@@ -121,6 +121,7 @@ export const ERROR_CODE_EXPLANATIONS: Readonly<Record<string, ErrorCodeExplanati
   config_backup_error: { summary: '写入前的备份步骤失败', hint: '确认配置目录可写', recovery: 'open-agent-settings' },
   config_lock_busy: { summary: '另一处正在写入配置，请稍后重试' },
   config_active_agent_protected: { summary: '不能删除当前正在使用的 Agent', hint: '先切换到别的 Agent 再删除它', recovery: 'open-agent-settings' },
+  config_verification_required: { summary: '保存的启动参数有变更，需要先通过一次连接测试', hint: '在 设置 → Agent 里点「测试连接」成功后再保存（#422 起后端强制）', recovery: 'open-agent-settings' },
   config_not_applied: { summary: '改动已写入磁盘，但当前运行中的配置还没切换过去', hint: '重载配置或重连 Agent 后生效', recovery: 'open-agent-settings' },
 
   // ── ACP 传输（pylon-acp 引擎）──

@@ -219,6 +219,10 @@ pub(crate) struct AppState {
     pub(crate) pylon_cli: Arc<crate::pylon_cli::PylonCliBridge>,
     /// P55：kernel hook 桥（pending oneshot 挂表 + ready 握手 + registry 闸）。
     pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
+    /// #422：连接测试凭证登记（B1 保存门禁后端化）——test_agent_candidate
+    /// 成功握手记录 (agent_id, launch 指纹)；update_agents_config 保存
+    /// launch 指纹变更的候选前查表（无凭证 fail-closed 拒绝）。
+    pub(crate) verified_agent_fingerprints: Arc<lifecycle::verification::VerificationVouchers>,
 }
 
 impl AppState {
@@ -833,6 +837,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         plugin_processes: Arc::new(crate::plugin_process::PluginProcessSupervisor::default()),
         pylon_cli: Arc::new(crate::pylon_cli::PylonCliBridge::default()),
         hook_bridge: Arc::new(crate::hook_bridge::HookBridge::default()),
+        verified_agent_fingerprints: Arc::new(lifecycle::verification::VerificationVouchers::new()),
     }
 }
 

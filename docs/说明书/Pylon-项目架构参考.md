@@ -310,7 +310,7 @@ flowchart TB
 `agents.yaml`（#372 起随包：模板源 `resources/release/agents.template.yaml`，打包时改名），因此发行包首跑的配置来源是
 第 2 档而非第 3 档，效果同为零 Agent 空态，用户在包内即有可编辑的预置入口。
 
-当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1；门禁在设置页前端状态机 `agentDraftMachine` + `AgentRuntimePanel` UI 拦截，后端 `update_agents_config` 仅 revision CAS/active 保护、无凭证校验——后端化为待决策项，见 issue #417）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
+当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。门禁为**前后端双层**（#422 起后端强制）：前端三道门（状态机 `agentDraftMachine` + reducer + `AgentRuntimePanel` UI 拦截）负责交互引导；后端 `update_agents_config` 对 scope=agent/agent_fields 且 launch 指纹（`AgentDef::runtime_fingerprint`，不含 name/default 显示字段）有变更的候选强制校验「该指纹经 `test_agent_candidate` 成功握手」的凭证（进程内指纹登记表，指纹变更才要求新凭证、未变更沿用，无 TTL），无凭证拒绝保存（`config_verification_required`）——绕过 UI 的 CLI / 直接 IPC / 第三方插件同样受限；agent_create 的未验证导入为产品豁免（#425）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 
 ## 10. Plugin Runtime 生命周期
 
