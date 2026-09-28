@@ -6,7 +6,7 @@
  */
 import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs.ts'
 import { toCssBackgroundImage } from '../../infrastructure/skin/backgroundImage.ts'
-import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
+import { fontContributionCssVariable } from '../../contracts/fonts.ts'
 import { VISUAL_SEMANTIC_ROLE_TOKENS, type VisualSemanticRole } from './visualSemantics.ts'
 
 export interface ThemeCssLayout {

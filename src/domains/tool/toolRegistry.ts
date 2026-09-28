@@ -1,23 +1,8 @@
 import type { ToolAction, ToolKind } from './toolKinds.ts'
+import type { ToolRegistryEntry } from './toolRegistryTypes.ts'
+export type { ToolRegistryEntry, ToolRegistryOverlay } from './toolRegistryTypes.ts'
 import { builtinAgentCatalog } from '../agent/agentCatalog.ts'
 
-export interface ToolRegistryEntry {
-  provider: string
-  name: string
-  aliases?: readonly string[]
-  displayName?: string
-  kind: ToolKind
-  action: ToolAction
-  summaryFields?: readonly string[]
-  outputLabel?: 'lines' | 'matches' | 'changed-lines'
-  capabilities?: readonly string[]
-}
-
-export interface ToolRegistryOverlay {
-  upsert?: unknown
-  remove?: unknown
-  aliases?: unknown
-}
 
 export interface EffectiveToolDictionary {
   readonly generation: number

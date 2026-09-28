@@ -23,3 +23,10 @@ export interface FontContribution {
   readonly order?: number
   readonly sample?: string
 }
+
+
+/** 插件贡献字体的 CSS 变量名约定（自 plugin-runtime/fonts/fontContributionRegistry 上收；theme⇄skin 环破除件）。 */
+export function fontContributionCssVariable(id: string): string {
+  const safeId = id.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
+  return `--pylon-font-${safeId || 'invalid'}`
+}

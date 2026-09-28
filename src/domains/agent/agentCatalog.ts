@@ -1,7 +1,7 @@
 import rawCatalog from '../../../shared/agent-catalog.json' with { type: 'json' }
 import type { InteractionKind } from '../activity/activity.ts'
 import type { ToolAction, ToolKind } from '../tool/toolKinds.ts'
-import type { ToolRegistryEntry } from '../tool/toolRegistry.ts'
+import type { ToolRegistryEntry } from '../tool/toolRegistryTypes.ts'
 import type { AgentDescriptor } from './agentContracts.ts'
 
 export interface AgentCatalogDetector {
