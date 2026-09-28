@@ -3,7 +3,7 @@ import { ERROR_CODE_EXPLANATIONS, explainErrorCode } from '../errorCodeExplanati
 
 /**
  * 码表稳定性看守（#325，参照 `pylon-acp/src/error.rs` 的 `wire_codes_are_stable_and_machine_readable`
- * 与 `src/obs06/__tests__/deleteErrorForensics.test.ts` 的封闭词表先例）。
+ * 与 `src/devtools/obs/__tests__/deleteForensics/deleteErrorForensics.test.ts` 的封闭词表先例）。
  *
  * 这张表是错误码解释的**单源**：改动要么是有意扩充（那就同步改本用例的期望集），
  * 要么是误改（这里红灯）。解释文案本身不逐字钉（会随语气调整），只钉「每个码都有解释、
