@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPredictionRateLimiter, findHistoryCompletion, mergeHistory, normalizePredictionText } from '../inputPredictionState.ts'
+import { createPredictionRateLimiter, findHistoryCompletion, mergeHistory, normalizePredictionText } from '../../../../infrastructure/prediction/inputPredictionState.ts'
 
 describe('input prediction state', () => {
   it('chooses the newest history message that extends the prefix', () => {

@@ -7,7 +7,7 @@ import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/w
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
-import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
 
 export interface SolidWorkbenchContextValue {
   input: Accessor<SolidWorkbenchInput>

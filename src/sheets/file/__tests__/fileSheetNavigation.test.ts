@@ -4,7 +4,7 @@ import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useIdentityStore } from '../../../domains/identity/identityStore.ts'
 import { useWorkspaceEntityStore } from '../../../infrastructure/persistence/workspaceEntityStore.ts'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore.ts'
-import { createSheetState } from '../../../workspace-sheets/sheetState.ts'
+import { createSheetState } from '../../../domains/workspace/sheetState.ts'
 import {
   FILE_NAVIGATION_METADATA_KEY,
   openFileLinkFromEvent,

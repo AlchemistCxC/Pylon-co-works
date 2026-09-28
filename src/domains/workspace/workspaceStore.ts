@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { createSheetState, sheetReducer } from '../../workspace-sheets/sheetState.ts'
+import { createSheetState, sheetReducer } from './sheetState.ts'
 import {
   DEFAULT_SHEET_LAYOUT,
   loadSheetStateV2,
@@ -7,10 +7,10 @@ import {
   type PersistedSheetState,
   type SheetLayoutState,
   type SheetWorkspaceState,
-} from '../../workspace-sheets/sheetPersistence.ts'
-import { readShowPet, writeShowPet } from '../../workspace-sheets/showPetPersistence.ts'
+} from './sheetPersistence.ts'
+import { readShowPet, writeShowPet } from './showPetPersistence.ts'
 import { pushTouchedFile, type TouchedFile } from '../../infrastructure/acp/touchedFiles.ts'
-import type { SheetInput, SheetId } from '../../workspace-sheets/sheetTypes.ts'
+import type { SheetInput, SheetId } from '../../contracts/sheets.ts'
 import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
 import { toAgentContextKey } from '../agent/agentContext.ts'
 import { normalizeFilePath } from '../file/fileRelations.ts'

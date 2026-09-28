@@ -5,7 +5,7 @@ import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, Workbe
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
-import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { errorCode, errorMessage } from '../../infrastructure/tauri/errorPayload.ts'
 

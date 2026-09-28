@@ -7,7 +7,7 @@
  * too_many/io）。损坏 DTO/二进制不崩。
  */
 
-import type { WorkspaceEntry, WorkspaceTextPreview, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
+import type { WorkspaceEntry, WorkspaceTextPreview, WorkspaceTree } from '../../contracts/workspaceFiles.ts'
 
 export interface WorkspaceTextResponse {
   relativePath: string

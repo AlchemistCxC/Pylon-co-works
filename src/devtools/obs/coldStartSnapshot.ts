@@ -31,7 +31,7 @@
 
 import type { Session } from '../../domains/identity/identityStore'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes'
-import type { SheetWorkspaceState } from '../../workspace-sheets/sheetPersistence'
+import type { SheetWorkspaceState } from '../../domains/workspace/sheetPersistence'
 import type { AgentStatus } from '../../contracts/agentTypes'
 import type { SessionConfig } from '../../domains/runtime/runtimeStore'
 import type { SessionLiveStats } from '../../domains/chat/sessionRuntime'

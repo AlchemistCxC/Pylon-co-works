@@ -4,7 +4,7 @@
 // #371：增 docs（离线文档站），11 kind。
 // 结构审查 B-2：Sheet 纯类型正身迁 src/contracts/sheets.ts（plugin-runtime 与视图共用），
 // 本文件保留内置 kind 表与 kind 有效性值件。
-import { resolveWorkspace } from '../plugin-runtime/workspaces/workspaceRegistry.ts'
+import { isSheetKind } from '../plugin-runtime/workspaces/workspaceRegistry.ts'
 
 export {
   type SheetContext,
@@ -14,7 +14,6 @@ export {
   type SheetRecord,
   type SidebarMode,
 } from '../contracts/sheets.ts'
-import type { SheetKind } from '../contracts/sheets.ts'
 export type { BuiltinSheetKind } from './sheetKinds.ts'
 
 /** 内置 workspace 种子；动态 kind 的有效性以 Workspace Registry 为准。 */
@@ -32,6 +31,4 @@ export const SHEET_KINDS = [
   'docs',
 ] as const
 
-export function isSheetKind(value: unknown): value is SheetKind {
-  return typeof value === 'string' && resolveWorkspace(value) !== undefined
-}
+export { isSheetKind }

@@ -13,8 +13,8 @@ import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
 import { ASSIST_PREDICTION_CONSUMED_KEY, assistPredictionInstanceKey, assistPredictionText } from '../../../domains/workbench/session/assistPrediction.ts'
-import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from './inputPredictionState.ts'
-import { createPredictionScheduler, type InputPredictionProvider } from './inputPredictionProvider.ts'
+import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from '../../../infrastructure/prediction/inputPredictionState.ts'
+import { createPredictionScheduler, type InputPredictionProvider } from '../../../infrastructure/prediction/inputPredictionProvider.ts'
 import { loadInputPredictionSettings } from '../../../domains/inputPrediction/inputPredictionSettings.ts'
 
 export interface QueuedWorkbenchMessage {

@@ -10,8 +10,8 @@
  */
 import { PROFILE_STORAGE_KEY } from '../domains/identity/profilePersistence'
 import { SESSION_STORAGE_KEY } from '../domains/identity/sessionPersistence'
-import { RETENTION_STORAGE_KEY } from '../components/settings/historyRetentionPolicy'
-import { isRetentionPolicyValid, type RetentionPolicy } from '../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../domains/overview/retentionPolicy.ts'
+import { isRetentionPolicyValid, type RetentionPolicy } from '../domains/overview/retentionPolicy.ts'
 
 export const CONFIG_ENVELOPE_APP = 'pylon'
 export const CONFIG_ENVELOPE_VERSION = 1

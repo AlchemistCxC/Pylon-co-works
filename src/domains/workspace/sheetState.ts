@@ -1,5 +1,6 @@
 import { getSheetRegistryEntry, resolveSheetSingletonKey } from './sheetRegistry.ts'
-import { isSheetKind, type SheetId, type SheetInput, type SheetRecord } from './sheetTypes.ts'
+import {  type SheetId, type SheetInput, type SheetRecord } from '../../contracts/sheets.ts'
+import { isSheetKind } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
 
 export interface SheetState {
   sheets: SheetRecord[]

@@ -13,7 +13,7 @@ import {
   writeRetentionPolicy,
   type RetentionPolicy,
   type StorageLike,
-} from '../historyRetentionPolicy'
+} from '../retentionPolicy.ts'
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
   const data: Record<string, string> = { ...initial }

@@ -12,22 +12,7 @@
 export type FileTabMode = 'file' | 'diff'
 
 
-export interface WorkspaceEntry {
-  path: string
-  label: string
-  kind: 'file' | 'folder'
-  expandable?: boolean
-  entries?: readonly WorkspaceEntry[]
-}
-
-export interface WorkspaceTextPreview {
-  relativePath: string
-  content: string
-  bytesRead: number
-  totalBytes: number
-  truncated: boolean
-  encoding: string
-}
+export type { WorkspaceEntry, WorkspaceTextPreview } from '../../contracts/workspaceFiles.ts'
 
 export interface FileTabRecord {
   path: string

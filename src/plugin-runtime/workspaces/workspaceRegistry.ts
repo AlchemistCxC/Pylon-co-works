@@ -297,3 +297,8 @@ export function beginWorkspaceShadowTransaction(
 ): WorkspaceRegistryTransaction {
   return store.beginShadowTransaction(owner, replacingRuntimeInstanceId)
 }
+
+/** Sheet kind 有效性（原 workspace-sheets/sheetTypes 值件；与 registry 同源防漂移）。 */
+export function isSheetKind(value: unknown): value is string {
+  return typeof value === 'string' && resolveWorkspace(value) !== undefined
+}

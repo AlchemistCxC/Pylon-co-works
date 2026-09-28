@@ -1,18 +1,9 @@
 import { createPredictionRateLimiter, normalizePredictionText, type PredictionRateLimiter } from './inputPredictionState.ts'
+import type { InputPredictionProvider, InputPredictionRequest, PredictionHttpPayload } from '../../contracts/prediction.ts'
 
-export interface InputPredictionRequest {
-  readonly sessionId: string
-  readonly generation?: number
-  readonly draft: string
-  readonly history: readonly string[]
-  /** Canonical bounded conversation transcript (assistant + user turns). */
-  readonly messages?: readonly { role: 'user' | 'assistant'; content: string }[]
-  readonly signal: AbortSignal
-}
+export type { InputPredictionProvider, InputPredictionRequest, PredictionHttpPayload } from '../../contracts/prediction.ts'
 
-export interface InputPredictionProvider {
-  predict(request: InputPredictionRequest): Promise<string | null>
-}
+
 
 export interface HttpPredictionProviderOptions {
   /** Local or remote endpoint that accepts a JSON prediction request. */
@@ -25,13 +16,6 @@ export interface HttpPredictionProviderOptions {
   readonly maxHistoryChars?: number
 }
 
-export interface PredictionHttpPayload {
-  readonly sessionId: string
-  readonly generation?: number
-  readonly draft: string
-  readonly history: readonly string[]
-  readonly messages?: readonly { role: 'user' | 'assistant'; content: string }[]
-}
 
 /**
  * Keep prediction context bounded even when the SQLite transcript is large.

@@ -21,7 +21,7 @@ import { render } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
-import { createSheetState } from '../../../workspace-sheets/sheetState'
+import { createSheetState } from '../../../domains/workspace/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))

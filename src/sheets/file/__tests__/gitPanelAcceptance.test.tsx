@@ -12,7 +12,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
-import { createSheetState } from '../../../workspace-sheets/sheetState'
+import { createSheetState } from '../../../domains/workspace/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 

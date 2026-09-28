@@ -1,6 +1,7 @@
 import { createSheetState, type SheetState } from './sheetState.ts'
-import { isSheetKind, type SheetRecord } from './sheetTypes.ts'
-import { resolveWorkspace } from '../plugin-runtime/workspaces/workspaceRegistry.ts'
+import {  type SheetRecord } from '../../contracts/sheets.ts'
+import { isSheetKind } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
+import { resolveWorkspace } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
 
 // W1-01：schema v1→v2（F1-A 方案 A + F2-B 布局搬家）——9 kind 清洗旧 kind；
 // v2 envelope 加 layout 三字段（sidebarWidth/sidebarCollapsed/rightPanelCollapsed）；
