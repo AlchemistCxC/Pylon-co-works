@@ -17,7 +17,7 @@ import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/tool
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
-import { resolveCcWidgetGroup } from '../../../domains/cc/widgetDefinitions.ts'
+import { resolveCcWidgetGroup, type CcDetachX } from '../../../domains/cc/widgetDefinitions.ts'
 import { parseTranslateOffset } from '../input/ccPlacementCollision.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
@@ -1244,6 +1244,54 @@ describe('mountSolidWorkbench', () => {
     const group = row.querySelector('.cc-status-group')!
     expect(row.querySelector('.cc-widget-separator')).toBeNull()
     expect(group.querySelectorAll('.cc-widget').length).toBe(group.childElementCount)
+  })
+
+  /**
+   * ★★ #266 刀2.5：**声明式脱离**（横向独立定位）。
+   *
+   * 声明位在定义表上（静态真值，`widgetDefinitions.ts` 每行的 `detachX`）⇒ 这里临时声明、
+   * `finally` 收回，测的正是验收项 3/4：「未声明 = 排队」「声明 = 脱离 + 独立贴边」「两件声明到
+   * 同一处 ⇒ 都脱离、互不挤开（允许重叠）」。
+   * ★ 几何（真的叠上去了没）在 jsdom 里量不出来 —— 那是**实机读数**的事；这里锁的是
+   *   类名、内联定位来源与"DOM 结构不因脱离而变"。
+   */
+  it('★ 刀2.5 声明式脱离：未声明 = 排队；声明 = 脱离队列、按声明贴边、可叠', async () => {
+    // ── ① 默认（表里一个都不声明）⇒ 无脱离类；最小宽已暴露（约束值，本刀不消费）──
+    const { host } = mountPreview()
+    await waitFor(() => expect(host.querySelector('.cc-status-group [data-widget-id="tokens"]')).toBeInTheDocument())
+    expect(host.querySelectorAll('.cc-widget.cc-detach-x')).toHaveLength(0)
+    expect(host.querySelector<HTMLElement>('.control-center')!.style.getPropertyValue('--cc-min-width')).toBe('384px')
+
+    // ── ② 声明 tokens 与 mode 贴到同一处（背景板右边内 12px）──
+    const tokensRow = resolveCcWidgetGroup('tokens') as { detachX?: CcDetachX }
+    const modeRow = resolveCcWidgetGroup('mode') as { detachX?: CcDetachX }
+    tokensRow.detachX = { anchor: 'cc-surface', side: 'right', gap: 12 }
+    modeRow.detachX = { anchor: 'cc-surface', side: 'right', gap: 12 }
+    try {
+      const second = mountPreview()
+      await waitFor(() => expect(second.host.querySelector('.cc-status-group [data-widget-id="tokens"]')).toBeInTheDocument())
+      // 只有声明过的两件脱离；其余三件照旧排队（DOM 结构不因脱离而变，脱离只是定位层面的事）
+      expect([...second.host.querySelectorAll('.cc-widget.cc-detach-x')]
+        .map(el => el.getAttribute('data-widget-id')).sort()).toEqual(['mode', 'tokens'])
+      expect([...second.host.querySelectorAll('.cc-status-group [data-widget-id]')]
+        .map(el => el.getAttribute('data-widget-id'))).toEqual(['model', 'reasoning', 'mode', 'tokens', 'cc-command-hint'])
+      // 两件读到的是**同一条声明** ⇒ 定位值逐项相同（同一处叠着，互不挤开）
+      for (const id of ['mode', 'tokens']) {
+        const element = second.host.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)!
+        expect([element.style.left, element.style.right], id).toEqual(['auto', '12px'])
+      }
+      // 队列少两件 ⇒ 最小宽 120 + 132 + 0 = 252；两个脱离组各 12 / 132 ⇒ max 仍是 252
+      expect(second.host.querySelector<HTMLElement>('.control-center')!.style.getPropertyValue('--cc-min-width')).toBe('252px')
+    } finally {
+      delete tokensRow.detachX
+      delete modeRow.detachX
+    }
+
+    // ── ③ 撤回声明 ⇒ 回到队列（"未声明 = 照旧排队"）──
+    const third = mountPreview()
+    await waitFor(() => expect(third.host.querySelector('.cc-status-group [data-widget-id="tokens"]')).toBeInTheDocument())
+    expect(third.host.querySelectorAll('.cc-widget.cc-detach-x')).toHaveLength(0)
+    expect(third.host.querySelector<HTMLElement>('.control-center')!.style.getPropertyValue('--cc-min-width')).toBe('384px')
   })
 
   it('update 不重挂 root，并切换 replay/Session 输入', async () => {

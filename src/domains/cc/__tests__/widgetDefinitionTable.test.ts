@@ -522,3 +522,41 @@ describe('#238 刀5B · 命令行提示已升格为可拖元件', () => {
     expect(CC_FLOATING_WIDGET_IDS).not.toContain('cc-command-hint')
   })
 })
+
+/**
+ * ★★ #266 刀2.5：**横向独立定位声明**（`detachX`）的两条守卫。
+ *
+ * 判据的形态是「行上有没有这个字段」：没有 = 照旧排队（默认排布不变），有 = 脱离横向队列。
+ * 所以这里钉两件事：① 本刀交付时**一个都不声明**（默认排布 = 纯排队，任何件都不许静默脱离）；
+ * ② 真声明时要合法（锚点在表内、方位在允许集、必须是本来就在排布的普通可拖件）。
+ *
+ * ★ 这不是教条：**将来要声明某个件到背景边缘，改第一条测试是一个显式动作** ——
+ *   改哪一条、为什么改，都会进 diff。这正是它存在的意义。
+ */
+describe('#266 刀2.5 · 横向脱离声明（detachX）', () => {
+  it('交付态：表里没有任何元件声明 detachX（"未声明 = 照旧排队" ⇒ 默认排布不变）', () => {
+    const declared = CC_WIDGET_GROUPS.filter(row => row.detachX !== undefined).map(row => row.id)
+    expect(declared, '本刀不带任何默认脱离；要声明位置就显式改这条测试的期望').toEqual([])
+  })
+
+  it('正控：定义表本体仍在（否则上面那条会因为"表整个没了"而假绿）', () => {
+    expect(CC_WIDGET_GROUPS.length).toBeGreaterThan(0)
+    expect(CC_WIDGET_GROUPS.map(row => row.id)).toContain('model')
+  })
+
+  it('声明一旦出现必须合法（给将来的声明立判据，防"声明位被写坏"）', () => {
+    const allIds = CC_WIDGET_GROUPS.map(row => row.id)
+    for (const row of CC_WIDGET_GROUPS) {
+      const detach = row.detachX
+      if (!detach) continue
+      const at = `detachX@${row.id}`
+      expect(allIds, `${at} 的锚点必须指向表内的 id`).toContain(detach.anchor)
+      expect(['left', 'right', 'center'], `${at} 的 side 只允许这三条`).toContain(detach.side)
+      expect(detach.gap === undefined || Number.isFinite(detach.gap), `${at} 的距离必须是有限数`).toBe(true)
+      // 脱离的前提是"本来就在那条行上排队"：必须有 layout、可拖，且不是悬浮件
+      expect(row.layout, `${at} 没有 layout ⇒ 它本来就不在队列里，无需（也不能）脱离`).toBeDefined()
+      expect(row.draggable, `${at} 不可拖 ⇒ 它不进 ccLayout，脱离声明无从消费`).toBe(true)
+      expect(CC_FLOATING_WIDGET_IDS, `${at} 已是悬浮件（另有定位通路），不该再声明脱离`).not.toContain(row.id)
+    }
+  })
+})

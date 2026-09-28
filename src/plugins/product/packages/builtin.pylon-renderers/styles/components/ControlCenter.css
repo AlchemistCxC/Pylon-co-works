@@ -114,9 +114,13 @@
      其现值就是 `max(14px, 16px)`。分隔点、空态控件大小因此逐项不变。 */
   font-family:var(--mono); font-size:16px; line-height:1.35;
 }
+/* ★★ #266 刀2.5：**不折行** —— 下边组（模型/思考强度/权限/用量/命令行提示 那一行）行数恒为 1
+   （刀 3 的高度算式依赖这条）。原 `flex-wrap:wrap` 与只在折行时才生效的 `row-gap:3px` 一并去掉。
+   窄窗装不下时，排队中的件**横向溢出**而不折成第二行（件的不可压缩口径见 `.cc-natural[data-widget-id]`
+   那一组）；要"各自贴边独立定位"的件走定义表的 `detachX` 声明（见 `.cc-widget.cc-detach-x`）。 */
 .cc-status-row {
   display:flex; align-items:center; justify-content:flex-start;
-  gap:0; min-width:0; flex-wrap:wrap; row-gap:3px;
+  gap:0; min-width:0; flex-wrap:nowrap;
   min-height:18px; font-family:var(--mono); font-size:16px; line-height:1.35;
 }
 /* ★ #238 刀3：信息控件容器 = **一个落脚处一个容器**（原三个槽位包装 div `.cc-status-primary`
@@ -182,8 +186,14 @@
 .cc-widget.cc-natural[data-widget-id='mode'],
 .cc-widget.cc-natural[data-widget-id='tokens'] { flex:0 0 auto; }
 
+/* ★ #266 刀2.5 连带（**此处显式登记**，不并进上面那组"按钮型"）：
+   去掉折行之后，行内**不再有第二行**接住装不下的内容 —— 文案型件若仍可压缩，会被压到 0 宽
+   （`scrollWidth` 还在、看得到的却没有），即"在场却看不见"，与本方向"在场集合"的语义相矛盾。
+   故与按钮型同款声明不可压缩：排队件在窄窗下**横向溢出**，形状与 §7.6（不折行 + 不滚动 + 允许重叠）一致。
+   改造前的行为是折到第二行、提示完整可见；本刀把"折行"整体去掉，这条是它的直接连带。 */
+.cc-widget.cc-natural[data-widget-id='cc-command-hint'] { flex:0 0 auto; }
+
 @media (max-width:900px) {
-  .cc-status-row { row-gap:2px; }
   .cc-command-hint .cc-hint-tertiary { display:none; }
 }
 @media (max-width:720px) {
@@ -197,6 +207,9 @@
      漏了它，多行输入会把输入栏**向下**长、压住状态行 —— 而不是"底边不动、上边延伸"。 */
   height:calc(var(--cc-height, 76px) + var(--cc-input-extra-height, 0px));
   min-height:var(--cc-min-height,76px);
+  /* ★ #266 刀2.5：脱离队列的件靠这条值纵向对齐状态行 —— 它必须等于下面 `.cc-body` 的
+     下内边距（状态行是最后一个在流内子节点，其行底 = 背景板底 − 该内边距）。 */
+  --cc-status-line-inset:3px;
 }
 .control-center.cli-mode .cc-bg { background:transparent; }
 .control-center.cli-mode .cc-body {
@@ -333,11 +346,24 @@
 
 .cc-status-group {
   gap: var(--ui-space-1);
-  /* 窄窗（面板被侧栏挤到约 300px 时）容不下按钮型控件的自然宽：
-     控件已由 .cc-natural[data-widget-id] 设为不可压缩，这里让组内换行，
-     保证控件完整可见（宁可信息栏升到两行，也不压扁/裁掉控件）。 */
-  flex-wrap: wrap;
+  /* ★ #266 刀2.5：**组内也不折行**（与 `.cc-status-row` 同一件事，原为 `flex-wrap:wrap`）——
+     原注释"窄窗让组内换行，宁可信息栏升到两行"已作废：行数恒 1 是刀 3 高度算式的前提。
+     件的不可压缩（`.cc-natural[data-widget-id]` 那组 `flex:0 0 auto`）保持不动 ⇒
+     窄窗下排队中的件横向溢出，**不压扁、也不折行**。 */
+  flex-wrap: nowrap;
   align-content: center;
+}
+
+/* ── ★★ #266 刀2.5：声明式脱离（横向独立定位） ──
+   定义表里**声明了** `detachX` 的件由渲染侧挂上 `.cc-detach-x`，并内联 `left`/`right` 给出
+   「贴哪条边 + 距离」（距离 = 到**背景板横边**的距离；`.cc-body` 是最近的定位祖先）。
+   这里只管"脱离队列"本身：取出文档流 ⇒ 不再与谁排队、**允许重叠**（互不挤开、也不报错）。
+   纵向：底对齐状态行那条线（`--cc-status-line-inset` = `.cc-body` 的下内边距）。
+   ★ 未声明 `detachX` 的件**不带这个类**，照旧排队 —— 默认排布逐像素不变。 */
+.cc-widget.cc-detach-x {
+  position:absolute;
+  bottom:var(--cc-status-line-inset, 3px);
+  z-index:2;
 }
 
 

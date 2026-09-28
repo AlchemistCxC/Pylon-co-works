@@ -2,7 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, 
 import { formatUsagePercent, formatUsageTokens } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../domains/cc/ccLayoutState.ts'
-import { resolveCcMinHeight } from '../../../domains/cc/ccHeightState.ts'
+import { resolveCcMinHeight, resolveCcMinWidth, resolveCcWidthGroups, type CcWidgetWidthIndex } from '../../../domains/cc/ccHeightState.ts'
 import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
@@ -287,6 +287,32 @@ export function SolidControlCenter() {
   // ★ #266 刀9~11：输入固定命令行 / 底部信息固定独立状态行 / 多行输入固定增高
   //   ⇒ 最小高度不再随形态浮动（常量，见 ccHeightState.resolveCcMinHeight）。
   const minHeight = () => resolveCcMinHeight()
+  // ★ #266 刀2.5：宽度算式的输入 —— 件 id → 宽度字段值。只有三个触发器有宽度字段；
+  //   用量胶囊 / 命令行提示是**内容撑**（`width:max-content`）⇒ 索引里缺席（算式按 0 计 = 下界）。
+  const widthIndexOf = (): CcWidgetWidthIndex => ({
+    model: appearance().modelWidth,
+    reasoning: appearance().reasoningWidth,
+    mode: appearance().permissionWidth,
+  })
+  // ★★ #266 刀2.5：**最小宽**（约束值）—— 与最小高同构：`max over 各组 ( 组宽 + 到所贴横边的距离 )`。
+  //   本刀**只暴露、不强制**（不横向滚动、不撑宽，见规范 §7.6 形态决定 2）⇒ 没有任何 CSS 规则
+  //   消费它，消费者留给刀 4 的"显示前校验"。挂成变量是为了让这个值可读、可验收。
+  const minWidth = () => resolveCcMinWidth(resolveCcWidthGroups(hiddenWidgetIds(), widthIndexOf()))
+  /**
+   * ★★ #266 刀2.5：**声明式脱离**的定位（横向）。
+   *
+   * 返回 `undefined` = 该行**没声明** `detachX` ⇒ 照旧排队（默认排布因此逐像素不变）。
+   * 声明了才返回定位：距离 = 到**背景板横边**的距离（`.cc-body` 是最近的定位祖先，
+   * 它的盒子就是背景板本体）；`position/bottom` 由 CSS 的 `.cc-widget.cc-detach-x` 给。
+   */
+  const detachStyle = (id: CcWidgetId): JSX.CSSProperties | undefined => {
+    const detach = resolveCcWidgetGroup(id)?.detachX
+    if (!detach) return undefined
+    const gap = `${detach.gap ?? 0}px`
+    if (detach.side === 'left') return { left: gap, right: 'auto' }
+    if (detach.side === 'right') return { right: gap, left: 'auto' }
+    return { left: '0', right: '0', 'margin-inline': 'auto' }
+  }
   // ★ 按**落脚处**成组（#238 刀3）：同一 `(y.anchor, y.side)` 的元件归入同一个容器，组内按 order 排。
   //   进组前过一遍**输入栏落脚处独占守卫**（原「input 槽只准放输入栏」的替代）：
   //   非输入栏若被错标到输入栏容器，退回信息落脚处 —— 宁可换位置，不凭空消失。
@@ -388,15 +414,17 @@ export function SolidControlCenter() {
     }
   }
 
+  const isDetached = (id: CcWidgetId) => resolveCcWidgetGroup(id)?.detachX !== undefined
   const renderWidget = (id: CcWidgetId) => {
     const placement = () => appearance().ccLayout.placements[id]
     const body = renderBody(id)
     if (body === null) return null
     return <div
-      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${selected() === id ? ' cc-selected' : ''}`}
+      // ★ #266 刀2.5：声明了 `detachX` 的件挂 `cc-detach-x`（脱离队列，见 CSS）；未声明不挂。
+      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${selected() === id ? ' cc-selected' : ''}${isDetached(id) ? ' cc-detach-x' : ''}`}
       data-widget-id={id}
       data-widget-anchor={resolveCcWidgetGroup(id)?.layout?.y.anchor}
-      style={placementStyle(placement())}
+      style={{ ...detachStyle(id), ...placementStyle(placement()) }}
       onPointerDown={event => beginDrag(event, id)}
     >{body}</div>
   }
@@ -470,7 +498,8 @@ export function SolidControlCenter() {
       offsetY: partial.offsetY ?? current.offsetY,
     }
     // 障碍集 = 其他可拖元件里**不在悬浮名单**的（悬浮件既不当障碍也不受约束）。
-    // ★ 每次调用**重新测量**：拖动中可能换行回流（flex-wrap），缓存会失效且症状隐蔽。
+    // ★ 每次调用**重新测量**：拖动中其它元件可能换落脚处/被声明脱离（rect 因此变），
+    //   缓存会失效且症状隐蔽。
     const obstacles = CC_EDIT_TOOLBAR_IDS
       .filter(other => other !== id && !CC_FLOATING_WIDGET_IDS.includes(other))
       .map(other => measureWidgetBox(other)?.rect)
@@ -583,6 +612,9 @@ export function SolidControlCenter() {
     style={{
       '--cc-height': `${appearance().ccHeight}px`,
       '--cc-min-height': `${minHeight()}px`,
+      // ★ #266 刀2.5：最小宽（约束值）—— 与 `--cc-min-height` 同族，但**本刀不消费它**：
+      //   不横向滚动、不撑宽（规范 §7.6 形态决定 2）。挂在这里是为了让值可读、可验收。
+      '--cc-min-width': `${minWidth()}px`,
       '--cc-margin-x': `${appearance().ccMarginX}px`,
       '--cc-margin-bottom': `${appearance().ccMarginBottom}px`,
       '--cc-radius': `${appearance().ccRadius}px`,
