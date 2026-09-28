@@ -32,7 +32,7 @@ import { createZustandWorkbenchAppearanceStore } from '../../domains/appearance/
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
 import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
-import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
+import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBusHost.ts'
 import { messageStorageKey, parseMessageSnapshot } from '../../domains/chat/messagePersistence.ts'
 import type { Message } from '../../domains/chat/messageTypes.ts'
 import { resolveRuntimeErrors } from '../../app/runtimeError.ts'

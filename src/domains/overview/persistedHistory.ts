@@ -5,7 +5,7 @@
  * （按 updatedAt 倒序 + page/pageSize）与导出参数校验（outputPath 绝对路径——前端
  * 预检，后端仍权威）。
  */
-import { normalizePersistedSessions, type PersistedSessionSummary } from '../overview/persistedSessions.ts'
+import { normalizePersistedSessions, type PersistedSessionSummary } from './persistedSessions.ts'
 
 export const HISTORY_PAGE_SIZE = 20
 

@@ -20,7 +20,7 @@ import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { EDIT_TOOL_NAMES, extractTouchedPath, relativizePath } from '../../infrastructure/acp/touchedFiles.ts'
-import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
+import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBusHost.ts'
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

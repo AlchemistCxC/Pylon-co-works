@@ -11,7 +11,7 @@ import { removeSessionTransaction, sessionDurableOwnerKey } from '../../applicat
 import { runSessionNotificationHook } from '../../application/transactions/sessionHookTransactions'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from '../../domains/chat/messagePersistence'
-import { validateExportPath } from '../../domains/history/persistedHistory.ts'
+import { validateExportPath } from '../../domains/overview/persistedHistory.ts'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 
