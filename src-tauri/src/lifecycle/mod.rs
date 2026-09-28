@@ -43,6 +43,8 @@ use crate::AppState;
 use crate::AppStateHandles;
 
 /// 连接 + 原子替换客户端（手动/自动重连/平台懒启动共用）。
+/// #421：connect 全程受 [`budgets::CONNECT_TOTAL_BUDGET_SECS`]（60s TotalDeadline）
+/// 包裹，超时按既有 Crashed 收敛——见函数内预算分支注释。
 // clippy 2026-08-02：9 参为连接全参数（handles/runtime/window/agent/agent_id/start_status/
 // log_action/continuity/announce），跨 4 个调用点共享签名，保持显式（结构体重构收益低）。
 #[allow(clippy::too_many_arguments)]
@@ -76,17 +78,26 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         .client_generation
         .load(std::sync::atomic::Ordering::Acquire)
         + 1;
-    let new_acp = match AcpClient::connect_with_generation(
-        agent,
-        Some(handles.runtime_logs.clone()),
-        // OBS-02：新连接将激活为 current+1 代际（replace_agent_client 的
-        // fetch_add(1)+1 一致），wire trace 据此记录 clientGeneration。
-        next_generation,
+    // #421：生产 connect 总预算（TotalDeadline，形状见 budgets.rs）——盖过
+    // initialize 的 rpc_timeout（默认 30s、可配至 300s）作为外层上限；死 agent
+    // 握手悬置时在此切断，switch_lock→agent_lifecycle 双锁持有期随之有界。
+    // 超时取消 connect future 后，已 spawn 的子进程树由 `ManagedChild::drop` 的
+    // kill_and_wait 兜底（Job Object / taskkill），与既有错误路径同语义。
+    let connect_budget_secs = budgets::connect_budget_secs();
+    let new_acp = match tokio::time::timeout(
+        std::time::Duration::from_secs(connect_budget_secs),
+        AcpClient::connect_with_generation(
+            agent,
+            Some(handles.runtime_logs.clone()),
+            // OBS-02：新连接将激活为 current+1 代际（replace_agent_client 的
+            // fetch_add(1)+1 一致），wire trace 据此记录 clientGeneration。
+            next_generation,
+        ),
     )
     .await
     {
-        Ok(client) => client,
-        Err(error) => {
+        Ok(Ok(client)) => client,
+        Ok(Err(error)) => {
             let fallback_status = status_after_connection_failure(previous_status);
             if announce {
                 handles.emit_agent_status(
@@ -104,6 +115,36 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
                 serde_json::Map::new(),
             );
             return Err(error.into());
+        }
+        // #421：预算耗尽 = agent 无响应，按既有 Crashed 收敛路径处置（不发明
+        // 新 runtime 状态）。调用方语义照旧：自动重连经 crash_reconnect 既有
+        // Err 分支退避重试（机制复用；status 保持 Crashed 使其 still_stale 复查
+        // 成立），手动 switch/reconnect/restart 在预算处释放双锁并向前端播报
+        // crashed + lastError。
+        Err(_elapsed) => {
+            let message = format!(
+                "connect total budget exceeded ({}s); agent unresponsive, treated as crashed",
+                connect_budget_secs
+            );
+            if announce {
+                handles.emit_agent_status(
+                    runtime,
+                    window,
+                    AgentLifecycleStatus::Crashed,
+                    Some(message.clone()),
+                );
+            }
+            handles.log_runtime_summary(
+                "error",
+                "agent",
+                agent_id,
+                &format!("Agent {log_action} failed"),
+                serde_json::Map::from_iter([(
+                    "code".to_string(),
+                    serde_json::Value::String("connect_budget_exceeded".to_string()),
+                )]),
+            );
+            return Err(message);
         }
     };
     // B3：登记实例（InstanceKey = agentId/instanceId/generation）——全局并发
@@ -796,6 +837,75 @@ mod tests {
         assert_eq!(
             state.activated_config_fingerprint.as_deref(),
             Some("old-definition")
+        );
+    }
+
+    /// #421：生产 connect 总预算——hang 场景（驻留 3600s、永不应答 initialize）
+    /// 在 TotalDeadline 处被切断，收敛走既有 Crashed 语义。判别证据：进入时
+    /// 前一状态为 Disconnected，普通连接错误会经 `status_after_connection_failure`
+    /// 回落 Disconnected——终态 Crashed 只能来自预算分支。预算经测试注入缝
+    /// 取 2s（真子进程 + 真时钟；模拟时钟不可用的论证见 budgets.rs）。
+    #[tokio::test]
+    async fn connect_total_budget_cuts_hung_agent_and_converges_to_crashed() {
+        assert_eq!(
+            budgets::CONNECT_TOTAL_BUDGET_SECS,
+            60,
+            "预算常量 pin（#417 裁决值）"
+        );
+        assert_eq!(
+            budgets::connect_budget_secs(),
+            budgets::CONNECT_TOTAL_BUDGET_SECS,
+            "未注入时解析口必须返回常量默认"
+        );
+        budgets::connect_budget_override::set(2);
+        struct RestoreBudget;
+        impl Drop for RestoreBudget {
+            fn drop(&mut self) {
+                budgets::connect_budget_override::clear();
+            }
+        }
+        let _restore = RestoreBudget;
+        let agent = crate::test_utils::fake_acp_agent("budget-hang", &["--scenario", "hang"]);
+        let runtime = crate::runtime::AgentRuntime::new_disconnected();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_agent(agent.clone())
+            .with_runtime("budget-hang", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+        let error = do_connect_and_replace(
+            &handles,
+            &runtime,
+            &mock_window().await,
+            &agent,
+            Some("budget-hang".to_string()),
+            AgentLifecycleStatus::Connecting,
+            "switch",
+            SessionContinuity::Invalidated,
+            true,
+        )
+        .await
+        .expect_err("hang agent 必须被总预算切断");
+        assert!(
+            error.contains("connect total budget exceeded"),
+            "Err 必须携带预算标记，实际: {error}"
+        );
+        let state = runtime.agent_runtime.lock().unwrap();
+        assert_eq!(
+            state.status,
+            AgentLifecycleStatus::Crashed,
+            "预算超时按既有 Crashed 收敛（不发明新状态）"
+        );
+        assert!(
+            state
+                .last_error
+                .as_deref()
+                .is_some_and(|message| message.contains("connect total budget exceeded")),
+            "lastError 必须携带预算标记，实际: {:?}",
+            state.last_error
         );
     }
 

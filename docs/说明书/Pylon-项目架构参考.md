@@ -386,7 +386,7 @@ stateDiagram-v2
 - Agent Instance 配置写盘状态与 live runtime 生效状态必须可区分。
 - generation 变化后，旧 runtime 的迟到事件不得污染新 runtime。
 - Runtime Candidate 的“身份可信”和“ACP 可运行”是两个不同证据级别。
-- 检测、版本探测、连接测试和 replay 都必须有总时间预算（现状缺口：生产 connect 尚无外层总预算、仅 initialize 受 `rpc_timeout` 约束，见 issue #417；预算常量归口 `lifecycle/budgets.rs`）。
+- 检测、版本探测、连接测试、replay 和生产 connect 都必须有总时间预算（生产 connect 为 60s TotalDeadline `CONNECT_TOTAL_BUDGET_SECS`，#421——超时按既有 Crashed 收敛；预算常量归口 `lifecycle/budgets.rs`）。
 
 ### Plugin Runtime
 
