@@ -197,7 +197,8 @@ async fn wait_pending_id(
     tokio::time::timeout(timeout, async {
         loop {
             if runtime
-                .pending_permissions
+                .ledger
+                .permissions()
                 .lock()
                 .unwrap()
                 .contains_key(&id)
@@ -456,7 +457,7 @@ async fn run_invalid_params_matrix(provider: &str, id_case: &IdCase) {
         "解析失败不得触发 interaction 事件"
     );
     assert!(
-        fx.runtime.pending_permissions.lock().unwrap().is_empty(),
+        fx.runtime.ledger.permissions().lock().unwrap().is_empty(),
         "解析失败不得产生 pending"
     );
 
@@ -525,7 +526,8 @@ async fn run_cancel_matrix(provider: &str, id_case: &IdCase) {
     .expect("cancel_prompt 必须成功");
     assert!(
         !fx.runtime
-            .pending_permissions
+            .ledger
+            .permissions()
             .lock()
             .unwrap()
             .contains_key(&id_case.request_id),
@@ -860,7 +862,8 @@ async fn case_b_string_id_round_trip_echoes_original_variant() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if runtime
-                .pending_permissions
+                .ledger
+                .permissions()
                 .lock()
                 .unwrap()
                 .contains_key(&crate::acp::RequestId::String("perm-b".to_string()))
@@ -975,7 +978,7 @@ async fn case_e_string_id_invalid_params_answers_jsonrpc_error() {
         "解析失败不得触发 interaction 事件"
     );
     assert!(
-        runtime.pending_permissions.lock().unwrap().is_empty(),
+        runtime.ledger.permissions().lock().unwrap().is_empty(),
         "解析失败不得产生 pending"
     );
     // 证据 #1（ACP-04）：JSON-RPC error 信封应答（-32602 Invalid params），id 回显
@@ -1044,7 +1047,7 @@ async fn case_e2_number_id_invalid_params_answers_jsonrpc_error() {
         "解析失败不得触发 interaction 事件"
     );
     assert!(
-        runtime.pending_permissions.lock().unwrap().is_empty(),
+        runtime.ledger.permissions().lock().unwrap().is_empty(),
         "解析失败不得产生 pending"
     );
     // 证据 #1（ACP-04）：JSON-RPC error 应答（number id 回显原始形态），无伪造 optionId。
@@ -1128,7 +1131,8 @@ async fn case_f_number_id_pending_cancel_converges_to_cancelled() {
     .expect("cancel_prompt 必须成功");
     assert!(
         !runtime
-            .pending_permissions
+            .ledger
+            .permissions()
             .lock()
             .unwrap()
             .contains_key(&crate::acp::RequestId::Number(7)),

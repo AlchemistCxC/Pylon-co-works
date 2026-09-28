@@ -223,25 +223,15 @@ async fn respond_request_permission(
     })?;
     // ACP-01：前端回显为字符串——数字形态还原为 Number（命中原 numeric 请求），
     // 否则 String；最终 variant 由 pending 规范键决定（原 string-id 请求不被转数）。
+    // #423：只读复核经 Ledger 单点（canonical 键双向回退 + 现行条目）。
     let candidate = crate::acp::RequestId::from_echo_string(&identity.request_id);
     let canonical_id = {
-        let pending = runtime
-            .pending_permissions
-            .lock()
-            .map_err(|e| e.to_string())?;
-        let canonical_id = crate::permission::canonical_pending_key(&pending, &candidate)
-            .ok_or_else(|| {
-                PylonError::Protocol(format!(
-                    "permission request not found: {}",
-                    identity.request_id
-                ))
-            })?;
-        let permission = pending.get(&canonical_id).ok_or_else(|| {
-            PylonError::Protocol(format!(
+        let Some((canonical_id, permission)) = runtime.ledger.pending_permission(&candidate) else {
+            return Err(PylonError::Protocol(format!(
                 "permission request not found: {}",
                 identity.request_id
-            ))
-        })?;
+            )));
+        };
         if permission.session_id != identity.session_id
             || identity
                 .tool_call_id

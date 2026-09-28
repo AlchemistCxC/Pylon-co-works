@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use crate::acp::AcpClient;
 use crate::agent::runtime::{session_mapping_matches, source_for_peri_id_in_generation};
-use crate::permission::PendingPermission;
 use crate::runtime::AgentRuntime;
 use crate::session::SessionInfo;
 // #317 批次二 ④：flush 正身迁 canonical_flush.rs。
@@ -675,11 +674,8 @@ struct NotificationPump<R: tauri::Runtime> {
     event_service: Option<Arc<crate::session::EventService>>,
     message_service: Option<Arc<crate::session::MessageService>>,
     hook_bridge: Arc<crate::hook_bridge::HookBridge>,
-    pending_permissions:
-        Arc<std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>>,
     terminal_registry: Arc<crate::acp::terminal_runtime::TerminalRegistry>,
     host_tools_policy: Arc<std::sync::Mutex<crate::acp::host_tools::HostToolsPolicy>>,
-    private_interactions: crate::private_interaction::PrivateInteractionOwner,
     /// 本泵所属 runtime（重连/update_channels/mapping_ready/账本等 per-agent 状态入口）。
     runtime: Arc<AgentRuntime>,
     window: tauri::Window<R>,
@@ -731,10 +727,8 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             .ok()
             .and_then(|slot| slot.clone());
         let hook_bridge = handles.hook_bridge.clone();
-        let pending_permissions = runtime.pending_permissions.clone();
         let terminal_registry = runtime.terminal_registry.clone();
         let host_tools_policy = runtime.host_tools_policy.clone();
-        let private_interactions = runtime.private_interactions.clone();
         let agent_id = handles
             .runtimes
             .all_with_ids()
@@ -798,10 +792,8 @@ impl<R: tauri::Runtime> NotificationPump<R> {
             event_service,
             message_service,
             hook_bridge,
-            pending_permissions,
             terminal_registry,
             host_tools_policy,
-            private_interactions,
             runtime: runtime.clone(),
             window,
             handle_crash,
@@ -1068,7 +1060,6 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 &self.acp,
                 &self.client_generation,
                 &self.approval_mode,
-                &self.pending_permissions,
                 &self.sessions,
                 &self.hook_bridge,
                 &self.runtimes,
@@ -1119,7 +1110,6 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 &self.window,
                 &self.acp,
                 &self.agents,
-                &self.private_interactions,
                 &self.runtimes,
                 &self.agent_id,
                 self.generation,

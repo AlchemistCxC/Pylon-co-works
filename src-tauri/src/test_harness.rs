@@ -640,7 +640,8 @@ impl TestHarness {
                 .active_runtime()
                 .and_then(|runtime| {
                     runtime
-                        .pending_permissions
+                        .ledger
+                        .permissions()
                         .lock()
                         .ok()
                         .map(|pending| pending.get(&crate::acp::RequestId::Number(id)).cloned())
@@ -678,7 +679,8 @@ impl TestHarness {
             .active_runtime()
             .map(|runtime| {
                 runtime
-                    .pending_permissions
+                    .ledger
+                    .permissions()
                     .lock()
                     .map(|pending| pending.contains_key(&crate::acp::RequestId::Number(id)))
                     .unwrap_or(false)

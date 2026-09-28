@@ -8,18 +8,11 @@ use super::interaction_route::{reject_interaction_request, resolve_agent_provide
 use super::{AcpLock, SessionsLock};
 use crate::emit_event;
 use crate::hook_bridge::HookBridge;
-use crate::permission::{
-    permission_response, pick_allow_option, pick_option, pick_reject_option, PendingPermission,
-};
+use crate::permission::{permission_response, pick_allow_option, pick_option, pick_reject_option};
 use crate::runtime::AgentRuntimeManager;
 use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-// R8：拆 handler 后共享状态经显式参数传递——句柄别名随审批正身迁入本域
-//（原 mod.rs 联合定义，仅剩本文件消费）。
-type PermissionLock =
-    std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>;
 
 /// B9 权限审批（R8 自主循环拆分）：agent 主动 request_permission（带 id 请求，
 /// 客户端必须应答）。C4/C5 语义保持：代复核（应答不误写新代进程）+ 模式判定
@@ -33,7 +26,6 @@ async fn handle_permission_request<R: tauri::Runtime>(
     acp: &AcpLock,
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
-    pending_permissions: &PermissionLock,
     sessions: &SessionsLock,
     hook_bridge: &Arc<HookBridge>,
     runtimes: &AgentRuntimeManager,
@@ -339,55 +331,18 @@ async fn handle_permission_request<R: tauri::Runtime>(
             .await;
     } else {
         remember_permission(sessions);
-        let _ = pending_permissions.lock().map(|mut pending| {
-            pending.insert(request_id.clone(), effective_permission.clone());
-        });
-        // #98：统一交互队列登记（FIFO / 单一 Active / queued depth）。队列是
-        // cancel/timeout/disconnect drain 终态与冷挂载快照的数据源；permission
-        // 即 kind="approval"，队列里的事件载荷与 pylon:interaction 完全同构。
-        let payload = serde_json::json!({
-            "title": effective_permission.title,
-            "prompt": effective_permission.prompt,
-            "options": effective_permission.options,
-            "requestedAt": effective_permission.requested_at,
-            // ACP-03（§5.6）：deadline 由后端单一来源（PERMISSION_REQUEST_TIMEOUT_SECS），
-            // 前端只做倒计时展示，不自行持有 300s 常量。
-            "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
-        });
-        // #98: unified interaction queue admission (FIFO / single Active /
-        // queued depth). The queue feeds cancel/timeout/disconnect drain
-        // terminal states and the cold-mount snapshot; kind = "approval" and
-        // the stored event payload is identical to pylon:interaction.
-        let interaction_event = serde_json::json!({
-            "provider": provider,
-            "agentId": agent_id,
-            "sessionId": permission.session_id,
-            "eventType": "permission.request",
-            "requestId": request_id.to_string(),
-            "toolCallId": permission.tool_call_id,
-            "clientGeneration": permission.client_generation,
-            "payload": payload,
-        });
+        // #423：登记面单点——store 写 + queue admit（deadline 注入）+ 事件 json
+        // 构造一次完成（#98：队列是 cancel/timeout/disconnect drain 终态与冷挂载
+        // 快照的数据源；kind = "approval"，事件载荷与 pylon:interaction 同构）。
         if let Some(runtime) = runtimes.get(agent_id) {
-            match runtime
-                .interactions
-                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
-                    request_id: request_id.to_string(),
-                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
-                    kind: "approval".to_string(),
-                    session_id: permission.session_id.clone(),
-                    agent_id: agent_id.to_string(),
-                    client_generation: permission.client_generation,
-                    enqueued_at: permission.requested_at,
-                    // #356：deadline admit 时注入（与事件 payload 内 deadlineMs 同源同值）。
-                    deadline_ms: Some(crate::permission::permission_deadline_ms(
-                        permission.requested_at,
-                    )),
-                    event: interaction_event.clone(),
-                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
-                }) {
-                Ok(admission) => {
-                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
+            match runtime.ledger.admit_permission(
+                provider,
+                agent_id,
+                &request_id,
+                &effective_permission,
+            ) {
+                Ok((admission, interaction_event)) => {
+                    let (_, waiting) = runtime.ledger.queue().depth().unwrap_or((None, 0));
                     tracing::trace!(
                         agent_id = %agent_id,
                         request_id = %request_id,
@@ -395,11 +350,19 @@ async fn handle_permission_request<R: tauri::Runtime>(
                         waiting,
                         "interaction queue admitted permission request"
                     );
+                    emit_event(window, crate::event_names::INTERACTION, interaction_event);
                 }
                 Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
             }
+        } else {
+            // runtime 缺席（结构性不可达：泵存活期 runtime 必在 manager）——
+            // 整体不登记（store 与 queue 恒一致，杜绝单边写入）。
+            tracing::warn!(
+                agent_id = %agent_id,
+                request_id = %request_id,
+                "permission admit skipped: runtime not found"
+            );
         }
-        emit_event(window, crate::event_names::INTERACTION, interaction_event);
     }
 }
 
@@ -411,7 +374,6 @@ pub(crate) async fn route_permission_request<R: tauri::Runtime>(
     acp: &AcpLock,
     client_generation: &AtomicU64,
     approval_mode: &std::sync::Mutex<String>,
-    pending_permissions: &PermissionLock,
     sessions: &SessionsLock,
     hook_bridge: &Arc<HookBridge>,
     runtimes: &AgentRuntimeManager,
@@ -431,7 +393,6 @@ pub(crate) async fn route_permission_request<R: tauri::Runtime>(
             acp,
             client_generation,
             approval_mode,
-            pending_permissions,
             sessions,
             hook_bridge,
             runtimes,

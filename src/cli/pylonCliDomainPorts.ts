@@ -20,6 +20,7 @@ import { enabledHookIds, runSessionNotificationHook, runUserMessageBeforeHook, r
 import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
 import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
+import { normalizeWireInteractionEntry } from './pylonCliService.ts'
 import { requestNewSession } from '../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { provisionAgentTransaction } from '../application/transactions/provisionAgentTransaction.ts'
@@ -303,11 +304,20 @@ export function createCliApprovalControlPort(): ApprovalControlPort {
   }
 }
 
-/** CLI 增强：挂起权限交互 port——list 快照 + respond 应答（桥牌等外部自动化前置）。 */
+/** CLI 增强：挂起权限交互 port——list 快照 + respond 应答（桥牌等外部自动化前置）。
+ *  #423 快照面单源：后端 `interaction_list` 输出 wire 形状（统一队列 snapshot
+ *  投影，与 agent_status 的 pendingInteractions 同源），此处经
+ *  `normalizeWireInteractionEntry` 重建 CLI 消费形状（identity + 展示字段 +
+ *  应答 options 白名单），对外表面与旧后端两 store 投影逐字段等价（parity
+ *  测试钉住）。 */
 export function createCliInteractionControlPort(): InteractionControlPort {
   return {
     async list() {
-      return await invoke<{ items: InteractionItem[] }>('interaction_list')
+      const wire = await invoke<{ items: unknown[] }>('interaction_list')
+      const items = (wire.items ?? [])
+        .map(normalizeWireInteractionEntry)
+        .filter((item): item is InteractionItem => item !== null)
+      return { items }
     },
     async respond(identity, kind, answer) {
       await invoke('respond_interaction', { identity, kind, answer })
