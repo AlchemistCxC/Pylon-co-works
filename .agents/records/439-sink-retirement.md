@@ -77,3 +77,12 @@ canonical journal 收敛 **kernel 严格单写者**：删除前端「第二写�
 - **3b（顺延）**：`mergeAdjacentDeltaChunks` 物理搬迁至 `src/test-utils/`——#449（perf-bench 基准）在途新增对它的依赖，收工后随迁 import（replay 10 文件 + fixtures.ts + memorySuite.ts）。
 - **#447 处置**：canonicalEventSink seeding 队列 cap 随 sink 退役失去对象，建议关闭（或其「文档化部分」转移——sink 语义已消，无文档可留）。
 - browser 预览模式不受影响（非 Tauri 本为 noop sink，现已无此分支）。
+
+## 审查修正（2026-09-29，独立审查裁决「需修正后合并」后补记）
+
+- **B1 · 批次 2 丢失一个测试删除**：`canonicalEventSink.batch.test.ts` 的 `git rm` 未随批次 2 的 pathspec 提交落盘（`git commit -- <paths>` 不包含未 add 的删除），分支 tip 由 **`cf29a865` 代修补落**（修正 §2.5 纪律事故：staged 删除务必随批核 `git status`）。本记录初版所载门禁读数（tsc 绿 / vitest 5102）系**共享工作树测量**（含该未提交删除），对 4038e309 提交树不成立；cf29a865 后提交树与工作树重新一致。
+- **C6 · 测试迁移表述修正**：初版「载体 append→revision，语义不变」高估——`event_revision_conflict`/`event_invalid`/`event_session_deleted` 对 revision 载体**不可达**（RevisionConflict 仅 append 比对 expected_revision 时产生）；用例实际语义从「adapter 透传后端真实可达错误」弱化为「mock 驱动的错误归一函数测试」（`asCanonicalEventRepositoryError` 为全命令共享路径，用例仍有价值）。生产代码已无任何路径能收到 `event_revision_conflict`（唯一按它分支的 sink 已删）。
+- **C2/C3 已修**：`pylon-session/src/lib.rs` 单源注释与 fold.rs 的内部矛盾、`session/mod.rs` evt_revision 的 scheduler 失效指涉。
+- **C4（移交后续小批）**：`evt_append` 命令名注释指涉清理——Rust 侧 8 文件（del01/del03/del05/user_data/event_repo tests/draft_flush:272/dispatcher mod.rs:867/**session mod.rs:81**，复审补遗）+ 前端注释与死 fixture（src/obs06/deleteErrorForensics.ts:18、src/obs06/devTrigger.ts:14、obs06 测试:236 的 `cmd:'evt_append'` 取证分类字符串）+ 测试头注释对已删测试文件的指涉（replay/harness.ts:19,32-33、del05_p4DeleteMatrix.test.ts:9-11）+ canonicalEventRepository.ts:15-17 模块头错误码清单的 `event_revision_conflict`（生产不可达，随批收敛）——gate 语义本体（`EventService::append_events`）仍存活，命令名指涉失效，留独立清理批。
+- **C5（移交 #449）**：`scripts/perf-bench/README.md:222` 仍指导 invoke 已删除的 `evt_append`——README 在 #449 在途域，已 L.md 移交随迁修正；「全仓 grep evt_append 零命中」应限定为「生产 src/」。
+- **N2（实测关闭）**：跨测试文件 import `extractBraceBlock` 的「describe 双注册」担忧经实测否定（sanitize 单文件跑 = 14 tests，acp-vocabulary 用例未重复注册；全量计数亦吻合）。

@@ -792,7 +792,7 @@ fn require_event_service(
     event_service_of(state.inner())
 }
 
-/// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基线）。
+/// owner 当前 revision（MAX(sequence)，空 = 0；cursor seed/gap 补读的 revision 基线）。
 #[tauri::command]
 pub(crate) async fn evt_revision(
     state: tauri::State<'_, AppState>,
