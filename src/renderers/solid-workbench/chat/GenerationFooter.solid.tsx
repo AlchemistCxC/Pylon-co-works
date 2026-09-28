@@ -447,9 +447,7 @@ export function formatElapsed(elapsedMs: number): string {
   return elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`
 }
 
-function formatSummaryElapsed(summary: GenerationFooterInput['summary'] extends infer T
-  ? Exclude<T, null>
-  : never): string {
+function formatSummaryElapsed(summary: NonNullable<GenerationFooterInput['summary']>): string {
   return summary.durationAvailable === false ? '耗时不可用' : formatElapsed(summary.elapsedMs)
 }
 
