@@ -21,7 +21,7 @@ import {
   DEFAULT_TIME_DAYS,
   RETENTION_COUNT_LIMITS,
   RETENTION_TIME_DAYS,
-} from '../../components/settings/historyRetentionPolicy.contract.ts'
+} from './historyRetentionPolicy.contract.ts'
 
 export {
   DEFAULT_COUNT_LIMIT,

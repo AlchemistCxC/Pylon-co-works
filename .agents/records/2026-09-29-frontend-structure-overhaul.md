@@ -26,14 +26,19 @@
 | `a57a3fb2` | SheetLayout keep-alive 三段手写块 → KEEP_ALIVE_SHEET_SLOT 数据驱动槽位表（browser 块恢复错误边界覆盖） | A-V10 |
 | （更早批内） | projector timeline 收窄开关改「宿主默认 + 批量入口显式 WorkbenchReduceOptions」（B-8 头条）；模式兜底字面量收敛 DEFAULT_INTERFACE_MODE（A-V9 有界件） | B-8、A-V9(部分) |
 
-## 门禁证据
+## 门禁证据（R1 修复后实测更新）
 
-- `bun run test`：654 文件 / 5,066+ 用例绿（各批次点验 + 收尾全量）
-- `bun run check:frontend:static`：exit 0（lint/csp/canonical-types/retention-policy/ipc/first-party-styles/tailwind-tokens/example-plugin/wasm/build/bundle/solid-smoke/docs/deps 全链）
-- `bunx tsc -b`：0 错（每批次点验）
-- `bun scripts/check-layer-boundaries.mts`：814 生产文件四层零越界（豁免 7 条均带理由）
+- `bun run test`：654 文件 / 5,067 用例绿
+- `bun run check:frontend:static`：exit 0（lint/csp/canonical-types/retention-policy/ipc/first-party-styles/tailwind-tokens/example-plugin/wasm/build/bundle/solid-smoke/docs/deps 全链；R1 指出的 vite build 断裂在 mountSolidWorkbench re-export 修复后复验通过）
+- `bunx tsc -b`：0 错
+- `bun scripts/check-layer-boundaries.mts`：818 生产文件四层零越界（豁免 7 条均带理由；R1 指出的 retentionPolicy 生成契约越界已随生成件迁域真修）
+- `bun scripts/check-runtime-boundaries.mts`：通过（R1 指出的 obs 收敛 allowlist 漏随迁已补 7 条新路径）
 - `bun run check:clippy`：基线外零新增（本批零 Rust 改动）
-- `bun run check:solid`：过（含新并入的 layer-boundaries）
+- `bun run check:retention-policy`：与 Rust 单源一致（生成件迁 domains/overview 后）
+
+## R1 复审（`_research/frontend-structure-review-R1.md`）
+
+总裁决「需修复后再审」，四项阻塞（mountSolidWorkbench 漏 re-export、3 个 compat 脚本路径、layer/runtime 两门禁红）已全部真修并复验；结构本体 25 项发现 0 误判、遗留 7 项全部裁决为可接受非阻塞。R1 另指出 A-V2（视图层 23 处 client 实例化收口）未入遗留清单——已在 issue #454 评论区补充登记。
 
 ## 遗留（显式登记，评审轮裁决是否阻塞）
 

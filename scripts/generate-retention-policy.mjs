@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SOURCE = join(root, 'src-tauri', 'pylon-session', 'src', 'retention.rs')
-const TARGET = join(root, 'src', 'components', 'settings', 'historyRetentionPolicy.contract.ts')
+const TARGET = join(root, 'src', 'domains', 'overview', 'historyRetentionPolicy.contract.ts')
 
 /** Rust 常量名 → TS 导出名。 */
 const NAME_MAP = {

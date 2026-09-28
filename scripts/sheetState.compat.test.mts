@@ -2,7 +2,7 @@ import '../src/plugin-runtime/pluginCompositionRoot.ts'
 import { describe, expect, it } from 'vitest'
 import { getSheetRegistryEntry, resolveSheetSingletonKey } from '../src/workspace-sheets/sheetRegistry.ts'
 import { getWorkspaceRegistrySnapshot } from '../src/plugin-runtime/workspaces/workspaceRegistry.ts'
-import { createSheetState, EMPTY_SHEET_STATE, sheetReducer } from '../src/workspace-sheets/sheetState.ts'
+import { createSheetState, EMPTY_SHEET_STATE, sheetReducer } from '../src/domains/workspace/sheetState.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()

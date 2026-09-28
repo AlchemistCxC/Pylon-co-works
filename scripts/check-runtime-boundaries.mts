@@ -63,7 +63,7 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/app/startupTiming.ts',
   'src/sheets/agent-workbench/agentWorkbenchLifecycle.ts',
   'src/infrastructure/skin/skinHostPorts.ts',
-  'src/obs04/devTrigger.ts',
+  'src/devtools/obs/threeSourceExportTrigger.ts', // obs04 收敛迁名（结构全修批）,
   'src/plugin-runtime/pluginCompositionRoot.ts',
   'src/plugin-runtime/process/processRuntimeServices.ts',
   'src/plugins/core/browser/builtinBrowserCommands.ts',

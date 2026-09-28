@@ -5,7 +5,7 @@ import {
   parseSheetStateV1,
   serializeSheetStateV1,
   type PersistedSheetState,
-} from '../src/workspace-sheets/sheetPersistence.ts'
+} from '../src/domains/workspace/sheetPersistence.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 // W1-01：v1 parser 保留为迁移源（细化路线 §4 步骤 1），本 describe 锁定 v1 normalize/roundtrip 输出
