@@ -48,7 +48,9 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `markdown-parse` | `parseMarkdown` | `src/renderers/solid-workbench/chat/markdownRenderModel.ts:7,494` |
 | `markdown-highlight` | `highlightBlockWithLezer`（Lezer，纯 JS；**不经 wasm**） | `src/components/chat/codeHighlight.ts:76` |
 | `projector` | `projectWorkbench` | `src/domains/workbench/workbenchProjector.ts:444` |
+| `projector`（live，#449） | `reduceWorkbenchEvent` | `src/domains/workbench/workbenchProjector.ts:423`（经 `agentWorkbenchSession.applyLive` 每信封调用） |
 | `events` | `normalizeRawEvent` | `src/domains/events/canonicalNormalizer.ts:196` |
+| `display-chain`（#441/#449） | `toSolidMessage`→`prepareMessages`→`buildMessageLookups`→`buildChatRowDescriptors`→`reuseMessageListItems` | `src/renderers/solid-workbench/WorkbenchContent.solid.tsx:177-222` |
 
 **没接线的 not in the table.** 两个计算核的**当前**真实导出共 **9 个**（`pylon-compute` 6 + `pylon-markdown` 3，`initSync` 除外）：**接线 4 个**（正是上表里 4 个 wasm 路径），**未接线 5 个** —— 三个被 #220 ends 出口取代的旧切分出口、`parseMarkdownJson` 编组变体、`markdownEngineVersion` 诊断出口。
 
@@ -67,9 +69,11 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `suites/streamingSuite.ts` | 切分/揭示：**直接复用 parity 套件的 case 定义**（`pair.wasm` 就是生产出口），按白名单挑已接线的 pair |
 | `suites/markdownParseSuite.ts` | markdown 解析：形状语料放大到 ~4k 字符 + 规模档 + 生产流式短尾 + 逐帧增长 |
 | `suites/markdownHighlightSuite.ts` | 高亮：语言语料 + 巨块档。**#241 起量的是 Lezer（`highlightBlockWithLezer`），不走计算核** |
-| `suites/projectorSuite.ts` | 投影折叠：delta 流 / 混合流 / 乱序覆盖 |
+| `suites/projectorSuite.ts` | 投影折叠：delta 流 / 混合流 / 乱序覆盖；#449 起 `reduceWorkbenchEvent(live)`（大文档上的 64 连拍——live 每帧路径，#440 的改前基线行） |
 | `suites/eventsSuite.ts` | 单帧归一：delta 流 / 完整回合 / 真机捕获载荷 / 畸形 |
+| `suites/displayChainSuite.ts` | #441/#449 显示链：`append-delta`（每发布全价）与 `usage-only`（引用门控验收行——#441-A 落地后应趋近 0）两 pair |
 | `fixtures/envelopes.ts` | projector 的 envelope 生成器（出处 `fa4aab5d^:scripts/compute-parity/fixtures/envelopes.ts`） |
+| `fixtures/foldedDocuments.ts` | #449：按 blocks memo 化的已折大文档（display-chain 与 live 两域共享，惰性构造——xs/s 档不为 l 档的 240k 事件折叠付费） |
 | `fixtures/eventWires.ts` | events 的原始 wire 构造（形状抄自 `src/__tests__/replay/harness.ts`）+ 真机捕获载荷 |
 
 ## 借了哪些存量资产（「已接线才借」）
@@ -121,6 +125,17 @@ PERF_MEMORY_LEGACY=1 bun run perf-bench:memory   # 对照档：关掉 timeline �
 | `驻留/Σ载荷` | `cold-load-residency`：整份 compact 读折完后的驻留比 | **≤ 1.2×** |
 | 拍数敏感性 | **同一终值内容**下 5 拍 → 40 拍的**绝对**驻留增长 | **≤ 1.5×** |
 | 同内容元数据快照 | 500 行**同内容** `session.commands-updated`（真机单份 16 132 B）折完后，快照对象的驻留 / 单份 | **≤ 2×** |
+| `text-thinking-residency`（#449） | 增量 chunk 文本族（thinking 538k + text 8k，零工具拍）batch 折叠后的驻留比 | **判据挂起**（见下） |
+| text 拍数敏感性（#449） | 同一终值 thinking 下 chunk 5 → 40 的绝对驻留增长 | **≤ 1.5×** |
+| text 粒度对照（#449） | 同一份 50k 文本：batch 行 vs 逐 delta 行的驻留比（信息读数） | — |
+
+**text 族判据为什么挂起（#449 实测）**：文本族驻留 ≈ 3S 是结构性的——`messages.content`（S）+
+`messages.parts` 合并串（S）+ `timeline[].data.parts`（S）；前两项是 WorkbenchMessage 双字段
+**固有**，第三项才是 timeline 收窄（⧖ M2，需裁决）能动的。实测基线 **3.119×**（tool 族口径的
+1.2× 对文本族不成立——即使 M2 落地也只到 ≈2×）。阈值定多少、要不要动消息形状，归 M2 裁决包；
+裁决前该行只出读数、不计入退出码。`text 粒度对照` 顺带量化了「不过 sink 折叠」的代价：
+batch 8 行 0.4 MB vs 逐 delta 2087 行 1.5 MB（**3.55×**）——这正是 memorySuite 必须先过
+`mergeAdjacentDeltaChunks` 的原因。
 
 两点别读错：
 
@@ -163,6 +178,11 @@ PERF_MEMORY_LEGACY=1 bun run perf-bench:memory   # 对照档：关掉 timeline �
 20 × `tool_call_update`，content **逐拍累计**至 60 KB）→ `usage_update` → `done` = **2203 行**
 （与开发记录 §复现方法同一配方）。走生产归一化器 `normalizeRawEvent`，且**不含 turn.unit 行**
 （单元只由 kernel ingest 追加，而记录的注入走前端 append 轨）——正是「compact 读全量下发」的形状。
+
+#449 起另有 **text/thinking 档**（仅由 text 族 case 显式启用，既有 case 的语料形状不变）：
+`agent_thought_chunk`（thinking，分块均分）→ `agent_message_chunk`（text，按 `deltaChars`
+分块）→ 工具段 → 终态。chunk 是**增量式**（每 chunk 只带新文本）——与工具拍的累计式相对，
+这才是正文/思考的真实回传形状。
 
 ### 实机口径（绝对 MB 与进程峰值）
 

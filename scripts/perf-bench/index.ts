@@ -5,13 +5,14 @@
 
 import { loadComputeContext } from '../compute-parity/index.ts'
 import type { PerfSuite } from './harness.ts'
+import { buildDisplayChainSuite } from './suites/displayChainSuite.ts'
 import { buildEventsSuite } from './suites/eventsSuite.ts'
 import { buildMarkdownHighlightSuite } from './suites/markdownHighlightSuite.ts'
 import { buildMarkdownParseSuite } from './suites/markdownParseSuite.ts'
 import { buildProjectorSuite } from './suites/projectorSuite.ts'
 import { buildStreamingSuites } from './suites/streamingSuite.ts'
 
-/** 六域全套件。计算核装载失败即抛（不静默降级——没有产物就没有读数）。 */
+/** 六域 + display-chain（#449）全套件。计算核装载失败即抛（不静默降级——没有产物就没有读数）。 */
 export async function buildPerfSuites(): Promise<PerfSuite[]> {
   const ctx = await loadComputeContext()
   return [
@@ -20,6 +21,7 @@ export async function buildPerfSuites(): Promise<PerfSuite[]> {
     await buildMarkdownHighlightSuite(),
     buildProjectorSuite(),
     buildEventsSuite(),
+    buildDisplayChainSuite(),
   ]
 }
 

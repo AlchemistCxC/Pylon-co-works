@@ -19,6 +19,17 @@ export interface MemoryCorpusOptions {
   readonly beats?: number
   /** 每次调用最后一拍累计到的 content 字符数（逐拍线性累计）。 */
   readonly finalBytes?: number
+  /**
+   * assistant.thinking 分块数（#449）。`0`（缺省）= 不生成思考流——既有 case 的语料形状
+   * 保持逐字节不变，text/thinking 只由显式传入的新 case 启用。
+   */
+  readonly thinkingBlocks?: number
+  /** thinking 总字符量（在 `thinkingBlocks` 个 chunk 间均分；增量式——每 chunk 只带新文本）。 */
+  readonly thinkingChars?: number
+  /** assistant.text 总字符量（按 `deltaChars` 分块，增量式）。 */
+  readonly textChars?: number
+  /** 文本族每 chunk 携带的新字符数（真实 token 流形状；与工具拍的「累计式」相对）。 */
+  readonly deltaChars?: number
   readonly owner?: CanonicalEventOwner
 }
 
@@ -29,6 +40,8 @@ export interface MemoryCorpus {
   readonly logicalPayloadBytes: number
   readonly calls: number
   readonly beats: number
+  /** 文本族（thinking+text）的 chunk 总数——拍数敏感性与粒度对照的量纲。 */
+  readonly textChunks: number
 }
 
 const DEFAULT_OWNER: CanonicalEventOwner = {
@@ -41,11 +54,33 @@ export function buildMemoryCorpus(options: MemoryCorpusOptions = {}): MemoryCorp
   const calls = options.calls ?? 100
   const beats = options.beats ?? 20
   const finalBytes = options.finalBytes ?? 60_000
+  const thinkingBlocks = options.thinkingBlocks ?? 0
+  const thinkingChars = options.thinkingChars ?? 0
+  const textChars = options.textChars ?? 0
+  const deltaChars = Math.max(1, options.deltaChars ?? 24)
   const owner = options.owner ?? DEFAULT_OWNER
   const wires: unknown[] = [
     { update: { sessionUpdate: 'user_message_chunk', content: { text: '跑一遍内存语料' } } },
   ]
   let logicalPayloadBytes = '跑一遍内存语料'.length
+  // 文本族（#449）：真实回合的产出段——thinking 先行、text 随后，**增量式** chunk（每 chunk
+  // 只带新文本，与工具拍的累计式相对）。wire 形状与 `acpNormalizer` 的真实 sessionUpdate 名
+  // 一致：`agent_thought_chunk` → assistant.thinking.delta、`agent_message_chunk` → text.delta。
+  let textChunks = 0
+  const pushChunks = (sessionUpdate: 'agent_thought_chunk' | 'agent_message_chunk', total: number, count: number): void => {
+    if (count <= 0 || total <= 0) return
+    const per = Math.max(1, Math.round(total / count))
+    let emitted = 0
+    for (let chunk = 0; chunk < count && emitted < total; chunk += 1) {
+      const size = Math.min(per, total - emitted)
+      emitted += size
+      textChunks += 1
+      logicalPayloadBytes += size
+      wires.push({ update: { sessionUpdate, content: { type: 'text', text: 'x'.repeat(size) } } })
+    }
+  }
+  pushChunks('agent_thought_chunk', thinkingChars, thinkingBlocks)
+  pushChunks('agent_message_chunk', textChars, Math.ceil(textChars / deltaChars))
   for (let call = 0; call < calls; call += 1) {
     const toolCallId = `call-${call}`
     wires.push({
@@ -75,7 +110,7 @@ export function buildMemoryCorpus(options: MemoryCorpusOptions = {}): MemoryCorp
     receivedAt: new Date(Date.UTC(2026, 8, 14, 0, 0, 0) + index * 10).toISOString(),
   }).event)
 
-  return { owner, rows, logicalPayloadBytes, calls, beats }
+  return { owner, rows, logicalPayloadBytes, calls, beats, textChunks }
 }
 
 /**

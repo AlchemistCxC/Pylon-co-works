@@ -28,6 +28,7 @@ export type Domain =
   | 'markdown-highlight'
   | 'projector'
   | 'events'
+  | 'display-chain'
 
 export interface CaseMeta {
   readonly scale?: Scale

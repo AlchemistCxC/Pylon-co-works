@@ -8,11 +8,17 @@
  * - `cold-load-residency`：整份 compact 读（2203 行 / Σ载荷 ≈61.5 MB）折完后的文档驻留；
  * - `beat-sensitivity`：同一终值内容下，拍数 5 → 40 的驻留增长（累计式回传的放大量纲）。
  *
+ * #449 起补 text/thinking 族（`text` 节）——旧语料只有 user chunk + tool 族，text 族的
+ * 驻留形态从未被量过：`text-thinking-residency`（增量 chunk 生成产段折完的驻留/Σ载荷）、
+ * text 拍数敏感性（chunk 5 → 40）、粒度对照（batch 行 vs 逐 delta 行——生产稳态走 sink
+ * 折叠，折叠前必须过 `mergeAdjacentDeltaChunks`，本套件此前直折 rows 不过 sink 正是缺口）。
+ *
  * 装载路径走**生产出口**：`toWorkbenchEnvelopes`（canonical 行 → 信封）+ `projectWorkbench`
  * （信封 → 文档）。行与信封在折完之后即可回收——这正是 #376-b 分页装载要让位给 GC 的部分，
  * 故本域只从**文档**取根，不把行数组算进驻留。
  */
 import { toWorkbenchEnvelopes } from '../../../src/sheets/agent-workbench/agentWorkbenchProjection.ts'
+import { mergeAdjacentDeltaChunks } from '../../../src/infrastructure/events/canonicalEventBatch.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, setTimelinePayloadNarrowing } from '../../../src/domains/workbench/workbenchProjector.ts'
 import { measureRetainedBytes, type RetainedBytesReport } from '../retainedHeap.ts'
 import { buildMemoryCorpus, buildMetadataSnapshotEnvelopes, type MemoryCorpusOptions } from '../fixtures/memoryCorpus.ts'
@@ -55,18 +61,57 @@ export interface MemorySuiteResult {
     readonly threshold: number
     readonly pass: boolean
   }
+  /** #449：text/thinking 族的驻留形态（旧语料盲区）。 */
+  readonly text: TextFamilySection
 }
 
-/** 把一整份 compact 读折成文档（与前端 `listJournalPages` 的逐页折同序同果）。 */
-function foldToDocument(corpus: ReturnType<typeof buildMemoryCorpus>, pageSize = 256) {
+export interface TextFamilySection {
+  /** 增量 chunk 生成产段（thinking 538k + text 8k，零工具拍）折完的驻留/Σ载荷。 */
+  readonly residency: MemoryCaseResult
+  /** chunk 5 → 40（同一终值文本）的绝对驻留增长——batch 折叠下应天然低拍敏。 */
+  readonly beat: {
+    readonly lowChunks: number
+    readonly highChunks: number
+    readonly lowBytes: number
+    readonly highBytes: number
+    readonly growth: number
+    readonly threshold: number
+    readonly pass: boolean
+  }
+  /** 粒度对照（信息读数，不设阈值）：同一份文本族行，batch 折叠 vs 逐 delta 直折。 */
+  readonly granularity: {
+    readonly chars: number
+    readonly batchRows: number
+    readonly perDeltaRows: number
+    readonly batchBytes: number
+    readonly perDeltaBytes: number
+    readonly amplification: number
+  }
+}
+
+/**
+ * 把一整份 compact 读折成文档（与前端 `listJournalPages` 的逐页折同序同果）。
+ *
+ * `granularity: 'batch'`（缺省）先过 `mergeAdjacentDeltaChunks`——**生产稳态**下 delta 行
+ * 在 sink 落盘前就已折成 batch 行（≤48KiB/2000 chunk），读侧见到的就是折叠后形状；此前
+ * 本套件直折 rows 不过 sink，per-chunk 行永不折 batch，正是 #449 指出的语料缺口。
+ * `'per-delta'` 保留逐 delta 行，量「最坏形状」（播种/旧日志/折叠关闭）的驻留差。
+ */
+function foldToDocument(
+  corpus: ReturnType<typeof buildMemoryCorpus>,
+  options: { readonly granularity?: 'batch' | 'per-delta', readonly pageSize?: number } = {},
+) {
+  const granularity = options.granularity ?? 'batch'
+  const pageSize = options.pageSize ?? 256
+  const source = granularity === 'batch' ? mergeAdjacentDeltaChunks(corpus.rows) : corpus.rows
   let document = createWorkbenchDocument(corpus.owner.localSessionId)
-  const rows = corpus.rows as readonly unknown[]
+  const rows = source as readonly unknown[]
   for (let start = 0; start < rows.length; start += pageSize) {
     const envelopes = rows.slice(start, start + pageSize).flatMap(row => toWorkbenchEnvelopes(row))
     document = projectWorkbench(envelopes, { initialDocument: document }).document
     // 页内行与信封在这里失去引用（页级回收）——与分页装载的实际形状一致。
   }
-  return document
+  return { document, foldedRows: source.length }
 }
 
 function residencyCase(
@@ -74,9 +119,10 @@ function residencyCase(
   options: MemoryCorpusOptions,
   threshold: number,
   note: string,
+  fold: { readonly granularity?: 'batch' | 'per-delta' } = {},
 ): { readonly result: MemoryCaseResult } {
   const corpus = buildMemoryCorpus(options)
-  const document = foldToDocument(corpus)
+  const { document } = foldToDocument(corpus, fold)
   // 根 = 文档本身（+ 它挂着的全部切片）；行数组**不**入根。
   const retained = measureRetainedBytes([document])
   const ratio = corpus.logicalPayloadBytes === 0 ? 0 : retained.bytes / corpus.logicalPayloadBytes
@@ -129,8 +175,46 @@ function buildMemorySuiteInner(): MemorySuiteResult {
   const lowBytes = low.result.retained.bytes
   const highBytes = high.result.retained.bytes
   const growth = lowBytes === 0 ? 1 : highBytes / lowBytes
+  // ── #449：text/thinking 族（旧语料盲区）────────────────────────────────
+  // 思考量取实测会话档（538,695 字符 thinking，见 issue-205 记录）；零工具拍，
+  // 让比值只反映文本族自身的「载荷 → 驻留」形态。
+  //
+  // 判据挂起（信息读数，#449 实测基线 3.119×）：1.2× 是 tool 族的口径（收窄+共享后载荷
+  // 唯一承载面成立）。文本族的驻留 ≈ 3S 是结构性的——S(messages.content) + S(messages.parts
+  // 合并串) + S(timeline.data.parts)，前两项是 WorkbenchMessage 双字段**固有**；即使把 text 族
+  // 纳入 timeline 收窄（⧖ M2，需裁决）也只降到 ≈2×，仍过不了 1.2×。阈值该定多少、要不要动
+  // 消息形状，是 M2 裁决包的一部分——在裁决落地前这里不设阈值，只出读数。
+  const textResidency = residencyCase(
+    'text-thinking-residency',
+    { calls: 0, thinkingBlocks: 17, thinkingChars: 538_000, textChars: 8_000, deltaChars: 24 },
+    Number.POSITIVE_INFINITY,
+    '增量 chunk 生成产段（thinking 538k + text 8k，零工具拍）batch 折叠后的驻留 / Σ逻辑载荷；判据待 M2 裁决（基线 3.119×，tool 族口径的 1.2× 对文本族不成立——WorkbenchMessage content/parts 双字段固有 2×）',
+  )
+  const textLow = residencyCase(
+    'text-beat-low',
+    { calls: 0, thinkingBlocks: 5, thinkingChars: 538_000, textChars: 0 },
+    Number.POSITIVE_INFINITY,
+    '同一终值 thinking、chunk 数 5',
+  )
+  const textHigh = residencyCase(
+    'text-beat-high',
+    { calls: 0, thinkingBlocks: 40, thinkingChars: 538_000, textChars: 0 },
+    Number.POSITIVE_INFINITY,
+    '同一终值 thinking、chunk 数 40',
+  )
+  const textLowBytes = textLow.result.retained.bytes
+  const textHighBytes = textHigh.result.retained.bytes
+  const textGrowth = textLowBytes === 0 ? 1 : textHighBytes / textLowBytes
+  // 粒度对照（信息读数）：同一份 50k 文本，batch 行 vs 逐 delta 行——量化「不过 sink 折叠」
+  // 的最坏形状。总量取 50k 而非 538k：逐 delta 直折是 O(行数²) 的投影成本，538k/24 ≈ 22k 行
+  // 会让对照 case 的构造成本淹没读数本身；形状结论在 50k 上已成立。
+  const granularityCorpus = buildMemoryCorpus({ calls: 0, textChars: 50_000, deltaChars: 24 })
+  const batchFold = foldToDocument(granularityCorpus, { granularity: 'batch' })
+  const perDeltaFold = foldToDocument(granularityCorpus, { granularity: 'per-delta' })
+  const batchBytes = measureRetainedBytes([batchFold.document]).bytes
+  const perDeltaBytes = measureRetainedBytes([perDeltaFold.document]).bytes
   return {
-    cases: [cold.result, low.result, high.result],
+    cases: [cold.result, low.result, high.result, textResidency.result, textLow.result, textHigh.result],
     metadataSnapshot: {
       rows: metadata.envelopes.length,
       singleBytes,
@@ -147,6 +231,26 @@ function buildMemorySuiteInner(): MemorySuiteResult {
       growth,
       threshold: 1.5,
       pass: growth <= 1.5,
+    },
+    text: {
+      residency: textResidency.result,
+      beat: {
+        lowChunks: 5,
+        highChunks: 40,
+        lowBytes: textLowBytes,
+        highBytes: textHighBytes,
+        growth: textGrowth,
+        threshold: 1.5,
+        pass: textGrowth <= 1.5,
+      },
+      granularity: {
+        chars: granularityCorpus.logicalPayloadBytes,
+        batchRows: batchFold.foldedRows,
+        perDeltaRows: perDeltaFold.foldedRows,
+        batchBytes,
+        perDeltaBytes,
+        amplification: batchBytes === 0 ? 1 : perDeltaBytes / batchBytes,
+      },
     },
   }
 }
