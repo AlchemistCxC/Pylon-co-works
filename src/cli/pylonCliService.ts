@@ -201,8 +201,8 @@ export function normalizeWireInteractionEntry(entry: WireInteractionEntry): Inte
   const envelope = isPlainRecord(entry.payload) ? entry.payload : {}
   const body = isPlainRecord(envelope.payload) ? envelope.payload : {}
   const eventType = typeof envelope.eventType === 'string' ? envelope.eventType : ''
-  let title = ''
-  let prompt = ''
+  let title: string
+  let prompt: string
   let toolCallId = ''
   let options: ReadonlyArray<{ optionId: string; kind?: string | null; name?: string | null }> = []
   if (eventType === 'permission.request') {
