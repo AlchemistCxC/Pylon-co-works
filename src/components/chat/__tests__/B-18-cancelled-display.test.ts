@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMockMessages } from '../chatMockData.ts'
+import { createMockMessages } from '../../../demo/chatMockData.ts'
 import { buildMessageLookups } from '../messageLookups.ts'
 import { buildChatRowDescriptors } from '../chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../messageTypes.ts'

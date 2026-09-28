@@ -1,5 +1,5 @@
-import type { Message } from './messageTypes'
-import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import type { Message } from '../components/chat/messageTypes.ts'
+import type { ContentPart } from '../domains/workbench/content/contentPartSchema.ts'
 
 type VisualQaMessage = Message & { semanticParts?: readonly ContentPart[] }
 

@@ -35,6 +35,9 @@ function cacheKey(language: string, code: string): string {
 
 function cacheResult(key: string, value: string | null): string | null {
   if (key.length > MAX_HIGHLIGHT_CACHE_ENTRY_CHARS) return value
+  // 防御双记（审查轮 P2）：has 前置检查在唯一调用链里保证「key 必不在缓存」，但这里
+  // 不依赖它——键已在缓存时先按旧键长退款，cachedChars 才与真实驻留一致。
+  if (highlightCache.has(key)) cachedChars -= key.length
   highlightCache.delete(key)
   highlightCache.set(key, value)
   cachedChars += key.length

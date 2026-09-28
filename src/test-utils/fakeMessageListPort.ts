@@ -5,7 +5,7 @@ import {
   type MessageListItem,
   type MessageListPort,
   type MessageViewportState,
-} from './messageListPort.ts'
+} from '../domains/workbench/messageListPort.ts'
 
 export type FakeMessageListCall =
   | { type: 'set-items'; itemKeys: string[] }

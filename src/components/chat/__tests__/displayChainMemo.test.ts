@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatRowDescriptorsOf } from '../chatRowPipeline.ts'
+import { buildChatRowDescriptors, chatRowDescriptorsOf } from '../chatRowPipeline.ts'
 import { messageLookupsOf } from '../messageLookups.ts'
 import { prepareMessagesOf } from '../messagePipeline.ts'
 import type { Message } from '../messageTypes.ts'
@@ -86,6 +86,17 @@ describe('#441-A 显示链单槽引用门', () => {
     const third = chatRowDescriptorsOf(prepareMessagesOf(middleChanged), messageLookupsOf(middleChanged), undefined)
     expect(third[0]).toBe(first[0])
     expect(third[1]).not.toBe(first[1])
+    // 审查轮补锁：增量输出与全量构建逐字段等价（重建段 connector 取新前驱、row 0 语义）
+    expect(third).toStrictEqual(buildChatRowDescriptors(
+      prepareMessagesOf(middleChanged),
+      messageLookupsOf(middleChanged),
+      undefined,
+    ))
+    expect(second).toStrictEqual(buildChatRowDescriptors(
+      prepareMessagesOf(grown),
+      messageLookupsOf(grown),
+      undefined,
+    ))
   })
 
   it('#441-B 安全阀：lookups 非空（legacy 工具行）回退全量构建', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFakeMessageListPort } from '../fakeMessageListPort.ts'
+import { createFakeMessageListPort } from '../../../test-utils/fakeMessageListPort.ts'
 import { createMessageListItems, type MessageViewportState } from '../messageListPort.ts'
 import { selectMessageViewportState } from '../messageViewportState.ts'
 import type { ChatRowDescriptor } from '../../../components/chat/chatRowPipeline.ts'

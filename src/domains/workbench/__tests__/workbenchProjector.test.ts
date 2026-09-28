@@ -9,7 +9,6 @@ import {
   selectTimeline,
   type WorkbenchDocument,
 } from '../workbenchProjector.ts'
-import { selectLegacyMessages } from '../workbenchLegacyFacade.ts'
 import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
 
 const base = {
@@ -72,7 +71,7 @@ describe('WorkbenchProjector', () => {
       envelope(3, { type: 'event.unknown', originalType: 'future_event', summary: 'future', raw: { value: 1 }, truncated: false }),
     ]
     const document = reduce(events)
-    expect(selectLegacyMessages(document).map(message => [message.role, message.content])).toEqual([
+    expect(document.messages.map(message => [message.role, message.content])).toEqual([
       ['user', 'question'],
       ['assistant', 'answer'],
     ])
@@ -196,13 +195,13 @@ describe('WorkbenchProjector', () => {
   it('aggregates contiguous same-role chunks when the provider omits message identity', () => {
     const first = envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'first' }] })
     const second = envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'second' }] })
-    expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
+    expect(projectWorkbench([first, second]).document.messages.map(message => message.content)).toEqual(['firstsecond'])
   })
 
   it('aggregates contiguous identity-less user chunks into one prompt row', () => {
     const first = envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'first' }] })
     const second = envelope(2, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'second' }] })
-    expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
+    expect(projectWorkbench([first, second]).document.messages.map(message => message.content)).toEqual(['firstsecond'])
   })
 
   it('aggregates one assistant stream when the provider rotates identity on every chunk', () => {
@@ -214,7 +213,7 @@ describe('WorkbenchProjector', () => {
     ]
 
     const document = projectWorkbench(chunks).document
-    expect(selectLegacyMessages(document).map(message => message.content))
+    expect(document.messages.map(message => message.content))
       .toEqual(['这是 complete answer'])
     expect(document.messages[0].parts).toEqual([{ kind: 'text', text: '这是 complete answer' }])
   })
@@ -429,5 +428,45 @@ describe('#446 diagnostics 环', () => {
     expect(two?.data).toBeDefined()
     // 摘除只动载荷：卡片语义字段仍在
     expect(one?.message).toBe(big)
+  })
+})
+
+describe('#446 审查轮补锁', () => {
+  const bigNotice = (sequence: number, code: string) =>
+    envelope(sequence, { type: 'diagnostic.notice', level: 'info', message: 'x'.repeat(200_000), code })
+
+  it('合并恢复 data 时剥掉 dataOmitted——不出现 data 与标记并存的违约态', () => {
+    const first = bigNotice(1, 'big.ring')
+    const second = bigNotice(2, 'big.ring')
+    const document = reduce([first, second, envelope(3, { type: 'diagnostic.notice', level: 'info', message: 'x'.repeat(200_000), code: 'big.ring' })])
+    const entry = document.diagnostics.find(item => item.code === 'big.ring')
+    // 第二拍起总量超预算摘除首条 data；第三拍合并恢复 data ⇒ 标记必须消失
+    expect(entry?.dataOmitted).toBeUndefined()
+    expect(entry?.data).toBeDefined()
+    expect(entry?.count).toBe(3)
+  })
+
+  it('不同 level（info→warning）不成环——升级证据不被首条 level 吞掉', () => {
+    const info = envelope(1, { type: 'diagnostic.notice', level: 'info', message: '同形', code: 'lvl.x' })
+    const warning = envelope(2, { type: 'diagnostic.notice', level: 'warning', message: '同形', code: 'lvl.x' })
+    const document = reduce([info, warning])
+    const rows = document.diagnostics.filter(entry => entry.code === 'lvl.x')
+    expect(rows).toHaveLength(2)
+    expect(rows.map(row => row.level)).toEqual(['info', 'warning'])
+  })
+
+  it('条目环淘汰保持到达序（error 不被重排到队首）', () => {
+    const events = [envelope(1, { type: 'diagnostic.notice', level: 'info', message: '早期', code: 'early' })]
+    for (let index = 0; index < 300; index += 1) {
+      events.push(envelope(index + 2, { type: 'diagnostic.notice', level: index === 150 ? 'error' : 'info', message: `n${index}`, code: `c-${index}` }))
+    }
+    const document = reduce(events)
+    const codes = document.diagnostics.map(entry => entry.code)
+    // 幸存的是最新 256 条非 error（最旧的 early/c-0..c-43 被环丢掉），且保持到达序——
+    // error 条目（c-150）留在它到达的位置，不被重排到队首
+    expect(codes[0]).toBe('c-43')
+    expect(codes).not.toContain('early')
+    expect(codes.indexOf('c-150')).toBeGreaterThan(0)
+    expect(codes.indexOf('c-150')).toBeLessThan(codes.length - 1)
   })
 })

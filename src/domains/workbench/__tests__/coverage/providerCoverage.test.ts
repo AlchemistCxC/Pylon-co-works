@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import {
   allCoverageItems, EXPECTED_UNITS, PROVIDER_COVERAGE, summarize,
-} from '../providerCoverageIndex.ts'
+} from './providerCoverageIndex.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../rendererContent/executionRenderKindCatalog.ts'
 import { normalizeAgentEvent, type NormalizeContext } from '../../normalizers/agentEventNormalizer.ts'

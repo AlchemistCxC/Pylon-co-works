@@ -3,7 +3,7 @@ import type {
   ToolConnectorInvalidationReason,
   ToolConnectorLayoutPort,
   ToolConnectorRegistration,
-} from './toolConnectorLayoutPort.ts'
+} from '../domains/workbench/toolConnectorLayoutPort.ts'
 
 export interface FakeToolConnectorLayoutPort extends ToolConnectorLayoutPort {
   readonly toolIds: readonly string[]

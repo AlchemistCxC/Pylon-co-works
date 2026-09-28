@@ -1,4 +1,4 @@
-import type { WorkbenchClock } from './generationFooterContracts.ts'
+import type { WorkbenchClock } from '../domains/workbench/generationFooterContracts.ts'
 
 interface ScheduledTask {
   id: number

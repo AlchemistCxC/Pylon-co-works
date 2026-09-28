@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createFakeToolConnectorLayoutPort } from '../../../../domains/workbench/fakeToolConnectorLayoutPort.ts'
+import { createFakeToolConnectorLayoutPort } from '../../../../test-utils/fakeToolConnectorLayoutPort.ts'
 import { createToolConnectorLayoutPort } from '../../../../domains/workbench/toolConnectorLayoutPort.ts'
 import { SolidToolConnector, SolidToolConnectorLayer } from '../ToolConnector.solid.tsx'
 import { SolidToolCard } from '../ToolCard.solid.tsx'
