@@ -115,3 +115,11 @@
   - #444① → `src/domains/export/threeSourceExport.ts`（仅 sanitize 路径注释修正）+ sanitize 词表 parity 测试（`scripts/sanitize-vocabulary.test.mts` 或 export `__tests__` 内）。
   - **不碰**：`src/domains/workbench/**` 与 `src/sheets/agent-workbench/**` 其余文件（#442 未来域）、`src/domains/identity/**`、`store.ts` 主题预设集群、cursor/gap 回填、投影层。
   - 关联登记：#442/#445/#448 已登记未开工。规格 `.agents/spec/439-sink-retirement.md`、`.agents/spec/444-sanitize-vocabulary.md`。
+- [kumo] **#440+#441+#443+#446+#449 前端性能/内存热点清偿批次（调查已完结，开工）**：
+  - #440 live 每帧 O(N) → `src/sheets/agent-workbench/agentWorkbenchSession.ts`（**仅 applyLive 的 priorUser 段 ~:529**，与 #439 的 :985 flush 摘除不相邻，提交按 hunk 分账）、`src/domains/workbench/{workbenchRuntime,workbenchProjector}.ts`（appliedRanges/appliedEventIds 冻结治理，**依 #449 基线读数后再动**）+ 对应 `__tests__`。
+  - #441 显示链 → `src/renderers/solid-workbench/WorkbenchContent.solid.tsx`、`src/components/chat/{messageLookups,chatRowPipeline,messagePipeline}.ts` + `__tests__`（lookups 引用门控 → 前缀复用，两步走）。
+  - #443 → `src/components/chat/codeHighlight.ts`（2M 字符预算 + 64K 单条上限 + 过时头注修正）+ `__tests__`。
+  - #446 → `src/domains/workbench/workbenchProjector.ts` 的 `addDiagnostic` 段（按码计数环 + 256KB data 预算环，error 豁免）+ `__tests__`。
+  - #449 基准 → `scripts/perf-bench/{index.ts,harness.ts?}`、新 `suites/displayChainSuite.ts`、`suites/{memorySuite,projectorSuite}.ts`、`fixtures/memoryCorpus.ts`、`README.md`（**避让 #439 的 `eventsSuite.ts`**）。
+  - ⚠️ **#447（canonicalEventSink seeding 队列 cap）避让顺延**：canonicalEventSink.ts 在 #439 在途域内，待其合入后再动。issue 已登记，仅文档化部分届时一并做。
+  - **不碰**：`src-tauri/**`（本批零 Rust 改动）、`src/infrastructure/events/**`（#439 域；只 import 其纯函数不改文件）、`src/workspace-sheets/**`、⧖ 三条待裁决项（text 族 timeline 收窄扩 K20 / event.unknown data 收窄（#405 冲突）/ interactions（C11））。规格 `.agents/spec/440-449-perf-mem-hotspots.md`，记录落 `.agents/records/`。提交一律 pathspec。
