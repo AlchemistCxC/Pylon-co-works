@@ -1,52 +1,33 @@
 /**
- * canonicalEventBatch — #81 L1 写入窗口聚合的纯合并规则。
+ * canonicalEventBatch — `*.delta.batch` 行的**读侧解析**（#439 起）。
  *
- * 在 canonicalEventSink 分配 sequence/eventId 之后、落盘之前，把 pending 中
- * **相邻同类 delta** 合并为一行 batch 行（跨度占用 sequence：行取跨度内最后一条的
- * sequence/eventId，跨度中间编号不被任何行占用，留给读侧按 `owner#(seqSpan[0]+i)`
- * 重建原始 id）。sink 的 id 分配与 conflict rebase 都经同一函数合并，规则不分叉。
+ * 写侧（sink 的合并与预算常量）已随前端自写轨退役：生产 batch 行由 Rust
+ * `event_repo/fold.rs`（终态 `turn.unit`）与 `draft_flush.rs`（draft 折叠）产出，
+ * 预算常量（48 KiB / 2000 chunk）以 fold.rs 为唯一单源。本文件只保留读侧
+ * 纯函数（投影展开 batch 行用）与测试期参考合并器 `mergeAdjacentDeltaChunks`
+ * （replay 测试/perf-bench 造数器——无生产调用方，#449 基准在途依赖，收工后
+ * 迁 `src/test-utils/`）。
  *
- * 合并条件（保守，等价性按构造成立）：
- * - 事件类型 ∈ {assistant.text.delta, assistant.thinking.delta} 且相邻同类；
- * - identity 全字段相等（比 messageProjectionRules 的三元组口径更严：合并更少、
- *   永不少并行为不同的事件）；
- * - 未超上限：rawPayload 序列化字节 ≤ maxRawBytes 且 foldedCount ≤ maxFoldedCount，
- *   超限切断成多行（不截断 ⇒ 不产生 raw_truncated 语义）。
- *   maxRawBytes 取 48 KiB 而非裁决字面的 256 KiB：Rust `retain_raw_payload`
- *   （MAX_CANONICAL_RAW_BYTES = 64 KiB）会对超限 rawPayload 做截断替换，与
- *   "不截断、rawPayload 可逐字节还原"的裁决意图冲突 ⇒ 预算必须落在 64 KiB 之内。
+ * 读侧判据（与 Rust 写入形状互为镜像）：
+ * - 事件类型 ∈ {assistant.text.delta.batch, assistant.thinking.delta.batch}；
+ * - 行占跨度末位 sequence，跨度中间编号不被任何行占用，读侧按
+ *   `owner#(seqSpan[0]+i)` 重建原始 id；
+ * - rawPayload 字节 ≤ 48 KiB 且 foldedCount ≤ 2000（写入侧保证，读侧不重验预算）。
  *
- * 非 delta 事件、未知事件、identity 不连续处、单条 run：原样保留（unknown 不丢弃）。
- * 纯域函数：零 sink/scheduler/store 依赖，node 可测。
+ * 纯域函数：零 sink/store 依赖，node 可测。
  */
 import type { CanonicalConversationEvent, CanonicalEventIdentity, CanonicalEventType } from '../../domains/events/eventSchema'
 
 export type CanonicalBatchDeltaType = 'assistant.text.delta.batch' | 'assistant.thinking.delta.batch'
 
+/** 测试期参考合并器用：delta → batch 类型映射（写入规则由 Rust fold.rs 单源承载）。 */
 const DELTA_TO_BATCH: Record<string, CanonicalBatchDeltaType> = {
   'assistant.text.delta': 'assistant.text.delta.batch',
   'assistant.thinking.delta': 'assistant.thinking.delta.batch',
 }
 
-export interface CanonicalBatchLimits {
-  /** 单行 rawPayload 序列化字节上限（须低于 Rust 64 KiB 截断阈值，见文件头）。 */
-  maxRawBytes: number
-  /** 单行折叠 chunk 数上限。 */
-  maxFoldedCount: number
-}
-
-export const CANONICAL_BATCH_LIMITS: CanonicalBatchLimits = {
-  maxRawBytes: 48 * 1024,
-  maxFoldedCount: 2000,
-}
-
 export function isCanonicalBatchDeltaType(eventType: CanonicalEventType | string): eventType is CanonicalBatchDeltaType {
   return eventType === 'assistant.text.delta.batch' || eventType === 'assistant.thinking.delta.batch'
-}
-
-/** delta → batch 类型映射；非 delta 返回 undefined。 */
-export function batchEventTypeOf(eventType: CanonicalEventType | string): CanonicalBatchDeltaType | undefined {
-  return DELTA_TO_BATCH[eventType]
 }
 
 /** batch 行的 seqSpan（typedPayload.seqSpan，形状非法返回 undefined）。 */
@@ -121,13 +102,17 @@ interface BatchRun {
 }
 
 /**
- * 合并 pending 中相邻同类 delta chunk 为 batch 行；其余事件原样保留。
+ * 合并相邻同类 delta chunk 为 batch 行（**测试期参考合并器**——replay 测试与
+ * perf-bench 造数器用，无生产调用方；生产折叠归 Rust fold.rs/draft_flush.rs）。
  * 输入须为同一 owner 的逐 chunk canonical 事件（升序 = 到达序）；单条 run 不合并
- * （保持与逐 chunk 存储逐字节一致）。id 分配与 conflict rebase 共用本函数。
+ * （保持与逐 chunk 存储逐字节一致）。预算字面量与 Rust fold.rs 常量同源对齐。
  */
 export function mergeAdjacentDeltaChunks(
   events: readonly CanonicalConversationEvent[],
-  limits: CanonicalBatchLimits = CANONICAL_BATCH_LIMITS,
+  limits: { readonly maxRawBytes: number; readonly maxFoldedCount: number } = {
+    maxRawBytes: 48 * 1024,
+    maxFoldedCount: 2000,
+  },
 ): CanonicalConversationEvent[] {
   const rows: CanonicalConversationEvent[] = []
   let run: BatchRun | undefined
@@ -137,7 +122,7 @@ export function mergeAdjacentDeltaChunks(
     run = undefined
   }
   for (const event of events) {
-    const batchType = batchEventTypeOf(event.eventType)
+    const batchType = DELTA_TO_BATCH[event.eventType]
     const foldText = batchType === undefined ? undefined : deltaTextOf(event)
     if (run
       && foldText !== undefined
