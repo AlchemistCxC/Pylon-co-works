@@ -314,24 +314,27 @@ impl AgentRuntime {
     /// 数据面全部来自后端权威状态，不依赖一次性 Tauri event：
     /// - `turn`：turn 账本的单条记录（在途优先，否则最近终态——含 `turnState`/
     ///   `terminalCause`）；会话无已知 turn 时缺省；
-    /// - `turnInFlight`：ADR-0017/#217 在途回合标记——「本进程已派发 prompt、
-    ///   尚未收到终态」的一等事实（进程内，不落盘）；
-    /// - `turnInFlightAnomaly` / `turnInFlightAnomalies`：标记与账本失配的
-    ///   「已不在途却仍为真」诊断读数（本次查询是否失配 / 累计计数）；
+    /// - `turnInFlight`：#420/ADR-0034 在途回合事实——「本进程已派发 prompt、
+    ///   尚未收到终态」（进程内，不落盘），由 turn_ledger.active 单源承载
+    ///   （`turn` 记录无 terminal 即在途，与账本「在途优先」同口径）；
+    /// - `turnInFlightAnomaly` / `turnInFlightAnomalies`：该会话存在
+    ///   **非当前代际**在途残留的诊断读数（本次查询是否命中 / 累计计数）——
+    ///   单源化后旧的「标记与账本失配」按构造不可达，判据换轴为
+    ///   drop_generation 漏清检测（旧代际在途漏过清理会以幽灵在途污染后续
+    ///   会话事实）；
     /// - `sequence`：入站 ingress 序列 cursor（lastIngressSeq/spill/drop/overloaded）；
     /// - `lastError`：runtime 生命周期错误；
     /// - `replayLoading`：session/load 回放进行中标志（replay progress 输入）。
     ///
     /// 会话映射不存在时返回 None（调用方不得伪造空快照）。
     pub(crate) async fn cold_mount_turn_snapshot(&self, source: &str) -> Option<serde_json::Value> {
-        let (peri_id, generation, replay_loading, turn_in_flight) = {
+        let (peri_id, generation, replay_loading) = {
             let sessions = self.sessions.lock().ok()?;
             let session = sessions.get(source)?;
             (
                 session.peri_id.clone(),
                 session.generation,
                 session.replay_loading,
-                session.turn_in_flight(),
             )
         };
         let last_error = self
@@ -344,14 +347,18 @@ impl AgentRuntime {
             .turn_ledger
             .latest_session_snapshot(source, &peri_id, generation)
             .and_then(|record| serde_json::to_value(record).ok());
-        // ADR-0017/#217 诊断读数：「已不在途却仍为真」——标记为真而账本无在途
-        // turn（记录已终态或不存在）。正常情况下标记与账本同点置位/清理，二者
-        // 不会失配；失配即标记滞留（等待 future 被取消等未经终态臂的残余），
-        // 必须显形：告警 + 计数 + 快照字段。
-        let ledger_in_flight = turn
+        // #420/ADR-0034：在途事实单源化——`turn` 记录无 terminal 即在途
+        // （与 latest_session_snapshot 的「在途优先」选择器同口径，无第二来源）。
+        let turn_in_flight = turn
             .as_ref()
             .is_some_and(|value| value.get("terminal").is_none());
-        let turn_in_flight_anomaly = turn_in_flight && !ledger_in_flight;
+        // #420 诊断读数（判据换轴）：同会话存在 generation ≠ 当前的在途残留。
+        // 正常路径客户端替换时 drop_generation 整体清理，此值恒 0；>0 即旧代际
+        // 在途漏过了清理（幽灵在途），必须显形：告警 + 计数 + 快照字段。
+        let stale_active = self
+            .turn_ledger
+            .stale_active_for_session(source, generation);
+        let turn_in_flight_anomaly = stale_active > 0;
         if turn_in_flight_anomaly {
             let anomalies = self
                 .turn_in_flight_anomalies
@@ -360,9 +367,10 @@ impl AgentRuntime {
                 source,
                 peri_id,
                 generation,
+                stale_active,
                 anomalies = anomalies + 1,
-                "in-flight turn mark is set but the turn ledger has no active turn; \
-                 a liveness mark leaked past every terminal path (ADR-0017 diagnostic)"
+                "turn ledger holds active turns from a stale generation for this session; \
+                 drop_generation should have cleared them (ADR-0034 diagnostic)"
             );
         }
         Some(serde_json::json!({
@@ -543,9 +551,9 @@ mod tests {
         assert_eq!(snapshot["lastError"], serde_json::Value::Null);
     }
 
-    /// #217（ADR-0017）：在途回合标记经快照暴露的三态契约——
+    /// #420/ADR-0034：在途回合（账本单源）经快照暴露的三态契约——
     /// 在途 turn ⇒ `turnInFlight=true`（anomaly=false）；终态 ⇒ false；
-    /// 滞留标记（账本已无在途）⇒ anomaly=true + 诊断计数递增。
+    /// 非当前代际的在途残留 ⇒ anomaly=true + 诊断计数递增。
     /// 本测试钉住 `turnInFlight` / `turnInFlightAnomaly` / `turnInFlightAnomalies`
     /// 字段名，前端消费按此对接。
     #[tokio::test]
@@ -568,15 +576,8 @@ mod tests {
             turn_id: 9,
         };
 
-        // ① 在途：标记与账本一致为真，无 anomaly。
+        // ① 在途：账本 begin 即单源事实，无 anomaly。
         runtime.turn_ledger.begin(key.clone(), 10);
-        {
-            let mut session = runtime.sessions.lock().unwrap();
-            session
-                .get_mut("local:c2")
-                .unwrap()
-                .mark_turn_in_flight(5, 9);
-        }
         let snapshot = runtime
             .cold_mount_turn_snapshot("local:c2")
             .await
@@ -586,20 +587,13 @@ mod tests {
         assert_eq!(snapshot["turnInFlightAnomalies"], serde_json::json!(0));
         assert_eq!(snapshot["turn"]["phase"], serde_json::json!("prompting"));
 
-        // ② 终态：settle 同时按键清理标记（与账本一致为假，无 anomaly）。
+        // ② 终态：settle 收敛在途（单源，无第二标记需要同步）。
         assert_eq!(
             runtime
                 .turn_ledger
                 .settle(&key, crate::acp::TurnTerminalCause::Completed, 20, None,),
             crate::acp::SettleOutcome::Published
         );
-        {
-            let mut session = runtime.sessions.lock().unwrap();
-            assert!(session
-                .get_mut("local:c2")
-                .unwrap()
-                .clear_turn_in_flight(5, 9));
-        }
         let snapshot = runtime
             .cold_mount_turn_snapshot("local:c2")
             .await
@@ -608,19 +602,20 @@ mod tests {
         assert_eq!(snapshot["turnInFlightAnomaly"], serde_json::json!(false));
         assert_eq!(snapshot["turnInFlightAnomalies"], serde_json::json!(0));
 
-        // ③ 失配（模拟滞留：标记绕过终态路径存活）⇒ anomaly 读数显形 + 计数。
-        {
-            let mut session = runtime.sessions.lock().unwrap();
-            session
-                .get_mut("local:c2")
-                .unwrap()
-                .mark_turn_in_flight(5, 9);
-        }
+        // ③ 残留（模拟 drop_generation 漏清：旧代际在途绕过清理存活）
+        //    ⇒ anomaly 读数显形 + 计数。
+        let stale_key = crate::acp::TurnKey {
+            local_session_id: "local:c2".to_string(),
+            remote_session_id: "peri-c2".to_string(),
+            generation: 4,
+            turn_id: 3,
+        };
+        runtime.turn_ledger.begin(stale_key, 5);
         let snapshot = runtime
             .cold_mount_turn_snapshot("local:c2")
             .await
             .expect("session mapping exists");
-        assert_eq!(snapshot["turnInFlight"], serde_json::json!(true));
+        assert_eq!(snapshot["turnInFlight"], serde_json::json!(false));
         assert_eq!(snapshot["turnInFlightAnomaly"], serde_json::json!(true));
         assert_eq!(snapshot["turnInFlightAnomalies"], serde_json::json!(1));
         // 连续查询累计计数单调。
@@ -628,7 +623,7 @@ mod tests {
         assert_eq!(
             runtime.turn_in_flight_anomalies.load(Ordering::Acquire),
             2,
-            "每次失配查询都必须累加诊断计数"
+            "每次残留命中查询都必须累加诊断计数"
         );
     }
 

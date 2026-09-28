@@ -123,7 +123,7 @@ fn gui_idle_timeout_parsing() {
     );
 }
 
-/// #363-4：在途回合标记是豁免信号——超时也不得回收。
+/// #363-4：在途回合是豁免信号——超时也不得回收（#420 起由账本 active 单源判定）。
 #[tokio::test]
 async fn session_with_an_in_flight_turn_is_exempt() {
     let state = state_with_initial_acp().await;
@@ -133,14 +133,23 @@ async fn session_with_an_in_flight_turn_is_exempt() {
         sessions.clear();
         let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
         local.updated_at = Some(Timestamp::new(1)); // 早已超时
-        local.mark_turn_in_flight(0, 1);
         sessions.insert("local".to_string(), local);
     }
+    // #420：在途事实登记进账本（remote = 会话 peri_id，generation = 0）。
+    runtime.turn_ledger.begin(
+        crate::acp::TurnKey {
+            local_session_id: "local".to_string(),
+            remote_session_id: "local-peri".to_string(),
+            generation: 0,
+            turn_id: 1,
+        },
+        0,
+    );
 
     check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
     assert!(
         runtime.sessions.lock().unwrap().contains_key("local"),
-        "有在途回合的会话必须豁免（ADR-0017 的进程内标记）"
+        "有在途回合的会话必须豁免（ADR-0034 的账本在途事实）"
     );
 }
 

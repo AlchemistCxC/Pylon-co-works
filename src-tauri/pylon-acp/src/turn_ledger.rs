@@ -542,6 +542,74 @@ impl TurnLedger {
         }
     }
 
+    /// #420：该会话三元组当前是否存在在途 turn（expiry 豁免/快照的廉价查询；
+    /// 与 [`Self::latest_session_snapshot`] 的「在途优先」判定同口径）。
+    pub fn turn_in_flight(
+        &self,
+        local_session_id: &str,
+        remote_session_id: &str,
+        generation: u64,
+    ) -> bool {
+        let tables = self.lock();
+        tables.active.keys().any(|key| {
+            key.local_session_id == local_session_id
+                && key.remote_session_id == remote_session_id
+                && key.generation == generation
+        })
+    }
+
+    /// #420：防御性结算——**只**在该会话三元组的在途候选中取 turn_id 最小者
+    /// 收敛；无在途返回 `UnknownTurn`（调用方静默 no-op）。与 cfg(test) 的
+    /// [`Self::settle_by_session`]（候选含终态、命中走 Late）不同：本方法
+    /// 永不触碰终态记录，正常路径（终态臂已 settle）调用即 no-op，不产生
+    /// Late 噪声。生产调用方：prompt 失败路径的防御纵深。
+    pub fn settle_active_for_session(
+        &self,
+        local_session_id: &str,
+        remote_session_id: &str,
+        generation: u64,
+        cause: TurnTerminalCause,
+        settled_at_ms: u64,
+        detail: Option<String>,
+    ) -> SettleOutcome {
+        let target = {
+            let tables = self.lock();
+            tables
+                .active
+                .keys()
+                .filter(|key| {
+                    key.local_session_id == local_session_id
+                        && key.remote_session_id == remote_session_id
+                        && key.generation == generation
+                })
+                .min_by_key(|key| key.turn_id)
+                .cloned()
+        };
+        match target {
+            Some(key) => self.settle(&key, cause, settled_at_ms, detail),
+            None => SettleOutcome::UnknownTurn,
+        }
+    }
+
+    /// #420：该本地会话下 generation ≠ 当前的在途残留计数（快照 anomaly 判据）。
+    /// 正常情况下客户端替换（generation bump）经 [`Self::drop_generation`] 整体
+    /// 清理，此值恒 0；>0 即旧代际在途漏过了清理——继续驻留会以幽灵在途污染
+    /// 后续会话事实，必须显形。
+    pub fn stale_active_for_session(
+        &self,
+        local_session_id: &str,
+        current_generation: u64,
+    ) -> usize {
+        let tables = self.lock();
+        tables
+            .active
+            .keys()
+            .filter(|key| {
+                key.local_session_id == local_session_id && key.generation != current_generation
+            })
+            .count()
+    }
+
     /// generation 硬隔离清理：客户端替换后旧代际条目整体收敛。
     /// 返回被清理的条目数（诊断）。
     /// (#260-B7) 单遍 retain 替代「收集 keys 再逐个 remove」的两遍遍历，同删除集。
@@ -648,6 +716,123 @@ mod tests {
             generation: 1,
             turn_id,
         }
+    }
+
+    /// #420：`turn_in_flight` 会话三元组查询——begin 后为真、settle 后为假、
+    /// 三元组任一维不匹配（他会话/他代际）不命中。
+    #[test]
+    fn turn_in_flight_matches_session_triple_only() {
+        let ledger = ledger();
+        assert!(!ledger.turn_in_flight("local:s1", "peri-s1", 1));
+        ledger.begin(key(4), 10);
+        assert!(ledger.turn_in_flight("local:s1", "peri-s1", 1));
+        assert!(
+            !ledger.turn_in_flight("local:s1", "peri-s1", 2),
+            "他代际不得命中"
+        );
+        assert!(
+            !ledger.turn_in_flight("local:other", "peri-s1", 1),
+            "他本地会话不得命中"
+        );
+        assert!(
+            !ledger.turn_in_flight("local:s1", "peri-other", 1),
+            "他远端会话不得命中"
+        );
+        ledger.settle(&key(4), TurnTerminalCause::Completed, 20, None);
+        assert!(!ledger.turn_in_flight("local:s1", "peri-s1", 1));
+    }
+
+    /// #420：`settle_active_for_session` 只结算在途候选——终态记录不被触碰
+    /// （正常路径 no-op 返回 UnknownTurn，不产生 Late 噪声）；多个在途取
+    /// turn_id 最小者。
+    #[test]
+    fn settle_active_for_session_never_touches_terminal_records() {
+        let ledger = ledger();
+        // 已终态的 turn：防御结算必须 no-op（UnknownTurn），不得翻成 Late。
+        ledger.begin(key(1), 10);
+        ledger.settle(&key(1), TurnTerminalCause::Completed, 20, None);
+        assert_eq!(
+            ledger.settle_active_for_session(
+                "local:s1",
+                "peri-s1",
+                1,
+                TurnTerminalCause::ProtocolError,
+                30,
+                None
+            ),
+            SettleOutcome::UnknownTurn
+        );
+        assert_eq!(
+            ledger.late_terminal_events(),
+            0,
+            "防御结算不得把已终态记录计入迟到终态"
+        );
+
+        // 在途 turn：防御结算收敛它（Published）。
+        ledger.begin(key(2), 40);
+        assert_eq!(
+            ledger.settle_active_for_session(
+                "local:s1",
+                "peri-s1",
+                1,
+                TurnTerminalCause::ProtocolError,
+                50,
+                Some("defensive".to_string())
+            ),
+            SettleOutcome::Published
+        );
+        assert!(!ledger.turn_in_flight("local:s1", "peri-s1", 1));
+        let record = ledger
+            .snapshot(&key(2))
+            .expect("defensively settled record");
+        assert_eq!(
+            record.terminal.expect("terminal").cause,
+            TurnTerminalCause::ProtocolError
+        );
+
+        // 多在途（理论竞态）：取 turn_id 最小者，其余留给显式 key 收敛。
+        ledger.begin(key(4), 60);
+        ledger.begin(key(3), 61);
+        assert_eq!(
+            ledger.settle_active_for_session(
+                "local:s1",
+                "peri-s1",
+                1,
+                TurnTerminalCause::ConnectionLost,
+                70,
+                None
+            ),
+            SettleOutcome::Published
+        );
+        assert!(
+            ledger.turn_in_flight("local:s1", "peri-s1", 1),
+            "turn_id 较大者仍在途"
+        );
+    }
+
+    /// #420：`stale_active_for_session`——同会话非当前代际的在途残留计数；
+    /// 当前代际在途与他会话在途都不计入。
+    #[test]
+    fn stale_active_for_session_counts_only_stale_generations() {
+        let ledger = ledger();
+        ledger.begin(key(1), 10);
+        assert_eq!(ledger.stale_active_for_session("local:s1", 1), 0);
+        let mut stale = key(2);
+        stale.generation = 0;
+        ledger.begin(stale, 20);
+        assert_eq!(ledger.stale_active_for_session("local:s1", 1), 1);
+        let mut other_session = key(3);
+        other_session.local_session_id = "local:s2".to_string();
+        other_session.generation = 0;
+        ledger.begin(other_session, 30);
+        assert_eq!(
+            ledger.stale_active_for_session("local:s1", 1),
+            1,
+            "他会话的旧代际在途不计入"
+        );
+        // drop_generation 清理后残留归零。
+        ledger.drop_generation(0);
+        assert_eq!(ledger.stale_active_for_session("local:s1", 1), 0);
     }
 
     fn ledger() -> Arc<TurnLedger> {
