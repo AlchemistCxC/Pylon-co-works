@@ -301,6 +301,19 @@ impl TestHarness {
             builder = builder.with_prism(config.resolve_prism());
             builder.build()
         };
+        // #379：夹具语义对齐——上方 connect 成功意味着 fake agent 已真实 initialize，
+        // lifecycle status 必须如实置 Connected（test_state_with_acp 只热插 acp 不动
+        // 状态）。否则命令入口的懒重连（ensure_connected_for_send）会在 harness 测试
+        // 里触发真实二次 spawn：连接换代、wire trace hub 指向旧客户端、golden 断言漂移。
+        if let Some(agent) = &config.agent {
+            if let Some(runtime) = state.runtimes.get(&agent.name) {
+                runtime
+                    .agent_runtime
+                    .lock()
+                    .expect("runtime status lock")
+                    .status = crate::agent::runtime::AgentLifecycleStatus::Connected;
+            }
+        }
         // approval_mode 覆盖在 build 之后（build_app_state 只承载生产默认值）。
         *state.approval_mode.lock().expect("approval mode lock") = config.approval_mode;
         {
@@ -884,6 +897,7 @@ impl TestHarness {
     ) -> Result<serde_json::Value, String> {
         crate::session::new_session(
             self.app.state::<crate::AppState>(),
+            self.window.as_ref().window().clone(),
             agent_id.to_string(),
             source.to_string(),
             profile.to_string(),
@@ -1082,6 +1096,7 @@ mod tests {
         // 经真实 command 入口建会话（session/new 上 wire + SessionInfo 记账）。
         let created = crate::session::new_session(
             state.clone(),
+            window.as_ref().window().clone(),
             "harness-smoke".to_string(),
             "local:harness-smoke".to_string(),
             "profile-harness".to_string(),
