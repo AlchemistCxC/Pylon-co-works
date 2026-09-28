@@ -9,7 +9,7 @@
  * - 生产：三个 collect* 采集器经 src/plugins/core/export/builtinExportSources.ts 包装为
  *   core.export.* 插件 source，由产品 workspace 插件统一登记。
  * - DEV 取证钩子：完整三源工件组装（exportThreeSourcesForSession / downloadThreeSourceArtifact）
- *   仅由 src/obs04/devTrigger.ts 挂载（import.meta.env.DEV 守卫，生产构建 tree-shake）。
+ *   仅由 src/devtools/obs/threeSourceExportTrigger.ts 挂载（import.meta.env.DEV 守卫，生产构建 tree-shake）。
  *
  * 纪律（方案书 §2 阶段 M0）：
  * - 只读取证：不修改任何业务语义；三源全部经只读路径采集。

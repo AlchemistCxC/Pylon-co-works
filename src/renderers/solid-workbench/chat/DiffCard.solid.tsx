@@ -10,6 +10,11 @@ import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { CODE_INHERIT, DIFF_BODY, DIFF_CARD, DIFF_COUNT, DIFF_HEAD, DIFF_LINE, DIFF_LINE_BG, DIFF_SIGN, DIFF_SIGN_TONE, WORD_BASE, WORD_TONE } from '../../../domains/chat/diffCardPresentation.ts'
 
+export interface SolidDiffCardProps {
+  output: string
+  payload?: DiffPayload | null
+}
+
 export function SolidDiffCard(props: SolidDiffCardProps) {
   const payload = createMemo(() => props.payload ?? normalizeDiffPayload(props.output))
   const addedCount = createMemo(() => payload()?.lines.filter(line => line.kind === 'added').length ?? 0)
