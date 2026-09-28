@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ThemeSettings } from '../../theme/themeStore.ts'
 import { DEFAULTS } from '../../theme/themeDefaults.ts'
-import { selectCcProperties } from '../appearance.ts'
+import { selectCcProperties } from '../../appearance/appearance.ts'
 
 /**
  * 中控可编辑属性键集合（CC_EDITABLE_PROPERTY_KEYS）—— 逐个列出，本用例钉住「不多不少」。

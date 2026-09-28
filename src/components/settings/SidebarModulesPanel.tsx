@@ -3,8 +3,8 @@ import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts
 import {
   applyModulePrefs,
   sidebarModulePrefsStore,
-  useSidebarModulePrefs,
-} from '../../domains/workbench/sidebarModulePrefs.ts'
+} from '../../domains/appearance/sidebarModulePrefs.ts'
+import { useSidebarModulePrefs } from '../sidebar/sidebarPrefsHooks.ts'
 
 /**
  * 侧栏模块显隐（设置 → 侧栏）。

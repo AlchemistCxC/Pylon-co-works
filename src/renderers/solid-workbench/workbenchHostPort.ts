@@ -1,4 +1,4 @@
-import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, SessionCreateResult, ExportSessionInput, CommandResult, WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'

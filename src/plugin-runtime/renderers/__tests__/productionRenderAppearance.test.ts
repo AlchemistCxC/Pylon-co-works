@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { selectWorkbenchAppearance } from '../../../domains/workbench/appearance.ts'
+import { selectWorkbenchAppearance } from '../../../domains/appearance/appearance.ts'
 import type { RegistryEntry } from '../../registry/types.ts'
 import type { PluginSettingOptionsContribution } from '../../settings/pluginSettingsTypes.ts'
 import type { RenderCatalogSnapshot } from '../rendererRegistry.ts'

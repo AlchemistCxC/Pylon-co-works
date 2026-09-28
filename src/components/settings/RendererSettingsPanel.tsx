@@ -12,7 +12,7 @@ import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.t
 import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 import type { SettingsDensity } from './settingsChromeState.ts'
-import { selectWorkbenchAppearance } from '../../domains/workbench/appearance.ts'
+import { selectWorkbenchAppearance } from '../../domains/appearance/appearance.ts'
 import { useStore } from '../../domains/theme/themeStore.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'

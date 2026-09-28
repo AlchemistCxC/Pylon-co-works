@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSignal } from 'solid-js'
 import { toRenderMessage, type Message } from '../../../../domains/chat/messageTypes.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../../../domains/appearance/appearance.ts'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
 

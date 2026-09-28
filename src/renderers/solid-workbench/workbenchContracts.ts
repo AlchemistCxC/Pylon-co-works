@@ -1,4 +1,4 @@
-import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'

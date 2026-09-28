@@ -7,7 +7,7 @@ import {
   readModulePrefs,
   reorderModuleIds,
   writeModulePrefs,
-} from '../sidebarModulePrefs.ts'
+} from '../../appearance/sidebarModulePrefs.ts'
 import type { AgentSidebarContribution } from '../../../plugin-runtime/sidebar/sidebarTypes.ts'
 
 const buildModule = (id: string, extra: Partial<AgentSidebarContribution> = {}) => ({

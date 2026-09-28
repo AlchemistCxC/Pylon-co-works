@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from 'react'
 
 /**
  * 左栏模块的**折叠/展开**状态。
@@ -89,10 +88,3 @@ export function resetBlockCollapse(next: BlockCollapseMap = EMPTY_BLOCK_COLLAPSE
   emit()
 }
 
-export function useSidebarBlockCollapse(): BlockCollapseMap {
-  return useSyncExternalStore(
-    listener => sidebarBlockCollapseStore.subscribe(listener),
-    () => sidebarBlockCollapseStore.getSnapshot(),
-    () => sidebarBlockCollapseStore.getSnapshot(),
-  )
-}

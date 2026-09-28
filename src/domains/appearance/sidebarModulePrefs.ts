@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from 'react'
 
 /**
  * 左栏模块的**顺序与显隐**偏好。
@@ -143,10 +142,3 @@ export function resetModulePrefs(next: SidebarModulePrefs = EMPTY_MODULE_PREFS):
   emit()
 }
 
-export function useSidebarModulePrefs(): SidebarModulePrefs {
-  return useSyncExternalStore(
-    listener => sidebarModulePrefsStore.subscribe(listener),
-    () => sidebarModulePrefsStore.getSnapshot(),
-    () => sidebarModulePrefsStore.getSnapshot(),
-  )
-}

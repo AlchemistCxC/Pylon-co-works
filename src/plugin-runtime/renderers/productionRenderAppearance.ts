@@ -1,5 +1,5 @@
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../domains/appearance/appearance.ts'
 import type { RenderCatalogSnapshot } from './rendererRegistry.ts'
 import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceResolution } from './renderAppearanceResolver.ts'
 import type { RendererSettingValue, RendererSettingsSchema } from './rendererSettingsTypes.ts'

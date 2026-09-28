@@ -28,7 +28,7 @@ import {
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
-import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
+import { createZustandWorkbenchAppearanceStore } from '../../domains/appearance/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
 import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'

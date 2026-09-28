@@ -9,7 +9,7 @@ import {
 } from '../../../domains/chat/toolPresentationModel.ts'
 import type { Message } from '../../../domains/chat/messageTypes.ts'
 import { toolStatePresentation, type ToolVisualState } from '../../../domains/tool/status.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../../domains/appearance/appearance.ts'
 import { toolSummaryUsesCodeFont } from '../../../domains/tool/toolPresentation.ts'
 import type { ToolConnectorLayoutPort } from '../../../domains/workbench/toolConnectorLayoutPort.ts'
 import { measureToolAnchor } from './domToolConnectorMeasurement.ts'

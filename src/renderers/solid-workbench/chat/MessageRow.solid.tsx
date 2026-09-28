@@ -2,7 +2,7 @@ import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } 
 import type { RenderMessage } from '../../../domains/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
 import { createScrollUserIntent } from '../../../domains/chat/scrollUserIntent.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../../domains/appearance/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'

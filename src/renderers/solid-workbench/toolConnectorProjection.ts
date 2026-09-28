@@ -2,7 +2,7 @@
  * DOM registration and layout subscriptions remain owned by the mounted workbench.
  */
 import { isToolRenderMessage } from '../../domains/chat/chatRowPipeline.ts'
-import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../domains/appearance/appearance.ts'
 import type { WorkbenchActivityNode, WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import type { SolidToolConnectorEdge, ToolConnectorAppearance } from './toolConnectorContracts.ts'

@@ -7,7 +7,7 @@ import {
   SIDEBAR_BLOCK_COLLAPSE_STORAGE_KEY,
   sidebarBlockCollapseStore,
   writeBlockCollapse,
-} from '../sidebarBlockCollapse.ts'
+} from '../../appearance/sidebarBlockCollapse.ts'
 
 const storage = () => localStorage
 
@@ -40,7 +40,7 @@ describe('左栏模块折叠偏好（跨 Sheet 应用级，issue #202）', () =>
   it('重启恢复：模块重新加载时从持久化 key 读回折叠映射（应用级偏好的语义）', async () => {
     sidebarBlockCollapseStore.setCollapseMap({ mod: true })
     vi.resetModules()
-    const fresh = await import('../sidebarBlockCollapse.ts')
+    const fresh = await import('../../appearance/sidebarBlockCollapse.ts')
     expect(fresh.sidebarBlockCollapseStore.getSnapshot()).toEqual({ mod: true })
     // 恢复现场：后续用例与本文件的顶层单例各自独立。
     fresh.resetBlockCollapse()
