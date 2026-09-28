@@ -18,11 +18,14 @@
  *    2000。越界会被 Rust 在 64 KiB 处**静默截断**（raw 不可还原），故这是硬边界。
  */
 import { describe, expect, it } from 'vitest'
-import { CANONICAL_BATCH_LIMITS, mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch.ts'
+import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { SCENARIOS, generateScenarios } from './fixtures.ts'
 import { REAL_FIXTURE_SCENARIOS } from './realFixtures.ts'
+
+/** #439：预算期望值测试本地硬拷贝（生产常量已随自写轨退役；Rust fold.rs 是唯一单源）。 */
+const CANONICAL_BATCH_LIMITS = { maxRawBytes: 48 * 1024, maxFoldedCount: 2000 } as const
 import { chunkRows } from './harness.ts'
 
 const ALL_SCENARIOS = [...SCENARIOS, ...REAL_FIXTURE_SCENARIOS, ...generateScenarios(24)]

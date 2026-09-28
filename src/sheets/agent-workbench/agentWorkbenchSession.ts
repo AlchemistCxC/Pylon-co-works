@@ -982,7 +982,6 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       try {
         if (action === 'keep') await keepInterruptedDraft(ownerKey, draftId)
         else if (!await discardInterruptedDraft(ownerKey, draftId)) return { ok: false, error: 'draft_not_found' }
-        getCanonicalEventFeed().flush()
         if (binding.refreshInFlight) await binding.refreshInFlight
         draft.reconcilePending = true
         await refresh(session)

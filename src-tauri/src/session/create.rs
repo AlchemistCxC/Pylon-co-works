@@ -1515,8 +1515,10 @@ pub(crate) fn restore_previous_slot(
     reason = "IPC 契约签名：参数与 wire 面一一对应不可折叠；摘除条件 = 改为 payload 结构体并同步前端调用方"
 )]
 #[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：会话建立序列（守卫/上限/RPC/插入/close 旧）整体串行
-pub(crate) async fn new_session(
+pub(crate) async fn new_session<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
+    // #379：懒重连的状态播报需要窗口（Tauri 注入，前端 wire 不变）。
+    window: tauri::Window<R>,
     agent_id: String,
     source: String,
     profile_id: String,
@@ -1542,6 +1544,13 @@ pub(crate) async fn new_session(
             "invalid GUI source: {source}"
         )));
     }
+    // #379：建会话前懒重连——与 send_message 同一懒连接语义（详见
+    // ensure_connected_for_send）；廉价校验先行，重建的慢路径在进入创建序列前完成。
+    state
+        .inner()
+        .ensure_connected_for_send(&runtime, &agent_id, &window)
+        .await
+        .map_err(PylonError::from)?;
     state.inner().log_runtime_summary(
         "info",
         "session",

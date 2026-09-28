@@ -2,7 +2,7 @@
 //!
 //! # R9：LifecycleOp 状态机与统一串行化
 //!
-//! 生命周期操作（switch / reconnect / 自动重连 / 平台懒启动）统一走
+//! 生命周期操作（switch / reconnect / 自动重连 / 平台懒启动 / GUI 发送前懒重连）统一走
 //! [`do_connect_and_replace`]，并按下表串行约束执行（C7 落地 switch_lock，
 //! R9 复核全部入口后整理为显式状态机文档化）：
 //!
@@ -12,6 +12,7 @@
 //! | `reconnect_agent` | ✓ | ✓（active runtime） | —（强制重连语义，锁已串行） | — |
 //! | 自动重连（dispatcher.rs） | —（无 kill，无交叉清理面） | ✓（本 runtime） | ✓ P2-1 锁后 stale 复查 + 每轮 active 复查 | — |
 //! | `ensure_runtime_ready`（平台懒启动，session.rs） | —（无 kill） | ✓（目标 runtime） | ✓ 双检查 | — |
+//! | `ensure_connected_for_send`（GUI 发送/建会话懒重连，session.rs #379） | —（无 kill） | ✓（目标 runtime） | ✓ 双检查（只认 Disconnected；Crashed 让路自动重连） | — |
 //!
 //! 状态机（状态载体 = [`AgentLifecycleStatus`]；LifecycleOp 是操作视角的命名，
 //! 不引入平行枚举——状态已由该字段承载，避免双份类型漂移）：

@@ -112,7 +112,7 @@ flowchart TB
       WORKCOMMAND[WorkbenchCommandFacade]
       APPEARANCE[WorkbenchAppearanceStore]
       SESSIONUI[SessionUiStore]
-      CANONREPO[CanonicalEventRepository / Sink / Scheduler]
+      CANONREPO[CanonicalEventRepository / Cursor]
       GAP[CanonicalEventCursor<br/>per-owner cursor / gap 回填]
       TOOLCAT[Agent Catalog / Tool Registry]
       WORKPORTS[AgentInstanceSink / ToolDictionarySink]

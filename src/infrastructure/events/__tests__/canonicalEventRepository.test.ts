@@ -1,6 +1,6 @@
 /**
  * A1-c P1：canonicalEventRepository typed adapter 测试。
- * - append/revision/list/loadAll 的 invoke 参数映射与分页
+ * - revision/list/loadAll 的 invoke 参数映射与分页（#439 起 append 随自写轨退役）
  * - 结构化错误 { code, message } 透传与归一
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,24 +41,11 @@ describe('tauriCanonicalEventRepository', () => {
     invokeMock.mockReset()
   })
 
-  it('append 经 evt_append 映射 events/expectedRevision 并返回 revision', async () => {
-    invokeMock.mockResolvedValueOnce({ events: [], revision: 4 })
-    const repo = tauriCanonicalEventRepository()
-    const revision = await repo.append([event(1), event(2)], 3)
-    expect(revision).toBe(4)
-    expect(invokeMock).toHaveBeenCalledTimes(1)
-    const [command, args] = invokeMock.mock.calls[0]
-    expect(command).toBe('evt_append')
-    expect(args.expectedRevision).toBe(3)
-    expect(args.events).toHaveLength(2)
-    expect(args.events[0].eventId).toBe(`${OWNER_KEY}#1`)
-  })
-
-  it('append 透传 event_revision_conflict（code 分支依据）', async () => {
+  it('revision 透传 event_revision_conflict（code 分支依据）', async () => {
     invokeMock.mockRejectedValueOnce({ code: 'event_revision_conflict', message: '事件仓库 revision 冲突：期望 3，实际 5' })
     const repo = tauriCanonicalEventRepository()
-    const error = await repo.append([event(1)], 3).then(
-      () => { throw new Error('append 应当 reject') },
+    const error = await repo.revision(OWNER_KEY).then(
+      () => { throw new Error('revision 应当 reject') },
       (e: unknown) => e,
     )
     expect(error).toMatchObject({ code: 'event_revision_conflict' })
@@ -78,8 +65,8 @@ describe('tauriCanonicalEventRepository', () => {
       ['event_session_deleted', '会话已删除（tombstone）：["p1","peri","s1"]（tombstone state=deleted）'],
     ] as const) {
       invokeMock.mockRejectedValueOnce({ code, message })
-      const error = await repo.append([event(1)], 1).then(
-        () => { throw new Error('append 应当 reject') },
+      const error = await repo.revision(OWNER_KEY).then(
+        () => { throw new Error('revision 应当 reject') },
         (e: unknown) => e,
       )
       expect(error).toMatchObject({ code })
@@ -291,7 +278,6 @@ describe('loadCanonicalEventsIncremental（#81 L1 双读修复）', () => {
   /** 计数型 fake：loadAll 调用次数即"全量读"次数。 */
   function fakeRepository(rows: CanonicalEventRow[], revision: number) {
     const repository = {
-      async append() { return revision },
       async revision() { return revision },
       async list(_ownerKey: string, beforeSequence: number | null, limit?: number) {
         const through = (beforeSequence ?? Number.MAX_SAFE_INTEGER) - 1

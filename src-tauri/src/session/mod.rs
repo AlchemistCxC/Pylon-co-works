@@ -82,6 +82,10 @@ mod del03_local_first_delete;
 // #155 T2：存储写入基准（v15 vs v14 形态的 WAL/占用/空闲页数值证据）。
 #[cfg(test)]
 mod revive_tests;
+// #379：GUI 发送/建会话前懒重连——ensure_connected_for_send 触发集/幂等/失败
+// 传播 + #363 空闲回收后 GUI 发送恢复的场景回归。
+#[cfg(test)]
+mod lazy_reconnect_tests;
 // #97：模型选择器切换闭环 wire 级集成测试（真实广告 config id、发送前拒绝、
 // 钳制收敛、session/load 复活零 selector RPC）。
 #[cfg(test)]
@@ -536,6 +540,70 @@ impl AppState {
         )
         .await
     }
+
+    /// #379：GUI 发送/建会话前懒重连——runtime 处于 `Disconnected` 时先重建连接。
+    /// 与平台侧 [`Self::ensure_runtime_ready`] 同形（首查 → agent_lifecycle 串行 →
+    /// 锁后复查 → do_connect_and_replace），三处差异（issue #379 拍板）：
+    /// 1. 只认 `Disconnected`——`Crashed` 不抢 `crash_reconnect` 的退避重连
+    ///    （发送路径既有 `is_crashed → AgentCrashed` 早退语义不变）；
+    /// 2. `announce=true`——重建期间三灯显示 connecting，失败回落 Disconnected +
+    ///    `lastError` 如实播报并上抛（前端既有拒绝面：回滚乐观行 + 错误提示）；
+    /// 3. `log_action="send"`——runtime 日志溯源区分于 platform-ingest。
+    ///
+    /// 会话映射：continuity=Invalidated（主动停止/回收后 agent 子进程已死，远端
+    /// 会话必亡，不做 probe）——重连后 ensure_session_mapping 按 `known_peri_id`
+    /// 走 session/load 复活，失败回退 session/new（既有语义，无额外前置）。
+    /// agent_id=None：不接管 active_agent（owner 路由的非 active runtime 不抢位）。
+    /// 调用点必须在 prompt 锁 / prompt_gate / session_creation 获取之前
+    /// （无锁序反转；LifecycleOp 状态机表见 lifecycle/mod.rs 模块文档）。
+    #[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接（同 ensure_runtime_ready）
+    pub(crate) async fn ensure_connected_for_send<R: tauri::Runtime>(
+        &self,
+        runtime: &Arc<AgentRuntime>,
+        agent_id: &str,
+        window: &tauri::Window<R>,
+    ) -> Result<(), String> {
+        let status = runtime
+            .agent_runtime
+            .lock()
+            .map(|s| s.status)
+            .unwrap_or(AgentLifecycleStatus::Disconnected);
+        // 只认 Disconnected：Connected/Connecting/Reconnecting = 可用或在途；
+        // Crashed = 交给 crash_reconnect 自动重连 + 既有 AgentCrashed 早退。
+        if !matches!(status, AgentLifecycleStatus::Disconnected) {
+            return Ok(());
+        }
+        let agent = self
+            .agents
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(agent_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
+        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        // 双检查：拿到生命周期锁后重查（并发连接/自动重连已推进状态则让路）
+        let status = runtime
+            .agent_runtime
+            .lock()
+            .map(|s| s.status)
+            .unwrap_or(AgentLifecycleStatus::Disconnected);
+        if !matches!(status, AgentLifecycleStatus::Disconnected) {
+            return Ok(());
+        }
+        let handles = AppStateHandles::from_state(self);
+        crate::lifecycle::do_connect_and_replace(
+            &handles,
+            runtime,
+            window,
+            &agent,
+            None,
+            AgentLifecycleStatus::Connecting,
+            "send",
+            crate::agent::runtime::SessionContinuity::Invalidated,
+            true,
+        )
+        .await
+    }
 }
 
 // ============================================================================
@@ -724,21 +792,7 @@ fn require_event_service(
     event_service_of(state.inner())
 }
 
-/// 校验 + 批量 append canonical 事件（单事务；event_id 去重；expected_revision 冲突检测）。
-/// #317 批次二：错误经 PylonError::CanonicalEvent 委托，wire code 逐字不变。
-#[tauri::command]
-pub(crate) async fn evt_append(
-    state: tauri::State<'_, AppState>,
-    events: Vec<serde_json::Value>,
-    expected_revision: Option<i64>,
-) -> Result<EventAppendResult, PylonError> {
-    require_event_service(&state)?
-        .append_events(events, expected_revision)
-        .await
-        .map_err(PylonError::from)
-}
-
-/// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基准）。
+/// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基线）。
 #[tauri::command]
 pub(crate) async fn evt_revision(
     state: tauri::State<'_, AppState>,
@@ -1500,6 +1554,8 @@ gateway:
         *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
+        // #379：已连接夹具如实置 Connected，避免命令入口懒重连在此二次 spawn。
+        runtime.agent_runtime.lock().unwrap().status = AgentLifecycleStatus::Connected;
         let state = crate::test_utils::TestStateBuilder::bare()
             .with_active_agent("p28-agent")
             .with_agent(agent)
@@ -1513,6 +1569,16 @@ gateway:
 
         let response = new_session(
             state,
+            // #379：命令入口新增 window 注入参（懒重连播报面）；直呼测试用 mock 窗。
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "main",
+                tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+            )
+            .build()
+            .expect("mock window must build")
+            .as_ref()
+            .window(),
             "p28-agent".to_string(),
             "local:p28".to_string(),
             "profile-p28".to_string(),

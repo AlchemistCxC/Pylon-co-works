@@ -1,13 +1,11 @@
 /**
  * canonicalEventRepository — canonical 事件流 typed repository（A1-c P1）。
  *
- * Tauri 下经 `evt_append` / `evt_revision` / `evt_list` 命令访问 SQLite
- * `canonical_events` 表；browser preview 无后端，不提供 adapter（调用方按
- * IS_TAURI 守卫，本模块不做静默回退）。
+ * Tauri 下经 `evt_revision` / `evt_list` 等只读命令访问 SQLite `canonical_events`
+ * 表（#439 起 append 随前端自写轨退役，journal 写路径严格归 kernel）；browser
+ * preview 无后端，不提供 adapter（调用方按 IS_TAURI 守卫，本模块不做静默回退）。
  *
  * 后端契约（src-tauri/src/session/mod.rs / event_repo.rs）：
- * - evt_append(events, expected_revision)：owner_key 由后端从 event.owner 推导，
- *   批量必须同 owner；eventId 必须等于 owner_key#sequence；重复 event_id 幂等跳过。
  * - evt_revision(owner_key)：owner 当前 MAX(sequence)，空=0。
  * - evt_list(owner_key, before_sequence, limit, cap_typed_payload)：升序页 + 下一页游标。
  *   #376 起读出口对 `typed_payload` 的字符串叶子按 64 KiB 线收口（`cap_typed_payload`
@@ -21,11 +19,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { wireErrorParts } from '../tauri/errorPayload'
 import { typedPayloadCapDisabled } from './readPathSwitches'
-import type { CanonicalConversationEvent, CanonicalEventOwner } from '../../domains/events/eventSchema'
+import type { CanonicalEventOwner } from '../../domains/events/eventSchema'
 import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 
-/** evt_append 结果：实际写入事件 + owner 最新 revision。 */
+/** draft keep/discard 操作结果（evt_draft_keep 返回同形）。 */
 export interface CanonicalEventAppendResult {
   events: unknown[]
   revision: number
@@ -108,10 +106,8 @@ export function rejectCanonicalEventRepositoryError(error: unknown): never {
   throw asCanonicalEventRepositoryError(error)
 }
 
-/** 事件流 repository：append/read（Tauri typed invoke）。 */
+/** 事件流 repository：read（Tauri typed invoke）。#439 起 append 随自写轨退役。 */
 export interface CanonicalEventRepository {
-  /** 批量 append（单事务、event_id 去重、expected_revision 冲突检测）；返回写入后 revision。 */
-  append(events: readonly CanonicalConversationEvent[], expectedRevision: number | null): Promise<number>
   /** owner 当前 revision（MAX(sequence)，空=0）。 */
   revision(ownerKey: string): Promise<number>
   /** 游标分页读取（升序；latest 页 beforeSequence=null）。 */
@@ -195,18 +191,7 @@ export async function loadCanonicalEventsIncremental(
 }
 
 export function tauriCanonicalEventRepository(): CanonicalEventRepository {
-  const appendImpl = async (
-    events: readonly CanonicalConversationEvent[],
-    expectedRevision: number | null,
-  ): Promise<number> => {
-    const result = await invoke<CanonicalEventAppendResult>('evt_append', {
-      events: events as unknown[],
-      expectedRevision,
-    }).catch(rejectCanonicalEventRepositoryError)
-    return result.revision
-  }
   return {
-    append: appendImpl,
     async revision(ownerKey) {
       return invoke<number>('evt_revision', { ownerKey }).catch(rejectCanonicalEventRepositoryError)
     },

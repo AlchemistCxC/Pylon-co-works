@@ -28,6 +28,13 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     // 不要求会话已存在（send_message 允许自动创建会话）；不存在 owner runtime →
     // agent_runtime_unavailable，绝不 fallback active runtime。
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
+    // #379：发送前懒重连——Disconnected 的连接先重建再发送（失败如实上抛；
+    // 三灯 connecting/回落 + lastError 由 do_connect_and_replace 播报）。
+    state
+        .inner()
+        .ensure_connected_for_send(&runtime, &agent_id, &window)
+        .await
+        .map_err(PylonError::from)?;
     // G2-05：PromptContext 内联构造（IPC 签名锁定；字段全部 move，零 clone）。
     // peri_id：前端持久化的远端会话 id——内存映射缺失时优先 session/load 复活。
     let ctx = PromptContext {
@@ -66,6 +73,13 @@ pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
     on_update: tauri::ipc::Channel<serde_json::Value>,
 ) -> Result<String, PylonError> {
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
+    // #379：同 send_message——懒重连须在 register_update_channel 之前，
+    // 重建失败时命令直接拒绝，不留无主 channel 注册。
+    state
+        .inner()
+        .ensure_connected_for_send(&runtime, &agent_id, &window)
+        .await
+        .map_err(PylonError::from)?;
     runtime.register_update_channel(&source, on_update);
     let ctx = PromptContext {
         source,

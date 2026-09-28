@@ -13,6 +13,22 @@ use crate::agent_config::{AcpProtocolConfig, SetModelApi};
 use crate::test_utils::TestStateBuilder;
 use tauri::Manager;
 
+/// #379：new_session 命令入口的 window 注入参在直呼测试里的 MockRuntime 形态
+/// （每测试恰好一窗，label 固定 "main"）。
+fn mock_window(
+    app: &tauri::App<tauri::test::MockRuntime>,
+) -> tauri::Window<tauri::test::MockRuntime> {
+    tauri::WebviewWindowBuilder::new(
+        app,
+        "main",
+        tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+    )
+    .build()
+    .expect("mock window must build")
+    .as_ref()
+    .window()
+}
+
 #[tokio::test]
 async fn mode_uses_advertised_config_id_and_validates_before_wire() {
     let trace = std::env::temp_dir().join(format!(
@@ -36,6 +52,9 @@ async fn mode_uses_advertised_config_id_and_validates_before_wire() {
     );
     let runtime = AgentRuntime::new_disconnected();
     *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None).await.unwrap();
+    // #379：client 已连接 → lifecycle status 如实置 Connected——否则命令入口的
+    // 懒重连（ensure_connected_for_send）会在此真实二次 spawn，换代污染 wire trace。
+    runtime.agent_runtime.lock().unwrap().status = AgentLifecycleStatus::Connected;
     let state = TestStateBuilder::bare()
         .with_active_agent("mode-agent")
         .with_agent(agent)
@@ -47,6 +66,7 @@ async fn mode_uses_advertised_config_id_and_validates_before_wire() {
     app.manage(state);
     new_session(
         app.state::<AppState>(),
+        mock_window(&app),
         "mode-agent".into(),
         "local:mode".into(),
         "profile".into(),
@@ -135,10 +155,13 @@ async fn rebind_on_other_runtime_starts_with_clean_selector_snapshot() {
     *runtime_a.acp.lock().await = AcpClient::connect_with_logs(&agent_a, None)
         .await
         .expect("fake ACP must initialize");
+    // #379：同上——已连接夹具如实置 Connected，避免命令入口懒重连二次 spawn。
+    runtime_a.agent_runtime.lock().unwrap().status = AgentLifecycleStatus::Connected;
     let runtime_b = AgentRuntime::new_disconnected();
     *runtime_b.acp.lock().await = AcpClient::connect_with_logs(&agent_b, None)
         .await
         .expect("fake ACP must initialize");
+    runtime_b.agent_runtime.lock().unwrap().status = AgentLifecycleStatus::Connected;
     let state = TestStateBuilder::bare()
         .with_active_agent("rebind-a")
         .with_agent(agent_a)
@@ -152,8 +175,10 @@ async fn rebind_on_other_runtime_starts_with_clean_selector_snapshot() {
     app.manage(state);
 
     // runtime A：带模型目录的会话。
+    let window = mock_window(&app);
     new_session(
         app.state::<AppState>(),
+        window.clone(),
         "rebind-a".to_string(),
         "local:rebind".to_string(),
         "profile-ms".to_string(),
@@ -170,6 +195,7 @@ async fn rebind_on_other_runtime_starts_with_clean_selector_snapshot() {
     // runtime B：同一 source 重建（不同 agent、无模型宣告）。
     new_session(
         app.state::<AppState>(),
+        window,
         "rebind-b".to_string(),
         "local:rebind".to_string(),
         "profile-ms".to_string(),

@@ -1,8 +1,9 @@
 // events 域基准：生产活实现 `normalizeRawEvent`（TS）。
 //
 // 接线点：`src/domains/events/canonicalNormalizer.ts:196`——每个 wire 帧进前端都要过它
-// （`canonicalEventFeed` → cursor → sink 那条链的行归一）。ADR-0018 修订 1 的记载是
-// 「events 的 TS 一直就是跑着的那份（`canonicalEventSink.ts` 从未切流）」。
+// （`canonicalEventFeed` → cursor 那条链的行归一；#439 起 sink 自写轨退役，kernel
+// 是 journal 唯一写者）。ADR-0018 修订 1 的记载是
+// 「events 的 TS 一直就是跑着的那份」。
 //
 // 为什么值得量：单事件成本在**每个** wire 帧上发生，量级 ~µs ⇒ 高事件率下是持续的
 // 主线程占用。ADR-0018 修订 1 给过的读数是 ~7.3µs/事件（按 500 事件/s = 单核 0.4%），
@@ -71,7 +72,7 @@ export function buildEventsSuite(): PerfSuite {
         name: 'normalizeRawEvent',
         domain: 'events',
         wiredAt: 'src/domains/events/canonicalNormalizer.ts:196',
-        note: '单帧归一的成本 × 帧数。这一列不含落盘（`canonicalEventSink` 的批事务）与投影（`projector` 域另列）。',
+        note: '单帧归一的成本 × 帧数。这一列不含落盘（kernel 侧批事务）与投影（`projector` 域另列）。',
         cases: [
           normalizeCase('delta-run-s', { scale: 's', shape: 'delta' }, deltaRun(500),
             '纯正文 delta 流：最低成本形状，也是最高频的那一种。'),

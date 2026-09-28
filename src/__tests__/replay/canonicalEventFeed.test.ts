@@ -3,7 +3,8 @@
  * P52 D2：canonicalEventFeed 单元契约。
  * 锁定：kernel-committed 行经 cursor 逐条 publish 恰一次（pluginEventBus 单一
  * 发布者不变量的 feed 侧）；无 canonicalEvent 的帧直转发 kernelCommitted=false；
- * 终帧信号 done/error；source gate 前置丢弃；sink 注入缝与 discard/seed 委托。
+ * 终帧信号 done/error；source gate 前置丢弃；discard/seed 委托。
+ * #439：canonical sink 自写轨与注入缝已退役，feed 只读消费 committed 行。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,7 +24,6 @@ vi.mock('@tauri-apps/api/core', async () => {
 import { createCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { subscribePluginEvents, clearPluginEventListenersForTests } from '../../infrastructure/events/pluginEventBus.ts'
 import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
-import type { CanonicalEventSink } from '../../infrastructure/events/canonicalEventSink.ts'
 
 const SOURCE = 'local:feed-unit'
 
@@ -35,18 +35,6 @@ function canonicalEvent(sequence: number, eventType: string, text: string): Reco
     occurredAt: '2026-09-06T00:00:00.000Z', receivedAt: '2026-09-06T00:00:00.000Z',
     eventType, payloadVersion: 1,
     typedPayload: { text }, rawPayload: { source: SOURCE }, createdAt: 1,
-  }
-}
-
-function makeFakeSink(): CanonicalEventSink & { offers: unknown[][] } {
-  const offers: unknown[][] = []
-  return {
-    offers,
-    offer: (_context, raw, _force) => { offers.push([raw]) },
-    flushAll: () => {},
-    flushAllAsync: async () => {},
-    discard: () => {},
-    dispose: () => {},
   }
 }
 
@@ -63,7 +51,7 @@ afterEach(() => {
 
 describe('canonicalEventFeed（P52 D2）', () => {
   it('#155 T3：draft 只走临时 seam，正式提交再进入 canonical bus', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const drafts: string[] = []
     const commits: string[] = []
     const canonical: number[] = []
@@ -86,7 +74,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
     expect(canonical).toEqual([1])
   })
   it('kernel-committed 行 publish 恰一次，且转发标记 kernelCommitted=true', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const published: CanonicalEventRow[] = []
     subscribePluginEvents(event => { published.push(event as CanonicalEventRow) })
     const forwards: boolean[] = []
@@ -100,7 +88,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('无 canonicalEvent 的帧只转发不 publish，kernelCommitted=false', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const published: unknown[] = []
     subscribePluginEvents(event => { published.push(event) })
     const forwards: boolean[] = []
@@ -113,7 +101,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('gap 回填行不转发当前帧标记，经 onRecoveredRow 回传；当前行转发 kernelCommitted=true', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const recovered: string[] = []
     feed.onRecoveredRow(event => { recovered.push(event.eventType) })
     const forwards: boolean[] = []
@@ -131,7 +119,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('终帧信号 done/error 附 source；非终帧不发射', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const terminals: Array<{ source?: string; kind: string }> = []
     feed.onTerminal(signal => { terminals.push({ source: signal.source, kind: signal.kind }) })
 
@@ -146,7 +134,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('source gate 拒绝的帧整帧丢弃（不 cursor、不 publish、不转发）', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     feed.setSourceGate(source => source === SOURCE)
     const published: unknown[] = []
     subscribePluginEvents(event => { published.push(event) })
@@ -160,7 +148,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('onCanonicalRow 回传每条已提交行（load 事务缓冲输入）', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     const rows: number[] = []
     feed.onCanonicalRow(event => { rows.push(event.sequence) })
 
@@ -171,7 +159,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('pylon:user 广播兜底走同一 acceptFrame 入口', async () => {
-    createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    createCanonicalEventFeed()
     // 广播注册是异步的（listen promise）；等待一拍
     await new Promise(resolve => setTimeout(resolve, 0))
     const handler = listeners.get('pylon:user')
@@ -179,7 +167,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('#310：pylon:update 广播兜底把助手正文帧送进 plugin bus（未注册 Channel 的发送路径）', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     await new Promise(resolve => setTimeout(resolve, 0))
     const handler = listeners.get('pylon:update')
     expect(handler).toBeDefined()
@@ -197,7 +185,7 @@ describe('canonicalEventFeed（P52 D2）', () => {
   })
 
   it('discard 与 seed 委托 cursor（seed 只增）', async () => {
-    const feed = createCanonicalEventFeed({ sinkFactory: makeFakeSink })
+    const feed = createCanonicalEventFeed()
     feed.seed(`["p1","peri","${SOURCE}"]`, 5)
     // 已 seed 到 5：sequence 2 的行是旧消息，直接去重丢弃（无 publish）
     const published: unknown[] = []
