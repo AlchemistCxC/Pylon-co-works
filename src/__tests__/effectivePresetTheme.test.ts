@@ -199,7 +199,7 @@ describe('B4 「终端补全」机制确实没了（源码级扫描）', () => {
     }
     expect(hits, '被删机制的名字不得再出现在源码或测试里').toEqual([])
     // 机制本体（补全模块与它的测试）也已删除
-    expect(sourceFiles(join(REPO_ROOT, 'src', 'presets')).some(file => file.endsWith('completion.ts')), 'completion.ts 应已删除').toBe(false)
+    expect(sourceFiles(join(REPO_ROOT, 'src', 'domains', 'theme', 'presets')).some(file => file.endsWith('completion.ts')), 'completion.ts 应已删除').toBe(false)
   })
 })
 

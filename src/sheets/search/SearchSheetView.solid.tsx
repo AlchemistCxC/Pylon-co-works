@@ -15,7 +15,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  *
  * 扫描本地会话消息快照（复用 messagePersistence key/parse 语义，扫描上限纯常量）；
  * 结果点击 → open agent sheet + selectSession（定位 message id 经 sessionUiState 持久
- * 意图由 ChatView 后续消费）。范围仅本地会话（平台扫描范围为产品未决项，不猜策略）。
+ * 意图由 agent workbench 消息恢复链消费）。范围仅本地会话（平台扫描范围为产品未决项，不猜策略）。
  * 行为与 React 版逐行同构：generation 守卫、错误上报 key、类串（workspace adaptive.css
  * 锚点 `search-sheet-input/search-sidebar-scope/-action/search-result-row` 等）原样携带。
  */
@@ -96,8 +96,8 @@ export default function SearchSheetView(props: SearchSheetViewProps) {
   const openResult = async (result: SearchHitUi) => {
     const session = sessions().find(item => item.id === result.sessionId)
     if (!session) return
-    // FE-AUD-003：持久导航意图（按 sessionId+messageId），ChatView 消息恢复后消费并清除——
-    // 不依赖瞬时 CustomEvent（先发事件后挂载 ChatView 会丢）
+    // FE-AUD-003：持久导航意图（按 sessionId+messageId），workbench 消息恢复后消费并清除——
+    // 不依赖瞬时 CustomEvent（先发事件后挂载消费方会丢）
     sessionUiStateSet(result.sessionId, 'pendingMessageLocation', { sessionId: result.sessionId, messageId: result.messageId })
     // I01-W4：owner-aware 打开（Session owner 而非 active Agent）；切换失败保持原页面
     const opened = await openOwnedSessionTransaction(

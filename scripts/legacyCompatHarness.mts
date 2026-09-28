@@ -13,7 +13,7 @@ import {
   BUILTIN_PYLON_RENDERERS_ID,
   BUILTIN_PYLON_TOOLS_ID,
 } from '../src/plugins/product/productPluginIds.ts'
-import { getWorkspaceRegistryStore } from '../src/workspace-sheets/workspaceRegistry.ts'
+import { getWorkspaceRegistryStore } from '../src/plugin-runtime/workspaces/workspaceRegistry.ts'
 
 const registrations: Array<{ dispose(): void }> = []
 const activatedRuntimeKeys: string[] = []

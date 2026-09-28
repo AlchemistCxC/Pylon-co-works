@@ -19,7 +19,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * list_persisted_sessions 分页/排序（复用 overview normalize）；导出经 save 对话框
  * 取绝对路径 → export_session（预检路径绝对；目标文件已存在错误明确展示，后端权威）。
  * W4-02（姿态二拍板）：行「回放」复用 Overview resumeSession 机制（找/建 identity 行）
- * → 进入只读姿态 → 开 agent sheet；消息 load 由 ChatView 挂载后 lifecycle 承担
+ * → 进入只读姿态 → 开 agent sheet；消息 load 由 agentWorkbenchLifecycle 承担（legacy React ChatView 已退役）
  * （load_persisted_session，listener 先于 load），姿态下无输入面直至点击继续。
  * 行为与 React 版逐行同构：错误上报 key/scope、OWNER-02 归属解析、I01-W4 owner-aware 打开。
  *
@@ -130,7 +130,7 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
   }
 
   // W4-02（姿态二）：复用 Overview 的找/建 identity 行机制（resumePersistedSessionTransaction，
-  // FE-AUD-010），进入只读姿态后开 agent sheet；load 由 ChatView 挂载后的 lifecycle 承担
+  // FE-AUD-010），进入只读姿态后开 agent sheet；load 由 agentWorkbenchLifecycle 承担（ChatView 已退役）
   const openReplay = async (entry: PersistedSessionSummary) => {
     setExportError('')
     setReplayError('')

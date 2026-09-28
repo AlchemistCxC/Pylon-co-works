@@ -5,31 +5,14 @@ import type { LspDiagnosticContentPart, LspRelatedInformation, TextRange } from 
 import { wordDiff, type DiffWordSegment } from '../../../../domains/tool/diffPresentation.ts'
 import { SolidCollapsibleRegion } from '../CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from '../CollapsiblePresenter.solid.tsx'
+import { DIFF_BODY, DIFF_CARD, DIFF_COUNT, DIFF_HEAD, DIFF_LINE, DIFF_LINE_BG, DIFF_SIGN, DIFF_SIGN_TONE, WORD_BASE, WORD_TONE } from '../../../../domains/chat/diffCardPresentation.ts'
 
 // 样式绞杀（P92 地基后机械翻译）：与 React DiffCard.tsx / DiffCard.solid.tsx
 // 镜像同一组 utility 常量（原 DiffCard.css）。solid-diff-content 与
 // solid-lsp-diagnostic 类名保留为 renderers 包 adaptive.css 残量规则的锚点。
-const DIFF_CARD = 'mt-1 mb-1.5 rounded-none overflow-hidden border border-border bg-[var(--chat-code-bg,rgba(0,0,0,0.02))]'
-const DIFF_HEAD = 'w-full flex justify-between gap-3 py-[5px] px-2 border-0 text-text bg-transparent [font:inherit] text-left cursor-pointer hover:bg-border'
-const DIFF_COUNT = 'text-text-dim text-[0.85em]'
-const DIFF_BODY = 'max-h-[320px] overflow-auto font-mono text-[0.9em] leading-[1.5]'
+// 共享 utility 常量改引 domains/chat/diffCardPresentation（结构审查 A-V7）；以下为本文件专有常量：
 const DIFF_OPEN = 'mx-2 mb-1.5 mt-0 px-[7px] py-0.5 border border-border text-text bg-transparent [font:inherit] cursor-pointer enabled:hover:border-accent enabled:hover:text-accent disabled:text-text-dim disabled:cursor-not-allowed disabled:opacity-70'
-const DIFF_LINE = 'flex min-w-max pr-2.5 whitespace-pre'
 const DIFF_LINE_NUMBER = 'w-[4ch] shrink-0 basis-[4ch] px-1.5 text-text-dim text-right select-none border-r border-stroke-faint'
-const DIFF_SIGN = 'w-6 shrink-0 pl-2 text-text-dim select-none'
-const DIFF_LINE_BG: Partial<Record<'context' | 'added' | 'removed', string>> = {
-  added: 'bg-[color-mix(in_srgb,var(--diff-added,#4EBA65)_14%,transparent)]',
-  removed: 'bg-[color-mix(in_srgb,var(--diff-removed,#FF6B80)_14%,transparent)]',
-}
-const DIFF_SIGN_TONE: Partial<Record<'context' | 'added' | 'removed', string>> = {
-  added: 'text-[var(--diff-added,#4EBA65)]',
-  removed: 'text-[var(--diff-removed,#FF6B80)]',
-}
-const WORD_BASE = 'rounded-none'
-const WORD_TONE: Record<'added' | 'removed', string> = {
-  added: 'bg-[var(--diff-added-word,#3EA15E)] text-white',
-  removed: 'bg-[var(--diff-removed-word,#E0556B)] text-white',
-}
 const DIFF_OMISSION = 'px-2 py-0.5 text-text-dim bg-stroke-faint italic'
 const DIFF_RAW = 'border-t border-border px-2 py-1.5'
 const MUTED_BLOCK = 'block m-0 p-2 text-text-dim'
@@ -244,7 +227,7 @@ function DiffLineRow(props: {
   const number = () => props.kind === 'added' ? props.newLine : props.oldLine
   return <div class={`${DIFF_LINE} ${DIFF_LINE_BG[props.kind] ?? ''}`} style={{ 'white-space': props.wrap === 'soft' ? 'pre-wrap' : 'pre' }}>
     <Show when={props.lineNumbers}><span class={DIFF_LINE_NUMBER} aria-hidden="true">{number() ?? ''}</span></Show>
-    <span class={`${DIFF_SIGN} ${DIFF_SIGN_TONE[props.kind] ?? ''}`} aria-hidden="true">{props.kind === 'added' ? '+' : props.kind === 'removed' ? '-' : ' '}</span>
+    <span class={`${DIFF_SIGN} ${DIFF_SIGN_TONE[props.kind as 'added' | 'removed'] ?? ''}`} aria-hidden="true">{props.kind === 'added' ? '+' : props.kind === 'removed' ? '-' : ' '}</span>
     <code class="[font:inherit]">{props.text || '\u00a0'}</code>
   </div>
 }

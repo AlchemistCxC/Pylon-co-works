@@ -64,7 +64,7 @@ vi.mock('../../../app/runtimeError.ts', () => ({
   reportRuntimeDiagnostic: mocks.reportDiagnostic,
   resolveRuntimeErrors: mocks.resolveErrors,
 }))
-vi.mock('../../../domains/sessionState/sessionStateSync.ts', () => ({
+vi.mock('../../../domains/session/sessionStateSync.ts', () => ({
   applySessionStateResponse: mocks.applyResponse,
 }))
 vi.mock('../../../plugin-runtime/runtimeServices.ts', () => ({
@@ -81,7 +81,7 @@ vi.mock('../../../infrastructure/events/canonicalEventFeed.ts', () => ({
 vi.mock('../../../application/transactions/sessionHookTransactions.ts', () => ({
   runSessionBoundaryHook: mocks.boundary,
 }))
-vi.mock('../../../components/chat/chatReplayTrace.ts', () => ({
+vi.mock('../../../domains/chat/chatReplayTrace.ts', () => ({
   CHAT_REPLAY_TRACE_CONTRACT: 'contract',
   recordChatReplayTrace: vi.fn(),
   replayErrorCode: () => 'replay-error',

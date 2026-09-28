@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const fileTab: FileTabRecord = { path: 'src/a.ts', mode: 'file' }
 const otherTab: FileTabRecord = { path: 'src/b.ts', mode: 'file' }

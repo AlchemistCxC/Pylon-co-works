@@ -16,7 +16,7 @@ vi.mock('../markdownRenderModel.ts', async importOriginal => {
   }
 })
 
-vi.mock('../../../../components/chat/codeHighlight.ts', async importOriginal => {
+vi.mock('../../../../domains/chat/codeHighlight.ts', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../../domains/chat/codeHighlight.ts')>()
   return {
     ...actual,

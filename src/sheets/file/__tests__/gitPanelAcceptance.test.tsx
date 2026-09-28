@@ -21,7 +21,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 const ASYNC_PANEL_TIMEOUT = { timeout: 10_000 }
 
 const ctx: SheetContext = {

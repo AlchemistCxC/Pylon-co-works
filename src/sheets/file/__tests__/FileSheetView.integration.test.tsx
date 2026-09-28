@@ -20,7 +20,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const ctx: SheetContext = {
   openSheet: vi.fn(),

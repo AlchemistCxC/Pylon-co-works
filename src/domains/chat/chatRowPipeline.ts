@@ -2,8 +2,8 @@
  * chatRowPipeline — 消息列表渲染编排（纯函数模块）。
  *
  * 把 preparedMessages + messageLookups 转成每行的渲染描述符
- * （key / 工具视觉状态 / 连续 Tool 连接线 / 搜索命中），ChatView 只消费描述符渲染 JSX。
- * 编排逻辑从 ChatView 抽出后可以独立测试（scripts/test-chat-row-pipeline.mts），
+ * （key / 工具视觉状态 / 连续 Tool 连接线 / 搜索命中），Solid 渲染侧（PlainMessageList 等）只消费描述符渲染。
+ * 编排逻辑独立于渲染组件、可独立测试（scripts/test-chat-row-pipeline.mts），
  * 输入不变输出不变——渲染行为由测试锁定，拆分不会影响业务。
  */
 
