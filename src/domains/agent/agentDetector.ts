@@ -6,7 +6,8 @@ export interface AgentRuntimeDetectorMetadata {
 }
 
 export interface AgentDetectionEvidence { kind: string; detail: string }
-export type AgentIdentityConfidence = 'exact' | 'high' | 'medium' | 'low'
+/** #425 件5：`exact`/`low` 随 Rust 死变体同轮裁除（探测面只产出 high/medium）。 */
+export type AgentIdentityConfidence = 'high' | 'medium'
 export type AgentStartability = 'not_tested' | 'verified' | 'failed'
 export type AgentProtocolAvailability = 'not_tested' | 'verified' | 'failed'
 
@@ -189,7 +190,7 @@ export function normalizeAgentRuntimeCandidates(raw: unknown): AgentRuntimeCandi
       && typeof value.executable === 'string' && Array.isArray(value.args)
       && value.args.every(argument => typeof argument === 'string')
       && Array.isArray(value.evidence) && Array.isArray(value.warnings)
-      && ['exact', 'high', 'medium', 'low'].includes(value.identityConfidence ?? '')
+      && ['high', 'medium'].includes(value.identityConfidence ?? '')
       && (value.startability === undefined || ['not_tested', 'verified', 'failed'].includes(value.startability))
       && ['not_tested', 'verified', 'failed'].includes(value.protocolAvailability ?? '')
   }).map(candidate => ({

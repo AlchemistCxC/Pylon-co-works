@@ -238,16 +238,6 @@ pub enum CrashReason {
     WriterFailed,
     /// stdout EOF（agent 进程退出/管道关闭）。
     StdoutClosed,
-    /// pending 分片锁中毒（保守收敛，fail-closed）。
-    ///
-    /// 豁免保留（#348 返工裁定）：本仓**无产生点**——release 为
-    /// `panic = "abort"`，锁中毒即进程终止，本变体描述的「保守收敛」在
-    /// release 下不可达。未按词表纪律摘除，因前端错误码词表
-    /// （`src/app/errorCodeExplanations.ts` 的 `pending_lock_poisoned` 词条）
-    /// 已承载该 code 的文案，前端域属另一在途批次；反向映射
-    /// `crash_reason_from_code` 对远端传入的该 code 仍按词表放行。
-    /// 前端词条收编或删除后应一并摘除本变体。
-    PendingLockPoisoned,
     /// #99：入站投递过载（inbox+spill 均满，显式 gap 终止连接）。
     Overloaded,
 }
@@ -257,7 +247,6 @@ impl CrashReason {
         match self {
             CrashReason::WriterFailed => "writer_failed",
             CrashReason::StdoutClosed => "stdout_closed",
-            CrashReason::PendingLockPoisoned => "pending_lock_poisoned",
             CrashReason::Overloaded => "overloaded",
         }
     }

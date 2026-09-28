@@ -43,7 +43,7 @@ struct ReplayImport {
 fn replay_journal_commit_outcome(status: &str) -> &'static str {
     match status {
         "imported" => "recovery-import-committed",
-        "already-imported" | "already-present" | "reconciled" => "recovery-import-already-present",
+        "already-imported" => "recovery-import-already-present",
         "local-authoritative" => "local-journal-wins",
         "incomplete-not-imported" => "incomplete-preserved-runtime",
         "empty" => "empty",
@@ -352,17 +352,13 @@ pub(crate) async fn load_persisted_session(
             .await;
             let authority = match replay_journal_status {
                 "local-authoritative" => "local-journal",
-                "imported" | "already-imported" | "already-present" | "reconciled" => {
-                    "recovery-import"
-                }
+                "imported" | "already-imported" => "recovery-import",
                 _ if canonical_revision > 0 => "recovery-import",
                 _ => "empty",
             };
             let journal_coverage = match replay_journal_status {
                 "local-authoritative" => "local-observed",
-                "imported" | "already-imported" | "already-present" | "reconciled" => {
-                    "unverified-import"
-                }
+                "imported" | "already-imported" => "unverified-import",
                 _ if canonical_revision > 0 => "unverified-import",
                 _ => "empty",
             };
@@ -377,7 +373,7 @@ pub(crate) async fn load_persisted_session(
                     status: "imported",
                     trust: "unverified",
                 }),
-                "already-imported" | "already-present" => Some(ReplayImport {
+                "already-imported" => Some(ReplayImport {
                     import_id: format!("{}:{}:{}", owner.agent_id, owner.local_session_id, peri_id),
                     status: "already-imported",
                     trust: "unverified",
@@ -506,7 +502,9 @@ mod tests {
             "local-journal-wins"
         );
         assert_eq!(
-            replay_journal_commit_outcome("reconciled"),
+            // #425 件2：词表与 event_repo/service.rs 实际产出对齐——死词
+            // `already-present`/`reconciled` 已摘，活词以 `already-imported` 断言。
+            replay_journal_commit_outcome("already-imported"),
             "recovery-import-already-present"
         );
         assert_eq!(

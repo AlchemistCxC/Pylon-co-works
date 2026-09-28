@@ -21,7 +21,6 @@ const EXPECTED_CODES = [
   'agent_spawn_io_failed',
   'writer_failed',
   'stdout_closed',
-  'pending_lock_poisoned',
   'overloaded',
   'version_probe_spawn_failed',
   'version_probe_timeout',

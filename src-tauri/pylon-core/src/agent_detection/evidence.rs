@@ -102,10 +102,8 @@ pub(crate) type RankedCandidate = (
 
 pub(crate) fn identity_rank(confidence: IdentityConfidence) -> u8 {
     match confidence {
-        IdentityConfidence::Exact => 0,
-        IdentityConfidence::High => 1,
-        IdentityConfidence::Medium => 2,
-        IdentityConfidence::Low => 3,
+        IdentityConfidence::High => 0,
+        IdentityConfidence::Medium => 1,
     }
 }
 

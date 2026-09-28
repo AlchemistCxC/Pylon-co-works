@@ -42,15 +42,16 @@ export interface AgentCandidateValidationState {
 export type CandidateImportMode = 'blocked' | 'verified' | 'unverified'
 
 /**
- * high/exact 候选有版本探针等强证据：完成过验证但握手失败后允许用户显式导入。
- * medium/low 证据不足，必须拿到一次成功握手；所有候选在尚未验证时都保持阻止。
+ * high 候选有版本探针等强证据：完成过验证但握手失败后允许用户显式导入。
+ * medium 证据不足，必须拿到一次成功握手；所有候选在尚未验证时都保持阻止。
+ * （#425 件5：exact/low 随 Rust 死变体裁除，判据只剩两档。）
  */
 export function candidateImportMode(
   candidate: Pick<AgentRuntimeCandidate, 'identityConfidence'>,
   validation: AgentCandidateValidationState | undefined,
 ): CandidateImportMode {
   if (validation?.status === 'ok') return 'verified'
-  if (validation?.status === 'failed' && (candidate.identityConfidence === 'exact' || candidate.identityConfidence === 'high')) return 'unverified'
+  if (validation?.status === 'failed' && candidate.identityConfidence === 'high') return 'unverified'
   return 'blocked'
 }
 

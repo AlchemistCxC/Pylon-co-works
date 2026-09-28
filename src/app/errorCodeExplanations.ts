@@ -32,16 +32,15 @@ export interface ErrorCodeExplanation {
 /**
  * Agent 崩溃原因（pylon-acp `CrashReason` wire 词表）的子表。
  *
- * 与 Rust 侧 `engine.rs::CrashReason::as_str` 的封闭集**双向精确对齐**，由
+ * 与 Rust 侧 `engine/prompt_wait.rs::CrashReason::as_str` 的封闭集**双向精确对齐**，由
  * `scripts/acp-vocabulary.test.mts` 静态比对看守：Rust 增删变体而本表不同步、
  * 或本表残留死码（先例：#348 A1 摘除 `WriterTimeout` 后 `writer_timeout` 词条
- * 滞留，#357），门禁都红灯。`pending_lock_poisoned` 属 #348 返工裁定的一对
- * 豁免保留（Rust 变体无产生点但因本词条而暂留），摘除须两侧同轮。
+ * 滞留，#357），门禁都红灯。`pending_lock_poisoned`（#348 返工裁定的临时豁免）
+ * 已随 #425 与 Rust 变体同轮摘除。
  */
 const ACP_CRASH_CAUSE_EXPLANATIONS = {
   writer_failed: { summary: 'Agent 进程管道通信失败（stdin 写 / stdout 读物理 IO 错误），连接已按崩溃收敛', hint: '在运行日志里查看该进程的最后输出' },
   stdout_closed: { summary: 'Agent 进程已退出（标准输出关闭）' },
-  pending_lock_poisoned: { summary: '内部状态锁中毒，连接已按崩溃收敛', hint: '重启 Pylon 后重试；持续出现请反馈' },
   overloaded: { summary: 'Agent 入站事件速率超过背压上限，连接按过载收敛（事件有缺口）' },
 } satisfies Record<string, ErrorCodeExplanation>
 
