@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
-import { waitFor } from '@solidjs/testing-library'
+import { fireEvent, waitFor } from '@solidjs/testing-library'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { CC_WIDGET_LABELS, EMPTY_STATE_HIDDEN_WIDGET_IDS } from '../../../domains/cc/widgetDefinitions.ts'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
@@ -219,7 +219,7 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('04b 空态极简：发送按钮空态隐藏、编辑模式豁免可见，选择器始终不显示', async () => {
+  it('04b 空态极简：发送按钮空态隐藏、编辑态下**仍不在场**，选择器始终不显示', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
     const host = document.createElement('div')
@@ -240,9 +240,11 @@ describe('mountSolidControlCenterPreview', () => {
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-      // 丁：编辑模式豁免 —— 发送按钮（注册轨）与状态控件都回来
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).not.toBeNull())
-      expect(controlCenter?.querySelector('[data-widget-id="model"]')).not.toBeNull()
+      // ★ 刀1 反转自 CC-02「编辑模式豁免」：空态名单里的件进了编辑态**同样不在场**
+      //   （正控：编辑工具栏必须已出现，否则"仍然为空"是假绿）
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
+      expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
       // 甲：选择器在编辑态仍不显示
       expect(controlCenter?.querySelector('[aria-label="新会话工作区"]')).toBeNull()
       destroy()
@@ -253,7 +255,7 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('CC-02 编辑态豁免吃的是同一份隐藏名单：预设 ccHidden 藏了发送按钮，编辑态它仍在场', async () => {
+  it('★ 刀1：编辑态下被预设 ccHidden 藏起来的发送按钮**不在场**（DOM 缺失）', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
     const host = document.createElement('div')
@@ -268,14 +270,16 @@ describe('mountSolidControlCenterPreview', () => {
       const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
       const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
       expect(controlCenter).not.toBeNull()
-      // 非编辑态：预设把它藏了 ⇒ 不在场（现状不变）
+      // 非编辑态：预设把它藏了 ⇒ 不在场
       expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-      // 编辑态：在场（裸预设值那一份判据会让它整个消失），且带上风格识别的「藏着了」标记
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-send-button')).not.toBeNull())
-      expect(controlCenter?.querySelector('.cc-send-button')).toHaveClass('cc-hidden')
+      // ★ 本刀的核心行为：编辑态不再豁免 ⇒ 被藏件在 DOM 里**不存在**。
+      //   ★ 反转自 CC-02 旧断言（编辑态「在场 + 淡显」）。
+      //   正控：编辑工具栏必须已出现，否则"仍然为空"是假绿。
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
       destroy()
     } finally {
       services.destroy()
@@ -284,7 +288,7 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('CC-02 第 4 步同源：空态 + 编辑态下内置件带同一个「藏着了」标记', async () => {
+  it('★ 刀1：清单是隐藏件唯一入口 —— 被藏件不在场、清单如实说「已隐藏」、点「显示」它回来', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
     const host = document.createElement('div')
@@ -292,20 +296,30 @@ describe('mountSolidControlCenterPreview', () => {
     const services = createPreviewWorkbenchServices()
     const theme = structuredClone(DEFAULTS)
     theme.inputSubmitButtonMode = 'inline'
+    theme.ccHidden = ['model']
     services.appearance.setTheme(theme)
 
     try {
-      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
       const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
       expect(controlCenter).not.toBeNull()
-      // 空态非编辑：空态语境名单里的内置件根本不渲染
-      expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
 
-      // 编辑态：内置件露出来，且与发送按钮走**同一份**名单 ⇒ 同样带标记（走裸预设值则不带）
+      // 画布上不存在（新语义：它回来了才说明清单这个入口真的管用）
+      expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
+
+      // 清单如实：该格标 dim、开关写着「显示 X」
+      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+        .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
+      expect(chipWrap('model')?.classList.contains('dim')).toBe(true)
+      const toggle = chipWrap('model')?.querySelector<HTMLButtonElement>('.cc-chip-toggle')
+      expect(toggle?.getAttribute('aria-label')).toBe('显示 模型')
+
+      // 点清单的「显示」⇒ 它出现在场
+      fireEvent.click(toggle as HTMLButtonElement)
       await waitFor(() => expect(controlCenter?.querySelector('[data-widget-id="model"]')).not.toBeNull())
-      expect(controlCenter?.querySelector('[data-widget-id="model"]')).toHaveClass('cc-hidden')
       destroy()
     } finally {
       services.destroy()
@@ -338,7 +352,8 @@ describe('mountSolidControlCenterPreview', () => {
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
       const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-toolbar-chip')?.textContent?.trim().at(0)
 
-      // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim），与控件自己的 cc-hidden 幽灵态一致
+      // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
+      // 清单是它唯一的入口，故这里的"如实"就是隐藏件的全部可见信息。
       await waitFor(() => expect(chipWrap('model')?.classList.contains('dim')).toBe(true))
       for (const id of EMPTY_STATE_HIDDEN_WIDGET_IDS) {
         expect(chipWrap(id)?.classList.contains('dim')).toBe(true)

@@ -99,7 +99,8 @@ export function SolidControlCenter() {
   let controlCenterElement: HTMLDivElement | undefined
   const sendButtonMode = () => {
     // 04b：空态隐藏发送按钮 —— 与其余控件共用 hiddenWidgetIds() 这一个入口。
-    // ★ CC-02：编辑态豁免不再手抄，改由 isWidgetVisible 承担（与渲染处同一判据）。
+    // ★ CC-02：可见性由 isWidgetVisible 承担（与渲染处同一判据）。
+    // ★ #266 刀1：编辑态豁免已撤 ⇒ 被藏件在编辑态下同样不渲染。
     if (!isWidgetVisible('cc-send-button', visibilityContext())) return undefined
     return appearance().inputSubmitButtonMode === 'external' ? 'external' : appearance().inputSubmitButtonMode === 'inline' ? 'inline' : undefined
   }
@@ -276,15 +277,10 @@ export function SolidControlCenter() {
       : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])],
     cliHintMode: appearance().cliHintMode,
   })
-  // ★ CC-02：「发送按钮该不该算在隐藏名单里」只留这一个具名入口 —— `sendButtonMode()`
-  //   与渲染处的 `hidden` prop 共用它，不再各写一遍裸名单（那正是本 bug 的形状）。
-  const sendButtonHidden = () => hiddenWidgetIds().includes('cc-send-button')
-  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）+ 编辑态豁免」——元件的行上不再有显隐申明，
+  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）」——元件的行上不再有显隐申明，
   //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
-  const visibilityContext = () => ({
-    hidden: hiddenWidgetIds(),
-    editMode: appearance().ccEditMode,
-  })
+  //   ★ #266 刀1：编辑态豁免已撤 ⇒ 上下文里不再有编辑态这一项。
+  const visibilityContext = () => ({ hidden: hiddenWidgetIds() })
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
   const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
@@ -397,7 +393,7 @@ export function SolidControlCenter() {
     const body = renderBody(id)
     if (body === null) return null
     return <div
-      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${hiddenWidgetIds().includes(id) ? ' cc-hidden' : ''}${selected() === id ? ' cc-selected' : ''}`}
+      class={`cc-widget${id === 'input' ? '' : ' cc-natural'}${appearance().ccEditMode ? ' cc-edit' : ''}${selected() === id ? ' cc-selected' : ''}`}
       data-widget-id={id}
       data-widget-anchor={resolveCcWidgetGroup(id)?.layout?.y.anchor}
       style={placementStyle(placement())}
@@ -650,7 +646,7 @@ export function SolidControlCenter() {
       }}
     ><div class="cc-edit-hdr-bar" /><span class="cc-edit-hdr-label">{appearance().ccHeight}px</span></div></Show>
     <div class="cc-bg" data-cc-widget={ccSurfaceRegistered() ? 'cc-surface' : undefined} />
-    <Show when={ccSendButtonRegistered() && sendButtonMode()}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} hidden={sendButtonHidden()} /></Show>
+    <Show when={ccSendButtonRegistered() && sendButtonMode()}><SolidCcSendButton disabled={readonly() || submitting()} mode={sendButtonMode() as 'inline' | 'external'} /></Show>
     <div class="cc-input-shadow-clip" aria-hidden="true" />
     <div class="cc-body">
       <Show when={selectorPending()}><span role="status" aria-live="polite">{selectorPending()}</span></Show>
