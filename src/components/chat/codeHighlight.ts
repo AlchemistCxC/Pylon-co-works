@@ -6,29 +6,50 @@
 // （纯计算：整块代码进、行数组出）。
 //
 // 出口形状与旧 wasm 出口**逐项一致**（`{ spans: { classes, text } }[]`、未知语言 `null`、
-// 源码以 '\n' 收尾时行数组少一个空尾行）——这是「换引擎不动消费方」的前提：四个消费面
-// （插件 provider `core.renderer.code-highlight`、聊天代码块、markdown 内嵌代码块、
-// 文件只读视图 `FileTabView`）都只经过本文件。
+// 源码以 '\n' 收尾时行数组少一个空尾行）——这是「换引擎不动消费方」的前提：三个消费面
+// （插件 provider `core.renderer.code-highlight`、聊天代码块、markdown 内嵌代码块）
+// 都只经过本文件。（第四个消费面 FileTabView 的只读分支已退役，见 `FileTabView.solid.tsx`。）
 import { hasHighlightLanguage, highlightBlockWithLezer, type LezerHighlightedLine } from './lezerHighlight.ts'
 import { resolveCodeHighlightProvider } from '../../domains/rendererContent/rendererContentRegistry.ts'
 
 const highlightCache = new Map<string, string | null>()
 const highlightPending = new Map<string, Promise<string | null>>()
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 128
+/**
+ * #443：条数预算与字节量脱钩——128 条大块可钉住数十 MB（key 内嵌整段源码，value ≈ 源码
+ * 2–3 倍的 HTML）。补**字符预算**（键长即源码长度，与 `markdownRenderModel` 的
+ * `MAX_CACHE_CHARS = 2_000_000` 同值同依据）。
+ */
+const MAX_HIGHLIGHT_CACHE_CHARS = 2_000_000
+/**
+ * 单条不缓存上限（与 canonical raw 64KiB 同量级）：超限块仍返回结果但不进缓存——
+ * 单条 64K 块的 HTML ≈ 192–768 KB，一条就能吃掉总预算的一到三成；超限块重进视口走
+ * Lezer 切片重算（可让出、不卡帧），比钉住常驻更划算。
+ */
+const MAX_HIGHLIGHT_CACHE_ENTRY_CHARS = 65_536
+let cachedChars = 0
 
 function cacheKey(language: string, code: string): string {
   return `${language.toLowerCase()}\u0000${code}`
 }
 
 function cacheResult(key: string, value: string | null): string | null {
+  if (key.length > MAX_HIGHLIGHT_CACHE_ENTRY_CHARS) return value
   highlightCache.delete(key)
   highlightCache.set(key, value)
-  while (highlightCache.size > MAX_HIGHLIGHT_CACHE_ENTRIES) {
+  cachedChars += key.length
+  while (cachedChars > MAX_HIGHLIGHT_CACHE_CHARS || highlightCache.size > MAX_HIGHLIGHT_CACHE_ENTRIES) {
     const oldest = highlightCache.keys().next().value
     if (oldest === undefined) break
     highlightCache.delete(oldest)
+    cachedChars -= oldest.length
   }
   return value
+}
+
+/** 只读读数：缓存条数与键字符占用（消费方是单测与探针，先例 `markdownRenderModel.graftBaseStats`）。 */
+export function highlightCacheStats(): { readonly entries: number, readonly chars: number } {
+  return { entries: highlightCache.size, chars: cachedChars }
 }
 
 /** 内置高亮实现（core.renderer.code-highlight 与无插件回退共用）。 */
