@@ -104,6 +104,8 @@ pub(crate) fn session_expired(
 }
 
 /// 一条会话的回收判定输入（快照；后续的删除复核仍在锁内重做，见 TOCTOU 纪律）。
+/// #420：`turn_in_flight` 改由 turn_ledger.active 单源判定——采集闭包内就地
+/// 查账本（账本是叶子锁：只做 HashMap 读写、不回调宿主、不取其他锁）。
 struct SessionSnapshot {
     source: String,
     peri_id: String,
@@ -148,7 +150,14 @@ pub(crate) async fn check_session_expiry_with(
                         source: source.clone(),
                         peri_id: info.peri_id.clone(),
                         updated_at: info.updated_at,
-                        turn_in_flight: info.turn_in_flight(),
+                        // #420：在途事实查账本 active 表（单源）。账本是叶子锁
+                        // （内部只做 HashMap 读写、不回调宿主、不取其他锁），
+                        // 在 sessions 锁内查询无锁序风险。
+                        turn_in_flight: runtime.turn_ledger.turn_in_flight(
+                            source,
+                            &info.peri_id,
+                            info.generation,
+                        ),
                     })
                     .collect()
             })

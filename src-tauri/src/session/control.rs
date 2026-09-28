@@ -457,7 +457,8 @@ pub(crate) async fn cancel_prompt(
     // #352：把「用户 cancel 已发出」登记为本会话的一等判死输入——prompt 等待
     // 循环看到即直接进入 cancel-settle 窗口；不再依赖会被 agent 继续产出无限
     // 续命的闲置判死。置于发送成功 + 复核之后：发送失败的 cancel 不判死。
-    // generation 随置位键化（镜像 turn_in_flight）：旧代际 cancel 不入新代际。
+    // generation 随置位键化（原镜像 turn_in_flight 的键化纪律，#420 后在途事实
+    // 归账本单源，cancel 仍按 generation 键控）：旧代际 cancel 不入新代际。
     // 锁形态：tauri command 错误边界，按 dev-standards #331 例外一 map_err 入域，
     // 中毒不得静默跳过置位。
     let mut sessions = runtime.sessions.lock().map_err(|error| {

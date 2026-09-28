@@ -10,9 +10,10 @@ pub(super) fn now_ms() -> u64 {
 
 /// #99：把 ledger settle 结果落到诊断日志——`Published` 静默（正常收敛），
 /// `Late`/`UnknownTurn` 告警（竞态被 CAS 拦截 / 未登记 turn）。
-/// ADR-0017/#217：settle 同时按键清理会话的在途回合标记——这是三条终态臂
-/// （Response / ConnectionClosed / CancelledAfterTimeout）的唯一汇聚点，标记的
-/// 终态清理无需在各臂重复。
+/// #420/ADR-0034：settle 即「本回合在途」事实的唯一收敛点（账本 active→terminal
+/// 原子转移）——三条终态臂（Response / ConnectionClosed / CancelledAfterTimeout）
+/// 都汇到这里；SessionInfo 不再有需要同步清理的镜像标记，旧代际迟到终态的
+/// 让位语义由账本键控（TurnKey 含 generation）本身承担。
 pub(super) fn report_settle(
     runtime: &Arc<AgentRuntime>,
     turn_key: &crate::acp::TurnKey,
@@ -22,12 +23,6 @@ pub(super) fn report_settle(
     let outcome = runtime
         .turn_ledger
         .settle(turn_key, cause, now_ms(), detail);
-    if let Ok(mut sessions) = runtime.sessions.lock() {
-        if let Some(session) = sessions.get_mut(&turn_key.local_session_id) {
-            // 键不匹配（代际已换）说明标记已归属新回合，静默让位。
-            let _cleared = session.clear_turn_in_flight(turn_key.generation, turn_key.turn_id);
-        }
-    }
     match outcome {
         crate::acp::SettleOutcome::Published => {}
         crate::acp::SettleOutcome::Late { existing } => tracing::warn!(
@@ -113,10 +108,10 @@ pub(super) fn settle_turn_from_response(
 }
 
 /// #352：构造「用户 cancel 已发出」判死探针——只认 generation 一致的置位
-/// （载体键化 generation，镜像 turn_in_flight：客户端替换后旧代际的迟到置位
-/// 不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按 dev-standards #331
-/// 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，就地恢复——判死输入
-/// 不得因锁中毒静默消失。
+/// （载体键化 generation，与账本 TurnKey 的代际隔离同纪律：客户端替换后
+/// 旧代际的迟到置位不得把新代际等待循环拖进 cancel-settle 窗口）。锁形态按
+/// dev-standards #331 例外二（into_inner）：标记是时间戳事实，中毒后仍自洽，
+/// 就地恢复——判死输入不得因锁中毒静默消失。
 pub(crate) fn cancel_requested_probe(
     runtime: Arc<AgentRuntime>,
     source: String,
