@@ -466,12 +466,11 @@ describe('#266 ⑰ · 可见性只剩「值 + 语境名单」（元件不自己�
   it('命令行提示：没有会话 / 标准输入模式下**照样可见**（本件的目的）', () => {
     // ★ 反转自旧断言 `inputMode: 'default' ⇒ false`：用户口径「命令行提示按模式驱动可见我后悔了」。
     expect(isWidgetVisible('cc-command-hint', { hidden: [] })).toBe(true)
-    expect(isWidgetVisible('cc-command-hint', { hidden: [], editMode: true })).toBe(true)
   })
 
-  it('`ccHidden` 仍能藏它；编辑态豁免（把藏起来的元件露出来）', () => {
+  it('`ccHidden` 仍能藏它 —— 判据只有名单（★ 刀1：编辑态豁免已撤，编辑态同样不显示）', () => {
     expect(isWidgetVisible('cc-command-hint', { hidden: ['cc-command-hint'] })).toBe(false)
-    expect(isWidgetVisible('cc-command-hint', { hidden: ['cc-command-hint'], editMode: true })).toBe(true)
+    expect(isWidgetVisible('cc-command-hint', { hidden: [] })).toBe(true)
   })
 
   it('详细档「隐藏」按**值**折进名单（组装只有一处，渲染与计数同源）', () => {

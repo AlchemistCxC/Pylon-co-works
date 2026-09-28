@@ -1409,7 +1409,7 @@ describe('mountSolidWorkbench', () => {
     }))
   })
 
-  it('04b 空态 + 编辑模式：4 个状态控件豁免可见，选择器仍不显示', async () => {
+  it('04b 空态 + 编辑模式：状态控件**不再豁免**（仍不在场），选择器仍不显示', async () => {
     const { services, lifecycle } = mountPreview()
     lifecycle.update({
       sheetId: 'sheet-a', sessionId: null, preview: true,
@@ -1420,10 +1420,11 @@ describe('mountSolidWorkbench', () => {
 
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-    await waitFor(() => {
-      const ids = [...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))
-      expect(ids).toEqual(expect.arrayContaining(['input', 'model', 'reasoning', 'mode', 'tokens']))
-    })
+    // 正控：编辑工具栏已出现 —— 否则下面那句"仍然只有 input"会因为"根本没进编辑态"而假绿
+    await screen.findByRole('toolbar', { name: '中控控件工具栏' })
+    // ★ 刀1 反转自 CC-02「4 个状态控件豁免可见」：编辑态不再豁免
+    //   ⇒ 空态名单里的件仍**不在场**（清单才是它们唯一的入口）
+    expect([...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))).toEqual(['input'])
     // 甲：编辑态也不显示选择器
     expect(screen.queryByRole('combobox', { name: '新会话工作区' })).toBeNull()
   })
@@ -1910,10 +1911,12 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(await screen.findByRole('toolbar', { name: '中控控件工具栏' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '隐藏 模型' }))
     await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toContain('model'))
-    expect(host.querySelector('[data-widget-id="model"]')).toHaveClass('cc-hidden')
+    // ★ 刀1：编辑态下被藏件**不在场**（旧行为是「在场 + 淡显」）
+    expect(host.querySelector('[data-widget-id="model"]')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '显示 模型' }))
     await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).not.toContain('model'))
+    await waitFor(() => expect(host.querySelector('[data-widget-id="model"]')).not.toBeNull())
 
     services.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 20 } })
     fireEvent.click(screen.getByRole('button', { name: '重置控件位置' }))
