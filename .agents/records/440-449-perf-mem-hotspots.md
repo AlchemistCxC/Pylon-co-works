@@ -5,8 +5,8 @@
 ## 元信息
 
 - issue：#440、#441、#443、#446、#449（#447 避让 #439 在途域，顺延）
-- 分支：`kumo/prometheus`（共享分支，随其 PR 走）
-- 基准提交：`c2a3a190`（L.md 开工声明）
+- 分支：共享线施工中途由 `kumo/prometheus` 演进为 `kumo/439-review-fixes`（#452 已并），本批提交在其上、以 `kumo/perf-mem-hotspots` 推远端开 PR
+- 基准提交：`c2a3a190`（L.md 开工声明）；base = `82ca7e68`（已并入 main）
 - 日期：2026-09-29
 
 ## 目标与范围
