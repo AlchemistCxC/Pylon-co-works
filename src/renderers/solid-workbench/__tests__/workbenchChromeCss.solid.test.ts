@@ -107,6 +107,49 @@ describe('#238 刀5B · 分隔点整族已删 + 命令行提示不再是整行�
   })
 })
 
+/** 某选择器的**全部**声明块（同名规则在本文件里出现两次时，两处都要看），并剥注释。 */
+function allDeclarations(source: string, selector: string): string {
+  const pattern = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*\\{)`, 'g')
+  const blocks: string[] = []
+  for (const match of source.matchAll(pattern)) {
+    const open = source.indexOf('{', match.index)
+    const close = source.indexOf('}', open)
+    blocks.push(source.slice(open + 1, close))
+  }
+  if (blocks.length === 0) throw new Error(`CSS 中找不到选择器 ${selector}`)
+  // 块里的注释**会提到**被改掉的属性（说明"原来是什么"），不该被误判
+  return blocks.join('\n').replaceAll(/\/\*[\s\S]*?\*\//g, '').replaceAll(/\s+/g, '')
+}
+
+/**
+ * ★★ #266 刀2.5 · 下边组**不折行** + 脱离件定位（CSS 侧守卫）。
+ *
+ * 为什么要有它：本刀第一条逻辑就是「**不折行 ⇒ 下行组行数恒为 1**」，而刀 3 的
+ * 「最小高按边算取最大」正是建立在"行数恒 1"之上。折行若被改回来，`lint` / `tsc` /
+ * `check:solid` / 其它测试**没有一层看得见**（没有任何断言盯这两条属性）⇒ 在这里钉住。
+ * 做法与上面 `.cc-command-hint` 那条同款（读 CSS 文本 + 剥注释）。
+ * ★ 这不是教条：将来真要恢复折行，**改这条测试是一个显式动作**。
+ */
+describe('#266 刀2.5 · 下边组不折行 + 脱离件定位（CSS 侧守卫）', () => {
+  it('承载下边组的两条规则都不再折行（`.cc-status-row` / `.cc-status-group`）', () => {
+    for (const selector of ['.cc-status-row', '.cc-status-group']) {
+      const block = allDeclarations(controlCenterCss, selector)
+      expect(block, `${selector} 又折行了（行数会变 2 ⇒ 刀3 的高度算式失效）`).not.toContain('flex-wrap:wrap')
+      expect(block, `${selector} 缺 flex-wrap:nowrap`).toContain('flex-wrap:nowrap')
+    }
+    // 正控：编辑工具条那个 `flex-wrap:wrap` 与下边组无关，本刀**保留**它（不顺手改别的）
+    expect(allDeclarations(controlCenterCss, '.cc-edit-toolbar')).toContain('flex-wrap:wrap')
+  })
+
+  it('脱离件的定位规则在：绝对定位 + 纵向基准变量（允许重叠的前提）', () => {
+    const block = allDeclarations(controlCenterCss, '.cc-widget.cc-detach-x')
+    expect(block).toContain('position:absolute')
+    expect(block).toContain('bottom:var(--cc-status-line-inset,3px)')
+    // 纵向基准 = `.cc-body` 的下内边距 ⇒ 声明在 cli-mode 那条规则上
+    expect(allDeclarations(controlCenterCss, '.control-center.cli-mode')).toContain('--cc-status-line-inset:3px')
+  })
+})
+
 const statusBarCss = css('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css')
 
 /**

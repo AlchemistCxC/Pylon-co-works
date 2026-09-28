@@ -8,6 +8,9 @@
  * - ★ **位置**（刀3）：每行自己声明 `layout: { x: {锚点, 方位, 间距?}, y: {…}, order }`
  *   —— 不再有「先分槽、再在槽里排序」两段式。渲染按**落脚处**（`ccWidgetLanding` =
  *   `(y.anchor, y.side)`）自动成组，组内按 `order` 排。声明为 `floating` 的行不进文档流。
+ *   ★★ **横向脱离**（#266 刀2.5）：行上可选声明 `detachX`（贴哪条边 + 距离）——
+ *   **缺省 = 照旧排队**（默认排布不变），声明了才脱离横向队列、贴到背景板的那条横边、
+ *   **允许与队列重叠**（见 `CcDetachX`）。下边组因此不折行（行数恒 1），最小宽按 max 取。
  * - ★ **显隐**（#266 ⑰）：**这一维只有「显示 / 隐藏」两个属性，且只有两种承载** ——
  *   ① 预设里的**值**（`ccHidden`，另加提示详细档这个自己的值，见 `resolveCcHiddenWidgetIds`）；
  *   ② **语境侧名单**（空态名单 `EMPTY_STATE_HIDDEN_WIDGET_IDS`）。
@@ -132,6 +135,34 @@ export interface CcPlacementY {
 }
 
 /**
+ * ★★ #266 刀2.5：**横向独立定位**声明（声明式脱离）—— 「贴哪条边 + 距离」。
+ *
+ * 判据两条，都以「行上有没有这个字段」为准，不再有第三种形态：
+ * - **缺省（没有此字段）= 照旧排队** —— 该件留在所在落脚处的 flex 队列里，与同组件按
+ *   `placements[].order` 依次排。**默认观感逐像素不变**（表里今天一个都不声明）。
+ * - **有此字段 = 脱离队列** —— 该件从文档流里取出、单独贴到 `side` 那条横边（`gap` 缺省 0），
+ *   **不再与谁排队** ⇒ **允许与队列或其它脱离件重叠**（互不挤开，也不报错）。
+ *   ★ 这正是「最小宽按 max 取」而不是按 sum 取的前提（规范 §7.6）。
+ *
+ * ★ 只有横向：纵向仍随所在落脚处那一行（高度一行一件事，见刀 3）。
+ * ★ `stretch` 不作为脱离的 `side` —— 脱离件不撑满容器（要撑满的就是留在队列里的输入栏）。
+ * ★ 与 `floating` 的分工：`floating`（发送按钮）是"不进任何落脚处、不成组"，位置由它自己的
+ *   CSS 与 `layout.x/y` 算；本字段是"仍在那条行上、但横向不受队列摆布"。
+ * ★ 与用户数据的分工：贴哪条边由**本表声明**（`ccLayoutState.ts` 里已立的决定 ——
+ *   "元件贴哪一行/哪一侧不在用户数据里"）；`ccLayout.placements` 仍只存用户手调的可变量
+ *   （组内序号 + 两个方向的微调）。
+ */
+export type CcDetachSide = 'left' | 'right' | 'center'
+
+export interface CcDetachX {
+  /** 贴谁（指向表内 id；当前一律 `cc-surface` = 背景板本体） */
+  readonly anchor: string
+  readonly side: CcDetachSide
+  /** 与该横边之间的距离（px；`center` 时忽略）。缺省 0 = 紧贴该边。 */
+  readonly gap?: number
+}
+
+/**
  * ★★ 位置（#238 刀3）：**两轴各声明一次「贴着谁」**，取代原来的「槽位 + 行内序」两段式。
  * `order` = 同一**落脚处**（`(y.anchor, y.side)`，见 `ccWidgetLanding`）组内的次序。
  */
@@ -180,6 +211,11 @@ export interface CcWidgetGroup {
   rail: 'builtin' | 'registered'
   /** ★ 位置声明（两轴）；最外的容器 `cc-surface` 无此项（它是所有锚点的终点） */
   layout?: CcWidgetLayout
+  /**
+   * ★★ #266 刀2.5：**横向独立定位**声明（贴哪条边 + 距离）。**缺省 = 照旧排队**。
+   * 形态与读法见 `CcDetachX`；渲染侧按它挂 `.cc-detach-x` 并内联 `left`/`right`。
+   */
+  detachX?: CcDetachX
   /**
    * ★ **同落脚处内的前置间距**（与同组前一个元件之间的距离，落在元件自己身上）。
    * 现状：思考强度 / 权限各 12px（原先硬编码在控件里的 `REASONING_GAP_PX` / `PERMISSION_GAP_PX`，
