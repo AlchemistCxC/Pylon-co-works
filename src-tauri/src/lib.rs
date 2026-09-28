@@ -1757,7 +1757,6 @@ pub fn run() {
                 crate::session::send_message_streaming,
                 crate::session::load_persisted_session,
                 crate::session::list_persisted_sessions,
-                crate::session::evt_append,
                 crate::session::evt_revision,
                 crate::session::evt_list,
                 crate::session::evt_draft_list,

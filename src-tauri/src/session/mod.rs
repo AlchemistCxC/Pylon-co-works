@@ -792,21 +792,7 @@ fn require_event_service(
     event_service_of(state.inner())
 }
 
-/// 校验 + 批量 append canonical 事件（单事务；event_id 去重；expected_revision 冲突检测）。
-/// #317 批次二：错误经 PylonError::CanonicalEvent 委托，wire code 逐字不变。
-#[tauri::command]
-pub(crate) async fn evt_append(
-    state: tauri::State<'_, AppState>,
-    events: Vec<serde_json::Value>,
-    expected_revision: Option<i64>,
-) -> Result<EventAppendResult, PylonError> {
-    require_event_service(&state)?
-        .append_events(events, expected_revision)
-        .await
-        .map_err(PylonError::from)
-}
-
-/// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基准）。
+/// owner 当前 revision（MAX(sequence)，空 = 0；scheduler expected_revision 基线）。
 #[tauri::command]
 pub(crate) async fn evt_revision(
     state: tauri::State<'_, AppState>,
