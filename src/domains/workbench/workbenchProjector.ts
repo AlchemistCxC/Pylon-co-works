@@ -205,6 +205,10 @@ export interface WorkbenchProjectionDiagnostic {
   readonly sequence: number
   readonly level: 'info' | 'warning' | 'error'
   readonly data?: unknown
+  /** #446：同码计数环——同 code 非 error 的后续诊断不再逐条追加，记在首条上。 */
+  readonly count?: number
+  /** #446：该条目的 data 因字节预算被摘除（卡片仍在，载荷让位）。 */
+  readonly dataOmitted?: true
 }
 
 /** Canonical negotiated extension event projected into the disposable document. */
@@ -1535,18 +1539,109 @@ function reduceDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventE
   return addDiagnostic(withError, envelope, code, message, level, event)
 }
 
+// #446：diagnostics 无上限收敛（调查：addDiagnostic 无 cap、仅三码去重；event.unknown
+// 整包进 data 且单条 raw ≤64KiB，病态流 ≈6MB/分钟且会话周期常驻）。
+// - 条目环：非 error 条目超 256 丢最旧（error 级豁免——它们是 error center 的事实源，量小）；
+// - 计数环：同 code 非 error 不再逐条追加，count+1 记在首条上（late-event/out-of-order 先例形态）；
+// - data 字节预算：非 error 条目的 data 总量超 256KB 时从最旧起摘 data（置 dataOmitted——
+//   卡片与 message 保留，载荷让位）。⚠️ event.unknown 的 data 也在预算内：#405 裁决
+//   「原始载荷留在事件详情」指的是正常路径不投喂前摘除，这里是资源压力下的显式降级
+//   （有标记、可裁），与该裁决的冲突面已在 issue #446 记录，如需豁免改一处表即可。
+const DIAGNOSTICS_ENTRY_LIMIT = 256
+const DIAGNOSTICS_DATA_BUDGET_CHARS = 262_144
+
+/** data 的字节估算（JSON 字符数；与 retainedHeap 的估算口径同级——只用于预算判，不当绝对值）。 */
+function diagnosticDataChars(data: unknown): number {
+  if (data === undefined) return 0
+  try {
+    const encoded = JSON.stringify(data)
+    return encoded === undefined ? 0 : encoded.length
+  } catch {
+    return 0
+  }
+}
+
+// 非 error data 总字符量按 diagnostics 数组引用 memo（同 orphanActivityIdsMemo 的先例）：
+// 无诊断事件时引用稳定 ⇒ O(1)；每次诊断事件重算一次 O(N)（N 被条目环钉在 ≤256）。
+const diagnosticsDataCharsMemo = new WeakMap<readonly WorkbenchProjectionDiagnostic[], number>()
+
+function diagnosticsDataChars(diagnostics: readonly WorkbenchProjectionDiagnostic[]): number {
+  const cached = diagnosticsDataCharsMemo.get(diagnostics)
+  if (cached !== undefined) return cached
+  let total = 0
+  for (const entry of diagnostics) {
+    if (entry.level !== 'error' && entry.data !== undefined) total += diagnosticDataChars(entry.data)
+  }
+  diagnosticsDataCharsMemo.set(diagnostics, total)
+  return total
+}
+
 function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, code: string, message: string, level: 'info' | 'warning' | 'error', data?: unknown): WorkbenchDocument {
-  const diagnostic = { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }
   const failedTurn = code === 'turn.failed' || code === 'provider.error'
   const alreadyTerminal = TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())
   const transitionToError = failedTurn && !alreadyTerminal
+  const isError = level === 'error'
+  const previous = document.diagnostics
+  // 计数环（非 error）：同 code 且同 message 的既有条目就地 count+1 并刷新到最新事件。
+  // 键带 message：event.unknown 的卡片标题取变体名（#405），不同 originalType 的变体
+  // 必须各自成卡，只折叠「同一形状的重复」。error 级恒追加。
+  let appended = false
+  let nextDiagnostics: WorkbenchProjectionDiagnostic[]
+  if (isError) {
+    nextDiagnostics = [...previous, { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }]
+    appended = true
+  } else {
+    let merged = false
+    nextDiagnostics = previous.map(entry => {
+      if (merged || entry.level === 'error' || entry.code !== code || entry.message !== message) return entry
+      merged = true
+      return {
+        ...entry,
+        count: (entry.count ?? 1) + 1,
+        eventId: envelope.eventId,
+        sequence: envelope.sequence,
+        ...(data !== undefined ? { data } : {}),
+      }
+    })
+    if (!merged) {
+      nextDiagnostics = [...previous, { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }]
+      appended = true
+    }
+  }
+  // 条目环：非 error 超 256 丢最旧（error 恒保留）。
+  let ringed = nextDiagnostics
+  if (!isError && nextDiagnostics.length > DIAGNOSTICS_ENTRY_LIMIT) {
+    const errorEntries = nextDiagnostics.filter(entry => entry.level === 'error')
+    const infoEntries = nextDiagnostics.filter(entry => entry.level !== 'error')
+    ringed = [...errorEntries, ...infoEntries.slice(infoEntries.length - DIAGNOSTICS_ENTRY_LIMIT)]
+  }
+  // data 字节预算：超预算从最旧的非 error 条目起摘 data（error 豁免）。合并/新增那条的
+  // data 是本事件引入的增量（data === undefined 时旧 data 原样保留、零增量），用它校正
+  // memo 总量，其余条目沿用 memo；环淘汰发生在超限 pathological 区，被淘汰条目的贡献
+  // 保留在账上只会让预算判更保守（多摘不漏摘），不值得为此重算全表。
+  let budgeted = ringed
+  const previousTotal = diagnosticsDataChars(previous)
+  const removedChars = appended || data === undefined ? 0 : (() => {
+    const old = previous.find(entry => entry.level !== 'error' && entry.code === code && entry.message === message)
+    return old !== undefined ? diagnosticDataChars(old.data) : 0
+  })()
+  let total = previousTotal - removedChars + diagnosticDataChars(data)
+  if (total > DIAGNOSTICS_DATA_BUDGET_CHARS) {
+    budgeted = ringed.map(entry => {
+      if (total <= DIAGNOSTICS_DATA_BUDGET_CHARS || entry.level === 'error' || entry.data === undefined) return entry
+      total -= diagnosticDataChars(entry.data)
+      return entry.dataOmitted === undefined ? { ...entry, data: undefined, dataOmitted: true } : entry
+    })
+    diagnosticsDataCharsMemo.delete(previous)
+  }
+  diagnosticsDataCharsMemo.set(budgeted, total)
   return {
     ...document,
     ...(transitionToError ? {
       messages: document.messages.map(item => item.running ? freezeDeepSnapshot({ ...item, running: false }) : item),
       session: { ...document.session, status: 'error' },
     } : {}),
-    diagnostics: [...document.diagnostics, diagnostic],
+    diagnostics: budgeted,
     timeline: updateTimeline(document.timeline, envelope.eventId, { status: level, summary: message }),
   }
 }

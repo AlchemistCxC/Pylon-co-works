@@ -371,3 +371,63 @@ describe('WorkbenchProjector', () => {
     expect(document.messages.at(-1)?.optimistic).toBe(true)
   })
 })
+
+// #446：diagnostics 无上限收敛——同码计数环 / 条目环 / data 字节预算，error 级豁免。
+describe('#446 diagnostics 环', () => {
+  const notice = (sequence: number, code: string, message = `notice ${sequence}`, level: 'info' | 'warning' | 'error' = 'info') =>
+    envelope(sequence, { type: 'diagnostic.notice', level, message, code })
+
+  it('同 code 同 message 的非 error notice 合并为一条 count=2（刷新到最新事件，保留首条 message）', () => {
+    const first = notice(1, 'usage.invalid-field', '字段 size 非法')
+    const second = notice(2, 'usage.invalid-field', '字段 size 非法')
+    const document = reduce([first, second])
+    expect(document.diagnostics).toHaveLength(1)
+    expect(document.diagnostics[0]).toMatchObject({
+      code: 'usage.invalid-field',
+      message: '字段 size 非法',
+      count: 2,
+      eventId: second.eventId,
+      sequence: 2,
+    })
+  })
+
+  it('不同 message（如不同 unknown 变体名）不成环——#405 的变体名各自成卡', () => {
+    const a = envelope(1, { type: 'event.unknown', originalType: 'future_event', summary: 'future', raw: { v: 1 }, truncated: false })
+    const b = envelope(2, { type: 'event.unknown', originalType: 'peri.goal_snapshot', summary: 'goal', raw: { v: 2 }, truncated: false })
+    const document = reduce([a, b])
+    const unknowns = document.diagnostics.filter(entry => entry.code === 'event.unknown')
+    expect(unknowns).toHaveLength(2)
+    expect(unknowns.map(entry => entry.count)).toEqual([undefined, undefined])
+  })
+
+  it('error 级豁免计数环（逐条进 diagnostics，与 systemErrors 的收敛并行）', () => {
+    const document = reduce([notice(1, 'agent.x', 'boom', 'error'), notice(2, 'agent.x', 'boom', 'error')])
+    expect(document.diagnostics.filter(entry => entry.code === 'agent.x')).toHaveLength(2)
+    expect(document.systemErrors.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('条目环：非 error 条目超 256 丢最旧，error 条目恒保留', () => {
+    const events = [notice(1, 'agent.keep', 'boom', 'error')]
+    for (let index = 0; index < 300; index += 1) events.push(notice(index + 2, `code-${index}`))
+    const document = reduce(events)
+    const nonError = document.diagnostics.filter(entry => entry.level !== 'error')
+    expect(nonError.length).toBeLessThanOrEqual(256)
+    expect(document.diagnostics.some(entry => entry.code === 'agent.keep')).toBe(true)
+    // 丢的是最旧：最早的非 error 码已不在
+    expect(document.diagnostics.some(entry => entry.code === 'code-0')).toBe(false)
+  })
+
+  it('data 字节预算：超 256KB 时从最旧的非 error 条目摘 data（置 dataOmitted），最新保留', () => {
+    const big = 'x'.repeat(200_000)
+    const first = envelope(1, { type: 'diagnostic.notice', level: 'info', message: big, code: 'big.one' })
+    const second = envelope(2, { type: 'diagnostic.notice', level: 'info', message: big, code: 'big.two' })
+    const document = reduce([first, second])
+    const one = document.diagnostics.find(entry => entry.code === 'big.one')
+    const two = document.diagnostics.find(entry => entry.code === 'big.two')
+    expect(one?.dataOmitted).toBe(true)
+    expect(one?.data).toBeUndefined()
+    expect(two?.data).toBeDefined()
+    // 摘除只动载荷：卡片语义字段仍在
+    expect(one?.message).toBe(big)
+  })
+})
