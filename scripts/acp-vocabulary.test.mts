@@ -4,7 +4,7 @@
 // 死词条滞留至 #357）的根因是：Rust 封闭词表与前端呈现表各自手工维护，改一侧
 // 没有任何东西逼着改另一侧。本文件把两侧做成**静态双向比对**（先例：
 // `check-ipc-contract.mts` 的解析思想 × `audit-maintenance.test.mts` 的形态）：
-//   1. `engine.rs::CrashReason::as_str` wire 码集 ≡ `ACP_CRASH_CAUSE_CODES`
+//   1. `engine/prompt_wait.rs::CrashReason::as_str` wire 码集 ≡ `ACP_CRASH_CAUSE_CODES`
 //      （src/app/errorCodeExplanations.ts）——双向精确，死词条 / 漏词条都红；
 //   2. `turn_ledger.rs::TurnTerminalCause` serde camelCase 标签全集
 //      − {completed, cancelled, emptyTurn}（三者由专门分支处理）≡
@@ -14,7 +14,7 @@
 //
 // 纪律语义：前端镜像 Rust **封闭词表本身**，而非产生频率——`#[allow(dead_code)]`
 // 预留变体（firstTokenTimeout 等）保留映射；无产生点但被裁定豁免保留的变体
-// （pending_lock_poisoned，见 engine.rs 文档注释）两侧同轮摘除，谁先动谁红灯。
+// （pending_lock_poisoned，见 engine/prompt_wait.rs 文档注释）两侧同轮摘除，谁先动谁红灯。
 //
 // 只读解析 Rust 源文本，不要求 rust 工具链；解析器自带合成输入自测（对齐
 // check-ipc-contract 的 --self-test 精神）。Rust 侧重构了枚举/匹配臂的书写
@@ -28,7 +28,8 @@ import { LEDGER_FAILURE_CAUSES } from '../src/domains/workbench/generationLedger
 
 const readSource = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
 
-const ENGINE_RS = '../src-tauri/pylon-acp/src/engine.rs'
+// #357：路径随 #416 engine.rs 拆分随迁——CrashReason 现居 engine/prompt_wait.rs。
+const ENGINE_RS = '../src-tauri/pylon-acp/src/engine/prompt_wait.rs'
 const TURN_LEDGER_RS = '../src-tauri/pylon-acp/src/turn_ledger.rs'
 const ERROR_RS = '../src-tauri/pylon-acp/src/error.rs'
 
@@ -148,7 +149,7 @@ describe('acp-vocabulary 跨语言对齐（改任一侧必须同步另一侧）'
     const implBlock = extractBraceBlock(readSource(ENGINE_RS), 'impl CrashReason')
     const asStrBlock = extractBraceBlock(implBlock, 'pub fn as_str(&self)')
     const rustCodes = [...parseMatchArms(asStrBlock, ['CrashReason', 'Self']).values()]
-    expect(rustCodes.length, 'engine.rs 的 CrashReason::as_str 解析为空——Rust 侧重构了书写形状，需同步本门禁').toBeGreaterThan(0)
+    expect(rustCodes.length, 'engine/prompt_wait.rs 的 CrashReason::as_str 解析为空——Rust 侧重构了书写形状，需同步本门禁').toBeGreaterThan(0)
 
     const missingInFrontend = rustCodes.filter(code => !ACP_CRASH_CAUSE_CODES.includes(code))
     const deadInFrontend = ACP_CRASH_CAUSE_CODES.filter(code => !rustCodes.includes(code))

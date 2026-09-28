@@ -161,6 +161,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   }, [sheetAgentId, probeTick])
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
+    // #395：文档按 provider source 建键——渲染器的「这份文档是不是本会话的」判据要用它。
+    sessionSource: session?.source ?? null,
     replayReadonly: props.isReplay,
     reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
     visibility: isActiveSheet ? 'active' : 'background', rightInset: props.ctx.rightInset, preview: false,

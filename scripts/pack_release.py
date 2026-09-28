@@ -24,6 +24,15 @@
 
 脚本只负责收集、审计、压缩，不隐式执行构建；构建由 npm script 编排：
     npm run release:portable  =  build + plugin-sdk + docs:build:offline + tauri build --no-bundle + pylon-detect + pack
+
+#402 起新增**显式**发行编排入口（不带编排参数时行为与历史一致）：
+    --bump X.Y.Z-SUF   版本号落位 9 文件（package.json/tauri.conf/6 处 Cargo.toml + lock，
+                       先例 6e7a22d3）并 pathspec 提交；--no-commit 只改不提交
+    --build            本地跑 bun run release:portable 全链（#232 定位：预演/排障；
+                       目标盘余量 < 10 GiB 时拒绝启动，#228/#399 纪律）
+    --upload           main 归属守卫通过后打 v<version> tag 并推送，触发 release.yml
+                       构建上传 GitHub Release（打 tag 即发行，#232）
+组合示例（一键到「可发布」）：python scripts/pack_release.py --bump 0.3.2-EFF --build
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -121,18 +131,23 @@ def parse_version_from_tauri_conf() -> str:
     return str(data.get("version", "")).strip()
 
 
-def parse_version_from_cargo_toml() -> str:
-    text = (SRC_TAURI_DIR / "Cargo.toml").read_text(encoding="utf-8")
+def parse_package_field_from_toml(text: str, field: str, origin: str) -> str:
     in_package = False
     for line in text.splitlines():
         if line.startswith("["):
             in_package = line.strip() == "[package]"
             continue
         if in_package:
-            match = re.match(r'^\s*version\s*=\s*"([^"]+)"\s*$', line)
+            match = re.match(rf'^\s*{field}\s*=\s*"([^"]+)"\s*$', line)
             if match:
                 return match.group(1).strip()
-    raise PackError("Cargo.toml [package] 段缺少 version")
+    raise PackError(f"{origin} [package] 段缺少 {field}")
+
+
+def parse_version_from_cargo_toml() -> str:
+    return parse_package_field_from_toml(
+        (SRC_TAURI_DIR / "Cargo.toml").read_text(encoding="utf-8"), "version", "Cargo.toml"
+    )
 
 
 def resolve_version() -> str:
@@ -145,6 +160,222 @@ def resolve_version() -> str:
     if len(unique) != 1 or "" in unique:
         raise PackError(f"三处版本不一致: {versions}")
     return unique.pop()
+
+
+# ── 版本落位与发行编排（#402）──
+# 落位域 = 先例 6e7a22d3 的 9 文件：package.json / tauri.conf.json / src-tauri 根与
+# 携带同版本号的成员 crate 各自 Cargo.toml / Cargo.lock 的对应 version 行。
+# 成员清单不硬编码（#259 教训）：从根 Cargo.toml 的 [workspace] members 动态解析，
+# 凡 [package] version 与当前应用版本一致的成员一并落位，保持「随版本前进」的锁定步调。
+
+BUMP_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-[0-9A-Za-z]+$")
+# #228/#399 两次实测：目标盘余量见底时 release 全链死在编译中途（os error 112），
+# 与其烧半小时再炸，不如启动前拒绝。
+MIN_BUILD_FREE_BYTES = 10 * 1024**3
+
+
+def workspace_member_manifests(root_text: str) -> list[Path]:
+    in_workspace = False
+    members: list[Path] = []
+    for line in root_text.splitlines():
+        if line.startswith("["):
+            in_workspace = line.strip() == "[workspace]"
+            continue
+        if not in_workspace:
+            continue
+        match = re.match(r'^\s*"([^"]+)"\s*,?\s*$', line)
+        if match and match.group(1) != ".":
+            members.append(SRC_TAURI_DIR / match.group(1) / "Cargo.toml")
+    return members
+
+
+def patch_cargo_lock(lock_path: Path, crate_versions: dict[str, str]) -> tuple[list[str], int]:
+    """纯计算：返回替换后的行序列与替换数，不写盘——由调用方在各校验全过后统一落盘。"""
+    lines = lock_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    remaining = dict(crate_versions)
+    current_name: str | None = None
+    patched = 0
+    for index, line in enumerate(lines):
+        name_match = re.match(r'^name = "([^"]+)"', line)
+        if name_match:
+            current_name = name_match.group(1)
+            continue
+        version_match = re.match(r'^version = "([^"]+)"', line)
+        if version_match and current_name in remaining:
+            eol = "\r\n" if line.endswith("\r\n") else "\n"
+            lines[index] = f'version = "{remaining.pop(current_name)}"{eol}'
+            patched += 1
+    if remaining:
+        raise PackError(
+            f"Cargo.lock 缺少待落位 crate 的条目: {', '.join(sorted(remaining))}"
+            "——lock 与 manifest 脱钩，先跑一次 cargo build 让 lock 回同步"
+        )
+    return lines, patched
+
+
+def bump_version_files(new_version: str) -> tuple[list[Path], int]:
+    """把 new_version 落位到全部版本文件。校验全过才写盘（任一计数不对即中止）。"""
+    old = resolve_version()
+    if not BUMP_VERSION_RE.match(new_version):
+        raise PackError(f"版本号格式非法: {new_version}（需要 X.Y.Z-SUF，如 0.3.2-EFF）")
+    if new_version == old:
+        raise PackError(f"新版本号与当前相同: {new_version}")
+
+    root_toml = SRC_TAURI_DIR / "Cargo.toml"
+    root_text = root_toml.read_text(encoding="utf-8")
+    manifests: list[Path] = [
+        REPO_DIR / "package.json",
+        SRC_TAURI_DIR / "tauri.conf.json",
+    ]
+    cargo_tomls = [root_toml]
+    for member_manifest in workspace_member_manifests(root_text):
+        member_text = member_manifest.read_text(encoding="utf-8")
+        if parse_package_field_from_toml(member_text, "version", str(member_manifest)) == old:
+            cargo_tomls.append(member_manifest)
+    manifests.extend(cargo_tomls)
+
+    # 先全量算补丁并核计数（manifest 计数 + lock 条目完整性），再统一写盘——半套落位比失败更糟。
+    patched: list[tuple[Path, str]] = []
+    crate_versions: dict[str, str] = {}
+    for path in manifests:
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".json":
+            pattern = re.compile(rf'("version"\s*:\s*"){re.escape(old)}(")')
+            new_text, count = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
+        else:
+            pattern = re.compile(rf'^(version\s*=\s*"){re.escape(old)}("\s*)$', re.MULTILINE)
+            new_text, count = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
+            crate_versions[parse_package_field_from_toml(new_text, "name", str(path))] = new_version
+        if count != 1:
+            raise PackError(
+                f"{path} 中版本号 {old} 出现 {count} 次（应为 1）——落位中止，未写任何文件"
+            )
+        patched.append((path, new_text))
+
+    lock_path = SRC_TAURI_DIR / "Cargo.lock"
+    lock_lines, lock_count = patch_cargo_lock(lock_path, crate_versions)
+    if lock_count != len(crate_versions):
+        raise PackError(f"Cargo.lock 落位 {lock_count} 处（应为 {len(crate_versions)}）")
+
+    for path, new_text in patched:
+        path.write_text(new_text, encoding="utf-8")
+    lock_path.write_text("".join(lock_lines), encoding="utf-8")
+    return [path for path, _text in patched] + [lock_path], len(cargo_tomls)
+
+
+def release_commit_message(new_version: str, cargo_toml_count: int) -> str:
+    return (
+        f"chore(release): {new_version} 版本号落位（package.json/tauri.conf/"
+        f"{cargo_toml_count} 处 Cargo.toml + lock）——pack_release.py --bump 编排（#402）"
+    )
+
+
+def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    # 参数一律走列表、不经 shell：message 里的反引号/括号不会被展开（见 L.md 088a5096 教训）。
+    result = subprocess.run(
+        ["git", *args],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if check and result.returncode != 0:
+        raise PackError(f"git {' '.join(args)} 失败: {(result.stderr or result.stdout).strip()}")
+    return result
+
+
+def commit_version_bump(changed: list[Path], new_version: str, cargo_toml_count: int) -> str:
+    status = _git("status", "--porcelain", "--", *[str(path) for path in changed])
+    if not status.stdout.strip():
+        raise PackError("版本文件无改动可提交——工作树与 HEAD 一致？")
+    message = release_commit_message(new_version, cargo_toml_count)
+    # pathspec 提交（AGENTS.md §2.5）：只带 9 个版本文件，不碰共享树上他人在途改动。
+    _git("commit", "-m", message, "--", *[str(path) for path in changed])
+    return message
+
+
+def preflight_build_disk(target_root: Path | None = None) -> None:
+    root = target_root if target_root is not None else _TARGET_ROOT
+    probe = root
+    while not probe.exists():
+        if probe.parent == probe:
+            raise PackError(f"无法定位构建目标盘: {root}")
+        probe = probe.parent
+    free = shutil.disk_usage(probe).free
+    if free < MIN_BUILD_FREE_BYTES:
+        raise PackError(
+            f"构建目标盘余量 {free / 1024**3:.1f} GiB < 10 GiB（{probe}）——release 全链会在"
+            "编译中途 os error 112。按 #228 纪律把 CARGO_TARGET_DIR 指到余量充足的盘后重试。"
+        )
+    print(f"构建目标盘余量: {free / 1024**3:.1f} GiB（{probe}）")
+
+
+def run_release_build() -> None:
+    print("== bun run release:portable（wasm + 前端 + SDK + 离线文档站 + tauri --no-bundle"
+          " + pylon-detect + webview2-mcp + 打包审计）==")
+    # bun 常是 npm 风格的 .cmd 垫片：CreateProcess 只自动补 .exe，裸 "bun" 会
+    # WinError 2——先按 PATHEXT 解析真实路径，.cmd/.bat 经 cmd /c 启动。
+    bun = shutil.which("bun")
+    if not bun:
+        raise PackError("PATH 上找不到 bun——--build 需要它编排 release:portable 全链")
+    if bun.lower().endswith((".cmd", ".bat")):
+        command: list[str] | str = ["cmd", "/c", bun, "run", "release:portable"]
+    else:
+        command = [bun, "run", "release:portable"]
+    result = subprocess.run(command, cwd=REPO_DIR)
+    if result.returncode != 0:
+        raise PackError(f"release:portable 失败（exit {result.returncode}）")
+
+
+def select_git_remote() -> str:
+    remotes = [line.strip() for line in _git("remote").stdout.splitlines() if line.strip()]
+    for preferred in ("github", "origin"):
+        if preferred in remotes:
+            return preferred
+    raise PackError(f"未找到可用的 git 远端（现有: {remotes or '无'}）")
+
+
+def github_release_url(remote: str, tag: str) -> str | None:
+    url = _git("remote", "get-url", remote).stdout.strip()
+    match = re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
+    if not match:
+        return None
+    return f"https://github.com/{match.group(1)}/releases/tag/{tag}"
+
+
+def upload_release(expected_version: str | None) -> None:
+    version = resolve_version()
+    if expected_version and version != expected_version:
+        raise PackError(
+            f"工作树版本 {version} 与 --bump 目标 {expected_version} 不一致——先完成落位提交"
+        )
+    tag = f"v{version}"
+    remote = select_git_remote()
+    if _git("rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise PackError(
+            f"tag {tag} 已存在。CI 失败重试走 release.yml 的 workflow_dispatch（tag ref 上"
+            " dispatch 等价重推）；确认作废才删 tag 重打。"
+        )
+    fetch = _git("fetch", remote, "main", check=False)
+    if fetch.returncode != 0:
+        raise PackError(
+            f"git fetch {remote} main 失败: {(fetch.stderr or fetch.stdout).strip()}"
+            "\n（先确认网络/代理：git config --get http.proxy）"
+        )
+    ancestor = _git("merge-base", "--is-ancestor", "HEAD", f"{remote}/main", check=False)
+    if ancestor.returncode != 0:
+        raise PackError(
+            f"HEAD 不在 {remote}/main 上——#232 守卫要求发行内容经 PR 入 main（PR CI 全绿）。"
+            f"请先推送分支、合并 PR，再在 main 上执行 --upload。"
+        )
+    _git("tag", tag, "HEAD")
+    _git("push", remote, tag)
+    print(f"OK: tag {tag} 已推送 → release.yml 开始构建并上传发行资产")
+    url = github_release_url(remote, tag)
+    if url:
+        print(f"Release 页: {url}")
+    print("进度查看: gh run watch（Actions 页）；CI 守卫：tag=package.json=tauri.conf + main 归属")
 
 
 # ── 文件审计 ──
@@ -627,6 +858,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="ZIP",
         help="仅审计已存在的 release ZIP，不重新打包",
     )
+    parser.add_argument(
+        "--bump",
+        metavar="X.Y.Z-SUF",
+        help="版本号落位（package.json/tauri.conf/6 处 Cargo.toml + lock）并 pathspec 提交；"
+        "与 --build/--upload 组合成一键编排",
+    )
+    parser.add_argument(
+        "--no-commit",
+        action="store_true",
+        help="--bump 只改文件不提交（默认落位即提交）",
+    )
+    parser.add_argument(
+        "--build",
+        action="store_true",
+        help="本地跑 bun run release:portable 全链构建（#232 定位：预演/排障；"
+        "正式发布走 --upload 打 tag 由 CI 构建）",
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="main 归属守卫通过后打 v<version> tag 并推送，触发 release.yml 构建上传"
+        " GitHub Release（#232：打 tag 即发行）",
+    )
     return parser.parse_args(argv)
 
 
@@ -635,6 +889,28 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verify_only:
         verify_zip(Path(args.verify_only))
+        return 0
+
+    orchestrated = False
+    if args.bump:
+        changed, cargo_toml_count = bump_version_files(args.bump)
+        print(f"OK: 版本号落位 {args.bump}（{len(changed)} 文件: "
+              + ", ".join(str(path.relative_to(REPO_DIR)) for path in changed) + "）")
+        if args.no_commit:
+            print("OK: 未提交（--no-commit）")
+        else:
+            print(f"OK: 已提交 — {commit_version_bump(changed, args.bump, cargo_toml_count)}")
+        orchestrated = True
+        if not (args.build or args.upload):
+            print("下一步: 加 --build 本地预演构建；正式发布 = 分支 PR 入 main 后，在 main 上加 --upload")
+    if args.build:
+        preflight_build_disk()
+        run_release_build()
+        orchestrated = True
+    if args.upload:
+        upload_release(args.bump)
+        orchestrated = True
+    if orchestrated:
         return 0
 
     version = resolve_version()

@@ -8,7 +8,7 @@ import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../So
 import { SolidInputBar } from '../InputBar.solid.tsx'
 import { getCommandRegistry } from '../../../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
-import { createWorkbenchEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../../domains/workbench/workbenchProjector.ts'
 import type { InputPredictionProvider } from '../inputPredictionProvider.ts'
 
@@ -31,7 +31,14 @@ afterAll(() => { void modelCommand.dispose() })
  * 输入形态固定命令行，`inputVariant` / `inputMode` 两个字段不存在了。
  * 参数位保留为「摆位/其它可选项」的占位（调用点里原本传 'composer' 的地方传 undefined）。
  */
-function renderInput(sessionId = 'session-a', _legacyVariant?: 'cli' | 'composer', predictionProvider?: InputPredictionProvider, inInputSlot = false) {
+function renderInput(
+  sessionId = 'session-a',
+  _legacyVariant?: 'cli' | 'composer',
+  predictionProvider?: InputPredictionProvider,
+  inInputSlot = false,
+  /** #395：宿主提供的 provider source——文档判据的比对基准（缺省 null = 不收紧）。 */
+  sessionSource: string | null = null,
+) {
   const services = createPreviewWorkbenchServices()
   services.runtime.update({ sessionId, generating: false })
   const theme = structuredClone(DEFAULTS)
@@ -40,7 +47,7 @@ function renderInput(sessionId = 'session-a', _legacyVariant?: 'cli' | 'composer
   const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())
   const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
   const [activeSessionId, setActiveSessionId] = createSignal(sessionId)
-  const input = () => ({ sheetId: 'sheet-a', sessionId: activeSessionId(), preview: true })
+  const input = () => ({ sheetId: 'sheet-a', sessionId: activeSessionId(), preview: true, sessionSource })
   const context: SolidWorkbenchContextValue = {
     input,
     runtime: services.runtime,
@@ -529,5 +536,98 @@ describe('SolidInputBar', () => {
     expect(provider.predict).toHaveBeenCalledTimes(1)
     fireEvent.keyDown(textarea, { key: 'Tab' })
     expect(textarea.value).toBe('模型建议继续')
+  })
+})
+
+// ── #394/#395：Agent 原生预测接进既有预测系统（ghost）────────────────────
+
+/** 文档按 provider source 建键——与真实宿主一致（`binding.source`）。 */
+function predictionDocument(source: string, event: WorkbenchEventEnvelope['event']) {
+  return projectWorkbench([createWorkbenchEnvelope({
+    sessionId: source, recordedAt: '2026-08-21T00:00:01.000Z', sequence: 1,
+    source: { provider: 'peri', sourceId: 'wire-native' },
+    provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+  })]).document
+}
+
+describe('Agent 原生预测（#394）', () => {
+  const SOURCE = 'local:session-a'
+
+  it('随文档进入 ghost（源标注 native），Tab 接受并消费该实例', async () => {
+    const { services, textarea } = renderInput('session-a', undefined, undefined, false, SOURCE)
+    const projected = predictionDocument(SOURCE, { type: 'assist.prediction', placeholder: '先帮我看看这个仓库的结构', actions: [] })
+    const eventId = projected.assist.prediction?.eventId
+    expect(eventId).toBeTruthy()
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-a' })
+
+    const ghost = await screen.findByText('先帮我看看这个仓库的结构')
+    expect(ghost.closest('.input-ghost-suggestion')?.getAttribute('data-prediction-source')).toBe('native')
+
+    fireEvent.keyDown(textarea, { key: 'Tab' })
+    expect(textarea.value).toBe('先帮我看看这个仓库的结构')
+    // 接受＝消费该实例：ghost 与会话卡共用这个标记，两侧同时收敛。
+    expect(services.sessionUi.get('session-a', 'assist-prediction-consumed', '')).toBe(eventId)
+  })
+
+  it('草稿是预测前缀时续显剩余；输入分歧即拒绝（消费）', async () => {
+    const { services, textarea } = renderInput('session-a', undefined, undefined, false, SOURCE)
+    const projected = predictionDocument(SOURCE, { type: 'assist.prediction', placeholder: '先帮我看看这个仓库的结构', actions: [] })
+    const eventId = projected.assist.prediction?.eventId
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-a' })
+    await screen.findByText('先帮我看看这个仓库的结构')
+
+    fireEvent.input(textarea, { target: { value: '先帮我' } })
+    expect(await screen.findByText('看看这个仓库的结构')).toBeTruthy()
+
+    fireEvent.input(textarea, { target: { value: '帮我' } })
+    await waitFor(() => expect(services.sessionUi.get('session-a', 'assist-prediction-consumed', '')).toBe(eventId))
+    expect(screen.queryByText('看看这个仓库的结构')).toBeNull()
+  })
+
+  it('空草稿上按退格即拒绝', async () => {
+    const { services, textarea } = renderInput('session-a', undefined, undefined, false, SOURCE)
+    const projected = predictionDocument(SOURCE, { type: 'assist.prediction', placeholder: '继续审计这个仓库', actions: [] })
+    const eventId = projected.assist.prediction?.eventId
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-a' })
+    await screen.findByText('继续审计这个仓库')
+
+    fireEvent.keyDown(textarea, { key: 'Backspace' })
+    expect(services.sessionUi.get('session-a', 'assist-prediction-consumed', '')).toBe(eventId)
+  })
+
+  it('原生预测在场时不发起本地 provider 请求（原生优先）', async () => {
+    const provider: InputPredictionProvider = { predict: vi.fn(async () => '本地模型建议') }
+    const { services } = renderInput('session-a', undefined, provider, false, SOURCE)
+    services.runtime.replaceDocument(
+      predictionDocument(SOURCE, { type: 'assist.prediction', placeholder: '先帮我看看这个仓库的结构', actions: [] }),
+      { ownerKey: 'owner-a' },
+    )
+    await screen.findByText('先帮我看看这个仓库的结构')
+
+    // 越过 scheduler 的 400ms 去抖窗口：原生在场时请求根本不该排上。
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(provider.predict).not.toHaveBeenCalled()
+    expect(screen.queryByText('本地模型建议')).toBeNull()
+  })
+
+  it('#395：文档 source 不匹配时不用它（原生预测与文档历史都不参与）', async () => {
+    const { services, textarea } = renderInput('session-a', undefined, undefined, false, 'local:other-session')
+    services.runtime.replaceDocument(
+      predictionDocument(SOURCE, { type: 'assist.prediction', placeholder: '先帮我看看这个仓库的结构', actions: [] }),
+      { ownerKey: 'owner-a' },
+    )
+    fireEvent.input(textarea, { target: { value: '继续' } })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen.queryByText('先帮我看看这个仓库的结构')).toBeNull()
+  })
+
+  it('#395：source 匹配时文档历史参与 ghost 补全', async () => {
+    const { services, textarea } = renderInput('session-a', undefined, undefined, false, SOURCE)
+    services.runtime.replaceDocument(
+      predictionDocument(SOURCE, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '继续做' }] }),
+      { ownerKey: 'owner-a' },
+    )
+    fireEvent.input(textarea, { target: { value: '继续' } })
+    expect(await screen.findByText('做')).toBeTruthy()
   })
 })

@@ -12,6 +12,7 @@ import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCo
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
+import { ASSIST_PREDICTION_CONSUMED_KEY, assistPredictionInstanceKey, assistPredictionText } from '../../../domains/workbench/session/assistPrediction.ts'
 import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from './inputPredictionState.ts'
 import { createPredictionScheduler, type InputPredictionProvider } from './inputPredictionProvider.ts'
 import { loadInputPredictionSettings } from '../../../domains/inputPrediction/inputPredictionSettings.ts'
@@ -63,6 +64,8 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [queueSendingSessions, setQueueSendingSessions] = createSignal<ReadonlySet<string>>(new Set())
   const [dismissedPrediction, setDismissedPrediction] = createSignal<string | null>(null)
   const [providerPrediction, setProviderPrediction] = createSignal<string | null>(null)
+  // #394：原生预测的消费标记（per-session）——接受/拒绝后 ghost 与卡片同时收敛。
+  const [consumedPrediction, setConsumedPrediction] = createSessionUiSignal(workbench.sessionUi, sessionId, ASSIST_PREDICTION_CONSUMED_KEY, '')
   const predictionScheduler = props.predictionProvider ? createPredictionScheduler(props.predictionProvider) : null
   let textarea: HTMLTextAreaElement | undefined
   let inputBar: HTMLDivElement | undefined
@@ -155,20 +158,40 @@ export function SolidInputBar(props: SolidInputBarProps) {
   createEffect(() => {
     if (commandIndex() >= paletteRows().length) setCommandIndex(0)
   })
-  const durableHistory = createMemo(() => {
+  /** #395：文档按 **provider source** 建键（`WorkbenchDocument.sessionId` 即 source，见
+   *  `agentWorkbenchSession.ts` 的 `binding.source`），而 `sessionId()` 是身份域的
+   *  `Session.id`——判「这份文档是不是本会话的」必须用 source 比。此前两者混比导致判据恒假：
+   *  原生预测（ghost）+ 本地预测的 durable 上下文同时被丢弃。宿主未提供 source 时不收紧。 */
+  const sessionDocument = createMemo(() => {
     const document = runtime().document
-    if (!document || document.sessionId !== sessionId()) return [] as readonly string[]
+    if (!document) return undefined
+    const source = workbench.input().sessionSource ?? null
+    return source === null || document.sessionId === source ? document : undefined
+  })
+  const durableHistory = createMemo(() => {
+    const document = sessionDocument()
+    if (!document) return [] as readonly string[]
     return document.messages
       .filter(message => message.role === 'user')
       .map(message => message.content)
       .filter((value): value is string => typeof value === 'string')
   })
   const durableMessages = createMemo(() => {
-    const document = runtime().document
-    if (!document || document.sessionId !== sessionId()) return [] as readonly { role: 'user' | 'assistant'; content: string }[]
+    const document = sessionDocument()
+    if (!document) return [] as readonly { role: 'user' | 'assistant'; content: string }[]
     return document.messages
       .filter(message => (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string')
       .map(message => ({ role: message.role as 'user' | 'assistant', content: message.content as string }))
+  })
+  /** #394：Agent 推送的原生预测（一次性实例）。空文本帧不算预测——Peri 用 `prediction_ready`
+   *  的 `set_title` 动作发会话标题，此前那类帧被渲成一张无字空卡。已消费的实例不再呈现。 */
+  const nativePrediction = createMemo(() => {
+    const prediction = sessionDocument()?.assist.prediction
+    const text = assistPredictionText(prediction)
+    if (!text) return null
+    const key = assistPredictionInstanceKey(prediction)
+    if (!key || key === consumedPrediction()) return null
+    return { key, text }
   })
   const prediction = createMemo<PredictionCandidate | null>(() => {
     const value = draft()
@@ -178,16 +201,31 @@ export function SolidInputBar(props: SolidInputBarProps) {
       const key = `history:${value}:${historyCompletion}`
       return dismissedPrediction() === key ? null : { text: historyCompletion, source: 'history' }
     }
+    // 原生源优先（#394）：空草稿给全文；已输入部分是它的前缀时续显剩余（与代码补全同形）。
+    // 分歧分支这里只返回 null——消费是副作用，交给下面的 effect，memo 保持纯净。
+    const native = nativePrediction()
+    if (native) {
+      if (!native.text.startsWith(value)) return null
+      return native.text.length > value.length
+        ? { text: native.text, source: 'native', instanceKey: native.key }
+        : null
+    }
     if (value) return null
     const predictionMode = loadInputPredictionSettings().mode
-    if (predictionMode === 'off') return null
-    const llm = predictionMode === 'standalone' ? undefined : runtime().document?.sessionId === sessionId()
-      ? runtime().document?.assist.prediction?.placeholder?.trim()
-      : undefined
-    const valueFromProvider = llm || providerPrediction()
+    if (predictionMode === 'off' || predictionMode === 'standalone') return null
+    const valueFromProvider = providerPrediction()
     if (!valueFromProvider) return null
     const key = `llm:${valueFromProvider}`
     return dismissedPrediction() === key ? null : { text: valueFromProvider, source: 'llm' }
+  })
+  // #394：输入分歧即拒绝（代码补全语义）——草稿不再以原生预测为前缀就消费掉它，
+  // 于是它不会在草稿被删回前缀时复活。写 sessionUi 是副作用，必须放 effect。
+  createEffect(() => {
+    const native = nativePrediction()
+    if (!native) return
+    const value = draft()
+    if (!value || native.text.startsWith(value)) return
+    setConsumedPrediction(native.key)
   })
   createEffect(() => {
     const scheduler = predictionScheduler
@@ -196,7 +234,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const generating = runtime().generating
     const hasCommands = suggestionList().length > 0
     const hasAttachments = attachments().length > 0
-    if (!scheduler || !id || value || generating || hasCommands || hasAttachments) {
+    // #394：原生预测在场时不再发本地请求（原生优先；`standalone` 模式表「强制本地」，故排除）。
+    const nativeActive = nativePrediction() !== null && loadInputPredictionSettings().mode !== 'standalone'
+    if (!scheduler || !id || value || generating || hasCommands || hasAttachments || nativeActive) {
       scheduler?.cancel()
       setProviderPrediction(null)
       return
@@ -509,22 +549,34 @@ export function SolidInputBar(props: SolidInputBarProps) {
     if (currentPrediction && (event.key === 'Tab' || (event.key === 'ArrowRight' && atEnd))) {
       event.preventDefault()
       setDraft(currentPrediction.text)
+      // #394：接受＝消费该预测实例（卡片与 ghost 同时收敛，不再横在会话流里）。
+      if (currentPrediction.instanceKey) setConsumedPrediction(currentPrediction.instanceKey)
       setDismissedPrediction(null)
       setHistoryIndex(-1)
       textarea?.focus()
       return
     }
+    // #394：退格即拒绝（代码补全语义）。空草稿上没有可删字符，这一击就是对建议说「不要」。
+    if (currentPrediction && event.key === 'Backspace' && !draft()) {
+      event.preventDefault()
+      if (currentPrediction.instanceKey) setConsumedPrediction(currentPrediction.instanceKey)
+      setDismissedPrediction(currentPrediction.source === 'history' ? `history:${draft()}:${currentPrediction.text}` : `llm:${currentPrediction.text}`)
+      return
+    }
     if (currentPrediction && event.key === 'Escape') {
       event.preventDefault()
+      if (currentPrediction.instanceKey) setConsumedPrediction(currentPrediction.instanceKey)
       setDismissedPrediction(currentPrediction.source === 'history'
         ? `history:${draft()}:${currentPrediction.text}`
         : `llm:${currentPrediction.text}`)
       return
     }
-    if (currentPrediction && currentPrediction.source === 'llm'
+    // 空草稿上按 Enter = 采纳并直接发出（ghost 与 llm 同形，键位语义保持一致）。
+    if (currentPrediction && (currentPrediction.source === 'llm' || currentPrediction.source === 'native')
       && !draft() && event.key === 'Enter' && !event.shiftKey && !composing) {
       event.preventDefault()
       setDraft(currentPrediction.text)
+      if (currentPrediction.instanceKey) setConsumedPrediction(currentPrediction.instanceKey)
       setDismissedPrediction(null)
       void sendText(currentPrediction.text)
       return
@@ -643,7 +695,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
         <span class="cli-prefix">❯</span>
         <div class="input-editor-stack">
           <Show when={prediction()}>{candidate => (
-            <div class="input-ghost-suggestion" aria-hidden="true">
+            <div class="input-ghost-suggestion" aria-hidden="true" data-prediction-source={candidate().source}>
               <span class="input-ghost-prefix">{draft()}</span><span>{candidate().text.slice(draft().length)}</span>
             </div>
           )}</Show>

@@ -1,6 +1,6 @@
 [package]
 name = "pylon"
-version = "0.3.1-FMF"
+version = "0.3.2-EFF"
 edition = "2021"
 description = "Prism Desktop - AI Agent GUI"
 default-run = "pylon"
@@ -31,6 +31,20 @@ members = [
     "pylon-fake-agent",
 ]
 resolver = "2"
+
+# 性能卫生 lint 清单（#414）：把默认 allow 的 nursery lint 提编进基线棘轮。
+# 默认已 warn 的 await_holding_lock / await_holding_refcell_ref /
+# regex-creation-in-loops 不重复登记；「tokio 锁卫跨 .await」走仓库根
+# clippy.toml 的 await-holding-invalid-types。执行语义仍是「相对
+# artifacts/clippy-baseline.json 零新增」（AGENTS.md §2.4）。
+# 新增 member crate 必须接 [lints] workspace = true，否则清单对该 crate 不生效。
+[workspace.lints.clippy]
+# nursery 提编：深拷贝机械半区（已知有少量误报，个案 allow 需注明原因）
+redundant_clone = "warn"
+
+# 本包（pylon）同样接入 workspace 清单；各 member crate 同此。
+[lints]
+workspace = true
 
 [package.metadata]
 authors = ["Pylon Contributors"]

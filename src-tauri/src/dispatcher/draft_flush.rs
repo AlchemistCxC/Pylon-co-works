@@ -14,9 +14,10 @@ use crate::session::{
     draft_candidate, DraftCandidate, DraftCommitChunk, DraftFragmentInput, DurableSessionOwner,
     EventService,
 };
+// draft 预算与 canonical fold 共用同一份规则（pylon-session event_repo 单源再导出，
+// 本地副本已收口）。
+use crate::session::event_repo::{MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES};
 
-const MAX_CHUNKS: usize = 2000;
-const MAX_BYTES: usize = 48 * 1024;
 pub(super) const DRAFT_PERSIST_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(800);
 const DRAFT_FRAGMENT_CHUNKS: usize = 16;
@@ -55,8 +56,8 @@ impl DraftRun {
             && self.generation == item.input.generation
             && self.candidate.event_type == candidate.event_type
             && self.candidate.identity == candidate.identity
-            && self.items.len() < MAX_CHUNKS
-            && self.bytes + candidate.raw_bytes <= MAX_BYTES
+            && self.items.len() < MAX_FOLDED_CHUNKS
+            && self.bytes + candidate.raw_bytes <= MAX_FOLD_BYTES
     }
 
     fn push(&mut self, item: PendingCanonicalPublish, bytes: usize) {
@@ -72,6 +73,8 @@ impl DraftRun {
 // #155 T3：draft 路径的 flush 环境上下文直接共用 `CanonicalFlushContext`
 // （字段面与原独立定义的 DraftFlushContext 完全一致，main #335/U1b 收敛后
 // 不再保留第二份同形结构）。装配唯一处为 `NotificationPump::flush_context`。
+// 选路本体单点化于 publish_route::publish_session_update（#416 W2 步骤②）；
+// 本函数只保留 draft 路径的载荷富化（source + draftChunk）。
 fn publish_draft_update<R: tauri::Runtime>(
     ctx: &CanonicalFlushContext<'_, R>,
     run: &DraftRun,
@@ -94,29 +97,14 @@ fn publish_draft_update<R: tauri::Runtime>(
             }),
         );
     }
-    let channel = if ctx.gateway.is_platform_source(&run.source) {
-        None
-    } else {
-        ctx.update_channels
-            .lock()
-            .ok()
-            .and_then(|map| map.get(&run.source).cloned())
-    };
-    if let Some(channel) = channel {
-        let frame =
-            serde_json::json!({"event":crate::event_names::SESSION_UPDATE,"payload":payload});
-        if let Err(error) = channel.send(frame) {
-            tracing::warn!("draft channel update failed source={}: {error}", run.source);
-        }
-    } else {
-        crate::emit_event_all(
-            ctx.window,
-            ctx.gateway,
-            &run.source,
-            crate::event_names::SESSION_UPDATE,
-            payload,
-        );
-    }
+    super::publish_route::publish_session_update(
+        ctx.window,
+        ctx.gateway,
+        ctx.update_channels,
+        &run.source,
+        payload,
+        "draft channel update failed",
+    );
 }
 
 async fn persist_through<R: tauri::Runtime>(
@@ -135,7 +123,7 @@ async fn persist_through<R: tauri::Runtime>(
         while end < target && end - start < DRAFT_FRAGMENT_CHUNKS {
             let next = run.chunks[end].raw_payload.to_string().len();
             let required = next + usize::from(end > start);
-            if end > start && bytes + required > MAX_BYTES {
+            if end > start && bytes + required > MAX_FOLD_BYTES {
                 break;
             }
             bytes += required;
@@ -176,9 +164,11 @@ async fn persist_through<R: tauri::Runtime>(
                     tracing::warn!(agent_id=ctx.agent_id, source=%item.input.source, error=%error, "draft session state persistence failed");
                 }
             }
-            for pet_event in item.pet_events.drain(..) {
-                let _ = ctx.pet.lock().map(|mut state| pet_event.apply(&mut state));
-            }
+            // 感知应用经订阅缝（原逐事件 `ctx.pet.lock()` 循环改调 sink；位置
+            // 不变：session state 持久化之后、片段节流发布之前；mem::take 保序
+            // 整批取出，应用序 = 收集序在 sink 内逐位保持）。
+            let drained = std::mem::take(&mut item.pet_events);
+            ctx.reactions.on_pet_events(drained);
         }
     }
     if publish {

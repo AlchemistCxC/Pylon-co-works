@@ -1,11 +1,114 @@
 //! 私有交互路由缝（#317 批次二 ④ 自 mod.rs 主泵分支迁入）：
 //! elicitation/complete 收敛（#316）与 provider 私有方法桥接（grok/pi/elicitation，
 //! #98/AC11）。两个分支在主泵中均为纯 `continue` 语义——所有路径都在本模块内终结。
+//! #416 W2 步骤①：交互域共享 helper（`reject_interaction_request` 拒绝面 /
+//! `match_pending_elicitation` 匹配 / `resolve_agent_provider` provider 解析）
+//! 自 mod.rs 正身迁入，本模块自足。
 
-use super::{match_pending_elicitation, reject_interaction_request, AcpLock};
+use super::AcpLock;
 use crate::emit_event;
 use crate::runtime::AgentRuntimeManager;
 use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
+
+/// Reject an interaction request at the protocol boundary.  Every rejection is both
+/// observable (a redacted Tauri event/runtime log) and, when the wire supplied an id,
+/// answered with a JSON-RPC error so the provider cannot wait until its own timeout.
+/// The helper intentionally accepts only summary fields; params are never emitted back
+/// to the UI because interaction payloads may contain commands, paths, or credentials.
+// clippy 2026-09-22：10 参均为独立拒绝摘要入参（window/acp/provider/agent_id/method/
+// request_id/params/reason_code/rpc_code/message），语义互不分组，结构体重构收益低。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn reject_interaction_request<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    acp: &AcpLock,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    request_id: Option<crate::acp::RequestId>,
+    params: Option<&serde_json::Value>,
+    reason_code: &str,
+    rpc_code: WireErrorCode,
+    message: &str,
+) {
+    let request_id_text = request_id.as_ref().map(ToString::to_string);
+    let response_sent = if let Some(id) = request_id {
+        let responder = {
+            let acp = acp.lock().await;
+            acp.responder()
+        };
+        responder.respond_error(id, rpc_code, message).await
+    } else {
+        false
+    };
+    let session_id = params.and_then(|value| {
+        value.as_object().and_then(|object| {
+            object
+                .get("sessionId")
+                .or_else(|| object.get("session_id"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+    });
+    tracing::warn!(
+        provider,
+        agent_id,
+        method = ?method,
+        request_id = ?request_id_text,
+        reason_code,
+        response_sent,
+        "ACP interaction request rejected: {message}"
+    );
+    emit_event(
+        window,
+        crate::event_names::INTERACTION_REJECTED,
+        serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id_text,
+            "method": method,
+            "reasonCode": reason_code,
+            "message": message,
+            "rpcCode": rpc_code,
+            "responseSent": response_sent,
+        }),
+    );
+}
+
+/// #316：在私有交互快照中按 elicitationId 匹配挂起的 URL elicitation
+/// （method 必须是 elicitation/create 且 params.elicitationId 相等）。纯函数
+/// 便于测试（官方契约：未知/已完成 id 忽略）。
+pub(crate) fn match_pending_elicitation(
+    snapshot: &[(
+        crate::acp::RequestId,
+        crate::private_interaction::PendingPrivateInteraction,
+    )],
+    elicitation_id: &str,
+) -> Option<(
+    crate::acp::RequestId,
+    crate::private_interaction::PendingPrivateInteraction,
+)> {
+    snapshot
+        .iter()
+        .find(|(_, pending)| {
+            pending.method == "elicitation/create"
+                && pending.params.get("elicitationId").and_then(|v| v.as_str())
+                    == Some(elicitation_id)
+        })
+        .map(|(id, pending)| (id.clone(), pending.clone()))
+}
+
+/// P1-3（R2-WI03）：从活 agents 配置解析 agent 的 provider（reload 修改实例 provider
+/// 后新请求即用新 provider，不再依赖 dispatcher 启动时捕获的快照）。
+/// permission.rs 经 `crate::dispatcher::resolve_agent_provider` 再导出消费。
+pub(crate) fn resolve_agent_provider(
+    agents: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
+    agent_id: &str,
+) -> Option<String> {
+    agents
+        .get(agent_id)
+        .and_then(|agent| agent.provider.clone())
+}
 
 /// #316：elicitation/complete —— URL 模式外带交互完成通知（form 模式
 /// 同步应答不产生本通知）。官方契约：客户端忽略未知/已完成 id。当前
@@ -87,7 +190,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
     let provider = agents
         .lock()
         .ok()
-        .and_then(|agents| super::resolve_agent_provider(&agents, agent_id))
+        .and_then(|agents| resolve_agent_provider(&agents, agent_id))
         .unwrap_or_else(|| "unknown".to_string());
     let private_validation = raw.method.as_deref().map(|method| {
         crate::acp::adapter::private_ext::validate_request(
@@ -213,6 +316,10 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
                             agent_id: agent_id.to_string(),
                             client_generation: generation,
                             enqueued_at: arrived_at,
+                            // #356：私有交互对等参与超时结算——deadline 与权限请求同源同值。
+                            deadline_ms: Some(crate::permission::permission_deadline_ms(
+                                arrived_at,
+                            )),
                             event: interaction_event.clone(),
                             state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
                         },
@@ -274,7 +381,7 @@ pub(crate) async fn route_private_interaction<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use crate::acp::RawMessage;
-    use crate::private_interaction::PrivateInteractionOwner;
+    use crate::private_interaction::{PendingPrivateInteraction, PrivateInteractionOwner};
     use crate::runtime::AgentRuntime;
     use std::collections::HashMap;
 
@@ -309,7 +416,7 @@ mod tests {
                 }
             });
         }
-        let window = webview.as_ref().window().clone();
+        let window = webview.as_ref().window();
         (window, webview, app, rx)
     }
 
@@ -585,5 +692,111 @@ mod tests {
             .expect("rejection event must be emitted");
         assert_eq!(event["reasonCode"], "invalid_private_payload");
         assert_eq!(event["rpcCode"], -32602);
+    }
+
+    // ── 共享 helper characterization（#416 W2 步骤①随正身迁入）──
+
+    fn pending_elicitation(elicitation_id: &str) -> PendingPrivateInteraction {
+        PendingPrivateInteraction {
+            provider: "peri".into(),
+            agent_id: "a1".into(),
+            session_id: "peri-s1".into(),
+            method: "elicitation/create".into(),
+            bridge: crate::acp::adapter::private_ext::PrivateBridge::Elicitation,
+            params: serde_json::json!({
+                "sessionId": "peri-s1",
+                "elicitationId": elicitation_id,
+                "url": "https://example.com/auth",
+                "message": "完成登录",
+            }),
+            question_specs: None,
+            client_generation: 1,
+            enqueued_at: crate::time::Timestamp::now(),
+        }
+    }
+
+    /// #316：elicitation/complete 按 elicitationId 匹配 pending 私有交互。
+    #[test]
+    fn match_pending_elicitation_finds_only_exact_id_and_method() {
+        let a = crate::acp::RequestId::Number(11);
+        let b = crate::acp::RequestId::Number(12);
+        let snapshot = vec![
+            (a, pending_elicitation("el-1")),
+            (b.clone(), pending_elicitation("el-2")),
+        ];
+        let (hit, pending) = match_pending_elicitation(&snapshot, "el-2").expect("el-2 必须命中");
+        assert_eq!(hit, b);
+        assert_eq!(pending.session_id, "peri-s1");
+        // 未知 id → None（官方契约：忽略）
+        assert!(match_pending_elicitation(&snapshot, "el-404").is_none());
+    }
+
+    #[test]
+    fn match_pending_elicitation_ignores_other_methods_and_malformed_params() {
+        let mut other_method = pending_elicitation("el-1");
+        other_method.method = "session/request_permission".into();
+        let mut malformed = pending_elicitation("el-1");
+        malformed.params = serde_json::json!({"message": "form 模式无 elicitationId"});
+        let snapshot = vec![
+            (crate::acp::RequestId::Number(21), other_method),
+            (crate::acp::RequestId::Number(22), malformed),
+        ];
+        assert!(
+            match_pending_elicitation(&snapshot, "el-1").is_none(),
+            "方法不符或缺 elicitationId 的条目不得命中"
+        );
+    }
+
+    #[test]
+    fn runtime_store_roundtrip_supports_complete_matching() {
+        let runtime = crate::test_utils::connected_runtime();
+        let request_id = crate::acp::RequestId::Number(31);
+        runtime
+            .private_interactions
+            .insert(request_id.clone(), pending_elicitation("el-9"))
+            .expect("insert 必须成功");
+        let matched = match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9")
+            .expect("inserted pending must match");
+        assert_eq!(matched.0, request_id);
+        assert!(
+            runtime
+                .private_interactions
+                .take(&request_id)
+                .map(|taken| taken.is_some())
+                .unwrap_or(false),
+            "take 成功才 settle+emit（P2-2 守卫的数据前提）"
+        );
+        assert!(
+            match_pending_elicitation(&runtime.private_interactions.snapshot(), "el-9").is_none()
+        );
+    }
+
+    /// P1-3（R2-WI03）：provider 从活配置解析——reload 修改实例 provider 后立即生效。
+    #[test]
+    fn resolve_agent_provider_follows_live_config() {
+        use std::collections::HashMap;
+        let mut agents = HashMap::new();
+        let mut peri = crate::test_utils::fake_acp_agent_stub("peri");
+        peri.provider = Some("peri".to_string());
+        agents.insert("peri-copy".to_string(), peri);
+        assert_eq!(
+            resolve_agent_provider(&agents, "peri-copy").as_deref(),
+            Some("peri"),
+            "活配置解析 provider"
+        );
+        // reload 把该实例 provider 改为 hermes → 新请求即用新 provider
+        let mut reloaded = crate::test_utils::fake_acp_agent_stub("peri");
+        reloaded.provider = Some("hermes".to_string());
+        agents.insert("peri-copy".to_string(), reloaded);
+        assert_eq!(
+            resolve_agent_provider(&agents, "peri-copy").as_deref(),
+            Some("hermes"),
+            "reload 后 provider 变更必须生效"
+        );
+        assert_eq!(
+            resolve_agent_provider(&agents, "missing"),
+            None,
+            "未知 agent 无 provider"
+        );
     }
 }

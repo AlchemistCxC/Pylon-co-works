@@ -128,13 +128,23 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
   let disposed = false
 
   const [stableEdges, setStableEdges] = createSignal<readonly StableConnectorEdge[]>([])
+  /** #409：锚点注册表版本（register/unregister 时经 onMembershipChange 递增）。 */
+  const [membership, setMembership] = createSignal(0)
+
+  onMount(() => props.layoutPort.onMembershipChange(() => setMembership(value => value + 1)))
 
   createEffect(() => {
+    // #409：边活性 = 两端锚点都在 port 注册中。锚点随行/槽位挂载而注册、卸载而注销，
+    // 虚拟化窗外的边既不建 DOM 也不参与 measure pass；滚动/渐进挂载经 membership
+    // 版本自动跟随。读 membership() 让 effect 跟踪注册表变化。
+    membership()
     const incoming = props.edges
+    const live = incoming.filter(edge =>
+      props.layoutPort.hasToolAnchor(edge.fromMessageId) && props.layoutPort.hasToolAnchor(edge.toMessageId))
     const previous = new Map(untrack(stableEdges).map(edge => [edge.key, edge]))
     const next: StableConnectorEdge[] = []
     const seen = new Set<string>()
-    for (const edge of incoming) {
+    for (const edge of live) {
       if (seen.has(edge.key)) continue
       seen.add(edge.key)
       const existing = previous.get(edge.key)
@@ -183,14 +193,17 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
     const chat = term.closest<HTMLElement>('.chat-view')
     const app = term.closest<HTMLElement>('.app')
     const observed = new Set<Element>()
+    const ROW_SELECTOR = '.term-row, .term-tool-head, .term-reasoning-head'
 
+    // 静态容器（term/layer/chat/app）+ 初始全量行扫；此后 childList 变化走增量 diff，
+    // 不再每批突变全量 querySelectorAll（#409：流式提交时该扫描是 O(全部行)/批）。
     const syncObserved = () => {
       if (!resizeObserver) return
       const targets: Element[] = [term]
       if (layer) targets.push(layer)
       if (chat) targets.push(chat)
       if (app) targets.push(app)
-      term.querySelectorAll<HTMLElement>('.term-row, .term-tool-head, .term-reasoning-head')
+      term.querySelectorAll<HTMLElement>(ROW_SELECTOR)
         .forEach(node => targets.push(node))
       const next = new Set(targets.filter(Boolean))
       for (const target of observed) {
@@ -205,6 +218,32 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
       }
     }
 
+    /** #409：按 MutationRecord 增量维护观察集（added/removed 覆盖子树插入与移除）。 */
+    const applyMutations = (records: MutationRecord[]) => {
+      if (!resizeObserver) return
+      const ro = resizeObserver
+      const observeIfFresh = (element: Element) => {
+        if (observed.has(element)) return
+        ro.observe(element)
+        observed.add(element)
+      }
+      const unobserveIfKnown = (element: Element) => {
+        if (observed.delete(element)) ro.unobserve(element)
+      }
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue
+          if (node.matches(ROW_SELECTOR)) observeIfFresh(node)
+          node.querySelectorAll<HTMLElement>(ROW_SELECTOR).forEach(observeIfFresh)
+        }
+        for (const node of record.removedNodes) {
+          if (!(node instanceof Element)) continue
+          if (node.matches(ROW_SELECTOR)) unobserveIfKnown(node)
+          node.querySelectorAll<HTMLElement>(ROW_SELECTOR).forEach(unobserveIfKnown)
+        }
+      }
+    }
+
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => stabilize('row-resized'))
       syncObserved()
@@ -216,8 +255,8 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
       // ResizeObservers below; observing every characterData mutation here
       // would restart the eight-frame connector settle loop on every token and
       // compete with the chat auto-follow rail, producing visible jitter.
-      mutationObserver = new MutationObserver(() => {
-        syncObserved()
+      mutationObserver = new MutationObserver(records => {
+        applyMutations(records)
         stabilize('items-changed')
       })
       mutationObserver.observe(term, { childList: true, subtree: true })
@@ -231,7 +270,22 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
     }
 
     const onResize = () => stabilize('manual')
-    const onTransition = () => stabilize('manual')
+    // #409：只有**布局类属性**的过渡才可能移动 overlay 坐标；颜色/透明度/阴影类
+    // hover 过渡不再驱动 8 帧全量测量窗。`all` 按布局处理（保守）。
+    const LAYOUT_TRANSITION_PROPERTIES = new Set([
+      'all', 'width', 'height', 'min-width', 'max-width', 'min-height', 'max-height',
+      'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+      'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+      'top', 'right', 'bottom', 'left', 'inset', 'inset-block', 'inset-inline',
+      'flex-basis', 'flex-grow', 'flex-shrink', 'gap', 'row-gap', 'column-gap',
+      'grid-template-columns', 'grid-template-rows', 'grid-auto-columns', 'grid-auto-rows',
+      'order', 'transform', 'translate', 'scale', 'rotate',
+    ])
+    const onTransition = (event: Event) => {
+      const property = (event as TransitionEvent).propertyName
+      if (property !== undefined && !LAYOUT_TRANSITION_PROPERTIES.has(property)) return
+      stabilize('manual')
+    }
     window.addEventListener('resize', onResize)
     window.addEventListener('transitionrun', onTransition, true)
     window.addEventListener('transitionend', onTransition, true)

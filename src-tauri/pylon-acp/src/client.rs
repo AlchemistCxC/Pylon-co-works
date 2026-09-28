@@ -112,11 +112,13 @@ impl NotificationInbox {
     }
 
     /// 普通通知 lane（session/update 等）。
+    #[allow(clippy::await_holding_invalid_type)] // Mutex<Receiver> 的 recv 必须持锁消费（跨消息串行化），锁卫跨 await 是本结构的工作方式
     pub async fn recv(&self) -> Option<ClassifiedMessage> {
         self.updates.lock().await.recv().await
     }
 
     /// 控制帧 lane（agent JSON-RPC 请求 / 崩溃广播；优先消费）。
+    #[allow(clippy::await_holding_invalid_type)] // 同 recv：Mutex<Receiver> 持锁消费
     pub async fn recv_control(&self) -> Option<ClassifiedMessage> {
         self.control.lock().await.recv().await
     }
@@ -481,7 +483,7 @@ impl AcpClient {
         match agent.transport.as_str() {
             "subprocess" => {
                 let mut child =
-                    super::engine::spawn_agent_child(agent, base_dir.as_deref()).await?;
+                    super::process::spawn_agent_child(agent, base_dir.as_deref()).await?;
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
                 let crashed = Arc::new(AtomicBool::new(false));
                 // OBS-02：hub 以连接级 correlation context（含 clientGeneration）构造。

@@ -22,16 +22,34 @@ export function selectActivityTimelinePlacement(document: WorkbenchDocument | un
   if (!document || document.activities.length === 0) return { leading: [], afterMessage: new Map() }
   const leading: WorkbenchActivityNode[] = []
   const afterMessage = new Map<string, WorkbenchActivityNode[]>()
-  for (const activity of selectActivityDisplayOrder(document)) {
-    let anchor: WorkbenchDocument['messages'][number] | undefined
-    for (const message of document.messages) {
-      if (message.sequence >= activity.sequence) continue
-      if (!anchor || message.sequence > anchor.sequence) anchor = message
+  // #409：原实现对每个活动线性扫全部消息找锚（O(活动×消息)，随每次发布重算）。
+  // 消息序列收集一次，每活动两次二分：上界定位「sequence < activity.sequence」的
+  // 最大值，下界回到该最大值的**首现位置**。平 sequence 时原扫描的严格 `>` 判据
+  // 保留数组序第一条，稳定排序保序 ⇒ 下界首现即原取值，语义逐条一致。
+  const messages = document.messages
+  const sequences = messages.map(message => message.sequence)
+  const ascending = sequences.every((value, index) => index === 0 || sequences[index - 1]! <= value!)
+  const orderedMessages = ascending
+    ? messages
+    : sequences.map((_, index) => index).sort((left, right) => sequences[left]! - sequences[right]!).map(index => messages[index]!)
+  const orderedSequences = ascending ? sequences : orderedMessages.map(message => message.sequence)
+  const firstIndexAtOrAfter = (sequence: number, high: number): number => {
+    let low = 0
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (orderedSequences[middle]! < sequence) low = middle + 1
+      else high = middle
     }
-    if (!anchor) {
+    return low
+  }
+  for (const activity of selectActivityDisplayOrder(document)) {
+    const upper = firstIndexAtOrAfter(activity.sequence, orderedSequences.length)
+    if (upper === 0) {
       leading.push(activity)
       continue
     }
+    const maxSequence = orderedSequences[upper - 1]!
+    const anchor = orderedMessages[firstIndexAtOrAfter(maxSequence, upper)]
     const anchored = afterMessage.get(anchor.id) ?? []
     anchored.push(activity)
     afterMessage.set(anchor.id, anchored)

@@ -1,15 +1,407 @@
-//! 权限请求路由缝（#317 批次二 ④ 自 mod.rs 主泵分支迁入）：B9 权限审批分支——
-//! 带-id 请求委派 handle_permission_request（P1-3：provider 每次从活配置解析）；
+//! 权限请求路由缝（#317 批次二 ④ 自 mod.rs 主泵分支迁入）：B9 权限审批分支。
+//! #416 W2 步骤①：`handle_permission_request` 正身（370 行）自 mod.rs 迁入，
+//! `PermissionLock` 句柄别名随迁——本模块自足（委派层 → 自足模块）。
+//! 带-id 请求走审批正身（P1-3：provider 每次从活配置解析）；
 //! 缺-id 畸形请求走可观测拒绝。分支在主泵中为纯 `continue` 语义。
 
-use super::{
-    handle_permission_request, reject_interaction_request, AcpLock, PermissionLock, SessionsLock,
-};
+use super::interaction_route::{reject_interaction_request, resolve_agent_provider};
+use super::{AcpLock, SessionsLock};
+use crate::emit_event;
 use crate::hook_bridge::HookBridge;
+use crate::permission::{
+    permission_response, pick_allow_option, pick_option, pick_reject_option, PendingPermission,
+};
 use crate::runtime::AgentRuntimeManager;
 use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+// R8：拆 handler 后共享状态经显式参数传递——句柄别名随审批正身迁入本域
+//（原 mod.rs 联合定义，仅剩本文件消费）。
+type PermissionLock =
+    std::sync::Mutex<std::collections::HashMap<crate::acp::RequestId, PendingPermission>>;
+
+/// B9 权限审批（R8 自主循环拆分）：agent 主动 request_permission（带 id 请求，
+/// 客户端必须应答）。C4/C5 语义保持：代复核（应答不误写新代进程）+ 模式判定
+/// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
+/// P0-3（R2-WI03）：provider-scoped adapter dispatch——未注册 provider 明确
+/// unsupported + runtime log 可观察，不生成 RPC；classify 非 interaction 同样丢弃。
+/// 参数多为各锁/上下文的按引用透传，故保留显式形参。
+#[allow(clippy::too_many_arguments)]
+async fn handle_permission_request<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    acp: &AcpLock,
+    client_generation: &AtomicU64,
+    approval_mode: &std::sync::Mutex<String>,
+    pending_permissions: &PermissionLock,
+    sessions: &SessionsLock,
+    hook_bridge: &Arc<HookBridge>,
+    runtimes: &AgentRuntimeManager,
+    provider: &str,
+    agent_id: &str,
+    method: Option<&str>,
+    request_id: crate::acp::RequestId,
+    params: Option<&serde_json::Value>,
+) {
+    // #98: method-driven dispatch - adapter lookup by ACP method, provider name
+    // no longer a gate; unknown methods get a stable method_unsupported with the
+    // raw params kept observable via the rejection event.
+    let Some(adapter) =
+        crate::protocol_adapter::get_protocol_adapter_for_method(method.unwrap_or(""))
+    else {
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "method_unsupported",
+            WireErrorCode::MethodNotFound,
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
+        )
+        .await;
+        return;
+    };
+    if adapter.classify(method) != crate::protocol_adapter::InteractionClassification::Interaction {
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "method_unsupported",
+            WireErrorCode::MethodNotFound,
+            &format!(
+                "interaction method unsupported: {}",
+                method.unwrap_or("<missing>")
+            ),
+        )
+        .await;
+        return;
+    }
+    // C4：记录到达时 client_generation——应答时复核，客户端替换后
+    // 旧进程同 id 请求不得被旧审批决策误写。
+    let Some(permission) =
+        adapter.normalize_request(params, client_generation.load(Ordering::Acquire))
+    else {
+        // ACP-04（§5.6）：解析失败 = protocol error，不是可 approve/reject 的 pending
+        // permission——**不伪造 optionId**（旧实现按拒绝兜底回 reject_once，OBS-03
+        // 已证实协议缺陷），按 ACP 标准发 JSON-RPC error（-32602 Invalid params），
+        // 让 agent 按标准错误处理。未挂起 pending，无需清理。
+        // O9/G3 §2.2.2：锁内只克隆发送句柄，锁外发送；同时发出独立拒绝事件，
+        // 让前端能解释“为什么没有弹出权限卡”。
+        reject_interaction_request(
+            window,
+            acp,
+            provider,
+            agent_id,
+            method,
+            Some(request_id),
+            params,
+            "invalid_params",
+            WireErrorCode::InvalidParams,
+            // Keep the stable diagnostic phrase used by the OBS-03 evidence
+            // surface while retaining the machine-readable invalid_params
+            // reason code and JSON-RPC -32602 response above.
+            "ACP request_permission 解析失败: invalid params",
+        )
+        .await;
+        return;
+    };
+    // Reducer ownership is resolved by the protocol session id, never by the
+    // request id alone (request ids may be reused across sessions).
+    let remember_permission = |sessions: &SessionsLock| {
+        let _ = sessions.lock().map(|mut sessions| {
+            if let Some(session) = sessions.get_mut(&permission.session_id) {
+                // R-t5 续命：**等用户答复不算沉默**。本回合此前只有 `session/update` 刷新
+                // `last_activity`，于是 agent 发出权限请求后静默等待用户点击的那段时间被当成
+                // "无输出"，闲置窗口到点即判死——真机实测一次 `elapsed 472535ms` 的截断正卡在
+                // 等权限答复上，并留下一个无法关闭的悬空模态（#209）。用户答复后 agent 恢复产出
+                // 会自然续命，故只在**收到请求**这一刻打点。
+                session.last_activity = Some(std::time::Instant::now());
+                let deltas = session.acp_state.apply(&crate::acp::RawMessage {
+                    id: Some(request_id.clone()),
+                    method: Some("session/request_permission".into()),
+                    kind: crate::acp::AcpKind::PermissionRequest,
+                    result: None,
+                    params: params.cloned(),
+                    error: None,
+                });
+                if let Some(depth) = deltas.iter().find_map(|delta| match delta {
+                    crate::acp::AcpStateDelta::PermissionQueueDepth { depth } => Some(*depth),
+                    _ => None,
+                }) {
+                    tracing::trace!(
+                        session_id = %permission.session_id,
+                        request_id = %request_id,
+                        depth,
+                        "ACP permission reducer queue updated"
+                    );
+                }
+            }
+        });
+    };
+    let mode = approval_mode
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_else(|_| "default".to_string());
+    // API 1.3（#37）：钩子缝——先把 ACP 远端 sessionId 规范化为本地 source，
+    // 再依次派发 tool.beforeCall（gate）与 permission.request（allow/deny/modify）。
+    // 不可映射 = 可诊断跳过（fail-open 至常规审批流）；桥故障/超时/未注册不阻断。
+    // modify 仅接受原选项的过滤/重排（interpret 侧校验），后续 bypass/auto 与
+    // 前端事件均使用过滤后的选项集。
+    let local_source =
+        crate::hook_bridge::resolve_local_source(runtimes, Some(agent_id), &permission.session_id);
+    let mut effective_permission = permission.clone();
+    if let Some(local_source) = local_source {
+        let tool_payload = serde_json::json!({
+            "source": local_source,
+            "toolCallId": permission.tool_call_id,
+            "title": permission.title,
+            "prompt": permission.prompt,
+            "options": permission.options,
+        });
+        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
+            .dispatch(
+                Some(window),
+                crate::hook_bridge::HOOK_TOOL_BEFORE_CALL,
+                &local_source,
+                tool_payload,
+            )
+            .await
+        {
+            if response.get("action").and_then(serde_json::Value::as_str) == Some("cancel") {
+                let reason = response
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("denied by tool.beforeCall hook");
+                tracing::info!(
+                    source = %local_source,
+                    tool_call_id = %permission.tool_call_id,
+                    reason = %reason,
+                    "tool.beforeCall hook denied tool call"
+                );
+                // 钩子驱动的拒绝用严格 reject 选择（无 first() 回退）：请求不含
+                // reject 语义项时不伪造 optionId（ACP-04 §5.6），落回常规流程。
+                if let Some(option_id) = pick_reject_option(&permission.options) {
+                    if client_generation.load(Ordering::Acquire) != permission.client_generation {
+                        // C4：钩子派发窗口（最长 ~3s）内客户端已换代——旧决策不得
+                        // 写到新进程同 id 请求，丢弃应答交由 agent 侧超时收敛。
+                        tracing::warn!(
+                            request_id = %request_id,
+                            "hook deny decision dropped: client generation advanced during hook dispatch"
+                        );
+                        return;
+                    }
+                    let responder = {
+                        let acp = acp.lock().await;
+                        acp.responder()
+                    };
+                    responder
+                        .respond(request_id, permission_response(option_id))
+                        .await;
+                    return;
+                }
+                tracing::warn!("tool.beforeCall 拒绝但请求无 reject 选项，跳过应答交回常规流程");
+            }
+        }
+        let permission_payload = serde_json::json!({
+            "source": local_source,
+            "provider": provider,
+            "agentId": agent_id,
+            "requestId": request_id.to_string(),
+            "toolCallId": permission.tool_call_id,
+            "title": permission.title,
+            "prompt": permission.prompt,
+            "options": permission.options,
+        });
+        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
+            .dispatch(
+                Some(window),
+                crate::hook_bridge::HOOK_PERMISSION_REQUEST,
+                &local_source,
+                permission_payload,
+            )
+            .await
+        {
+            match crate::hook_bridge::interpret_permission_hook_response(
+                &response,
+                &permission.options,
+            ) {
+                crate::hook_bridge::PermissionHookDecision::Allow => {
+                    // 钩子驱动的批准用严格 allow 选择 + C4 代际复核（同 deny 路径）。
+                    if let Some(option_id) = pick_allow_option(&permission.options) {
+                        if client_generation.load(Ordering::Acquire) != permission.client_generation
+                        {
+                            tracing::warn!(
+                                request_id = %request_id,
+                                "hook allow decision dropped: client generation advanced during hook dispatch"
+                            );
+                            return;
+                        }
+                        let responder = {
+                            let acp = acp.lock().await;
+                            acp.responder()
+                        };
+                        responder
+                            .respond(request_id, permission_response(option_id))
+                            .await;
+                        return;
+                    }
+                    tracing::warn!(
+                        "permission.request 钩子允许但请求无 allow 语义项，跳过应答交回常规流程"
+                    );
+                }
+                crate::hook_bridge::PermissionHookDecision::Deny => {
+                    if let Some(option_id) = pick_reject_option(&permission.options) {
+                        if client_generation.load(Ordering::Acquire) != permission.client_generation
+                        {
+                            tracing::warn!(
+                                request_id = %request_id,
+                                "hook deny decision dropped: client generation advanced during hook dispatch"
+                            );
+                            return;
+                        }
+                        let responder = {
+                            let acp = acp.lock().await;
+                            acp.responder()
+                        };
+                        responder
+                            .respond(request_id, permission_response(option_id))
+                            .await;
+                        return;
+                    }
+                    tracing::warn!(
+                        "permission.request 钩子拒绝但请求无 reject 语义项，跳过应答交回常规流程"
+                    );
+                }
+                crate::hook_bridge::PermissionHookDecision::Modify(options) => {
+                    tracing::info!(
+                        source = %local_source,
+                        option_count = options.len(),
+                        "permission.request hook modified permission options"
+                    );
+                    effective_permission.options = options;
+                }
+                crate::hook_bridge::PermissionHookDecision::Pass => {}
+            }
+        }
+    } else {
+        tracing::warn!(
+            session_id = %permission.session_id,
+            agent_id = %agent_id,
+            request_id = %request_id,
+            "Pylon hook bridge: permission request sessionId not mappable to a local session; hooks skipped"
+        );
+    }
+    if matches!(mode.as_str(), "bypass" | "auto") {
+        tracing::info!(
+            "权限模式 {mode}：自动批准工具调用 {}",
+            permission.tool_call_id
+        );
+        // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。ACP-04（§5.6）：
+        // 解析层保证 options 非空（空集不可能进此分支），pick_option 恒返回 Some；
+        // 防御分支不得伪造 optionId——如异常出现则跳过应答并告警（agent 侧自会
+        // 超时收敛），绝不硬编码不存在的选项。
+        let Some(option_id) = pick_option(&effective_permission.options, false) else {
+            tracing::error!(
+                "权限模式 {mode}：请求 options 为空（不应发生），跳过自动批准应答，不伪造 optionId"
+            );
+            reject_interaction_request(
+                window,
+                acp,
+                provider,
+                agent_id,
+                method,
+                Some(request_id),
+                params,
+                "invalid_options",
+                WireErrorCode::InvalidParams,
+                "invalid params: permission request options 为空",
+            )
+            .await;
+            return;
+        };
+        // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
+        let responder = {
+            let acp = acp.lock().await;
+            acp.responder()
+        };
+        responder
+            .respond(request_id, permission_response(option_id))
+            .await;
+    } else {
+        remember_permission(sessions);
+        let _ = pending_permissions.lock().map(|mut pending| {
+            pending.insert(request_id.clone(), effective_permission.clone());
+        });
+        // #98：统一交互队列登记（FIFO / 单一 Active / queued depth）。队列是
+        // cancel/timeout/disconnect drain 终态与冷挂载快照的数据源；permission
+        // 即 kind="approval"，队列里的事件载荷与 pylon:interaction 完全同构。
+        let payload = serde_json::json!({
+            "title": effective_permission.title,
+            "prompt": effective_permission.prompt,
+            "options": effective_permission.options,
+            "requestedAt": effective_permission.requested_at,
+            // ACP-03（§5.6）：deadline 由后端单一来源（PERMISSION_REQUEST_TIMEOUT_SECS），
+            // 前端只做倒计时展示，不自行持有 300s 常量。
+            "deadlineMs": crate::permission::permission_deadline_ms(permission.requested_at),
+        });
+        // #98: unified interaction queue admission (FIFO / single Active /
+        // queued depth). The queue feeds cancel/timeout/disconnect drain
+        // terminal states and the cold-mount snapshot; kind = "approval" and
+        // the stored event payload is identical to pylon:interaction.
+        let interaction_event = serde_json::json!({
+            "provider": provider,
+            "agentId": agent_id,
+            "sessionId": permission.session_id,
+            "eventType": "permission.request",
+            "requestId": request_id.to_string(),
+            "toolCallId": permission.tool_call_id,
+            "clientGeneration": permission.client_generation,
+            "payload": payload,
+        });
+        if let Some(runtime) = runtimes.get(agent_id) {
+            match runtime
+                .interactions
+                .admit(crate::acp::interaction_queue::InteractionQueueEntry {
+                    request_id: request_id.to_string(),
+                    method: crate::acp::METHOD_SESSION_REQUEST_PERMISSION.to_string(),
+                    kind: "approval".to_string(),
+                    session_id: permission.session_id.clone(),
+                    agent_id: agent_id.to_string(),
+                    client_generation: permission.client_generation,
+                    enqueued_at: permission.requested_at,
+                    // #356：deadline admit 时注入（与事件 payload 内 deadlineMs 同源同值）。
+                    deadline_ms: Some(crate::permission::permission_deadline_ms(
+                        permission.requested_at,
+                    )),
+                    event: interaction_event.clone(),
+                    state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
+                }) {
+                Ok(admission) => {
+                    let (_, waiting) = runtime.interactions.depth().unwrap_or((None, 0));
+                    tracing::trace!(
+                        agent_id = %agent_id,
+                        request_id = %request_id,
+                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
+                        waiting,
+                        "interaction queue admitted permission request"
+                    );
+                }
+                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
+            }
+        }
+        emit_event(window, crate::event_names::INTERACTION, interaction_event);
+    }
+}
 
 /// B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
 /// ACP-01：id 为原始 variant（number/string）——string-id agent 请求不再丢弃。
@@ -32,7 +424,7 @@ pub(crate) async fn route_permission_request<R: tauri::Runtime>(
         let provider = agents
             .lock()
             .ok()
-            .and_then(|agents| super::resolve_agent_provider(&agents, agent_id))
+            .and_then(|agents| resolve_agent_provider(&agents, agent_id))
             .unwrap_or_else(|| "unknown".to_string());
         handle_permission_request(
             window,
@@ -56,7 +448,7 @@ pub(crate) async fn route_permission_request<R: tauri::Runtime>(
         let provider = agents
             .lock()
             .ok()
-            .and_then(|agents| super::resolve_agent_provider(&agents, agent_id))
+            .and_then(|agents| resolve_agent_provider(&agents, agent_id))
             .unwrap_or_else(|| "unknown".to_string());
         reject_interaction_request(
             window,

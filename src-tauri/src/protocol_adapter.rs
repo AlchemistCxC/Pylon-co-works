@@ -620,32 +620,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn hermes_adapter_reuses_request_permission_wire() {
-        // R2-WI06（Phase F 源码实证）：Hermes 审批 wire 与 Peri 逐字段一致
-        // （session/request_permission + RequestPermissionResponse + optionId 语义集），
-        // 同一 request_permission 实现按 provider 注册即可。不调用全局 clear（防竞态）。
-        register_protocol_adapter(Arc::new(RequestPermissionAdapter { provider: "hermes" }));
-        let adapter = get_protocol_adapter("hermes").expect("hermes 适配器必须已注册");
-        assert_eq!(adapter.provider(), "hermes");
-        let params = serde_json::json!({
-            "sessionId": "s1",
-            "toolCall": {"toolCallId": "perm-check-1", "title": "edit"},
-            "options": [{"optionId": "allow_once"}, {"optionId": "deny"}]
-        });
-        let permission = adapter
-            .normalize_request(Some(&params), 5)
-            .expect("hermes request_permission 必须按同款 wire 解析");
-        assert_eq!(permission.session_id, "s1");
-        assert_eq!(permission.tool_call_id, "perm-check-1");
-        assert_eq!(
-            permission.options,
-            vec![
-                crate::permission::PermissionOption::plain("allow_once"),
-                crate::permission::PermissionOption::plain("deny"),
-            ]
-        );
-    }
+    // #416 W2 wave2 步骤 5：hermes_adapter_reuses_request_permission_wire 与
+    // peri_normalize_reuses_permission_parser 两条 wire 解析表征测试已随 parse
+    // 正身平移至 pylon-acp/src/adapter/permission_wire.rs（直呼 parse 正身）；
+    // 本模块 normalize_request 的两行委托由 respond 拒绝面与注册表测试继续覆盖。
 
     #[test]
     fn peri_classifies_only_request_permission_as_interaction() {
@@ -769,35 +747,6 @@ mod tests {
         assert!(
             serialized.get("env").is_none(),
             "catalog must not expose environment values"
-        );
-    }
-
-    #[test]
-    fn peri_normalize_reuses_permission_parser() {
-        let adapter = RequestPermissionAdapter { provider: "peri" };
-        let params = serde_json::json!({
-            "sessionId": "s1",
-            "toolCall": {"toolCallId": "call-1", "title": "t"},
-            "options": [{"optionId": "allow_once"}, {"optionId": "reject_once"}]
-        });
-        let permission = adapter
-            .normalize_request(Some(&params), 3)
-            .expect("合法 request_permission 必须解析");
-        assert_eq!(permission.session_id, "s1");
-        assert_eq!(permission.tool_call_id, "call-1");
-        assert_eq!(permission.client_generation, 3);
-        assert_eq!(
-            permission.options,
-            vec![
-                crate::permission::PermissionOption::plain("allow_once"),
-                crate::permission::PermissionOption::plain("reject_once"),
-            ]
-        );
-        assert!(
-            adapter
-                .normalize_request(Some(&serde_json::json!({"sessionId": "s"})), 0)
-                .is_none(),
-            "缺 options 必须解析失败（调用方按 protocol error 处理）"
         );
     }
 

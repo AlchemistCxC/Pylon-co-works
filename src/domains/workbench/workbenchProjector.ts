@@ -472,11 +472,17 @@ export function projectWorkbench(
   // 文本流边界 / 终态 session 条目」。原本逐事件整条扫描（落在最高频的 delta 上 ⇒
   // Θ(N·T)）。timeline 自身按 sequence 升序，故按位置增量延展即保持有序；
   // 归约器换掉 timeline 数组时（tool/activity/诊断等低频事件）按位置补扫。
+  // #409：activities 与 timeline 同据——入口复制一次取得批内所有权（initial 可能来自
+  // 外部 initialDocument），此后追加/替换就地发生在本拷贝上。
+  const ownedActivities = [...initial.activities]
   const context: {
     toolSequences: number[]
     textBoundarySequences: number[]
     terminalSessionSequences: number[]
     draft: boolean
+    activityIds: Map<string, number>
+    activityIndexSize: number
+    hasParentActivities: boolean
   } = {
     toolSequences: [],
     textBoundarySequences: [],
@@ -484,6 +490,10 @@ export function projectWorkbench(
     // #234：批量路径独占本轮的中间数组（timeline 已在入口复制、中间文档一律丢弃），
     // 故允许归约器就地改尾条/数组，免掉每事件 O(T) 的整表复制。
     draft: true,
+    // #409：入口建一次 id→下标索引；此后由主循环随追加增量补录。
+    activityIds: new Map(ownedActivities.map((activity, index) => [activity.id, index])),
+    activityIndexSize: ownedActivities.length,
+    hasParentActivities: ownedActivities.some(activity => activity.parentId !== undefined),
   }
   let indexedEntries = 0
   const indexTimeline = (entries: readonly WorkbenchTimelineEntry[], from: number): void => {
@@ -497,7 +507,7 @@ export function projectWorkbench(
   let orphanActivities: readonly WorkbenchActivityNode[] | undefined
   // #234：可变集合——按尾部增量补齐 id（见下方循环里的不变式说明），不再每事件整集合重建。
   let orphanIds: Set<string> | undefined
-  let document = initial
+  let document: WorkbenchDocument = { ...initial, activities: ownedActivities }
   for (const envelope of sorted) {
     // #81 L2：与 reduceWorkbenchEvent 同一幂等判据（journal 信封按区间覆盖，
     // 其余按 eventId）——单事件路径与批量路径语义一致。
@@ -573,7 +583,9 @@ export function projectWorkbench(
     // 且 activities **只在尾部增长**。该不变式由两个生产者保证：
     // `upsertActivity` 新节点追加在末尾、按 id 命中时原位替换（id 与位置都不变）；
     // `refreshOrphans` 保序保长。长度回退时才退回整集合重建（防御，不是热路径）。
-    if (next.activities !== orphanActivities) {
+    // #409：upsert 就地替换/追加后数组引用可以不变，孤儿集合的门改按「引用或长度」——
+    // 引用变=整集合换新（refreshOrphans 克隆），长度变=尾部追加了新 id；两者都要补录。
+    if (next.activities !== orphanActivities || next.activities.length !== (orphanIds?.size ?? 0)) {
       if (orphanIds === undefined || next.activities.length < orphanIds.size) {
         orphanIds = new Set(next.activities.map(activity => activity.id))
       } else {
@@ -583,7 +595,16 @@ export function projectWorkbench(
       }
       orphanActivities = next.activities
     }
-    document = refreshOrphans(next, orphanIds)
+    // #409：文档里不存在带 parentId 的活动时，refreshOrphans 的探测恒「无需工作」
+    // 恒等返回——整跳这次 O(A) 扫描（upsert 在引入首个 parentId 时置位）。
+    document = context.hasParentActivities ? refreshOrphans(next, orphanIds) : next
+    // #409：activity id→下标索引随追加补录（原位替换不改序，无需动作）。
+    if (document.activities.length > context.activityIndexSize) {
+      for (let index = context.activityIndexSize; index < document.activities.length; index += 1) {
+        context.activityIds.set(document.activities[index]!.id, index)
+      }
+      context.activityIndexSize = document.activities.length
+    }
   }
   const finalRanges = ranges ?? initial.appliedRanges.map(range => [range[0], range[1]] as [number, number])
   return {
@@ -682,9 +703,23 @@ export interface ToolInvocationSnapshot {
  * C04 架构补全：从 document activities 收窄出 typed 工具调用快照。
  * 缺字段保持 undefined（不伪造空值/零值）；未知 id 返回 null。
  */
+// #409：渲染侧每个工具卡每拍都查一次快照（O(A) find × 卡数）。activities 数组每拍
+// 重建一次 ⇒ 以数组为键的 WeakMap 每 tick 只付一次 O(A) 建 Map，M 个卡读 O(1)；
+// 旧数组失引用后条目随 GC 回收。
+const activityLookupCache = new WeakMap<readonly WorkbenchActivityNode[], Map<string, WorkbenchActivityNode>>()
+
+function activityById(document: WorkbenchDocument, id: string): WorkbenchActivityNode | undefined {
+  let lookup = activityLookupCache.get(document.activities)
+  if (lookup === undefined) {
+    lookup = new Map(document.activities.map(node => [node.id, node]))
+    activityLookupCache.set(document.activities, lookup)
+  }
+  return lookup.get(id)
+}
+
 export function toolInvocationSnapshot(document: WorkbenchDocument, toolCallId: string): ToolInvocationSnapshot | null {
-  const node = document.activities.find(entry => entry.id === toolCallId && entry.kind === 'tool')
-  if (!node) return null
+  const node = activityById(document, toolCallId)
+  if (!node || node.kind !== 'tool') return null
   // C04：result 只在真实结果到达后存在——running 中不伪造 {status:'running'}
   const terminalOrHasOutput = TERMINAL_TOOL_STATUSES.has(node.status) || node.parts !== undefined || node.rawOutput !== undefined || node.error !== undefined
   const resultFields = terminalOrHasOutput ? {
@@ -769,6 +804,16 @@ interface ProjectionContext {
    * 单次折叠 2.7s、24,000 事件 19s）。live 路径不传本字段，语义与形状**一字不变**。
    */
   readonly draft?: boolean
+  /**
+   * #409：activity id → 数组下标。activities 只尾部追加 / 原位替换（upsert），
+   * 序与位置稳定 ⇒ 索引可跨事件增量维护，归约器的 `activities.find`（每 tool/
+   * activity 事件 O(A)）降为 O(1)。批量路径独占；单事件路径不传（回退线性）。
+   */
+  readonly activityIds: Map<string, number>
+  /** #409：索引已覆盖的 activities 前缀长度（追加后由主循环补录）。 */
+  activityIndexSize: number
+  /** #409：是否出现过带 parentId 的活动——没有时 refreshOrphans 恒等返回，可整跳。 */
+  hasParentActivities: boolean
 }
 
 function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, context?: ProjectionContext): WorkbenchDocument {
@@ -792,7 +837,7 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'activity.completed':
     case 'activity.failed':
     case 'activity.cancelled':
-      return reduceActivity(document, envelope, event)
+      return reduceActivity(document, envelope, event, context)
     case 'interaction.requested':
     case 'interaction.resolved':
     case 'interaction.expired':
@@ -829,11 +874,12 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'assist.prediction':
     case 'assist.file-suggestions':
     case 'assist.queued-command':
-      return reduceAssist(document, event)
+      return reduceAssist(document, envelope, event)
     case 'extension.event':
       return reduceExtension(document, envelope, event)
     case 'event.unknown':
-      return addDiagnostic(document, envelope, 'event.unknown', event.summary, 'warning', event)
+      // #405：卡片标题给变体名（可读一行），原始载荷仍留在「事件详情」里（诊断携带 event）。
+      return addDiagnostic(document, envelope, 'event.unknown', `未识别的 ${event.originalType} 事件`, 'warning', event)
     default:
       // assist.* 等未接 slice 的事件：只保留 timeline 条目，不产生副作用
       return document
@@ -1056,7 +1102,8 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   const normalizedToolError = tool.error !== undefined ? normalizeNormalizedError(tool.error) : undefined
   // C04 DIC-C04-01/架构补全：canonical 字段自 normalized payload 收窄进 activity node，
   // renderer 经 toolInvocationSnapshot 消费，不再读 provider raw。
-  const previous = document.activities.find(node => node.id === id && node.kind === 'tool')
+  // #409：O(A) find → 索引 O(1)（批量路径）；单事件路径回退线性。
+  const previous = previousActivityOf(document, id, 'tool', context)
   if (!previous) {
     document = settleSupersededRunningMessages(document)
     document = { ...document, timeline: updateTimeline(document.timeline, envelope.eventId, { streamBoundary: true }, context?.draft === true) }
@@ -1091,7 +1138,7 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
     data: event, sequence: previous?.sequence ?? envelope.sequence,
   }
   const merged = mergeToolActivity(previous, node)
-  const activities = upsertActivity(document.activities, merged ?? node)
+  const activities = upsertActivity(document.activities, merged ?? node, context)
   const timeline = updateTimeline(document.timeline, envelope.eventId, { status: merged?.status ?? status, title: merged?.title ?? node.title }, context?.draft === true)
   return { ...document, activities, timeline }
 }
@@ -1134,7 +1181,7 @@ function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: Wo
   return next
 }
 
-function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent): WorkbenchDocument {
+function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent, context?: ProjectionContext): WorkbenchDocument {
   if (TERMINAL_SESSION_STATUSES.has(document.session.status.toLowerCase())) {
     return addLateEventDiagnostic(document, envelope, 'late activity event ignored after terminal fence')
   }
@@ -1142,7 +1189,7 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
   const activity = isRecord(event.activity) ? event.activity : {}
   const patch = isRecord(event.patch) ? event.patch : {}
   const result = isRecord(event.result) ? event.result : undefined
-  const previous = document.activities.find(item => item.id === id && item.kind === 'activity')
+  const previous = previousActivityOf(document, id, 'activity', context)
   const status = activityLifecycleStatus(event.type, patch, previous)
   const activityKind = stringValue(activity.kind) ?? stringValue(patch.kind) ?? previous?.activityKind
   const semanticKind = stringValue(activity.semanticKind) ?? stringValue(patch.semanticKind) ?? previous?.semanticKind
@@ -1210,7 +1257,7 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     provenance: envelope.provenance,
   }
   const merged = mergeActivityTerminal(previous, next)
-  const projected = { ...document, activities: upsertActivity(document.activities, merged ?? next) }
+  const projected = { ...document, activities: upsertActivity(document.activities, merged ?? next, context) }
   return narrowedParts.diagnostics.length > 0
     ? { ...projected, diagnostics: [...projected.diagnostics, ...narrowedParts.diagnostics] }
     : projected
@@ -1446,11 +1493,14 @@ function settleUnsettledTools(
     : node)
 }
 
-function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
+function reduceAssist(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: AssistEvent): WorkbenchDocument {
   if (event.type === 'assist.prediction') {
+    // #394：预测是**一次性实例**——带 eventId 才可被接受/拒绝消费（renderer 侧按 eventId 写
+    // 消费标记，幽灵与卡片同时收敛；新预测带新 eventId 自然重现）。
     return { ...document, assist: { ...document.assist, prediction: {
       ...(event.placeholder ? { placeholder: event.placeholder } : {}),
       actions: Object.freeze([...(event.actions ?? [])]),
+      eventId: envelope.eventId,
     } } }
   }
   if (event.type === 'assist.file-suggestions') {
@@ -1707,10 +1757,59 @@ function updateTimeline(
   return items.map(item => item.eventId === eventId ? { ...item, ...patch } : item)
 }
 
-function upsertActivity(items: readonly WorkbenchActivityNode[], next: WorkbenchActivityNode): WorkbenchActivityNode[] {
+/**
+ * #409：按 id 找已有 activity 节点。批量路径走 context 索引 O(1)；单事件路径（无
+ * context）保留线性扫描，语义与改造前逐字一致。索引命中但 kind 不符 = 该 id 的
+ * 节点存在但不是目标 kind（id 在数组内唯一）⇒ 直接不存在，不再扫描。
+ */
+function previousActivityOf(
+  document: WorkbenchDocument,
+  id: string,
+  kind: 'tool' | 'activity',
+  context?: ProjectionContext,
+): WorkbenchActivityNode | undefined {
+  const index = context?.activityIds.get(id)
+  if (index !== undefined) {
+    const candidate = document.activities[index]
+    return candidate !== undefined && candidate.id === id && candidate.kind === kind ? candidate : undefined
+  }
+  return document.activities.find(node => node.id === id && node.kind === kind)
+}
+
+/**
+ * #409：upsert 接批量路径 context——索引 O(1) 定位 + draft 就地写（替换与追加都不再
+ * 整表复制）。原位语义与 #234 的 updateTimeline draft 同据：批内中间数组独占，就地写
+ * 只动本轮独占的数组；对外形状（不可变 readonly 数组）不变，单事件路径逐字保留原实现。
+ * 就地引入 parentId 时置位 context.hasParentActivities（孤儿刷新的跳过门）。
+ */
+function upsertActivity(items: readonly WorkbenchActivityNode[], next: WorkbenchActivityNode, context?: ProjectionContext): readonly WorkbenchActivityNode[] {
+  if (context && next.parentId !== undefined) context.hasParentActivities = true
+  const inPlace = context?.draft === true && !Object.isFrozen(items)
+  const replaceAt = (index: number): readonly WorkbenchActivityNode[] => {
+    const existing = items[index]!
+    const merged: WorkbenchActivityNode = { ...existing, ...next, parentId: next.parentId ?? existing.parentId }
+    if (inPlace) {
+      // SAFETY: inPlace 已确认数组未冻结且批内独占；readonly 是公共形状契约，非运行时约束。
+      ;(items as unknown as WorkbenchActivityNode[])[index] = merged
+      return items
+    }
+    return items.map((item, itemIndex) => itemIndex === index ? merged : item)
+  }
+  const indexed = context?.activityIds.get(next.id)
+  if (indexed !== undefined) {
+    // 索引命中即定位置换（下标由主循环保证与 id 同步；id 冲突不存在——upsert 按 id 唯一）
+    return replaceAt(indexed)
+  }
   const index = items.findIndex(item => item.id === next.id)
-  if (index < 0) return [...items, next]
-  return items.map((item, itemIndex) => itemIndex === index ? { ...item, ...next, parentId: next.parentId ?? item.parentId } : item)
+  if (index < 0) {
+    if (inPlace) {
+      // SAFETY: 同上——批内独占的未冻结数组，追加就地发生。
+      ;(items as unknown as WorkbenchActivityNode[]).push(next)
+      return items
+    }
+    return [...items, next]
+  }
+  return replaceAt(index)
 }
 
 function textFromParts(parts: readonly ContentPart[]): string {

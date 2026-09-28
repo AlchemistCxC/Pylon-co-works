@@ -90,6 +90,10 @@ impl AcpSessionState {
     /// are intentionally no-ops. Unknown update variants remain observable as
     /// typed deltas so a newer Agent can be added without changing this state
     /// machine's framing or losing evidence.
+    // pending_permissions 队列与 PermissionRequested delta 双消费同一对 id，
+    // 各需一份所有权——push 处的 clone 是最小必要拷贝，属 redundant_clone
+    // 的已知误报形态（clippy#81469 族），在此定点豁免。
+    #[allow(clippy::redundant_clone)]
     pub fn apply(&mut self, message: &RawMessage) -> Vec<AcpStateDelta> {
         if message.kind == AcpKind::PermissionRequest {
             let request_id = message.id.as_ref().map(ToString::to_string);

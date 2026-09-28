@@ -797,7 +797,10 @@ impl EventRepo {
     }
 
     /// #376-b：按 sequence 清单取整行（compact 分页的第二步；只取要的，一次取完）。
-    /// #81 L2：compact 读**一次性**（分页读的循环封装；测试与冷路径兼容用）。
+    /// #81 L2：compact 读**一次性**（分页读的循环封装）。生产读口已全部走
+    /// `load_events_compact_page`（#376），本封装现仅测试使用——`#[cfg(test)]` 化
+    /// （W3 重构批次 P9 清偿；行为零变化，生产调用方为零）。
+    #[cfg(test)]
     pub fn load_events_compact(
         &self,
         owner_key: &str,

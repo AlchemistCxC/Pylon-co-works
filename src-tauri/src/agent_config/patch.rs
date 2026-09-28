@@ -2,6 +2,10 @@ use super::*;
 use std::collections::HashMap;
 use std::path::Path;
 
+// L6：本模块的字段级校验（exe/name/transport 非空、只许 subprocess）与 parse 层
+// （load.rs）是刻意的防御深度双层。**parse 层是权威**，本层是提前失败优化——
+// 只改一处会造成「候选过 patch 层却死在 parse 层」的绕行报错路径；两处口径必须同步。
+
 // #317 批次二 ③：原子写原语正身已下沉 pylon-foundations（原经 atomic_write::* glob 重导出）。
 use pylon_foundations::atomic_write::{replace_file, sync_parent, write_synced_temp};
 

@@ -104,11 +104,11 @@ flowchart TB
 | `src/domains` | Agent、event、workspace、search 等领域逻辑 | Domain modules | 仅阅读目标 domain |
 | `src/renderers` | Workbench Renderer 与 Solid implementation | Product Renderer | renderer contracts 与目标实现 |
 | `src/sheets`、`src/workspace-sheets` | 产品工作区与 Sheet UI | Product Plugin/UI | 对应 Sheet 与 integration tests |
-| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：engine/client/negotiated/replay/wire trace/policies；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine.rs`、`client.rs`、`negotiated.rs` |
+| `src-tauri/pylon-acp` | ACP 协议引擎核（`agent-client-protocol`）：`engine/`（mod/inbound/outbound/prompt_wait，#416 拆分）/client/negotiated/replay/wire trace/policies/`adapter/`（private_ext 方言信封 + permission_wire + interaction_bridge）；spawn 入口在 `process.rs`；日志经 `runtime_sink` 端口注入 | 可复用 Kernel library | `engine/mod.rs`、`client.rs`、`negotiated.rs` |
 | `src-tauri/src/agent_config` | agents.yaml 读取/补丁/config 域原子事务编排（AgentDef 值类型在 pylon-core）；通用原子写正身在 `pylon-foundations/src/atomic_write.rs`（#317 批次二） | Rust Kernel | `load.rs`、`patch.rs`、`atomic_write.rs` |
 | `src-tauri/pylon-session` | 会话存储核：canonical event / message / user_data 仓库、retention、turn 聚合（rusqlite，零 tauri） | 可复用 Kernel library | `event_repo/`、`msg_repo/`、`error.rs`（SessionError） |
 | `src-tauri/src/lifecycle` | Agent connect/switch/reconnect/config transaction | Rust Kernel | `mod.rs` |
-| `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect | Rust Kernel，夹杂产品行为 | `mod.rs` |
+| `src-tauri/src/dispatcher` | ACP notification dispatch、runtime projection、reconnect；产品反应经 KernelReactionSink 订阅 adapter（`reactions.rs`）、会话更新选路收口 `publish_session_update`（`publish_route.rs`），#416 起 kernel 决策面不再内嵌 pet 策略字段 | Rust Kernel | `mod.rs`、`reactions.rs` |
 | `src-tauri/src/agent` | GUI 检测命令层（`detection.rs`：`DetectionSnapshot` 三态 TTL 缓存、force 刷新与取消，P74 B0）与多 agent 运行时状态机（`runtime.rs`） | Rust Kernel | `detection.rs`、`runtime.rs` |
 | `src-tauri/pylon-core` | Agent Catalog、native detection、preflight/环境诊断、launch plan、CLI client | 可复用 Kernel library | `agent_catalog.rs`、`agent_detection.rs`、`agent_diagnostics.rs` |
 | `src-tauri/pylon-foundations` | event_names、sanitize、time、workspace、git、atomic_write（通用原子写正身，#317 批次二下沉）等零 tauri 纯逻辑（P58 拆分） | 可复用 Kernel library | `src/lib.rs` |
@@ -204,6 +204,8 @@ sequenceDiagram
 
 #393（会话标题做成通用 ACP 能力）：标题走**官方**两条通路，不新增私有协议——`session/update` 的 `SessionInfoUpdate.title/updatedAt`（`MaybeUndefined`：字段缺席 = 不修改 / `null` = 清空 / 字符串 = 设置）与 `session/list` 的 `SessionInfo.title`（官方 `ListSessionsResponse` 是**包装对象** `{sessions:[…]}`，条目键为 `sessionId`，分页游标 `nextCursor`）。Peri 与 Hermes 均已发出这两条（Hermes 经 turn prologue 的自动起标题回调推通知），此前 Pylon 全链路丢弃：内核 `event_repo::normalize` 只提 `model`；前端 `acpNormalizer` 只拆 mode/status/model。现在内核在 `session_info_update` 包内把 `title`/`updatedAt` 一并落 `typed_payload`（**三态保真**：键存在才落，清空原样落 `null`，不压成「无值」——压平会让「不改」与「清空」互相冒充）；workbench 新语义事件 `session.title-updated`（`title: string | null`，「缺席 = 不修改」由**事件不存在**表达）经 `wireSemanticCorrespondence` 单源表登记，投影到 `WorkbenchSessionSurface.title`，清空时**删键**而不是留旧值。重放/重启不需要额外通路：canonical 行带 `rawPayload`，`canonicalRowToWorkbench` 用原始 update 再走同一套 normalizer。本地身份域口径分离（ADR-0030）：`Session.autoName` 存 Agent 给的标题（每帧覆盖写，Agent 清空回落 `''`），用户改名只置 `renamedByUser` 不动存储，显示由 `resolveSessionDisplayName` 收口为「用户改名 > Agent 标题 > 本地生成名」；存档恢复（`resumePersistedSessionTransaction`）把 `session/list` 的 `title` 落 `autoName`。`persistedSessions` 的 normalize 兼容两代形状（官方包装 + `sessionId` / 旧裸数组 + `id`）——此前只认后者，存档会话列表恒空（#396）。已知遗留：Hermes 的 `nextCursor` 分页未消费（Peri 一次给全量）。
 
+#394/#395/#405（预测接线与噪声卡收口，ADR-0033）：Agent 推送的预测（Peri `peri/prediction_ready` → `assist.prediction`）接进**既有**预测系统（设置 → router → scheduler → 输入框 ghost），不再自成一面。文档里的预测是**带身份的一次性实例**：投影层把信封 `eventId` 落进 `assist.prediction.eventId`，`domains/workbench/session/assistPrediction.ts` 以它作实例键（无 eventId 回退 `text:<预测文本>`）；消费标记存在 per-session 的 `sessionUi`（`SessionUiKey = 'assist-prediction-consumed'`），**ghost 与会话卡共用**——Tab / → / 空草稿 Enter **接受**（填草稿 + 消费），**空草稿退格**与**输入分歧**（草稿不再是预测前缀，由 effect 触发）**拒绝**（消费）；新回合的新 eventId 不命中旧标记，自然重现。草稿是预测前缀时 ghost 续显剩余（与代码补全同形），空文本帧不算预测（Peri 用同一通道的 `set_title` 动作发会话标题——那类帧此前渲成一张「只有标题 + 两个按钮」的空卡）。源优先级：`auto`/`fork` 下 **Agent 原生预测优先**且在场时**不调度**本地 provider 请求（`standalone` = 强制本地、忽略原生；`off` = 关闭）。身份口径修正（#395）：文档按 provider **source** 建键，而渲染器拿到的 `sessionId` 是身份域 `Session.id`，此前 `document.sessionId !== sessionId()` **恒真** ⇒ 原生预测与 durable 历史（ghost 补全与本地预测上下文）全被丢弃；现在宿主经 mount input 给 `sessionSource`（`AgentRendererSuiteWorkbench` 传 `session.source`），判据按 source 比、缺省不收紧。噪声卡收口（#405）：peri 的已知**簿记变体**（`goal_snapshot`——实测全字段 null、每回合必发；`turn_committed`；`state_snapshot`）不再走 unknown 兜底，改由 `SILENT_ACP_EVENT_VARIANTS` 收口为「不产事件 + info 诊断」（`visibleDiagnostics` 过滤 info ⇒ 不进时间轴，raw 仍在 canonical 行里）；真未知变体的卡片标题取**变体名**（`未识别的 <originalType> 事件`），原始载荷留在「事件详情」——此前标题直接是 120 字符截断的裸 JSON。
+
 #316（ACP v1 协议面补强）：宿主 fs/terminal 能力"实现与广告同源"通电——`acp.host_tools`（fs 门，默认 host）与 `acp.host_terminal`（terminal 门，默认 agent）双门控进 `AcpProtocolConfig`（YAML 声明优先、env `PYLON_ACP_HOST_TOOLS` 兼容回退、两门入 runtime_fingerprint），`build_initialize_plan` 消费与 dispatcher 门禁**同一份** `HostToolsPolicy::resolve` 结论注入/裁剪官方形状声明（`fs:{readTextFile,writeTextFile}`/`terminal:true`/`elicitation:{form:{}}`；显式 initialize_caps 不追加不裁剪）；strict fs 沙箱根取自会话工作区（SessionInfo.cwd），不信任 agent 自报参数。stopReason 走官方 `StopReason` typed 判定（max_tokens 转合法终态、未知值 warn 降级 end_turn）、initialize 回显 protocolVersion 校验（缺字段 lenient、不一致 fail-closed `protocol_version_mismatch`）、session/update 变体分类单一入口 `classify_session_update`（schema typed-first + Peri/Hermes 宽容别名 fallback），turn_ledger 增 saw_thinking 位（thinking-only 回合不算 agent-empty）。elicitation 标准 form 模式：能力广告 + GUI 表单卡（受限原语子集，object/array/url 降级拒绝）+ `elicitation/complete` 通知收敛（typed `CompleteElicitationNotification`，elicitationId 匹配 pending 私有交互）；permission watcher 死亡分支补 private_interactions 残留清理。#356 起 request-scoped elicitation 放行（广告⇔执行一致）：官方 `CreateElicitationRequest` 无 `sessionId` 字段，scope 可为 `ElicitationRequestScope{requestId}`（auth/config 阶段的会话外 elicitation 合法）——dispatcher 对空 `sessionId` 且 bridge 为 elicitation 的请求走 typed `CreateElicitationRequest` 解析投影（Request scope 允许空串 session_id 入队；Session scope 取回投影 id；显式空 sessionId、未知 scope 变体、官方形状解析失败一律 -32602 fail-closed），非 elicitation 桥 + 空 sessionId 维持 -32601；前端三道门同步放行——envelope 的 sessionId 区分「字段缺失」与「显式空串」，`normalizePermissionRequest`/`requireIdentity` 对 request-scoped elicitation 以 requestId+agentId 收口身份（放宽仅限 elicitation，permission 请求缺 sessionId 仍拒）。私有交互补与 `pending_permissions` 对等的 300s 超时 drain + **向 agent 回包**（默认动作取各桥非承诺值：elicitation→`cancel`、grok/pi 问题桥→既有 declined 映射（`skip_interview`/`cancelled:true`）、exit_plan→`keep_planning`；裁决集中于 `private_interaction_timeout_response`），并广播 `interaction.resolved{kind, reason:"timed_out"}`（与断线 drain 同构）；`interaction_list` 私有条目 deadlineMs 由 0 改为真实 deadline。TerminalRegistry 增 release_session/clear（close_session 与 stop_agent_runtime 挂钩，终端进程不再跨代泄漏）。协议解析面收编官方 SDK 类型：StopReason/SessionUpdate/ContentBlock/CancelNotification/各 fs·terminal Response/CLIENT_METHOD_NAMES/ErrorCode。#354 起宿主 fs/terminal 负路径回官方语义码：fs 缺失（含新写目标的中间目录缺失）→ `resource_not_found`（-32002，`data:{uri}`），且沙箱判定先于存在性判定（roots 外恒拒绝，不泄漏沙箱外路径存在性）；沙箱拒绝保持 -32602 但 message 加 `sandbox:` 稳定前缀；未知 host 工具子方法 → -32601。agent 侧 -32000 `authRequired` 被结构化消费（`rpc_failure_details` 按码一票判定、先于文本启发式），initialize 阶段映射为稳定码 `agent_auth_required`（前端码表已登记），不再落入文本启发式的泛化分类。
 
 
@@ -249,6 +251,8 @@ Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 
 显示层的揭示策略同时受三个上限约束：发布频率（`maxUpdatesPerSecond`，**60 次/秒**，即每显示帧一次）、打字机基线速率（`revealUnitsPerSecond`，120 字素/秒）与单帧上限（`maxRevealUnitsPerTick`，128 单元），追赶窗口（`maxRevealLagMs`，400ms）决定抬升预算的快慢。追赶步长按窗口内剩余拍数细分，所以提高发布频率只会把同一个 400ms 窗口切得更细（单帧增量更小），不改变收敛时间。**三个上限适用于每一次发布，终态那一帧也不例外**：identity/reset 切换整发快照（被替换的行本就无法插值），其余一切——段完成、追加行、列表重排、终态/错误、后台恢复——只立即发布**结构**（summary、耗时、running、错误状态），未揭示文本按同一上限继续收敛，因此流式行不会在单帧内长出整块文本（那是实时布局测量被打破的来源），也不会出现首次整块倒出。该揭示策略只影响**发布节奏**，不可能改变任何行的**宽度**；真正的宽度类版式缺陷（正文宽度塌陷、行盒撑不开）仍在 CSS 层。但「每几个字换行」类碎裂**不是**宽度问题，也不在 CSS 层：它是流式行**行集合**与当前文本漂移的后果——行边界被留在当前文本里已不存在的空行上，于是同一段干净文本被切成大量极短行（issue #55）。判据：同一条文本在终态或重启后渲染正常，即可排除 CSS 层。修复方向是让行集合始终是当前文本的纯函数（`MarkdownContent.solid.tsx` 的 `StreamingMarkdownBlocks` 由当前文本推导行描述、按位置对账，不保留独立于文本的累积状态）；只读判据见 `streamingDisplay` 读数的 `rowSet`（`rows / textParagraphs > 1` 即出现当前文本之外的边界）。
 
 Workbench 的底部跟随由 `followBottom` sticky seam 控制。`PlainMessageList` 负责消息行测量，外层 `.term` 另以 `ResizeObserver` 覆盖流式行、异步 Markdown/highlight 和图片导致的高度变化；观察回调只有在 sticky 时才执行底部跟随，用户上滚后不再夺回滚动权。
+
+聊天内容的限宽阅读块由 Renderer Slot 的 `maxWidth` 决定宽度，并在 `.term` 内容盒内水平居中；左右侧栏折叠只改变可用宽度，不改变该对齐语义。助手标记列在另一侧留出同宽空间，正文和 Markdown 自身仍左对齐。全宽用户消息条及气泡态用户消息保留原有对齐；独立的工具与顶层活动卡同样居中，嵌套活动继续保留层级缩进。
 
 聊天动效（#311）只消费显示层标记：`PlainMessageList` 对生成中的少量尾部新增消息设置短时 `data-entry`，`CanonicalActivityList` 对同一会话生成期间新增的工具活动 id 设置短时 `data-entry`；两者在 760ms 后清除，历史重放、会话换代和虚拟化重挂不重复入场。消息入场为短暂抬升与边缘描线，工具卡入场为轻回弹与一次性描边光晕；直播期间从无结果到首次获得输出或错误的工具卡，在原卡头部和已展开结果区播放一次局部回执，历史恢复与后续同 id 更新不重播；入场仅改变不参与行高测量的 opacity/transform。权威生成态下助手正文尾部的独立覆盖层持续扫光、左轨细线呼吸，终态后若显示调度器仍在补齐文字，覆盖层保留至可见文字连续 440ms 不再增长，随后用一次性短扫线与光点收束并清除；长正文只扫尾部，Markdown 节点不因动效重挂。调度器的打字机只负责按预算揭示文字；`MarkdownContent` 在已经开始流式揭示的助手正文发生前缀增长时，把零盒宽高的光标放到最后一个可见文本叶节点（跳过容器末尾的结构空白，含未闭合代码围栏末行），暂停 420ms 后清除，终态补齐期间仍跟随，不改变换行与调度预算；思考区保持既有表现。Markdown 增量解析仍保留上次已解析模型，首次解析才显示骨架；增长尾块晋升稳定块或未闭合代码围栏闭合时，仅代码、表格、列表、引用和标题播放一次局部定稿描线，不对逐 token 解析结果重播段落入场动效。系统与聊天视图减动效设置均关闭这些动画。
 
@@ -304,7 +308,7 @@ flowchart TB
 `agents.yaml`（#372 起随包：模板源 `resources/release/agents.template.yaml`，打包时改名），因此发行包首跑的配置来源是
 第 2 档而非第 3 档，效果同为零 Agent 空态，用户在包内即有可编辑的预置入口。
 
-当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
+当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。GUI 检测结果由 `DetectionSnapshot` 三态 TTL 缓存（fresh/stale/expired）承载，支持强制刷新与取消在途探测（P74 B0）；设置页保存受 fail-closed 门禁约束，必须先对当前草稿指纹通过一次连接测试（P74 B1；门禁在设置页前端状态机 `agentDraftMachine` + `AgentRuntimePanel` UI 拦截，后端 `update_agents_config` 仅 revision CAS/active 保护、无凭证校验——后端化为待决策项，见 issue #417）。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 
 ## 10. Plugin Runtime 生命周期
 
@@ -363,7 +367,7 @@ stateDiagram-v2
 | Product Shell/UI | `App.tsx`、components | First-party Product Plugin |
 | Workspace/Renderer/Tools | product/core plugins | First-party Product Plugin |
 | SQLite、Tauri IPC、ACP subprocess | Rust/TS infrastructure | Kernel adapters |
-| Pet/Prism/Gateway 产品反应 | 部分嵌在 dispatcher/prompt | 待确认是否迁为 Kernel events 的订阅 adapter |
+| Pet/Prism/Gateway 产品反应 | KernelReactionSink 订阅 adapter（`dispatcher/reactions.rs`）+ PromptTurnHooks（`session/prompt/hooks.rs`） | 已收敛为 Kernel events 订阅 adapter（#416） |
 
 ## 12. 必须维持或建立的 invariants
 
@@ -382,7 +386,7 @@ stateDiagram-v2
 - Agent Instance 配置写盘状态与 live runtime 生效状态必须可区分。
 - generation 变化后，旧 runtime 的迟到事件不得污染新 runtime。
 - Runtime Candidate 的“身份可信”和“ACP 可运行”是两个不同证据级别。
-- 检测、版本探测、连接测试和 replay 都必须有总时间预算。
+- 检测、版本探测、连接测试和 replay 都必须有总时间预算（现状缺口：生产 connect 尚无外层总预算、仅 initialize 受 `rpc_timeout` 约束，见 issue #417；预算常量归口 `lifecycle/budgets.rs`）。
 
 ### Plugin Runtime
 

@@ -67,6 +67,30 @@ release profile 为 `panic = "abort"`（`src-tauri/Cargo.toml`）：任一 panic
 - **例外二（中毒免疫值）**：锁保护的内容在中毒后依然自洽（如 `gateway/qq/auth.rs` 的 token 缓存），可用 `lock().unwrap_or_else(|e| e.into_inner())` 就地恢复。
 - 不引入上述之外的新形态；新增代码按主形态与两类例外落点选择。
 
+## Rust 性能卫生静态门禁（#414 成文）
+
+Rust 侧性能反模式按「clippy 能否机械判定」分两半。执行语义都是基线棘轮「相对 `artifacts/clippy-baseline.json` 零新增」（AGENTS.md §2.4）；存量豁免一律 `#[allow(...)]` 附理由注释，不许无注释压制。
+
+**机械可拦（进 clippy 门禁）**
+
+- 配置两处：仓库根 `clippy.toml`（`await-holding-invalid-types` 列 tokio 锁卫全家族：`MutexGuard`/`OwnedMutexGuard`/`RwLock{Read,Write}Guard`/`Owned*`）+ `src-tauri/Cargo.toml` 的 `[workspace.lints.clippy]`（nursery 的 `redundant_clone`）。新增 member crate 必须接 `[lints] workspace = true`，否则清单对该 crate 不生效。
+- 默认 warn、已在棘轮内的（不重复登记）：`await_holding_lock`/`await_holding_refcell_ref`（std 锁与 RefCell 跨 await）、`regex-creation-in-loops`（循环内编译正则）、`unbuffered-bytes` 等 perf 家族。
+- **有意持锁跨 await 的写法**：命名守卫表达串行化意图（`_lifecycle_guard`/`refresh_lock` 单飞等），函数级 `#[allow(clippy::await_holding_invalid_type)]` 附设计依据；意外宽持锁（如 `if let Some(x) = lock().await.remove(..)` 的检视位临时守卫活过分支体、id 分配锁卫跨第二把锁）必须真重构，不许 allow。
+
+**非机械可拦（review checklist + grep 线索）**
+
+1. **async 内阻塞**：`block_on`/`std::fs` 同步读 / `thread::sleep` / CPU 密集循环只许出现在线程入口、测试或 `spawn_blocking` 内（`Handle::block_on` 只在阻塞线程用）；async fn 里发现即改 `spawn_blocking` 或异步原语。
+2. **无谓深拷贝**：owned `String` 上的 `.to_string()`/`.clone()` 是全量拷贝；错误映射 `map_err(PylonError::Protocol)` 直接 move。`redundant_clone` 拦机械半区；其已知误报形态（同一值队列与 delta 双消费）用定点 allow。
+3. **热路径堆分配**：逐条事件/逐帧路径避免 `format!`/`to_owned`/每条新 `Vec`；能复用的缓冲提出循环外。
+4. **Vec 当队列**：队首出列用 `VecDeque`（`pop_front`/`push_back`）；grep 线索 `\.remove\(0\)`。
+5. **HashMap 选型**：本仓无 fast-hash 依赖（dashmap 只作并发容器）；非热路径可继续 std `HashMap`，逐条事件级路径若基准显示哈希开销占比，再裁决引入（架构决策，不默认换）。
+6. **无缓冲 IO**：小粒度多次读/写包 `BufReader`/`BufWriter`；一次性 `read_to_end` 不需要。`.bytes()` 已有 lint 拦。
+7. **循环内编译正则**：`Regex::new` 提到 `OnceLock` 静态（#258 先例，`stderr_tail.rs`/`sanitize.rs` 为范式）。
+
+## Rust 时间预算常量（#416 成文）
+
+检测/连接/探测类预算常量归口 `src-tauri/src/lifecycle/budgets.rs`，按三形状词法命名并写明语义：`TotalDeadline`（端到端硬限）、`StageBudget`（阶段预算）、`Ttl`（缓存/快照时效）。新增预算不散落硬编码；改动任何预算**数值**属行为变更，需独立 spec 与 issue（如生产 connect 总预算，见 issue #417）。
+
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。

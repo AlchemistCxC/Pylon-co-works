@@ -14,6 +14,8 @@ import { createEntryMotion } from '../entryMotion.solid.tsx'
 
 /** #212 S4：小于该像素的差量视为无变化（避免亚像素抖动的写入循环）。 */
 const ANCHOR_EPSILON_PX = 1
+/** #409：container 宽度差量小于该值不触发 D5 全量失效（亚像素回差不影响换行）。 */
+const CONTAINER_WIDTH_EPSILON_PX = 0.5
 /** Bulk history hydration and session replacement must never animate as live arrivals. */
 const MAX_ANIMATED_APPEND_ROWS = 4
 
@@ -440,8 +442,20 @@ export function PlainMessageList(props: PlainMessageListProps) {
   onMount(() => {
     setAncestorKill(killSwitched())
     if (typeof ResizeObserver !== 'undefined' && container) {
-      resizeObserver = new ResizeObserver(() => {
-        port.invalidateMeasurements('container-resized')
+      // #409：失效按 entry.target 分流。container 自身也被观察，而行高和=容器高，
+      // 行增高必然级联出 container 条目——但**高度**级联不影响换行，不该作废任何实测
+      // （D5 的「容器变化」本意是影响换行的几何，即宽度）。此前行/容器两条 entry 都落
+      // container-resized，虚拟化长会话流式期间每发布清一次引擎实测缓存再全体重测。
+      let containerWidth: number | undefined
+      resizeObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          if (entry.target !== container) continue
+          const width = entry.contentRect.width
+          if (containerWidth !== undefined && Math.abs(width - containerWidth) >= CONTAINER_WIDTH_EPSILON_PX) {
+            port.invalidateMeasurements('container-resized')
+          }
+          containerWidth = width
+        }
         syncAnchorCompensation()
         geometrySync.schedule()
         props.onContentResize?.()

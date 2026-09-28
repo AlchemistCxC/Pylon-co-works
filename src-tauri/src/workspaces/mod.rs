@@ -522,7 +522,7 @@ mod tests {
         assert!(error.to_string().contains("absolute"));
         let updated = update_workspace_in_state(
             &state,
-            ws.id.clone(),
+            ws.id,
             Some("重命名".into()),
             Some("D:\\new-root".into()),
             Some(vec!["code-review".to_string()]),

@@ -41,6 +41,12 @@ export interface ToolConnectorLayoutPort {
   registerConnector(registration: ToolConnectorRegistration): () => void
   invalidate(reason: ToolConnectorInvalidationReason): void
   destroy(): void
+  /** #409：边活性判据——锚点是否已注册（随行挂载/卸载实时变化）。 */
+  hasToolAnchor(messageId: string): boolean
+  /** #409：注册表版本号，register/unregister 时递增。边集按它重滤活性。 */
+  membershipRevision(): number
+  /** #409：注册表变化通知（边集层据此重滤；同步回调，监听方自行节流）。 */
+  onMembershipChange(listener: () => void): () => void
 }
 
 export interface ToolConnectorScheduler {
@@ -68,8 +74,16 @@ export function createToolConnectorLayoutPort(
   const tools = new Map<string, () => ToolAnchorMeasurement | null>()
   const connectors = new Map<string, ToolConnectorRegistration>()
   const lastApplied = new Map<string, ToolConnectorLayout | null>()
+  const membershipListeners = new Set<() => void>()
+  let membershipVersion = 0
   let scheduled: unknown | null = null
   let destroyed = false
+
+  /** #409：注册表变化即 bump 版本并同步通知监听者（边集层重滤活性）。 */
+  const notifyMembershipChange = () => {
+    membershipVersion += 1
+    for (const listener of membershipListeners) listener()
+  }
 
   const measure = () => {
     scheduled = null
@@ -104,9 +118,13 @@ export function createToolConnectorLayoutPort(
     registerTool(messageId, read) {
       if (destroyed) return () => {}
       tools.set(messageId, read)
+      notifyMembershipChange()
       port.invalidate('items-changed')
       return () => {
-        if (tools.get(messageId) === read) tools.delete(messageId)
+        if (tools.get(messageId) === read) {
+          tools.delete(messageId)
+          notifyMembershipChange()
+        }
         port.invalidate('items-changed')
       }
     },
@@ -114,6 +132,7 @@ export function createToolConnectorLayoutPort(
       if (destroyed) return () => {}
       lastApplied.delete(registration.key)
       connectors.set(registration.key, registration)
+      notifyMembershipChange()
       port.invalidate('items-changed')
       return () => {
         if (connectors.get(registration.key) === registration) {
@@ -127,6 +146,16 @@ export function createToolConnectorLayoutPort(
       if (destroyed || scheduled !== null) return
       scheduled = scheduler.schedule(measure)
     },
+    hasToolAnchor(messageId) {
+      return tools.has(messageId)
+    },
+    membershipRevision() {
+      return membershipVersion
+    },
+    onMembershipChange(listener) {
+      membershipListeners.add(listener)
+      return () => membershipListeners.delete(listener)
+    },
     destroy() {
       if (destroyed) return
       destroyed = true
@@ -136,6 +165,7 @@ export function createToolConnectorLayoutPort(
       connectors.clear()
       tools.clear()
       lastApplied.clear()
+      membershipListeners.clear()
     },
   }
 

@@ -22,6 +22,8 @@ pub mod correlation;
 pub mod log_context;
 // #247：hermes profile 探测与 Windows 启动适配（消费 AgentDef，随 agent 域归位）。
 pub mod hermes;
+// L8：FNV-1a 64 唯一实现（域内四份手写循环收编，逐位保值）。
+pub mod fnv1a;
 // #363-3：node 版本管理器 PATH 修复（启动最早期调用一次）。
 pub mod node_path;
 // #247：catalog 投影的 provider 适配边界（纯逻辑，原宿主 provider_adapter/）。

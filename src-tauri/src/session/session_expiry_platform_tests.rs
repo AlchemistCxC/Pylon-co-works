@@ -166,6 +166,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
             agent_id: String::new(),
             client_generation: 0,
             enqueued_at: Timestamp::now(),
+            deadline_ms: None,
             event: serde_json::json!({}),
             state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
         })
@@ -179,6 +180,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
 }
 
 /// #363-4：prompt 闸门被占用时，该连接的全部会话本轮跳过。
+#[allow(clippy::await_holding_invalid_type)] // 测试本体：持 prompt_gate 模拟在途 prompt
 #[tokio::test]
 async fn sessions_of_a_busy_prompt_gate_are_exempt() {
     let state = state_with_initial_acp().await;
@@ -334,6 +336,7 @@ async fn idle_connection_with_a_pending_interaction_is_exempt() {
             agent_id: String::new(),
             client_generation: 0,
             enqueued_at: Timestamp::now(),
+            deadline_ms: None,
             event: serde_json::json!({}),
             state: crate::acp::interaction_queue::InteractionEntryState::Waiting,
         })

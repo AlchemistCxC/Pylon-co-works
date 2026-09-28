@@ -29,56 +29,18 @@
 //! （持 active runtime 的 agent_lifecycle，仅杀被移除且非 active 的 runtime，
 //! 与 switch 的清理集合不相交），不在 R9 的 switch_lock 串行范围内。
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_util::{stream, StreamExt};
-
-use crate::acp::{AcpClient, AcpError};
+use crate::acp::AcpClient;
 use crate::agent::runtime::{
     status_after_connection_failure, AgentLifecycleStatus, ClientActivation, ClientEpoch,
     SessionContinuity,
 };
-use crate::agent_config::{AgentDef, ToolDictEntry};
+use crate::agent_config::AgentDef;
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::AppState;
 use crate::AppStateHandles;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum AgentConfigActivationState {
-    Stored,
-    PendingRestart,
-    Activated,
-}
-
-fn config_activation_state(
-    agent: &AgentDef,
-    active: bool,
-    status: Option<AgentLifecycleStatus>,
-    activated_fingerprint: Option<&str>,
-) -> AgentConfigActivationState {
-    let live = active
-        && matches!(
-            status,
-            Some(
-                AgentLifecycleStatus::Connected
-                    | AgentLifecycleStatus::Connecting
-                    | AgentLifecycleStatus::Reconnecting
-            )
-        );
-    if !live {
-        return AgentConfigActivationState::Stored;
-    }
-    match activated_fingerprint {
-        Some(fingerprint) if fingerprint == agent.runtime_fingerprint() => {
-            AgentConfigActivationState::Activated
-        }
-        Some(_) => AgentConfigActivationState::PendingRestart,
-        None => AgentConfigActivationState::Stored,
-    }
-}
 
 /// 连接 + 原子替换客户端（手动/自动重连/平台懒启动共用）。
 // clippy 2026-08-02：9 参为连接全参数（handles/runtime/window/agent/agent_id/start_status/
@@ -251,391 +213,8 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
     Ok(())
 }
 
-const SESSION_PROBE_CONCURRENCY: usize = 4;
-const SESSION_PROBE_HARD_CAP_SECS: u64 = 30;
-
-async fn probe_unknown_session_continuity(
-    runtime: &Arc<AgentRuntime>,
-    agent: &AgentDef,
-    candidates: Vec<crate::session::store::SessionProbeCandidate>,
-    target_generation: u64,
-) {
-    if candidates.is_empty() {
-        return;
-    }
-    // #98：探针与 session 建立/revive 消费同一份协商快照——不再用根级
-    // `loadSession` 裸路径判断（旧实现与标准嵌套 `sessionCapabilities.loadSession`
-    // 不一致：同一 Agent 可能在建立时被判支持 load、重连探针却判不支持）。
-    // 快照读取失败按 fail-closed 处理（等价不支持 load → 全部 detached 收敛）。
-    let load_supported = crate::acp::capture_negotiated_snapshot(runtime)
-        .await
-        .map(|snapshot| {
-            tracing::debug!(
-                target: "capability",
-                generation = snapshot.generation,
-                "continuity probe consumes the negotiated capability snapshot"
-            );
-            snapshot.load_supported()
-        })
-        .unwrap_or(false);
-    if !load_supported {
-        for candidate in candidates {
-            let _ = crate::session::store::mark_detached_if_current(
-                runtime,
-                &candidate.source,
-                &candidate.peri_id,
-                candidate.from_generation,
-                target_generation,
-                "session-load-capability-unavailable".into(),
-                false,
-                false,
-            );
-        }
-        return;
-    }
-
-    let budget = std::time::Duration::from_secs(
-        agent
-            .protocol()
-            .rpc_timeout()
-            .min(SESSION_PROBE_HARD_CAP_SECS),
-    );
-    let deadline = tokio::time::Instant::now() + budget;
-    let mode = agent.protocol().mcp_servers;
-    let results = stream::iter(candidates)
-        .map(|candidate| {
-            let runtime = runtime.clone();
-            async move {
-                let handles = runtime
-                    .acp
-                    .lock()
-                    .await
-                    .begin_replay_capture(&candidate.peri_id);
-                let handles = match handles {
-                    Ok(handles) => handles,
-                    Err(error) => return (candidate, Ok(Err(error))),
-                };
-                let probe = tokio::time::timeout_at(
-                    deadline,
-                    crate::acp::load_session_with_replay(
-                        handles,
-                        &candidate.peri_id,
-                        &candidate.cwd,
-                        Vec::new(),
-                        mode,
-                    ),
-                )
-                .await;
-                (candidate, probe)
-            }
-        })
-        .buffer_unordered(SESSION_PROBE_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await;
-
-    for (candidate, result) in results {
-        match result {
-            Ok(Ok((response, _replay))) => {
-                let returned_id = response
-                    .get("sessionId")
-                    .or_else(|| response.get("session_id"))
-                    .and_then(serde_json::Value::as_str);
-                if returned_id.is_some_and(|id| id != candidate.peri_id) {
-                    let _ = crate::session::store::mark_detached_if_current(
-                        runtime,
-                        &candidate.source,
-                        &candidate.peri_id,
-                        candidate.from_generation,
-                        target_generation,
-                        "session-probe-identity-mismatch".into(),
-                        false,
-                        false,
-                    );
-                } else {
-                    let _ = crate::session::store::mark_attached_if_current(
-                        runtime,
-                        &candidate.source,
-                        &candidate.peri_id,
-                        candidate.from_generation,
-                        target_generation,
-                    );
-                }
-            }
-            Ok(Err(error))
-                if error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::SessionMissing) =>
-            {
-                let _ = crate::session::store::mark_detached_if_current(
-                    runtime,
-                    &candidate.source,
-                    &candidate.peri_id,
-                    candidate.from_generation,
-                    target_generation,
-                    "remote-session-missing".into(),
-                    false,
-                    true,
-                );
-            }
-            Ok(Err(error)) => {
-                let retryable = error.is_retryable_transport_failure()
-                    || error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::Other);
-                let reason = match error.rpc_failure_details() {
-                    Some(details) => details
-                        .code
-                        .map(|code| format!("session-probe-rpc-{code}"))
-                        .unwrap_or_else(|| "session-probe-rpc-error".into()),
-                    None if matches!(error, AcpError::ConnectionClosed) => {
-                        "session-probe-connection-closed".into()
-                    }
-                    None => "session-probe-transport-error".into(),
-                };
-                let _ = crate::session::store::mark_detached_if_current(
-                    runtime,
-                    &candidate.source,
-                    &candidate.peri_id,
-                    candidate.from_generation,
-                    target_generation,
-                    reason,
-                    retryable,
-                    false,
-                );
-            }
-            Err(_) => {
-                let _ = crate::session::store::mark_detached_if_current(
-                    runtime,
-                    &candidate.source,
-                    &candidate.peri_id,
-                    candidate.from_generation,
-                    target_generation,
-                    "session-probe-timeout".into(),
-                    true,
-                    false,
-                );
-            }
-        }
-    }
-}
-
-pub(crate) fn agent_summary_payload(
-    id: &str,
-    agent: &AgentDef,
-    active_id: Option<&str>,
-    active_status: Option<AgentLifecycleStatus>,
-    crashed: bool,
-) -> serde_json::Value {
-    agent_summary_payload_with_activation(id, agent, active_id, active_status, crashed, None)
-}
-
-fn agent_summary_payload_with_activation(
-    id: &str,
-    agent: &AgentDef,
-    active_id: Option<&str>,
-    active_status: Option<AgentLifecycleStatus>,
-    crashed: bool,
-    activated_fingerprint: Option<&str>,
-) -> serde_json::Value {
-    // 方案 3（漂移修复）：统一状态推导与 agent_status_payload 一致——
-    // process_crashed 时有效状态为 crashed，available 只看有效状态是否 Connected。
-    // 修复前 crashed=true, available=true 的矛盾（前端状态灯误判可用）。
-    let effective_connected = !crashed && active_status == Some(AgentLifecycleStatus::Connected);
-    let available = active_id.is_some_and(|aid| id == aid) && effective_connected;
-    let active = active_id.is_some_and(|aid| id == aid);
-    let activation = config_activation_state(
-        agent,
-        active,
-        if crashed {
-            Some(AgentLifecycleStatus::Crashed)
-        } else {
-            active_status
-        },
-        activated_fingerprint,
-    );
-    serde_json::json!({
-        // list_agents 的 id 是 registry key，name 仅用于展示。
-        "id": id,
-        "name": agent.name,
-        "provider": agent.provider,
-        "transport": agent.transport,
-        // 施工文档 §4.2：结构化表单需要 exe/default，list_agents 直接输出，
-        // 不新增 get_agent_config 命令（避免 secret 出前端）。
-        "exe": agent.exe.clone(),
-        "args": agent.args.clone(),
-        "effectiveArgs": agent.command_args(),
-        "default": agent.default,
-        "crashed": crashed,
-        "available": available,
-        "active": active,
-        "cwd": agent.cwd.clone(),
-        "configActivationState": activation,
-    })
-}
-
-/// registry 是否包含指定 agent（switch 前置存在性检查用，不克隆）。
-fn agent_exists_in_registry(state: &AppState, agent_id: &str) -> bool {
-    state
-        .agents
-        .lock()
-        .map(|agents| agents.contains_key(agent_id))
-        .unwrap_or(false)
-}
-
-/// 从 registry 读取指定 agent 定义（克隆）；不存在报 unknown agent（多处命令共用）。
-fn agent_from_registry(state: &AppState, agent_id: &str) -> Result<AgentDef, PylonError> {
-    state
-        .agents
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(agent_id)
-        .cloned()
-        .ok_or_else(|| PylonError::Protocol(format!("unknown agent: {agent_id}")))
-}
-
-fn stored_agent_activation(state: &AppState, agent_id: &str) -> Option<AgentConfigActivationState> {
-    let agent = state.agents.lock().ok()?.get(agent_id)?.clone();
-    let active = state.active_agent.lock().ok()?.as_str() == agent_id;
-    let runtime = state.runtimes.get(agent_id);
-    let runtime_state = runtime
-        .as_ref()
-        .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.clone()));
-    Some(config_activation_state(
-        &agent,
-        active,
-        runtime_state.as_ref().map(|state| state.status),
-        runtime_state
-            .as_ref()
-            .and_then(|state| state.activated_config_fingerprint.as_deref()),
-    ))
-}
-
 #[tauri::command]
-pub(crate) async fn list_agents(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, PylonError> {
-    let active_id = state
-        .active_agent
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone();
-    let active_status = state
-        .active_runtime()
-        .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.status))
-        .unwrap_or(AgentLifecycleStatus::Disconnected);
-    Ok(state
-        .agents
-        .lock()
-        .map_err(|e| e.to_string())?
-        .iter()
-        .map(|(id, a)| {
-            // O11：crashed 感知——per-agent runtime 的 acp 是否已死
-            // （try_lock：读路径不等待 acp 锁；锁被占用时视为未崩溃）。
-            let runtime = state.runtimes.get(id);
-            let crashed = runtime.as_ref().is_some_and(|runtime| {
-                runtime
-                    .acp
-                    .try_lock()
-                    .map(|acp| acp.is_crashed())
-                    .unwrap_or(false)
-            });
-            let activated_fingerprint = runtime.as_ref().and_then(|runtime| {
-                runtime
-                    .agent_runtime
-                    .lock()
-                    .ok()
-                    .and_then(|state| state.activated_config_fingerprint.clone())
-            });
-            agent_summary_payload_with_activation(
-                id,
-                a,
-                Some(&active_id),
-                Some(active_status),
-                crashed,
-                activated_fingerprint.as_deref(),
-            )
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub(crate) async fn set_session_state(
-    owner: crate::session::DurableSessionOwner,
-    remote_session_id: Option<String>,
-    state: serde_json::Value,
-    app_state: tauri::State<'_, crate::AppState>,
-) -> Result<(), PylonError> {
-    // #317 批次二：错误经 PylonError::MessagePersistence 委托，wire code 逐字不变。
-    let service = crate::session::message_service_of(&app_state)?;
-    service
-        .set_session_state(owner, remote_session_id, state)
-        .await
-        .map_err(PylonError::from)
-}
-
-#[tauri::command]
-pub(crate) async fn list_tool_dictionary() -> Result<HashMap<String, Vec<ToolDictEntry>>, PylonError>
-{
-    Ok(crate::agent_config::load_tool_dictionary()?)
-}
-
-#[tauri::command]
-pub(crate) async fn validate_agents() -> Result<serde_json::Value, PylonError> {
-    let agents = crate::agent_config::load()?;
-    let default_agent_id = crate::agent_config::default_agent_id(&agents)?;
-    let summaries = agents
-        .iter()
-        .map(|(id, agent)| agent_summary_payload(id, agent, None, None, false))
-        .collect::<Vec<_>>();
-    Ok(serde_json::json!({
-        "valid": true,
-        "defaultAgentId": default_agent_id,
-        "agents": summaries,
-    }))
-}
-
-/// 清理被移除 agent 的幽灵 runtime（abort 通知任务 + kill + 从注册表移除）。
-/// reload/update/initialize 三条配置提交路径共用（同款清理语义）。
-async fn remove_stale_runtimes(inner: &AppState, removed: Vec<String>) {
-    for id in removed {
-        stop_agent_runtime(&id, inner).await;
-        inner.runtimes.remove(&id);
-    }
-}
-
-/// C7：停掉旧 runtime 的进程——先 abort notification_task（防 kill 触发的崩溃
-/// 通知被旧 dispatcher 处理并调度自动重连）再 kill acp，状态置 Disconnected。
-/// switch 换目标 / reload 删除 agent 共用。
-///
-/// #363-4：`pub(crate)` 开放给空闲回收 watcher（`session/expiry.rs`）——回收零会话的
-/// 闲置连接必须走**同一条** kill 路径（Job Object 杀进程树 + 归还实例预算槽），
-/// 不在回收侧另写一份清理。
-pub(crate) async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
-    if let Some(old) = inner.runtimes.get(agent_id) {
-        if let Ok(mut task) = old.notification_task.lock() {
-            if let Some(handle) = task.take() {
-                handle.abort();
-            }
-        }
-        // A4：清空流式通道注册——旧 runtime 的 channel 随 dispatcher 一起失效，
-        // 防 kill 后残留帧投递到已被前端废弃的通道对象。
-        old.clear_update_channels();
-        // #316：清空宿主终端注册表——旧 runtime 的 terminal/* 子进程不再跨代
-        // 泄漏（registry 本体随 runtime 保留复用，仅清终端）。
-        let cleared = old.terminal_registry.clear().await;
-        if cleared > 0 {
-            tracing::debug!(agent_id, cleared, "host terminals cleared on runtime stop");
-        }
-        let mut acp = old.acp.lock().await;
-        let _ = acp.kill();
-        drop(acp);
-        // B3：实例停止即归还全局预算配额（runtime 仍留在表中，槽位显式清空）。
-        if let Ok(mut slot) = old.instance_guard.lock() {
-            *slot = None;
-        }
-        if let Ok(mut state) = old.agent_runtime.lock() {
-            state.status = AgentLifecycleStatus::Disconnected;
-        }
-    }
-}
-
-#[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：switch_lock→agent_lifecycle 跨 await 串行是 LifecycleOp 状态机设计（模块文档）
 pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -712,6 +291,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：与 switch_agent 共用串行锁，防交叉杀进程
 pub(crate) async fn reconnect_agent(
     state: tauri::State<'_, AppState>,
     window: tauri::Window,
@@ -742,6 +322,7 @@ pub(crate) async fn reconnect_agent(
 }
 
 #[tauri::command]
+#[allow(clippy::await_holding_invalid_type)] // C7/R9：restart 属 LifecycleOp 统一序列，须与 switch/reconnect 串行
 pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -783,70 +364,48 @@ pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     }))
 }
 
-#[tauri::command]
-pub(crate) async fn agent_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    let inner = state.inner();
-    // P2-3：崩溃检测显式前置（acp 已死 → 记录 Crashed + lastError），
-    // 随后 getter 只读构造 payload——响应形状（status/lastError/recentError/error）
-    // 是前端契约，保持不变。
-    let runtime = inner.active_runtime();
-    AppStateHandles::detect_and_record_crashes(runtime.as_deref());
-    Ok(inner.agent_status_payload())
-}
-
-/// OBS-01/OBS-02 读取端：返回当前 active agent 的 ACP wire 记录快照。
-/// 记录器在 transport 边界持续写入（脱敏、环形 4096 条有界）；此前只有写没有读。
-/// 本命令把读取路径接通，供 devtools/诊断面板后续消费。
-#[tauri::command]
-pub(crate) async fn acp_wire_trace_snapshot(
-    state: tauri::State<'_, AppState>,
-    format: Option<String>,
-) -> Result<serde_json::Value, PylonError> {
-    let inner = state.inner();
-    let runtime = inner.active_runtime().ok_or(PylonError::NoActiveAgent)?;
-    let acp = runtime.acp.lock().await;
-    let trace = acp
-        .wire_trace()
-        .ok_or_else(|| PylonError::Acp("wire trace unavailable".to_string()))?;
-    if format.as_deref() == Some("jsonl") {
-        const MAX_BYTES: usize = 4 * 1024 * 1024;
-        return serde_json::to_value(trace.snapshot_jsonl(MAX_BYTES))
-            .map_err(|error| PylonError::Acp(format!("wire JSONL export failed: {error}")));
-    }
-    let records = trace.snapshot();
-    // #260-A2：单次持锁批量 correlate，替代逐条记录各取一次锁的旧路径；输出不变。
-    let ordinals: Vec<u64> = records.iter().map(|record| record.monotonic_seq).collect();
-    let correlations = trace.correlate_many(&ordinals);
-    let canonical_correlations: Vec<_> = records
-        .iter()
-        .zip(correlations)
-        .filter_map(|(record, correlation)| {
-            correlation.map(|correlation| {
-                serde_json::json!({
-                    "ordinal": record.monotonic_seq,
-                    "correlation": correlation,
-                })
-            })
-        })
-        .collect();
-    Ok(serde_json::json!({
-        "traceId": trace.trace_id(),
-        "length": trace.len(),
-        "records": records,
-        "canonicalCorrelations": canonical_correlations,
-    }))
-}
-
+pub(crate) mod budgets;
 pub(crate) mod config_cmds;
 pub(crate) mod connection_test;
 pub(crate) mod mcp;
+pub(crate) mod registry;
+pub(crate) mod session_probe;
+pub(crate) mod stop;
+pub(crate) mod summary;
 
-// 拆分后的命令经此 re-export：tauri::generate_handler 与测试的 `use super::*` 路径不变。
+// 拆分后的命令/纯函数块经此 re-export：tauri::generate_handler、兄弟子模块
+// `use super::*`（config_cmds/connection_test）、session/expiry 对
+// stop_agent_runtime 的调用与测试的 `use super::*` 路径全部不变。
 // `__cmd__*` 是 tauri::command 宏生成的隐藏项，必须一并 re-export 才能被 generate_handler 解析。
 #[cfg(test)]
-use crate::acp::{AgentConnectFailure, AgentConnectStage};
+use crate::acp::{AcpError, AgentConnectFailure, AgentConnectStage};
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__acp_wire_trace_snapshot;
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__agent_status;
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__list_agents;
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__list_tool_dictionary;
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__set_session_state;
+#[allow(unused_imports)]
+pub(crate) use registry::__cmd__validate_agents;
+pub(crate) use registry::__tauri_command_name_acp_wire_trace_snapshot;
+pub(crate) use registry::__tauri_command_name_agent_status;
+pub(crate) use registry::__tauri_command_name_list_agents;
+pub(crate) use registry::__tauri_command_name_list_tool_dictionary;
+pub(crate) use registry::__tauri_command_name_set_session_state;
+pub(crate) use registry::__tauri_command_name_validate_agents;
+pub(crate) use registry::{
+    acp_wire_trace_snapshot, agent_exists_in_registry, agent_from_registry, agent_status,
+    list_agents, list_tool_dictionary, set_session_state, validate_agents,
+};
+pub(crate) use session_probe::probe_unknown_session_continuity;
+pub(crate) use stop::{remove_stale_runtimes, stop_agent_runtime};
+// summary 块的 config_activation_state/AgentConfigActivationState 仅测试与块内消费。
+#[cfg(test)]
+use budgets::AGENT_VALIDATION_TIMEOUT_SECS;
 #[allow(unused_imports)]
 pub(crate) use config_cmds::__cmd__agent_config_snapshot;
 #[allow(unused_imports)]
@@ -869,9 +428,9 @@ pub(crate) use connection_test::__cmd__test_agent_connection;
 pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
 pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
 #[cfg(test)]
-use connection_test::connection_test_error_payload;
+use connection_test::candidate_stderr;
 #[cfg(test)]
-use connection_test::{candidate_stderr, AGENT_VALIDATION_TIMEOUT_SECS};
+use connection_test::connection_test_error_payload;
 pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
 #[allow(unused_imports)]
 pub(crate) use mcp::__cmd__get_mcp_servers;
@@ -880,6 +439,11 @@ pub(crate) use mcp::__cmd__set_mcp_servers;
 pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
 pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
 pub(crate) use mcp::{get_mcp_servers, load_mcp_persisted, set_mcp_servers};
+#[allow(unused_imports)]
+pub(crate) use summary::{
+    agent_summary_payload, agent_summary_payload_with_activation, config_activation_state,
+    stored_agent_activation, AgentConfigActivationState,
+};
 
 #[cfg(test)]
 mod tests {
@@ -987,7 +551,7 @@ mod tests {
             AgentConfigActivationState::Activated
         );
 
-        let mut changed = stored.clone();
+        let mut changed = stored;
         changed.args.push("--new-runtime-option".into());
         assert_eq!(
             config_activation_state(

@@ -4,6 +4,7 @@ import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand, isRe
 import type { RendererSlotContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { SolidWorkbenchContextValue } from '../SolidWorkbenchContext.solid.tsx'
+import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { normalizeWorkbenchMountInput } from '../workbenchContracts.ts'
 
 /** appearance 是每 tick 重建的对象；用稳定化键做浅比较（键排序 + 值稳定序列化）。 */
@@ -182,26 +183,40 @@ export function SolidRendererSlotHost(props: {
     lastAppliedUpdate = undefined
   })
 
+  // #409：appearance 稳定键按宿主快照引用缓存。appearanceSnapshot 是 Solid signal
+  // ——appearance 真变前引用稳定；流式 tick 里 node/payload 引用未变 + 宿主快照引用
+  // 未变 ⇒ 直接返回，稳定化键（全量排序 + JSON.stringify）只在真要 apply 时计算。
+  let appearanceGate: { host: WorkbenchAppearanceSnapshot; resolved: RenderAppearanceSnapshot; key: string } | undefined
+
   createEffect(() => {
     const node = props.node
     const hostAppearance = props.context.appearanceSnapshot()
-    const appearance: RenderAppearanceSnapshot = props.context.hostPort?.appearance.resolve?.({
-      kind: currentKind,
-      suiteId: props.context.activation?.suite.value.id ?? '',
-      slotId: currentEntry?.value.id ?? '',
-    }) ?? { ...hostAppearance } as RenderAppearanceSnapshot
     if (!surface || !surfaceMounted) return
     // P57 S2-R5 方案 A：nodeId/kind/payload 引用/streaming 全等时跳过 surface.update
     //（零契约变化：update 不被调用，revision 不推进给 surface）。payload 引用稳定性
     // 由显示链包装复用（toRenderMessage/toSolidMessage WeakMap）保证。appearance 是
     // 每 tick 重建的对象，用稳定化键比较。
-    const appearanceKey = appearanceStableKey(appearance)
-    if (lastAppliedUpdate !== undefined
+    const nodeUnchanged = lastAppliedUpdate !== undefined
       && lastAppliedUpdate.nodeId === node.nodeId
       && lastAppliedUpdate.kind === node.kind
       && lastAppliedUpdate.payload === node.payload
       && lastAppliedUpdate.streaming === node.streaming
-      && lastAppliedUpdate.appearanceKey === appearanceKey) return
+    if (nodeUnchanged && appearanceGate !== undefined && appearanceGate.host === hostAppearance) return
+    let appearance: RenderAppearanceSnapshot
+    let appearanceKey: string
+    if (appearanceGate !== undefined && appearanceGate.host === hostAppearance) {
+      appearance = appearanceGate.resolved
+      appearanceKey = appearanceGate.key
+    } else {
+      appearance = props.context.hostPort?.appearance.resolve?.({
+        kind: currentKind,
+        suiteId: props.context.activation?.suite.value.id ?? '',
+        slotId: currentEntry?.value.id ?? '',
+      }) ?? { ...hostAppearance } as RenderAppearanceSnapshot
+      appearanceKey = appearanceStableKey(appearance)
+      appearanceGate = { host: hostAppearance, resolved: appearance, key: appearanceKey }
+    }
+    if (nodeUnchanged && lastAppliedUpdate!.appearanceKey === appearanceKey) return
     const resolvedNode = currentKind === node.kind ? node : { ...node, kind: currentKind }
     try {
       surface.update(handle, resolvedNode, appearance)

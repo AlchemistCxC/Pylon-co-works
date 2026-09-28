@@ -27,8 +27,18 @@ class ResizeObserverMock {
   constructor(private readonly callback: ResizeObserverCallback) {
     ResizeObserverMock.instances.push(this)
   }
-  emit() {
-    this.callback([], this as unknown as ResizeObserver)
+  /** #409：entries 可省略（=空数组，不构成任何 target 信号）；给 target 时按 contentRect 构造 entry。 */
+  emit(entries: Array<{ target: HTMLElement; width?: number; height?: number }> = []) {
+    const resolved = entries.map(entry => ({
+      target: entry.target,
+      contentRect: {
+        width: entry.width ?? entry.target.getBoundingClientRect().width,
+        height: entry.height ?? entry.target.getBoundingClientRect().height,
+        top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}),
+      },
+      borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [],
+    }))
+    this.callback(resolved as unknown as ResizeObserverEntry[], this as unknown as ResizeObserver)
   }
   unobserve = vi.fn()
 }
@@ -470,11 +480,24 @@ describe('PlainMessageList', () => {
     expect(container.dataset.measurementRevision).toBe('1')
     expect(container.dataset.measurementReason).toBe('theme-changed')
 
-    observer.emit()
+    // #409 口径：首次回调整立宽度基线（真实 RO 挂载即发初始尺寸），不构成失效
+    observer.emit([{ target: container, width: 800, height: 500 }])
+    expect(container.dataset.measurementRevision).toBe('1')
+    expect(onContentResize).toHaveBeenCalledTimes(1)
+
+    // container **宽度**变化的 entry 才走 container-resized 全量失效
+    observer.emit([{ target: container, width: 760, height: 500 }])
     expect(container.dataset.measurementRevision).toBe('2')
     expect(container.dataset.measurementReason).toBe('container-resized')
     expect(observer.observe).toHaveBeenCalledTimes(3)
-    expect(onContentResize).toHaveBeenCalledTimes(1)
+
+    // 行条目 / container 纯高度变化（行增高的级联）不触发全量失效，onContentResize 照常
+    const before = container.dataset.measurementRevision
+    const rowNode = container.querySelector('[data-message-id]') as HTMLElement
+    observer.emit([{ target: rowNode, width: 760, height: 120 }])
+    observer.emit([{ target: container, width: 760, height: 620 }])
+    expect(container.dataset.measurementRevision).toBe(before)
+    expect(onContentResize).toHaveBeenCalledTimes(4)
 
     port!.destroy()
     port!.destroy()

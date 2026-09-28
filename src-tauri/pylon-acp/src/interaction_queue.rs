@@ -76,6 +76,10 @@ pub struct InteractionQueueEntry {
     /// 到达时的 client_generation（应答身份复核与 generation drain 用）。
     pub client_generation: u64,
     pub enqueued_at: Timestamp,
+    /// admit 时注入的 deadline（epoch-ms；#356 权限/私有交互对等同源同值）。
+    /// 判定语义钉住：超时当且仅当 `now_ms > deadline_ms`——与宿主 sweep 现行
+    /// `elapsed > 300_000ms` 判据逐 ms 等价（**非** `now >= deadline`）。
+    pub deadline_ms: Option<u64>,
     /// 事件 payload（与 `pylon:interaction` 事件同一份结构，冷挂载恢复直接复用）。
     pub event: serde_json::Value,
     pub state: InteractionEntryState,
@@ -202,6 +206,25 @@ impl InteractionQueue {
         self.drain_where(|_| true, reason)
     }
 
+    /// §4.3.3：deadline 判定机制归队列——终结所有 `now_ms > deadline_ms` 的
+    /// 条目（严格大于；deadline 恰好到达当刻**不**算超时，与宿主 sweep 现行
+    /// `elapsed_since(enqueued_at) > 300_000ms` 边界逐 ms 等价）。宿主以
+    /// admit 注入的 `deadline_ms` 为唯一判据来源；watcher 轮询粒度（5s）不变。
+    #[allow(
+        dead_code,
+        reason = "§4.3.3 机制先落；宿主 sweep 的 store 级判定合一归后续 Ledger 步骤"
+    )]
+    pub fn drain_expired(
+        &self,
+        now_ms: u64,
+        reason: InteractionTerminalReason,
+    ) -> Result<Vec<InteractionQueueEntry>, String> {
+        self.drain_where(
+            |entry| entry.deadline_ms.is_some_and(|deadline| now_ms > deadline),
+            reason,
+        )
+    }
+
     /// FIFO 快照（冷挂载/agent_status 投影用；Active 在前，保持队序）。
     pub fn snapshot(&self) -> Result<Vec<InteractionQueueEntry>, String> {
         let inner = self.inner.lock().map_err(|error| error.to_string())?;
@@ -289,6 +312,7 @@ mod tests {
             agent_id: "a1".into(),
             client_generation: 3,
             enqueued_at: Timestamp::now(),
+            deadline_ms: None,
             event: json!({"title": id}),
             state: InteractionEntryState::Waiting,
         }
@@ -436,5 +460,39 @@ mod tests {
         assert_eq!(items[1].get("state"), Some(&json!("waiting")));
         assert_eq!(items[0].pointer("/payload/title"), Some(&json!("1")));
         assert!(items[0].get("clientGeneration").is_some());
+    }
+
+    /// §4.3.3 边界钉住：drain_expired 只终结 `now > deadline` 的条目——deadline
+    /// 恰好到达当刻不算超时（与宿主 sweep `elapsed > 300_000ms` 判据逐 ms 等价，
+    /// 非 `now >= deadline`）；无 deadline 条目永不因过期被终结。
+    #[test]
+    fn drain_expired_uses_strict_after_deadline_boundary() {
+        let queue = InteractionQueue::default();
+        let mut at_deadline = entry("at-deadline", "approval");
+        at_deadline.deadline_ms = Some(1_000);
+        let mut past_deadline = entry("past-deadline", "approval");
+        past_deadline.deadline_ms = Some(999);
+        let mut no_deadline = entry("no-deadline", "approval");
+        no_deadline.deadline_ms = None;
+        let _ = queue.admit(at_deadline);
+        let _ = queue.admit(past_deadline);
+        let _ = queue.admit(no_deadline);
+        // now == deadline（1_000）：严格大于语义——deadline 1_000 的条目保留，
+        // 已过线者（999）被终结，无 deadline 者不受影响。
+        let drained = queue
+            .drain_expired(1_000, InteractionTerminalReason::TimedOut)
+            .unwrap();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].request_id, "past-deadline");
+        // now = deadline + 1：deadline 当刻幸存的条目此刻过线被终结，其余保留。
+        let drained = queue
+            .drain_expired(1_001, InteractionTerminalReason::TimedOut)
+            .unwrap();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].request_id, "at-deadline");
+        let snapshot = queue.snapshot().unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].request_id, "no-deadline");
+        assert_eq!(snapshot[0].state, InteractionEntryState::Active);
     }
 }

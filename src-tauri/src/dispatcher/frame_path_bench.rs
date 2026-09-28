@@ -7,7 +7,8 @@
 //! CI 会抖动），数字供开发记录对比「改造前/后」。
 //!
 //! 覆盖五个逐帧组件：
-//! 1. `apply_update_event_with_pet_policy`（dispatcher 逐帧总入口；#334 后为
+//! 1. `derive_session_reactions`（原 apply_update_event_with_pet_policy，#416 W2
+//!    改名收窄；dispatcher 逐帧总入口；#334 后为
 //!    `apply_session_update` 零拷贝直喂，含 reducer 应用 + delta 匹配）；
 //! 2. `AcpSessionState::apply`（pylon-acp reducer 单独，chunk 文本路径）；
 //! 3. `should_flush_batch`（P4 值比较 + #334 字段级借用 owner 比较的窗口归属决策）；
@@ -17,8 +18,9 @@
 use std::time::Instant;
 
 use super::canonical_flush::{should_flush_batch, PendingCanonicalPublish};
+use super::reactions::derive_session_reactions;
 use super::routing::RoutingInput;
-use super::{apply_update_event_with_pet_policy, SessionsLock};
+use super::SessionsLock;
 use crate::acp::{AcpKind, RawMessage, ReplayClassification};
 use crate::session::{DurableSessionOwner, SessionInfo};
 
@@ -88,7 +90,6 @@ fn bench_pending_batch(owner: DurableSessionOwner) -> Vec<PendingCanonicalPublis
                 variant: None,
                 mutate_session: true,
                 collect_response: true,
-                apply_pet: false,
                 persist_canonical: true,
                 publish: true,
             },
@@ -103,10 +104,11 @@ fn ns_per_iter(started: Instant, iterations: usize) -> u128 {
     started.elapsed().as_nanos() / iterations.max(1) as u128
 }
 
-/// 逐帧总入口：文本 chunk 走完整 `apply_update_event_with_pet_policy`
-///（含 json! 深拷贝喂食）。功能不变量：usage/tools 不被 chunk 触碰。
+/// 逐帧总入口：文本 chunk 走完整 `derive_session_reactions`
+///（原 apply_update_event_with_pet_policy，#416 W2 改名收窄，含零拷贝直喂）。
+/// 功能不变量：usage/tools 不被 chunk 触碰。
 #[test]
-fn frame_cost_apply_update_event_with_pet_policy_text_chunk() {
+fn frame_cost_derive_session_reactions_text_chunk() {
     const FRAMES: usize = 20_000;
     let mut session = bench_session();
     let update = serde_json::json!({
@@ -115,7 +117,7 @@ fn frame_cost_apply_update_event_with_pet_policy_text_chunk() {
     });
     let started = Instant::now();
     for _ in 0..FRAMES {
-        let events = apply_update_event_with_pet_policy(
+        let events = derive_session_reactions(
             &mut session,
             &update,
             Some(crate::acp::SessionUpdateVariant::AgentMessageChunk),
@@ -124,7 +126,7 @@ fn frame_cost_apply_update_event_with_pet_policy_text_chunk() {
         assert!(events.is_empty(), "text chunk 不产出宠物事件");
     }
     println!(
-        "frame-bench apply_update_event_with_pet_policy(text-chunk): {} ns/frame (N={FRAMES})",
+        "frame-bench derive_session_reactions(text-chunk): {} ns/frame (N={FRAMES})",
         ns_per_iter(started, FRAMES)
     );
 }

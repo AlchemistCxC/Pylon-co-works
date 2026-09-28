@@ -1,8 +1,11 @@
-//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
+//! ACP Client — spawn the agent as a child process and speak JSON-RPC over
+//! stdin/stdout through the official `agent-client-protocol` SDK (the only
+//! backend since A1c; the legacy hand-rolled transport was removed).
 //!
-//! Architecture: one dedicated reader thread dispatches messages by request_id
-//! to per-session channels. No lock contention between concurrent sessions.
-//! stderr is drained in a background thread to prevent pipe buffer deadlock.
+//! Architecture: the SDK engine's untyped dispatch classifies inbound frames
+//! once and feeds a reliable inbound relay (bounded updates/control inboxes +
+//! bounded spill, issue #99). stderr is drained in a background task to
+//! prevent pipe buffer deadlock.
 
 pub mod adapter;
 mod capabilities;

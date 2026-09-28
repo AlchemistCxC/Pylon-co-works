@@ -1,6 +1,6 @@
 [package]
 name = "pylon-compute"
-version = "0.3.1-FMF"
+version = "0.3.2-EFF"
 edition = "2021"
 description = "Pylon 前端计算核（Rust/WASM）——issue #220"
 publish = false
@@ -38,3 +38,7 @@ wasm-opt = [
     "--enable-mutable-globals",
     "--enable-extended-const",
 ]
+
+# #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
+[lints]
+workspace = true

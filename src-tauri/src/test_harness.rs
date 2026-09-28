@@ -410,7 +410,7 @@ impl TestHarness {
     pub fn wire_gateway_ingest(&self) {
         use crate::session::send_prompt_core;
         let app_handle = self.app.handle().clone();
-        let window = self.window.as_ref().window().clone();
+        let window = self.window.as_ref().window();
         let state = self.app.state::<crate::AppState>();
         state.gateway.set_ingest_handler(Arc::new(
             move |resolved: &crate::gateway::ResolvedIngest| {

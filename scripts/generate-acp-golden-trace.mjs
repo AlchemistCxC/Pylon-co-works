@@ -4,6 +4,10 @@
 // 用法：
 //   node scripts/generate-acp-golden-trace.mjs           # 重新生成基线并写入 src-tauri/tests/golden-traces/
 //   node scripts/generate-acp-golden-trace.mjs --check   # 只校验：连跑两遍须逐字节一致，且与已提交基线一致
+//   … --check --keep-dirs=<父目录>                        # 同上，但把两轮运行的目录留在该父目录下不删，
+//                                                        # 并在 stdout 的 summary 里回报 runs[{dir,elapsedMs,testMs}]
+//                                                        # 供 check-acp-shadow-parity 复用（#401：一份 trace 两用，
+//                                                        # 省掉 parity 自己再跑两遍 fixture）。清理责任归调用方。
 //
 // 生成器本体是 test-only 的 Rust 测试（src-tauri/src/acp/golden_trace_tests.rs），
 // 由 PYLON_GOLDEN_TRACE_DIR 环境变量启用；本脚本负责两次运行的确定性比对与落盘。
@@ -28,6 +32,11 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const crateDir = resolve(root, "src-tauri");
 const baselineDir = resolve(crateDir, "tests/golden-traces");
 const checkOnly = process.argv.includes("--check");
+// #401：--keep-dirs=<父目录> 时保留两轮运行目录（见文件头用法），调用方负责清理。
+const keepDirsArg = process.argv.find((arg) => arg.startsWith("--keep-dirs="));
+const keepDirsRoot = keepDirsArg ? resolve(keepDirsArg.slice("--keep-dirs=".length)) : null;
+/** 本轮运行的自报读数（elapsedMs = cargo 进程墙钟；testMs = cargo 自报的测试本体耗时）。 */
+const runs = [];
 const SCENARIOS = [
   "initialize",
   "new_load",
@@ -42,8 +51,16 @@ const SCENARIOS = [
   "wrapper_codex",
 ];
 
+/** fixture 的**测试本体**耗时（cargo 自报的 `finished in X.XXs`，取最后一次）。 */
+function reportedTestMs(stdout) {
+  const matches = [...String(stdout).matchAll(/finished in ([0-9.]+)s/g)];
+  if (matches.length === 0) return Number.NaN;
+  return Number.parseFloat(matches[matches.length - 1][1]) * 1000;
+}
+
 function generateInto(dir) {
   rmSync(dir, { recursive: true, force: true });
+  const started = process.hrtime.bigint();
   const result = spawnSync(
     "cargo",
     [
@@ -66,6 +83,7 @@ function generateInto(dir) {
       shell: true,
     },
   );
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
   if (result.status !== 0) {
     console.error(result.stdout ?? "");
     console.error(result.stderr ?? "");
@@ -79,6 +97,7 @@ function generateInto(dir) {
       throw new Error(`generated ${scenario}.jsonl is empty`);
     }
   }
+  runs.push({ dir, elapsedMs, testMs: reportedTestMs(result.stdout) });
 }
 
 /** 比较前统一换行：
@@ -109,8 +128,8 @@ function compareDirs(left, right, label) {
   return leftFiles;
 }
 
-const runA = mkdtempSync(resolve(tmpdir(), "pylon-golden-a-"));
-const runB = mkdtempSync(resolve(tmpdir(), "pylon-golden-b-"));
+const runA = mkdtempSync(resolve(keepDirsRoot ?? tmpdir(), "pylon-golden-a-"));
+const runB = mkdtempSync(resolve(keepDirsRoot ?? tmpdir(), "pylon-golden-b-"));
 let files;
 try {
   generateInto(runA);
@@ -130,8 +149,11 @@ try {
       cpSync(resolve(runA, name), resolve(baselineDir, name));
   }
 } finally {
-  rmSync(runA, { recursive: true, force: true });
-  rmSync(runB, { recursive: true, force: true });
+  // #401：--keep-dirs 交给调用方（check-acp-shadow-parity）复用与清理；本脚本只在未指定时自清。
+  if (!keepDirsRoot) {
+    rmSync(runA, { recursive: true, force: true });
+    rmSync(runB, { recursive: true, force: true });
+  }
 }
 
 const summary = {
@@ -139,6 +161,12 @@ const summary = {
   scenarios: files.length,
   baselineDir: relative(root, baselineDir).replaceAll("\\", "/"),
   deterministic: true,
+  dirsKept: Boolean(keepDirsRoot),
+  runs: runs.map(({ dir, elapsedMs, testMs }) => ({
+    dir,
+    elapsedMs: Math.round(elapsedMs),
+    testMs: Number.isFinite(testMs) ? Math.round(testMs) : null,
+  })),
 };
 process.stdout.write(`${JSON.stringify(summary, null, 2)}
 `);

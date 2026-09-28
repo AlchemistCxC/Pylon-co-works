@@ -794,7 +794,7 @@ gateway:
     fn adapter_for_source_resolves_registered_adapter_by_prefix() {
         let core = GatewayCore::new();
         let qq = FakeAdapter::new("qq", 4000);
-        core.register(qq.clone()).unwrap();
+        core.register(qq).unwrap();
         assert!(
             core.adapter_for_source("qq:group:123").is_some(),
             "注册适配器前缀命中必须返回适配器"

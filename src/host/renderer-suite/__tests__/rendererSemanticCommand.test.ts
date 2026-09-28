@@ -20,6 +20,8 @@ function makeHost() {
       copy: vi.fn().mockResolvedValue({ ok: true, value: null }),
       setConfigOption: vi.fn().mockResolvedValue({ ok: true, value: null }),
     },
+    // #394：assist.accept/reject 要按文档里的预测实例身份消费（见下条用例）。
+    document: { getSnapshot: () => ({ assist: { prediction: { eventId: 'wb-prediction-1', placeholder: '建议文本' }, files: [] } }) },
     diagnostics,
   }
   return { host, diagnostics }
@@ -93,6 +95,8 @@ describe('renderer semantic command routing (wiring audit regression)', () => {
     await run(assistHost, { type: 'assist.accept', payload: { text: '建议文本' } })
     await run(assistHost, { type: 'assist.reject' })
     expect(draft.set).toHaveBeenCalledWith('draft', '建议文本')
+    // #394：接受/忽略都消费当前预测实例——此前「忽略」只留诊断，卡片原样横在会话流里。
+    expect(draft.set).toHaveBeenCalledWith('assist-prediction-consumed', 'wb-prediction-1')
     expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ code: 'assist.accepted', phase: 'action' }))
     expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ code: 'assist.rejected', phase: 'action' }))
   })

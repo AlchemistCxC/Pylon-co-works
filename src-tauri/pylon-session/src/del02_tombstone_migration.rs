@@ -1,11 +1,12 @@
-//! DEL-02：现有 tombstone 升级为 owner/deletion state（方案书 §5.12、任务表 DEL-02）。
+//! DEL-02：tombstone 存储形态守护测试（origin：方案书 §5.12、任务表 DEL-02）。
 //!
-//! 兼容迁移（v6→v7）：deleted_sessions 增列 owner_key/state/deletion_revision/reason；
-//! 旧行兼容为 state='deleted'；owner_key 优先自 canonical_events 反查（同 local_session_id
-//! 最新事件 profile/agent），无则标记 legacy scope；v12 原表升级为 owner_key 主键并保留
-//! v11 forensic archive，不另建活动 tombstone。
+//! 头注释更正（W3 重构批次）：本文件早期头注释为「v6→v7 兼容迁移升级」叙事
+//! （deleted_sessions 增列 / 旧行兼容 / v11 forensic archive 等），该逐版本迁移链已被
+//! ADR-0008「老数据全丢重建」取代（#155 T2，v15 起）——v6 旧库不再原位升版，而是
+//! 随重建丢弃旧墓碑与历史行，active schema 以当前版本全新形态重建。下方测试体已随之
+//! 改写为「重建丢弃」characterization；本文件保留为该行为与 tombstone 写入契约的守护。
 //!
-//! DEL-01 审计基线随本迁移演进（列/索引/版本断言更新）——审计→迁移顺序门禁的落地。
+//! DEL-01 审计基线随 schema 版本演进（列/索引/版本断言更新）——审计→迁移顺序门禁的落地。
 
 use rusqlite::Connection;
 
