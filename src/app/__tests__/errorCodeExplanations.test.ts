@@ -73,6 +73,7 @@ const EXPECTED_CODES = [
   'config_backup_error',
   'config_lock_busy',
   'config_active_agent_protected',
+  'config_verification_required',
   'config_not_applied',
   'acp_error',
   'connect_error',

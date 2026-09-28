@@ -322,8 +322,15 @@ export function createAgentClient(transport: ClientTransport) {
      *  「重新探测」必须真的重跑探测，否则用户点了没反应（#325）。 */
     detectAgentRuntimes: (detectorIds: readonly string[], force = false): Promise<AgentDetectionReport> =>
       transport.invoke('detect_agent_runtimes', { detectorIds, force }).then(normalizeAgentDetectionReport),
-    testAgentCandidate: (agentId: string, agent: { name: string; provider: string; transport: string; exe: string; args: string[] }): Promise<AgentConnectionTestResult> =>
-      transport.invoke('test_agent_candidate', { agentId, agent }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
+    /** 施工文档 §4.5：隔离连接测试（不改 active/runtime）。
+     *  `agentYaml`（#422）：scope=agent 的 YAML 整块入口——后端按整块替换语义解析
+     *  测试并签发保存凭证；省略与 JSON def 二选一（同时传以 YAML 为准）。 */
+    testAgentCandidate: (
+      agentId: string,
+      agent: { name: string; provider: string; transport: string; exe: string; args: string[] },
+      agentYaml?: string,
+    ): Promise<AgentConnectionTestResult> =>
+      transport.invoke('test_agent_candidate', { agentId, agent, agentYaml }).then(raw => normalizeAgentCandidateValidationResult(raw, agentId)),
     /** OBS-01/02 读取端：当前 active agent 的 ACP wire 记录快照（脱敏、有界）。 */
     wireTraceSnapshot: (): Promise<unknown> => transport.invoke('acp_wire_trace_snapshot'),
     /** 只读 ACP 能力目录：共享 baseline 与本次运行实际 adapter 注册状态分离。 */

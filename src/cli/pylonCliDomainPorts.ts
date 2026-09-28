@@ -19,7 +19,7 @@ import { getHookRuntime, getPluginServiceRegistry } from '../plugin-runtime/runt
 import { enabledHookIds, runSessionNotificationHook, runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
 import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
-import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
+import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WireInteractionEntry, WorkspaceRegistryControlPort } from './pylonCliService.ts'
 import { normalizeWireInteractionEntry } from './pylonCliService.ts'
 import { requestNewSession } from '../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
@@ -313,7 +313,7 @@ export function createCliApprovalControlPort(): ApprovalControlPort {
 export function createCliInteractionControlPort(): InteractionControlPort {
   return {
     async list() {
-      const wire = await invoke<{ items: unknown[] }>('interaction_list')
+      const wire = await invoke<{ items: WireInteractionEntry[] }>('interaction_list')
       const items = (wire.items ?? [])
         .map(normalizeWireInteractionEntry)
         .filter((item): item is InteractionItem => item !== null)

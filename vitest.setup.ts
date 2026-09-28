@@ -61,6 +61,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
   'src/components/chat/__tests__/messageRenderBoundary.test.tsx',
   'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
+  // #422：凭证门禁错误路径（config_verification_required / 连接测试失败）刻意触发
+  // reportRuntimeError 的 console.error——与上面 AgentRuntimePanel 同族的预期契约。
+  'src/components/settings/__tests__/AgentConfigEditor.test.tsx',
   'src/components/settings/__tests__/GatewayRiskPanel.test.tsx',
   'src/components/settings/__tests__/PluginManager.test.tsx',
   'src/components/__tests__/ErrorCenter.test.tsx',

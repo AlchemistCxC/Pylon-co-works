@@ -40,6 +40,10 @@ pub enum ConfigError {
     /// 候选配置删除当前 active agent（保护语义，与 reload_agents 一致）。
     #[error("config_active_agent_protected: {0}")]
     ActiveAgentProtected(String),
+    /// #422：保存变更了 agent 的 launch 指纹，但没有该指纹通过连接测试的凭证
+    /// （fail-closed 门禁；先 test_agent_candidate 成功一次再保存）。
+    #[error("config_verification_required: {0}")]
+    VerificationRequired(String),
     /// 磁盘已提交但内存域 reload 未完成（禁止返回成功）。
     #[error("config_not_applied: {0}")]
     NotApplied(String),
@@ -59,6 +63,7 @@ impl ConfigError {
             Self::Backup(_) => "config_backup_error",
             Self::LockBusy(_) => "config_lock_busy",
             Self::ActiveAgentProtected(_) => "config_active_agent_protected",
+            Self::VerificationRequired(_) => "config_verification_required",
             Self::NotApplied(_) => "config_not_applied",
         }
     }

@@ -179,6 +179,19 @@ pub(crate) async fn update_agents_config_via(
         let agents = inner.agents.lock().map_err(|e| e.to_string())?;
         removed_agents_guard(&agents, &new_agents, &active)?
     };
+    // 4.5 #422 连接测试凭证门禁（写盘前，fail-closed）：编辑类 scope 的候选若
+    // 变更了目标 agent 的 launch 指纹，必须持有该指纹通过 test_agent_candidate
+    // 的凭证（B1 前端三道门的后端强制面——绕过 UI 的 CLI/直连 IPC 同样受限）。
+    {
+        let agents = inner.agents.lock().map_err(|e| e.to_string())?;
+        enforce_connection_voucher(
+            &scope,
+            agent_id.as_deref(),
+            &agents,
+            &new_agents,
+            &inner.verified_agent_fingerprints,
+        )?;
+    }
     // 5. 原子写盘（替换语义）。先落盘、后提交内存：写盘失败时 registry 不变
     // （施工文档 §2.1 必测失败链）。
     let write_content = candidate.clone();
@@ -372,6 +385,52 @@ pub(crate) async fn initialize_agents_config(
     }))
 }
 
+/// #422：连接测试凭证门禁（纯函数，写盘前只读判定）。
+///
+/// 只作用于编辑既有 agent 的 scope（`agent` YAML 整块 / `agent_fields` 结构化
+/// patch——`apply_agent_patch`/`apply_agent_field_patch` 已保证目标 agent 必在
+/// 当前配置中）。判据 = [`AgentDef::runtime_fingerprint`]（launch 投影，排除
+/// name/default 显示字段）：
+///
+/// - 候选指纹 == 当前指纹：放行（未变更——只改 name/default 的保存不引入新
+///   launch 风险，不强制在线探测）；
+/// - 候选指纹 != 当前指纹：需该指纹经 `test_agent_candidate` 成功握手的凭证，
+///   无则 [`ConfigError::VerificationRequired`]（fail-closed）。
+///
+/// create/delete/gateway scope 不校验：create 的「未验证导入」是产品功能
+/// （#425 件5），delete/gateway 不改 launch 指纹。
+fn enforce_connection_voucher(
+    scope: &str,
+    agent_id: Option<&str>,
+    current: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
+    candidate: &std::collections::HashMap<String, crate::agent_config::AgentDef>,
+    vouchers: &super::verification::VerificationVouchers,
+) -> Result<(), crate::agent_config::ConfigError> {
+    use crate::agent_config::ConfigError;
+    if scope != "agent" && scope != "agent_fields" {
+        return Ok(());
+    }
+    let Some(agent_id) = agent_id else {
+        return Ok(()); // 编辑类 scope 缺 agentId 在候选生成阶段已被拒
+    };
+    let Some(next) = candidate.get(agent_id) else {
+        return Ok(()); // 候选不含目标 agent = 无 launch 定义可校验（防御）
+    };
+    let next_fingerprint = next.runtime_fingerprint();
+    if current
+        .get(agent_id)
+        .is_some_and(|current| current.runtime_fingerprint() == next_fingerprint)
+    {
+        return Ok(());
+    }
+    if vouchers.contains(agent_id, &next_fingerprint) {
+        return Ok(());
+    }
+    Err(ConfigError::VerificationRequired(format!(
+        "agent {agent_id} 的 launch 配置有变更，保存前需先对该配置通过一次连接测试（test_agent_candidate）"
+    )))
+}
+
 /// scope 分派 → 候选文档（纯函数：不经 env / 文件系统，可直接单测）。
 ///
 /// 只做"读当前原文 → 造候选"；双域校验、active 保护、写盘与内存提交仍在调用方，
@@ -534,6 +593,88 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "无变化时候选不产生清理名单"
+        );
+    }
+
+    /// #422：构造 args 变更后的 keep 候选（其余字段与 TWO_AGENTS 中 keep 一致）。
+    fn keep_with_args(
+        args: &[&str],
+    ) -> std::collections::HashMap<String, crate::agent_config::AgentDef> {
+        let mut candidate = parsed(TWO_AGENTS);
+        if let Some(keep) = candidate.get_mut("keep") {
+            keep.args = args.iter().map(|value| value.to_string()).collect();
+        }
+        candidate
+    }
+
+    #[test]
+    fn voucher_gate_binds_only_edit_scopes_and_only_changed_fingerprints() {
+        use crate::agent_config::ConfigError;
+        let vouchers = super::super::verification::VerificationVouchers::new();
+        let current = parsed(TWO_AGENTS);
+
+        // 非 launch 字段（name）变更：指纹未变，无凭证放行——不强制在线探测。
+        let mut renamed = current.clone();
+        if let Some(keep) = renamed.get_mut("keep") {
+            keep.name = "renamed".to_string();
+        }
+        assert!(
+            enforce_connection_voucher("agent", Some("keep"), &current, &renamed, &vouchers)
+                .is_ok(),
+            "指纹未变更的保存无需凭证"
+        );
+
+        // 编辑 scope + 指纹变更 + 无凭证 → fail-closed 拒绝。
+        let changed = keep_with_args(&["--scenario", "alive"]);
+        let error =
+            enforce_connection_voucher("agent_fields", Some("keep"), &current, &changed, &vouchers)
+                .expect_err("指纹变更且无凭证必须拒绝");
+        assert!(
+            matches!(error, ConfigError::VerificationRequired(_)),
+            "{error}"
+        );
+
+        // 非编辑 scope（create/delete/gateway 不改 launch 语义或属产品豁免）不受门禁。
+        assert!(enforce_connection_voucher(
+            "agent_create",
+            Some("fresh"),
+            &current,
+            &changed,
+            &vouchers
+        )
+        .is_ok());
+        assert!(enforce_connection_voucher(
+            "agent_delete",
+            Some("doomed"),
+            &current,
+            &changed,
+            &vouchers
+        )
+        .is_ok());
+        assert!(enforce_connection_voucher("gateway", None, &current, &changed, &vouchers).is_ok());
+
+        // 持有候选指纹凭证 → 放行（按候选 def 指纹记账）。
+        vouchers.record("keep", &changed["keep"].runtime_fingerprint());
+        assert!(
+            enforce_connection_voucher("agent_fields", Some("keep"), &current, &changed, &vouchers)
+                .is_ok(),
+            "凭证对应候选指纹时必须放行"
+        );
+    }
+
+    #[test]
+    fn voucher_gate_is_defensive_when_agent_id_or_entry_missing() {
+        let vouchers = super::super::verification::VerificationVouchers::new();
+        let current = parsed(TWO_AGENTS);
+        let changed = keep_with_args(&["--flag"]);
+        assert!(
+            enforce_connection_voucher("agent", None, &current, &changed, &vouchers).is_ok(),
+            "缺 agentId 在候选生成阶段已被拒，此处防御性放行"
+        );
+        assert!(
+            enforce_connection_voucher("agent", Some("ghost"), &current, &changed, &vouchers)
+                .is_ok(),
+            "候选不含目标 agent = 无 launch 定义可校验（防御性放行）"
         );
     }
 }

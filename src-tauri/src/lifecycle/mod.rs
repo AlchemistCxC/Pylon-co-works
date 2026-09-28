@@ -413,6 +413,7 @@ pub(crate) mod registry;
 pub(crate) mod session_probe;
 pub(crate) mod stop;
 pub(crate) mod summary;
+pub(crate) mod verification;
 
 // 拆分后的命令/纯函数块经此 re-export：tauri::generate_handler、兄弟子模块
 // `use super::*`（config_cmds/connection_test）、session/expiry 对
@@ -1249,6 +1250,7 @@ mod tests {
             app.state::<AppState>(),
             "candidate-native-failure".to_string(),
             agent,
+            None,
         )
         .await
         .expect("candidate validation should return a diagnostic payload");
@@ -1334,6 +1336,269 @@ mod tests {
 
         std::fs::remove_dir_all(&backup_blocker).ok();
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── #422：B1 保存门禁后端化——连接测试凭证行为测试 ──
+
+    /// 测试用 def 字面量（字段全列 = parse_agents 反序列化缺省形态，
+    /// 保证与候选侧指纹可比；exe 建议单组件或绝对路径，避开 resolve 差异）。
+    fn voucher_test_def(name: &str, exe: &str, args: &[&str]) -> AgentDef {
+        AgentDef {
+            name: name.to_string(),
+            provider: None,
+            transport: "subprocess".to_string(),
+            exe: exe.to_string(),
+            args: args.iter().map(|value| value.to_string()).collect(),
+            cwd: None,
+            env: std::collections::HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
+        }
+    }
+
+    /// #422 夹具：临时 agents.yaml（与 registry 同初态）+ mock app。
+    fn voucher_gate_setup(
+        label: &str,
+        yaml: &str,
+        agent: AgentDef,
+    ) -> (
+        tauri::App<tauri::test::MockRuntime>,
+        std::path::PathBuf,
+        String,
+    ) {
+        let dir = crate::test_utils::unique_temp(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let revision = crate::agent_config::config_revision_for_bytes(yaml.as_bytes());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent(&agent.name)
+            .with_agent(agent)
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        (app, path, revision)
+    }
+
+    async fn voucher_gate_update(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        scope: &str,
+        agent_id: Option<&str>,
+        config: serde_json::Value,
+        revision: &str,
+        path: std::path::PathBuf,
+    ) -> Result<serde_json::Value, PylonError> {
+        config_cmds::update_agents_config_via(
+            app.state::<AppState>(),
+            scope.to_string(),
+            agent_id.map(str::to_string),
+            config,
+            Some(revision.to_string()),
+            Some(path),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn update_agents_config_rejects_launch_change_without_voucher() {
+        let yaml =
+            "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n";
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-reject",
+            yaml,
+            voucher_test_def("keep", "keep-agent", &[]),
+        );
+        let error = voucher_gate_update(
+            &app,
+            "agent_fields",
+            Some("keep"),
+            serde_json::json!({ "exe": "renamed-agent" }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect_err("launch 指纹变更且无凭证必须 fail-closed 拒绝");
+        assert!(
+            matches!(
+                error,
+                PylonError::Config(crate::agent_config::ConfigError::VerificationRequired(_))
+            ),
+            "错误必须是 VerificationRequired: {error}"
+        );
+        // fail-closed：写盘前拦截，磁盘与内存 registry 均不变。
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), yaml);
+        let agents = app.state::<AppState>().inner().agents.lock().unwrap();
+        assert_eq!(
+            agents.get("keep").map(|def| def.exe.as_str()),
+            Some("keep-agent")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_agents_config_allows_launch_change_with_voucher() {
+        let yaml =
+            "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n";
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-allow",
+            yaml,
+            voucher_test_def("keep", "keep-agent", &[]),
+        );
+        let next = voucher_test_def("keep", "renamed-agent", &[]);
+        app.state::<AppState>()
+            .inner()
+            .verified_agent_fingerprints
+            .record("keep", &next.runtime_fingerprint());
+        let result = voucher_gate_update(
+            &app,
+            "agent_fields",
+            Some("keep"),
+            serde_json::json!({ "exe": "renamed-agent" }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect("持有该指纹凭证的保存必须放行");
+        assert_eq!(result["applied"], true);
+        let disk = std::fs::read_to_string(&path).unwrap();
+        assert!(disk.contains("renamed-agent"), "磁盘必须写入新 exe：{disk}");
+        let agents = app.state::<AppState>().inner().agents.lock().unwrap();
+        assert_eq!(
+            agents.get("keep").map(|def| def.exe.as_str()),
+            Some("renamed-agent"),
+            "内存 registry 必须提交"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_agents_config_rejects_stale_voucher_for_changed_fingerprint() {
+        let yaml =
+            "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n";
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-stale",
+            yaml,
+            voucher_test_def("keep", "keep-agent", &[]),
+        );
+        // 凭证对应指纹 A（exe=renamed-agent），保存提交指纹 B（exe=other-agent）→ 拒。
+        let verified = voucher_test_def("keep", "renamed-agent", &[]);
+        app.state::<AppState>()
+            .inner()
+            .verified_agent_fingerprints
+            .record("keep", &verified.runtime_fingerprint());
+        let error = voucher_gate_update(
+            &app,
+            "agent_fields",
+            Some("keep"),
+            serde_json::json!({ "exe": "other-agent" }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect_err("指纹变更后旧凭证必须失效");
+        assert!(
+            matches!(
+                error,
+                PylonError::Config(crate::agent_config::ConfigError::VerificationRequired(_))
+            ),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), yaml);
+    }
+
+    #[tokio::test]
+    async fn update_agents_config_allows_unchanged_fingerprint_without_voucher() {
+        // 只改显示字段 name（不参与 runtime_fingerprint）：无需凭证——
+        // 「指纹变更才要求新凭证，未变更沿用」（issue #422 约束）。
+        let yaml =
+            "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n";
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-unchanged",
+            yaml,
+            voucher_test_def("keep", "keep-agent", &[]),
+        );
+        voucher_gate_update(
+            &app,
+            "agent_fields",
+            Some("keep"),
+            serde_json::json!({ "name": "Renamed" }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect("指纹未变更的保存不得强制在线探测");
+        let disk = std::fs::read_to_string(&path).unwrap();
+        assert!(disk.contains("Renamed"), "{disk}");
+    }
+
+    #[tokio::test]
+    async fn agent_create_scope_does_not_require_voucher() {
+        // 「未验证导入」是产品功能（#425 件5）：create 路径不走凭证门禁。
+        let yaml =
+            "agents:\n  keep:\n    name: keep\n    transport: subprocess\n    exe: keep-agent\n";
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-create",
+            yaml,
+            voucher_test_def("keep", "keep-agent", &[]),
+        );
+        voucher_gate_update(
+            &app,
+            "agent_create",
+            Some("fresh"),
+            serde_json::json!({ "name": "fresh", "transport": "subprocess", "exe": "fresh-agent" }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect("agent_create 无凭证照常（既有行为）");
+        let agents = app.state::<AppState>().inner().agents.lock().unwrap();
+        assert!(agents.contains_key("fresh"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_candidate_alive_signs_voucher_consumed_by_update() {
+        // 端到端：真实握手（pylon-fake-agent alive 场景）成功 → 签发凭证 →
+        // 同指纹候选的 agent_fields 保存消费凭证放行。
+        let fake_bin = crate::test_utils::fake_agent_bin()
+            .to_string_lossy()
+            .into_owned();
+        let yaml = format!(
+            "agents:\n  keepalive:\n    name: keepalive\n    transport: subprocess\n    exe: '{fake_bin}'\n"
+        );
+        let (app, path, revision) = voucher_gate_setup(
+            "voucher-e2e",
+            &yaml,
+            voucher_test_def("keepalive", &fake_bin, &[]),
+        );
+        // 1) 候选测试：args 变更为 --scenario alive（结构化路径，签发时与
+        //    registry base 合成 = 保存候选同构）。
+        let tested = voucher_test_def("keepalive", &fake_bin, &["--scenario", "alive"]);
+        let payload = connection_test::test_agent_candidate(
+            app.state::<AppState>(),
+            "keepalive".to_string(),
+            tested,
+            None,
+        )
+        .await
+        .expect("candidate validation must return a payload");
+        assert_eq!(payload["ok"], true, "alive 场景握手必须成功：{payload}");
+        // 2) 消费凭证：patch 同 args → 候选指纹与凭证一致 → 放行。
+        voucher_gate_update(
+            &app,
+            "agent_fields",
+            Some("keepalive"),
+            serde_json::json!({ "args": ["--scenario", "alive"] }),
+            &revision,
+            path.clone(),
+        )
+        .await
+        .expect("真实握手签发的凭证必须能被同指纹保存消费");
+        let disk = std::fs::read_to_string(&path).unwrap();
+        assert!(disk.contains("--scenario"), "磁盘必须写入新 args：{disk}");
     }
 
     #[tokio::test]
