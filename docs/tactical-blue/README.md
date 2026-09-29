@@ -15,7 +15,7 @@
 - 发现旧有 CLI 权限应答契约错误：前端传 `permission`，后端只接受 `approval`，返回 `[object Object]`，请求仍挂起。此问题单独报告，未混入样式提交。不能据此推断 GUI 权限按钮同样失败。
 - 浏览器预览使用项目自带 IPC mock；截图中的 Agent/日志不证明实际供应商连接。原生验证用本目录 fixture，不调用真实模型或工具。
 
-完整视觉验收见项目根目录 `design-qa.md`。本目录 screenshots 是实际浏览器截图，不是效果图。
+完整视觉验收见本目录 [`design-qa.md`](design-qa.md)（#457 落位，原散落仓库根目录）。本目录 screenshots 是实际浏览器截图，不是效果图。
 
 ## 可重复的原生 ACP 检查
 
