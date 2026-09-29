@@ -293,7 +293,17 @@ pub(super) async fn settle_prompt_response<R: tauri::Runtime>(
 ) -> Result<String, PylonError> {
     // #99：wire 终态判定先于展示/持久化——ensure_generation 等后续失败
     // 也不能让 turn 悬在账本外；一个 prompt 至多一个 terminal transition。
-    settle_turn_from_response(runtime, turn_key, &raw);
+    // #442 Step3：CAS Published 时广播 pylon:turn-settled（内核事实主轨，
+    // 先于 done/error 帧与持久化）。
+    let settle_outcome = settle_turn_from_response(runtime, turn_key, &raw);
+    emit_turn_settled(
+        flow.window,
+        flow.gateway,
+        runtime,
+        source,
+        turn_key,
+        &settle_outcome,
+    );
     state.ensure_generation(runtime, flow.generation)?;
     if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
         return Err(PylonError::Protocol(format!(
@@ -349,7 +359,16 @@ pub(super) async fn settle_prompt_connection_closed<R: tauri::Runtime>(
     failure: &mut Option<PromptFailureMetadata>,
 ) -> Result<String, PylonError> {
     // #99：连接关闭 = 回合终态 ConnectionLost（不再悬置）。
-    report_settle(runtime, turn_key, TurnTerminalCause::ConnectionLost, None);
+    // #442 Step3：CAS Published 时广播 turn-settled（内核事实主轨）。
+    let settle_outcome = report_settle(runtime, turn_key, TurnTerminalCause::ConnectionLost, None);
+    emit_turn_settled(
+        flow.window,
+        flow.gateway,
+        runtime,
+        source,
+        turn_key,
+        &settle_outcome,
+    );
     *failure = Some(PromptFailureMetadata::connection(prompt_started_at));
     runtime.acp.lock().await.remove_pending(flow.request_id);
     // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
@@ -435,7 +454,16 @@ pub(super) async fn settle_prompt_cancelled_after_timeout<R: tauri::Runtime>(
             Some("inconsistent cancel settle resolution".to_string()),
         ),
     };
-    report_settle(runtime, turn_key, cause, settle_detail);
+    // #442 Step3：CAS Published 时广播 turn-settled（内核事实主轨）。
+    let settle_outcome = report_settle(runtime, turn_key, cause, settle_detail);
+    emit_turn_settled(
+        flow.window,
+        flow.gateway,
+        runtime,
+        source,
+        turn_key,
+        &settle_outcome,
+    );
     runtime.acp.lock().await.remove_pending(flow.request_id);
     if let Some(cancel_error) = cancel_error {
         tracing::warn!("cancel timed-out prompt {}: {}", flow.peri_id, cancel_error);

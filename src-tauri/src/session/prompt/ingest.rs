@@ -184,19 +184,42 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
             .map(|session| (session.peri_id.clone(), session.generation))
     });
     if let Some((peri_id, generation)) = defensive_settle {
-        if let crate::acp::SettleOutcome::Published = runtime.turn_ledger.settle_active_for_session(
+        // #442 Step3：候选回合身份先于防御结算读取（与 settle_active_for_session
+        // 同一选择序）；Published 时广播 turn-settled——未经终态臂的残余同样要给
+        // 前端一个内核事实主轨的收敛点。
+        let defensive_turn_key = runtime
+            .turn_ledger
+            .active_turn_id_for_session(&ctx.source, &peri_id, generation)
+            .map(|turn_id| crate::acp::TurnKey {
+                local_session_id: ctx.source.clone(),
+                remote_session_id: peri_id.clone(),
+                generation,
+                turn_id,
+            });
+        let defensive_outcome = runtime.turn_ledger.settle_active_for_session(
             &ctx.source,
             &peri_id,
             generation,
             crate::acp::TurnTerminalCause::ProtocolError,
             super::ledger::now_ms(),
             Some(error.to_string()),
-        ) {
+        );
+        if let crate::acp::SettleOutcome::Published = defensive_outcome {
             tracing::warn!(
                 source = %ctx.source,
                 code = %error.code(),
                 "prompt failure path defensively settled a residual in-flight turn; \
                  a terminal arm should have settled it (diagnostic)"
+            );
+        }
+        if let Some(turn_key) = defensive_turn_key {
+            super::ledger::emit_turn_settled(
+                window,
+                gateway,
+                runtime,
+                &ctx.source,
+                &turn_key,
+                &defensive_outcome,
             );
         }
     }

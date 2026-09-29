@@ -60,8 +60,8 @@ import type { LatestTurnBoundary } from '../../domains/events/canonicalTurnDurat
 import type { PersistedTurnBoundary } from '../../infrastructure/acp/sessionClient.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
 import { createAgentWorkbenchOptimisticEcho } from './agentWorkbenchOptimisticEcho.ts'
-import type { CanonicalDraftChunkNotification, CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
-import { getCanonicalEventFeed, subscribeWindowTerminalFrames } from '../../infrastructure/events/canonicalEventFeed.ts'
+import type { CanonicalDraftChunkNotification, CanonicalTerminalSignal, CanonicalTurnSettledEvent } from '../../infrastructure/events/canonicalEventFeed.ts'
+import { getCanonicalEventFeed, subscribeTurnSettled, subscribeWindowTerminalFrames } from '../../infrastructure/events/canonicalEventFeed.ts'
 
 export type { LocalSessionFact } from './agentWorkbenchProjection.ts'
 
@@ -93,6 +93,12 @@ export interface AgentWorkbenchSessionRuntimeDependencies {
    * 的路。返回退订函数。
    */
   listenTerminalFallback(listener: (signal: CanonicalTerminalSignal) => void): () => void
+  /**
+   * #442 Step3：账本 settle 广播订阅（终态收敛主轨）。`pylon:turn-settled
+   * {source, turn}` 由后端账本 CAS Published 时发射，与 Channel 注册生命周期无关
+   * ——终帧丢失场景由此收敛。缺省实现 `subscribeTurnSettled`（非 Tauri no-op）。
+   */
+  listenTurnSettled?(listener: (event: CanonicalTurnSettledEvent) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
 }
 
@@ -114,6 +120,10 @@ export function workbenchSessionBindingKey(session: Session | undefined): string
 
 function defaultTerminalFallbackListener(listener: (signal: CanonicalTerminalSignal) => void): () => void {
   return subscribeWindowTerminalFrames(listener)
+}
+
+function defaultTurnSettledListener(listener: (event: CanonicalTurnSettledEvent) => void): () => void {
+  return subscribeTurnSettled(listener)
 }
 
 function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
@@ -157,6 +167,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     ? loadCanonicalDraftFragments(ownerKey) : Promise.resolve([]))
   const subscribe = dependencies.subscribe ?? defaults.subscribe
   const listenTerminalFallback = dependencies.listenTerminalFallback ?? defaults.listenTerminalFallback
+  const listenTurnSettled = dependencies.listenTurnSettled ?? defaultTurnSettledListener
   const runtime = createWorkbenchRuntime({
     sessionId: null, status: 'idle', messages: [],
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
@@ -694,6 +705,34 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   }
   const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(handleTerminalSignal)
   const unsubscribeTerminalFallback = listenTerminalFallback(handleTerminalSignal)
+  // #442 Step3：账本广播 = 终态收敛主轨（内核事实，与 Channel 注册生命周期无关）。
+  // done/error 帧自此退化为正文/usage 载体——本 handler 用后端权威 TurnRecord 直接
+  // 收敛：cause→reason 走既有词表映射（resolveGenerationLedgerTerminalReason，不新增
+  // 语义），settledAtMs/turnId 直供时钟（elapsed 起点用权威终点、身份戳精确结算）；
+  // 与终帧的双到由 TurnClock 幂等吸收。
+  const handleTurnSettled = (event: CanonicalTurnSettledEvent): void => {
+    const reason = resolveGenerationLedgerTerminalReason({ turn: event.turn })
+    if (reason !== undefined) {
+      const terminal = (event.turn as { terminal?: { settledAtMs?: unknown } }).terminal
+      const settledAtMs = terminal !== null && typeof terminal === 'object'
+        && typeof (terminal as { settledAtMs?: unknown }).settledAtMs === 'number'
+        ? (terminal as { settledAtMs: number }).settledAtMs
+        : undefined
+      const key = (event.turn as { key?: { turnId?: unknown } }).key
+      const turnId = key !== null && typeof key === 'object'
+        && typeof (key as { turnId?: unknown }).turnId === 'number'
+        ? (key as { turnId: number }).turnId
+        : undefined
+      clock.terminal(event.source, reason, settledAtMs ?? Date.now(), undefined, turnId)
+      return
+    }
+    // 词表认不出的 cause：内核说 settle 就是 settle——收敛活性与封存时钟，但不伪造
+    // reason 摘要（宁可「无摘要的静止」，也不把失败报成成功）。
+    clock.settleKernelFromLedger(event.source)
+    clock.settleFromDocument(event.source, true, undefined)
+    clock.settleRuntimeLiveness(event.source)
+  }
+  const unsubscribeTurnSettled = listenTurnSettled(handleTurnSettled)
   const unsubscribeEvents = subscribe(event => {
     if (binding.destroyed || !binding.ownerKey || !binding.source || !event || typeof event !== 'object') return
     const candidate = event as { owner?: Parameters<typeof toCanonicalOwnerKey>[0]; sessionId?: unknown }
@@ -1227,7 +1266,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     destroy() {
       if (binding.destroyed) return
       binding.destroyed = true
-      unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeEvents()
+      unsubscribeTurnClockTerminal(); unsubscribeTerminalFallback(); unsubscribeTurnSettled(); unsubscribeEvents()
       unsubscribeDraftChunks(); unsubscribeDraftCommits(); unsubscribeSessionTitle()
       runtime.destroy(); appearance.destroy(); sessionUi.destroy()
       pendingSessionResponses.clear(); appliedSessionResponseKeys.clear(); transientSequenceBySource.clear()

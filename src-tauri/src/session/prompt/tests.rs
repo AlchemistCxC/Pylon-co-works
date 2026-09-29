@@ -903,3 +903,55 @@ async fn prompt_failure_frame_without_turn_omits_turn_id() {
         "turnId must not be fabricated when no turn was begun"
     );
 }
+
+/// #442 Step3：`pylon:turn-settled` 门控与载荷——仅 CAS `Published` 产出载荷
+/// （至多一次，Late/UnknownTurn 静默）；载荷携带完整账本记录（终因/settledAtMs/
+/// 回合身份 key）。窗口发射是薄壳，此处单测纯函数。
+#[test]
+fn turn_settled_broadcast_publishes_once_with_full_record() {
+    let runtime = AgentRuntime::new_disconnected();
+    let turn_key = crate::acp::TurnKey {
+        local_session_id: "local:ts".to_string(),
+        remote_session_id: "peri-ts".to_string(),
+        generation: 2,
+        turn_id: 11,
+    };
+    runtime.turn_ledger.begin(turn_key.clone(), 100);
+
+    // 未登记的回合（UnknownTurn）不产出载荷。
+    assert!(super::ledger::turn_settled_payload_if_published(
+        &runtime,
+        "local:ts",
+        &turn_key,
+        &crate::acp::SettleOutcome::UnknownTurn,
+    )
+    .is_none());
+
+    let outcome = super::ledger::report_settle(
+        &runtime,
+        &turn_key,
+        crate::acp::TurnTerminalCause::Completed,
+        None,
+    );
+    let payload =
+        super::ledger::turn_settled_payload_if_published(&runtime, "local:ts", &turn_key, &outcome)
+            .expect("Published settle must produce the broadcast payload");
+    assert_eq!(payload["source"], "local:ts");
+    assert_eq!(payload["turn"]["phase"], "terminal");
+    assert_eq!(payload["turn"]["terminal"]["cause"], "completed");
+    assert_eq!(payload["turn"]["key"]["turnId"], serde_json::json!(11));
+    assert!(payload["turn"]["terminal"]["settledAtMs"].is_u64());
+
+    // 重复结算被 CAS 判 Late：不再产出载荷（至多一次）。
+    let late = super::ledger::report_settle(
+        &runtime,
+        &turn_key,
+        crate::acp::TurnTerminalCause::ProtocolError,
+        None,
+    );
+    assert!(matches!(late, crate::acp::SettleOutcome::Late { .. }));
+    assert!(super::ledger::turn_settled_payload_if_published(
+        &runtime, "local:ts", &turn_key, &late,
+    )
+    .is_none());
+}

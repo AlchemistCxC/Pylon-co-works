@@ -179,6 +179,54 @@ export function subscribeWindowTerminalFrames(listener: CanonicalFeedTerminalLis
   }
 }
 
+/** #442 Step3：`pylon:turn-settled` 载荷投影（逐字段守卫，畸形整体丢弃）。 */
+export interface CanonicalTurnSettledEvent {
+  readonly source: string
+  /** 后端 `TurnRecord`（camelCase Serialize：phase/startedAtMs/terminal{cause,settledAtMs}/key）。 */
+  readonly turn: Record<string, unknown>
+}
+
+export type CanonicalTurnSettledListener = (event: CanonicalTurnSettledEvent) => void
+
+/** 载荷守卫：source 非空字符串 + turn 为对象才接受（缺失不伪造，调用方据此丢弃）。 */
+export function canonicalTurnSettledFromPayload(payload: unknown): CanonicalTurnSettledEvent | undefined {
+  if (payload === null || typeof payload !== 'object') return undefined
+  const source = extractSource(payload)
+  if (source === undefined) return undefined
+  const turn = (payload as { turn?: unknown }).turn
+  if (turn === null || typeof turn !== 'object' || Array.isArray(turn)) return undefined
+  return { source, turn: turn as Record<string, unknown> }
+}
+
+/**
+ * #442 Step3：账本 settle 广播订阅——终态收敛**主轨**。
+ *
+ * `pylon:turn-settled {source, turn}` 由后端在账本 CAS `Published` 时发射（至多
+ * 一次），只走窗口广播、与 per-source IPC Channel 的注册生命周期无关——
+ * `stop_agent_runtime` 清空注册后仍可投递，终帧丢失场景由此收敛（无永久假在途）。
+ * done/error 帧自此退化为正文/usage 载体（双发变无害，TurnClock 幂等吸收）。
+ * 非 Tauri 环境为 no-op。
+ */
+export function subscribeTurnSettled(listener: CanonicalTurnSettledListener): () => void {
+  if (!IS_TAURI) return () => {}
+  let disposed = false
+  let stop: (() => void) | undefined
+  void listen(PYLON_STREAM_WIRE_EVENTS.turnSettled, payload => {
+    const event = canonicalTurnSettledFromPayload(payload.payload)
+    if (event) listener(event)
+  }).then(unlisten => {
+    if (disposed) unlisten()
+    else stop = unlisten
+  }).catch(() => {
+    // 主轨订阅失败只损失冗余，done/error 帧与账本快照仍可用。
+  })
+  return () => {
+    disposed = true
+    stop?.()
+    stop = undefined
+  }
+}
+
 export function createCanonicalEventFeed(): CanonicalEventFeed {
   const cursor = new CanonicalEventCursor(tauriCanonicalEventRepository())
   const rowListeners = new Set<CanonicalFeedRowListener>()

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
-import type { CanonicalTerminalSignal } from '../../../infrastructure/events/canonicalEventFeed.ts'
+import type { CanonicalTerminalSignal, CanonicalTurnSettledEvent } from '../../../infrastructure/events/canonicalEventFeed.ts'
 
 /**
  * issue #68 残留面：生成摘要**只**由终帧驱动，而终帧只经 per-source IPC Channel
@@ -273,6 +273,104 @@ describe('#442 Step2 terminal frame turnId retires the stamp guess', () => {
     const snapshot = service.runtime.getSnapshot()
     expect(snapshot.livenessSource).toBe('kernel')
     expect(snapshot.generating).toBe(false)
+    service.destroy()
+  })
+})
+
+/**
+ * #442 Step3：`pylon:turn-settled` 账本广播是终态收敛**主轨**——内核事实，与
+ * Channel 注册生命周期无关（后端账本 CAS Published 时窗口广播，至多一次）。
+ * 终帧丢失场景（stop_agent_runtime 清注册 / activeStreams 条目被移除）由此收敛，
+ * 无永久假在途；done/error 帧退化为正文/usage 载体，双到由 TurnClock 幂等吸收。
+ */
+describe('#442 Step3 turn-settled broadcast is the convergence main track', () => {
+  const settledTurn = (turnId: number, cause = 'completed') => ({
+    phase: 'terminal',
+    startedAtMs: 1,
+    terminal: { cause, settledAtMs: Date.parse('2026-09-05T00:00:05.000Z') },
+    key: { generation: 1, turnId },
+  })
+
+  function serviceWithTurnSettled(active: Session, listeners: Array<(event: CanonicalTurnSettledEvent) => void>) {
+    return createAgentWorkbenchSessionRuntime({
+      loadAll: async () => [],
+      subscribe: () => () => {},
+      // Channel 丢失形态：终帧永不到达（feed.onTerminal 与广播兜底都保持静默）。
+      listenTerminalFallback: () => () => {},
+      listenTurnSettled: listener => { listeners.push(listener); return () => {} },
+      commands: {
+        resolveSession: () => active,
+        nextClientMessageId: () => 'client-442-turn-settled',
+        sendMessage: async () => {},
+        optimisticUser: () => {},
+        rejectOptimisticUser: () => {},
+        resolvePersona: () => 'default',
+        requestCancel: () => {},
+      },
+    })
+  }
+
+  it('converges a lost-terminal-frame turn from the broadcast (no permanent fake in-flight)', async () => {
+    const active = session('session-ts-main', 'local:ts-main')
+    const listeners: Array<(event: CanonicalTurnSettledEvent) => void> = []
+    const service = serviceWithTurnSettled(active, listeners)
+
+    await service.commands.send(active.id, { text: '唯一消息' })
+    await service.bind(active)
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    // 终帧永不到达；账本 settle 广播先到（内核事实主轨）。
+    listeners[0]({ source: active.source, turn: settledTurn(5) })
+
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating, '账本广播必须收敛假在途').toBe(false)
+    expect(snapshot.summary).toMatchObject({
+      reason: 'done',
+      durationSource: 'live-monotonic',
+      durationAvailable: true,
+    })
+    service.destroy()
+  })
+
+  it('carries the ledger cause into the summary reason (cancelled stays 已停止)', async () => {
+    const active = session('session-ts-cancel', 'local:ts-cancel')
+    const listeners: Array<(event: CanonicalTurnSettledEvent) => void> = []
+    const service = serviceWithTurnSettled(active, listeners)
+
+    await service.commands.send(active.id, { text: '消息' })
+    await service.bind(active)
+    listeners[0]({ source: active.source, turn: settledTurn(6, 'cancelled') })
+
+    expect(service.runtime.getSnapshot().summary).toMatchObject({ reason: 'cancelled' })
+    service.destroy()
+  })
+
+  it('unmapped cause still stops the spinner but never fabricates a summary reason', async () => {
+    const active = session('session-ts-unknown', 'local:ts-unknown')
+    const listeners: Array<(event: CanonicalTurnSettledEvent) => void> = []
+    const service = serviceWithTurnSettled(active, listeners)
+
+    await service.commands.send(active.id, { text: '消息' })
+    await service.bind(active)
+    listeners[0]({ source: active.source, turn: settledTurn(7, 'zombieProtocol') })
+
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.generating, '内核说 settle 就是 settle：活性必须落静').toBe(false)
+    expect(snapshot.summary, '认不出的 cause 不得伪造 reason 摘要').toBeNull()
+    service.destroy()
+  })
+
+  it('duplicate broadcasts are absorbed idempotently (first summary wins)', async () => {
+    const active = session('session-ts-dup', 'local:ts-dup')
+    const listeners: Array<(event: CanonicalTurnSettledEvent) => void> = []
+    const service = serviceWithTurnSettled(active, listeners)
+
+    await service.commands.send(active.id, { text: '消息' })
+    await service.bind(active)
+    listeners[0]({ source: active.source, turn: settledTurn(8) })
+    const first = service.runtime.getSnapshot().summary
+    listeners[0]({ source: active.source, turn: settledTurn(8) })
+    expect(service.runtime.getSnapshot().summary).toBe(first)
     service.destroy()
   })
 })
