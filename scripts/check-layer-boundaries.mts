@@ -78,8 +78,6 @@ const RULES: LayerRule[] = [
     scopeRoots: ['src/plugin-runtime/'],
     forbiddenPathIncludes: VIEW_DIRS,
     allowlist: {
-      // workspaceController 是视图编排实现（open/close sheet）；port 化随 workspaceStore 域化跟进（B-2 记录）。
-      'src/plugin-runtime/workspaces/pluginWorkspaceApi.ts': 'workspace 控制器值边（port 化待办，B-2）',
     },
   },
   {

@@ -17,6 +17,7 @@ import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
 import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
 import '../app/bootstrap/identityCrossDomainWiring'
+import '../app/bootstrap/workspaceControllerWiring'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)

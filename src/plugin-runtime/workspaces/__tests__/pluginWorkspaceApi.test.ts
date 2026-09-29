@@ -11,6 +11,7 @@ import type { WorkspaceTypeDefinition } from '../workspaceTypes'
 import { TestPluginRuntime as PluginRuntime } from '../../testing/pluginRuntimeHarness.ts'
 import type { PluginWorkspaceApi } from '../pluginWorkspaceApi'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
+import '../../../app/bootstrap/workspaceControllerWiring'
 
 function dynamicWorkspace(kind: string): WorkspaceTypeDefinition {
   return {

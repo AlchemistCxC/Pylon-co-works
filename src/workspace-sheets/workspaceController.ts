@@ -3,15 +3,8 @@ import { resolveWorkspace } from '../plugin-runtime/workspaces/workspaceRegistry
 import type { SheetId, SheetRecord } from './sheetTypes.ts'
 import { canCloseWorkspaceLiveState } from './workspaceLiveCloseGuards.ts'
 
-export interface WorkspaceOpenInput {
-  type: string
-  title?: string
-  state?: unknown
-  agentId?: string
-  singletonKey?: string
-  pinned?: boolean
-  metadata?: Record<string, string>
-}
+export type { WorkspaceOpenInput } from '../plugin-runtime/workspaces/workspaceControllerPort.ts'
+import type { WorkspaceOpenInput } from '../plugin-runtime/workspaces/workspaceControllerPort.ts'
 
 export function openWorkspace(input: WorkspaceOpenInput): SheetId | null {
   const definition = resolveWorkspace(input.type)
