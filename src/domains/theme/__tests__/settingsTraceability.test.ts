@@ -57,6 +57,9 @@ describe('settings traceability contract (D-trace)', () => {
       'appliedPreset',
       'ccEditMode',
       'ccHidden',
+      // ★ #266 刀2：显隐空态切面（结构载体）—— 读方 = `resolveCcHiddenWidgetIds` 的门选一份，
+      //   写方 = 预设数据（`zones/factory/**` / `presets/builtin.ts` 的 cc 切面）与持久化。
+      'ccHiddenEmpty',
       'ccLayout',
       'custom',
       'rightWidth',

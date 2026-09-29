@@ -5,6 +5,7 @@ import {
   coerceInputLanding,
   isWidgetVisible,
   STATUS_WIDGET_IDS,
+  type CcNumberPropertyKey,
 } from './widgetDefinitions.ts'
 
 /**
@@ -71,12 +72,12 @@ export function clampInputTypography<T extends { inputFontSize: number; inputLin
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
 }: {
-  /** 隐藏名单（**组装好的**：预设的值 + 详细档折叠 + 语境侧名单，见 `resolveCcHiddenWidgetIds`） */
+  /** 隐藏名单（**组装好的**：生效的那份切面 + 详细档折叠，见 `resolveCcHiddenWidgetIds`） */
   hiddenIds: readonly string[]
 }): number {
   // C2：与渲染共用一个可见性谓词。★ #266 ⑰ 后可见性**只由隐藏名单决定** ——
   //   元件的行上不再有任何显隐申明，也不再有运行期条件 ⇒ 谓词的上下文只剩 `hidden`。
-  //   名单的组装**只有一处**（`resolveCcHiddenWidgetIds`），渲染侧与这里同源，
+  //   名单的组装**只有一处**（`resolveCcHiddenWidgetIds`：门选一份切面 + 详细档折叠），渲染侧与这里同源，
   //   否则会出现"计数多算一个不渲染的元件"（正是 C2 要防的）。
   return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds })).length
 }
@@ -84,23 +85,169 @@ export function resolveVisibleStatusWidgetCount({
 const BASE_MIN_HEIGHT = 64
 
 /**
- * 中控区最小高度。
+ * 一行的**行高兜底**（CSS 给的下限）：`.cc-status-row` 的 `min-height`。
  *
- * ★ #266 刀9/刀10/刀11：形态收敛成**唯一一种**（命令行输入 + 独立状态行 + 随内容增高）之后，
- *   原先那三条分支 —— `cliOverflowMode==='grow'`、`inputMode!=='cli'`、`footerLayout!=='peri'`
- *   —— 全部导向同一个值 ⇒ 本函数退化为常量。
- *   **行为等价**：改造前 free 形态（= 现在唯一形态，也是用户实际在用的）走的就是
- *   `return BASE_MIN_HEIGHT` 这一支；peri 形态那一套算式随 `footerLayout` 字段一并退场。
- *
- * ★ 用户口径：位置 / 尺寸差异不再由「元件的小预设」承载，改由**区域预设记值**；中控最小高度
- *   因此回归到一个固定约束，不再随提示详细档或状态控件个数浮动。
+ * 真值出处：`src/index.css:66` 的 `--ui-control-compact: 28px`，被
+ * `…/ControlCenter.css:322` 的 `.cc-status-row { min-height: var(--ui-control-compact) }` 消费
+ * （同文件 `:118` 那条 `min-height:18px` 被它覆盖；两处都 ≥18 ⇒ 规范 §7.2 的"≥18px"仍成立）。
+ * ★ 输入栏那一格另有一条 `min-height:32px`（`.control-center.cli-mode .cc-input-slot`）——
+ *   本算式**不逐格追 CSS 兜底**（那是渲染真值），两处统一取 28 ⇒ 结果对输入栏那一组是**下界**。
  */
-export function resolveCcMinHeight(): number {
-  return BASE_MIN_HEIGHT
+const ROW_MIN_HEIGHT = 28
+
+/**
+ * 所贴竖边 → 该组「到那条边的距离」从哪个字段取。
+ * 今天只有上（输入栏 / `inputOffsetTop`）与下（下边组 / `ccMarginBottom`）两处；
+ * 其它方位（`center` / `stretch`）取不到值 ⇒ 按 0（现状没有这样的组）。
+ */
+const VERTICAL_EDGE_FIELD: Readonly<Record<string, CcMinHeightScalarKey | undefined>> = {
+  top: 'inputOffsetTop',
+  bottom: 'ccMarginBottom',
 }
 
-export function clampCcHeight(height: number): number {
-  const min = resolveCcMinHeight()
+/** 竖向上参与「最小高」竞争的一个**组**（与最小宽那套同构，取法相反：高度取 max、宽度取 sum）。 */
+export interface CcMinHeightGroup {
+  /** 组的标识（诊断/读数用）：`landing:<落脚处>`（落脚处 = `y.anchor:y.side`） */
+  readonly id: string
+  /** 该组的**高**（px）—— 组内件**并排** ⇒ 各件高之**最大**（都算不出高时取行高兜底） */
+  readonly height: number
+  /** 该组到所贴竖边的距离（px）：上边组 = `inputOffsetTop`、下边组 = `ccMarginBottom` */
+  readonly edgeGap: number
+}
+
+/**
+ * 算式用到的数字字段集：
+ * - **件高字段** = 各可拖行声明的 `heightField`（键型 `CcNumberPropertyKey`）；
+ * - **贴边距离** = 上边 `inputOffsetTop`（本身就是输入栏的属性字段）+ 下边 `ccMarginBottom`
+ *   （它是**容器**外观字段，不在 `CcNumberPropertyKey` 里 ⇒ 单列进来）。
+ * ★ 只列这两个距离，是因为"所贴竖边 → 字段"目前只有上/下两处（`VERTICAL_EDGE_FIELD`）。
+ */
+export type CcMinHeightScalarKey = CcNumberPropertyKey | 'ccMarginBottom'
+
+/** 竖向算式的输入里那一份"主题数字字段表"（结构性类型 ⇒ 主题本体可直接传）。 */
+export type CcMinHeightScalars = Partial<Record<CcMinHeightScalarKey, number>>
+
+/**
+ * 最小高算式的输入。
+ *
+ * - `hiddenSlices` = **两种门态各自生效的隐藏名单**（常态切面 / 空态切面）；算式对每一态各算一遍、
+ *   取 **max**（理由见 `resolveCcMinHeight` 的"两态取 max"）；
+ * - `scalars` = 主题的数字字段表（**结构性类型** ⇒ `ThemeSettings` / `Partial<ThemeSettings>`
+ *   可直接传）。算式只按定义表的 `heightField` 声明取用，**缺项按 0 计**（= 内容撑 ⇒ 结果是下界）。
+ */
+export interface CcMinHeightInput {
+  readonly hiddenSlices: readonly (readonly string[])[]
+  readonly scalars: CcMinHeightScalars
+}
+
+/**
+ * 主题形态 → 算式输入（**唯一一处拼装**，免得各调用面各拼一份）。
+ *
+ * 泛型 + 结构性约束：`ThemeSettings` / `Partial<ThemeSettings>` / `ThemePresetState` 都可直接传。
+ * 两态各取一份切面：常态 `ccHidden` / 空态 `ccHiddenEmpty`；**空态缺省（没写）⇒ 回落常态切面**
+ * （与刀 2 的落值口径 `inheritCcEmptySlice` 一致 ⇒ 两边同义，不会一处当"没藏"、一处当"藏"）。
+ * `scalars` 的取值口径仍由算式把关（按定义表的 `heightField` 声明取、非数字按 0）。
+ */
+export function ccMinHeightInputOf<T extends {
+  readonly ccHidden?: readonly string[]
+  readonly ccHiddenEmpty?: readonly string[]
+}>(theme: T): CcMinHeightInput {
+  const normal = theme.ccHidden ?? []
+  return {
+    hiddenSlices: [normal, theme.ccHiddenEmpty ?? normal],
+    scalars: theme as unknown as CcMinHeightScalars,
+  }
+}
+
+/**
+ * ★★ 中控区**最小高**（#266 刀3 · 精确版）：
+ *
+ * ```text
+ * min_height = max( BASE_MIN_HEIGHT,
+ *                   max( 算式(常态切面在场集合), 算式(空态切面在场集合) ) )
+ *
+ * 其中 算式(某态在场集合) = max over 该态各组 ( 该组高 + 该组到所贴竖边的距离 )
+ *   上边组 = inputOffsetTop + 输入栏组高；下边组 = ccMarginBottom + 下边组高
+ * ```
+ *
+ * 四条口径（都是**逻辑**，不是"看起来对不对"）：
+ * 1. **两组取 max，不是 sum** —— 输入栏是 `position:absolute`（浮起、**不占流**）
+ *    ⇒ 两块可"上下错开占同一段垂直空间"（`ControlCenter.css:89-96`）。这与横向"允许重叠"是同一条
+ *    空间口径，两个方向都取 max（规范 §7.6）。
+ * 2. **行数恒为 1** —— #266 刀2.5 已去掉下边组的折行 ⇒ 组高 = 该行在场件的**最大高**，
+ *    **不需要**任何"折行档 / 件数阈值"（旧实现那套"在场件数 > 4 再加一行"的估算整体退场）。
+ * 3. ★ **两种门态取 max**（用户 2026-09-28 定）—— 为什么不是"只按常态切面算"：**空态切面是自由的**
+ *    （刀 2 刚配好），某套预设的空态完全可以**比常态在场更多**（常态藏了、空态没藏）⇒ 只按常态算会
+ *    **低估空态**、显示时可能超界。取两态 max 才真的"两种门态都成立"。
+ *    ★ 这仍然是**同一批运算**跑两遍（同一算式、同一批声明），只是喂进两份切面 —— 仍是"预设值 + 一道门"
+ *    两层，**没有引入新概念、新字段、新阈值**：切面本来就是刀 2 的产物，门本来就是"现在是不是空态"。
+ * 4. **`BASE_MIN_HEIGHT` 是下界（乘底）** —— 两态都算不出大值时它就是结果；它不是替代品。
+ *
+ * ★ 本刀**取代**了刀 9~11 的"形态收敛 ⇒ 常量 64"：那是把估算换成常量，本刀把估算升级成
+ *   **按件字段 + 趟数可算的算式**（输入清单见规范 §七：主件都有 Height 字段）。
+ * ★ 出厂 10 套预设两态切面**同值**（常态藏 `cc-send-button`、空态藏那 6 件；空态是常态的超集）
+ *   ⇒ 判据换口径后**观感不产生新变化**（实机读数：默认口径仍 64、出厂数据仍 85）。
+ * ★ 纯函数：只读入参（同输入同输出）。渲染侧把它挂成 `--cc-min-height`
+ *   （`.control-center { min-height: var(--cc-min-height) }` 是真正的消费者），落值侧用它当 clamp 下界。
+ */
+export function resolveCcMinHeight(input: CcMinHeightInput): number {
+  const slices = input.hiddenSlices.length > 0 ? input.hiddenSlices : [[]]
+  return slices.reduce(
+    (max, hiddenIds) => Math.max(max, sliceHeightRequirement(hiddenIds, input.scalars)),
+    BASE_MIN_HEIGHT,
+  )
+}
+
+/** 单态的"按边算"需求（`max over 该态各组 ( 组高 + 到边距离 )`；**不含** `BASE_MIN_HEIGHT`）。 */
+function sliceHeightRequirement(hiddenIds: readonly string[], scalars: CcMinHeightScalars): number {
+  return resolveCcHeightGroups(hiddenIds, scalars)
+    .reduce((max, group) => Math.max(max, group.height + group.edgeGap), 0)
+}
+
+/**
+ * 从「**某一态**的隐藏名单 + 主题数字字段」派生竖向上参与竞争的组（= `resolveCcMinHeight` 的单态输入）。
+ *
+ * 签名与最小宽那边的 `resolveCcWidthGroups(hiddenIds, widths)` 同形（同一族、同一种读法）。
+ *
+ * 口径（全部从定义表读，不另立第二份规则）：
+ * - **组 = 竖向落脚处**（`y.anchor:y.side`，与渲染成组同源）；组高 = 组内**在场**件高的**最大**，
+ *   件高取自该行声明的 `heightField`（缺省 / 缺值 ⇒ 0）；组内件都算不出高时取行高兜底 `ROW_MIN_HEIGHT`；
+ * - **悬浮件**（发送按钮）不占流 ⇒ 不参与（它骑在输入栏上，高度跟 `--cc-send-size` 走）；
+ * - **不在场的件不计入**（"谁在场" = 谓词，与渲染同源 ⇒ 与"计数多算一个不渲染的件"是同一道防线）；
+ * - 组级 `edgeGap` 按所贴竖边取字段（上 = `inputOffsetTop`、下 = `ccMarginBottom`）。
+ */
+export function resolveCcHeightGroups(
+  hiddenIds: readonly string[],
+  scalars: CcMinHeightScalars,
+): CcMinHeightGroup[] {
+  const groups = new Map<string, { height: number; edgeGap: number }>()
+  for (const row of CC_WIDGET_GROUPS) {
+    if (row.type !== 'widget' || !row.draggable || !row.layout) continue
+    if (CC_FLOATING_WIDGET_IDS.includes(row.id)) continue
+    if (!isWidgetVisible(row.id, { hidden: hiddenIds })) continue
+    const landing = coerceInputLanding(row.id, ccWidgetLanding(row.id)) ?? row.id
+    const group = groups.get(landing) ?? { height: 0, edgeGap: 0 }
+    const declared = row.heightField ? scalars[row.heightField] : undefined
+    // 件并排 ⇒ 组高取**最大**（不是求和；宽度那边同组的件也是并排，但算的是宽之和）
+    group.height = Math.max(group.height, typeof declared === 'number' && Number.isFinite(declared) ? declared : 0)
+    const edgeField = VERTICAL_EDGE_FIELD[row.layout.y.side]
+    const edgeValue = edgeField ? scalars[edgeField] : undefined
+    group.edgeGap = Math.max(group.edgeGap, typeof edgeValue === 'number' && Number.isFinite(edgeValue) ? edgeValue : 0)
+    groups.set(landing, group)
+  }
+  return [...groups].map(([landing, group]) => ({
+    id: `landing:${landing}`,
+    height: Math.max(ROW_MIN_HEIGHT, group.height),
+    edgeGap: group.edgeGap,
+  }))
+}
+
+/**
+ * 高度 clamp：区间 `[最小高（算式）, 400]`；非有限值回落到**最小高**（既有语义，未变）。
+ * ★ 下界来自 `resolveCcMinHeight`（算式），不再是常量 —— 这是刀 3 的落点之一。
+ */
+export function clampCcHeight(height: number, input: CcMinHeightInput): number {
+  const min = resolveCcMinHeight(input)
   const safeHeight = Number.isFinite(height) ? height : min
   return Math.max(min, Math.min(400, safeHeight))
 }

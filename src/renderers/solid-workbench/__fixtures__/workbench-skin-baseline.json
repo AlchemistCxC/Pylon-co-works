@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-28T10:45:29.535Z",
+  "generatedAt": "2026-09-29T05:53:14.615Z",
   "source": {
     "builtinPresetIds": [
       "claude",
@@ -14,7 +14,7 @@
       "focus-flow"
     ],
     "customPresetIds": [],
-    "themeSettingCount": 176,
+    "themeSettingCount": 177,
     "cssVariableCount": 88
   },
   "fixtures": [
@@ -199,6 +199,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -522,6 +530,14 @@
         "ccEditMode": false,
         "ccHidden": [
           "cc-send-button"
+        ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
         ],
         "ccLayout": {
           "version": 9,
@@ -859,6 +875,14 @@
         "ccHidden": [
           "cc-send-button"
         ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -1187,6 +1211,14 @@
         "ccEditMode": false,
         "ccHidden": [
           "cc-send-button"
+        ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
         ],
         "ccLayout": {
           "version": 9,
@@ -1527,6 +1559,14 @@
         "ccHidden": [
           "cc-send-button"
         ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -1866,6 +1906,14 @@
         "ccHidden": [
           "cc-send-button"
         ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -2201,6 +2249,14 @@
         "ccEditMode": false,
         "ccHidden": [
           "cc-send-button"
+        ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
         ],
         "ccLayout": {
           "version": 9,
@@ -2541,6 +2597,14 @@
         "ccHidden": [
           "cc-send-button"
         ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -2878,6 +2942,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -3202,6 +3274,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -3526,6 +3606,14 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -3851,6 +3939,14 @@
         "ccEditMode": false,
         "ccHidden": [
           "cc-send-button"
+        ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
         ],
         "ccLayout": {
           "version": 9,
@@ -4191,6 +4287,14 @@
         "ccHidden": [
           "ekg"
         ],
+        "ccHiddenEmpty": [
+          "model",
+          "reasoning",
+          "mode",
+          "tokens",
+          "cc-send-button",
+          "cc-command-hint"
+        ],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -4513,6 +4617,7 @@
         "rightBlur": 0,
         "ccEditMode": false,
         "ccHidden": [],
+        "ccHiddenEmpty": [],
         "ccLayout": {
           "version": 9,
           "placements": {
@@ -4794,6 +4899,10 @@
         "rightBlur": 40,
         "ccEditMode": false,
         "ccHidden": [
+          "ekg",
+          "tasks"
+        ],
+        "ccHiddenEmpty": [
           "ekg",
           "tasks"
         ],

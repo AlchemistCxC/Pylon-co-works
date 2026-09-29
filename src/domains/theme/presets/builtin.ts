@@ -189,6 +189,16 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   ccHidden: [
     "cc-send-button"
   ],
+  // ★ #266 刀2：显隐的**空态切面**（与 ccHidden 同形）。空态没有会话 ⇒ 会话相关的件一律不显示
+  //   （原先这份名单硬编码在 `widgetDefinitions.ts`，现在由预设携带）。
+  ccHiddenEmpty: [
+    "model",
+    "reasoning",
+    "mode",
+    "tokens",
+    "cc-send-button",
+    "cc-command-hint"
+  ],
   inputBg: "rgba(0,0,0,0.03)",
   inputTextColor: "rgba(0,0,0,0.80)",
   inputPlaceholder: "rgba(0,0,0,0.22)",

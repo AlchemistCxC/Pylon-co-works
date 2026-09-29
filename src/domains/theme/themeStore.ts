@@ -13,7 +13,7 @@ import {
   removeZonePresetEntryReducer,
   type ZonePresetEntry,
 } from './zones/index.ts'
-import { clampCcHeight } from '../cc/ccHeightState.ts'
+import { clampCcHeight, ccMinHeightInputOf } from '../cc/ccHeightState.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './migration.ts'
 import { DEFAULTS } from './themeDefaults.ts'
 import { useInterfaceModeStore } from '../interface/interfaceModeStore.ts'
@@ -130,8 +130,8 @@ export const useStore = create<ThemeState>()(persist(
   },
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => {
-    // D1：ccHeight 经布局约束漏斗归一化（★ #266 刀9~11：形态固定 ⇒ 最小高度为常量，参数已收敛）
-    const ccHeight = clampCcHeight(height)
+    // D1：ccHeight 经布局约束漏斗归一化（★ #266 刀3：下界 = 按边算取最大，见 ccHeightState.resolveCcMinHeight）
+    const ccHeight = clampCcHeight(height, ccMinHeightInputOf(state))
     return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
   updateCcPlacement: (id, partial) => set(state => ({
@@ -144,7 +144,10 @@ export const useStore = create<ThemeState>()(persist(
   })),
   setCcHidden: (id, hidden) => set(state => {
     const ccHidden = setCcHiddenState(state.ccHidden, id, hidden)
-    const ccHeight = clampCcHeight(state.ccHeight)
+    // ★ #266 刀3：显隐一变必须重过 clamp —— 这里写的正是**常态切面**，它一变、常态那一份算式就变。
+    //   但下界取「两态中要求更高的那一份」（见 ccHeightState.resolveCcMinHeight）⇒ 常态变矮**不一定**
+    //   抬得动下界：空态那一份可能仍咬住，所以"藏一件 ⇒ 最小高变小"**不再必然成立**。
+    const ccHeight = clampCcHeight(state.ccHeight, ccMinHeightInputOf({ ...state, ccHidden }))
     return {
       ccHidden,
       ccHeight,

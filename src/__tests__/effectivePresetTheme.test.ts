@@ -73,10 +73,18 @@ const REPO_ROOT = resolve(__dirname, '..', '..')
  * - `agent-command` / `agent-map` / `focus-flow` 的 36 **不动**（cc 区仅 6 键，七个键都不含）。
  * ★ 真值同样由 `.agents/spec/266-probe-preset-counts.mts` 实测：本次实测
  * `claude/nord/tokyo/solarized/amber/matrix = 176`、`glass = 63`、`agent-* = 36`。
+ *
+ * ★ #266 刀2（空态收成「盒子 + 一道门」）：新增 `ccHiddenEmpty`（显隐的**空态切面**）
+ * ⇒ 基线第六次按**真值**重算。本刀的账：**10 套的 cc 区切面各 +1 键**（出厂每套预设都带一份空态切面）
+ * - 6 套「完整快照」型 + `glass`：`176 → 177` / `63 → 64`；
+ * - `agent-command` / `agent-map` / `focus-flow`：`36 → 37`（刀2 之前它们的 cc 区不含任何名单键，
+ *   空态靠**代码侧硬编码名单**兜着；那份名单搬进预设后，它们也必须各带一份，否则空态会静默变成"什么都不藏"）。
+ * ★ 真值由 `.agents/spec/266-probe-preset-counts.mts` 实测（`THEME_SETTING_KEYS=177`、
+ *   逐套打印 `Object.keys(effectivePresetTheme(p)).length`），**不是手推**。
  */
 const BASELINE_FIELD_COUNTS: Record<string, number> = {
-  claude: 176, glass: 63, nord: 176, tokyo: 176, solarized: 176,
-  amber: 176, matrix: 176, 'agent-command': 36, 'agent-map': 36, 'focus-flow': 36,
+  claude: 177, glass: 64, nord: 177, tokyo: 177, solarized: 177,
+  amber: 177, matrix: 177, 'agent-command': 37, 'agent-map': 37, 'focus-flow': 37,
 }
 
 /** 该预设的有效值 —— 用测试侧独立算法（直接并池里的 5 个切面），不复用被测函数。 */
@@ -106,7 +114,7 @@ describe('B1 有效值等价（视图 == 五区切面之并集）', () => {
       const padded = Object.keys(view).filter(key => !(key in unionOfZoneSlices(preset.name, preset.interfaceMode)))
       expect(padded, `${preset.name} 不得多出并集以外的键（"先铺默认值"会多出这些）`).toEqual([])
       for (const key of Object.keys(view)) {
-        expect(key in THEME_DEFAULTS || key === 'ccHidden' || key === 'ccLayout',
+        expect(key in THEME_DEFAULTS || key === 'ccHidden' || key === 'ccLayout' || key === 'ccHiddenEmpty',
           `${preset.name}/${key} 应是主题字段`).toBe(true)
       }
     }

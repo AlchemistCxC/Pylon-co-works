@@ -120,13 +120,26 @@ describe('预设路由纯 reducer 全套（迁移自 scripts/test-zone-preset-st
 
   it('D1 校验漏斗：ccHeight clamp（★ 刀9：`inputVariant`↔`inputMode` 联动不变量已随字段删除）', () => {
     const state = makeZoneState()
-    // ccHeight 低于最小高（常量 64）→ clamp 上调
+    // ccHeight 低于最小高 → clamp 上调（默认口径下界 = 64，见下一条用例的算式）
     const lowPatch = setZoneFieldReducer(state, 'cc', { ccHeight: 5 })
     expect(typeof lowPatch.ccHeight).toBe('number')
     expect(lowPatch.ccHeight as number).toBe(64)
     // 区间内原样（上界 400 见纯函数用例）
     expect(setZoneFieldReducer(state, 'cc', { ccHeight: 200 }).ccHeight).toBe(200)
     expect(setZoneFieldReducer(state, 'cc', { ccHeight: 999 }).ccHeight).toBe(400)
+  })
+
+  it('★ D1 漏斗的下界来自**算式**（#266 刀3）：抬高输入栏 / 件高即抬高下界', () => {
+    // 真实 state 里带着算式要看的那些数字字段（夹具只补需要的那两个）
+    const tall = { ...makeZoneState(), inputHeight: 130 } as ThemePresetState
+    // 输入栏那一组：inputOffsetTop(默认 10) + 130 = 140
+    expect(setZoneFieldReducer(tall, 'cc', { ccHeight: 5 }).ccHeight).toBe(140)
+    // 下边组：ccMarginBottom(默认 15) + 该行最大件高 60 = 75
+    const tallRow = { ...makeZoneState(), modelHeight: 60 } as ThemePresetState
+    expect(setZoneFieldReducer(tallRow, 'cc', { ccHeight: 5 }).ccHeight).toBe(75)
+    // 两组取 **max**（不是 sum）：140 与 75 ⇒ 140
+    const both = { ...makeZoneState(), inputHeight: 130, modelHeight: 60 } as ThemePresetState
+    expect(setZoneFieldReducer(both, 'cc', { ccHeight: 5 }).ccHeight).toBe(140)
   })
 
   it('setZoneField：写入字段 + 标 zone custom，不污染其他 zone、不带 appliedPreset（基准不动）', () => {

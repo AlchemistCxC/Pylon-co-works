@@ -104,6 +104,8 @@ export interface WorkbenchAppearanceSnapshot {
   ccRadius: number
   ccLayout: CcLayoutV3
   ccHidden: readonly string[]
+  /** ★ #266 刀2：显隐的空态切面（空 = 该套预设没带 ⇒ 回落 `ccHidden`） */
+  ccHiddenEmpty: readonly string[]
   ccEditMode: boolean
   ccProperties: Readonly<Pick<ThemeSettings, CcEditablePropertyKey>>
   showPet: boolean
@@ -217,6 +219,8 @@ export function selectWorkbenchAppearance(
     ccRadius: theme.ccRadius,
     ccLayout: cloneCcLayout(theme.ccLayout),
     ccHidden: [...theme.ccHidden],
+    // ★ #266 刀2：空态切面同形平铺（取值二选一在 `resolveCcHiddenWidgetIds` 里，快照不预先选边）
+    ccHiddenEmpty: [...theme.ccHiddenEmpty],
     ccEditMode: theme.ccEditMode,
     ccProperties: selectCcProperties(theme),
     showPet: theme.showPet,
@@ -258,6 +262,7 @@ function freezeAppearanceSnapshot(snapshot: WorkbenchAppearanceSnapshot): Workbe
   for (const placement of Object.values(snapshot.ccLayout.placements)) Object.freeze(placement)
   Object.freeze(snapshot.ccLayout)
   Object.freeze(snapshot.ccHidden)
+  Object.freeze(snapshot.ccHiddenEmpty)
   Object.freeze(snapshot.ccProperties)
   Object.freeze(snapshot.spinner.frames)
   Object.freeze(snapshot.spinner.verbs)

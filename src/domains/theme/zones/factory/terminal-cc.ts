@@ -74,6 +74,14 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -198,6 +206,14 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       },
       ccHidden: [
         "cc-send-button"
+      ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
       ],
       inputOffsetTop: 10,
       inputHeight: 40,
@@ -324,6 +340,14 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -448,6 +472,14 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       },
       ccHidden: [
         "cc-send-button"
+      ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
       ],
       inputOffsetTop: 10,
       inputHeight: 40,
@@ -574,6 +606,14 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -637,4 +677,4 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
   },
 ]
 
-// 本文件 5 条 / 415 个字段值
+// 本文件 5 条 / 420 个字段值（★ #266 刀2：5 条各 +1 `ccHiddenEmpty`）

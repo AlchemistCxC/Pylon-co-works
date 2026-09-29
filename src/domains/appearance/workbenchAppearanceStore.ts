@@ -1,6 +1,6 @@
 import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { ThemeSettings } from '../theme/themeStore.ts'
-import { clampCcHeight, clampInputTypography } from '../cc/ccHeightState.ts'
+import { clampCcHeight, ccMinHeightInputOf, clampInputTypography } from '../cc/ccHeightState.ts'
 import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
@@ -104,8 +104,10 @@ export function reduceAppearanceCommand(
     case 'set-cc-hidden':
       return settleCcHeight({ ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) })
     case 'set-cc-height': {
-      // ★ #266 刀9~11：形态固定 ⇒ 最小高度为常量，clamp 不再需要形态参数。
-      const ccHeight = clampCcHeight(command.height)
+      // ★ #266 刀3：下界 = 按边算取最大（算式见 `ccHeightState.resolveCcMinHeight`）。
+      //   原先那条「把 ccHeight 抬到容得下输入栏」的规则（`Math.max(h, inputOffsetTop + inputHeight)`）
+      //   已并入算式 —— 它正是算式里"输入栏那一组"的这一项，留着就是同一规则维护两遍。
+      const ccHeight = clampCcHeight(command.height, ccMinHeightInputOf(theme))
       return settleCcInputBounds({ ...theme, ccHeight }, 'ccHeight')
     }
     case 'update-cc-placement':
@@ -120,16 +122,17 @@ export function reduceAppearanceCommand(
 }
 
 function settleCcHeight(theme: ThemeSettings): ThemeSettings {
-  const ccHeight = clampCcHeight(theme.ccHeight)
+  // ★ #266 刀3：显隐一变（`set-cc-hidden`）必须重过 clamp ⇒ 下界按**两态各算一遍取 max** 算
+  //   （同 `themeStore.setCcHidden`）：常态那一份变了则常态算式变，而空态那一份可能仍咬住下界。
+  const ccHeight = clampCcHeight(theme.ccHeight, ccMinHeightInputOf(theme))
   return { ...theme, ccHeight }
 }
 
 function settleCcInputBounds(theme: ThemeSettings, changedKey: string): ThemeSettings {
   const next = clampInputTypography({ ...theme }, changedKey)
-  if (changedKey === 'ccHeight') {
-    next.ccHeight = Math.min(400, Math.max(next.ccHeight, next.inputOffsetTop + next.inputHeight))
-    return next
-  }
+  // ★ #266 刀3：原先这里有一条"把 ccHeight 抬到容得下输入栏"的规则
+  //   （`min(400, max(ccHeight, inputOffsetTop + inputHeight))`）—— 它已并入最小高算式
+  //   （算式的"输入栏那一组"正是这一项），故整条删除，只留下面那段"输入框让位"与末尾的 settle。
   if (next.inputHeight + next.inputOffsetTop > next.ccHeight) {
     if (changedKey === 'inputHeight') {
       next.inputHeight = Math.max(0, next.ccHeight - next.inputOffsetTop)

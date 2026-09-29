@@ -1,8 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../domains/theme/tokenFormat.ts'
-import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, EMPTY_STATE_HIDDEN_WIDGET_IDS, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
 import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../domains/cc/ccLayoutState.ts'
-import { resolveCcMinHeight, resolveCcMinWidth, resolveCcWidthGroups, type CcWidgetWidthIndex } from '../../../domains/cc/ccHeightState.ts'
+import { ccMinHeightInputOf, resolveCcMinHeight, resolveCcMinWidth, resolveCcWidthGroups, type CcWidgetWidthIndex } from '../../../domains/cc/ccHeightState.ts'
 import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
@@ -269,24 +269,30 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  // ★ #266 ⑰：隐藏名单 = **语境侧名单**（空态那一侧）∪ 预设的**值**，再经 `resolveCcHiddenWidgetIds`
-  //   把「提示详细档 = 隐藏」这个值折进来 —— 组装只有这一处，计数侧调同一个函数（渲染与计数同源）。
+  // ★ #266 刀2「盒子 + 一道门」：隐藏名单 = **门**（`emptyVisual()` = 现在是不是空态）在**两份切面**里
+  //   二选一份 —— 常态切面 `ccHidden` / 空态切面 `ccHiddenEmpty`（空态切面没写 = 空 ⇒ **回落常态切面**，
+  //   不报错），再由 `resolveCcHiddenWidgetIds` 把「详细档 = 隐藏」按**件声明**折进来。
+  //   ★ 组装只有这一处（计数侧调同一个函数 ⇒ 渲染与计数同源）；不再有任何语境侧硬编码名单。
   const hiddenWidgetIds = () => resolveCcHiddenWidgetIds({
-    ccHidden: !emptyVisual()
-      ? appearance().ccHidden
-      : [...new Set([...appearance().ccHidden, ...EMPTY_STATE_HIDDEN_WIDGET_IDS])],
+    ccHidden: appearance().ccHidden,
+    ccHiddenEmpty: appearance().ccHiddenEmpty,
+    isEmpty: emptyVisual(),
     cliHintMode: appearance().cliHintMode,
   })
-  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（值）」——元件的行上不再有显隐申明，
+  // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（生效的那份切面）」——元件的行上不再有显隐申明，
   //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
   //   ★ #266 刀1：编辑态豁免已撤 ⇒ 上下文里不再有编辑态这一项。
   const visibilityContext = () => ({ hidden: hiddenWidgetIds() })
   // The registered cc-send-button owns the send block (F1=A)：槽位/显隐/缩放统一记在
   // `cc-send-button` 这个 id 上，legacy `send` 已随刀4 迁走。
   const visibleIds = createMemo(() => CC_WIDGET_IDS.filter(id => isWidgetVisible(id, visibilityContext())))
-  // ★ #266 刀9~11：输入固定命令行 / 底部信息固定独立状态行 / 多行输入固定增高
-  //   ⇒ 最小高度不再随形态浮动（常量，见 ccHeightState.resolveCcMinHeight）。
-  const minHeight = () => resolveCcMinHeight()
+  // ★ #266 刀3：最小高 = **按边算取最大**（算式见 ccHeightState.resolveCcMinHeight）——
+  //   输入栏那一组（贴上边）与下边组（贴下边）各算"组高 + 到边距离"，两组取 **max**（不是 sum：
+  //   输入栏是绝对定位、不占流），再与下界 64 取大。挂成 `--cc-min-height` 交给 CSS 消费。
+  //   ★ 在场集合 = **两态各算一遍取 max**（`ccMinHeightInputOf(appearance())` 交出常态 + 空态两份
+  //     切面，`resolveCcMinHeight` 逐态取大 ⇒ 下界由要求更高的那一份决定）：与落值侧 / 设置页同一口径
+  //     —— 同一个值算两处，口径必须一致，否则会出现"存进去的值低于渲染出来的下界"。
+  const minHeight = () => resolveCcMinHeight(ccMinHeightInputOf(appearance()))
   // ★ #266 刀2.5：宽度算式的输入 —— 件 id → 宽度字段值。只有三个触发器有宽度字段；
   //   用量胶囊 / 命令行提示是**内容撑**（`width:max-content`）⇒ 索引里缺席（算式按 0 计 = 下界）。
   const widthIndexOf = (): CcWidgetWidthIndex => ({
