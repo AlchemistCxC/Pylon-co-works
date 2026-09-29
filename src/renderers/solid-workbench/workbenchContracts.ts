@@ -3,10 +3,18 @@ import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
-import type { WorkbenchHostPort } from './workbenchHostPort.ts'
-import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
+import type { WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
-import type { WorkbenchOptionEntry } from './input/workbenchOptionCatalog.ts'
+import type { WorkbenchOptionEntry, WorkbenchMountInput, WorkbenchWorkspaceOption } from '../../plugin-runtime/renderers/workbenchRendererFactory.ts'
+
+/**
+ * B-2a：WorkbenchHostPort 与渲染器工厂契约族（WorkbenchRendererFactory /
+ * PreparedWorkbenchRenderer / WorkbenchRendererInstance / RendererPrepareContext /
+ * WorkbenchMountInput / WorkbenchWorkspaceOption / WorkbenchOptionEntry）已上移
+ * plugin-runtime（契约归扩展面所有，依赖方向单向：视图实现 → plugin-runtime 契约）。
+ * 本文件保留视图侧专有形状（SolidWorkbenchServices / 输入归一化 / lifecycle），并
+ * re-export 契约维持既有消费面 import 路径零改动。
+ */
 export type {
   WorkbenchHostPort,
   WorkbenchCommandPort,
@@ -18,7 +26,16 @@ export type {
   SessionUiPort,
   WorkbenchCapabilityReader,
   RendererDiagnosticPort,
-} from './workbenchHostPort.ts'
+} from '../../plugin-runtime/renderers/workbenchHostPort.ts'
+export type {
+  RendererPrepareContext,
+  WorkbenchRendererFactory,
+  PreparedWorkbenchRenderer,
+  WorkbenchRendererInstance,
+  WorkbenchMountInput,
+  WorkbenchWorkspaceOption,
+  WorkbenchOptionEntry,
+} from '../../plugin-runtime/renderers/workbenchRendererFactory.ts'
 
 export interface SolidWorkbenchServices {
   runtime: WorkbenchRuntime
@@ -31,67 +48,6 @@ export interface SolidWorkbenchServices {
   hostPort?: WorkbenchHostPort
   /** Optional host-owned local/remote provider for low-frequency input prediction. */
   predictionProvider?: InputPredictionProvider
-}
-
-export interface WorkbenchMountInput {
-  readonly sheetId: string
-  readonly sessionOwnerKey: string | null
-  readonly sessionId: string | null
-  /**
-   * #395：会话的 **provider source**（如 `local:smujxe9cc`）。文档按 source 建键
-   * （`WorkbenchDocument.sessionId` 即 source），而 `sessionId` 是身份域的 `Session.id`；
-   * 渲染器判「这份文档是不是本会话的」必须拿 source 比，否则判据恒假（ghost 与历史上下文全哑）。
-   */
-  readonly sessionSource: string | null
-  readonly replayReadonly: boolean
-  readonly reducedMotion: boolean
-  readonly visibility: 'active' | 'background'
-  readonly rightInset: number
-  readonly preview: boolean
-  readonly presentationProfileId?: string
-  readonly sessionLabel?: string
-  readonly workspaceLabel?: string
-  readonly workspacePath?: string
-  readonly availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
-  /**
-   * Empty-state model candidates advertised by the sheet's owning agent
-   * (its sessionConfig buckets). Host-derived plain data: the renderer
-   * subtree must not import the runtime store itself.
-   */
-  readonly agentAdvertisedModels?: readonly WorkbenchOptionEntry[]
-}
-
-export interface WorkbenchWorkspaceOption {
-  readonly id: string
-  readonly label: string
-  readonly path: string
-  readonly lastActiveAt?: number
-}
-
-export interface RendererPrepareContext {
-  readonly suiteId: string
-  readonly host: WorkbenchHostPort
-  readonly activation: RendererActivationSnapshot
-}
-
-export interface WorkbenchRendererFactory {
-  prepare(context: RendererPrepareContext): Promise<PreparedWorkbenchRenderer>
-}
-
-export interface PreparedWorkbenchRenderer {
-  mount(
-    container: HTMLElement,
-    input: WorkbenchMountInput,
-    host: WorkbenchHostPort,
-  ): Promise<WorkbenchRendererInstance> | WorkbenchRendererInstance
-}
-
-export interface WorkbenchRendererInstance {
-  update(input: WorkbenchMountInput): void
-  pause(): void
-  resume(): void
-  destroy(): void | Promise<void>
-  on(event: 'ready' | 'error' | 'request-action', listener: (payload: unknown) => void): () => void
 }
 
 export interface SolidWorkbenchInput {

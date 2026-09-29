@@ -8,7 +8,7 @@ import type {
   SolidWorkbenchMountInput,
 } from './workbenchContracts.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
-import { createWorkbenchHostPort } from './workbenchHostPort.ts'
+import { createWorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { WorkbenchHostPort, WorkbenchMountInput } from './workbenchContracts.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidServices.ts'

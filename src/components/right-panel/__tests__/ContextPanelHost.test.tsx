@@ -8,7 +8,7 @@ import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes.ts'
 import AgentContextPanel from '../AgentContextPanel.tsx'
 import { createPreviewWorkbenchServices } from '../../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
-import { createWorkbenchHostPort } from '../../../renderers/solid-workbench/workbenchHostPort.ts'
+import { createWorkbenchHostPort } from '../../../plugin-runtime/renderers/workbenchHostPort.ts'
 import { publishActiveWorkbenchHostPort } from '../../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
 import { useRightRailStore, RIGHT_RAIL_DEFAULT_WIDTH } from '../../../domains/workspace/layoutRailsStore.ts'
 

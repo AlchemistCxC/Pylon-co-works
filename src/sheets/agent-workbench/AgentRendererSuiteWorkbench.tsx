@@ -10,7 +10,7 @@ import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/
 import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'

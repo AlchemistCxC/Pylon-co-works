@@ -8,7 +8,7 @@ import type {
   WorkbenchCommandError,
   WorkbenchCommandResult,
   WorkbenchHostPort,
-} from './workbenchHostPort.ts'
+} from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { SolidWorkbenchServices } from './workbenchContracts.ts'
 import { resolveDocumentOptionEntries } from './input/workbenchOptionCatalog.ts'
 

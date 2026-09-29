@@ -1,4 +1,4 @@
-import type { WorkbenchCommandPort, WorkbenchCommandResult } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import type { WorkbenchCommandPort, WorkbenchCommandResult } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 
 export interface RendererSuiteCommandGate {
   readonly isActive: () => boolean
