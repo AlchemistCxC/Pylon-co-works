@@ -326,6 +326,20 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.destroy()
   })
 
+  it('★ #266 刀3：显隐一变最小高跟着变 —— 下界 = 按边算取最大（藏 / 显那件高的前后各一读数）', () => {
+    // 下边组里有一件高 60（其余两件 28）⇒ 它在场时下边组需求 = ccMarginBottom 15 + 60 = 75
+    const store = createStaticWorkbenchAppearanceStore(theme({ ccHeight: 20, modelHeight: 60 }))
+
+    // 藏掉那件高的 ⇒ 行高回落到 28 ⇒ 下界 = max(64, 10+40, 15+28) = **64**
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: true })
+    expect(store.getSnapshot()).toMatchObject({ ccHidden: ['model'], ccHeight: 64 })
+
+    // 放出来 ⇒ 下边组需求 75 成为绑定项 ⇒ 下界 = **75**（同一条 ccHeight 被抬上去）
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: false })
+    expect(store.getSnapshot()).toMatchObject({ ccHidden: [], ccHeight: 75 })
+    store.destroy()
+  })
+
   it('属性命令写入 cc 字段后 ccHeight 仍按最小高 clamp', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({ cliHintMode: 'full', ccHeight: 12 }))
 

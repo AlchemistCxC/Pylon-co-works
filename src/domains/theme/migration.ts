@@ -6,7 +6,7 @@
  */
 import { normalizeCustomPresetId, normalizeCustomPresets } from './customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
-import { clampCcHeight } from '../cc/ccHeightState.ts'
+import { clampCcHeight, ccMinHeightInputOf } from '../cc/ccHeightState.ts'
 import { normalizeThemeState } from './themeFieldDefs.ts'
 import { PRESET_ZONES } from './presetReducer.ts'
 
@@ -228,6 +228,10 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   //   老数据里残留的这些键由 `store.ts` 的 A4 白名单在下次写盘修剪（与刀5A/CC-07 前六刀同一处置）。
   state.ccHeight = clampCcHeight(
     typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150),
+    // ★ #266 刀3：下界 = 按边算取最大（**两态各算一遍取 max**）。此处 state 已过结构对齐
+    //   （`ccHidden` 必是数组、数字字段都有值；`ccHiddenEmpty` 缺省时由 `ccMinHeightInputOf`
+    //   回落常态切面）⇒ 直接当算式输入用。
+    ccMinHeightInputOf(state as { ccHidden?: readonly string[] }),
   )
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state

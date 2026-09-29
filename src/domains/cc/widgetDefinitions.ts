@@ -11,12 +11,16 @@
  *   ★★ **横向脱离**（#266 刀2.5）：行上可选声明 `detachX`（贴哪条边 + 距离）——
  *   **缺省 = 照旧排队**（默认排布不变），声明了才脱离横向队列、贴到背景板的那条横边、
  *   **允许与队列重叠**（见 `CcDetachX`）。下边组因此不折行（行数恒 1），最小宽按 max 取。
- * - ★ **显隐**（#266 ⑰）：**这一维只有「显示 / 隐藏」两个属性，且只有两种承载** ——
- *   ① 预设里的**值**（`ccHidden`，另加提示详细档这个自己的值，见 `resolveCcHiddenWidgetIds`）；
- *   ② **语境侧名单**（空态名单 `EMPTY_STATE_HIDDEN_WIDGET_IDS`）。
- *   ⇒ **行上不再有任何显隐申明**（`inActiveSession` / `conditions` / `hiddenInEmptyState` 三样已删）。
+ * - ★ **显隐**（#266 ⑰ → 刀2 收成「盒子 + 一道门」）：这一维只有「显示 / 隐藏」两个属性，
+ *   承载**只有一种：预设的切面** —— `ccHidden`（常态切面）/ `ccHiddenEmpty`（空态切面，与常态同形）。
+ *   取值 = **二选一**：门（"现在是不是空态"）开 ⇒ 空态切面，否则常态切面（`resolveCcHiddenWidgetIds`）。
+ *   ★ 预设**没写**空态切面 ⇒ 落值时抄该预设自己的常态切面（回落，见 `presetReducer.inheritCcEmptySlice`）。
+ *   ⇒ **行上不再有任何显隐申明**（`inActiveSession` / `conditions` / `hiddenInEmptyState` 三样已删），
+ *     也**不再有语境侧硬编码名单**（原 `EMPTY_STATE_HIDDEN_WIDGET_IDS` 已搬进预设数据）。
+ * - ★ **高度来源**（#266 刀3）：行上可选声明 `heightField`（该件的高从哪个主题字段来）——
+ *   缺省 = **内容撑**（算式按 0 计，见 `ccHeightState.resolveCcMinHeight` 的"下界"口径）。
  *
- * 其余全部派生：`CC_WIDGET_IDS` / `STATUS_WIDGET_IDS` / 空态隐藏名单 / 标签表 /
+ * 其余全部派生：`CC_WIDGET_IDS` / `STATUS_WIDGET_IDS` / 标签表 /
  * 默认布局（`ccLayoutState.ts`）/ 目录三份（`widgetCatalog.ts`）/
  * 属性表单 / 编辑工具条（`ControlCenter.solid.tsx`）。
  *
@@ -189,17 +193,35 @@ export function alignLayout(
 }
 
 /**
- * ★★ 显隐口径（#266 ⑰，2026-09-24）：**显隐只有值 + 语境名单；元件不自己申明。**
+ * ★★ 显隐口径（#266 ⑰ 立，刀2 收成「盒子 + 一道门」）：**显隐只有预设的切面；元件不自己申明。**
  *
  * 用户口径逐字：「所有东西在这一维只有显示 / 隐藏两个属性，要存状态存到预设里，不要额外申明属性」
- * 「如果要记『这里不显示』，应该是在这里注明 a 不显示，而不是 a 申明在这里不显示」。
+ * 「如果要记『这里不显示』，应该是在这里注明 a 不显示，而不是 a 申明在这里不显示」
+ * 「我更希望这是一个统一的筛选器…是一道门，最终效果由预设抄写和这道门共同决定，只此两层级，
+ *   不根据元件做特殊处理」。
  * ⇒ 原先挂在**元件行**上的三样申明已删（`inActiveSession` = 活跃会话显/隐、
  *   `conditions` = 运行期状态检测条件表 `CC_VISIBILITY_CONDITIONS`、
- *   `hiddenInEmptyState` = 空态隐藏）；连带删除随之而来的两个派生名单
- *   （常态放行 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`、以及条件表本身）。
- *   想记「这里不显示」⇒ 写进**语境侧名单**（`EMPTY_STATE_HIDDEN_WIDGET_IDS`）或预设的**值**（`ccHidden`）。
- * ★ 这里是**原位说明**，不是钩子：不要在这里重新长出任何"元件侧显隐申明"。
+ *   `hiddenInEmptyState` = 空态隐藏）；随之而来的两个派生名单
+ *   （常态放行 `ALWAYS_VISIBLE_STATUS_WIDGET_IDS`、条件表本身）与刀2 之前的
+ *   **语境侧空态名单**（`EMPTY_STATE_HIDDEN_WIDGET_IDS`）也已退场。
+ *   想记「这里不显示」⇒ 写进预设的**切面**（`ccHidden` / `ccHiddenEmpty`）。
+ * ★ 这里是**原位说明**，不是钩子：不要在这里重新长出任何"元件侧显隐申明"，
+ *   也不要再长出"按元件特判的名单"（唯一例外见 `cliHintGoverned`：那是**件自述**它受哪个档管辖，
+ *   由折叠逻辑统一读取，不是给某个 id 开的后门）。
  */
+
+/**
+ * ★★ 切面（slice）= 预设对中控某一维的取值，**同一维按「常态 / 空态」各一份**。
+ *
+ * 本刀（刀2）只做**显隐这一维**：
+ * - 常态切面 = `ccHidden`（主题字段，落在 `cc` 区 → 预设可携带）；
+ * - 空态切面 = `ccHiddenEmpty`（同形、同区）。
+ *
+ * ★ **扩展位**：位置将来同样按「常态 / 空态」两份切面承载（本刀不做 —— 位置仍只有一份
+ *   `ccLayout`，不进盒子）。届时新增 `ccLayoutEmpty` 一类字段即可，读取处仍走
+ *   `resolveCcHiddenWidgetIds` 那种"门选一份"的形状。
+ */
+export type CcVisibilitySlice = readonly string[]
 
 export interface CcWidgetGroup {
   id: string
@@ -224,6 +246,24 @@ export interface CcWidgetGroup {
   gap?: number
   /** ★ 声明为**悬浮**（不参与文档流成组；占区叠加约束对它豁免，见刀4） */
   floating?: boolean
+  /**
+   * ★ 刀2：本件**自述**「我的显隐受**详细档**（`cliHintMode` = 快捷提示详细档）管辖」。
+   *
+   * 这是**件侧的显隐申明**（⑰ 唯一允许的一种），存在的理由：详细档选「隐藏」时该件必须不显示，
+   * 而这条事实属于**该件自己**（别的件没有这个档）⇒ 由件声明、折叠逻辑**只读声明**，
+   * 不再在折叠逻辑里写死某个元件 id（刀2 之前的 `COMMAND_HINT_WIDGET_ID` 已删）。
+   * ★ 声明只是「受管辖」；**真值仍由预设切面给**（切面里已含它 ⇒ 不重复追加，集合语义）。
+   */
+  cliHintGoverned?: boolean
+  /**
+   * ★ 刀3：本件的**高度**从哪个主题字段来（`CcNumberPropertyKey` 里的数字字段）。
+   *
+   * 缺省 = **内容撑**（宽度 `max-content` / 高度 `auto`，如用量胶囊与命令行提示）——
+   * 算式算不出它的实际高，**按 0 计入**，于是结果对它们是**下界**
+   * （与最小宽那边同一性质，见 `ccHeightState.resolveCcMinHeight`）。
+   * ★ 声明在这里（而不是在算式里按 id 特判）⇒ 加件/换字段时只改表。
+   */
+  heightField?: CcNumberPropertyKey
   /** 是否进 `ccLayout` / `ccHidden` 两份名单 */
   draggable: boolean
   /** 属性表单（PropertyPanel 消费） */
@@ -287,6 +327,8 @@ export const CC_WIDGET_GROUPS = [
     rail: 'builtin',
     layout: { x: { anchor: 'cc-surface', side: 'stretch' }, y: { anchor: 'cc-surface', side: 'top' }, order: 1 },
     draggable: true,
+    // ★ 刀3：输入栏的高就是它的字段（多行增高由 CSS 的 `--cc-input-extra-height` 算进容器高，不在这里）
+    heightField: 'inputHeight',
     propertyFields: [
       { kind: 'section', title: '输入栏设置' },
       { kind: 'color', key: 'inputBg', label: '背景色' },
@@ -341,6 +383,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 2 },
     gap: 0,
     draggable: true,
+    heightField: 'modelHeight',
     propertyFields: [
       { kind: 'section', title: '模型控件' },
       {
@@ -375,6 +418,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 3 },
     gap: 12,
     draggable: true,
+    heightField: 'reasoningHeight',
     propertyFields: [
       { kind: 'section', title: '思考强度控件' },
       { kind: 'chips', key: 'reasoningSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
@@ -404,6 +448,7 @@ export const CC_WIDGET_GROUPS = [
     layout: { x: { anchor: 'cc-surface', side: 'left' }, y: { anchor: 'cc-surface', side: 'bottom' }, order: 4 },
     gap: 12,
     draggable: true,
+    heightField: 'permissionHeight',
     propertyFields: [
       { kind: 'section', title: '权限控件' },
       { kind: 'chips', key: 'permissionSwitchMode', label: '切换方式', options: [{ value: 'menu', label: '弹菜单' }, { value: 'cycle', label: '点击轮换' }] },
@@ -457,16 +502,17 @@ export const CC_WIDGET_GROUPS = [
     draggable: true,
     // ★ #266 ⑰：这里原先挂着三条 `conditions`（有会话 + 命令行模式 + 详细档不为 hidden）——
     //   用户口径「命令行提示按模式驱动可见**我后悔了**」⇒ 一律撤掉，**标准输入模式下它也默认显示**。
-    //   想让它不显示只有两条合法路径：预设里的**值**（`ccHidden`），或详细档选「隐藏」
-    //   （后者由 `resolveCcHiddenWidgetIds` 折进隐藏名单，不在行上申明）。
-    //   空态另有语境侧名单兜着（`EMPTY_STATE_HIDDEN_WIDGET_IDS` 含它）。
+    //   想让它不显示只有两条合法路径，都写在**预设的切面**里：常态 / 空态切面里的**值**（`ccHidden` /
+    //   `ccHiddenEmpty`），或详细档选「隐藏」（后者由 `resolveCcHiddenWidgetIds` 读本行的
+    //   `cliHintGoverned` 声明折进名单，不在折叠逻辑里认元件 id）。
+    cliHintGoverned: true,
     members: [
       {
         id: 'hint-line',
         label: '提示行',
         // ★ 原为 `{kind:'field', field:'inputMode', visibleWhen:['cli']}`（2026-09-23 删）、
-        //   组层 `conditions`（2026-09-24 / #266 ⑰ 删）—— 判据现在只在**值 + 语境名单**里
-        //   （`ccHidden` / 详细档折叠 / 空态名单，见 `isWidgetVisible` 与 `resolveCcHiddenWidgetIds`）。
+        //   组层 `conditions`（2026-09-24 / #266 ⑰ 删）—— 判据现在只在**切面 + 详细档声明**里
+        //   （`ccHidden` / `ccHiddenEmpty` / 详细档折叠，见 `isWidgetVisible` 与 `resolveCcHiddenWidgetIds`）。
         visibility: { kind: 'always' },
       },
     ],
@@ -574,22 +620,6 @@ export const CC_REGISTERED_SLOT_IDS: readonly CcRegisteredSlotId[] = CC_WIDGET_G
 /** 状态区 widget（除 input 外全部计入中控最小高度约束）——由 id 列表派生，不平行维护 */
 export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id => id !== 'input')
 
-/**
- * ★ **空态这一侧**：这些不显示（#266 ⑰ 起为**字面量**，不再从行上派生）。
- *
- * 口径（用户逐字）：「**如果要记『这里不显示』，应该是在这里注明 a 不显示，而不是 a 申明在这里不显示**」
- * ⇒ 空态隐藏是**语境侧**的事实，就该写在语境侧这里；元件行上不再有 `hiddenInEmptyState`。
- * - `cc-send-button`：注册轨 id（不是刀4 前的 legacy `send`）；
- * - `cc-command-hint`：⑰ 新增。空态没有会话，命令行提示没有意义 ——
- *   原由行上 `conditions` 的 `'has-session'` 承担，撤条件后必须由本名单接住，
- *   否则空态会多出一条提示（同时**空态高度数值也会跟着变**，见 `ccHeightState`）。
- *
- * ★ 它不是「可见性总名单」：活跃会话下的隐藏仍只看预设的**值** `ccHidden`。
- */
-export const EMPTY_STATE_HIDDEN_WIDGET_IDS: readonly CcWidgetGroupId[] = [
-  'model', 'reasoning', 'mode', 'tokens', 'cc-send-button', 'cc-command-hint',
-]
-
 /** 表里每行的中文名 —— 标签表唯一出处（ControlCenter 与 widgetCatalog 共用） */
 export const CC_WIDGET_LABELS: Readonly<Record<CcWidgetGroupId, string>> = Object.freeze(
   Object.fromEntries(CC_WIDGET_GROUPS.map(row => [row.id as string, row.label])) as Record<CcWidgetGroupId, string>,
@@ -603,42 +633,64 @@ export const WIDGET_PROPERTY_FIELDS: Record<CcWidgetId, WidgetPropertyForm> = Ob
 /**
  * 跨元件的系统字段：不属于任何单个组/成员的字段。
  *
- * - `ccLayout` / `ccHidden`：两份名单本体（值为元件名，属布局状态）。
+ * - `ccLayout`：位置名单本体（值为元件名，属布局状态）。
+ * - ★ 显隐**切面**（刀2）：`ccHidden`（常态切面）/ `ccHiddenEmpty`（空态切面，与常态同形）。
+ *   两者都是「预设的取值」，**不是**两份语义不同的名单 —— 取值规则（门选一份 + 缺省回落常态 +
+ *   详细档折叠）只在 `resolveCcHiddenWidgetIds` 一处。
  *   ★ 刀5 后「信息行」名下那三项（`ccStatusFontSize` / `statusBg` / `statusBgImage`）已**删除**
  *   （前两项是僵尸，第三项的字号收窄成 `cc-command-hint` 成员自己的 `ccHintFontSize`）；
  *   `footerLayout` 已由刀3 移入容器行 `cc-surface`；
  *   ★ 刀7：`ccScale`（缩放）已**整体删除**（用户口径「我预期里没有缩放这一项」）⇒ 名单由三份变两份。
  */
 export const CC_SYSTEM_FIELDS = [
-  'ccLayout', 'ccHidden',
+  'ccLayout', 'ccHidden', 'ccHiddenEmpty',
 ] as const satisfies readonly ThemeFieldKey[]
 
 export interface WidgetVisibilityCtx {
-  /** 预设里的**值**（`ccHidden` 经 `resolveCcHiddenWidgetIds` 组装后的隐藏名单） */
+  /** 生效的那份切面（常态或空态，由 `resolveCcHiddenWidgetIds` 选好后传进来） */
   hidden: readonly string[]
 }
 
-/** 命令行提示的 id（详细档折叠要用；`CcWidgetId` 联合里也有，此处给个可读名字） */
-const COMMAND_HINT_WIDGET_ID: CcWidgetId = 'cc-command-hint'
+/**
+ * ★ 受**详细档**管辖的元件 id —— 由定义表**派生**（件自己声明，见 `cliHintGoverned`），
+ * 折叠逻辑只读这份派生，**不认任何写死的元件 id**（刀2 之前那处 `COMMAND_HINT_WIDGET_ID` 已删）。
+ * 现状只有一条（命令行提示）；将来若有第二个件受详细档管辖，改表即可、这里不动。
+ */
+export const CLI_HINT_GOVERNED_WIDGET_IDS: readonly CcWidgetGroupId[] = CC_WIDGET_GROUPS
+  .filter(row => row.cliHintGoverned === true)
+  .map(row => row.id)
 
 /**
- * ★★ **隐藏名单的组装**（#266 ⑰）——「值」折成名单的**唯一一处**。
+ * ★★ **隐藏名单的组装**（#266 ⑰ 立，刀2 改成「盒子 + 一道门」）——「切面」变成「名单」的**唯一一处**。
  *
- * 命令行提示的「详细档 = 隐藏」是**它自己的值**（`cliHintMode`，出厂预设里写死的档位），
- * 不是元件侧的显隐申明 ⇒ 在这里折进隐藏名单，**渲染侧（`ControlCenter`）与全部计数调用点
- * 都调它**，保证同一真值（否则会出现"计数多算/少算一个不渲染的元件"，正是 `isWidgetVisible`
- * 注释里 C2 要防的）。
+ * 两段，按序：
+ * 1. **门**：`isEmpty`（= 现在是不是空态，由渲染侧给）开着 ⇒ 取**空态切面**，否则取**常态切面**。
+ *    ★ 纯二选一，**读的时候不做"缺省回落"** —— 回落发生在**预设落值那一步**
+ *    （`presetReducer.inheritCcEmptySlice`：预设没写空态切面 ⇒ 抄它自己的常态切面）。
+ *    两条理由：① 读不出"没写"与"写了空数组"的区别（DEFAULTS 必须给每个字段值，
+ *    `themeDefaults.test` 与 skin contract 都这么判）；② 读侧保持"二选一"这一条规则，不夹带第二套语义。
+ * 2. **详细档折叠**：`cliHintMode === 'hidden'` ⇒ 把**声明受详细档管辖**的件（`cliHintGoverned`）
+ *    并进名单（集合语义，已在名单里的不重复追加）。
  *
- * ★ 为什么不是"把 `cliHintMode` 传进谓词"：那就等于让可见性重新依赖一个**运行期档位**，
+ * 值一律照抄，不吞不改。
+ *
+ * ★ 为什么详细档不是"把 `cliHintMode` 传进谓词"：那就等于让可见性重新依赖一个**运行期档位**，
  *   与「这一维只有显示 / 隐藏两个属性」的口径相悖；折叠成名单后，谓词只认 `hidden`。
- * ★ 纯函数：不读 store、不碰全局（同输入同输出）。
+ * ★ 纯函数：不读 store、不碰全局（同输入同输出）。渲染侧（`ControlCenter`）与全部计数调用点都调它，
+ *   保证同一真值（否则会出现"计数多算/少算一个不渲染的元件"，正是 `isWidgetVisible` 注释里 C2 要防的）。
  */
-export function resolveCcHiddenWidgetIds({ ccHidden, cliHintMode }: {
-  ccHidden: readonly string[]
+export function resolveCcHiddenWidgetIds({ ccHidden, ccHiddenEmpty, isEmpty = false, cliHintMode }: {
+  /** 常态切面（预设的值） */
+  ccHidden: CcVisibilitySlice
+  /** 空态切面（预设的值）—— 门开时用它；**必填**，防调用方漏传导致"空态什么都不藏" */
+  ccHiddenEmpty: CcVisibilitySlice
+  /** 门：现在是不是空态 */
+  isEmpty?: boolean
   cliHintMode?: string
 }): string[] {
-  if (cliHintMode !== 'hidden') return [...ccHidden]
-  return ccHidden.includes(COMMAND_HINT_WIDGET_ID) ? [...ccHidden] : [...ccHidden, COMMAND_HINT_WIDGET_ID]
+  const slice = isEmpty ? ccHiddenEmpty : ccHidden
+  if (cliHintMode !== 'hidden') return [...slice]
+  return Array.from(new Set([...slice, ...CLI_HINT_GOVERNED_WIDGET_IDS]))
 }
 
 /**
@@ -647,9 +699,9 @@ export function resolveCcHiddenWidgetIds({ ccHidden, cliHintMode }: {
  *
  * ★ 判据（#266 ⑰ 收口）：**只剩「隐藏名单」一件事**。
  *   ★ #266 刀1：编辑态豁免已撤 —— 编辑态下被藏件与常态一样**不在场**，工具栏清单才是它唯一的入口。
- *   名单里的东西 = 预设的**值**（`ccHidden` + 详细档折叠）+ **语境侧名单**（空态那一侧），
- *   由调用方组装好传进来 —— 元件自己不申明显隐，谓词里也**不出现任何元件特例**
- *   （旧 `id === 'input'` 那类特例已随 ⑰ 清掉）。
+ *   ★ #266 刀2：名单里的东西 = **生效的那份切面**（门选一份；空态切面缺省回落常态切面）
+ *   + 详细档折叠（按件声明）——由调用方组装好传进来。元件自己不申明显隐，
+ *   谓词里也**不出现任何元件特例**（旧 `id === 'input'` 那类特例已随 ⑰ 清掉）。
  */
 export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   return !ctx.hidden.includes(id)

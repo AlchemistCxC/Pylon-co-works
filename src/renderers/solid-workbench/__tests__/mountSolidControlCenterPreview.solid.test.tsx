@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fireEvent, waitFor } from '@solidjs/testing-library'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { CC_WIDGET_LABELS, EMPTY_STATE_HIDDEN_WIDGET_IDS } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_LABELS } from '../../../domains/cc/widgetDefinitions.ts'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { mountSolidControlCenterPreview } from '../__fixtures__/mountSolidControlCenterPreview.solid.tsx'
 import { createBuiltinCcWidgetPluginDefinition } from '../../../plugins/core/cc/builtinCcWidgetPlugin.ts'
@@ -10,6 +10,13 @@ import { TestPluginRuntime } from '../../../plugin-runtime/testing/pluginRuntime
 import { getRuntimeServices } from '../../../plugin-runtime/runtimeServices.ts'
 
 const cleanups: Array<() => void> = []
+
+/**
+ * ★ #266 刀2：空态切面现在由**预设**携带（`ccHiddenEmpty`），不再是代码侧名单。
+ * 这份取值 = 出厂那 10 套 cc 条目里的空态切面（`zones/factory/*-cc.ts`）；
+ * 本文件只需要「一份非空的空态切面」来代表"预设写过了"，故写字面量。
+ */
+const PRESET_EMPTY_SLICE = ['model', 'reasoning', 'mode', 'tokens', 'cc-send-button', 'cc-command-hint'] as const
 
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
@@ -328,7 +335,7 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('CC-02 第 5 步收口：工具栏那一格与控件同源 —— 被空态名单藏起来的件显示为「已隐藏」', async () => {
+  it('CC-02 第 5 步收口：工具栏那一格与控件同源 —— 被**空态切面**藏起来的件显示为「已隐藏」', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
     const host = document.createElement('div')
@@ -336,15 +343,19 @@ describe('mountSolidControlCenterPreview', () => {
     const services = createPreviewWorkbenchServices()
     const theme = structuredClone(DEFAULTS)
     theme.inputSubmitButtonMode = 'inline'
+    // ★ 刀2：门开（空态）时读的是**空态切面**；常态切面一件都没藏。
+    theme.ccHidden = []
+    theme.ccHiddenEmpty = [...PRESET_EMPTY_SLICE]
     services.appearance.setTheme(theme)
 
     try {
       const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
       const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
       expect(controlCenter).not.toBeNull()
-      // 前提：这里是**空态语境名单**在藏件，预设值 ccHidden 里一件都没有。
-      // ⇒ 工具栏若读裸预设值，就会把这几格报成「● 显示着」——同一个事实两处判据，正是本单病灶。
+      // 前提：这里是**空态切面**在藏件，常态切面 ccHidden 里一件都没有。
+      // ⇒ 工具栏若读裸常态切面，就会把这几格报成「● 显示着」——同一个事实两处判据，正是本单病灶。
       expect(theme.ccHidden).not.toContain('model')
+      expect(theme.ccHiddenEmpty).toContain('model')
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
@@ -352,20 +363,64 @@ describe('mountSolidControlCenterPreview', () => {
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
       const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-toolbar-chip')?.textContent?.trim().at(0)
 
-      // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
+      // 切面里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
       // 清单是它唯一的入口，故这里的"如实"就是隐藏件的全部可见信息。
       await waitFor(() => expect(chipWrap('model')?.classList.contains('dim')).toBe(true))
-      for (const id of EMPTY_STATE_HIDDEN_WIDGET_IDS) {
+      for (const id of PRESET_EMPTY_SLICE) {
         expect(chipWrap(id)?.classList.contains('dim')).toBe(true)
         expect(chipMark(id)).toBe('＋')
       }
-      // 不在名单里的输入栏仍是「● 显示着」—— 挡住"这条用例恒为全部隐藏"
+      // 不在切面里的输入栏仍是「● 显示着」—— 挡住"这条用例恒为全部隐藏"
       expect(chipWrap('input')?.classList.contains('dim')).toBe(false)
       expect(chipMark('input')).toBe('●')
       destroy()
     } finally {
       services.destroy()
       host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀2 门开 / 门关读的是**两份切面**：同一份主题，空态缺席的件只在门关时在场', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const services = createPreviewWorkbenchServices()
+    // 常态切面藏 tokens；空态切面藏 model 与 command-hint（刻意与常态**不同**：并集会两边都藏）
+    const theme = structuredClone(DEFAULTS)
+    theme.ccHidden = ['tokens']
+    theme.ccHiddenEmpty = ['model', 'cc-command-hint']
+    services.appearance.setTheme(theme)
+
+    const mountWith = async (sessionId: string | null) => {
+      const host = document.createElement('div')
+      document.body.append(host)
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(controlCenter).not.toBeNull()
+      return {
+        controlCenter: controlCenter!,
+        present: (id: string) => controlCenter!.querySelector(`[data-widget-id="${id}"]`) !== null,
+        dispose: () => { destroy(); host.remove() },
+      }
+    }
+
+    try {
+      // 门关（有会话）：常态切面生效 ⇒ tokens 不在场、model 在场
+      const active = await mountWith('preview-session')
+      await waitFor(() => expect(active.present('model')).toBe(true))
+      expect(active.present('tokens'), '门关：常态切面藏的件不在场').toBe(false)
+      expect(active.present('cc-command-hint'), '门关：空态切面（写了 model / command-hint）不参与').toBe(true)
+      active.dispose()
+
+      // 门开（空态）：空态切面生效 ⇒ model / command-hint 不在场，而常态切面藏的 tokens 反而在场
+      const empty = await mountWith(null)
+      await waitFor(() => expect(empty.present('model')).toBe(false))
+      expect(empty.present('cc-command-hint'), '门开：空态切面藏的件不在场').toBe(false)
+      expect(empty.present('tokens'), '门开：常态切面不参与（旧并集会把它也藏掉）').toBe(true)
+      expect(empty.present('input')).toBe(true)
+      empty.dispose()
+    } finally {
+      services.destroy()
       await runtime.deactivate(instance.identity.key)
     }
   })

@@ -1,5 +1,5 @@
 import type { ThemeSettings } from './themeStore'
-import { resolveCcMinHeight } from '../cc/ccHeightState.ts'
+import { resolveCcMinHeight, ccMinHeightInputOf } from '../cc/ccHeightState.ts'
 import { CC_WIDGET_GROUPS } from '../cc/widgetDefinitions.ts'
 import type { FontRole } from '../../contracts/fonts.ts'
 import type { VisualSemanticRole } from './visualSemantics.ts'
@@ -224,9 +224,9 @@ export const THEME_FIELD_DEFS = {
   // ── cc ──
   ccHeight: {
     ...N('cc', '中控区高度', 0, 500), default: 150,
-    // ★ #266 刀9~11：输入/底部信息/多行溢出的形态都已固定 ⇒ 最小高度退化为常量
-    //   （真值仍在 `domains/cc/ccHeightState.resolveCcMinHeight`，此处只做转发）。
-    minFn: () => resolveCcMinHeight(),
+    // ★ #266 刀3：最小高从"常量 64"改回**按边算取最大**（`ccHeightState.resolveCcMinHeight`）。
+    //   设置页这条下界对**两态切面**各算一遍取 max（同落值侧 / 读盘侧口径，见该函数的"两种门态取 max"节）。
+    minFn: t => resolveCcMinHeight(ccMinHeightInputOf(t)),
     group: "中控本体面",
   },
   ccMarginX: { ...N('cc', '左右边距（对称）', 0, 100), default: 15, group: "中控本体面", unit: 'px', suffix: 'px' },
@@ -240,6 +240,11 @@ export const THEME_FIELD_DEFS = {
   ccBgImage: { ...T('cc', '中控区背景图'), default: '', control: 'bgImage', group: "中控本体面", },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
+  // ★ #266 刀2：显隐**空态切面**（与常态切面 `ccHidden` 同形、同区）——「盒子」的第二份。
+  //   取值 = 门（"现在是不是空态"）二选一，缺省（空）回落常态切面；规则唯一出处
+  //   `domains/cc/widgetDefinitions.ts` 的 `resolveCcHiddenWidgetIds`。
+  //   位置将来同样按两份切面承载（本刀不做，位置仍只有 `ccLayout` 一份）。
+  ccHiddenEmpty: H({ type: 'text', label: '空态隐藏控件', zone: 'cc', noCssVar: true }),
   // A6 输入区：本轮新增字段不投影 semanticRole/semanticSource；旧 inputBg 等字段保留。
   inputOffsetTop: { ...N('cc', '输入栏上间距', 0, 120), default: 10, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-offset-top' },
   inputHeight: { ...N('cc', '输入栏高度', 0, 200), default: 40, group: '输入框本体', unit: 'px', suffix: 'px', cssVar: '--cc-input-height' },

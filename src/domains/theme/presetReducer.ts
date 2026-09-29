@@ -14,7 +14,7 @@ export const PRESET_ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as cons
 export type PresetZone = (typeof PRESET_ZONES)[number]
 import type { CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import { normalizeCcLayout } from '../cc/ccLayoutState.ts'
-import { clampCcHeight, clampInputTypography } from '../cc/ccHeightState.ts'
+import { clampCcHeight, ccMinHeightInputOf, clampInputTypography } from '../cc/ccHeightState.ts'
 import {
   pickCustomPresetTheme,
   upsertCustomPreset,
@@ -31,6 +31,23 @@ const PRESET_KEY_SET = new Set<string>(THEME_PRESET_KEYS)
 
 export function filterPresetTheme(value: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
   return Object.fromEntries(Object.entries(value).filter(([key]) => PRESET_KEY_SET.has(key))) as Partial<ThemeSettings>
+}
+
+/**
+ * ★ #266 刀2：**预设没写空态切面 ⇒ 抄它自己的常态切面**（「缺省回落常态切面」的落点）。
+ *
+ * 为什么回落放在**这一步**而不是读名单那一步（`resolveCcHiddenWidgetIds`）：
+ * - 读侧要判"没写"，就得让空态切面能是 `undefined`；而 `DEFAULTS` 必须给每个主题字段一个值
+ *   （`themeDefaults.test` 的"每字段都有默认值" + skin contract 的"fixture 不得缺字段"两条硬约束），
+ *   所以经过装配后永远读不出"没写" —— 只有**预设数据本身**（这里）还留着"这个键在不在"。
+ * - 于是读侧保持一条规则：门开取空态切面、门关取常态切面（纯二选一，不夹带第二套语义）。
+ *
+ * 判据只看**键在不在**：写了就用写的（`ccHiddenEmpty: []` = 空态什么都不藏，合法且有意义），
+ * 没写才回落。非 cc 区 / 两样都没写 ⇒ 原样返回（由 `DEFAULTS` 铺底）。
+ */
+export function inheritCcEmptySlice(theme: Partial<ThemeSettings>): Partial<ThemeSettings> {
+  if (theme.ccHiddenEmpty !== undefined || theme.ccHidden === undefined) return theme
+  return { ...theme, ccHiddenEmpty: [...(theme.ccHidden as readonly string[])] }
 }
 
 /** W2-15（F3-B）：全量主题 → 相对 DEFAULTS 的 delta（过滤与默认相等键；自定义预设存储用） */
@@ -63,11 +80,17 @@ export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePreset
 
 /**
  * cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState。
- * ★ #266 刀9~11：形态固定后最小高度是常量 ⇒ 不再需要 `inputMode` / `footerLayout` /
- *   `cliOverflowMode` / 可见控件数参与（它们改造前也只影响已删除的 peri 分支）。
+ *
+ * ★ #266 刀3：下界由"常量 64"换成**按边算取最大**（`resolveCcMinHeight`）⇒ 入参要先补上
+ *   `DEFAULTS` 的数字字段（预设切面是**稀疏**的，缺项会让算式按 0 算、下界偏小）。
+ * ★ 在场集合口径 = **两态各算一遍取 max**（`ccMinHeightInputOf` 交出常态 + 空态两份切面，
+ *   `resolveCcMinHeight` 逐态各算一遍取大 ⇒ 下界由**要求更高的那一份**决定，常态 / 空态都可能
+ *   成为绑定项；见 `ccHeightState.resolveCcMinHeight` 的口径说明）。
  */
 export function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
-  return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : Number(DEFAULTS.ccHeight))
+  const merged = { ...DEFAULTS, ...theme } as Partial<ThemeSettings>
+  const value = typeof merged.ccHeight === 'number' ? merged.ccHeight : Number(DEFAULTS.ccHeight)
+  return clampCcHeight(value, ccMinHeightInputOf(merged))
 }
 
 export function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number } {
@@ -113,10 +136,11 @@ export function setZoneFieldReducer(
 
   // cc 高度不变量：高度或影响最小高的结构字段被写时整组收敛。
   // 属性面板/设置页恢复控件后，状态高度必须与 CSS 实际最小高一致。
-  // ★ #266 刀9~11：形态固定 ⇒ 最小高是常量，clamp 不再需要形态参数。
+  // ★ #266 刀3：最小高改成算式（按边算取最大）⇒ 这里的下界随之；数字字段仍先补 DEFAULTS
+  //   （`state` 若是稀疏夹具，缺项会让算式按 0 算）。
   if (zone === 'cc' || 'ccHeight' in patch) {
-    const merged = { ...state, ...patch } as ThemePresetState
-    patch.ccHeight = clampCcHeight(Number(merged.ccHeight))
+    const merged = { ...DEFAULTS, ...state, ...patch } as Partial<ThemeSettings>
+    patch.ccHeight = clampCcHeight(Number(merged.ccHeight), ccMinHeightInputOf(merged))
   }
 
   return {
@@ -132,12 +156,14 @@ export function applyZonePresetReducer(
   presetName: string,
   presetTheme: Partial<ThemeSettings>,
 ): ThemePresetPatch {
-  const theme = filterPresetTheme(presetTheme)
+  const theme = inheritCcEmptySlice(filterPresetTheme(presetTheme))
   return {
     ...theme,
     // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
     ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
-    ...(zone === 'cc' && theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
+    // ★ #266 刀3：最小高按**装配后的有效值**算（预设切面是稀疏的 —— 只按切面算，下界会漏掉
+    //   用户当前那份输入栏高 / 件高，与渲染侧算出的 `--cc-min-height` 不一致）
+    ...(zone === 'cc' && theme.ccHeight !== undefined ? syncPresetCcHeight({ ...state, ...theme } as Partial<ThemeSettings>) : {}),
     appliedPreset: { ...state.appliedPreset, [zone]: presetName },
     custom: { ...state.custom, [zone]: false },
   }
@@ -145,13 +171,14 @@ export function applyZonePresetReducer(
 
 /** 切换全局预设：全 PRESET_ZONES 记名 + 全 custom 清零 + 恢复规范排布 */
 export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSettings>): ThemePresetPatch {
-  const filteredTheme = filterPresetTheme(theme)
+  const filteredTheme = inheritCcEmptySlice(filterPresetTheme(theme))
   const presetDefaults = filterPresetTheme(DEFAULTS)
   return {
     ...presetDefaults,
     ...filteredTheme,
     ccLayout: normalizeCcLayout(filteredTheme.ccLayout),
-    ...(filteredTheme.ccHeight !== undefined ? syncPresetCcHeight(filteredTheme) : {}),
+    // ★ #266 刀3：同上 —— 用装配后的有效值（= 这份 patch 本身）算下界
+    ...(filteredTheme.ccHeight !== undefined ? syncPresetCcHeight({ ...presetDefaults, ...filteredTheme }) : {}),
     appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, name])),
     custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
@@ -314,12 +341,13 @@ export function applyCustomPresetReducer(
   const source = explicitTheme
     ?? state.customPresets.find(item => item.id === id)?.theme
   if (!source) return null
-  const theme = filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>)
+  const theme = inheritCcEmptySlice(filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>))
   return {
     ...filterPresetTheme(DEFAULTS),
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
-    ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
+    // ★ #266 刀3：同上 —— 用装配后的有效值（= 这份 patch 本身）算下界
+    ...(theme.ccHeight !== undefined ? syncPresetCcHeight({ ...filterPresetTheme(DEFAULTS), ...theme }) : {}),
     appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, id])),
     custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }

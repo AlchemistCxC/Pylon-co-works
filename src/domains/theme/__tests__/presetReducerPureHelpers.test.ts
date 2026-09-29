@@ -44,14 +44,20 @@ describe('toThemeDelta', () => {
 
 describe('clampPresetCcHeight / syncPresetCcHeight', () => {
   /**
-   * ★ #266 刀9~11：`inputMode` / `footerLayout` / `cliOverflowMode` 三个字段删除后，
-   * 形态只剩一种 ⇒ `clampPresetCcHeight` 收敛为「常量最小高 64 + 上界 400」——
-   * 原先那套「可见控件数 ⇒ 状态行换行 ⇒ 最小高 84/109」的联动随 peri 形态一并退场。
+   * ★ #266 刀3：下界从"常量 64"换成**按边算取最大**
+   * （`ccHeightState.resolveCcMinHeight`：两组各算"组高 + 到边距离"，取 max，再与 64 取大）。
+   * ⇒ 标量缺省（= 全按 0 / 默认口径）时结果仍是 64；**抬高输入栏或某件的高 ⇒ 下界跟着抬**。
    */
-  it('下界 = 常量 64（不再随可见状态控件数 / 形态浮动）', () => {
+  it('下界 = 算式：标量缺省落 64，抬高输入栏 / 件高则下界随之', () => {
     expect(clampPresetCcHeight({ ccHeight: 0 })).toBe(64)
     expect(clampPresetCcHeight({ ccHeight: 12 })).toBe(64)
     expect(clampPresetCcHeight({ ccHeight: 64 })).toBe(64)
+    // 输入栏那一组：inputOffsetTop + inputHeight = 10 + 130 = 140
+    expect(clampPresetCcHeight({ ccHeight: 0, inputOffsetTop: 10, inputHeight: 130 })).toBe(140)
+    // 下边组：ccMarginBottom + 该行最大件高 = 15 + 60 = 75
+    expect(clampPresetCcHeight({ ccHeight: 0, ccMarginBottom: 15, modelHeight: 60 })).toBe(75)
+    // 两组取 max（不是 sum）：140 vs 75 ⇒ 140
+    expect(clampPresetCcHeight({ ccHeight: 0, inputOffsetTop: 10, inputHeight: 130, ccMarginBottom: 15, modelHeight: 60 })).toBe(140)
   })
 
   it('上界固定 400，区间内原样返回', () => {

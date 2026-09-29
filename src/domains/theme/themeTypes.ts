@@ -76,6 +76,13 @@ export interface ThemeSettings {
   /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
   modeAutoColor: string; modeEditColor: string
   ccHidden: string[]
+  /**
+   * ★ #266 刀2：显隐的**空态切面**（与 `ccHidden` 同形、同区）。门（"现在是不是空态"）开时用它，
+   * 否则用 `ccHidden`（规则唯一出处：`domains/cc/widgetDefinitions.ts` 的 `resolveCcHiddenWidgetIds`）。
+   * ★ 预设**没写这一项**时不会留在"空数组"上：预设落值那一步会抄一份该预设的常态切面进来
+   * （`domains/theme/presetReducer.ts` 的 `inheritCcEmptySlice`）。写 `[]` 是显式选择（空态不藏任何件）。
+   */
+  ccHiddenEmpty: string[]
   ccLayout: CcLayoutV3
   ccEditMode: boolean
   appliedPreset: Record<string, string>

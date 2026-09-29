@@ -6,7 +6,7 @@ import {
   CC_WIDGET_GROUPS,
   CC_WIDGET_IDS,
   CC_WIDGET_LABELS,
-  EMPTY_STATE_HIDDEN_WIDGET_IDS,
+  CLI_HINT_GOVERNED_WIDGET_IDS,
   STATUS_WIDGET_IDS,
   WIDGET_PROPERTY_FIELDS,
   ccInputLandingViolations,
@@ -72,7 +72,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
   //   `cliOverflowMode` / `footerLayout` / `inputMinHeight`）⇒ cc 字段 75 → **68**。
   it('68 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(68)
+    expect(ccFields).toHaveLength(69)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -102,10 +102,13 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     // ★ #238 刀7：`ccScale`（缩放）整体删除 ⇒ 系统桶 3 → 2；它原本就**不属于任何成员**（跨元件系统字段）。
     // ★ #238 刀8：`ccVariant`（整体风格）整体删除 ⇒ 容器行成员计数 9 → **8**（它属「中控本体面」成员）。
     // ★ #266 CC-07：四字段删除 ⇒ 输入栏 33 → 32、用量 2 → 0、发送按钮 9 → 8；cc 总数 79 → 75。
-    // ★ #266 刀7~13：容器行 8 → 7（`footerLayout`）、输入栏 32 → 26（六项）、总数 75 → **68**。
-    expect(CC_SYSTEM_FIELDS).toHaveLength(2)
+    // ★ #266 刀7~13：容器行 8 → 7（`footerLayout`）、输入栏 32 → 26（六项）、总数 75 → 68。
+    // ★ #266 刀2：显隐的**空态切面** `ccHiddenEmpty` 进系统桶（跨元件）⇒ 系统桶 2 → 3、总数 68 → **69**。
+    //   ★ 它取代了原先那句「空态隐藏 6 条」的字面量名单：名单搬进预设数据，
+    //     出厂那 10 份空态切面的键集由 `ccVisibilitySliceGuard.test.ts` 钉住。
+    expect(CC_SYSTEM_FIELDS).toEqual(['ccLayout', 'ccHidden', 'ccHiddenEmpty'])
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(68)
+    expect(total).toBe(69)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -198,11 +201,14 @@ describe('#238 · 定义表不变量 4：成员与容器不进名单', () => {
     expect([...layoutNames].sort()).toEqual(Object.keys(DEFAULT_CC_LAYOUT.placements).sort())
   })
 
-  it('成员 id 不得落进空态隐藏名单', () => {
+  it('成员 id / 容器 id 不得混进切面取值名（切面名集 = 可拖元件 id 集）', () => {
     // ★ #266 ⑰：原来还有一份「常态放行名单」（`ALWAYS_VISIBLE_STATUS_WIDGET_IDS`）要求同一件事，
-    //   该名单已随 ⑰ 删除 ⇒ 这条保护由**语境侧的空态名单**继续承担。
+    //   该名单已随 ⑰ 删除；⑰ 的**语境侧空态名单**又在刀2 退场（搬进预设数据）。
+    //   ⇒ 这条保护改为**面向切面本身**：切面的取值名只允许是可拖元件（成员 / 容器一律不许进来）。
+    const sliceNames: readonly string[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
     const memberIds = memberRows.map(({ member }) => member.id)
-    expect(memberIds.filter(id => (EMPTY_STATE_HIDDEN_WIDGET_IDS as readonly string[]).includes(id))).toEqual([])
+    expect(memberIds.filter(id => sliceNames.includes(id))).toEqual([])
+    expect(sliceNames).not.toContain('cc-surface')
   })
 })
 
@@ -314,15 +320,11 @@ describe('#238 · 派生结果一致（默认布局 / 名单 / 标签 / 属性�
     expect(slotIds).toHaveLength(7)
   })
 
-  it('空态隐藏 6 条（⑰ 起含命令行提示）——它是**语境侧名单**，与预设的值无关', () => {
-    // ★ #266 ⑰：名单由行上派生改为**字面量**；`cc-command-hint` 是 ⑰ 新加入的一条 ——
-    //   空态没有会话，命令行提示没有意义（原由行上 `conditions` 的 `'has-session'` 承担）。
-    expect([...EMPTY_STATE_HIDDEN_WIDGET_IDS].sort())
-      .toEqual(['cc-send-button', 'cc-command-hint', 'model', 'reasoning', 'mode', 'tokens'].sort())
-    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-send-button')
-  })
-
   it('标签表逐字不变（含容器与不可拖行）', () => {
+    // 原位说明（#266 刀2）：这里原来还锁一条「空态隐藏 6 条」的字面量名单
+    // （`EMPTY_STATE_HIDDEN_WIDGET_IDS`，⑰ 立、刀2 拆）。名单没有换地方藏 —— 它搬进了
+    // **预设数据**（`zones/factory/*-cc.ts` 与 `presets/builtin.ts` 的空态切面），
+    // 由 `ccVisibilitySliceGuard.test.ts` 钉键集；代码侧只剩「门选一份切面」这一条规则。
     expect(CC_WIDGET_LABELS).toEqual({
       'cc-surface': '中控本体背景板',
       input: '输入栏',
@@ -419,6 +421,22 @@ describe('#238 · 零变化：属性面板的字段集与顺序', () => {
     expect(withShowIf, '属性项不该再有条件显示（机制已删，防回摆）').toEqual([])
   })
 
+  it('★ 高度来源声明（`heightField`）指向本行**自己**的字段（挂错即红）—— #266 刀3', () => {
+    const declared = CC_WIDGET_GROUPS.filter(row => row.heightField !== undefined)
+    // 正控：确实有件声明了（否则"全都合法"是真空绿）
+    expect(declared.map(row => row.id)).toEqual(['input', 'model', 'reasoning', 'mode'])
+    for (const row of declared) {
+      // 判据 = **本行成员拥有这个字段**（不是"在属性面板里"：输入栏的高在设置页改、不在面板里）
+      const owned = new Set(row.members.flatMap(member => fieldsOf(member)))
+      expect([...owned], `${row.id} 的 heightField 必须由本行的成员拥有（挂到别的件上就是暗耦合）`)
+        .toContain(row.heightField)
+    }
+    // 内容撑 / 悬浮件**不该**声明：算式对它们按 0 计（结果是下界），声明了反而算错
+    for (const id of ['tokens', 'cc-command-hint', 'cc-send-button']) {
+      expect(resolveCcWidgetGroup(id)?.heightField, `${id} 是内容撑 / 悬浮件，不该声明 heightField`).toBeUndefined()
+    }
+  })
+
   it('属性表单指向的字段必须由本组的某个成员拥有（挂错成员即红）', () => {
     const violations: string[] = []
     for (const group of CC_WIDGET_GROUPS) {
@@ -450,7 +468,14 @@ describe('#238 刀3 · 输入栏落脚处独占守卫（原「input 槽只准放
   })
 })
 
-describe('#266 ⑰ · 可见性只剩「值 + 语境名单」（元件不自己申明）', () => {
+describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」（元件不自己申明）', () => {
+  /**
+   * 出厂预设的空态切面取值（= 刀2 之前那份语境侧名单的内容，原样搬进预设数据）。
+   * 这里写**字面量**而不是从 `zones/factory` 取：本文件锁的是定义表侧的规则，
+   * 预设数据那份由 `ccVisibilitySliceGuard.test.ts` 钉。
+   */
+  const EMPTY_SLICE = ['model', 'reasoning', 'mode', 'tokens', 'cc-send-button', 'cc-command-hint'] as const
+
   it('行上不再有任何显隐申明（对象层：三个键都不存在）', () => {
     // ★ 用户口径：「如果要记『这里不显示』，应该是在这里注明 a 不显示，而不是 a 申明在这里不显示」
     //   ⇒ 原先的三样（`inActiveSession` / `conditions` / `hiddenInEmptyState`）从行上撤掉。
@@ -473,49 +498,82 @@ describe('#266 ⑰ · 可见性只剩「值 + 语境名单」（元件不自己�
     expect(isWidgetVisible('cc-command-hint', { hidden: [] })).toBe(true)
   })
 
-  it('详细档「隐藏」按**值**折进名单（组装只有一处，渲染与计数同源）', () => {
-    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'compact' })).toEqual([])
-    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'full' })).toEqual([])
-    expect(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
-    // 已在名单里不重复追加（集合语义）
-    expect(resolveCcHiddenWidgetIds({ ccHidden: ['cc-command-hint'], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
-    // 折进名单后由同一个谓词判隐 —— 谓词里不再需要"详细档"这件事
-    expect(isWidgetVisible('cc-command-hint', {
-      hidden: resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' }),
-    })).toBe(false)
-    // 预设里用户自己藏的那些原样带出（不吞不改）
-    expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], cliHintMode: 'compact' })).toEqual(['model'])
+  it('★ 刀2 门开 / 门关**二选一**（不再是并集）：门关取常态切面，门开取空态切面', () => {
+    const ctx = { ccHidden: ['tokens', 'cc-send-button'], ccHiddenEmpty: EMPTY_SLICE } as const
+    // 门关（非常态）：只看常态切面 —— 空态切面里那几件照常在场
+    const active = resolveCcHiddenWidgetIds({ ...ctx, isEmpty: false })
+    expect(active).toEqual(['tokens', 'cc-send-button'])
+    expect(isWidgetVisible('model', { hidden: active })).toBe(true)
+    // 门开（空态）：只看空态切面 —— 常态切面的值不参与（旧并集会在这里把 tokens 也并进来）
+    const empty = resolveCcHiddenWidgetIds({ ...ctx, isEmpty: true })
+    expect(empty).toEqual([...EMPTY_SLICE])
+    expect(isWidgetVisible('model', { hidden: empty })).toBe(false)
+    // 两态读的是**同一份数据的两侧**：常态切面没被空态那次读取改动（纯函数、不写回）
+    expect(ctx.ccHidden).toEqual(['tokens', 'cc-send-button'])
   })
 
-  it('空态由**语境侧名单**承担：提示在内 ⇒ 空态不显示（原由 `has-session` 条件承担）', () => {
-    const emptyHidden = resolveCcHiddenWidgetIds({
-      ccHidden: [...EMPTY_STATE_HIDDEN_WIDGET_IDS],
-      cliHintMode: 'full',
-    })
-    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-command-hint')   // 反转自旧断言"不在内"
+  it('★ 刀2 读侧是**纯二选一**：给什么读什么（空数组 = 空态不藏任何件，是显式选择）', () => {
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['tokens'], ccHiddenEmpty: [], isEmpty: true })).toEqual([])
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['tokens'], ccHiddenEmpty: [], isEmpty: false })).toEqual(['tokens'])
+    // ★「预设没写空态切面 ⇒ 回落常态切面」**不在读侧**判（读不出"没写"与"写了空数组"的差别），
+    //   而在预设落值那一步 —— 见 `ccVisibilitySliceGuard.test.ts` 的 `inheritCcEmptySlice` 用例。
+  })
+
+  it('详细档「隐藏」按**件声明**折进名单（组装只有一处，渲染与计数同源）', () => {
+    // 本组只验折叠（门关：isEmpty 缺省 false ⇒ 读常态切面），故空态切面给空数组占位
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'compact' })).toEqual([])
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'full' })).toEqual([])
+    expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
+    // 已在名单里不重复追加（集合语义）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['cc-command-hint'], ccHiddenEmpty: [], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
+    // 折进名单后由同一个谓词判隐 —— 谓词里不再需要"详细档"这件事
+    expect(isWidgetVisible('cc-command-hint', {
+      hidden: resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' }),
+    })).toBe(false)
+    // 切面里用户自己藏的那些原样带出（不吞不改）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], ccHiddenEmpty: [], cliHintMode: 'compact' })).toEqual(['model'])
+    // 折叠在**门选出来的那份切面**之上生效（空态那一份同样受详细档管辖）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], ccHiddenEmpty: ['tokens'], isEmpty: true, cliHintMode: 'hidden' }))
+      .toEqual(['tokens', 'cc-command-hint'])
+  })
+
+  it('★ 折叠只读**件声明**：管辖集由表派生，不认写死的元件 id', () => {
+    // 派生结果就是表里声明 `cliHintGoverned` 的行（正控：声明确实来自表，不是另一份平行清单）
+    const declared = CC_WIDGET_GROUPS.filter(row => row.cliHintGoverned === true).map(row => row.id)
+    expect(declared).toEqual([...CLI_HINT_GOVERNED_WIDGET_IDS])
+    expect(CLI_HINT_GOVERNED_WIDGET_IDS).toEqual(['cc-command-hint'])
+    // 其余的件一个都没声明受详细档管辖（新增声明是显式动作，会红在这条上）
+    expect(declared).not.toContain('input')
+    expect(declared).not.toContain('cc-send-button')
+  })
+
+  it('空态由**空态切面**承担：提示在内 ⇒ 空态不显示（原由 `has-session` 条件承担）', () => {
+    const emptyHidden = resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: EMPTY_SLICE, isEmpty: true, cliHintMode: 'full' })
+    expect(EMPTY_SLICE).toContain('cc-command-hint')
     expect(emptyHidden).toContain('cc-command-hint')
     expect(isWidgetVisible('cc-command-hint', { hidden: emptyHidden })).toBe(false)
   })
 
   it('计数与谓词同源：可见数 = 状态控件里不在名单上的个数', () => {
     const counts = (hiddenIds: readonly string[]) => resolveVisibleStatusWidgetCount({ hiddenIds })
-    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'full' }))).toBe(5)     // 四常态 + 提示
-    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], cliHintMode: 'hidden' }))).toBe(4)   // 详细档隐藏 ⇒ 少提示
-    // 空态：语境侧名单把 5 条状态控件全挡掉 ⇒ 计数 0（空态数值不变的成因）
-    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [...EMPTY_STATE_HIDDEN_WIDGET_IDS], cliHintMode: 'full' }))).toBe(0)
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'full' }))).toBe(5)     // 四常态 + 提示
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' }))).toBe(4)   // 详细档隐藏 ⇒ 少提示
+    // 空态：空态切面把 5 条状态控件全挡掉 ⇒ 计数 0（空态数值不变的成因）
+    expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: EMPTY_SLICE, isEmpty: true, cliHintMode: 'full' }))).toBe(0)
   })
 })
 
 describe('#238 刀5B · 命令行提示已升格为可拖元件', () => {
-  it('它在名单、默认布局里；空态名单里也有它（⑰ 起由语境侧名单接住）', () => {
+  it('它在名单、默认布局里；也带「受详细档管辖」的件声明', () => {
     const hint = resolveCcWidgetGroup('cc-command-hint')
     expect(hint).toBeDefined()
     expect(hint?.draggable).toBe(true)
     expect(hint?.layout).toBeDefined()
     expect(Object.keys(DEFAULT_CC_LAYOUT.placements)).toContain('cc-command-hint')
     expect(slotIds).toContain('cc-command-hint')
-    // ★ #266 ⑰：原先靠行上 `conditions` 的 `'has-session'` 把空态挡掉；撤条件后改由**空态名单**接住
-    expect(EMPTY_STATE_HIDDEN_WIDGET_IDS).toContain('cc-command-hint')
+    // ★ #266 ⑰：原先靠行上 `conditions` 的 `'has-session'` 把空态挡掉；
+    //   刀2：空态由**预设的空态切面**承担，件侧只留一条「受详细档管辖」的自述声明。
+    expect(hint?.cliHintGoverned).toBe(true)
   })
 
   it('它既受占区约束、也当障碍（不是悬浮件）', () => {

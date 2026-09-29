@@ -23,6 +23,14 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputBg: "rgba(0,0,0,0.03)",
       inputTextColor: "rgba(0,0,0,0.80)",
       inputPlaceholder: "rgba(0,0,0,0.22)",
@@ -101,6 +109,14 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       ccHidden: [
         "cc-send-button"
       ],
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputOffsetTop: 10,
       inputHeight: 40,
       inputMarginX: 10,
@@ -172,6 +188,14 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
     values: {
       ccHeight: 96,
       ccBg: "#0d192b",
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputBg: "rgba(148,163,184,0.09)",
       inputTextColor: "#e0f2fe",
       inputPlaceholder: "#647d99",
@@ -188,6 +212,14 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
     values: {
       ccHeight: 96,
       ccBg: "#1a172b",
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputBg: "rgba(167,139,250,0.08)",
       inputTextColor: "#f5f3ff",
       inputPlaceholder: "#766c91",
@@ -204,6 +236,14 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
     values: {
       ccHeight: 88,
       ccBg: "#201e19",
+      ccHiddenEmpty: [
+        "model",
+        "reasoning",
+        "mode",
+        "tokens",
+        "cc-send-button",
+        "cc-command-hint"
+      ],
       inputBg: "rgba(214,168,95,0.05)",
       inputTextColor: "#eee8dc",
       inputPlaceholder: "#81796d",
@@ -212,4 +252,4 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
   },
 ]
 
-// 本文件 5 条 / 122 个字段值
+// 本文件 5 条 / 127 个字段值（★ #266 刀2：5 条各 +1 `ccHiddenEmpty`）
