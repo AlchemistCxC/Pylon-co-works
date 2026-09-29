@@ -6,7 +6,8 @@
  * （#448 PR2：Tauri 权威在后端 SQLite，缓存未 hydrate 时回落 localStorage）。
  */
 import type { InputPredictionProvider, InputPredictionRequest } from '../../contracts/prediction.ts'
-import { cachedInputPredictionSettings, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
+import type { InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { cachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import { boundPredictionHistory, boundPredictionMessages } from './inputPredictionProvider.ts'
 
 function parseHeaders(value: string): Record<string, string> {

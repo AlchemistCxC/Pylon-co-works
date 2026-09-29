@@ -18,6 +18,7 @@
  */
 import { IS_TAURI } from '../tauri/env'
 import { wireErrorParts } from '../tauri/errorPayload'
+import { tauriInvokeTransport } from '../acp/tauriTransport.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
 import { updateCachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import {
@@ -56,14 +57,13 @@ function asSettings(payload: Record<string, unknown>): InputPredictionSettings {
   return normalizeInputPredictionSettings(payload)
 }
 
-async function invokeUserDataLoad(): Promise<UserDataEnvelopeWire | null> {
-  const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<UserDataEnvelopeWire | null>('user_data_load', { key: BACKEND_KEY })
+function invokeUserDataLoad(): Promise<UserDataEnvelopeWire | null> {
+  // #317 收口的共享 transport（非 direct invoke，不新增白名单豁免）
+  return tauriInvokeTransport('user_data_load', { key: BACKEND_KEY }) as Promise<UserDataEnvelopeWire | null>
 }
 
 async function invokeUserDataSave(settings: InputPredictionSettings): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('user_data_save', {
+  await tauriInvokeTransport('user_data_save', {
     key: BACKEND_KEY,
     payload: { version: ENVELOPE_VERSION, ...settings },
     expectedRevision: null,
@@ -95,7 +95,7 @@ export async function hydrateInputPredictionSettingsFromBackend(): Promise<void>
 
 /** 旧 localStorage key → 后端一次性搬家（仅当旧 key 在场；照 retention 迁移的幂等语义）。 */
 async function migrateLegacyLocalStorage(): Promise<void> {
-  let raw: string | null = null
+  let raw: string | null
   try { raw = globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY) } catch { raw = null }
   if (raw == null) {
     // 全新安装：后端与本地都无值 → 默认值入缓存（后续保存直写后端）

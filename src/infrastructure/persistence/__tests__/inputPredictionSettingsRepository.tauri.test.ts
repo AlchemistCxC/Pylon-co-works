@@ -17,7 +17,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 vi.mock('../../tauri/env', () => ({ IS_TAURI: true }))
-vi.mock('../../app/runtimeError.ts', () => ({
+vi.mock('../../../app/runtimeError.ts', () => ({
   reportRuntimeError: vi.fn(() => ({})),
   resolveRuntimeErrors: vi.fn(),
 }))
