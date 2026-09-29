@@ -196,3 +196,83 @@ describe('#99 cold-mount turn ledger is the second terminal evidence (issue #68 
     service.destroy()
   })
 })
+
+/**
+ * #442 Step2：终帧 additive `turnId` → stamps 归属退役。
+ *
+ * 终帧原本不带回合身份，身份戳只能猜「最近一次 active 快照」；后端在
+ * settle/失败路径注入 `turnId` 后，匹配走精确身份，错配宁可不落 settled
+ * （留给内核后续 false 快照收敛），旧内核缺省帧维持猜测回退轨。
+ */
+describe('#442 Step2 terminal frame turnId retires the stamp guess', () => {
+  const snapshotInFlight = (turnId: number) => ({
+    source: 'x',
+    turn: { phase: 'streaming', key: { generation: 1, turnId } },
+    turnInFlight: true,
+  })
+
+  it('matching turnId settles exactly that stamp; a stale in-flight snapshot of the same turn stays rejected', async () => {
+    const active = session('session-tid-match', 'local:tid-match')
+    const listeners: Array<(signal: CanonicalTerminalSignal) => void> = []
+    const service = runtimeFor(active, {
+      listenTerminalFallback: listener => { listeners.push(listener); return () => {} },
+    })
+
+    await service.bind(active)
+    await service.refresh(active, snapshotInFlight(7))
+    await service.commands.send(active.id, { text: '回合消息' })
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+
+    listeners[0]({ source: active.source, kind: 'done', payload: { source: active.source }, turnId: 7 })
+    expect(service.runtime.getSnapshot().generating).toBe(false)
+
+    // 新回合开跑后，上一回合（同身份）的 stale true 快照不得复活内核在途。
+    await service.commands.send(active.id, { text: '第二回合' })
+    await service.refresh(active, snapshotInFlight(7))
+    expect(service.runtime.getSnapshot().generating).toBe(true)
+    service.destroy()
+  })
+
+  it('mismatching turnId keeps the stamp unset: the real in-flight turn is not masked by a late frame', async () => {
+    const active = session('session-tid-mismatch', 'local:tid-mismatch')
+    const listeners: Array<(signal: CanonicalTerminalSignal) => void> = []
+    const service = runtimeFor(active, {
+      listenTerminalFallback: listener => { listeners.push(listener); return () => {} },
+    })
+
+    await service.bind(active)
+    // 内核条目 + 身份戳（无时钟条目：本轮从未 send）。
+    await service.refresh(active, snapshotInFlight(7))
+
+    // 迟到的旧回合终帧（turnId 8 ≠ active 戳的 7）：不得把 7 记成 settled。
+    listeners[0]({ source: active.source, kind: 'error', payload: { source: active.source, code: 'protocol_error' }, turnId: 8 })
+
+    // turn 7 的真实在途快照随后到达：必须照常采纳（内核说 7 还在跑）。
+    await service.refresh(active, snapshotInFlight(7))
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(true)
+    service.destroy()
+  })
+
+  it('a frame without turnId (old kernel) keeps the guess fallback: settled = most recent active stamp', async () => {
+    const active = session('session-tid-legacy', 'local:tid-legacy')
+    const listeners: Array<(signal: CanonicalTerminalSignal) => void> = []
+    const service = runtimeFor(active, {
+      listenTerminalFallback: listener => { listeners.push(listener); return () => {} },
+    })
+
+    await service.bind(active)
+    await service.refresh(active, snapshotInFlight(7))
+
+    // 旧内核终帧不携带 turnId → 回退猜测轨（settled = 最近 active 戳）。
+    listeners[0]({ source: active.source, kind: 'done', payload: { source: active.source } })
+
+    // 同身份的 stale true 快照被猜测轨挡住（与既有行为逐字一致）。
+    await service.refresh(active, snapshotInFlight(7))
+    const snapshot = service.runtime.getSnapshot()
+    expect(snapshot.livenessSource).toBe('kernel')
+    expect(snapshot.generating).toBe(false)
+    service.destroy()
+  })
+})

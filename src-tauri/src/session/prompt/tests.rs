@@ -787,7 +787,7 @@ async fn publish_prompt_failure_returns_domain_error_when_durable_owner_missing(
     };
     let error = PylonError::Protocol("synthetic failure".to_string());
     let outcome = publish_prompt_failure::<tauri::test::MockRuntime>(
-        &state, &runtime, None, &gateway, &ctx, &error, None,
+        &state, &runtime, None, &gateway, &ctx, &error, None, None,
     )
     .await;
     match outcome {
@@ -797,4 +797,109 @@ async fn publish_prompt_failure_returns_domain_error_when_durable_owner_missing(
         ),
         other => panic!("expected durable-owner domain error, got {other:?}"),
     }
+}
+
+/// #442 Step2: the error terminal frame carries an additive `turnId` once the
+/// turn has begun; when no turn was begun (None) the key is omitted (never
+/// fabricated). window=None skips the broadcast arm, so the registered IPC
+/// channel is the only delivery path (same shape as the production GUI path).
+#[tokio::test]
+async fn prompt_failure_frame_carries_attempted_turn_id() {
+    let runtime = AgentRuntime::new_disconnected();
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("agent-turn-frame")
+        .build();
+    let gateway = Arc::new(GatewayCore::new());
+    // profile_id=None skips the journal branch (durable owner resolution) so the
+    // publish path goes straight to the terminal dual-send.
+    let ctx = PromptContext {
+        source: "local:turn-frame".to_string(),
+        profile_id: None,
+        ..Default::default()
+    };
+    let error = PylonError::Protocol("synthetic failure".to_string());
+
+    let sent: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = sent.clone();
+    let channel = tauri::ipc::Channel::new(move |body| {
+        if let tauri::ipc::InvokeResponseBody::Json(text) = body {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                sink.lock().unwrap().push(value);
+            }
+        }
+        Ok(())
+    });
+    runtime.register_update_channel("local:turn-frame", channel);
+
+    publish_prompt_failure::<tauri::test::MockRuntime>(
+        &state,
+        &runtime,
+        None,
+        &gateway,
+        &ctx,
+        &error,
+        None,
+        Some(42),
+    )
+    .await
+    .expect("failure publish");
+
+    let frames = sent.lock().unwrap();
+    assert_eq!(
+        frames.len(),
+        1,
+        "exactly one frame through the registered channel"
+    );
+    assert_eq!(frames[0]["event"], crate::event_names::SESSION_ERROR);
+    assert_eq!(
+        frames[0]["payload"]["turnId"],
+        serde_json::json!(42),
+        "error frame must carry the turn identity"
+    );
+    assert_eq!(frames[0]["payload"]["code"], "protocol_error");
+}
+
+/// #442 Step2: when no turn was begun (`turn_id=None`) the error frame omits the
+/// `turnId` key entirely — missing is never fabricated, the frontend keeps its
+/// stamp-guess fallback track.
+#[tokio::test]
+async fn prompt_failure_frame_without_turn_omits_turn_id() {
+    let runtime = AgentRuntime::new_disconnected();
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("agent-turn-frame-none")
+        .build();
+    let gateway = Arc::new(GatewayCore::new());
+    let ctx = PromptContext {
+        source: "local:turn-frame-none".to_string(),
+        profile_id: None,
+        ..Default::default()
+    };
+    let error = PylonError::Protocol("synthetic failure".to_string());
+
+    let sent: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = sent.clone();
+    let channel = tauri::ipc::Channel::new(move |body| {
+        if let tauri::ipc::InvokeResponseBody::Json(text) = body {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                sink.lock().unwrap().push(value);
+            }
+        }
+        Ok(())
+    });
+    runtime.register_update_channel("local:turn-frame-none", channel);
+
+    publish_prompt_failure::<tauri::test::MockRuntime>(
+        &state, &runtime, None, &gateway, &ctx, &error, None, None,
+    )
+    .await
+    .expect("failure publish");
+
+    let frames = sent.lock().unwrap();
+    assert_eq!(frames.len(), 1);
+    assert!(
+        frames[0]["payload"].get("turnId").is_none(),
+        "turnId must not be fabricated when no turn was begun"
+    );
 }

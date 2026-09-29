@@ -32,8 +32,14 @@ export interface AgentWorkbenchTurnClock {
   start(targetSource: string, at: number): void
   /** 每条 live envelope 刷新活性；返回 undefined = 无活动回合（不写 patch）。 */
   touch(targetSource: string, at: number): number | undefined
-  /** 终帧到达：写 live 终态摘要（elapsed = 终点 - 本进程观察到的起点）。 */
-  terminal(targetSource: string, reason: 'done' | 'cancelled' | 'error', at: number, failure?: PromptFailureMetadata): void
+  /**
+   * 终帧到达：写 live 终态摘要（elapsed = 终点 - 本进程观察到的起点）。
+   *
+   * `turnId`（#442 Step2）：终帧 additive 回合身份——在场时身份戳结算走**精确
+   * 匹配**（帧身份与最近 active 戳一致才落 settled），stamps 的「最近一次 active
+   * 快照」猜测退役；缺省（旧内核终帧不携带）维持猜测作回退轨。
+   */
+  terminal(targetSource: string, reason: 'done' | 'cancelled' | 'error', at: number, failure?: PromptFailureMetadata, turnId?: number): void
   /** 发送被拒绝：活动回合回滚（后续帧不得复活指示器）。 */
   rollback(targetSource: string): void
   /**
@@ -149,12 +155,21 @@ export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps)
    * 终态/回滚路径上的内核事实同步：只 Fresh 已有条目（不得制造内核权威——ADR 兼容
    * 矩阵：新前端 + 旧内核必须永久保持 `'clock'` 权威）；终帧额外推进身份戳，
    * 回滚（派发从未发生）不动身份戳。
+   *
+   * `turnId`（#442 Step2）：终帧携带的回合身份。在场时按身份**精确匹配**——active
+   * 戳的 turnId 段与帧身份一致才落 settled（猜测退役）；不一致说明帧收敛的回合
+   * 不是最近一次 active 快照（罕见竞态），不动身份戳（宁可留给内核下一条 false
+   * 快照收敛，也不把错误的回合记成 settled）；无 active 戳维持既有清理。
    */
-  const markKernelSettled = (record: SourceTurnRecord, withStamp: boolean): void => {
+  const markKernelSettled = (record: SourceTurnRecord, withStamp: boolean, turnId?: number): void => {
     if (record.kernel === undefined) return
     record.kernel = { inFlight: false }
     if (!withStamp) return
     const active = record.stamps?.active
+    if (turnId !== undefined) {
+      if (active !== undefined && active.endsWith(`:${turnId}`)) record.stamps = { settled: active }
+      return
+    }
     if (active !== undefined) record.stamps = { settled: active }
     else delete record.stamps
   }
@@ -221,7 +236,7 @@ export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps)
       return entry.lastTokenAt
     },
 
-    terminal(targetSource, reason, at, failure) {
+    terminal(targetSource, reason, at, failure, turnId) {
       const record = records.get(targetSource)
       const entry = record?.clock
       const sealed = entry === undefined || entry.terminal
@@ -232,7 +247,7 @@ export function createAgentWorkbenchTurnClock(deps: AgentWorkbenchTurnClockDeps)
       }
       // #217：终帧 = 内核已收敛（后端终态先于终帧发布）——内核活性事实同步落静
       // （仅更新已有条目；无内核表态的宿主不得被制造出内核权威）。
-      if (record) markKernelSettled(record, true)
+      if (record) markKernelSettled(record, true, turnId)
       if (getSource() === targetSource && entry !== undefined) {
         // 已封存但从未写过 live 摘要 ⇒ #390 误封恢复：真终帧是比 displayOnly 兜底
         // 更强的事实，补写一次（`start` 会重置 summaryWritten，故不会跨回合误补）。

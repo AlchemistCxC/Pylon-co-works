@@ -128,7 +128,10 @@ pub(super) async fn finalize_response<R: tauri::Runtime>(
     if is_first {
         state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
     }
-    let mut done_payload = serde_json::json!({"source": source, "data": data});
+    // #442 Step2：终帧 additive turnId——done 帧携带本回合身份（= 账本 key 的
+    // turn_id，出站 request id），前端 stamps 猜测在字段可用时退役。
+    let mut done_payload =
+        serde_json::json!({"source": source, "turnId": flow.request_id, "data": data});
     // #324：cancelled 的 done_update 预置 stopReason（canonical 行 stopReason
     // 与 done 帧语义一致）；随后的三键覆写两侧相同。
     let mut done_update = if cancelled {

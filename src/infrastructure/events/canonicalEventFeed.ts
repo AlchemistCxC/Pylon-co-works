@@ -31,6 +31,11 @@ export interface CanonicalTerminalSignal {
   readonly source: string | undefined
   readonly kind: CanonicalTerminalKind
   readonly payload: unknown
+  /**
+   * #442 Step2：终帧 additive 回合身份（后端 settle/失败路径注入的出站 request
+   * id）。缺省 = 旧内核终帧（消费方回退 stamps 猜测轨）。
+   */
+  readonly turnId?: number
 }
 
 /** Channel 帧 / pylon:user 广播事件的同构信封（streamChannel.StreamFrame 的结构子集）。 */
@@ -116,6 +121,13 @@ export function canonicalTerminalSourceFromPayload(payload: unknown): string | u
   return extractSource(payload)
 }
 
+/** 终帧载荷顶层的回合身份（#442 Step2 additive `turnId`；非负安全整数才接受）。 */
+function terminalTurnIdFromPayload(payload: unknown): number | undefined {
+  if (payload === null || typeof payload !== 'object') return undefined
+  const turnId = (payload as { turnId?: unknown }).turnId
+  return typeof turnId === 'number' && Number.isSafeInteger(turnId) && turnId >= 0 ? turnId : undefined
+}
+
 /**
  * 终帧帧信封 → 终态信号。Channel 主轨（`acceptFrame`）与 window 广播兜底轨共用
  * 这一构造，两条路的终帧判定不得各自演化。
@@ -123,7 +135,14 @@ export function canonicalTerminalSourceFromPayload(payload: unknown): string | u
 export function canonicalTerminalSignalFromFrame(frame: CanonicalFeedFrame): CanonicalTerminalSignal | undefined {
   const kind = canonicalTerminalKindFromEvent(frame.event)
   if (!kind) return undefined
-  return { source: extractSource(frame.payload), kind, payload: frame.payload }
+  const source = extractSource(frame.payload)
+  const turnId = terminalTurnIdFromPayload(frame.payload)
+  return {
+    source,
+    kind,
+    payload: frame.payload,
+    ...(turnId !== undefined ? { turnId } : {}),
+  }
 }
 
 /**

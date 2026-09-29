@@ -688,7 +688,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     const failure = signal.kind === 'error' && payload && typeof payload === 'object' && typeof payload.failure === 'object'
       ? payload.failure as PromptFailureMetadata
       : undefined
-    clock.terminal(signal.source, reason, Date.now(), failure)
+    // #442 Step2：终帧 additive turnId 透传给时钟——身份戳结算走精确匹配，
+    // 「最近一次 active 快照」猜测在字段可用时退役（缺省回退猜测轨）。
+    clock.terminal(signal.source, reason, Date.now(), failure, signal.turnId)
   }
   const unsubscribeTurnClockTerminal = getCanonicalEventFeed().onTerminal(handleTerminalSignal)
   const unsubscribeTerminalFallback = listenTerminalFallback(handleTerminalSignal)

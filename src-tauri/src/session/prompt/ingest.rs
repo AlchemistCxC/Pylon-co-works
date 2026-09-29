@@ -170,6 +170,9 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
     ctx: &PromptContext,
     error: &PylonError,
     failure: Option<&PromptFailureMetadata>,
+    // #442 Step2：本回合身份（账本 begin 之后发生的错误终态 Some；回合未建立
+    // None——帧缺省该字段，不伪造）。
+    turn_id: Option<u64>,
 ) -> Result<(), PylonError> {
     // #420/ADR-0034：错误终态路径的防御纵深——无条件收敛该会话的在途 turn。
     // 正常时终态臂的 report_settle 已结算（active 为空，此处 no-op）；覆盖等待
@@ -202,6 +205,11 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
         "code": error.code(),
         "error": error.to_string(),
     });
+    // #442 Step2：终帧 additive turnId——前端 stamps 猜测在字段可用时退役
+    // （精确归属本回合；回合未建立时缺省）。
+    if let Some(turn_id) = turn_id {
+        error_payload["turnId"] = serde_json::json!(turn_id);
+    }
     if let Some(failure) = failure {
         error_payload["failure"] = failure.to_json();
     }
