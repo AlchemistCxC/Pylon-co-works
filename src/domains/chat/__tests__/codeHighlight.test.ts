@@ -159,6 +159,9 @@ describe('解析切片：不截断、片间让出', () => {
 
 // #443：缓存从「128 条」改为「128 条 + 2M 字符预算 + 单条 64K 不缓存」。这里的判据是
 // 驻留边界（stats 读数）与「结果不因缓存策略而变」，不是高亮正确性（那由上面的着色组锁）。
+// CI 低耗口径（main 首版曾在 CI 慢机 30s 超时）：预算记账/淘汰/封顶走**未知语言**路径——
+// `hasHighlightLanguage` 同步门直接返回 null，不穿越引擎，cacheResult 的记账/淘汰代码
+// 与真值完全同路；真高亮只留小块（2KB）验证逐出重算产物一致。
 describe('缓存字节预算（#443）', () => {
   const block = (chars: number, seed: string) => ('export const ' + seed + ' = 1\n').repeat(Math.ceil(chars / (seed.length + 16))).slice(0, chars)
 
@@ -172,12 +175,12 @@ describe('缓存字节预算（#443）', () => {
     expect(after.chars).toBe(before.chars)
     // 不缓存 ≠ 结果不同：再算一次仍逐字节一致
     expect(await highlightCode('ts', code)).toBe(html)
-  })
+  }, 60_000)
 
   it('字符预算封顶：灌入超预算的条目后，驻留不超过 2M 字符且条数不超 128', async () => {
-    // 30 × 100KB 的不同块：条数不足 128，但字符量 3M 必超预算 ⇒ 预算淘汰生效
-    for (let index = 0; index < 30; index += 1) {
-      await highlightCode('ts', block(100_000, `budget-${index}-${'x'.repeat(40)}`))
+    // 70 × 30KB 的不同块（未知语言：零解析成本）：条数不足 128，但字符量 2.1M 必超预算
+    for (let index = 0; index < 70; index += 1) {
+      await highlightCode('not-a-language', block(30_000, `budget-${index}-${'x'.repeat(40)}`))
     }
     const stats = highlightCacheStats()
     expect(stats.chars).toBeLessThanOrEqual(2_000_000)
@@ -186,11 +189,12 @@ describe('缓存字节预算（#443）', () => {
   })
 
   it('被预算淘汰的块再高亮：结果仍逐字节一致（重算不改变产物）', async () => {
-    const code = block(100_000, 'evict-check-' + 'y'.repeat(40))
+    // 小真块（2KB）先算并进缓存，再用未知语言零成本灌入 2.1M 字符把它挤出预算窗
+    const code = block(2_000, 'evict-check-' + 'y'.repeat(40))
     const first = await highlightCode('ts', code)
-    // 灌入 30 条把上面的条目挤出预算窗
-    for (let index = 0; index < 30; index += 1) {
-      await highlightCode('ts', block(100_000, `evict-${index}-${'z'.repeat(40)}`))
+    expect(first).not.toBeNull()
+    for (let index = 0; index < 70; index += 1) {
+      await highlightCode('not-a-language', block(30_000, `evict-${index}-${'z'.repeat(40)}`))
     }
     expect(await highlightCode('ts', code)).toBe(first)
   })
