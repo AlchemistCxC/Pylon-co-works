@@ -29,13 +29,16 @@ pub const MAX_USER_DATA_BYTES: usize = 2 * 1024 * 1024;
 /// sessions = Session（v2 + legacy unresolved 混合）envelope；
 /// browser-agent-ops = Agent 浏览器操作审计 ring buffer（issue #82）；
 /// input-prediction = 输入预测设置（含 baseUrl/apiKey 凭据，#448 PR1：凭据
-/// 从 WebView localStorage 迁至后端 SQLite 权威）。
+/// 从 WebView localStorage 迁至后端 SQLite 权威）；
+/// approval-mode = 全局审批模式（#448 PR3：后端内存态落盘，消除「前端启动
+/// 旧值回推」漂移路径）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserDataKey {
     Profiles,
     Sessions,
     BrowserAgentOps,
     InputPrediction,
+    ApprovalMode,
 }
 
 impl UserDataKey {
@@ -45,6 +48,7 @@ impl UserDataKey {
             Self::Sessions => "sessions",
             Self::BrowserAgentOps => "browser-agent-ops",
             Self::InputPrediction => "input-prediction",
+            Self::ApprovalMode => "approval-mode",
         }
     }
 
@@ -54,6 +58,7 @@ impl UserDataKey {
             "sessions" => Some(Self::Sessions),
             "browser-agent-ops" => Some(Self::BrowserAgentOps),
             "input-prediction" => Some(Self::InputPrediction),
+            "approval-mode" => Some(Self::ApprovalMode),
             _ => None,
         }
     }
@@ -330,6 +335,31 @@ fn validate_input_prediction(payload: &serde_json::Value) -> Result<i64, UserDat
     Ok(version)
 }
 
+/// approval-mode envelope 校验（#448 PR3）：`{version:1, mode}`，mode ∈
+/// {bypass, auto, edit, default}（与 permission::set_approval_mode 同一枚举）。
+fn validate_approval_mode(payload: &serde_json::Value) -> Result<i64, UserDataError> {
+    const APPROVAL_ENVELOPE_VERSION: i64 = 1;
+    let version = payload
+        .get("version")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| as_corrupt(UserDataKey::ApprovalMode, "version 必须为整数"))?;
+    if version != APPROVAL_ENVELOPE_VERSION {
+        return Err(as_corrupt(
+            UserDataKey::ApprovalMode,
+            format!("未知 envelope version {version}"),
+        ));
+    }
+    let mode = text_of(payload.get("mode").unwrap_or(&serde_json::Value::Null))
+        .ok_or_else(|| as_corrupt(UserDataKey::ApprovalMode, "缺少 mode 文本字段"))?;
+    if !matches!(mode, "bypass" | "auto" | "edit" | "default") {
+        return Err(as_corrupt(
+            UserDataKey::ApprovalMode,
+            format!("未知 approval mode {mode}"),
+        ));
+    }
+    Ok(version)
+}
+
 /// 用户数据仓库：单一 SQLite 连接 + 互斥（SQLite 单写者；与 MessageService 不同连接、
 /// 同文件——connect 内 busy_timeout 序列化同文件写）。
 pub struct UserDataStore {
@@ -401,6 +431,7 @@ impl UserDataStore {
             UserDataKey::Sessions => validate_sessions(&payload)?,
             UserDataKey::BrowserAgentOps => validate_browser_agent_ops(&payload)?,
             UserDataKey::InputPrediction => validate_input_prediction(&payload)?,
+            UserDataKey::ApprovalMode => validate_approval_mode(&payload)?,
         };
         let payload_str = serde_json::to_string(&payload)
             .map_err(|error| UserDataError::Corrupt(format!("payload 序列化失败：{error}")))?;
@@ -674,6 +705,13 @@ impl UserDataService {
             .map_err(|error| {
                 UserDataError::Unavailable(format!("user data load task failed: {error}"))
             })?
+    }
+
+    /// 启动路径同步读（#448 PR3）：setup 钩子跑在 `rt.block_on` 的 runtime 栈内，
+    /// 嵌套 block_on 必 panic；启动时无并发写者，直接在调用线程读单行是安全的。
+    /// 常规命令路径仍走 [`Self::load`]（spawn_blocking 边界）。
+    pub fn load_sync(&self, key: UserDataKey) -> Result<Option<UserDataEnvelope>, UserDataError> {
+        self.store.load(key)
     }
 
     pub async fn save(
@@ -1371,5 +1409,49 @@ mod tests {
         assert_eq!(UserDataKey::parse("input-prediction"), Some(UserDataKey::InputPrediction));
         assert_eq!(UserDataKey::InputPrediction.as_str(), "input-prediction");
         assert_eq!(UserDataKey::parse("input_prediction"), None, "wire 拼写必须逐字");
+    }
+
+    #[test]
+    fn approval_mode_roundtrip_all_four_values() {
+        let store = UserDataStore::open_in_memory().expect("open");
+        for (i, mode) in ["bypass", "auto", "edit", "default"].iter().enumerate() {
+            let revision = store
+                .save(
+                    UserDataKey::ApprovalMode,
+                    serde_json::json!({ "version": 1, "mode": mode }),
+                    None,
+                )
+                .expect("save");
+            assert_eq!(revision, (i + 1) as i64);
+            let loaded = store
+                .load(UserDataKey::ApprovalMode)
+                .expect("load")
+                .expect("present");
+            assert_eq!(loaded.payload["mode"], *mode);
+        }
+    }
+
+    #[test]
+    fn approval_mode_rejects_unknown_mode_and_version() {
+        let store = UserDataStore::open_in_memory().expect("open");
+        for (payload, why) in [
+            (serde_json::json!({ "version": 1, "mode": "yolo" }), "unknown mode"),
+            (serde_json::json!({ "version": 2, "mode": "auto" }), "future version"),
+            (serde_json::json!({ "version": 1 }), "missing mode"),
+            (serde_json::json!({ "version": 1, "mode": 42 }), "non-string mode"),
+        ] {
+            let error = store
+                .save(UserDataKey::ApprovalMode, payload, None)
+                .expect_err(why);
+            assert_eq!(error.code(), "user_data_corrupt", "{why}");
+        }
+        // 被拒后不落行：load 仍为 None
+        assert!(store.load(UserDataKey::ApprovalMode).expect("load").is_none());
+    }
+
+    #[test]
+    fn approval_mode_key_wire_roundtrip() {
+        assert_eq!(UserDataKey::parse("approval-mode"), Some(UserDataKey::ApprovalMode));
+        assert_eq!(UserDataKey::ApprovalMode.as_str(), "approval-mode");
     }
 }

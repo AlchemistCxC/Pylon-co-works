@@ -483,6 +483,9 @@ pub(crate) async fn respond_interaction(
 }
 
 /// 设置权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
+/// #448 PR3：后端为持久化权威——内存更新后写穿 user_data（approval-mode key）。
+/// 落盘失败降级为「内存生效 + warn」（审批语义不因落盘失败被拒绝；代价是重启
+/// 回到旧值，可见日志可查）。
 #[tauri::command]
 pub(crate) async fn set_approval_mode(
     state: tauri::State<'_, AppState>,
@@ -493,7 +496,30 @@ pub(crate) async fn set_approval_mode(
             "unknown approval mode: {mode}"
         )));
     }
-    *state.approval_mode.lock().map_err(|e| e.to_string())? = mode;
+    *state.approval_mode.lock().map_err(|e| e.to_string())? = mode.clone();
+    let service = state
+        .user_data_service
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
+    match service {
+        Some(service) => {
+            let payload = serde_json::json!({ "version": 1, "mode": mode });
+            if let Err(error) = service
+                .save(
+                    crate::session::user_data::UserDataKey::ApprovalMode,
+                    payload,
+                    None,
+                )
+                .await
+            {
+                tracing::warn!("approval mode 落盘失败（内存已生效，重启回退）：{error}");
+            }
+        }
+        None => {
+            tracing::warn!("approval mode 落盘跳过：user data service 未就绪（内存已生效）");
+        }
+    }
     Ok(())
 }
 
@@ -508,6 +534,42 @@ pub(crate) async fn get_approval_mode(
         .lock()
         .map(|mode| mode.clone())
         .map_err(|e| PylonError::Protocol(format!("approval mode lock poisoned: {e}")))
+}
+
+/// #448 PR3：启动回填——从 user_data 读 approval-mode 覆盖内存默认值（"default"）。
+/// 无持久化值保持默认（首次启动，前端种子兜底）；损坏/不可用 warn 不阻断启动
+/// （degraded：本次会话内 set 仍会写穿自愈）。读走 load_sync 同步路径——
+/// 调用方（setup 钩子）在 `rt.block_on` 的 runtime 栈内，不能嵌套 block_on。
+pub(crate) fn restore_persisted_approval_mode(state: &AppState) {
+    let service = state
+        .user_data_service
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
+    let Some(service) = service else {
+        tracing::warn!("approval-mode 恢复跳过：user data service 未就绪");
+        return;
+    };
+    match service.load_sync(crate::session::user_data::UserDataKey::ApprovalMode) {
+        Ok(Some(envelope)) => {
+            let mode = envelope
+                .payload
+                .get("mode")
+                .and_then(serde_json::Value::as_str)
+                .filter(|mode| matches!(*mode, "bypass" | "auto" | "edit" | "default"));
+            match mode {
+                Some(mode) => {
+                    if let Ok(mut slot) = state.approval_mode.lock() {
+                        *slot = mode.to_string();
+                        tracing::info!("approval mode 已从 user_data 恢复：{mode}");
+                    }
+                }
+                None => tracing::warn!("approval-mode envelope 缺少合法 mode，保持默认"),
+            }
+        }
+        Ok(None) => {} // 无持久化值：保持 default，前端首次种子兜底
+        Err(error) => tracing::warn!("approval-mode 恢复失败（保持默认）：{error}"),
+    }
 }
 
 /// CLI 增强：遍历全部 runtime 的挂起交互快照（含应答所需完整 identity）。
@@ -1464,5 +1526,107 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|entry| entry.request_id == "81"));
         assert!(entries.iter().any(|entry| entry.request_id == "82"));
+    }
+
+    /// #448 PR3：set_approval_mode 写穿 user_data（后端权威）。内存与 SQLite 落盘
+    /// 都生效；校验器拒绝垃圾 mode。
+    #[test]
+    fn set_approval_mode_persists_to_user_data() {
+        use tauri::Manager;
+        let shared = std::sync::Arc::new(
+            crate::session::UserDataService::in_memory().expect("user service"),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(shared.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(async {
+                set_approval_mode(app.state::<crate::AppState>(), "auto".into())
+                    .await
+                    .expect("set must succeed");
+            });
+        // 内存态生效
+        assert_eq!(
+            *app.state::<crate::AppState>()
+                .approval_mode
+                .lock()
+                .unwrap(),
+            "auto"
+        );
+        // 落盘生效（load_sync 直读——与启动回填同路径）
+        let envelope = shared
+            .load_sync(crate::session::user_data::UserDataKey::ApprovalMode)
+            .expect("load")
+            .expect("persisted");
+        assert_eq!(envelope.payload["mode"], "auto");
+    }
+
+    /// #448 PR3：service 未就绪（启动极早期）→ 写穿降级 warn，内存仍生效；
+    /// 非法 mode 仍然拒绝。
+    #[test]
+    fn set_approval_mode_degrades_to_memory_without_service() {
+        use tauri::Manager;
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async {
+            set_approval_mode(app.state::<crate::AppState>(), "edit".into())
+                .await
+                .expect("set must succeed（降级不拒绝）");
+            let error = set_approval_mode(app.state::<crate::AppState>(), "yolo".into())
+                .await
+                .expect_err("garbage mode must be rejected");
+            assert!(error.to_string().contains("unknown approval mode"));
+        });
+        assert_eq!(
+            *app.state::<crate::AppState>()
+                .approval_mode
+                .lock()
+                .unwrap(),
+            "edit"
+        );
+    }
+
+    /// #448 PR3：启动回填——set 写穿落盘的值经 restore_persisted_approval_mode
+    /// 回填内存（重启等价路径）；无持久化值保持默认；损坏 payload（手改 DB）不 panic。
+    #[test]
+    fn restore_persisted_approval_mode_reads_back_written_value() {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let shared = std::sync::Arc::new(
+            crate::session::UserDataService::in_memory().expect("user service"),
+        );
+        // 预置落盘值（模拟上一会话 set 的写穿产物）
+        rt.block_on(async {
+            shared
+                .save(
+                    crate::session::user_data::UserDataKey::ApprovalMode,
+                    serde_json::json!({ "version": 1, "mode": "bypass" }),
+                    None,
+                )
+                .await
+                .expect("seed save");
+        });
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(shared.clone())
+            .build();
+        restore_persisted_approval_mode(&state);
+        assert_eq!(*state.approval_mode.lock().unwrap(), "bypass");
+
+        // 无持久化值（空 service，模拟首次启动）→ 保持构造默认
+        let fresh = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(std::sync::Arc::new(
+                crate::session::UserDataService::in_memory().expect("user service"),
+            ))
+            .build();
+        restore_persisted_approval_mode(&fresh);
+        assert_eq!(*fresh.approval_mode.lock().unwrap(), "default");
     }
 }
