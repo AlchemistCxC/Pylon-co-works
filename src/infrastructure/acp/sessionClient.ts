@@ -365,6 +365,12 @@ export function createSessionClient(transport: ClientTransport) {
       transport.invoke('list_persisted_sessions').then(raw => normalizePersistedSessions(raw)),
     exportSession: (payload: ExportSessionPayload): Promise<unknown> => transport.invoke('export_session', payload),
     cancelPrompt: (payload: CancelPromptPayload): Promise<unknown> => transport.invoke('cancel_prompt', payload),
+    // A-V2\uFF1A\u7528\u6237\u7EA7\u5220\u9664\u94FE\u8DEF\uFF08DEL-03 tombstone \u4E0E DEL-04 \u7EC8\u6001\u5316\uFF0Cuser_data \u9762\u2014\u2014
+    // \u539F SessionSettings/useSidebarContributionProps \u7684\u88F8 invoke \u6536\u53E3\u4E8E\u6B64\uFF09\u3002
+    deleteUserSessionLocal: (payload: { sessionId: string; ownerKey: string }): Promise<unknown> =>
+      transport.invoke('user_session_delete', payload),
+    finalizeUserSessionDelete: (payload: { sessionId: string; ownerKey: string }): Promise<unknown> =>
+      transport.invoke('user_session_delete_finalize', payload),
   }
 }
 

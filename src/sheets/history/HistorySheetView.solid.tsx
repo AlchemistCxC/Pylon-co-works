@@ -1,11 +1,10 @@
 import { createEffect, createMemo, createSignal, onCleanup, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'
 import { useReplayPostureStore } from '../../domains/chat/replayPostureStore'
 import { pagePersistedSessions, validateExportPath } from '../../domains/overview/persistedHistory.ts'
@@ -71,7 +70,7 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
   createEffect(() => {
     const sheetId = props.sheet.id
     let disposed = false
-    const client = createSessionClient({ invoke: tauriInvokeTransport })
+    const client = appClients.session()
     client.listPersistedSessions().then(value => {
       if (!disposed) {
         setRaw(value)
@@ -116,7 +115,7 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
     const validation = validateExportPath(outputPath)
     if (validation) { setExportError(validation); return }
     try {
-      const client = createSessionClient({ invoke: tauriInvokeTransport })
+      const client = appClients.session()
       await client.exportSession({ agentId: owner.agentId, periId, format: 'markdown', outputPath })
       resolveRuntimeErrors({ key: `history:${props.sheet.id}:export:${periId}` })
     } catch (error) {

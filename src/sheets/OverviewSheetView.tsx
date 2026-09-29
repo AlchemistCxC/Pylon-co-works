@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../app/appClients.ts'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles } from 'lucide-react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
-import { createAgentClient } from '../infrastructure/acp/agentClient'
-import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../application/transactions/openOwnedSessionTransaction'
@@ -67,7 +64,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    invoke('startup_diagnostics')
+    appClients.runtime.startupDiagnostics()
       .then(raw => {
         if (!disposed) {
           setStorage(normalizeStartupDiagnostics(raw).storage)
@@ -86,7 +83,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (migrationBusy) return
     setMigrationBusy(true)
     try {
-      await invoke('migrate_appdata_to_portable')
+      await appClients.runtime.migrateAppdataToPortable()
       setMigrationDismissed(true)
       resolveRuntimeErrors({ key: 'overview:migrate-portable' })
     } catch (error) {
@@ -102,7 +99,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    const client = createSessionClient({ invoke: tauriInvokeTransport })
+    const client = appClients.session()
     client.listPersistedSessions().then(all => {
       if (!disposed) {
         setRecent(recentPersistedSessions(all))
@@ -121,7 +118,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     setSwitchingId(agent.id)
     setError('')
     setErrorIsValidation(false)
-    const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
+    const agentClient = appClients.agent()
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),

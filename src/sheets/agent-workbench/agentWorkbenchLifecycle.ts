@@ -13,12 +13,12 @@
  *
  * 框架无关（无 React hooks）：宿主 AgentRendererSuiteWorkbench 以 bind 效应驱动。
  */
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
+import type { ColdMountTurnSnapshot, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/session/sessionStateSync.ts'
 import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../domains/chat/chatReplayTrace.ts'
@@ -200,7 +200,7 @@ export class AgentWorkbenchLifecycle {
   private async createSession(session: Session, context: ReturnType<typeof sessionContext>, persona: string, isCurrent: () => boolean): Promise<void> {
     const loadGeneration = (this.loadGenerations.get(session.source) ?? 0) + 1
     this.loadGenerations.set(session.source, loadGeneration)
-    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
+    const sessionClient = appClients.session()
     // OWNER-02：new_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     try {
@@ -236,7 +236,7 @@ export class AgentWorkbenchLifecycle {
     isCurrent: () => boolean,
     placeholderRows?: readonly CanonicalEventRow[],
   ): Promise<void> {
-    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
+    const sessionClient = appClients.session()
     // OWNER-02：load_persisted_session 目标 owner = session.agentId（从 Session 读取）。
     // CWD-03：绑定 Workspace 时随 wire 发送 workspaceId（后端以 root_path 为 root 单一来源）。
     void getHookRuntime().invoke('session.loading', { session, source: session.source }, session.hooks.length > 0 ? session.hooks : undefined)

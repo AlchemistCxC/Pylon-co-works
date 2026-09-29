@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
-import { invoke } from '@tauri-apps/api/core'
 import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
 import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, PET_POSITION_KEY, PET_STORAGE_KEY } from './petPersistence'
@@ -19,7 +18,10 @@ import {
 
 // H2：宠物 DTO 集中 + 收窄（petContracts），invoke 结果一律经 normalize 兜底再入库
 type GrowthStage = PetGrowthStage
-const fetchPet = (cmd: string, args?: Record<string, unknown>) => invoke<unknown>(cmd, args).then(normalizePetState)
+import { appClients } from '../app/appClients.ts'
+// H2：DTO 归一化仍在 petContracts；transport 经 appClients.pet（A-V2 收口）。
+const fetchPetState = () => appClients.pet.getState().then(normalizePetState)
+const fetchPetAct = (action: string, value?: unknown) => appClients.pet.act(action, value).then(normalizePetState)
 
 interface Position { x: number; y: number }
 type PetDirection = 'left' | 'right'
@@ -251,7 +253,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       try {
         // I18 W1（LR2-WI08）：权威源仲裁——同时装载后端与本地缓存，较新者胜；
         // 禁止无条件 localStorage 覆盖后端（旧 restore 行为即 ISSUE-18 问题 1）。
-        const backendState = await fetchPet('get_pet')
+        const backendState = await fetchPetState()
         const savedRaw = localStorage.getItem(STORAGE_KEY)
         let localEnvelope: PetStateEnvelope | null = null
         if (savedRaw) {
@@ -268,7 +270,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
         if (!winner) return
         if (winner.source === 'local' && localEnvelope && savedRaw) {
           // 本地较新 → 推送本地到后端（restore），不静默覆盖后端新状态
-          save(await fetchPet('pet_action', { action: 'restore', value: savedRaw }))
+          save(await fetchPetAct('restore', savedRaw))
         } else {
           // 后端较新/相等 → 后端胜（并用后端刷新本地缓存）
           save(backendState)
@@ -282,7 +284,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     if (!IS_TAURI) return
     const poll = async () => {
       if (document.visibilityState !== 'visible') return
-      try { save(await fetchPet('get_pet')) } catch { /* 下一轮重试 */ }
+      try { save(await fetchPetState()) } catch { /* 下一轮重试 */ }
     }
     const timer = window.setInterval(poll, 12_000)
     const onVisibility = () => { if (document.visibilityState === 'visible') poll() }
@@ -463,7 +465,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       setComment('')
     }, 1200)
     if (IS_TAURI) {
-      fetchPet('pet_action', { action: 'poke' })
+      fetchPetAct('poke')
         .then(save)
         .catch(cause => setError(String(cause)))
     }
@@ -480,7 +482,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       } : current)
       return
     }
-    fetchPet('pet_action', { action, ...(value ? { value } : {}) })
+    fetchPetAct(action, value)
       .then(save)
       .catch(cause => setError(String(cause)))
   }

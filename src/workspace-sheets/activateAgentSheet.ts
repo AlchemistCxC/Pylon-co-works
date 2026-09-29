@@ -1,6 +1,5 @@
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../app/appClients.ts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
-import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
@@ -15,9 +14,7 @@ export async function activateAgentSheet(
   onActivated: () => void,
   options?: { silent?: boolean },
 ): Promise<boolean> {
-  const agentClient = createAgentClient({
-    invoke: tauriInvokeTransport,
-  })
+  const agentClient = appClients.agent()
   const result = await switchAgentTransaction(agentId, agentName, {
     switchAgent: () => agentClient.switchAgent(agentId),
     resetRuntime: () => useRuntimeStore.getState().resetAll(),

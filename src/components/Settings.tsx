@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
-import { createAgentClient } from '../infrastructure/acp/agentClient'
+import { appClients } from '../app/appClients.ts'
 import { ZoneGroupFields } from './settings/themeFieldRenderer'
 import { useStore } from '../domains/theme/themeStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
@@ -53,7 +52,7 @@ import { useSettingsContributionCatalog } from './settings/useSettingsContributi
 import SidebarModulesPanel from './settings/SidebarModulesPanel.tsx'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
-const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
+const agentClient = appClients.agent()
 
 // ── helpers ──
 

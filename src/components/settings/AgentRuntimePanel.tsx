@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
 import {
-  createAgentClient,
   type AgentCreateConfig,
   type AgentsConfigDocument,
 } from '../../infrastructure/acp/agentClient'
@@ -199,9 +198,7 @@ function pathHintForProvider(provider: string | null | undefined): string {
  * 全部走 typed client，不重建整块 YAML。
  */
 export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?: string }) {
-  const [agentClient] = useState(() => createAgentClient({
-    invoke: tauriInvokeTransport,
-  }))
+  const [agentClient] = useState(() => appClients.agent())
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)

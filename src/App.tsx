@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
+import { appClients } from './app/appClients.ts'
 import { loadWindowSize, persistWindowSize } from './infrastructure/persistence/windowSizePersistence'
 import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
@@ -24,8 +25,6 @@ import { projectSkinDocumentRoot } from './infrastructure/skin/skinProjection'
 import { getSkinRuntime, pickThemeBaseline } from './infrastructure/skin/skinRuntimeServices'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './contracts/agentTypes'
-import { createAgentClient } from './infrastructure/acp/agentClient'
-import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
@@ -103,9 +102,9 @@ function LazyDialogFallback() {
   )
 }
 
-// FE-AUD-008：typed client 收口 command literal（注入真实 transport）
-const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
-const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
+// FE-AUD-008 / A-V2：组装期统一 client 集（app/appClients），视图层不再自造 client。
+const agentClient = appClients.agent()
+const runtimeClient = appClients.runtime
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../app/appClients.ts'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
 import { useDiagnosticErrors, useErrorHistory, type ErrorEntry } from '../app/errorCenter.ts'
-import { createRuntimeClient } from '../infrastructure/tauri/runtimeClient'
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, RUNTIME_LOG_RENDER_WINDOW, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
@@ -33,7 +32,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
   useEffect(() => {
     // 浏览器模式 mock 后端已装（demo）：invoke/listen 经假 __TAURI_INTERNALS__ 返回 mock 数据
     let disposed = false
-    createRuntimeClient({ invoke: tauriInvokeTransport }).startupDiagnostics().then(raw => {
+    appClients.runtime.startupDiagnostics().then(raw => {
       if (!disposed) {
         setDiagnostics(normalizeStartupDiagnostics(raw))
         resolveRuntimeErrors({ key: runtimeErrorKey('读取启动诊断') })
@@ -45,7 +44,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
         source: 'runtime.sheet',
       })
     })
-    createRuntimeClient({ invoke: tauriInvokeTransport }).listRuntimeLogs().then(raw => {
+    appClients.runtime.listRuntimeLogs().then(raw => {
       if (!disposed) {
         setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
         resolveRuntimeErrors({ key: runtimeErrorKey('读取运行日志') })
@@ -58,7 +57,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
       })
     })
     // B2：挂载时开 live 推送、卸载时关（ringbuffer pull 兜底不受影响）
-    const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
+    const runtimeClient = appClients.runtime
     void runtimeClient.setRuntimeLogLive(true).catch(() => {})
     const unlisten = listen<unknown>('pylon:runtime-log', event => {
       if (disposed) return
@@ -85,7 +84,7 @@ export default function RuntimeSheetView({ sheet: _sheet }: { sheet: SheetRecord
 
   const clear = async () => {
     try {
-      await createRuntimeClient({ invoke: tauriInvokeTransport }).clearRuntimeLogs()
+      await appClients.runtime.clearRuntimeLogs()
       setEntries([])
       resolveRuntimeErrors({ key: runtimeErrorKey('清空运行日志') })
     } catch (error) {
