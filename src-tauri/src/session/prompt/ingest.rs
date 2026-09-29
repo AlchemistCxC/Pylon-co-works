@@ -162,6 +162,9 @@ pub(super) async fn ingest_prompt_event(
     Ok(result.events.into_iter().next())
 }
 
+/// 终帧 additive `turnId` 经独立出参进入本函数（#442 Step2；与
+/// `settle_prompt_response` 的 allow 同款——参数列是既有收尾路径形态的顺延）。
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
