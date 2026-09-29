@@ -99,3 +99,67 @@ describe('#110 F4 冷挂载 turn 快照透传', () => {
     expect(Object.keys(normalizeLoad(undefined))).not.toContain('turn')
   })
 })
+
+/** #442 Step1：load 响应顶层 turnBoundary 的归一化契约。 */
+describe('#442 Step1 turnBoundary 逐字段守卫与透传', () => {
+  /** 通过权威恢复链路观察 turnBoundary（与 turn 同一响应信封）。 */
+  const normalizeWithBoundary = (turnBoundary: unknown) => normalizePersistedSessionLoadResult({
+    response: { sessionId: 'peri-c1' },
+    replay: [],
+    replayMetadata: {
+      complete: true,
+      truncated: false,
+      droppedCount: 0,
+      boundary: { kind: 'session-load-response', observedCount: 0, retainedStartOrdinal: null, retainedEndOrdinal: null },
+    },
+    canonicalRevision: 0,
+    replayJournalStatus: 'local-authoritative',
+    authority: 'local-journal',
+    journalCoverage: 'local-observed',
+    collection: { complete: true, truncated: false, droppedCount: 0 },
+    diagnostics: [],
+    ...(turnBoundary === undefined ? {} : { turnBoundary }),
+  })
+
+  it('terminal（两端时间戳）与 open（仅起点）均原样透传', () => {
+    expect(normalizeWithBoundary({ kind: 'terminal', startedAtMs: 100, endedAtMs: 250 }).turnBoundary)
+      .toEqual({ kind: 'terminal', startedAtMs: 100, endedAtMs: 250 })
+    expect(normalizeWithBoundary({ kind: 'open', startedAtMs: 300 }).turnBoundary)
+      .toEqual({ kind: 'open', startedAtMs: 300 })
+    expect(normalizeWithBoundary({ kind: 'unknown' }).turnBoundary).toEqual({ kind: 'unknown' })
+  })
+
+  it('缺失/畸形不留键：非对象、kind 越界一律整体丢弃（缺失不伪造）', () => {
+    expect(normalizeWithBoundary(undefined).turnBoundary).toBeUndefined()
+    expect(Object.keys(normalizeWithBoundary(undefined))).not.toContain('turnBoundary')
+    for (const malformed of [null, 'terminal', 7, [], { kind: 'settled' }, { kind: 7 }]) {
+      expect(normalizeWithBoundary(malformed).turnBoundary, `boundary=${JSON.stringify(malformed)}`).toBeUndefined()
+    }
+  })
+
+  it('畸形时间戳键丢弃而 kind 保留（逐字段降级，不整体报废）', () => {
+    expect(normalizeWithBoundary({ kind: 'terminal', startedAtMs: '100', endedAtMs: 250 }).turnBoundary)
+      .toEqual({ kind: 'terminal', endedAtMs: 250 })
+  })
+
+  it('turn.startedAtMs / terminal.settledAtMs 透传（#442 Step1 判定臂后端化的事实输入）', () => {
+    const snapshot = normalizeColdMountTurnSnapshot({
+      source: 'local:c1',
+      turn: {
+        phase: 'terminal',
+        startedAtMs: 100,
+        terminal: { cause: 'completed', settledAtMs: 250 },
+        key: { turnId: 5 },
+      },
+    })
+    expect(snapshot!.turn).toEqual({
+      phase: 'terminal',
+      startedAtMs: 100,
+      terminal: { cause: 'completed', settledAtMs: 250 },
+      key: { turnId: 5 },
+    })
+    // 非法时间戳丢弃、不伪造。
+    const malformed = normalizeColdMountTurnSnapshot({ turn: { phase: 'terminal', startedAtMs: 'x', terminal: { settledAtMs: -1 } } })
+    expect(malformed!.turn).toEqual({ phase: 'terminal', terminal: {} })
+  })
+})

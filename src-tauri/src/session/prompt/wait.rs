@@ -241,7 +241,19 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     ctx: &PromptContext,
 ) -> Result<String, PylonError> {
     let mut failure = None;
-    let result = send_prompt_core_impl(state, runtime, window, gateway, ctx, &mut failure).await;
+    // #442 Step2：回合建立后的错误终态帧携带 turn 身份（前端精确归属；回合未
+    // 建立 = None，帧缺省该字段）。
+    let mut attempted_turn_id = None;
+    let result = send_prompt_core_impl(
+        state,
+        runtime,
+        window,
+        gateway,
+        ctx,
+        &mut failure,
+        &mut attempted_turn_id,
+    )
+    .await;
     if let Err(error) = &result {
         // Every known ACP boundary records its own provenance.  A validation
         // or setup error may happen before that boundary; preserve a stable
@@ -257,6 +269,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             ctx,
             error,
             failure.as_ref(),
+            attempted_turn_id,
         )
         .await
         {
@@ -281,6 +294,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
     failure: &mut Option<PromptFailureMetadata>,
+    // #442 Step2：回合建立后的错误终态经此透出 turn 身份（回合未建立保持 None，
+    // error 帧缺省不伪造）。
+    attempted_turn_id: &mut Option<u64>,
 ) -> Result<String, PylonError> {
     // 解构 ctx 业务参数（引用形态，管线内只读；session_prompt 由 prepare_prompt_blocks
     // 经 flow.ctx 直接读取，不在本函数体内消费）。
@@ -571,6 +587,9 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         generation: flow.generation,
         turn_id: flow.request_id,
     };
+    // #442 Step2：终帧 additive turnId 的事实来源——回合已建立后发生的任何错误
+    // 终态，error 帧都携带本回合身份（前端 stamps 猜测在字段可用时退役）。
+    *attempted_turn_id = Some(turn_key.turn_id);
     if let crate::acp::BeginOutcome::AlreadyActive =
         runtime.turn_ledger.begin(turn_key.clone(), now_ms())
     {

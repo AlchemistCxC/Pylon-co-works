@@ -162,6 +162,9 @@ pub(super) async fn ingest_prompt_event(
     Ok(result.events.into_iter().next())
 }
 
+/// 终帧 additive `turnId` 经独立出参进入本函数（#442 Step2；与
+/// `settle_prompt_response` 的 allow 同款——参数列是既有收尾路径形态的顺延）。
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -170,6 +173,9 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
     ctx: &PromptContext,
     error: &PylonError,
     failure: Option<&PromptFailureMetadata>,
+    // #442 Step2：本回合身份（账本 begin 之后发生的错误终态 Some；回合未建立
+    // None——帧缺省该字段，不伪造）。
+    turn_id: Option<u64>,
 ) -> Result<(), PylonError> {
     // #420/ADR-0034：错误终态路径的防御纵深——无条件收敛该会话的在途 turn。
     // 正常时终态臂的 report_settle 已结算（active 为空，此处 no-op）；覆盖等待
@@ -181,19 +187,42 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
             .map(|session| (session.peri_id.clone(), session.generation))
     });
     if let Some((peri_id, generation)) = defensive_settle {
-        if let crate::acp::SettleOutcome::Published = runtime.turn_ledger.settle_active_for_session(
+        // #442 Step3：候选回合身份先于防御结算读取（与 settle_active_for_session
+        // 同一选择序）；Published 时广播 turn-settled——未经终态臂的残余同样要给
+        // 前端一个内核事实主轨的收敛点。
+        let defensive_turn_key = runtime
+            .turn_ledger
+            .active_turn_id_for_session(&ctx.source, &peri_id, generation)
+            .map(|turn_id| crate::acp::TurnKey {
+                local_session_id: ctx.source.clone(),
+                remote_session_id: peri_id.clone(),
+                generation,
+                turn_id,
+            });
+        let defensive_outcome = runtime.turn_ledger.settle_active_for_session(
             &ctx.source,
             &peri_id,
             generation,
             crate::acp::TurnTerminalCause::ProtocolError,
             super::ledger::now_ms(),
             Some(error.to_string()),
-        ) {
+        );
+        if let crate::acp::SettleOutcome::Published = defensive_outcome {
             tracing::warn!(
                 source = %ctx.source,
                 code = %error.code(),
                 "prompt failure path defensively settled a residual in-flight turn; \
                  a terminal arm should have settled it (diagnostic)"
+            );
+        }
+        if let Some(turn_key) = defensive_turn_key {
+            super::ledger::emit_turn_settled(
+                window,
+                gateway,
+                runtime,
+                &ctx.source,
+                &turn_key,
+                &defensive_outcome,
             );
         }
     }
@@ -202,6 +231,11 @@ pub(super) async fn publish_prompt_failure<R: tauri::Runtime>(
         "code": error.code(),
         "error": error.to_string(),
     });
+    // #442 Step2：终帧 additive turnId——前端 stamps 猜测在字段可用时退役
+    // （精确归属本回合；回合未建立时缺省）。
+    if let Some(turn_id) = turn_id {
+        error_payload["turnId"] = serde_json::json!(turn_id);
+    }
     if let Some(failure) = failure {
         error_payload["failure"] = failure.to_json();
     }

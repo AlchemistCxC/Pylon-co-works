@@ -555,8 +555,10 @@ function ActiveAgentSessionLifecycle(props: {
     // bind; refresh the same owner document when the load chain completes.
     // #99：账本快照一并交下去——终帧只经一次性 IPC Channel 交付，账本是不依赖
     // 一次性 event 的终态证据，refresh 用它补出 journal 读漏掉的收敛事实。
-    lifecycleRef.current.onCanonicalRefresh = (session, _canonicalRevision, turn) => {
-      void props.sessionRuntime.refresh(session, turn)
+    // #442 Step1：权威 turnBoundary 随 options 进 refresh——「或」判定与
+    // duration 扫描在字段可用时退役（缺失回退既有轨，见 publishFoldedDocument）。
+    lifecycleRef.current.onCanonicalRefresh = (session, _canonicalRevision, turn, turnBoundary) => {
+      void props.sessionRuntime.refresh(session, turn, { turnBoundary })
     }
     // #358：复活的协商目录投影成工作台文档的 `session.started`——与建会话路径同构。
     // 没有这条事实，`WorkbenchDocumentSurface` 的守卫在复活会话上必然失配，model / mode

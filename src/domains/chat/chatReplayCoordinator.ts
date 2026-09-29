@@ -1,5 +1,5 @@
 import type { CanonicalEventRow } from '../events/canonicalEventRow.ts'
-import type { ColdMountTurnSnapshot, PersistedSessionLoadResult, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
+import type { ColdMountTurnSnapshot, PersistedSessionLoadResult, PersistedTurnBoundary, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { deriveCanonicalTurnDuration, hasCanonicalTurnTerminal, type CanonicalTurnDuration } from '../events/canonicalTurnDuration.ts'
 import type { Message } from './messageTypes.ts'
 
@@ -30,6 +30,12 @@ export interface ReplayLoadOutcome {
    * IPC Channel 交付，账本是**不依赖一次性 event** 的终态证据，故随 outcome 上抛。
    */
   readonly turn?: ColdMountTurnSnapshot
+  /**
+   * #442 Step1：后端权威最新回合边界（kind + 两端时间戳）。账本有记录即权威，
+   * 前端跨源「或」判定与 duration 扫描在此字段可用时退役；缺失/畸形在归一化层
+   * 已降级为 undefined，消费方回退现有判定轨。
+   */
+  readonly turnBoundary?: PersistedTurnBoundary
 }
 
 export interface ReplayLoadControllerAdapter {
@@ -162,6 +168,8 @@ export class ReplayLoadCoordinator {
         ...(canonicalDuration ? { canonicalDuration } : {}),
         hasCanonicalTurnTerminal: hasCanonicalTurnTerminal(projectionRows.length > 0 ? projectionRows : canonicalRows),
         ...(result.turn ? { turn: result.turn } : {}),
+        // #442 Step1：权威回合边界随 outcome 交宿主（refresh 据此退役「或」判定）。
+        ...(result.turnBoundary ? { turnBoundary: result.turnBoundary } : {}),
       }
     } catch (error) {
       if (lockGeneration !== undefined) this.controller.abortSessionLoad(request.source, lockGeneration)
