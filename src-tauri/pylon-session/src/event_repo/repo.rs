@@ -630,6 +630,42 @@ impl EventRepo {
         stored.map(|row| row.decode()).transpose()
     }
 
+    /// #442 Step1：回合边界判据的 tail 行（**升序**返回）。只取四类边界行的四个
+    /// 标量列——判据（`crate::turn_boundary`）只消费 sequence/event_type 与两个
+    /// 时间戳，不触任何载荷列；DESC 查询 + reverse 与 `list_events` 同语义。
+    pub(super) fn turn_boundary_rows(
+        &self,
+        owner_key: &str,
+        cap: u32,
+    ) -> Result<Vec<crate::turn_boundary::TurnBoundaryRow>, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT sequence, event_type, occurred_at, received_at FROM canonical_events
+                 WHERE owner_key = ?1
+                   AND event_type IN ('user.message', 'turn.completed', 'turn.failed', 'turn.unit')
+                 ORDER BY sequence DESC LIMIT ?2",
+            )
+            .map_err(EventError::from)?;
+        let mut rows: Vec<crate::turn_boundary::TurnBoundaryRow> = stmt
+            .query_map(params![owner_key, cap], |row| {
+                Ok(crate::turn_boundary::TurnBoundaryRow {
+                    sequence: row.get(0)?,
+                    event_type: row.get(1)?,
+                    occurred_at: row.get(2)?,
+                    received_at: row.get(3)?,
+                })
+            })
+            .map_err(EventError::from)?
+            .collect::<Result<_, _>>()
+            .map_err(EventError::from)?;
+        rows.reverse();
+        Ok(rows)
+    }
+
     /// #81 L2：compact 读——返回「单元 + 未覆盖行」（升序）。被 turn.unit 覆盖的
     /// 行不再读取（L3 裁剪后这些行已删除），前端读/解析行数随单元粒度下降。
     ///

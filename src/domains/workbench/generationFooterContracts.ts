@@ -36,7 +36,8 @@ export interface GenerationSummary {
   completedFrame: string
   reason: 'done' | 'cancelled' | 'error'
   failure?: PromptFailureMetadata
-  durationSource?: 'live-monotonic' | 'canonical-events' | 'provider' | 'unknown'
+  /** #442 Step1 增补 'turn-boundary'：后端权威 turnBoundary 两端推导的耗时。 */
+  durationSource?: 'live-monotonic' | 'canonical-events' | 'turn-boundary' | 'provider' | 'unknown'
   durationAvailable?: boolean
   /**
    * Display-only restore: the summary was synthesized from the canonical

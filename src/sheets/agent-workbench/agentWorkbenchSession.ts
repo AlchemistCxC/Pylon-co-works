@@ -57,6 +57,7 @@ import {
   type LocalSessionFact,
 } from './agentWorkbenchProjection.ts'
 import type { LatestTurnBoundary } from '../../domains/events/canonicalTurnDuration.ts'
+import type { PersistedTurnBoundary } from '../../infrastructure/acp/sessionClient.ts'
 import { createAgentWorkbenchTurnClock } from './agentWorkbenchTurnClock.ts'
 import { createAgentWorkbenchOptimisticEcho } from './agentWorkbenchOptimisticEcho.ts'
 import type { CanonicalDraftChunkNotification, CanonicalTerminalSignal } from '../../infrastructure/events/canonicalEventFeed.ts'
@@ -753,6 +754,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
     /** #390：回合作用域的终态判据（只看最新回合边界），不得用回合无关的「历史曾终态」。 */
     canonicalLatestBoundary: LatestTurnBoundary
+    /**
+     * #442 Step1：后端权威 turnBoundary（load 响应随行）。可用时替代 journal
+     * 扫描与跨源「或」判定；缺省 = 回退轨（journal 扫描 + 账本归档「或」）。
+     */
+    turnBoundary?: PersistedTurnBoundary
     /** #390：本次读的发起时刻——封存新鲜度守卫的锚点。 */
     readStartedAt: number
     withLedgerEvidence: boolean
@@ -777,6 +783,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     malformedCount: number
     canonicalDuration: ReturnType<typeof canonicalDurationFromRows>
     canonicalLatestBoundary: LatestTurnBoundary
+    /** #442 Step1：后端权威回合边界（refresh 随 load 响应携入；缺省 = 回退轨）。 */
+    turnBoundary?: PersistedTurnBoundary
     readStartedAt: number
     withLedgerEvidence: boolean
   }): void => {
@@ -811,27 +819,43 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     // 被压成上一轮的 displayOnly 摘要（切页/重读即触发）。
     // #217：终态证据同样收敛内核在途事实——账本/journal 终态就是内核自己在说
     // 「回合已终态」（终帧丢失时这是唯一落静路，displayOnly 摘要依赖它）。
+    // #442 Step1：后端权威 `turnBoundary` 可用时**替代**跨源「或」判定——它由
+    // 账本（存在即权威，journal 终态行落盘时序不参与）或 journal 判据在后端一次
+    // 合成，`open` 是权威的「未收敛」表态（封存会让在途回合被上一轮终态压塌，
+    // 正是 #390 缺陷族）；`unknown`/字段缺失回退既有「或」轨。
     const ledgerTerminalReason = input.withLedgerEvidence ? clock.ledgerTerminalOf(input.readSource) : undefined
-    const hasTerminalEvidence = input.canonicalLatestBoundary === 'terminal' || ledgerTerminalReason !== undefined
+    const hasTerminalEvidence = input.turnBoundary !== undefined
+      ? input.turnBoundary.kind === 'terminal'
+      : (input.canonicalLatestBoundary === 'terminal' || ledgerTerminalReason !== undefined)
     clock.settleFromDocument(input.readSource, hasTerminalEvidence, input.readStartedAt)
     // #217：终态证据收敛内核事实。**只认账本终态**（ledgerTerminalReason，内核
     // 自己的账本）——journal 终态行是文档历史，不是内核活性事实，不得制造内核
     // 条目（时钟封存那一半维持 #99 无条件既有语义，kernel 写跟随账本那一半）。
     // 这是无条件写，与顶部的新鲜度守卫刻意不同：账本终态是点时内核事实的
     // 收敛陈述，早于它发出的 true 快照已被守卫二的回合身份挡住。
-    if (ledgerTerminalReason !== undefined) clock.settleKernelFromLedger(input.readSource)
+    // #442 Step1：boundary 权威期为 `open` 时跳过——权威说「未收敛」，归档里的
+    // 账本终态只可能属于上一回合（不再让上一回合的终态收敛本回合内核条目）。
+    if (ledgerTerminalReason !== undefined && input.turnBoundary?.kind !== 'open') clock.settleKernelFromLedger(input.readSource)
     clock.settleRuntimeLiveness(input.readSource)
     clock.reconcile(input.readSource)
     const settled = runtime.getSnapshot()
+    // #442 Step1：boundary 两端可测时 duration 扫描退役（displayOnly 摘要的耗时
+    // 直接取后端权威两端）；扫描保留为字段缺失时的回退轨。
+    const boundaryElapsed = input.turnBoundary?.kind === 'terminal'
+      && input.turnBoundary.startedAtMs !== undefined && input.turnBoundary.endedAtMs !== undefined
+      ? { elapsedMs: input.turnBoundary.endedAtMs - input.turnBoundary.startedAtMs }
+      : undefined
     if (!settled.generating && !settled.summary && hasTerminalEvidence) {
       updateRuntimeState({
         summary: {
-          elapsedMs: input.canonicalDuration?.elapsedMs ?? 0,
+          elapsedMs: boundaryElapsed?.elapsedMs ?? input.canonicalDuration?.elapsedMs ?? 0,
           tokenCount: settled.tokenCount,
           completedFrame: '',
           reason: ledgerTerminalReason ?? 'done',
-          durationSource: input.canonicalDuration?.source ?? 'unknown',
-          durationAvailable: input.canonicalDuration !== undefined,
+          durationSource: boundaryElapsed !== undefined
+            ? 'turn-boundary'
+            : input.canonicalDuration?.source ?? 'unknown',
+          durationAvailable: boundaryElapsed !== undefined || input.canonicalDuration !== undefined,
           // Display-only restore: must not synthesize a terminal fence
           // (see normalizeRuntimeSnapshot), or the next controller-driven
           // generation cannot restart the indicator after a rebind.
@@ -855,8 +879,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
    * **被拒回滚**要的是重建语义——「重建视角里那条乐观行从未发生」；续折会把当前文档原样带过来，
    * 乐观行也就删不掉（这正是回滚不能直接复用缺省 refresh 的原因）。其余语义（epoch/generation
    * 守卫、`buffered` 覆盖读期间到达的 live 行、`withPending` 补折剩余乐观行）两条路径共用。
+   *
+   * `options.turnBoundary`（#442 Step1）：load 响应随行的后端权威回合边界——进
+   * `publishFoldedDocument` 后替代跨源「或」判定与 duration 扫描（字段可用即退役，
+   * 缺省回退既有轨）。
    */
-  const refresh = async (session: Session | undefined, ledgerTurn?: unknown, options: { rebuild?: boolean } = {}): Promise<void> => {
+  const refresh = async (session: Session | undefined, ledgerTurn?: unknown, options: { rebuild?: boolean; turnBoundary?: PersistedTurnBoundary } = {}): Promise<void> => {
     if (binding.destroyed || !session || !binding.ownerKey || !binding.boundSessionId || !binding.source) return
     const bindingKey = workbenchSessionBindingKey(session)
     const refreshOwnerKey = binding.ownerKey
@@ -937,6 +965,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           malformedCount: refreshMalformedCount,
           canonicalDuration,
           canonicalLatestBoundary,
+          turnBoundary: options.turnBoundary,
           readStartedAt: refreshStartedAt,
           withLedgerEvidence: true,
         })
