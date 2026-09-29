@@ -62,6 +62,7 @@ import { DEFAULT_INTERFACE_MODE } from './domains/interface/interfaceModeStore.t
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
 import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
+import { hydrateInputPredictionSettingsFromBackend } from './infrastructure/persistence/inputPredictionSettingsRepository.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
 // 非首屏 Dialog/Sheet 懒加载：ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
@@ -217,6 +218,9 @@ export default function App() {
       // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
       hydrateDomains: async () => {
         await hydrateIdentityAndWorkspace(consumeLegacyProfilePayload())
+        // #448 PR2：预测设置同步缓存以后端为权威 hydrate（内部吞错不降级启动；
+        // 失败时缓存回落 localStorage，等价旧行为）。
+        await hydrateInputPredictionSettingsFromBackend()
         startupMark('hydrated')
       },
       fetchAgents: () => agentClient.listAgents(),

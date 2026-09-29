@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
-import { DEFAULT_INPUT_PREDICTION_SETTINGS, loadInputPredictionSettings, saveInputPredictionSettings, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { DEFAULT_INPUT_PREDICTION_SETTINGS, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { cachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
+import { persistInputPredictionSettings } from '../../infrastructure/persistence/inputPredictionSettingsRepository.ts'
 import { createStandalonePredictionProvider } from '../../infrastructure/prediction/predictionStandalone.ts'
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -7,17 +9,17 @@ function Field({ label, children, hint }: { label: string; children: React.React
 }
 
 export default function InputPredictionSettingsPanel() {
-  const [settings, setSettings] = useState<InputPredictionSettings>(() => loadInputPredictionSettings())
+  const [settings, setSettings] = useState<InputPredictionSettings>(() => cachedInputPredictionSettings())
   const [status, setStatus] = useState<string>('')
   const update = <K extends keyof InputPredictionSettings>(key: K, value: InputPredictionSettings[K]) => {
     setSettings(previous => {
       const next = { ...previous, [key]: value }
-      saveInputPredictionSettings(next)
+      persistInputPredictionSettings(next)
       return next
     })
     setStatus('已保存')
   }
-  const reset = () => { saveInputPredictionSettings(DEFAULT_INPUT_PREDICTION_SETTINGS); setSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS }); setStatus('已恢复默认') }
+  const reset = () => { persistInputPredictionSettings(DEFAULT_INPUT_PREDICTION_SETTINGS); setSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS }); setStatus('已恢复默认') }
   const test = async () => {
     setStatus('测试中…')
     try {

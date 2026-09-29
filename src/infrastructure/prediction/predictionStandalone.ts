@@ -1,11 +1,12 @@
 /**
  * predictionStandalone — 独立（OpenAI 兼容）HTTP 预测 provider 工厂（自 domains 迁入）。
  *
- * fetch/localStorage/provider 路由属基础设施关注（结构审查 B-6）；域内只留 settings
- * 纯函数与 router 策略。settings 的读取经 options.settings 注入或域内缺省。
+ * fetch/provider 路由属基础设施关注（结构审查 B-6）；域内只留 settings 纯函数与
+ * 策略。settings 的读取经 options.settings 注入或缺省走域内同步缓存
+ * （#448 PR2：Tauri 权威在后端 SQLite，缓存未 hydrate 时回落 localStorage）。
  */
 import type { InputPredictionProvider, InputPredictionRequest } from '../../contracts/prediction.ts'
-import { loadInputPredictionSettings, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { cachedInputPredictionSettings, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import { boundPredictionHistory, boundPredictionMessages } from './inputPredictionProvider.ts'
 
 function parseHeaders(value: string): Record<string, string> {
@@ -23,7 +24,7 @@ function endpointFor(settings: InputPredictionSettings): string {
 export function createStandalonePredictionProvider(options: { fetch?: typeof globalThis.fetch; settings?: () => InputPredictionSettings } = {}): InputPredictionProvider {
   const request = options.fetch ?? globalThis.fetch
   return { async predict(input: InputPredictionRequest): Promise<string | null> {
-    const settings = options.settings?.() ?? loadInputPredictionSettings()
+    const settings = options.settings?.() ?? cachedInputPredictionSettings()
     if (!settings.enabled || !settings.baseUrl || !settings.apiKey || !settings.model || input.signal.aborted) return null
     const controller = new AbortController()
     const onAbort = () => controller.abort()

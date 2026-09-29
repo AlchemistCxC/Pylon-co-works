@@ -15,7 +15,7 @@ import type { SessionCommand } from '../../../domains/workbench/session/sessionS
 import { ASSIST_PREDICTION_CONSUMED_KEY, assistPredictionInstanceKey, assistPredictionText } from '../../../domains/workbench/session/assistPrediction.ts'
 import { findHistoryCompletion, mergeHistory, type PredictionCandidate } from '../../../infrastructure/prediction/inputPredictionState.ts'
 import { createPredictionScheduler, type InputPredictionProvider } from '../../../infrastructure/prediction/inputPredictionProvider.ts'
-import { loadInputPredictionSettings } from '../../../domains/inputPrediction/inputPredictionSettings.ts'
+import { cachedInputPredictionSettings } from '../../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 
 export interface QueuedWorkbenchMessage {
   id: number
@@ -211,7 +211,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
         : null
     }
     if (value) return null
-    const predictionMode = loadInputPredictionSettings().mode
+    const predictionMode = cachedInputPredictionSettings().mode
     if (predictionMode === 'off' || predictionMode === 'standalone') return null
     const valueFromProvider = providerPrediction()
     if (!valueFromProvider) return null
@@ -235,7 +235,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const hasCommands = suggestionList().length > 0
     const hasAttachments = attachments().length > 0
     // #394：原生预测在场时不再发本地请求（原生优先；`standalone` 模式表「强制本地」，故排除）。
-    const nativeActive = nativePrediction() !== null && loadInputPredictionSettings().mode !== 'standalone'
+    const nativeActive = nativePrediction() !== null && cachedInputPredictionSettings().mode !== 'standalone'
     if (!scheduler || !id || value || generating || hasCommands || hasAttachments || nativeActive) {
       scheduler?.cancel()
       setProviderPrediction(null)
