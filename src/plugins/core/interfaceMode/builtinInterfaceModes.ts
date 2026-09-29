@@ -1,5 +1,9 @@
 import type { InterfaceModeContribution } from '../../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import { INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK } from '../../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { DEFAULT_SHELL_RECIPE_ID } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
+
+/** tactical-blue 的装饰场景在宿主场景注册表（src/sheets/interfaceModeScenes.tsx）中的 surfaceId。 */
+export const BUILTIN_TACTICAL_SCENE_SURFACE_ID = 'builtin.scene.tactical'
 
 export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Object.freeze([
   Object.freeze({
@@ -38,5 +42,8 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     chromeStyle: 'icons',
     workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
     shellRecipeId: DEFAULT_SHELL_RECIPE_ID,
+    // A-V9：装饰场景与 Overview 指挥台按声明位/能力位挂载，宿主不再特判模式 id。
+    sceneSurface: Object.freeze({ surfaceId: BUILTIN_TACTICAL_SCENE_SURFACE_ID }),
+    capabilities: Object.freeze({ [INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK]: true }),
   }),
 ])

@@ -64,4 +64,22 @@ describe('InterfaceModeRegistry', () => {
     expect(registry.resolve('example.suite-mode')?.value.workbench)
       .toEqual({ renderKind: 'renderer-suite', defaultSuiteId: 'plugin.suite' })
   })
+
+  // A-V9：sceneSurface 声明位——装饰场景经 surfaceId 声明，宿主按注册表解析。
+  it('接受 sceneSurface 声明并冻结；空 surfaceId 拒绝', () => {
+    const registry = new InterfaceModeRegistry()
+    const owner = createPluginIdentity('example.scene-mode', 'one')
+    registry.register(owner, {
+      ...mode('Scene Mode'),
+      id: 'example.scene-mode',
+      sceneSurface: { surfaceId: 'example.scene.plane' },
+    })
+    expect(registry.resolve('example.scene-mode')?.value.sceneSurface)
+      .toEqual({ surfaceId: 'example.scene.plane' })
+    expect(() => registry.register(owner, {
+      ...mode('Bad Scene'),
+      id: 'example.scene-bad',
+      sceneSurface: { surfaceId: ' ' },
+    })).toThrow(/scene/)
+  })
 })
