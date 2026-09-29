@@ -12,7 +12,9 @@ name: Release
 #      打在未合并分支上的 tag 不予发行。
 #
 # workflow_dispatch 保留为**预演入口**：在分支上 dispatch 只构建、不发布（发布步骤由下方
-# `if` 门住）；在 tag ref 上 dispatch 则与 tag 推送等价（用于 CI 失败后的重试）。
+# `if` 门住），产物改为上传为 run artifact（7 天过期、缺文件即红）——否则预演与「发布步骤
+# 静默失败」都表现为绿 run 且零产出，无法区分（2026-09-29 main 上 dispatch 实测踩坑）；
+# 在 tag ref 上 dispatch 则与 tag 推送等价（用于 CI 失败后的重试）。
 #
 # 历史：`push: tags` 曾于 2026-09-18 移除——当时流程是「本地构建 → 先传资产 → 后打 tag」，
 # tag 触发纯属重复（0.2.0~0.2.2 三次 run 均中途取消、零产出）。2026-09-22 随 #228 发行
@@ -42,6 +44,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 运行模式标注：tag=正式发行，分支 dispatch=预演。写进 step summary，
+      # 避免「绿 run 但没发版」被误读为发布失败。
+      - name: 运行模式标注
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            summary="## Release：正式发行（tag \`${GITHUB_REF#refs/tags/}\`）"$'\n'"构建成功后上传到该 tag 的 GitHub Release。"
+          else
+            summary="## Release：预演（dispatch @ \`${GITHUB_REF#refs/heads/}\`，构建版本 \`v${version}\`）"$'\n'"只构建，产物上传为 **run artifact**（7 天过期），**不发布 GitHub Release**。"$'\n'"正式发行：版本号落位后从 main 打 \`v${version}\` tag（打 tag 即发行）。"
+          fi
+          echo "$summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "$summary"
 
       - name: 版本一致性守卫（tag = package.json = tauri.conf.json）
         if: startsWith(github.ref, 'refs/tags/')
@@ -149,6 +166,20 @@ jobs:
       # 产物：release/pylon-<version>-win64.zip + .sha256 + .manifest.json
       - name: 打包发行包
         run: bun run release:portable
+
+      # 预演模式的产物去留：不上 Release，但必须留痕为 run artifact（可下载、7 天过期）。
+      # if-no-files-found: error 把「打包没产出」从静默绿变成红——预演与静默失败自此可区分。
+      - name: 预演产物上传（run artifact）
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: pylon-preview-win64
+          path: |
+            release/pylon-*-win64.zip
+            release/pylon-*-win64.zip.sha256
+            release/pylon-*-win64.manifest.json
+          retention-days: 7
+          if-no-files-found: error
 
       - name: 发布到 GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
