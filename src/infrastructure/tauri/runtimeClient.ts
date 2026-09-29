@@ -11,6 +11,13 @@ export function createRuntimeClient(transport: ClientTransport) {
   return {
     getApprovalMode: (): Promise<unknown> => transport.invoke('get_approval_mode'),
     setApprovalMode: (mode: string): Promise<unknown> => transport.invoke('set_approval_mode', { mode }),
+    /**
+     * #448 PR4：审批模式持久层探询（user_data_load 的 approval-mode 行）。
+     * null = 后端从未存过（首次启动）→ 前端 localStorage 进入「首次种子」分支；
+     * 非 null = 后端权威在场（启动时 permission::restore_persisted_approval_mode
+     * 已回填内存态），payload.mode 即当前权威值。
+     */
+    loadApprovalModePersisted: (): Promise<unknown> => transport.invoke('user_data_load', { key: 'approval-mode' }),
     startupDiagnostics: (): Promise<unknown> => transport.invoke('startup_diagnostics').then(normalizeStartupDiagnostics),
     listRuntimeLogs: (): Promise<unknown> => transport.invoke('list_runtime_logs').then(normalizeRuntimeLogList),
     clearRuntimeLogs: (): Promise<unknown> => transport.invoke('clear_runtime_logs'),

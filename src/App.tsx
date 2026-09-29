@@ -61,7 +61,8 @@ import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInt
 import { DEFAULT_INTERFACE_MODE } from './domains/interface/interfaceModeStore.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
-import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
+import { persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
+import { restoreApprovalModeFromBackendAuthority } from './domains/permission/approvalModeRestore.ts'
 import { hydrateInputPredictionSettingsFromBackend } from './infrastructure/persistence/inputPredictionSettingsRepository.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
@@ -280,35 +281,35 @@ export default function App() {
     return bootstrapRun.dispose
   }, [bootstrapRetry])
 
-  // 全局审批模式不是会话事实：启动时先恢复本地最近一次成功设置，
-  // 再同步当前 Tauri runtime，避免进程重启后 UI 与 permission dispatcher 分叉。
+  // 全局审批模式：后端为持久化权威（#448 PR3/PR4——#321 决议「收敛到后端权威」）。
+  // 决策逻辑在 domains/permission/approvalModeRestore（可测事务）：后端持久层在场
+  // → 应用权威值；后端从未存过 → localStorage 首次种子（set 自带写穿）；后端不可用
+  // → 降级显示本地值。旧「本地有值即推送」分支移除——CLI 桥等不经 webview 的 set
+  // 重启后被前端旧值静默覆盖的漂移路径由此消除。本地 key 降级为缓存（种子读一次 +
+  // 成功路径镜像维护），不再参与决策。
   useEffect(() => {
     if (!IS_TAURI || isBrowserMockRuntime()) return
     let disposed = false
-    const reportApprovalError = (action: string, error: unknown) => reportRuntimeError(action, error, undefined, {
-      key: approvalModeKey(action),
-      scope: approvalModeScope,
-      source: 'permission.approval-mode',
-    })
-    const persisted = readPersistedApprovalMode()
-    if (persisted) {
-      useRuntimeStore.getState().setApprovalMode(persisted)
-      void runtimeClient.setApprovalMode(persisted).then(() => {
-        if (!disposed) resolveRuntimeErrors({ key: approvalModeKey('恢复权限模式'), scope: approvalModeScope })
-      }, error => {
-        if (!disposed) reportApprovalError('恢复权限模式', error)
-      })
-      return () => { disposed = true }
-    }
-    void runtimeClient.getApprovalMode().then(value => {
-      if (disposed || typeof value !== 'string') return
-      const mode = normalizeApprovalMode(value)
-      if (!mode) return
-      useRuntimeStore.getState().setApprovalMode(mode)
-      persistApprovalMode(mode)
-      resolveRuntimeErrors({ key: approvalModeKey('读取权限模式'), scope: approvalModeScope })
-    }).catch(error => {
-      if (!disposed) reportApprovalError('读取权限模式', error)
+    void restoreApprovalModeFromBackendAuthority({
+      loadPersisted: () => runtimeClient.loadApprovalModePersisted(),
+      seedToBackend: mode => runtimeClient.setApprovalMode(mode),
+      readLocal: () => readPersistedApprovalMode(),
+      apply: mode => {
+        if (disposed) return
+        useRuntimeStore.getState().setApprovalMode(mode)
+        persistApprovalMode(mode)
+        resolveRuntimeErrors({ key: approvalModeKey('恢复权限模式'), scope: approvalModeScope })
+      },
+      applyLocalFallback: mode => {
+        if (!disposed) useRuntimeStore.getState().setApprovalMode(mode)
+      },
+      reportError: (action, error) => {
+        if (!disposed) reportRuntimeError(action, error, undefined, {
+          key: approvalModeKey(action),
+          scope: approvalModeScope,
+          source: 'permission.approval-mode',
+        })
+      },
     })
     return () => { disposed = true }
   }, [])
