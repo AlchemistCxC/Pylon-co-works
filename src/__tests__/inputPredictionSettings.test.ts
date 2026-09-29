@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_INPUT_PREDICTION_SETTINGS,
   createPredictionRouter,
-  createStandalonePredictionProvider,
   normalizeInputPredictionSettings,
 } from '../domains/inputPrediction/inputPredictionSettings'
-import { boundPredictionMessages } from '../renderers/solid-workbench/input/inputPredictionProvider'
+import { createStandalonePredictionProvider } from '../infrastructure/prediction/predictionStandalone.ts'
+import { boundPredictionMessages } from '../infrastructure/prediction/inputPredictionProvider'
 
 describe('独立输入预测设置与 provider', () => {
   it('归一化模式、数值范围和默认值', () => {

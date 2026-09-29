@@ -6,7 +6,7 @@
  * 归档存档 + gateway/runtime/git/workspace 数据。
  */
 import type { Session } from '../domains/identity/identityStore.ts'
-import type { Message } from '../components/chat/messageTypes.ts'
+import type { Message } from '../domains/chat/messageTypes.ts'
 import type { WorkspaceBackendEntry } from '../infrastructure/tauri/workspaceContracts.ts'
 import type { RuntimeLogEntry } from '../domains/runtime/runtimeLogs.ts'
 import type { GatewayStatus, GatewayRoute } from '../infrastructure/tauri/gatewayContracts.ts'
@@ -120,7 +120,7 @@ export function buildDemoMessages(sessionId: string): Message[] {
       return [
         userMsg('把 AgentSheetView 里的回放姿态接线接完，然后跑一遍构建确认没有类型错误。', 0),
         reasoning('回放姿态（W4-02）已拍板姿态二：历史行进入 agent sheet 时只读，点击占位条转 live。需要改 AgentSheetView 的输入面门控，并把占位条组件抽出来复用。', 1),
-        toolMsg(2, 'read', 'read', 'completed', '{ path: "src/sheets/AgentSheetView.tsx" }', 'import ChatView from "../components/chat/ChatView"\nimport ControlCenter from "../components/ControlCenter"\nexport default function AgentSheetView({ ctx }) {\n  return (\n    <div className="main">\n      <ChatView sessionId={ctx.activeSession} />\n      <ControlCenter sessionId={ctx.activeSession} />\n    </div>\n  )\n}'),
+        toolMsg(2, 'read', 'read', 'completed', '{ path: "src/sheets/AgentSheetView.tsx" }', 'import ChatView from "../domains/chat/ChatView"\nimport ControlCenter from "../components/ControlCenter"\nexport default function AgentSheetView({ ctx }) {\n  return (\n    <div className="main">\n      <ChatView sessionId={ctx.activeSession} />\n      <ControlCenter sessionId={ctx.activeSession} />\n    </div>\n  )\n}'),
         reasoning('当前主区无条件渲染 ControlCenter。方案：引入只读姿态 store，姿态激活时隐藏 ControlCenter、渲染占位条；点击占位条 clear 姿态即转 live。', 3),
         toolMsg(4, 'bash', 'execute', 'completed', '{ command: "npx tsc --noEmit" }', ANSI_BUILD),
         toolMsg(5, 'write', 'write', 'completed', '{ path: "src/sheets/AgentSheetView.tsx" }', '已写入回放姿态门控 + 占位条', {

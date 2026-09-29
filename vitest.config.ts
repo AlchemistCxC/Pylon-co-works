@@ -77,7 +77,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**'],
-      exclude: ['src/**/*.test.{ts,tsx}', 'src/components/chat/chatMockData.ts'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/demo/chatMockData.ts'],
       reporter: ['text', 'json-summary'],
       // #228 批次F ratchet 语义（只升不降）：阈值 = 上次全量实测基线向下取整再留
       // 1 个百分点余量——防回退，不卡偶发抖动。下次实测（全量绿）高于当前阈值后，

@@ -12,9 +12,9 @@ import {
   generationIndicatorCopyText,
   type GenerationIndicatorCopyEvent,
 } from '../../../domains/activity/generationIndicatorCopyMachine.ts'
-import { resolveSpinnerMarker } from '../../../components/chat/spinnerFrames.ts'
-import { glimmerIntensity, resolveActivity, resolveFrame, resolveGlimmer, resolveStallProgress } from '../../../components/chat/spinnerMachine.ts'
-import { nextTokenCatchUp } from '../../../components/chat/tokenCatchUp.ts'
+import { resolveSpinnerMarker } from '../../../domains/chat/spinnerFrames.ts'
+import { glimmerIntensity, resolveActivity, resolveFrame, resolveGlimmer, resolveStallProgress } from '../../../domains/chat/spinnerMachine.ts'
+import { nextTokenCatchUp } from '../../../domains/chat/tokenCatchUp.ts'
 import { segmentGraphemes } from '../../../utils/textWidth.ts'
 import {
   browserWorkbenchClock,

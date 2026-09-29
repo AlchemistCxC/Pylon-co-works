@@ -5,7 +5,7 @@ import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRe
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
-import { useStore } from '../../store.ts'
+import { useStore } from '../../domains/theme/themeStore.ts'
 import { validateRendererSuiteReferences } from '../../plugin-runtime/renderers/rendererSuiteReferences.ts'
 
 export interface InterfaceModeTransactionPorts {

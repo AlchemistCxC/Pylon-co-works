@@ -12,7 +12,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
-import { createSheetState } from '../../../workspace-sheets/sheetState'
+import { createSheetState } from '../../../domains/workspace/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 
@@ -21,7 +21,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 const ASYNC_PANEL_TIMEOUT = { timeout: 10_000 }
 
 const ctx: SheetContext = {

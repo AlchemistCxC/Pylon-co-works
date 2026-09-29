@@ -9,7 +9,7 @@ import { openOrFocusSettingsSheet } from '../../sheets/settingsSheetNavigation'
 import SheetTabStrip from '../SheetTabStrip'
 import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import type { SheetRecord } from '../sheetTypes'
-import type { AgentStatus } from '../../components/settings/agentTypes'
+import type { AgentStatus } from '../../contracts/agentTypes'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 

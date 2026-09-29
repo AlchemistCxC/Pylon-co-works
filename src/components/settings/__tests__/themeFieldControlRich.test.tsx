@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ZoneGroupFields, type RenderCtx } from '../../../themeFieldRenderer'
-import { THEME_DEFAULTS } from '../../../themeFieldDefs'
+import { ZoneGroupFields, type RenderCtx } from '../themeFieldRenderer'
+import { THEME_DEFAULTS } from '../../../domains/theme/themeFieldDefs'
 
 /** T1 第一批：链A control 丰富——segmented 覆盖 + assistantDotImage 文件选择。 */
 

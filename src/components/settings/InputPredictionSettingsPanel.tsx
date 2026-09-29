@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { DEFAULT_INPUT_PREDICTION_SETTINGS, loadInputPredictionSettings, saveInputPredictionSettings, createStandalonePredictionProvider, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { DEFAULT_INPUT_PREDICTION_SETTINGS, loadInputPredictionSettings, saveInputPredictionSettings, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { createStandalonePredictionProvider } from '../../infrastructure/prediction/predictionStandalone.ts'
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return <label className="sess-field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>

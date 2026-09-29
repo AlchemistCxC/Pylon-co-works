@@ -9,8 +9,8 @@ import {
   persistSheetStateV2,
   serializeSheetStateV2,
   type PersistedSheetState,
-} from '../src/workspace-sheets/sheetPersistence.ts'
-import { readShowPet, writeShowPet, SHOW_PET_STORAGE_KEY } from '../src/workspace-sheets/showPetPersistence.ts'
+} from '../src/domains/workspace/sheetPersistence.ts'
+import { readShowPet, writeShowPet, SHOW_PET_STORAGE_KEY } from '../src/domains/workspace/showPetPersistence.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()

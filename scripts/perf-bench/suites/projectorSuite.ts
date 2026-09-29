@@ -26,32 +26,41 @@ function foldCase(id: string, meta: CaseMeta, events: readonly unknown[], note?:
 
 /**
  * live 单事件续折（#440/#449）：前端 `applyLive` 的每帧路径——在**已折好的大文档**上
- * 逐事件 `reduceWorkbenchEvent`。一 run = 64 条 assistant 文本 delta 链折到同一 running
- * 行（真实流式形状：同一 messageId 逐拍追加）。基文档引用跨 run 不变 ⇒ 每 run 工作相同；
- * 读数含 messages/timeline 整表拷贝与 appliedRanges/appliedEventIds 的合并+冻结——
- * #440-b（冻结治理）的改前基线就在这一行。
+ * 逐事件 `reduceWorkbenchEvent`。一 run = 1 条 `session.status-updated running`（真实
+ * 「新回合开始」形状——基文档以 session.completed 收尾，不先回 running 的话 64 连拍
+ * 会被 late-event-after-terminal 栅栏整批丢弃，审查轮 P0）+ 64 条 assistant 文本 delta
+ * 链折到同一 running 行。
+ *
+ * **口径边界（审查轮 P1 修正）**：本 pair 直调投影器，量的只有**归约层**——timeline
+ * 整表拷贝、消息折叠、覆盖合并。runtime 的 `freezeDocument`（#440-b 的治理面）与
+ * publish 扇出**不在读数内**；#440-b 的成本要单独量（导出 freezeDocument 单列 pair，
+ * 或 applyLive 打点），不得用本 pair 前后对照做归因。
  */
 function liveCase(id: string, meta: CaseMeta, blocks: number, note?: string): PerfCase {
   // 夹具惰性构造：套件 build 阶段只登记参数，首次 run 才折基文档——xs/s 档不为 l 档的
   // 240k 事件折叠付构造成本（foldedWorkbenchDocument 内部 memo，跨 case/套件共享）。
-  let prepared: { readonly base: ReturnType<typeof foldedWorkbenchDocument>, readonly deltas: ReturnType<typeof buildLiveDeltas> } | undefined
+  let prepared: { readonly base: ReturnType<typeof foldedWorkbenchDocument>, readonly frames: readonly ReturnType<typeof envelope>[] } | undefined
   const ensure = () => {
     if (prepared === undefined) {
       const base = foldedWorkbenchDocument(blocks)
-      prepared = { base, deltas: buildLiveDeltas(base.revision) }
+      const revive = envelope(
+        base.revision + 1,
+        { type: 'session.status-updated', status: 'running' },
+      )
+      prepared = { base, frames: [revive, ...buildLiveDeltas(base.revision + 1)] }
     }
     return prepared
   }
   return {
     id,
     meta,
-    units: 64,
+    units: 65,
     unitLabel: '事件',
     ...(note ? { note } : {}),
     run: () => {
-      const { base, deltas } = ensure()
+      const { base, frames } = ensure()
       let document = base
-      for (const delta of deltas) document = reduceWorkbenchEvent(document, delta)
+      for (const frame of frames) document = reduceWorkbenchEvent(document, frame)
     },
   }
 }
@@ -94,7 +103,7 @@ export function buildProjectorSuite(): PerfSuite {
         name: 'reduceWorkbenchEvent(live)',
         domain: 'projector',
         wiredAt: 'src/domains/workbench/workbenchProjector.ts:423（经 agentWorkbenchSession.applyLive 每信封调用）',
-        note: 'live 单事件续折成本：基文档（s≈1k / m≈10k / l≈40k 行）上的 64 连拍。#440 的每帧 O(N) 热点（整表拷贝、appliedRanges 冻结）都在这一行。',
+        note: 'live 单事件归约成本：基文档（s≈1k / m≈10k / l≈40k 行）上的 1+64 连拍（先回 running 再折消息）。只量投影器归约层（timeline 整表拷贝为主项）；runtime freezeDocument 与 publish 不在内，#440-b 不得用此 pair 归因。',
         cases: [
           liveCase('live-s', { scale: 's', flow: 'growing' }, 501),
           liveCase('live-m', { scale: 'm', flow: 'growing' }, 5_001),

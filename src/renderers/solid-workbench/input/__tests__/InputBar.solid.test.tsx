@@ -10,7 +10,7 @@ import { getCommandRegistry } from '../../../../plugin-runtime/runtimeServices.t
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../../domains/workbench/workbenchProjector.ts'
-import type { InputPredictionProvider } from '../inputPredictionProvider.ts'
+import type { InputPredictionProvider } from '../../../../infrastructure/prediction/inputPredictionProvider.ts'
 
 const modelCommand = getCommandRegistry().register(
   createPluginIdentity('test.solid-input', 'solid-input-test'),

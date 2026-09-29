@@ -9,7 +9,7 @@ import {
   normalizeCustomPresets,
   pickCustomPresetTheme,
   upsertCustomPreset,
-} from '../customPresets.ts'
+} from '../domains/theme/customPresets.ts'
 
 describe('custom preset ID / theme whitelist（原 test-custom-preset-id.mts）', () => {
   const theme = { globalBgColor: '#123456' }

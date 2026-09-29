@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { reportRuntimeError } from '../../app/runtimeError'
 import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
-import DiffCard from '../../components/chat/DiffCard'
+import DiffCard from '../../components/file/DiffCard'
 import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'

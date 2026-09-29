@@ -4,7 +4,7 @@ import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand, isRe
 import type { RendererSlotContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { SolidWorkbenchContextValue } from '../SolidWorkbenchContext.solid.tsx'
-import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot } from '../../../domains/appearance/appearance.ts'
 import { normalizeWorkbenchMountInput } from '../workbenchContracts.ts'
 
 /** appearance 是每 tick 重建的对象；用稳定化键做浅比较（键排序 + 值稳定序列化）。 */

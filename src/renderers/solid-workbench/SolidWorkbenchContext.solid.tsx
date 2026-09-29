@@ -1,5 +1,5 @@
 import { createContext, useContext, type Accessor } from 'solid-js'
-import type { WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
@@ -7,7 +7,7 @@ import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/w
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
-import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
 
 export interface SolidWorkbenchContextValue {
   input: Accessor<SolidWorkbenchInput>

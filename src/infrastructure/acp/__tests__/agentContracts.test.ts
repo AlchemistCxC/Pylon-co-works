@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { resolveCapabilitySnapshot, resolveAttachGate, resolveAttachFilters } from '../agentContracts'
 import { normalizeAgentList } from '../agentClient.ts'
-import type { AgentStatus } from '../../../components/settings/agentTypes'
+import type { AgentStatus } from '../../../contracts/agentTypes'
 
 function status(partial: Partial<AgentStatus>): AgentStatus {
   return {

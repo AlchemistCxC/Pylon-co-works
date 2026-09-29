@@ -5,16 +5,16 @@
  * sessionUiState 注册表。测试 beforeEach/afterEach 调用。
  */
 
-import { useStore } from '../store'
+import { useStore } from '../domains/theme/themeStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
-import { clearAllSessionUiState } from '../components/chat/sessionUiState'
+import { clearAllSessionUiState } from '../domains/chat/sessionUiState'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
-import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import '../app/bootstrap/identityCrossDomainWiring'
 
 export function resetStores(): void {

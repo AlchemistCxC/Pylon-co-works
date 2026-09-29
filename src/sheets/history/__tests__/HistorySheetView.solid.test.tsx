@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@solidjs/testing-library'
-import HistorySheetView from '../HistorySheetView.solid'
+import HistorySheetView from '../HistorySheetView.solid.tsx'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
 // #279 第 1 梯队：HistorySheetView Solid 实体的原生渲染路径（不经 React 桥）——

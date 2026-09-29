@@ -1,5 +1,5 @@
 import type { RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { THEME_PRESET_KEYS } from '../../themeFieldDefs.ts'
+import { THEME_PRESET_KEYS } from './themeFieldDefs.ts'
 
 export type PresetJsonValue = null | boolean | number | string | readonly PresetJsonValue[] | { readonly [key: string]: PresetJsonValue }
 

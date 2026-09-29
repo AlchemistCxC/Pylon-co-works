@@ -3,7 +3,7 @@ import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { markLegacyMigrationComplete } from '../../infrastructure/persistence/legacyKeyMigration.ts'
-import { pruneOrphanMessageSnapshots } from '../../components/chat/messagePersistence.ts'
+import { pruneOrphanMessageSnapshots } from '../../domains/chat/messagePersistence.ts'
 
 export type HydrationStage = 'profiles' | 'workspace-sheets' | 'workspace-entities' | 'sessions'
 export interface HydrationResult {

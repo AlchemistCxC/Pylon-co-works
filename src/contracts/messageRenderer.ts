@@ -61,7 +61,7 @@ export interface RenderSurface {
   on(event: RenderSurfaceEvent, listener: (payload: unknown) => void): () => void
 }
 
-/** renderMessage 的语义 props（主壳 RenderMessage 形状见 components/chat/messageTypes.ts）。 */
+/** renderMessage 的语义 props（主壳 RenderMessage 形状见 domains/chat/messageTypes.ts）。 */
 export interface MessageRenderProps {
   /** 主壳渲染消息；契约层不反向依赖 components。 */
   renderMessage: unknown

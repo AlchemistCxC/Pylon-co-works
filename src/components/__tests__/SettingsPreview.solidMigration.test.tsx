@@ -2,7 +2,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import SettingsPreview from '../SettingsPreview.tsx'
-import { useStore } from '../../store.ts'
+import { useStore } from '../../domains/theme/themeStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 describe('SettingsPreview Solid 中控迁移', () => {

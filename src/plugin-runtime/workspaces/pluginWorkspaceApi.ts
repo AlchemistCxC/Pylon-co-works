@@ -1,4 +1,4 @@
-import type { WorkspaceTypeDefinition } from '../../workspace-sheets/workspaceTypes.ts'
+import type { WorkspaceTypeDefinition } from './workspaceTypes.ts'
 import {
   closeWorkspace,
   focusWorkspace,
@@ -9,7 +9,7 @@ import {
 import {
   type WorkspaceRegistryStore,
   type WorkspaceRegistryTransaction,
-} from '../../workspace-sheets/workspaceRegistry.ts'
+} from './workspaceRegistry.ts'
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import type { PluginScope } from '../pluginScope.ts'
 

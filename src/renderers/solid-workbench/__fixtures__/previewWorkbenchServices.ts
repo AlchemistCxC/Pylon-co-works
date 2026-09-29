@@ -1,6 +1,6 @@
 import { WORKBENCH_MESSAGE_FIXTURE } from './workbenchFixtures.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { createStaticWorkbenchAppearanceStore } from '../../../domains/workbench/workbenchAppearanceStore.ts'
+import { createStaticWorkbenchAppearanceStore } from '../../../domains/appearance/workbenchAppearanceStore.ts'
 import { createSessionUiStore } from '../../../domains/workbench/sessionUiStore.ts'
 import { createFakeWorkbenchCommandFacade } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createPreviewWorkbenchRuntime } from '../../../domains/workbench/workbenchRuntime.ts'

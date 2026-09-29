@@ -20,23 +20,20 @@ import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createSessionClient, type ColdMountTurnSnapshot, type ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
-import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
-import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../components/chat/chatReplayTrace.ts'
-import { clearMessageStorage } from '../../components/chat/messagePersistence.ts'
+import { applySessionStateResponse } from '../../domains/session/sessionStateSync.ts'
+import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../domains/chat/chatReplayTrace.ts'
+import { clearMessageStorage } from '../../domains/chat/messagePersistence.ts'
 import { sessionContext } from '../../domains/agent/agentContext.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../../domains/events/messageProjection.ts'
-import {
-  loadCanonicalEventsIncremental,
-  tauriCanonicalEventRepository,
-  type CanonicalEventRow,
-} from '../../infrastructure/events/canonicalEventRepository.ts'
+import { loadCanonicalEventsIncremental, tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
-import { ReplayLoadCoordinator } from '../../components/chat/chatReplayCoordinator.ts'
-import type { Message } from '../../components/chat/messageTypes.ts'
+import { ReplayLoadCoordinator } from '../../domains/chat/chatReplayCoordinator.ts'
+import type { Message } from '../../domains/chat/messageTypes.ts'
 
 export interface SessionRecoveryFailure {
   sessionId: string

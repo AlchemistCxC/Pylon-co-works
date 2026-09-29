@@ -3,7 +3,7 @@ import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../../infrastructure/persistence/windowSizePersistence'
-import { Row } from '../../themeFieldRenderer.tsx'
+import { Row } from './themeFieldRenderer.tsx'
 
 function WindowSizeRow() {
   const [size, setSize] = useState('—')

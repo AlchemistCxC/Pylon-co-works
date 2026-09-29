@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetStores } from '../../../test/resetStores.ts'
 import TemplateLibrary from '../TemplateLibrary.tsx'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../../domains/theme/themeStore.ts'
 
 vi.mock('../../SettingsPreview.tsx', () => ({
   default: () => <div data-testid="settings-preview" />,

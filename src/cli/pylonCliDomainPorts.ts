@@ -17,7 +17,7 @@ import {
 } from '../domains/agent/agentDetector.ts'
 import { getHookRuntime, getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { enabledHookIds, runSessionNotificationHook, runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
-import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
+import { buildSendMessagePayload } from '../domains/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
 import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WireInteractionEntry, WorkspaceRegistryControlPort } from './pylonCliService.ts'
 import { normalizeWireInteractionEntry } from './pylonCliService.ts'

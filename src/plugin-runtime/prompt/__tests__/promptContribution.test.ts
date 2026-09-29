@@ -5,7 +5,7 @@
  *   无扩展段时与旧拼装语义等价（回归护栏，经 product 插件引导确定命令清单）。
  */
 import { describe, expect, it } from 'vitest'
-import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
+import '../../testing/productPluginTestBootstrap.ts'
 import { PromptContributionRegistry } from '../promptContributionRegistry.ts'
 import { validatePromptContribution, PROMPT_CONTRIBUTION_DEFAULT_MAX_BYTES } from '../promptContributionTypes.ts'
 import { assembleSessionPrompt } from '../../../host/commandSetResolver.ts'

@@ -1,4 +1,4 @@
-import { THEME_FIELD_DEFS, type ThemeFieldKey } from '../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, type ThemeFieldKey } from '../../domains/theme/themeFieldDefs.ts'
 import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { RegistryEntry } from '../registry/types.ts'
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './pluginSettingsTypes.ts'

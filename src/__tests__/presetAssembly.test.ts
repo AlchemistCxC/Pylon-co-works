@@ -17,7 +17,7 @@ import {
   GLOBAL_PRESETS,
   fallbackPresetChip,
   type GlobalPreset,
-} from '../presets/index.ts'
+} from '../domains/theme/presets/index.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { applyGlobalPreset } from '../application/transactions/applyGlobalPreset.ts'
 import {
@@ -39,9 +39,9 @@ import {
   type ThemePresetState,
 } from '../domains/theme/presetReducer.ts'
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
-import { ZONE_FIELDS, THEME_PRESET_KEYS } from '../themeFieldDefs.ts'
-import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, resolveZonePresetEntryTheme } from '../zones/index.ts'
-import { useStore, type ThemeSettings } from '../store.ts'
+import { ZONE_FIELDS, THEME_PRESET_KEYS } from '../domains/theme/themeFieldDefs.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, resolveZonePresetEntryTheme } from '../domains/theme/zones/index.ts'
+import { useStore, type ThemeSettings } from '../domains/theme/themeStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { resetStores } from '../test/resetStores.ts'
 import { expandGlobalPresetZoneRefs, planGlobalPreset } from '../application/transactions/applyGlobalPreset.ts'

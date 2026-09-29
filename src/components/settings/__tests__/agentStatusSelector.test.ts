@@ -5,7 +5,7 @@ import {
   statusLabel,
   type AgentConnectionStatus,
   type AgentStatus,
-} from '../agentTypes'
+} from '../../../contracts/agentTypes'
 
 describe('normalizeAgentStatus — 状态缺失/非法归一化矩阵（ISSUE-03 §6.4 L1）', () => {
   it('payload 缺少 status 且未 crashed → unknown，不再默认 connected（不出现假绿）', () => {

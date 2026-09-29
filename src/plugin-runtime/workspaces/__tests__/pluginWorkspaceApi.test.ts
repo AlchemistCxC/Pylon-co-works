@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { EMPTY_SHEET_STATE, sheetReducer } from '../../../workspace-sheets/sheetState'
+import { EMPTY_SHEET_STATE, sheetReducer } from '../../../domains/workspace/sheetState'
 import {
   parseSheetStateV2,
   serializeSheetStateV2,
   type PersistedSheetState,
-} from '../../../workspace-sheets/sheetPersistence'
-import { DEFAULT_SHEET_LAYOUT } from '../../../workspace-sheets/sheetPersistence'
-import { resolveWorkspace } from '../../../workspace-sheets/workspaceRegistry'
-import type { WorkspaceTypeDefinition } from '../../../workspace-sheets/workspaceTypes'
+} from '../../../domains/workspace/sheetPersistence'
+import { DEFAULT_SHEET_LAYOUT } from '../../../domains/workspace/sheetPersistence'
+import { resolveWorkspace } from '../workspaceRegistry'
+import type { WorkspaceTypeDefinition } from '../workspaceTypes'
 import { TestPluginRuntime as PluginRuntime } from '../../testing/pluginRuntimeHarness.ts'
 import type { PluginWorkspaceApi } from '../pluginWorkspaceApi'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'

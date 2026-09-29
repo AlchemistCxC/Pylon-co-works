@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS } from '../../../presets/index.ts'
-import { effectivePresetTheme } from '../../../zones/index.ts'
-import { GROUP_ORDER, THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
+import { GLOBAL_PRESETS } from '../presets/index.ts'
+import { effectivePresetTheme } from '../zones/index.ts'
+import { GROUP_ORDER, THEME_FIELD_DEFS } from '../themeFieldDefs.ts'
 import { DEFAULTS } from '../themeDefaults.ts'
 import { selectThemeCssSnapshot } from '../themeCssSnapshot.ts'
 

@@ -1,4 +1,4 @@
-import { THEME_FIELD_DEFS, normalizeThemeValue } from '../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, normalizeThemeValue } from '../../domains/theme/themeFieldDefs.ts'
 import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { PresentationProfileContribution } from './presentationProfileTypes.ts'
 import type { RendererSettingValue } from '../renderers/rendererSettingsTypes.ts'

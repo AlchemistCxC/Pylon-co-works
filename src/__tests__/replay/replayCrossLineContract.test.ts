@@ -7,12 +7,12 @@ import {
   readChatReplayTrace,
   recordChatReplayTrace,
   replayErrorCode,
-} from '../../components/chat/chatReplayTrace.ts'
+} from '../../domains/chat/chatReplayTrace.ts'
 import {
   ReplayLoadCoordinator,
   ReplayLoadInProgressError,
   type ReplayLoadControllerAdapter,
-} from '../../components/chat/chatReplayCoordinator.ts'
+} from '../../domains/chat/chatReplayCoordinator.ts'
 
 function metadata(complete: boolean, droppedCount = 0): PersistedSessionLoadResult['replayMetadata'] {
   const observedCount = droppedCount + (complete ? 2 : 1)

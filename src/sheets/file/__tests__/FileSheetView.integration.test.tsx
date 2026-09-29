@@ -7,7 +7,7 @@ import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { resetStores } from '../../../test/resetStores'
-import { createSheetState } from '../../../workspace-sheets/sheetState'
+import { createSheetState } from '../../../domains/workspace/sheetState'
 import { fileTabKey, parseFileTabs, serializeFileTabs, type FileTabRecord, type FileTabState } from '../fileSheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
@@ -20,7 +20,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
-vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 
 const ctx: SheetContext = {
   openSheet: vi.fn(),

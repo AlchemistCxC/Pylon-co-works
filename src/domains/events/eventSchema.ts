@@ -35,7 +35,7 @@ export interface CanonicalEventOwner {
  * 与 `src/infrastructure/compute/__tests__/pylonCompute.test.ts` 分别在静态与运行期兜漂移。
  */
 // 同时需要本地绑定（下面 `typeof` 用）与再导出，故 import + export 分开写。
-import { CANONICAL_EVENT_TYPES } from './canonicalEventTypes.generated'
+import { CANONICAL_EVENT_TYPES } from './canonicalEventTypes.generated.ts'
 
 export { CANONICAL_EVENT_TYPES }
 

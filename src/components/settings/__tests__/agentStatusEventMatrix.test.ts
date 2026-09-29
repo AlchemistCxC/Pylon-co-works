@@ -6,7 +6,7 @@ import {
   selectAgentStatus,
   type AgentStatus,
   type AgentStatusPayload,
-} from '../agentTypes'
+} from '../../../contracts/agentTypes'
 
 /** 模拟一次后端 status 事件：先归一化再写入 store（与 App.applyAgentStatus 同一路径） */
 const event = (payload: AgentStatusPayload, generation?: number): AgentStatus => ({

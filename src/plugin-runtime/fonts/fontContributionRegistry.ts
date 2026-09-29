@@ -1,12 +1,9 @@
+export { fontContributionCssVariable } from '../../contracts/fonts.ts'
 import { ValidatedContributionRegistry } from '../registry/validatedContributionRegistry.ts'
 import type { FontContribution, FontRole } from './fontContributionTypes.ts'
 
 const FONT_ROLES = new Set<FontRole>(['interface', 'content', 'code'])
 
-export function fontContributionCssVariable(id: string): string {
-  const safeId = id.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-  return `--pylon-font-${safeId || 'invalid'}`
-}
 
 export function validateFontContribution(contribution: FontContribution): FontContribution {
   if (!contribution.id || contribution.id !== contribution.id.trim()) throw new Error('Font contribution id 非法')

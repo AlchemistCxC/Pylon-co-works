@@ -11,7 +11,7 @@
 // 一条不在本域内：`HIGHLIGHT_CORPUS` 里的 `unknown-language` case——生产在同步语言门就被挡住、
 // 不进引擎，拿它当产品路径 case 会量到一条生产永不走的路径。
 
-import { highlightBlockWithLezer } from '../../../src/components/chat/lezerHighlight.ts'
+import { highlightBlockWithLezer } from '../../../src/domains/chat/lezerHighlight.ts'
 import { HIGHLIGHT_CORPUS } from '../../compute-parity/fixtures/corpora.ts'
 import type { PerfCase, PerfSuite } from '../harness.ts'
 

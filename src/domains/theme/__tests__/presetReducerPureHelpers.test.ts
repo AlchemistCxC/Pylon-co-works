@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { THEME_DEFAULTS, THEME_PRESET_KEYS, THEME_SETTING_KEYS } from '../../../themeFieldDefs.ts'
+import { THEME_DEFAULTS, THEME_PRESET_KEYS, THEME_SETTING_KEYS } from '../themeFieldDefs.ts'
 import { clampPresetCcHeight, filterPresetTheme, syncPresetCcHeight, toThemeDelta } from '../presetReducer.ts'
 
 const PRESET_KEY_SET = new Set<string>(THEME_PRESET_KEYS)

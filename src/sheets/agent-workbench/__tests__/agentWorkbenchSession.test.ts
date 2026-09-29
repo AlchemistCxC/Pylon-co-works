@@ -5,7 +5,7 @@ import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../../domains/theme/themeStore.ts'
 
 function session(id = 'session-a', source = 'local:a'): Session {
   return {

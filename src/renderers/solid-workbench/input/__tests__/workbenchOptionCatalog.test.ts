@@ -12,7 +12,7 @@ import {
 import type { WorkbenchRuntimeSnapshot } from '../../../../domains/workbench/workbenchRuntime.ts'
 import type { SessionConfigOption } from '../../../../domains/workbench/session/sessionSurface.ts'
 import { createWorkbenchDocument } from '../../../../domains/workbench/workbenchProjector.ts'
-import { normalizeSessionMode } from '../../../../components/chat/sessionModeState.ts'
+import { normalizeSessionMode } from '../../../../domains/chat/sessionModeState.ts'
 
 function emptySnapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
   return {

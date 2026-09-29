@@ -2,7 +2,7 @@
 // D-fix 回归：自定义预设"切换后未生效"——store 级应用链路（v2 bundle 提交 +
 // 静默失败可见化）。三段：正常应用、持久化往返后应用、失效 id 必须可见报告。
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from '../migration.ts'
 import { createPresetBundle } from '../presetBundle.ts'

@@ -123,7 +123,9 @@ for (const root of r4Roots) {
 // ── M1 suite completeness matrix ─────────────────────────────────────────
 
 try {
-  const coverageIndex = await readFile(resolve(projectRoot, 'src/domains/workbench/coverage/providerCoverageIndex.ts'), 'utf8')
+  // 前端结构全修批（PR #455）把 coverage 台账迁到测试侧（`__tests__/coverage/`）——
+  // 台账是测试自有数据，门禁跟随新落点读。
+  const coverageIndex = await readFile(resolve(projectRoot, 'src/domains/workbench/__tests__/coverage/providerCoverageIndex.ts'), 'utf8')
   if (!coverageIndex.includes('EXPECTED_UNITS')) {
     violations.push('[M1/C16] providerCoverageIndex.ts 缺少 EXPECTED_UNITS 口径常量')
   }

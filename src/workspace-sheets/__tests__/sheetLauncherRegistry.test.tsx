@@ -5,7 +5,7 @@ import SheetLauncher from '../SheetLauncher'
 import { resetStores } from '../../test/resetStores'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
-import { registerWorkspace } from '../workspaceRegistry'
+import { registerWorkspace } from '../../plugin-runtime/workspaces/workspaceRegistry'
 
 describe('SheetLauncher Registry 卡片', () => {
   beforeEach(() => {

@@ -5,7 +5,7 @@ import { useWorkspaceEntityStore } from '../../infrastructure/persistence/worksp
 import type { SessionCreateInput } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
-import { applySessionStateResponse } from '../../domains/sessionState/sessionStateSync.ts'
+import { applySessionStateResponse } from '../../domains/session/sessionStateSync.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 import { requestNewSession } from '../../application/transactions/requestNewSession.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'

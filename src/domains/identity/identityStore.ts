@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../contracts/agentCommandSet.ts'
 import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION, type LegacySession, type OwnerHints } from './sessionPersistence'
 import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
-import { clearSessionUiState } from '../../components/chat/sessionUiState'
+import { clearSessionUiState } from '../chat/sessionUiState'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
@@ -23,9 +23,9 @@ import { registerPluginSessionDataPort } from '../../plugin-runtime/sessionData/
 import { getSessionCreationRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { compileSessionCreationSnapshot } from '../../plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
 import type { SessionCreationSnapshot } from '../../plugin-runtime/session-creation/sessionCreationTypes.ts'
-import type { AgentEntry } from '../agent/agentEntry.ts'
+import type { AgentEntry } from '../../contracts/agentEntry.ts'
 
-export type { AgentEntry } from '../agent/agentEntry.ts'
+export type { AgentEntry } from '../../contracts/agentEntry.ts'
 
 // #228 批次D：持久化与后端同步切至独立模块；以下 re-export 保持既有公开 import 面
 // （消费方仍从 identityStore 取这些名字，零改动）。

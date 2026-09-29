@@ -2,8 +2,8 @@ import '../src/plugin-runtime/pluginCompositionRoot.ts'
 import { describe, expect, it } from 'vitest'
 import { getToolSummary } from '../src/domains/tool/toolPresentation.ts'
 import { resolveToolKind, buildToolRenderModel, TOOL_KINDS } from '../src/domains/tool/toolPresentation.ts'
-import { buildToolPresentationModel } from '../src/components/chat/toolPresentationModel.ts'
-import type { Message } from '../src/components/chat/messageTypes.ts'
+import { buildToolPresentationModel } from '../src/domains/chat/toolPresentationModel.ts'
+import type { Message } from '../src/domains/chat/messageTypes.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()

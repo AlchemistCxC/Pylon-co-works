@@ -11,7 +11,7 @@ import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { resetStores } from '../test/resetStores'
-import { sheetReducer } from '../workspace-sheets/sheetState'
+import { sheetReducer } from '../domains/workspace/sheetState'
 
 const PERSISTED_V2 = {
   version: 2,

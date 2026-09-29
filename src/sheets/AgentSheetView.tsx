@@ -1,11 +1,12 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
-import { useReplayPostureStore } from '../components/chat/replayPostureStore'
+import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { DEFAULT_INTERFACE_MODE } from '../domains/interface/interfaceModeStore.ts'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
 import AgentSheetPageHost, { useOpenSidebarPage } from '../components/sidebar/AgentSheetPageHost.tsx'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
@@ -42,7 +43,7 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
   )
   const mode = modeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
-    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!
+    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === DEFAULT_INTERFACE_MODE)!
   useEffect(() => {
     if (postureSession !== null && postureSession !== ctx.activeSession) {
       useReplayPostureStore.getState().clear()

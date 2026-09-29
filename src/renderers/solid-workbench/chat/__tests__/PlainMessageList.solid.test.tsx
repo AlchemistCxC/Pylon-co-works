@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { render, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
-import { toRenderMessage, type Message } from '../../../../components/chat/messageTypes.ts'
+import type { ChatRowDescriptor } from '../../../../domains/chat/chatRowPipeline.ts'
+import { toRenderMessage, type Message } from '../../../../domains/chat/messageTypes.ts'
 import { createMessageListItems, type MessageListItem, type MessageListPort } from '../../../../domains/workbench/messageListPort.ts'
 import { PlainMessageList } from '../PlainMessageList.solid.tsx'
 

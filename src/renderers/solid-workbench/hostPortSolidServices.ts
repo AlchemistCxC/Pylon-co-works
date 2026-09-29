@@ -1,5 +1,5 @@
-import type { Message } from '../../components/chat/messageTypes.ts'
-import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { Message } from '../../domains/chat/messageTypes.ts'
+import type { WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { CancelResult, CommandResult, SendResult, WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchProjectionDiagnostic } from '../../domains/workbench/workbenchProjector.ts'

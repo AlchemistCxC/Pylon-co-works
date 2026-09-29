@@ -3,7 +3,7 @@
  * Storage access belongs to the session host. This adapter never upgrades demo
  * or migrated content to authoritative native history.
  */
-import type { Message } from '../../components/chat/messageTypes.ts'
+import type { Message } from '../../domains/chat/messageTypes.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 
 /** Browser/demo compatibility bridge. The visual seed predates the Workbench

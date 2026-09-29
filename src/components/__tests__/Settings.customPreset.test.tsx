@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
-import { useStore } from '../../store.ts'
+import { useStore } from '../../domains/theme/themeStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({ default: () => <div /> }))

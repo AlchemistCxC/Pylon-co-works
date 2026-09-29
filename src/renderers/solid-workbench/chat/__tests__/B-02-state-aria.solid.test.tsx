@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SolidToolCard } from '../ToolCard.solid.tsx'
-import type { Message } from '../../../../components/chat/messageTypes.ts'
+import type { Message } from '../../../../domains/chat/messageTypes.ts'
 
 afterEach(cleanup)
 

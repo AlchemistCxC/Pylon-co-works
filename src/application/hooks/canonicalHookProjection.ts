@@ -22,7 +22,7 @@ import type {
 } from '../../plugin-runtime/hooks/hookTypes.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
-import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBus.ts'
+import { subscribePluginEvents, type PluginEventDisposable } from '../../infrastructure/events/pluginEventBusHost.ts'
 
 const PROJECTION_SOURCE_TYPES: ReadonlySet<string> = new Set([
   'tool.call.started',

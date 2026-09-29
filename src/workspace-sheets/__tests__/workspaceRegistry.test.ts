@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { BUILTIN_WORKSPACE_TYPES } from '../../plugins/core/sheet/builtinWorkspacePlugins'
-import type { WorkspaceTypeDefinition } from '../workspaceTypes'
+import type { WorkspaceTypeDefinition } from '../../plugin-runtime/workspaces/workspaceTypes'
 import {
   getSheetLaunchOption,
   getSheetLaunchOptions,
@@ -14,9 +14,9 @@ import {
   registerWorkspace,
   resolveWorkspace,
   subscribeWorkspaceRegistry,
-} from '../workspaceRegistry'
+} from '../../plugin-runtime/workspaces/workspaceRegistry'
 import { createRuntimeServices } from '../../plugin-runtime/runtimeServices.ts'
-import { WorkspaceRegistryStore } from '../workspaceRegistry.ts'
+import { WorkspaceRegistryStore } from '../../plugin-runtime/workspaces/workspaceRegistry.ts'
 
 describe('Workspace Registry（阶段 6 首个切片）', () => {
   // P77：gateway 类型由第 7 包 builtin.pylon-gateway 贡献（core BUILTIN_WORKSPACE_TYPES

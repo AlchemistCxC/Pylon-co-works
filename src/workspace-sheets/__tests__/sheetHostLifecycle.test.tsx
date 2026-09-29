@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
 import SheetHost from '../SheetHost'
 import type { SheetContext, SheetRecord } from '../sheetTypes'
-import { registerWorkspace } from '../workspaceRegistry'
+import { registerWorkspace } from '../../plugin-runtime/workspaces/workspaceRegistry'
 
 const sheet: SheetRecord = {
   id: 'sheet-host-lifecycle',

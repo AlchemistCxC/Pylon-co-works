@@ -18,9 +18,9 @@
  * - binding_stale     重连 generation 变化 → 旧 binding 失效（OWNER-04：不能继续发送旧 remote id，
  *                     须重新加载会话后重建 binding）
  */
-import type { AgentConnectionStatus, AgentStatus } from '../../components/settings/agentTypes'
-import type { SessionBindingSnapshot } from '../../components/settings/agentTypes'
-import { statusLabel } from '../../components/settings/agentTypes'
+import type { AgentConnectionStatus, AgentStatus } from '../../contracts/agentTypes'
+import type { SessionBindingSnapshot } from '../../contracts/agentTypes'
+import { statusLabel } from '../../contracts/agentTypes'
 import type { Session } from '../identity/identityStore'
 
 export type BindingState =

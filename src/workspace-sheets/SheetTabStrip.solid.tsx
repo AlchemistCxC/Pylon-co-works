@@ -4,11 +4,11 @@ import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { activateAgentSheet } from './activateAgentSheet'
-import { selectAgentStatus, type AgentStatus } from '../components/settings/agentTypes'
+import { selectAgentStatus, type AgentStatus } from '../contracts/agentTypes'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 
 import type { SheetRecord } from './sheetTypes'
-import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu.solid'
+import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu.solid.tsx'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 
 export interface SheetTabStripProps {

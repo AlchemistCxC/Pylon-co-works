@@ -1,4 +1,4 @@
-import type { AgentConnectionStatus } from './agentTypes'
+import type { AgentConnectionStatus } from '../../contracts/agentTypes'
 
 /** Explicit, display-only failure events. Backend payloads are intentionally not inferred here. */
 export type AgentFailureKind =

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULTS } from '../themeDefaults.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
 import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
-import { normalizeCustomPresets } from '../../../customPresets.ts'
+import { normalizeCustomPresets } from '../customPresets.ts'
 
 describe('tool indicator migration', () => {
   it('maps a legacy single glyph to all three semantic states', () => {

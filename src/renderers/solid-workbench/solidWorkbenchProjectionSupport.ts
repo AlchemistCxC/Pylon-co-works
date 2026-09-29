@@ -1,7 +1,7 @@
 import { selectActivityDisplayOrder, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
-import type { Message } from '../../components/chat/messageTypes.ts'
+import type { Message } from '../../domains/chat/messageTypes.ts'
 export function canonicalTokenCount(
   usage: WorkbenchDocument['session']['usage'],
   fallback: number,

@@ -4,10 +4,10 @@
  * store.ts 只留 `migrate: persisted => themeDomainMigrate(persisted, DEFAULTS)` 薄壳。
  * 依赖全显式 .ts，node 可直接 import 做确定性迁移测试。
  */
-import { normalizeCustomPresetId, normalizeCustomPresets } from '../../customPresets.ts'
+import { normalizeCustomPresetId, normalizeCustomPresets } from './customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import { clampCcHeight } from '../cc/ccHeightState.ts'
-import { normalizeThemeState } from '../../themeFieldDefs.ts'
+import { normalizeThemeState } from './themeFieldDefs.ts'
 import { PRESET_ZONES } from './presetReducer.ts'
 
 /**

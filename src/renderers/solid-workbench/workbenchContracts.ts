@@ -1,11 +1,11 @@
-import type { WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
-import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
+import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
 import type { WorkbenchOptionEntry } from './input/workbenchOptionCatalog.ts'
 export type {
   WorkbenchHostPort,

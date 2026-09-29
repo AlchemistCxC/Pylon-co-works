@@ -17,14 +17,16 @@ import {
   Waypoints,
   type LucideIcon,
 } from 'lucide-react'
+import { type LaunchIconKey } from './launchIconKeys.ts'
 
 /**
  * 稳定图标键 → 图标的唯一映射。由 **Workspace launch 项**与**左栏区块头动作**共用。
  *
  * 键是宿主解释的字符串（不是 React 组件），因此可以出现在插件贡献里；未知键安全降级为
  * 通用图标。抽出来是因为原先这份表只服务于 SheetLauncher，左栏区块头再写一份就会漂移。
+ * 键表单源见 ./launchIconKeys.ts（两侧编译期穷举，防漂移）。
  */
-export const LAUNCH_ICONS: Readonly<Record<string, LucideIcon>> = {
+export const LAUNCH_ICONS: Readonly<Record<LaunchIconKey, LucideIcon>> = {
   activity: Activity,
   'book-open': BookOpen,
   agent: Bot,
@@ -43,5 +45,5 @@ export const LAUNCH_ICONS: Readonly<Record<string, LucideIcon>> = {
 }
 
 export function resolveLaunchIcon(icon?: string): LucideIcon {
-  return (icon && LAUNCH_ICONS[icon]) || SquareStack
+  return (icon && LAUNCH_ICONS[icon as LaunchIconKey]) || SquareStack
 }

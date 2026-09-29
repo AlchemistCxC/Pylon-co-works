@@ -1,6 +1,6 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
 import type { RegistryEntry } from '../registry/types.ts'
-import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+import type { SheetContext, SheetRecord } from '../../contracts/sheets.ts'
 import type { SettingsSchema, SettingsValueAdapter } from '../renderers/rendererSettingsTypes.ts'
 
 export interface ContextPanelContributionContext {

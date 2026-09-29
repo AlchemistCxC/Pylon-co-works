@@ -2,8 +2,8 @@
 import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createFakeWorkbenchClock } from '../../../../domains/workbench/fakeWorkbenchClock.ts'
-import type { SpinnerAppearanceSnapshot } from '../../../../domains/workbench/appearance.ts'
+import { createFakeWorkbenchClock } from '../../../../test-utils/fakeWorkbenchClock.ts'
+import type { SpinnerAppearanceSnapshot } from '../../../../domains/appearance/appearance.ts'
 import type { GenerationFooterLifecycle } from '../../../../domains/workbench/generationFooterContracts.ts'
 import { SolidGenerationFooter, formatElapsed, formatTokens } from '../GenerationFooter.solid.tsx'
 

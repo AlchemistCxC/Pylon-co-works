@@ -1,6 +1,6 @@
-import { THEME_FIELD_DEFS, type ZoneName } from '../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, type ZoneName } from '../../domains/theme/themeFieldDefs.ts'
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
-import type { ThemeSettings } from '../../store.ts'
+import type { ThemeSettings } from '../../domains/theme/themeStore.ts'
 import type { SettingWriteSource } from '../../domains/theme/settingProvenance.ts'
 import type { PresetApplyResult } from '../../domains/theme/presetBundle.ts'
 

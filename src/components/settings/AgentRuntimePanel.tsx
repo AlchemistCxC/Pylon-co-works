@@ -12,7 +12,7 @@ import { presentDetectionDiagnostic } from './agentDetectionDiagnostics.ts'
 import { explainErrorCode } from '../../app/errorCodeExplanations.ts'
 import { useIdentityStore, type AgentEntry } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
-import { selectAgentStatus, statusLabel } from './agentTypes'
+import { selectAgentStatus, statusLabel } from '../../contracts/agentTypes'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { selectAcpRuntimeDetectorIds, type AgentDetectionDiagnostic, type AgentRuntimeCandidate, type AgentRuntimeDetectorMetadata, type AgentStartability } from '../../domains/agent/agentDetector.ts'
 import {

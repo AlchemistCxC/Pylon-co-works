@@ -3,7 +3,7 @@
 // 每个主题字段（含 meta/对象字段）都必须在 DEFAULTS 有值——加字段漏默认值即红。
 import { describe, expect, it } from 'vitest'
 import { DEFAULTS } from '../themeDefaults.ts'
-import { THEME_FIELD_KEYS } from '../../../themeFieldDefs.ts'
+import { THEME_FIELD_KEYS } from '../themeFieldDefs.ts'
 import { PRESET_ZONES } from '../presetReducer.ts'
 
 describe('DEFAULTS 完整性（原 test-defaults-completeness.mts）', () => {

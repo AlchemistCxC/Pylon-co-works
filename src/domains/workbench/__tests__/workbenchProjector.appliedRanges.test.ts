@@ -7,8 +7,8 @@
  * - 同一 compact 行集的任意分批投影 ⇒ 文档逐字节相等（重放 == 增量）。
  */
 import { describe, expect, it } from 'vitest'
-import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../events/workbenchEventSchema.ts'
+import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../workbenchProjector.ts'
 
 function deltaEnvelope(options: {
   sequence: number

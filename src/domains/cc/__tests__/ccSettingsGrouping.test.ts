@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CC_WIDGET_GROUPS } from '../widgetDefinitions.ts'
-import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, CC_MEMBER_FIELDS, type ThemeFieldDef } from '../../../themeFieldDefs.ts'
+import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, CC_MEMBER_FIELDS, type ThemeFieldDef } from '../../theme/themeFieldDefs.ts'
 
 /**
  * #238 刀6（设置页中控区改成「元件 → 子部件」分组）的**字段集合不变量**。

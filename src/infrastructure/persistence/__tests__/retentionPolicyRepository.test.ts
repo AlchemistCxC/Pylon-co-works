@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/api/core', async () => {
   return tauriCoreMock((cmd, args) => invokeRef.current!(cmd, args))
 })
 import { loadRetentionPolicy, previewRetentionPolicy, pruneRetentionPolicy, saveRetentionPolicy } from '../retentionPolicyRepository'
-import { RETENTION_STORAGE_KEY } from '../../../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../../../domains/overview/retentionPolicy.ts'
 
 let fakeInvoke: FakeInvoke
 

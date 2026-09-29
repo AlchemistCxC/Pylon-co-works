@@ -20,10 +20,10 @@ import {
   upsertCustomPreset,
   deleteCustomPreset,
   type CustomPreset,
-} from '../../customPresets.ts'
-import { normalizeThemeState, THEME_DEFAULTS, THEME_PRESET_KEYS, ZONE_FIELDS } from '../../themeFieldDefs.ts'
-import { markZoneCustom } from '../../themePresetState.ts'
-import type { ThemeSettings } from '../../store.ts'
+} from './customPresets.ts'
+import { normalizeThemeState, THEME_DEFAULTS, THEME_PRESET_KEYS, ZONE_FIELDS } from './themeFieldDefs.ts'
+import { markZoneCustom } from './themePresetState.ts'
+import type { ThemeSettings } from './themeStore.ts'
 import type { PresetBundleV2 } from './presetBundle.ts'
 
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>

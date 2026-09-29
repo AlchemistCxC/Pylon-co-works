@@ -1,7 +1,7 @@
 import { getPackageInstallationService, getPluginPackageClient, getPluginRuntime, getPluginProcessClient } from '../plugin-runtime/pluginCompositionRoot.ts'
 import { getAgentSidebarRegistry, getCommandRegistry, getContextPanelRegistry, getFileWorkbenchRegistry, getHookRuntime, getPluginServiceRegistry, getPluginSettingsPageRegistry, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { closeWorkspace, listOpenWorkspaces, openWorkspace } from '../workspace-sheets/workspaceController.ts'
-import { getWorkspaceRegistrySnapshot } from '../workspace-sheets/workspaceRegistry.ts'
+import { getWorkspaceRegistrySnapshot } from '../plugin-runtime/workspaces/workspaceRegistry.ts'
 import { PylonCliService, createPylonCliTool } from './pylonCliService.ts'
 import { createCliAgentControlPort, createCliApprovalControlPort, createCliInteractionControlPort, createCliSessionConfigControlPort, createCliSessionControlPort, createCliWorkspaceRegistryControlPort } from './pylonCliDomainPorts.ts'
 

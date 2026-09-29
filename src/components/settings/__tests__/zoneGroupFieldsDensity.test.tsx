@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { ZoneGroupFields, type RenderCtx } from '../../../themeFieldRenderer.tsx'
+import { ZoneGroupFields, type RenderCtx } from '../themeFieldRenderer.tsx'
 
 /** K-4：密度档过滤接线（施工书 09 §K-4，拍板 D5-A 无 tier 归标准）。 */
 

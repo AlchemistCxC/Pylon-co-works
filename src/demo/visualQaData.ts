@@ -5,10 +5,10 @@
  * 多语言、长上下文、工具状态矩阵、错误恢复、插件开发和窄窗口文案。
  */
 import type { Session } from '../domains/identity/identityStore.ts'
-import type { Message } from '../components/chat/messageTypes.ts'
+import type { Message } from '../domains/chat/messageTypes.ts'
 import type { Workspace } from '../domains/workspace/workspaceEntities.ts'
 import type { InstalledPluginPackage } from '../infrastructure/plugins/pluginPackageClient.ts'
-import { createMockMessages } from '../components/chat/chatMockData.ts'
+import { createMockMessages } from './chatMockData.ts'
 
 const HOUR = 3_600_000
 const QA_NOW = Date.now()

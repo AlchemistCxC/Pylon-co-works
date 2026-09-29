@@ -27,7 +27,7 @@ import {
   type CcLayoutWidgetId,
 } from '../ccLayoutState.ts'
 import { resolveVisibleStatusWidgetCount } from '../ccHeightState.ts'
-import { ZONE_FIELDS, CC_MEMBER_FIELDS, type ThemeFieldKey } from '../../../themeFieldDefs.ts'
+import { ZONE_FIELDS, CC_MEMBER_FIELDS, type ThemeFieldKey } from '../../theme/themeFieldDefs.ts'
 
 /**
  * #238 刀1（结构步）不变量与零变化锁。

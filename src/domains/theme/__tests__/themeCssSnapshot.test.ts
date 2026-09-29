@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { resolveFontToken, selectThemeCssSnapshot } from '../themeCssSnapshot'
-import { THEME_FIELD_DEFS } from '../../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS } from '../themeFieldDefs.ts'
 
 const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
 

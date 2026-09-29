@@ -2,7 +2,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import HistoryRetention from '../HistoryRetention'
-import { RETENTION_STORAGE_KEY, readRetentionPolicy } from '../historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY, readRetentionPolicy } from '../../../domains/overview/retentionPolicy.ts'
 
 function choose(label: string, option: string) {
   fireEvent.click(screen.getByRole('combobox', { name: label }))

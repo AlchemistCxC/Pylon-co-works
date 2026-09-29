@@ -2,9 +2,9 @@
 // 只迁 presets.ts 相关纯函数断言（zone 归属 + pickZoneFields）；
 // 原脚本 store/defs/App/CSS/skin/settingsDomains 的源码文本段由 css-var 审计覆盖，不迁。
 import { describe, expect, it } from 'vitest'
-import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../presets/index.ts'
-import { effectivePresetTheme, pickZoneFields } from '../zones/index.ts'
-import { ZONE_FIELDS } from '../themeFieldDefs.ts'
+import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET, fallbackPresetChip, presetsForInterfaceMode } from '../domains/theme/presets/index.ts'
+import { effectivePresetTheme, pickZoneFields } from '../domains/theme/zones/index.ts'
+import { ZONE_FIELDS } from '../domains/theme/themeFieldDefs.ts'
 
 // ★ #238 刀5：原样本字段 `ccStatusFontSize` 已删除（设置页三项收尾之一），
 //   故改用它旁边仍存在的 `inputFontSize` 作**同形样本** —— 下面锁的仍然是

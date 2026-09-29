@@ -8,7 +8,7 @@ import { createAgentClient } from '../agentClient'
 import { createSessionClient } from '../sessionClient'
 import { createChatClient } from '../chatClient'
 import { createRuntimeClient } from '../../tauri/runtimeClient'
-import { normalizeAgentStatus } from '../../../components/settings/agentTypes'
+import { normalizeAgentStatus } from '../../../contracts/agentTypes'
 
 describe('agentClient', () => {
   it('listAgents 宽容 normalize（非数组/损坏项/空 id 过滤）', async () => {
