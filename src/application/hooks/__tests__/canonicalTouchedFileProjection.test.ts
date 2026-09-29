@@ -32,7 +32,7 @@ import {
   extractTouchedPaths,
   installCanonicalTouchedFileProjection,
   projectCanonicalEventToTouchedFiles,
-  resetCanonicalTouchedFileProjectionForTests,
+  uninstallCanonicalTouchedFileProjection,
 } from '../canonicalTouchedFileProjection'
 
 function toolEvent(input: {
@@ -61,7 +61,7 @@ beforeEach(() => {
   subscribeSpy.mockClear()
   sessionsRef.current = [{ id: 's1', agentId: 'peri', source: 'local:a', workdir: 'C:\\ws' }]
   workspacesRef.current = []
-  resetCanonicalTouchedFileProjectionForTests()
+  uninstallCanonicalTouchedFileProjection()
 })
 
 describe('extractTouchedPaths 三级优先', () => {
@@ -147,7 +147,7 @@ describe('install 幂等', () => {
     installCanonicalTouchedFileProjection()
     installCanonicalTouchedFileProjection()
     expect(subscribeSpy).toHaveBeenCalledTimes(1)
-    resetCanonicalTouchedFileProjectionForTests()
+    uninstallCanonicalTouchedFileProjection()
     installCanonicalTouchedFileProjection()
     expect(subscribeSpy).toHaveBeenCalledTimes(2)
   })

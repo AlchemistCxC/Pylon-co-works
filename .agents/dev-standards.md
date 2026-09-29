@@ -91,6 +91,20 @@ Rust 侧性能反模式按「clippy 能否机械判定」分两半。执行语�
 
 检测/连接/探测类预算常量归口 `src-tauri/src/lifecycle/budgets.rs`，按三形状词法命名并写明语义：`TotalDeadline`（端到端硬限）、`StageBudget`（阶段预算）、`Ttl`（缓存/快照时效）。新增预算不散落硬编码；改动任何预算**数值**属行为变更，需独立 spec 与 issue（如生产 connect 总预算，见 issue #417）。
 
+## 前端全局可变状态（#454 / 结构审查 B-12 成文）
+
+模块级可变单例（`let` 状态 + 幂等 install/getter）只允许三类形态，新代码不得发明第四类：
+
+1. **显式生命周期**：`install*()` 返回解订/销毁函数，配对 `uninstall*()` 用生产语义命名（例：`installCanonicalHookProjection`）。禁止新增 `*ForTests` 导出——测试隔离复用生产 uninstall 口（存量 registry 类钩子 `clearToolRegistryForTests` 等保持现状，不强制回改）。
+2. **create/get 分离**：工厂 `createXxx(deps)` + 进程级 `getXxx()`（例：`runtimeServices`）。测试传自建实例，不劫持全局。
+3. **zustand store**：`create` 返回的 store 本身可测试（`setState/getInitialState`），不需要任何清理钩子。
+
+配套约束：
+
+- **持久化偏好只有一个落点**：域内 zustand persist（A-V12）。新偏好字段禁止新增手写 localStorage 读写器；sheet envelope（`pylon-workspace-sheets` 等带版本 schema 的迁移面）与契约钉住的存量键（ADR-0009）是登记过的例外。
+- **typed client 只从组装层取**：视图/宿主模块从 `app/appClients` 取 client（A-V2），禁止在视图层调用 `createXxxClient(transport)` 或裸 `invoke`。有状态 client（CAS revision、cold-mount 快照缓存）用工厂成员按消费方会话新建，不跨会话共享。
+- 进程级开关优先做成参数（例：projector 的 `WorkbenchReduceOptions` 显式选项 + 宿主默认），确需全局默认时以可注入常量承载并在文件头登记。
+
 ## 决策与开发笔记
 
 会改变依赖方向、数据所有权或持久化契约的决定使用短记录：问题与约束、备选方案、决定、状态、后果、代码/测试证据。推翻旧决定时标注被哪条决定替代，而不是删除历史。一般局部重命名不必生成 ADR。
