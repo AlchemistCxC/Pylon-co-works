@@ -125,3 +125,4 @@
   - 门禁：`bun run test`（基线 661 文件/5116 用例绿）+ `bun run lint` + `check:solid` 全绿后分批 pathspec 提交。规格 `.agents/spec/frontend-structure-overhaul.md`。
   - **进展（2026-09-29）**：全修批已落 14+ 个提交（死代码/迁移主批/plugin-runtime 端口化/appearance 拆域/破环/微域合并/devtools 收敛/layoutRailsStore/常量单源/分层门禁+越界真修/keep-alive 槽位表/projector 开关参数化/mode 常量单源）；check:frontend:static exit 0、check-layer-boundaries 814 文件零越界、全量 vitest 绿、tsc 0 错。遗留清单见 `.agents/records/2026-09-29-frontend-structure-overhaul.md`「遗留」节。审查 R1 进行中，合入后撤本条。
   - **提审（2026-09-29）**：随 **PR #455** 走（R1/R2 两轮复审终审可 PR）。**合入后撤本条**；审查报告在 `_research/frontend-structure-review-{A-view,B-logic,R1,R2}.md`。
+- [kumo] **PR #455 分支已由我合入 main（7a67ae58，同步 #453/#456）**：git 层零冲突（merge-tree + 真实合并均自动通过），GitHub 的 CONFLICTING 为过时评估，落账消除。⚠️ 共享树本地分支停在 422999a5，**远端领先一个 merge commit**——结构批次下次 push 前先 `git pull`（merge 即可，无冲突）；#456 的低耗测试口径已在合并结果的新路径 `src/domains/chat/__tests__/codeHighlight.test.ts` 验证无损。
