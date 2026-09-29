@@ -6,6 +6,7 @@
  */
 
 import { useStore } from '../domains/theme/themeStore'
+import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
@@ -32,6 +33,8 @@ export function resetStores(): void {
   useIdentityStore.setState(useIdentityStore.getInitialState(), true)
   useRuntimeStore.setState(useRuntimeStore.getInitialState(), true)
   useStore.setState(useStore.getInitialState(), true)
+  // #448 PR5：customPresets/zonePresetEntries 拆出的独立持久化域一并重置
+  useCustomPresetStore.setState(useCustomPresetStore.getInitialState(), true)
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)
   useInterfaceModeStore.setState(useInterfaceModeStore.getInitialState(), true)
   useWorkspaceEntityStore.setState(useWorkspaceEntityStore.getInitialState(), true)

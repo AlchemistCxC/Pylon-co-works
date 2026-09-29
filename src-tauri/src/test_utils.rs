@@ -211,7 +211,10 @@ impl TestStateBuilder {
         // 测试专属字段覆盖（build_app_state 只承载 run() 生产语义的公共部分）：
         *state.approval_mode.lock().expect("approval lock") = self.approval_mode;
         if let Some(service) = self.user_data_service {
-            *state.user_data_service.lock().expect("user data service lock") = Some(service);
+            *state
+                .user_data_service
+                .lock()
+                .expect("user data service lock") = Some(service);
         }
         *state.workspaces.lock().expect("workspaces lock") = Arc::into_inner(self.workspaces)
             .expect("workspaces Arc must be unique")

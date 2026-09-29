@@ -31,7 +31,9 @@ pub const MAX_USER_DATA_BYTES: usize = 2 * 1024 * 1024;
 /// input-prediction = 输入预测设置（含 baseUrl/apiKey 凭据，#448 PR1：凭据
 /// 从 WebView localStorage 迁至后端 SQLite 权威）；
 /// approval-mode = 全局审批模式（#448 PR3：后端内存态落盘，消除「前端启动
-/// 旧值回推」漂移路径）。
+/// 旧值回推」漂移路径）；
+/// custom-presets = 用户自建主题预设 + 区域预设条目（#448 PR5：唯一无任何
+/// 保障的用户资产从 WebView localStorage 迁至后端 SQLite 权威）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserDataKey {
     Profiles,
@@ -39,6 +41,7 @@ pub enum UserDataKey {
     BrowserAgentOps,
     InputPrediction,
     ApprovalMode,
+    CustomPresets,
 }
 
 impl UserDataKey {
@@ -49,6 +52,7 @@ impl UserDataKey {
             Self::BrowserAgentOps => "browser-agent-ops",
             Self::InputPrediction => "input-prediction",
             Self::ApprovalMode => "approval-mode",
+            Self::CustomPresets => "custom-presets",
         }
     }
 
@@ -59,6 +63,7 @@ impl UserDataKey {
             "browser-agent-ops" => Some(Self::BrowserAgentOps),
             "input-prediction" => Some(Self::InputPrediction),
             "approval-mode" => Some(Self::ApprovalMode),
+            "custom-presets" => Some(Self::CustomPresets),
             _ => None,
         }
     }
@@ -360,6 +365,75 @@ fn validate_approval_mode(payload: &serde_json::Value) -> Result<i64, UserDataEr
     Ok(version)
 }
 
+/// custom-presets envelope 校验（#448 PR5）：`{version:1, customPresets:[{id,name,
+/// theme, createdAt, updatedAt, bundle?}, …], zonePresetEntries:[{id,mode,zone,label,
+/// values}, …]}`。结构防守（条目为对象 + id/name(label) 文本 + 数组上限）——
+/// 值快照与 bundle 的逐字段规则在前端 normalize（CustomPreset/ZonePresetEntry
+/// 领域函数），后端只拒绝垃圾写入。两个数组允许缺省（空态）。
+fn validate_custom_presets(payload: &serde_json::Value) -> Result<i64, UserDataError> {
+    const PRESETS_ENVELOPE_VERSION: i64 = 1;
+    const MAX_PRESET_ENTRIES: usize = 500;
+    let version = payload
+        .get("version")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| as_corrupt(UserDataKey::CustomPresets, "version 必须为整数"))?;
+    if version != PRESETS_ENVELOPE_VERSION {
+        return Err(as_corrupt(
+            UserDataKey::CustomPresets,
+            format!("未知 envelope version {version}"),
+        ));
+    }
+    if let Some(presets) = payload.get("customPresets") {
+        let presets = presets
+            .as_array()
+            .ok_or_else(|| as_corrupt(UserDataKey::CustomPresets, "customPresets 必须为数组"))?;
+        if presets.len() > MAX_PRESET_ENTRIES {
+            return Err(as_corrupt(
+                UserDataKey::CustomPresets,
+                format!("customPresets 超过 {MAX_PRESET_ENTRIES} 条上限"),
+            ));
+        }
+        for preset in presets {
+            let object = preset
+                .as_object()
+                .ok_or_else(|| as_corrupt(UserDataKey::CustomPresets, "预设条目必须为对象"))?;
+            for field in ["id", "name"] {
+                if text_of(object.get(field).unwrap_or(&serde_json::Value::Null)).is_none() {
+                    return Err(as_corrupt(
+                        UserDataKey::CustomPresets,
+                        format!("预设条目缺少非空 {field}"),
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(entries) = payload.get("zonePresetEntries") {
+        let entries = entries.as_array().ok_or_else(|| {
+            as_corrupt(UserDataKey::CustomPresets, "zonePresetEntries 必须为数组")
+        })?;
+        if entries.len() > MAX_PRESET_ENTRIES {
+            return Err(as_corrupt(
+                UserDataKey::CustomPresets,
+                format!("zonePresetEntries 超过 {MAX_PRESET_ENTRIES} 条上限"),
+            ));
+        }
+        for entry in entries {
+            let object = entry
+                .as_object()
+                .ok_or_else(|| as_corrupt(UserDataKey::CustomPresets, "区域预设条目必须为对象"))?;
+            for field in ["id", "label"] {
+                if text_of(object.get(field).unwrap_or(&serde_json::Value::Null)).is_none() {
+                    return Err(as_corrupt(
+                        UserDataKey::CustomPresets,
+                        format!("区域预设条目缺少非空 {field}"),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(version)
+}
+
 /// 用户数据仓库：单一 SQLite 连接 + 互斥（SQLite 单写者；与 MessageService 不同连接、
 /// 同文件——connect 内 busy_timeout 序列化同文件写）。
 pub struct UserDataStore {
@@ -432,6 +506,7 @@ impl UserDataStore {
             UserDataKey::BrowserAgentOps => validate_browser_agent_ops(&payload)?,
             UserDataKey::InputPrediction => validate_input_prediction(&payload)?,
             UserDataKey::ApprovalMode => validate_approval_mode(&payload)?,
+            UserDataKey::CustomPresets => validate_custom_presets(&payload)?,
         };
         let payload_str = serde_json::to_string(&payload)
             .map_err(|error| UserDataError::Corrupt(format!("payload 序列化失败：{error}")))?;
@@ -1331,7 +1406,11 @@ mod tests {
     fn input_prediction_roundtrip_preserves_credentials() {
         let store = UserDataStore::open_in_memory().expect("open");
         let revision = store
-            .save(UserDataKey::InputPrediction, input_prediction_payload(), None)
+            .save(
+                UserDataKey::InputPrediction,
+                input_prediction_payload(),
+                None,
+            )
             .expect("save");
         assert_eq!(revision, 1);
         let loaded = store
@@ -1393,9 +1472,18 @@ mod tests {
     fn input_prediction_rejects_missing_enums() {
         let store = UserDataStore::open_in_memory().expect("open");
         for (payload, why) in [
-            (serde_json::json!({ "version": 1, "enabled": true }), "missing mode"),
-            (serde_json::json!({ "version": 1, "mode": "auto" }), "missing enabled"),
-            (serde_json::json!({ "version": 1, "mode": "auto", "enabled": "yes" }), "non-bool enabled"),
+            (
+                serde_json::json!({ "version": 1, "enabled": true }),
+                "missing mode",
+            ),
+            (
+                serde_json::json!({ "version": 1, "mode": "auto" }),
+                "missing enabled",
+            ),
+            (
+                serde_json::json!({ "version": 1, "mode": "auto", "enabled": "yes" }),
+                "non-bool enabled",
+            ),
         ] {
             let error = store
                 .save(UserDataKey::InputPrediction, payload, None)
@@ -1406,9 +1494,16 @@ mod tests {
 
     #[test]
     fn input_prediction_key_wire_roundtrip() {
-        assert_eq!(UserDataKey::parse("input-prediction"), Some(UserDataKey::InputPrediction));
+        assert_eq!(
+            UserDataKey::parse("input-prediction"),
+            Some(UserDataKey::InputPrediction)
+        );
         assert_eq!(UserDataKey::InputPrediction.as_str(), "input-prediction");
-        assert_eq!(UserDataKey::parse("input_prediction"), None, "wire 拼写必须逐字");
+        assert_eq!(
+            UserDataKey::parse("input_prediction"),
+            None,
+            "wire 拼写必须逐字"
+        );
     }
 
     #[test]
@@ -1435,10 +1530,19 @@ mod tests {
     fn approval_mode_rejects_unknown_mode_and_version() {
         let store = UserDataStore::open_in_memory().expect("open");
         for (payload, why) in [
-            (serde_json::json!({ "version": 1, "mode": "yolo" }), "unknown mode"),
-            (serde_json::json!({ "version": 2, "mode": "auto" }), "future version"),
+            (
+                serde_json::json!({ "version": 1, "mode": "yolo" }),
+                "unknown mode",
+            ),
+            (
+                serde_json::json!({ "version": 2, "mode": "auto" }),
+                "future version",
+            ),
             (serde_json::json!({ "version": 1 }), "missing mode"),
-            (serde_json::json!({ "version": 1, "mode": 42 }), "non-string mode"),
+            (
+                serde_json::json!({ "version": 1, "mode": 42 }),
+                "non-string mode",
+            ),
         ] {
             let error = store
                 .save(UserDataKey::ApprovalMode, payload, None)
@@ -1446,12 +1550,90 @@ mod tests {
             assert_eq!(error.code(), "user_data_corrupt", "{why}");
         }
         // 被拒后不落行：load 仍为 None
-        assert!(store.load(UserDataKey::ApprovalMode).expect("load").is_none());
+        assert!(store
+            .load(UserDataKey::ApprovalMode)
+            .expect("load")
+            .is_none());
     }
 
     #[test]
     fn approval_mode_key_wire_roundtrip() {
-        assert_eq!(UserDataKey::parse("approval-mode"), Some(UserDataKey::ApprovalMode));
+        assert_eq!(
+            UserDataKey::parse("approval-mode"),
+            Some(UserDataKey::ApprovalMode)
+        );
         assert_eq!(UserDataKey::ApprovalMode.as_str(), "approval-mode");
+    }
+
+    #[test]
+    fn custom_presets_roundtrip_and_migration_shape() {
+        let store = UserDataStore::open_in_memory().expect("open");
+        // 迁移搬家典型形状：从旧 pylon-theme 提取的两字段 + envelope version
+        let payload = serde_json::json!({
+            "version": 1,
+            "customPresets": [
+                { "id": "custom-1", "name": "夜间", "theme": { "bgBase": "#111" }, "createdAt": 1, "updatedAt": 2 }
+            ],
+            "zonePresetEntries": [
+                { "id": "zone-1", "mode": "gui", "zone": "cc", "label": "我的中控", "values": {} }
+            ]
+        });
+        let revision = store
+            .save(UserDataKey::CustomPresets, payload.clone(), None)
+            .expect("save");
+        assert_eq!(revision, 1);
+        let loaded = store
+            .load(UserDataKey::CustomPresets)
+            .expect("load")
+            .expect("present");
+        assert_eq!(loaded.payload, payload);
+        // 空态（两数组缺省）合法
+        store
+            .save(
+                UserDataKey::CustomPresets,
+                serde_json::json!({ "version": 1 }),
+                None,
+            )
+            .expect("empty state accepted");
+    }
+
+    #[test]
+    fn custom_presets_rejects_garbage_entries() {
+        let store = UserDataStore::open_in_memory().expect("open");
+        for (payload, why) in [
+            (
+                serde_json::json!({ "version": 2, "customPresets": [] }),
+                "future version",
+            ),
+            (
+                serde_json::json!({ "version": 1, "customPresets": {} }),
+                "presets not array",
+            ),
+            (
+                serde_json::json!({ "version": 1, "customPresets": [{ "id": "x" }] }),
+                "preset missing name",
+            ),
+            (
+                serde_json::json!({ "version": 1, "customPresets": [{ "name": "n" }] }),
+                "preset missing id",
+            ),
+            (
+                serde_json::json!({ "version": 1, "zonePresetEntries": ["nope"] }),
+                "zone entry not object",
+            ),
+            (
+                serde_json::json!({ "version": 1, "zonePresetEntries": [{ "id": "z", "values": {} }] }),
+                "zone entry missing label",
+            ),
+        ] {
+            let error = store
+                .save(UserDataKey::CustomPresets, payload, None)
+                .expect_err(why);
+            assert_eq!(error.code(), "user_data_corrupt", "{why}");
+        }
+        assert!(store
+            .load(UserDataKey::CustomPresets)
+            .expect("load")
+            .is_none());
     }
 }

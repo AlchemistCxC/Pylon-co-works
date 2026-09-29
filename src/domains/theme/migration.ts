@@ -4,7 +4,7 @@
  * store.ts 只留 `migrate: persisted => themeDomainMigrate(persisted, DEFAULTS)` 薄壳。
  * 依赖全显式 .ts，node 可直接 import 做确定性迁移测试。
  */
-import { normalizeCustomPresetId, normalizeCustomPresets } from './customPresets.ts'
+import { normalizeCustomPresetId } from './customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from '../cc/ccLayoutState.ts'
 import { clampCcHeight, ccMinHeightInputOf } from '../cc/ccHeightState.ts'
 import { normalizeThemeState } from './themeFieldDefs.ts'
@@ -177,11 +177,13 @@ export function normalizeThemeMigrationState(
   normalized.appliedPreset = appliedRecord
   normalized.custom = customRecord
 
-  const normalizedCustomPresets = normalizeCustomPresets(state.customPresets)
   // A1 renamed bare custom ids into the `custom-*` namespace.  Migrate any
   // persisted zone references in the same pass; otherwise the list row would
   // expose `custom-foo` while appliedPreset still points at `foo`, making the
   // preset appear inactive after a restart.
+  // #448 PR5：customPresets 列表本体已拆 customPresetStore（归一在彼处）——这里
+  // 只保留**主题侧引用一致性**（appliedPreset 指向的 id 随 namespace 迁移改写），
+  // 旧 pylon-theme 内嵌的列表字段仅作 alias 源读取，不再输出到 themeStore state。
   if (Array.isArray(state.customPresets)) {
     const aliases = new Map<string, string>()
     for (const item of state.customPresets) {
@@ -202,7 +204,8 @@ export function normalizeThemeMigrationState(
       if (canonical) appliedRecord[zone] = canonical
     }
   }
-  normalized.customPresets = normalizedCustomPresets
+  // ★ 搬家数据源透传在 themeDomainMigrate 的最终输出处（normalizeThemeValues 白名单
+  // 重建之后）——此处不透传（会被洗掉）。
   return normalized
 }
 
@@ -229,11 +232,11 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   state.ccHeight = clampCcHeight(
     typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150),
     // ★ #266 刀3：下界 = 按边算取最大（**两态各算一遍取 max**）。此处 state 已过结构对齐
-    //   （`ccHidden` 必是数组、数字字段都有值；`ccHiddenEmpty` 缺省时由 `ccMinHeightInputOf`
-    //   回落常态切面）⇒ 直接当算式输入用。
+    // （`ccHidden` 必是数组、数字字段都有值；`ccHiddenEmpty` 缺省时由 `ccMinHeightInputOf`
+    // 回落常态切面）⇒ 直接当算式输入用。
     ccMinHeightInputOf(state as { ccHidden?: readonly string[] }),
   )
-  state.customPresets = normalizeCustomPresets(state.customPresets)
+  // #448 PR5：customPresets 归一随拆分移交 customPresetStore（旧键残留由 A4 白名单修剪）
   return state
 }
 

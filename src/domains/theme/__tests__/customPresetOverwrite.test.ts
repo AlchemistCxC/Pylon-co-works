@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useStore } from '../themeStore.ts'
+import { useCustomPresetStore } from '../customPresetStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { useInterfaceModeStore } from '../../interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
@@ -39,10 +40,10 @@ describe('custom preset overwrite', () => {
 
     try {
       useStore.getState().setZoneField('chat', { chatFontSize: 17 })
-      const firstId = useStore.getState().saveCustomPreset('first')
+      const firstId = useCustomPresetStore.getState().saveCustomPreset('first')
       useStore.getState().setZoneField('chat', { chatFontSize: 19 })
-      const secondId = useStore.getState().saveCustomPreset('second')
-      const firstCreatedAt = useStore.getState().customPresets.find(item => item.id === firstId)?.createdAt
+      const secondId = useCustomPresetStore.getState().saveCustomPreset('second')
+      const firstCreatedAt = useCustomPresetStore.getState().customPresets.find(item => item.id === firstId)?.createdAt
 
       for (const [mode, profileId] of [
         ['terminal-like', 'builtin.presentation.terminal-classic'],
@@ -56,9 +57,9 @@ describe('custom preset overwrite', () => {
       }
 
       useStore.getState().setZoneField('chat', { chatFontSize: 31 })
-      expect(useStore.getState().saveCustomPreset('first', firstId)).toBe(firstId)
+      expect(useCustomPresetStore.getState().saveCustomPreset('first', firstId)).toBe(firstId)
 
-      const presets = useStore.getState().customPresets
+      const presets = useCustomPresetStore.getState().customPresets
       expect(presets).toHaveLength(2)
       expect(presets.find(item => item.id === firstId)?.theme.chatFontSize).toBe(31)
       expect(presets.find(item => item.id === secondId)?.theme.chatFontSize).toBe(19)
@@ -70,9 +71,9 @@ describe('custom preset overwrite', () => {
   })
 
   it('reports a stale explicit overwrite id instead of silently creating another preset', () => {
-    expect(() => useStore.getState().saveCustomPreset('stale', 'custom-does-not-exist'))
+    expect(() => useCustomPresetStore.getState().saveCustomPreset('stale', 'custom-does-not-exist'))
       .toThrow('要覆盖的自定义预设不存在')
-    expect(useStore.getState().customPresets).toHaveLength(0)
+    expect(useCustomPresetStore.getState().customPresets).toHaveLength(0)
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('modern-gui')
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBeTruthy()
   })

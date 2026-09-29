@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { useStore } from '../../domains/theme/themeStore.ts'
+import { useCustomPresetStore } from '../../domains/theme/customPresetStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 vi.mock('../settings/AgentRuntimePanel.tsx', () => ({ default: () => <div /> }))
@@ -31,7 +32,7 @@ invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
 describe('Settings custom preset controls', () => {
   beforeEach(() => {
     resetStores()
-    useStore.setState({
+    useCustomPresetStore.setState({
       customPresets: [{
         id: 'custom-existing', name: '我的预设', theme: { chatFontSize: 13 }, createdAt: 1, updatedAt: 1,
       }],
@@ -44,7 +45,7 @@ describe('Settings custom preset controls', () => {
     fireEvent.click(within(row).getByRole('button', { name: '覆盖' }))
 
     expect(screen.getByRole('status')).toHaveTextContent('自定义预设已覆盖')
-    expect(useStore.getState().customPresets[0].updatedAt).toBeGreaterThan(1)
+    expect(useCustomPresetStore.getState().customPresets[0].updatedAt).toBeGreaterThan(1)
   })
 
   it('shows an explicit applied status when a custom preset chip is clicked', async () => {
@@ -57,7 +58,7 @@ describe('Settings custom preset controls', () => {
   })
 
   it('shows the failed provider when a custom preset transaction rolls back', async () => {
-    useStore.setState({
+    useCustomPresetStore.setState({
       applyCustomPreset: vi.fn(async () => ({
         status: 'failed' as const, id: 'custom-existing', failedProvider: 'builtin.renderer-settings',
         message: '拒绝覆盖', rolledBack: true, revision: 2,
@@ -72,7 +73,7 @@ describe('Settings custom preset controls', () => {
 
   it('keeps a capture failure visible and reports it to the runtime error channel', () => {
     const report = vi.spyOn(console, 'error').mockImplementation(() => {})
-    useStore.setState({
+    useCustomPresetStore.setState({
       saveCustomPreset: () => { throw new Error('capture failed') },
     } as never)
     try {

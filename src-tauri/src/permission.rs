@@ -1552,10 +1552,7 @@ mod tests {
             });
         // 内存态生效
         assert_eq!(
-            *app.state::<crate::AppState>()
-                .approval_mode
-                .lock()
-                .unwrap(),
+            *app.state::<crate::AppState>().approval_mode.lock().unwrap(),
             "auto"
         );
         // 落盘生效（load_sync 直读——与启动回填同路径）
@@ -1587,10 +1584,7 @@ mod tests {
             assert!(error.to_string().contains("unknown approval mode"));
         });
         assert_eq!(
-            *app.state::<crate::AppState>()
-                .approval_mode
-                .lock()
-                .unwrap(),
+            *app.state::<crate::AppState>().approval_mode.lock().unwrap(),
             "edit"
         );
     }
@@ -1615,7 +1609,7 @@ mod tests {
                 .expect("seed save");
         });
         let state = crate::test_utils::TestStateBuilder::bare()
-            .with_user_data_service(shared.clone())
+            .with_user_data_service(shared)
             .build();
         restore_persisted_approval_mode(&state);
         assert_eq!(*state.approval_mode.lock().unwrap(), "bypass");

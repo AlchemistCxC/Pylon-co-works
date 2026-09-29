@@ -63,11 +63,14 @@ export function toThemeDelta(theme: Record<string, unknown> | Partial<ThemeSetti
 /**
  * 预设路由所需的状态切片。字段类型与 ThemeState 兼容（结构可赋值）：
  * ThemeState → ThemePresetState 无需断言；patch 用 ThemePresetPatch（兼容 Partial<ThemeState>）。
+ * #448 PR5：customPresets 拆独立 store 后为**可选**切片——themeStore 调用点
+ * （主题路由：setZoneField/setGlobalPreset/assemble/applyZonePreset）不提供；
+ * customPresetStore 的合成视图（含本字段）照常满足 save/apply/delete 事务。
  */
 export interface ThemePresetState {
   appliedPreset: Record<string, string>
   custom: Record<string, boolean>
-  customPresets: CustomPreset[]
+  customPresets?: CustomPreset[]
   ccLayout: CcLayoutV3
   ccHeight: number
   inputSubmitButtonMode: string
@@ -320,11 +323,11 @@ export function saveCustomPresetReducer(
   const { id, now } = command
   const cleanName = command.name.trim()
   if (!cleanName) throw new Error('预设名称不能为空')
-  const existing = state.customPresets.find(preset => preset.id === id)
+  const existing = (state.customPresets ?? []).find(preset => preset.id === id)
   const preset = existing
     ? { ...existing, name: cleanName.slice(0, 40), theme: toThemeDelta(pickCustomPresetTheme(state)), updatedAt: now, ...(command.bundle ? { bundle: command.bundle } : {}) }
     : { id, name: cleanName.slice(0, 40), theme: structuredClone(toThemeDelta(pickCustomPresetTheme(state))), createdAt: now, updatedAt: now, ...(command.bundle ? { bundle: command.bundle } : {}) }
-  return { patch: { customPresets: upsertCustomPreset(state.customPresets, preset) }, savedId: preset.id }
+  return { patch: { customPresets: upsertCustomPreset(state.customPresets ?? [], preset) }, savedId: preset.id }
 }
 
 /**
@@ -339,7 +342,7 @@ export function applyCustomPresetReducer(
   explicitTheme?: Record<string, unknown>,
 ): ThemePresetPatch | null {
   const source = explicitTheme
-    ?? state.customPresets.find(item => item.id === id)?.theme
+    ?? (state.customPresets ?? []).find(item => item.id === id)?.theme
   if (!source) return null
   const theme = inheritCcEmptySlice(filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>))
   return {
@@ -389,5 +392,5 @@ export function removeCustomPresetReducer(state: ThemePresetState, id: string): 
       custom[zone] = true
     }
   }
-  return { customPresets: deleteCustomPreset(state.customPresets, id), appliedPreset, custom }
+  return { customPresets: deleteCustomPreset(state.customPresets ?? [], id), appliedPreset, custom }
 }

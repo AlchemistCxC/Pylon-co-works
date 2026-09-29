@@ -3,6 +3,7 @@ import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from './settings/themeFieldRenderer'
 import { useStore } from '../domains/theme/themeStore'
+import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
@@ -81,7 +82,7 @@ function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onApply, onSa
   onSaveCurrent: (zone: ZonePresetEntry['zone'], name: string) => void
   onRemoveEntry: (id: string) => void
 }) {
-  const customEntries = useStore(s => s.zonePresetEntries)
+  const customEntries = useCustomPresetStore(s => s.zonePresetEntries)
   const entries = zonePresetsFor(interfaceMode, zone, customEntries)
   const [entryName, setEntryName] = useState('')
   // 刀7 前置（#211）：行内两段式确认的待删条目（照全局自定义预设先例，不常驻、不开模态）
@@ -181,7 +182,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const setAgentStatus = useRuntimeStore(s => s.setAgentStatus)
   const setActiveAgent = useIdentityStore(s => s.setActiveAgent)
-  const customPresets = useStore(s => s.customPresets)
+  const customPresets = useCustomPresetStore(s => s.customPresets)
   /** #116 子项 7：预设行兜底 chip 的口径见 presets.ts 的 fallbackPresetChip。 */
   const fallbackPresetChipView = fallbackPresetChip(globalStatus, customPresets.map(preset => preset.id))
   const sessions = useIdentityStore(s => s.sessions)
@@ -191,14 +192,14 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     const session = sessions.find(session => session.id === activeSessionId)
     return session ? { agentId: session.agentId, source: session.source } : undefined
   })()
-  const saveCustomPreset = useStore(s => s.saveCustomPreset)
-  const applyCustomPreset = useStore(s => s.applyCustomPreset)
-  const removeCustomPreset = useStore(s => s.removeCustomPreset)
+  const saveCustomPreset = useCustomPresetStore(s => s.saveCustomPreset)
+  const applyCustomPreset = useCustomPresetStore(s => s.applyCustomPreset)
+  const removeCustomPreset = useCustomPresetStore(s => s.removeCustomPreset)
   // 刀6（#206）：区域预设池自定义条目的存入口 + Q8 落盘清理（每次打开设置过一遍，
   // 读入容错也在此收口；无变化不写状态）。
-  const saveZonePresetEntry = useStore(s => s.saveZonePresetEntry)
-  const pruneZonePresetEntries = useStore(s => s.pruneZonePresetEntries)
-  const removeZonePresetEntry = useStore(s => s.removeZonePresetEntry)
+  const saveZonePresetEntry = useCustomPresetStore(s => s.saveZonePresetEntry)
+  const pruneZonePresetEntries = useCustomPresetStore(s => s.pruneZonePresetEntries)
+  const removeZonePresetEntry = useCustomPresetStore(s => s.removeZonePresetEntry)
   useEffect(() => { pruneZonePresetEntries() }, [pruneZonePresetEntries])
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   // #154 阶段 4：activeDomain/activeSection/activePluginPageId 已在函数顶部由 sheet 状态派生。
@@ -304,7 +305,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     if (!modeBucket) return
     const id = saveZonePresetEntry(modeBucket, zone, name)
     if (!id) return
-    const entry = useStore.getState().zonePresetEntries.find(item => item.id === id)
+    const entry = useCustomPresetStore.getState().zonePresetEntries.find(item => item.id === id)
     const theme = entry ? resolveZonePresetEntryTheme(entry) : null
     if (theme) applyZonePreset(zone, id, theme)
   }
