@@ -1,22 +1,8 @@
+import type { FontContribution } from '../../contracts/fonts.ts'
 import type { RegistryEntry } from '../registry/types.ts'
 
-/** The UI role controls where a contributed font may be selected. */
-export type FontRole = 'interface' | 'content' | 'code'
-
-/**
- * Plugins contribute a stable font id and a CSS font-family stack. Loading a
- * bundled @font-face remains the plugin's responsibility, so the host never
- * downloads an untrusted remote asset on behalf of a contribution.
- */
-export interface FontContribution {
-  readonly id: string
-  readonly label: string
-  readonly description?: string
-  readonly family: string
-  readonly roles: readonly FontRole[]
-  readonly order?: number
-  readonly sample?: string
-}
+// 契约正身在 src/contracts/fonts.ts（中立落点，domains/theme 与本层共用；
+// 结构审查 B-5：消除 theme⇄plugin-runtime 类型环）。此文件保留注册表包装类型。
+export type { FontContribution, FontRole } from '../../contracts/fonts.ts'
 
 export type FontContributionRegistryEntry = RegistryEntry<FontContribution>
-

@@ -93,7 +93,9 @@ export interface TextFamilySection {
  * 把一整份 compact 读折成文档（与前端 `listJournalPages` 的逐页折同序同果）。
  *
  * `granularity: 'batch'`（缺省）先过 `mergeAdjacentDeltaChunks`——**生产稳态**下 delta 行
- * 在 sink 落盘前就已折成 batch 行（≤48KiB/2000 chunk），读侧见到的就是折叠后形状；此前
+ * 在落盘前就已折成 batch 行（≤48KiB/2000 chunk，折叠规则单源在 Rust fold.rs；这里的
+ * `mergeAdjacentDeltaChunks` 是测试期参考合并器，无生产调用方，用它复现同一 batch 形状），
+ * 读侧见到的就是折叠后形状；此前
  * 本套件直折 rows 不过 sink，per-chunk 行永不折 batch，正是 #449 指出的语料缺口。
  * `'per-delta'` 保留逐 delta 行，量「最坏形状」（播种/旧日志/折叠关闭）的驻留差。
  */

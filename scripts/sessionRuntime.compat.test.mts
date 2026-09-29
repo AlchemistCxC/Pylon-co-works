@@ -5,8 +5,8 @@ import {
   clearSessionSourceState,
   emptySessionLiveStats,
   updateSessionLiveStats,
-} from '../src/components/chat/sessionRuntime.ts'
-import type { Session } from '../src/store.ts'
+} from '../src/domains/chat/sessionRuntime.ts'
+import type { Session } from '../src/domains/identity/identityStore.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()

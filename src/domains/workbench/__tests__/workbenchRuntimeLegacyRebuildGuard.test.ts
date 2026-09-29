@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createPreviewWorkbenchRuntime, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
 import { createWorkbenchDocument, reduceWorkbenchEvent, type WorkbenchDocument } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
-import type { Message } from '../../../components/chat/messageTypes.ts'
+import type { Message } from '../../chat/messageTypes.ts'
 
 /**
  * P48-① 回归锁：`update()` 的 legacy 字段补丁只允许重建"由 legacy 快照字段

@@ -13,12 +13,12 @@ import { useIdentityStore, type Session } from '../../domains/identity/identityS
 import type { WorkbenchRendererFactory, WorkbenchRendererInstance } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
-import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
+import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrastructure/events/pluginEventBusHost.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { clearErrors, getErrors } from '../../app/errorCenter.ts'
-import { messageStorageKey, persistMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import { messageStorageKey, persistMessageSnapshot } from '../../domains/chat/messagePersistence.ts'
 import { FakeInvoke } from '../../test/fakeInvoke'
 
 const { invokeRef } = vi.hoisted(() => ({

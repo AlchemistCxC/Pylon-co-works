@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { toRenderMessage } from '../../../../components/chat/messageTypes.ts'
+import { toRenderMessage } from '../../../../domains/chat/messageTypes.ts'
 import { estimateRowHeight } from '../rowHeightEstimate.ts'
-import type { ChatRowDescriptor } from '../../../../components/chat/chatRowPipeline.ts'
+import type { ChatRowDescriptor } from '../../../../domains/chat/chatRowPipeline.ts'
 import type { MessageListItem } from '../../../../domains/workbench/messageListPort.ts'
-import type { Message } from '../../../../components/chat/messageTypes.ts'
+import type { Message } from '../../../../domains/chat/messageTypes.ts'
 
 function item(message: Partial<Message> & Pick<Message, 'id' | 'role'>, estimatedHeight?: number): MessageListItem {
   const full: Message = { sender: 'user', content: '', time: '10:00', ...message } as Message

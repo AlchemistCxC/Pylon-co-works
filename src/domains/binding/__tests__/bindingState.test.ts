@@ -14,7 +14,7 @@ import {
   type BindingResolutionInput,
   type BindingState,
 } from '../bindingState'
-import type { AgentStatus } from '../../../components/settings/agentTypes'
+import type { AgentStatus } from '../../../contracts/agentTypes'
 import type { Session } from '../../identity/identityStore'
 
 const SESSION: Session = {

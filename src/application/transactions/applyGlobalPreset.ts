@@ -1,12 +1,12 @@
-import { GLOBAL_PRESETS, type GlobalPreset, type PresetInterfaceMode, type PresetName } from '../../presets/index.ts'
+import { GLOBAL_PRESETS, type GlobalPreset, type PresetInterfaceMode, type PresetName } from '../../domains/theme/presets/index.ts'
 import {
   PRESET_ZONES,
   requireZoneRefs,
   type GlobalPresetZoneSlice,
   type ZoneRefMap,
 } from '../../domains/theme/presetReducer.ts'
-import { ZONE_PRESET_POOL, effectivePresetTheme, resolveZonePresetEntryTheme } from '../../zones/index.ts'
-import { useStore, type ThemeSettings } from '../../store.ts'
+import { ZONE_PRESET_POOL, effectivePresetTheme, resolveZonePresetEntryTheme } from '../../domains/theme/zones/index.ts'
+import { useStore, type ThemeSettings } from '../../domains/theme/themeStore.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileRegistry } from '../../plugin-runtime/presentation/presentationProfileRegistry.ts'
 import { activatePresentationProfile } from './activateInterfaceMode.ts'

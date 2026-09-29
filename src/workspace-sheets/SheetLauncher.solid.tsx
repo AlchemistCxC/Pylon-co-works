@@ -3,11 +3,11 @@ import { render } from 'solid-js/web'
 import { resolveLaunchIconName } from './launchIcons.solid.tsx'
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
-import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { activateAgentSheet } from './activateAgentSheet'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import type { SheetRecord, SheetKind } from './sheetTypes'
-import type { WorkspaceLaunchOption } from './workspaceTypes'
+import type { WorkspaceLaunchOption } from '../plugin-runtime/workspaces/workspaceTypes'
 
 interface AgentOption {
   id: string

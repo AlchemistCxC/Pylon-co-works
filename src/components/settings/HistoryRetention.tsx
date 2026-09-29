@@ -11,7 +11,7 @@ import {
   writeRetentionPolicy,
   type RetentionMode,
   type RetentionPolicy,
-} from './historyRetentionPolicy'
+} from '../../domains/overview/retentionPolicy.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import {
   loadRetentionPolicy,

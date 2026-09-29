@@ -13,7 +13,7 @@
  *
  * 用途：canonical 首屏占位 / restart recovery。仅依赖 domains + 类型，不落盘。
  */
-import type { Message } from '../../components/chat/messageTypes'
+import type { Message } from '../chat/messageTypes'
 import type { EventProjector } from '../../contracts/eventProjector.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { getToolSummary } from '../tool/toolPresentation.ts'

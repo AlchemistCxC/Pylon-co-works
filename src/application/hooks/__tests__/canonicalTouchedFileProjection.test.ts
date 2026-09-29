@@ -22,7 +22,7 @@ vi.mock('../../../infrastructure/persistence/workspaceEntityStore.ts', () => ({
 vi.mock('../../../domains/workspace/workspaceStore.ts', () => ({
   useWorkspaceStore: { getState: () => ({ recordTouchedFile: recordTouchedFileMock }) },
 }))
-vi.mock('../../../infrastructure/events/pluginEventBus.ts', () => ({
+vi.mock('../../../infrastructure/events/pluginEventBusHost.ts', () => ({
   subscribePluginEvents: (...args: unknown[]) => subscribeSpy(...(args as [])),
   publishPluginEvent: vi.fn(),
 }))

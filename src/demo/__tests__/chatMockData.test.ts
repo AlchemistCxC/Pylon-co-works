@@ -1,6 +1,6 @@
 // 迁移自 scripts/test-chat-mock-data.mts（P91 A1，并入 demo 测试）
 import { describe, expect, it } from 'vitest'
-import { MOCK_MESSAGES, createMockMessages } from '../../components/chat/chatMockData.ts'
+import { MOCK_MESSAGES, createMockMessages } from '../chatMockData.ts'
 
 describe('ChatView mock display 场景（demo fixture 角色覆盖）', () => {
   it('mock 覆盖足够长的完整对话场景', () => {

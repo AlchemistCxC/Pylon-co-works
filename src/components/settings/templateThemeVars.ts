@@ -4,8 +4,8 @@
  * 对 { ...THEME_DEFAULTS, ...delta } 的内存态快照经 THEME_CSS_VAR_MAP 单一真值派生
  * 局部 CSS vars——注入预览容器局部 style，不触全局 store（hover 不写 store）。
  */
-import { THEME_CSS_VAR_MAP } from '../../themeFieldDefs.ts'
-import type { ThemeSettings } from '../../store'
+import { THEME_CSS_VAR_MAP } from '../../domains/theme/themeFieldDefs.ts'
+import type { ThemeSettings } from '../../domains/theme/themeStore'
 
 export function themeToCssVars(theme: Partial<ThemeSettings>): Record<string, string> {
   const vars: Record<string, string> = {}

@@ -1,6 +1,6 @@
 import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
-import type { FontContribution } from '../../plugin-runtime/fonts/fontContributionTypes.ts'
+import type { FontContribution } from '../../contracts/fonts.ts'
 
 export function projectFontContributions(
   root: HTMLElement,

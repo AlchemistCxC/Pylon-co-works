@@ -10,7 +10,7 @@ import { removeSessionTransaction, sessionDurableOwnerKey } from '../application
 import { runSessionNotificationHook } from '../application/transactions/sessionHookTransactions'
 
 import { getCanonicalEventFeed } from '../infrastructure/events/canonicalEventFeed.ts'
-import { clearMessageStorage } from './chat/messagePersistence'
+import { clearMessageStorage } from '../domains/chat/messagePersistence'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
 
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }

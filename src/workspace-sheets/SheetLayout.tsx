@@ -1,10 +1,10 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
-import { useStore } from '../store'
+import { useStore } from '../domains/theme/themeStore'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
-import { resolveSessionSource } from '../components/chat/sessionCommandState'
-import { belongsToProfile } from '../components/chat/sessionProfile'
+import { resolveSessionSource } from '../domains/chat/sessionCommandState'
+import { belongsToProfile } from '../domains/chat/sessionProfile'
 import { resolveSheetRender } from './sheetRegistry.tsx'
 import { activateAgentSheet } from './activateAgentSheet'
 import SheetHost from './SheetHost'
@@ -12,10 +12,10 @@ import SheetSidebarSlot from './SheetSidebarSlot'
 import LeftRailResizeHandle from './LeftRailResizeHandle.tsx'
 import RightRailHost from '../components/right-panel/RightRailHost.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
-import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspaceRegistry'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
-import { useRightRailStore } from '../components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 
 /**
@@ -181,46 +181,41 @@ export default function SheetLayout(props: SheetLayoutProps) {
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
       {leftColumnVisible && <LeftRailResizeHandle />}
       {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && activeSheet.kind !== 'browser' && <SheetHost sheet={activeSheet} ctx={ctx} />}
-      {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {
+      {/* keep-alive 槽位统一数据驱动（结构审查 A-V10）：哪些 kind 保活只有 KEEP_ALIVE_SHEET_SLOT
+          一处真相；槽位各自的 class/data 属性是存量 DOM 契约（样式与测试按它定位），逐 kind 保留。
+          browser 块改经 SheetHost 渲染——错误边界覆盖与其他保活 kind 对齐。
+          G5（FE-AUD-006）：browser 保活语义不变——非活动态只隐藏 DOM，真正 close 才卸载。 */}
+      {KEEP_ALIVE_SHEET_SLOT.map(slot => sheets.filter(sheet => sheet.kind === slot.kind).map(sheet => {
         const active = sheet.id === activeSheetId
+        const slotCtx = slot.kind === 'agent'
+          ? contextForAgentSheet(sheet)
+          : slot.passIsActive ? { ...ctx, isActive: active } : ctx
         return (
-          <div key={sheet.id} className="agent-sheet-keep-alive" data-sheet-id={sheet.id}
+          <div key={sheet.id} className={slot.className}
+            {...(slot.kind === 'file' ? { 'data-file-sheet-id': sheet.id } : { 'data-sheet-id': sheet.id })}
             aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
-            <SheetHost sheet={sheet} ctx={contextForAgentSheet(sheet)} />
+            <SheetHost sheet={sheet} ctx={slotCtx} />
           </div>
         )
-      })}
-      {/* FileSheet owns in-memory editor drafts. Keep every open FileSheet at one stable
-          React position so ordinary Sheet navigation cannot unmount and discard them. */}
-      {sheets.filter(sheet => sheet.kind === 'file').map(sheet => {
-        const active = sheet.id === activeSheetId
-        return (
-          <div key={sheet.id} className="file-sheet-keep-alive" data-file-sheet-id={sheet.id}
-            aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
-            <SheetHost sheet={sheet} ctx={ctx} />
-          </div>
-        )
-      })}
+      }))}
       <RightRailHost sheet={activeSheet} ctx={ctx} activeAgent={activeAgent} />
-      {/* G5（FE-AUD-006）：Browser 与 Agent/File 一样固定在稳定位置保活。
-          活动态用 display:contents 进入主舞台，非活动态只隐藏 DOM；真正 close
-          （从 sheets 移除）才卸载并触发 browser_close，避免标签/页面状态丢失。 */}
-      {sheets.filter(sheet => sheet.kind === 'browser').map(sheet => {
-        const active = sheet.id === activeSheetId
-        const browserEntry = resolveSheetRender('browser')
-        const BrowserComponent = browserEntry?.component
-        return (
-          <div key={sheet.id} data-sheet-id={sheet.id} className="browser-keep-alive"
-            aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
-            {BrowserComponent && browserEntry
-              ? <BrowserComponent sheet={sheet} ctx={{ ...ctx, isActive: active }} state={browserEntry.deserialize(sheet.state)} />
-              : null}
-          </div>
-        )
-      })}
     </div>
   )
 }
+
+/** 虚拟 overview sheet（空态专用，不持久化） */
+
+/**
+ * keep-alive 槽位表（结构审查 A-V10）——「哪些 sheet kind 保活」的唯一真相。
+ * 旧实现是三段手写近似 JSX + 一条反向否定链；class/data 属性是存量 DOM 契约逐 kind 保留
+ * （browser historic 名不带 -sheet、file 用 data-file-sheet-id）。passIsActive 仅 browser
+ * 声明（原块语义）；file 维持原样不注入 isActive，agent 走 contextForAgentSheet 特化。
+ */
+const KEEP_ALIVE_SHEET_SLOT: readonly { kind: string; className: string; passIsActive?: boolean }[] = [
+  { kind: 'agent', className: 'agent-sheet-keep-alive' },
+  { kind: 'file', className: 'file-sheet-keep-alive' },
+  { kind: 'browser', className: 'browser-keep-alive', passIsActive: true },
+]
 
 /** 虚拟 overview sheet（空态专用，不持久化） */
 const VIRTUAL_OVERVIEW_SHEET: SheetRecord = {

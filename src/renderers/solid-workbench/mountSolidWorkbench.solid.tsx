@@ -17,7 +17,8 @@ import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/
 import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 import { createStreamingDisplayPublishCostRecorder, registerStreamingDisplayDiagnostics } from './streamingDiagnostics.ts'
 import { clearMarkdownRenderModelCache } from './chat/markdownRenderModel.ts'
-import { createPredictionRouter, createStandalonePredictionProvider } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { createPredictionRouter } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { createStandalonePredictionProvider } from '../../infrastructure/prediction/predictionStandalone.ts'
 
 /** #212 判据 C 的初值：没有行被观察到增长（冻结实例，避免每次 setSignal 造新对象）。 */
 const EMPTY_REVEALING_ROWS: ReadonlySet<string> = Object.freeze(new Set<string>()) as ReadonlySet<string>

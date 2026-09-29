@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../../domains/theme/themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'

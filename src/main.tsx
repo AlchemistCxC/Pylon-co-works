@@ -22,10 +22,10 @@ startupMark('main_module_eval')
 // 用法与各自取证语义见各 devTrigger 文件头文档。
 const DEV_TRIGGER_INSTALLERS = [
   { id: 'mock-tauri', load: () => import('./demo/mockTauri').then(module => module.installMockTauri()) },
-  { id: 'obs04-three-source-export', load: () => import('./obs04/devTrigger').then(module => module.installObs04DevTrigger()) },
-  { id: 'obs05-cold-start-snapshot', load: () => import('./obs05/devTrigger').then(module => module.installObs05DevTrigger()) },
-  { id: 'obs06-delete-forensics', load: () => import('./obs06/devTrigger').then(module => module.installObs06DevTrigger()) },
-  { id: 'obs07-stderr-samples', load: () => import('./obs07/devTrigger').then(module => module.installObs07DevTrigger()) },
+  { id: 'obs04-three-source-export', load: () => import('./devtools/obs/threeSourceExportTrigger').then(module => module.installObs04DevTrigger()) },
+  { id: 'obs05-cold-start-snapshot', load: () => import('./devtools/obs/coldStartTrigger').then(module => module.installObs05DevTrigger()) },
+  { id: 'obs06-delete-forensics', load: () => import('./devtools/obs/deleteForensicsTrigger').then(module => module.installObs06DevTrigger()) },
+  { id: 'obs07-stderr-samples', load: () => import('./devtools/obs/stderrSamplesTrigger').then(module => module.installObs07DevTrigger()) },
   { id: 'css01-typography-baseline', load: () => import('./css01/devTrigger').then(module => module.installCss01DevTrigger()) },
 ] as const
 

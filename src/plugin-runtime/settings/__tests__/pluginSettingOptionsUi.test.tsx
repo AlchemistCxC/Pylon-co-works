@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { ZoneGroupFields } from '../../../themeFieldRenderer.tsx'
+import { ZoneGroupFields } from '../../../components/settings/themeFieldRenderer.tsx'
 import { getPluginSettingOptionsRegistry } from '../../runtimeServices.ts'
 import { createPluginIdentity } from '../../pluginIdentity.ts'
 import type { AsyncDisposable } from '../../registry/types.ts'

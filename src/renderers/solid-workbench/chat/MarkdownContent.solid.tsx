@@ -1,8 +1,8 @@
 import { Dynamic } from 'solid-js/web'
 import { For, Index, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js'
-import { highlightCode } from '../../../components/chat/codeHighlight.ts'
-import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
-import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
+import { highlightCode } from '../../../domains/chat/codeHighlight.ts'
+import { sanitizeHtml } from '../../../domains/chat/htmlSanitizer.ts'
+import { isPlainTextContent } from '../../../domains/chat/markdownFastPath.ts'
 import { scheduleHighlightJob, trackCodeBlockVisibility } from './codeBlockDomLifecycle.ts'
 import {
   getMarkdownRenderModel,

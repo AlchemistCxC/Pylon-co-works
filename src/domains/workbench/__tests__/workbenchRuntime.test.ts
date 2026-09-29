@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createPreviewWorkbenchRuntime, mergeWorkbenchRuntimeSnapshot, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
 import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
-import type { Message } from '../../../components/chat/messageTypes.ts'
+import type { Message } from '../../chat/messageTypes.ts'
 
 it('reuses message projections across metadata changes and interleaved owners without changing generation fields', () => {
   const times = ['2026-09-12T00:00:01Z', '2026-09-12T00:00:02Z', '2026-09-12T00:00:03Z']

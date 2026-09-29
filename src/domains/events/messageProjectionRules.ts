@@ -5,7 +5,7 @@
  * cancel、usage 或任何 renderer/store/sink 依赖。adapter 通过 `toolInputSummary`
  * 注入工具摘要策略，保证规则本身可在 live、replay、restart 三条路径复用。
  */
-import type { Message } from '../../components/chat/messageTypes'
+import type { Message } from '../chat/messageTypes'
 import type { OptionalChatEventIdentity } from '../../infrastructure/acp/chatContracts'
 import { resolveChunkAppend } from './chunkMerge.ts'
 import type { CanonicalConversationEvent } from './eventSchema.ts'

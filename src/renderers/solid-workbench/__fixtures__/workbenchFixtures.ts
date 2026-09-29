@@ -1,4 +1,4 @@
-import type { Message } from '../../../components/chat/messageTypes.ts'
+import type { Message } from '../../../domains/chat/messageTypes.ts'
 import type { PlanEntry } from '../../../domains/tasks/planTypes.ts'
 
 export interface WorkbenchMessageFixture {

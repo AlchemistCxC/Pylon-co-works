@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { useInterfaceModeStore } from '../../interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'

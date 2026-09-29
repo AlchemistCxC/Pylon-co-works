@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense, useRef, useSyncExternalStore } fro
 import SheetLayout from './workspace-sheets/SheetLayout'
 import TacticalScene from './sheets/TacticalScene'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
-import { useStore } from './store'
+import { useStore } from './domains/theme/themeStore'
 import { flushIdentityBackend, useIdentityStore } from './domains/identity/identityStore'
 import { useRuntimeStore } from './domains/runtime/runtimeStore'
 import { useWorkspaceStore } from './domains/workspace/workspaceStore'
@@ -24,7 +24,7 @@ import { useSkinSurface } from './infrastructure/skin/useSkinSurface'
 import { projectSkinDocumentRoot } from './infrastructure/skin/skinProjection'
 import { getSkinRuntime, pickThemeBaseline } from './infrastructure/skin/skinRuntimeServices'
 import { listen } from '@tauri-apps/api/event'
-import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
+import { normalizeAgentStatus, type AgentStatusPayload } from './contracts/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
@@ -51,15 +51,16 @@ import {
   getShellRecipeRegistry,
 } from './plugin-runtime/runtimeServices.ts'
 import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
-import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './plugin-runtime/workspaces/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
 import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { DEFAULT_INTERFACE_MODE } from './domains/interface/interfaceModeStore.ts'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
-import { useRightRailStore } from './components/right-panel/rightRailStore.ts'
+import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
 import { normalizeApprovalMode, persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 
@@ -132,7 +133,7 @@ export default function App() {
     getInterfaceModeSnapshot,
   )
   const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
-    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!
+    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === DEFAULT_INTERFACE_MODE)!
   const quickInterfaceMode = interfaceModeQuickTarget(interfaceMode)
   // Shell Recipe（ADR-0003）：激活期已硬校验引用；此处订阅仅保证插件热换后
   // 数据属性跟随 registry 快照更新。解析兜底 classic，瞬态不崩壳。
@@ -152,11 +153,11 @@ export default function App() {
   }, [interfaceMode])
   useEffect(() => { ensureInterfaceModeProfile() }, [interfaceMode, interfaceModeSnapshot])
   const [activeSession, setActiveSession] = useState<string | null>(null)
-  // W2-12：右栏折叠迁 workspaceStore（右栏按 sheet 声明挂载），旧 RightPanel 退役
+  // W2-12：右栏折叠随 sheet 声明挂载（layoutRailsStore.rightCollapsed），旧 RightPanel 退役
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
-  // W1-03（F2-B）：折叠/宽度状态迁入 workspaceStore（预设不覆盖布局），App 只读
+  // W1-03（F2-B）：左栏折叠/宽度真值源是 domains/workspace/layoutRailsStore（预设不覆盖布局），App 只读
   const sidebarWidth = useRightRailStore(s => s.leftRailWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
@@ -481,6 +482,8 @@ export default function App() {
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>
+      {/* 结构审查 A-V9 遗留：装饰场景仍按模式 id 特判。registry 化方向 = InterfaceModeContribution
+          增加 sceneSurface 声明位，插件模式才能获得等价装饰能力（独立小改动，评审轮裁决）。 */}
       {interfaceMode === 'tactical-blue' && <TacticalScene />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}

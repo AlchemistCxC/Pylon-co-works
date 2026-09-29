@@ -8,30 +8,7 @@ import {
 } from '../../../domains/tool/diffPresentation.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
-
-// 样式绞杀（P92 地基后机械翻译）：与 React DiffCard.tsx 镜像同一组 utility
-// 常量（原 DiffCard.css，跨端共享故各自持有一份）。同属性 utility 不跨常量
-// 组合；调色板变量连同 hex 兜底原样平移。
-const DIFF_CARD = 'mt-1 mb-1.5 rounded-none overflow-hidden border border-border bg-[var(--chat-code-bg,rgba(0,0,0,0.02))]'
-const DIFF_HEAD = 'w-full flex justify-between gap-3 py-[5px] px-2 border-0 text-text bg-transparent [font:inherit] text-left cursor-pointer hover:bg-border'
-const DIFF_COUNT = 'text-text-dim text-[0.85em]'
-const DIFF_BODY = 'max-h-[320px] overflow-auto font-mono text-[0.9em] leading-[1.5]'
-const DIFF_LINE = 'flex min-w-max pr-2.5 whitespace-pre'
-const DIFF_SIGN = 'w-6 shrink-0 pl-2 text-text-dim select-none'
-const DIFF_LINE_BG: Record<'added' | 'removed', string> = {
-  added: 'bg-[color-mix(in_srgb,var(--diff-added,#4EBA65)_14%,transparent)]',
-  removed: 'bg-[color-mix(in_srgb,var(--diff-removed,#FF6B80)_14%,transparent)]',
-}
-const DIFF_SIGN_TONE: Record<'added' | 'removed', string> = {
-  added: 'text-[var(--diff-added,#4EBA65)]',
-  removed: 'text-[var(--diff-removed,#FF6B80)]',
-}
-const WORD_BASE = 'rounded-none'
-const WORD_TONE: Record<'added' | 'removed', string> = {
-  added: 'bg-[var(--diff-added-word,#3EA15E)] text-white',
-  removed: 'bg-[var(--diff-removed-word,#E0556B)] text-white',
-}
-const CODE_INHERIT = '[font:inherit]'
+import { CODE_INHERIT, DIFF_BODY, DIFF_CARD, DIFF_COUNT, DIFF_HEAD, DIFF_LINE, DIFF_LINE_BG, DIFF_SIGN, DIFF_SIGN_TONE, WORD_BASE, WORD_TONE } from '../../../domains/chat/diffCardPresentation.ts'
 
 export interface SolidDiffCardProps {
   output: string

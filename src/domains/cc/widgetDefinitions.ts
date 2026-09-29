@@ -34,7 +34,7 @@
  * 取现状值）；`mode` 同理取「权限模式」而非骨架里的「权限」。
  * 新增 widget：此处加一行 + `widgetRenderers` 补 renderer + 该行的 `propertyFields` 补表单。
  */
-import type { ThemeFieldKey } from '../../themeFieldDefs.ts'
+import type { ThemeFieldKey } from '../theme/themeFieldDefs.ts'
 
 export type CcColorPropertyKey =
   | 'inputBg' | 'inputTextColor' | 'cliLineColor'

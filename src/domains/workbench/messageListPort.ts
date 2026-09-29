@@ -1,5 +1,5 @@
-import type { ChatRowDescriptor } from '../../components/chat/chatRowPipeline.ts'
-import { isSameChatRowDescriptor } from '../../components/chat/chatRowPipeline.ts'
+import type { ChatRowDescriptor } from '../chat/chatRowPipeline.ts'
+import { isSameChatRowDescriptor } from '../chat/chatRowPipeline.ts'
 
 export interface MessageListItem {
   key: string

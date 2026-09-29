@@ -3,9 +3,9 @@ import {
   THEME_CSS_VAR_MAP,
   THEME_FIELD_DEFS,
   THEME_SETTING_KEYS,
-} from '../../../themeFieldDefs.ts'
+} from '../../../domains/theme/themeFieldDefs.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { MESSAGE_ROLES } from '../../../components/chat/messageTypes.ts'
+import { MESSAGE_ROLES } from '../../../domains/chat/messageTypes.ts'
 import { TOOL_VISUAL_STATES } from '../../../domains/tool/status.ts'
 import {
   SKIN_SURFACES,

@@ -1,4 +1,4 @@
-import { useStore } from '../store'
+import { useStore } from '../domains/theme/themeStore'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { resolveSheetRender } from './sheetRegistry.tsx'
 

@@ -1,10 +1,10 @@
 import type { AgentContext } from '../../domains/agent/agentContext.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
-import type { WorkspaceEntry, WorkspaceTextPreview } from '../../components/right-panel/rightPanelTypes.ts'
+import type { WorkspaceEntry, WorkspaceTextPreview } from './fileViewContracts.ts'
 import type { WorkspaceSearchResult } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
 import type { GitCommit, GitOperationResult, GitStatusWithBranch } from '../../infrastructure/tauri/gitContracts.ts'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
-import type { FileTabRecord } from '../../sheets/file/fileSheetState.ts'
+import type { FileTabRecord } from './fileViewContracts.ts'
 import type { LanguageSupport } from '@codemirror/language'
 
 export interface FileProvider {

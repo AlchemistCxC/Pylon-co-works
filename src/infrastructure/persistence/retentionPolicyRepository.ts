@@ -22,7 +22,7 @@ import {
   writeRetentionPolicy,
   type RetentionPolicy,
   type StorageLike,
-} from '../../components/settings/historyRetentionPolicy'
+} from '../../domains/overview/retentionPolicy.ts'
 
 /** 后端 retention_policy 行（MsgRepo RetentionPolicyRow 的 camelCase wire 形状）。 */
 export interface BackendRetentionPolicyRow {

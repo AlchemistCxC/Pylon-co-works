@@ -21,7 +21,6 @@ import { wireErrorParts } from '../tauri/errorPayload'
 import { typedPayloadCapDisabled } from './readPathSwitches'
 import type { CanonicalEventOwner } from '../../domains/events/eventSchema'
 import { normalizeCanonicalEventRow, type CanonicalEventRow } from '../../domains/events/canonicalEventRow'
-export type { CanonicalEventRow } from '../../domains/events/canonicalEventRow'
 
 /** draft keep/discard 操作结果（evt_draft_keep 返回同形）。 */
 export interface CanonicalEventAppendResult {

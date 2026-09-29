@@ -8,7 +8,7 @@
  * - 速搜索引必须覆盖全部可见字段（搜索命中是 IA 的第二入口）。
  */
 import { describe, expect, it } from 'vitest'
-import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef } from '../../../themeFieldDefs'
+import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef } from '../themeFieldDefs'
 import { buildSettingsSearchIndex } from '../../../components/settings/settingsDomains'
 
 const defs = THEME_FIELD_DEFS as Record<string, ThemeFieldDef>

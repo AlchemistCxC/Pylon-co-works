@@ -3,7 +3,7 @@
 // 原脚本读 App.tsx / skinRuntimeServices.ts 的源码正则段（useSkinSurface / THEME_SETTING_KEYS
 // 订阅扫描）与 css-var 审计重复，按施工书处置不迁移；其余 defs 数据断言逐条平移。
 import { describe, expect, it } from 'vitest'
-import { resolveBasicThemeFields, THEME_FIELD_DEFS, THEME_DEFAULTS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONE_FIELDS } from '../themeFieldDefs.ts'
+import { resolveBasicThemeFields, THEME_FIELD_DEFS, THEME_DEFAULTS, THEME_CSS_VAR_MAP, THEME_SETTING_KEYS, ZONE_FIELDS } from '../domains/theme/themeFieldDefs.ts'
 
 const EDITOR_FIELDS = [
   'editorFontSize',

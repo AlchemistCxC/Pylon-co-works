@@ -1,6 +1,6 @@
 // 迁移自 scripts/test-theme-preset-state.mts（P91 A1）
 import { describe, expect, it } from 'vitest'
-import { markZoneCustom } from '../themePresetState.ts'
+import { markZoneCustom } from '../domains/theme/themePresetState.ts'
 
 // A1 模型：字段写入只标 custom[zone]=true，不动 appliedPreset（基准保留供"恢复原预设"）
 

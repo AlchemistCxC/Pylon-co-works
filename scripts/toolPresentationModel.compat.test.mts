@@ -4,7 +4,7 @@ import {
   buildToolPresentationModel,
   TOOL_PRESENTATION_LIMITS,
   truncateToolSummary,
-} from '../src/components/chat/toolPresentationModel.ts'
+} from '../src/domains/chat/toolPresentationModel.ts'
 import { toolStatePresentation } from '../src/domains/tool/status.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 

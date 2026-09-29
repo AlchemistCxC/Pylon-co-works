@@ -1,4 +1,4 @@
-import type { AgentConnectionStatus } from './agentTypes'
+import type { AgentConnectionStatus } from '../../contracts/agentTypes'
 
 export interface AgentStatusTransactionState {
   status: AgentConnectionStatus

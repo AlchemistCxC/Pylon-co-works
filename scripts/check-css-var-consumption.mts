@@ -5,7 +5,7 @@
 //
 // 注入集 = THEME_CSS_VAR_MAP（defs 中 color/number 且非 noCssVar 的字段，cssVar 显式或
 // kebab 派生）+ themeCssSnapshot 注入 var。
-import { THEME_CSS_VAR_MAP, THEME_SETTING_KEYS } from '../src/themeFieldDefs.ts'
+import { THEME_CSS_VAR_MAP, THEME_SETTING_KEYS } from '../src/domains/theme/themeFieldDefs.ts'
 import { strict as assert } from 'node:assert'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'

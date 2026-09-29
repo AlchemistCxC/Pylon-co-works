@@ -10,7 +10,7 @@ import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { resetStores } from '../../test/resetStores'
 import { MemoryStorage } from '../../test/memoryStorage'
-import { SHEET_STORAGE_KEY, type PersistedSheetState, type SheetLayoutState } from '../sheetPersistence'
+import { SHEET_STORAGE_KEY, type PersistedSheetState, type SheetLayoutState } from '../../domains/workspace/sheetPersistence'
 import type { SheetRecord } from '../sheetTypes'
 
 const KEY = SHEET_STORAGE_KEY

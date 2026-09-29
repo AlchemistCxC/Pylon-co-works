@@ -1,6 +1,6 @@
 import { createElement, lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
-import type { WorkspaceTypeDefinition, WorkspaceViewProps } from '../../workspace-sheets/workspaceTypes.ts'
+import type { WorkspaceTypeDefinition, WorkspaceViewProps } from '../../plugin-runtime/workspaces/workspaceTypes.ts'
 import { BUILTIN_PYLON_GATEWAY_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonGatewayStyles } from './packages/builtin.pylon-gateway/styleAssets.ts'

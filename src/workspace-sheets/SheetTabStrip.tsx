@@ -1,6 +1,6 @@
 import SolidMount from '../host/SolidMount'
 import type { SheetRecord } from './sheetTypes'
-import type { AgentStatus } from '../components/settings/agentTypes'
+import type { AgentStatus } from '../contracts/agentTypes'
 
 /**
  * SheetTabStrip — 页签条（#279 第 3 梯队 Solid 化）。

@@ -1,13 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
-import { useStore } from '../../store'
-import { GLOBAL_PRESETS } from '../../presets/index.ts'
-import { effectivePresetTheme } from '../../zones/index.ts'
-import { THEME_DEFAULTS } from '../../themeFieldDefs'
+import { useStore } from '../../domains/theme/themeStore'
+import { GLOBAL_PRESETS } from '../../domains/theme/presets/index.ts'
+import { effectivePresetTheme } from '../../domains/theme/zones/index.ts'
+import { THEME_DEFAULTS } from '../../domains/theme/themeFieldDefs'
 import SettingsPreview from '../SettingsPreview'
-import type { ThemeSettings } from '../../store'
+import type { ThemeSettings } from '../../domains/theme/themeStore'
 import { themeToCssVars } from './templateThemeVars.ts'
 import { createPresetBundle, presetCoverage, type PresetApplyResult } from '../../domains/theme/presetBundle.ts'
-import { normalizeCustomPresetId } from '../../customPresets.ts'
+import { normalizeCustomPresetId } from '../../domains/theme/customPresets.ts'
 
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。

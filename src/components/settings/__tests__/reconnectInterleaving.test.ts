@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../../../domains/runtime/runtimeStore'
 import { runReconnectCommand } from '../reconnectCommand'
-import type { AgentStatus } from '../agentTypes'
+import type { AgentStatus } from '../../../contracts/agentTypes'
 
 const status = (
   lifecycle: AgentStatus['status'],

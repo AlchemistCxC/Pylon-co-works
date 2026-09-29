@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPredictionRateLimiter } from '../inputPredictionState.ts'
-import { boundPredictionHistory, boundPredictionMessages, createHttpPredictionProvider, createPredictionScheduler } from '../inputPredictionProvider.ts'
+import { createPredictionRateLimiter } from '../../../../infrastructure/prediction/inputPredictionState.ts'
+import { boundPredictionHistory, boundPredictionMessages, createHttpPredictionProvider, createPredictionScheduler } from '../../../../infrastructure/prediction/inputPredictionProvider.ts'
 
 describe('input prediction provider scheduler', () => {
   it('bounds message payloads at the HTTP boundary, preserving roles and newest context', async () => {

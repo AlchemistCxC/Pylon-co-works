@@ -1,5 +1,5 @@
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
-import { fileTabViewType, type FileTabRecord } from '../../sheets/file/fileSheetState.ts'
+import { fileTabViewType, type FileTabRecord } from './fileViewContracts.ts'
 import { getFileWorkbenchRegistry } from '../runtimeServices.ts'
 import type { FileActivityContribution, FileLanguageProvider, FileProvider, FileViewRendererDefinition, GitProvider } from './fileWorkbenchTypes.ts'
 

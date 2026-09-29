@@ -1,4 +1,4 @@
-import type { AgentStatus } from '../../components/settings/agentTypes'
+import type { AgentStatus } from '../../contracts/agentTypes'
 
 /**
  * agentContracts — 能力快照归一化层（P2-02 / #98 协商快照三层投影）。

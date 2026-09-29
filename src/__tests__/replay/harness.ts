@@ -42,7 +42,7 @@
  *
  * 文件名刻意不匹配 `*.test.ts`，故不会被 vitest 收集为测试文件。
  */
-import type { CanonicalEventRow } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
 import type { CanonicalConversationEvent, CanonicalEventOwner, CanonicalEventType } from '../../domains/events/eventSchema.ts'
 

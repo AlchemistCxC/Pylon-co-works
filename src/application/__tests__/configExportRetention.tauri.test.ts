@@ -18,7 +18,7 @@ vi.mock('@tauri-apps/api/core', async () => {
 vi.mock('../../infrastructure/tauri/env', () => ({ IS_TAURI: true }))
 
 import { buildExportPayloadAsync } from '../configExportImport'
-import { RETENTION_STORAGE_KEY } from '../../components/settings/historyRetentionPolicy'
+import { RETENTION_STORAGE_KEY } from '../../domains/overview/retentionPolicy.ts'
 import {
   loadRetentionPolicyPayload,
   overwriteRetentionPolicy,

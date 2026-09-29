@@ -1,4 +1,4 @@
-import type { SpinnerAppearanceSnapshot } from './appearance.ts'
+import type { SpinnerAppearanceSnapshot } from '../appearance/appearance.ts'
 import type { PromptFailureMetadata } from '../../infrastructure/acp/chatContracts.ts'
 
 export type GenerationPhase =

@@ -13,27 +13,9 @@ export interface PanelStatusProps {
 }
 
 /** Backend-agnostic data used to render the Workspace tree. */
-export interface WorkspaceEntry {
-  path: string
-  label: string
-  kind: 'file' | 'folder'
-  expandable?: boolean
-  entries?: readonly WorkspaceEntry[]
-}
+import type { WorkspaceTextPreview, WorkspaceTree } from '../../contracts/workspaceFiles.ts'
 
-export interface WorkspaceTextPreview {
-  relativePath: string
-  content: string
-  bytesRead: number
-  totalBytes: number
-  truncated: boolean
-  encoding: string
-}
-
-export interface WorkspaceTree {
-  entries: readonly WorkspaceEntry[]
-  selectedPath: string | null
-}
+export type { WorkspaceEntry, WorkspaceTextPreview, WorkspaceTree } from '../../contracts/workspaceFiles.ts'
 
 export type WorkspaceViewState =
   | { status: 'no-session' }

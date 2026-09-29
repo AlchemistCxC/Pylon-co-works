@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runReconnectCommand } from '../reconnectCommand'
-import type { AgentStatus } from '../agentTypes'
+import type { AgentStatus } from '../../../contracts/agentTypes'
 
 describe('runReconnectCommand', () => {
   const snapshot: AgentStatus = { agent: 'peri', agentId: 'peri', status: 'connected', generation: 4 }

@@ -22,9 +22,9 @@ import {
 import {
   applyModulePrefs,
   sidebarModulePrefsStore,
-  useSidebarModulePrefs,
-} from '../domains/workbench/sidebarModulePrefs.ts'
-import { sidebarBlockCollapseStore, useSidebarBlockCollapse } from '../domains/workbench/sidebarBlockCollapse.ts'
+} from '../domains/appearance/sidebarModulePrefs.ts'
+import { sidebarBlockCollapseStore } from '../domains/appearance/sidebarBlockCollapse.ts'
+import { useSidebarModulePrefs, useSidebarBlockCollapse } from './sidebar/sidebarPrefsHooks.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import { resolveLaunchIcon } from '../workspace-sheets/launchIcons.tsx'

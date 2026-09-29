@@ -1,4 +1,4 @@
-import type { Message } from '../../components/chat/messageTypes.ts'
+import type { Message } from '../chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
 import { normalizePlanEntries, type PlanEntryV2 } from './plan/goalModel.ts'
 import type {

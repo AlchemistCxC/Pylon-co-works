@@ -133,9 +133,9 @@ PERF_MEMORY_LEGACY=1 bun run perf-bench:memory   # 对照档：关掉 timeline �
 `messages.parts` 合并串（S）+ `timeline[].data.parts`（S）；前两项是 WorkbenchMessage 双字段
 **固有**，第三项才是 timeline 收窄（⧖ M2，需裁决）能动的。实测基线 **3.119×**（tool 族口径的
 1.2× 对文本族不成立——即使 M2 落地也只到 ≈2×）。阈值定多少、要不要动消息形状，归 M2 裁决包；
-裁决前该行只出读数、不计入退出码。`text 粒度对照` 顺带量化了「不过 sink 折叠」的代价：
-batch 8 行 0.4 MB vs 逐 delta 2087 行 1.5 MB（**3.55×**）——这正是 memorySuite 必须先过
-`mergeAdjacentDeltaChunks` 的原因。
+裁决前该行只出读数、不计入退出码。`text 粒度对照` 顺带量化了「不折叠」的代价：
+batch 8 行 0.4 MB vs 逐 delta 2087 行 1.5 MB（**3.55×**）——这正是 memorySuite 折叠前必须先过
+`mergeAdjacentDeltaChunks`（测试期参考合并器，形状复刻 Rust fold.rs 的生产折叠；无生产调用方）的原因。
 
 两点别读错：
 

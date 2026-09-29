@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { FileCode2, Files, Search } from 'lucide-react'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
-import { useSessionUiState} from '../chat/sessionUiState'
-import { searchValuesMatchQuery } from '../chat/messageSearchIndex'
-import MessageSearchBar from '../chat/MessageSearchBar'
+import { sessionUiStateGet, sessionUiStateSet } from '../../domains/chat/sessionUiState'
+import { searchValuesMatchQuery } from '../../domains/chat/messageSearchIndex'
+import MessageSearchBar from './MessageSearchBar'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes'
 import type { SessionUiKey } from '../../domains/workbench/sessionUiStore.ts'
@@ -14,6 +14,29 @@ import {
   getActiveWorkbenchHostPort,
   subscribeActiveWorkbenchHostPort,
 } from '../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
+
+/** 按会话作用域的 UI 状态钩子（自 domains/chat/sessionUiState 内联——唯一 React 消费点）。 */
+function useSessionUiState<T,>(
+  sessionId: string | null,
+  key: string,
+  initial: T,
+): [T, Dispatch<SetStateAction<T>>] {
+  const id = sessionId ?? ''
+  const initialRef = useRef(initial)
+  const [state, setState] = useState<T>(() => sessionUiStateGet<T>(id, key) ?? initialRef.current)
+  // 会话切换：恢复该会话存档（useLayoutEffect 避免 B 先闪现 A 的一帧）
+  useLayoutEffect(() => {
+    setState(() => sessionUiStateGet<T>(id, key) ?? initialRef.current)
+  }, [id, key])
+  const set: Dispatch<SetStateAction<T>> = useCallback((action) => {
+    setState(prev => {
+      const next = typeof action === 'function' ? (action as (p: T) => T)(prev) : action
+      sessionUiStateSet(id, key, next)
+      return next
+    })
+  }, [id, key])
+  return [state, set]
+}
 
 function useActiveWorkbenchHostPort(sheetId: string): WorkbenchHostPort | undefined {
   return useSyncExternalStore(

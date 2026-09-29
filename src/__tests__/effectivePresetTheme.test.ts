@@ -15,12 +15,12 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PRESETS, GLOBAL_PRESETS } from '../presets/index.ts'
+import { DEFAULT_PRESETS, GLOBAL_PRESETS } from '../domains/theme/presets/index.ts'
 import { PRESET_ZONES } from '../domains/theme/presetReducer.ts'
-import { THEME_SETTING_KEYS, ZONE_FIELDS, THEME_FIELD_DEFS, ZONES } from '../themeFieldDefs.ts'
-import { effectivePresetTheme, pickZoneFields, ZONE_PRESET_POOL } from '../zones/index.ts'
+import { THEME_SETTING_KEYS, ZONE_FIELDS, THEME_FIELD_DEFS, ZONES } from '../domains/theme/themeFieldDefs.ts'
+import { effectivePresetTheme, pickZoneFields, ZONE_PRESET_POOL } from '../domains/theme/zones/index.ts'
 import { planGlobalPreset } from '../application/transactions/applyGlobalPreset.ts'
-import { THEME_DEFAULTS } from '../themeFieldDefs.ts'
+import { THEME_DEFAULTS } from '../domains/theme/themeFieldDefs.ts'
 
 const REPO_ROOT = resolve(__dirname, '..', '..')
 
@@ -199,7 +199,7 @@ describe('B4 「终端补全」机制确实没了（源码级扫描）', () => {
     }
     expect(hits, '被删机制的名字不得再出现在源码或测试里').toEqual([])
     // 机制本体（补全模块与它的测试）也已删除
-    expect(sourceFiles(join(REPO_ROOT, 'src', 'presets')).some(file => file.endsWith('completion.ts')), 'completion.ts 应已删除').toBe(false)
+    expect(sourceFiles(join(REPO_ROOT, 'src', 'domains', 'theme', 'presets')).some(file => file.endsWith('completion.ts')), 'completion.ts 应已删除').toBe(false)
   })
 })
 

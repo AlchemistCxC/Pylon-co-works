@@ -12,9 +12,9 @@
  * 来源为 App 实际布局结构（App root / SheetLayout 三段式 / App 级 dialog），
  * S5-C 会把这些值落到真实 DOM。
  */
-import { THEME_FIELD_DEFS, THEME_SETTING_KEYS, fieldToCssVar, type ThemeFieldDef, type ThemeFieldKey } from '../../themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, THEME_SETTING_KEYS, fieldToCssVar, type ThemeFieldDef, type ThemeFieldKey } from '../../domains/theme/themeFieldDefs.ts'
 import { DEFAULTS } from '../../domains/theme/themeDefaults.ts'
-import { MESSAGE_ROLES } from '../../components/chat/messageTypes.ts'
+import { MESSAGE_ROLES } from '../../domains/chat/messageTypes.ts'
 import { TOOL_VISUAL_STATES } from '../../domains/tool/status.ts'
 import type {
   SkinFieldSchema,

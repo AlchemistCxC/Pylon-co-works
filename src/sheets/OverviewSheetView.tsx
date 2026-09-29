@@ -13,11 +13,11 @@ import { switchAgentTransaction } from '../application/transactions/switchAgentT
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../application/transactions/openOwnedSessionTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
 import PylonMark from '../components/PylonMark'
-import { statusLabel } from '../components/settings/agentTypes.ts'
+import { statusLabel } from '../contracts/agentTypes.ts'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
-import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
+import { isAgentInvocationConfigured } from '../contracts/agentEntry.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
 
@@ -38,7 +38,7 @@ function relativeTime(timestamp: number): string {
  * 虚拟空态（不写入持久 sheet 数组）：无 active sheet 时 SheetLayout 直接渲染 overview。
  * 三入口：选择 Agent（list_agents → switch_agent → 无缝 open agent sheet，失败保持
  * overview 并报错）/ 配置 Agent（W1-07 接线）/ 继续会话（list_persisted_sessions →
- * 最近 5 个 → 找/建 identity row → selectSession + open agent sheet；load 由 ChatView
+ * 最近 5 个 → 找/建 identity row → selectSession + open agent sheet；load 由 agentWorkbenchLifecycle
  * 挂载后的 controller lifecycle 承担——listener 就绪后才 load）。
  */
 export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
@@ -144,7 +144,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   }
 
   // W1-06：复用现有 identity session；无则创建 row 并纠正 source/periId（不直接 load——
-  // 由 ChatView 挂载后的 lifecycle 执行 load，保证 listener/controller 就绪）。
+  // 由 agentWorkbenchLifecycle 执行 load，保证 listener/controller 就绪）。
   // FE-AUD-010：找/建逻辑收敛到 resumePersistedSessionTransaction，不靠数组长度定位。
   const resumeSession = async (p: PersistedSessionSummary) => {
     setError('')

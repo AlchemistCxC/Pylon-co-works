@@ -24,7 +24,7 @@ import { PresetRegistry } from './preset/presetRegistry.ts'
 import {
   setWorkspaceRegistryStore,
   WorkspaceRegistryStore,
-} from '../workspace-sheets/workspaceRegistry.ts'
+} from './workspaces/workspaceRegistry.ts'
 import type { RuntimeRegistries } from './pluginHostServices.ts'
 
 export interface RuntimeServices extends RuntimeRegistries {

@@ -8,7 +8,7 @@ import { createPluginHookApi, type PluginHookApi } from './hooks/pluginHookApi.t
 import type { CommandRegistryTransaction } from './commands/commandRegistry.ts'
 import type { HookRegistryTransaction } from './hooks/hookRegistry.ts'
 import type { RendererRegistryTransaction } from './renderers/rendererRegistry.ts'
-import type { WorkspaceRegistryTransaction } from '../workspace-sheets/workspaceRegistry.ts'
+import type { WorkspaceRegistryTransaction } from './workspaces/workspaceRegistry.ts'
 import type { PluginApplicationRegistryTransaction } from './application/applicationHost.ts'
 import type { PluginIdentity } from './pluginIdentity.ts'
 import type { PluginScope } from './pluginScope.ts'

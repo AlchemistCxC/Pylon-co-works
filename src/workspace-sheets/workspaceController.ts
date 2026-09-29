@@ -1,5 +1,5 @@
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
-import { resolveWorkspace } from './workspaceRegistry.ts'
+import { resolveWorkspace } from '../plugin-runtime/workspaces/workspaceRegistry.ts'
 import type { SheetId, SheetRecord } from './sheetTypes.ts'
 import { canCloseWorkspaceLiveState } from './workspaceLiveCloseGuards.ts'
 

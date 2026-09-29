@@ -1,4 +1,4 @@
-import type { AgentStatus } from './agentTypes'
+import type { AgentStatus } from '../../contracts/agentTypes'
 
 interface ReconnectCommandDependencies {
   reconnect: () => Promise<unknown>

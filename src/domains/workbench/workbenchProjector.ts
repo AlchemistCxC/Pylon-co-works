@@ -439,7 +439,7 @@ export function reduceWorkbenchEvent(
   const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
     ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
     : envelope
-  const timeline = insertBySequence(document.timeline, timelineEntry(effective))
+  const timeline = insertBySequence(document.timeline, timelineEntry(effective, narrowingEnabled(undefined)))
   let next: WorkbenchDocument = {
     ...document,
     revision: Math.max(document.revision, envelope.sequence),
@@ -454,7 +454,7 @@ export function reduceWorkbenchEvent(
 
 export function projectWorkbench(
   events: readonly WorkbenchEventEnvelope[],
-  options: { readonly initialDocument?: WorkbenchDocument } = {},
+  options: { readonly initialDocument?: WorkbenchDocument; readonly narrowTimelinePayload?: boolean } = {},
 ): ProjectionResult {
   // #205：冷重放的 journal 行本就有序（SQL ORDER BY sequence）——已升序时直接用入参，
   // 省掉一份整集合拷贝 + 一次排序；乱序输入（live 缓冲折入）仍走同一排序语义。
@@ -529,7 +529,7 @@ export function projectWorkbench(
     const effective: WorkbenchEventEnvelope = envelope.event.type.startsWith('interaction.')
       ? { ...envelope, event: redactInteractionEvent(envelope.event as unknown as Record<string, unknown>) } as unknown as WorkbenchEventEnvelope
       : envelope
-    const entry = timelineEntry(effective)
+    const entry = timelineEntry(effective, narrowingEnabled(options.narrowTimelinePayload))
     const tail = timeline.at(-1)
     // 升序输入下恒走 push（入口已排序 ⇒ 不中插）；乱序兜底仍是同一插入语义。
     if (!tail || tail.sequence <= entry.sequence) timeline.push(entry)
@@ -1582,9 +1582,10 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   const transitionToError = failedTurn && !alreadyTerminal
   const isError = level === 'error'
   const previous = document.diagnostics
-  // 计数环（非 error）：同 code 且同 message 的既有条目就地 count+1 并刷新到最新事件。
-  // 键带 message：event.unknown 的卡片标题取变体名（#405），不同 originalType 的变体
-  // 必须各自成卡，只折叠「同一形状的重复」。error 级恒追加。
+  // 计数环（非 error）：同 code、同 message 且同 level 的既有条目就地 count+1 并刷新到
+  // 最新事件。键带 message：event.unknown 的卡片标题取变体名（#405），不同 originalType
+  // 的变体必须各自成卡，只折叠「同一形状的重复」；键带 level：info→warning 的升级证据
+  // 不能被首条的 level 吞掉（审查轮 P2）。error 级恒追加。
   let appended = false
   let nextDiagnostics: WorkbenchProjectionDiagnostic[]
   if (isError) {
@@ -1593,8 +1594,14 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   } else {
     let merged = false
     nextDiagnostics = previous.map(entry => {
-      if (merged || entry.level === 'error' || entry.code !== code || entry.message !== message) return entry
+      if (merged || entry.level === 'error' || entry.code !== code || entry.message !== message || entry.level !== level) return entry
       merged = true
+      // 恢复 data 时必须剥掉 dataOmitted——「标记 ⇒ 已摘除」是本形状的契约
+      // （审查轮 P1：合并携带旧标记会造出 data 与 dataOmitted 并存的违约态）。
+      if (data !== undefined && entry.dataOmitted !== undefined) {
+        const { dataOmitted: _dropped, ...restored } = entry
+        return { ...restored, count: (entry.count ?? 1) + 1, eventId: envelope.eventId, sequence: envelope.sequence, data }
+      }
       return {
         ...entry,
         count: (entry.count ?? 1) + 1,
@@ -1608,24 +1615,28 @@ function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnve
       appended = true
     }
   }
-  // 条目环：非 error 超 256 丢最旧（error 恒保留）。
+  // 条目环：非 error 超 256 丢**最旧**（error 恒保留），单趟 filter 保持到达序——
+  // 不做「error 前置重排」，那会打乱 error center 事实源的展示顺序（审查轮 P2）。
   let ringed = nextDiagnostics
   if (!isError && nextDiagnostics.length > DIAGNOSTICS_ENTRY_LIMIT) {
-    const errorEntries = nextDiagnostics.filter(entry => entry.level === 'error')
-    const infoEntries = nextDiagnostics.filter(entry => entry.level !== 'error')
-    ringed = [...errorEntries, ...infoEntries.slice(infoEntries.length - DIAGNOSTICS_ENTRY_LIMIT)]
+    const nonError = nextDiagnostics.filter(entry => entry.level !== 'error')
+    const excess = nonError.length - DIAGNOSTICS_ENTRY_LIMIT
+    if (excess > 0) {
+      const dropped = new Set(nonError.slice(0, excess))
+      ringed = nextDiagnostics.filter(entry => !dropped.has(entry))
+    }
   }
   // data 字节预算：超预算从最旧的非 error 条目起摘 data（error 豁免）。合并/新增那条的
   // data 是本事件引入的增量（data === undefined 时旧 data 原样保留、零增量），用它校正
-  // memo 总量，其余条目沿用 memo；环淘汰发生在超限 pathological 区，被淘汰条目的贡献
-  // 保留在账上只会让预算判更保守（多摘不漏摘），不值得为此重算全表。
+  // memo 总量；环淘汰后**重算全表**——否则被淘汰条目的幻影字符永久占账，极端时把有效
+  // 预算压到零（审查轮 P2）。环触发是超限 pathological 区的低频路径，O(N) 重算可接受。
   let budgeted = ringed
   const previousTotal = diagnosticsDataChars(previous)
   const removedChars = appended || data === undefined ? 0 : (() => {
-    const old = previous.find(entry => entry.level !== 'error' && entry.code === code && entry.message === message)
+    const old = previous.find(entry => entry.level !== 'error' && entry.code === code && entry.message === message && entry.level === level)
     return old !== undefined ? diagnosticDataChars(old.data) : 0
   })()
-  let total = previousTotal - removedChars + diagnosticDataChars(data)
+  let total = ringed !== nextDiagnostics ? diagnosticsDataChars(ringed) : previousTotal - removedChars + diagnosticDataChars(data)
   if (total > DIAGNOSTICS_DATA_BUDGET_CHARS) {
     budgeted = ringed.map(entry => {
       if (total <= DIAGNOSTICS_DATA_BUDGET_CHARS || entry.level === 'error' || entry.data === undefined) return entry
@@ -1697,11 +1708,22 @@ function refreshOrphans(document: WorkbenchDocument, providedIds?: ReadonlySet<s
  */
 const NARROWED_TIMELINE_KINDS: readonly WorkbenchTimelineKind[] = ['tool', 'activity']
 
-/** #375-a 的全局开关：默认收窄；宿主在 bind 时按逃生口置位（投影核本身保持纯函数）。 */
-let narrowTimelinePayload = true
+/** #375-a 的宿主默认开关：默认收窄；宿主（agentWorkbenchSession）按 DOM 逃生口置位。
+ * 投影核的确定性以「显式 options 优先」保证——同一入参 + 同一 options ⇒ 同一输出；
+ * 未传 options 时沿用宿主默认（结构审查 B-8：全局可变状态改为默认值语义）。 */
+let hostNarrowTimelinePayloadDefault = true
 
 export function setTimelinePayloadNarrowing(enabled: boolean): void {
-  narrowTimelinePayload = enabled
+  hostNarrowTimelinePayloadDefault = enabled
+}
+
+/** 投影 options：narrowTimelinePayload 显式传入时覆盖宿主默认（测试/工具不再依赖进程级状态）。 */
+export interface WorkbenchReduceOptions {
+  readonly narrowTimelinePayload?: boolean
+}
+
+function narrowingEnabled(explicit?: boolean): boolean {
+  return explicit ?? hostNarrowTimelinePayloadDefault
 }
 
 /**
@@ -1761,7 +1783,7 @@ function narrowTimelineData(event: unknown): unknown {
   return freezeDeepSnapshot(narrowed)
 }
 
-function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry {
+function timelineEntry(envelope: WorkbenchEventEnvelope, narrowTimelinePayload: boolean): WorkbenchTimelineEntry {
   const event = envelope.event
   const kind: WorkbenchTimelineKind = event.type.startsWith('message.') ? 'message'
     : event.type.startsWith('reasoning.') ? 'reasoning'

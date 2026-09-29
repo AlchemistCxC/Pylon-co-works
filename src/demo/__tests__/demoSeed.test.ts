@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 // openSheet 经 sheet registry（插件贡献）路由；接线测试需先注册第一方产品 sheet kinds。
 import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { buildDemoAgents, buildDemoMessages, buildDemoPermissionRequest, buildDemoSessions, buildGitStatus, buildSessionSummaries } from '../demoData.ts'
-import { persistMessageSnapshot, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import { persistMessageSnapshot, parseMessageSnapshot } from '../../domains/chat/messagePersistence.ts'
 import { runBrowserDemoSeed } from '../../app/bootstrap/browserDemoBootstrap.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'

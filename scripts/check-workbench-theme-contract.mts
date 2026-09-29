@@ -2,11 +2,11 @@ import { strict as assert } from 'node:assert'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { normalizeCustomPresets } from '../src/customPresets.ts'
+import { normalizeCustomPresets } from '../src/domains/theme/customPresets.ts'
 import {
   createWorkbenchSkinFixtureSet,
   validateWorkbenchSkinFixtureSet,
-} from '../src/domains/workbench/workbenchSkinContract.ts'
+} from '../src/domains/appearance/workbenchSkinContract.ts'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = new Set(process.argv.slice(2))

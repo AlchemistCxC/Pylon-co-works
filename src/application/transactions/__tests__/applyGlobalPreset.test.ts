@@ -6,7 +6,7 @@ import { getInterfaceModeRegistry, getPresentationProfileRegistry } from '../../
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../../domains/theme/themeStore.ts'
 import { applyGlobalPreset } from '../applyGlobalPreset.ts'
 
 const registrations: AsyncDisposable[] = []

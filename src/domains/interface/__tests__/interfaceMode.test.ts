@@ -6,7 +6,7 @@ import { getInterfaceModeRegistry, getPresentationProfileRegistry, getRendererRe
 import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../../theme/themeStore.ts'
 import { DEFAULT_INTERFACE_MODE, DEFAULT_INTERFACE_PROFILES, useInterfaceModeStore } from '../interfaceModeStore.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'

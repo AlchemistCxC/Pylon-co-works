@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // D-trace：设置项写入溯源——漏斗挂钩与贡献者区分（呈现风格 vs 用户编辑）。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../../../store.ts'
+import { useStore } from '../themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import {
   lastSettingWriter,

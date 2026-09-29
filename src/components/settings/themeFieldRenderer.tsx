@@ -1,0 +1,405 @@
+import { Fragment, useState, useSyncExternalStore } from 'react'
+import * as ToggleGroup from '@radix-ui/react-toggle-group'
+import type { ThemeSettings } from '../../domains/theme/themeStore'
+import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_FIELD_OWNERS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from '../../domains/theme/themeFieldDefs'
+import ColorPopover from '../ColorPopover'
+import { readCollapsed, writeCollapsed, type CollapseMap } from './settingsChromeState.ts'
+import { resolveBackgroundImage } from '../../infrastructure/skin/backgroundImage'
+import { resolveSpinnerFrames } from '../../domains/chat/spinnerFrames'
+import FontContributionPicker from './FontContributionPicker.tsx'
+import Select from '../ui/Select.tsx'
+import { getPluginSettingOptionsRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
+import type { PluginSettingOption, PluginSettingOptionsContribution } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
+import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
+import { resolveToolIndicatorAsset, toolIndicatorOptions } from '../../domains/chat/toolIndicatorAssets.ts'
+import { lastSettingWriter, SETTING_WRITE_SOURCE_LABELS } from '../../domains/theme/settingProvenance.ts'
+
+/**
+ * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）。
+ *
+ * 按 THEME_FIELD_DEFS 类型/控件标识 + GROUP_ORDER（分区/组/compact）渲染
+ * Settings 字段区。能力：type 分发、特殊控件（bgImage/spinnerMarker/
+ * schemeChip）、showIf 条件、advanced 折叠、suffix 后缀、hint 提示、
+ * compact 紧凑行、h3 分区。
+ */
+
+export interface RenderCtx {
+  t: ThemeSettings & { ccEditMode: boolean }
+  onChange: (partial: Partial<ThemeSettings>) => void
+  /** 设置搜索：按字段 label 过滤；非空时强制展开全部匹配组 */
+  search?: string
+  settingOptionEntries?: readonly RegistryEntry<PluginSettingOptionsContribution>[]
+}
+
+export function Row({ label, children, className = '', anchor, dataProv }: { label: string; children: React.ReactNode; className?: string; anchor?: string; dataProv?: string }) {
+  return <div className={`set-row${className ? ` ${className}` : ''}`} data-search-anchor={anchor} data-prov={dataProv}><span className="set-row-label">{label}</span>{children}</div>
+}
+
+export function Slider({ value, onChange, min, max, step }: { value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
+  return <input type="range" min={min} max={max} step={step || 0.05} value={value}
+    onChange={e => onChange(+e.target.value)} className="set-range" />
+}
+
+export function Num({ value, onChange, min, max }: { value: number; onChange: (v: number) => void; min?: number; max?: number }) {
+  return <input type="number" min={min} max={max} value={value} step={0.1}
+    onChange={e => onChange(+e.target.value)} className="set-num" />
+}
+
+export function Sel({ value, onChange, options, ariaLabel }: { value: string; onChange: (v: string) => void; options: readonly (string | { value: string; label: string; description?: string; disabled?: boolean })[]; ariaLabel: string }) {
+  return <Select ariaLabel={ariaLabel} value={value} onChange={onChange} className="set-select" options={options.map(option => typeof option === 'string' ? { value: option, label: option } : option)} />
+}
+
+function settingOptions(keyName: ThemeFieldKey, base: readonly PluginSettingOption[], ctx: RenderCtx) {
+  return resolvePluginSettingOptions(`theme.${keyName}`, base, ctx.settingOptionEntries ?? [])
+}
+
+function withUnavailableCurrent(options: ReturnType<typeof settingOptions>, value: string) {
+  return options.some(option => option.value === value)
+    ? options
+    : [{ value, label: `${value}（已不可用）`, disabled: true }, ...options]
+}
+
+export function Txt({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" />
+}
+
+// B1 边界修复：折叠记忆统一走 settingsChromeState（消除双读写器漂移）
+const collapseStorage: { get(k: string): string | null; set(k: string, v: string): void } = {
+  get: k => { try { return window.localStorage.getItem(k) } catch { return null } },
+  set: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 禁储静默 */ } },
+}
+
+// D-perf：折叠记忆读缓存。Group 数量 ~30，此前每次渲染每组各 JSON.parse 一次
+// localStorage（拖滑块/搜索逐键都全量重渲染）——写穿失效的单份缓存消除该开销。
+let collapseCache: CollapseMap | null = null
+function readCollapsedCached(): CollapseMap {
+  if (!collapseCache) collapseCache = readCollapsed(collapseStorage.get)
+  return collapseCache
+}
+
+function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: string; title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
+  const collapseKey = zone ? `${zone}.${title}` : undefined
+  const rememberedCollapsed = collapseKey ? readCollapsedCached()[collapseKey] : undefined
+  const [open, setOpen] = useState(rememberedCollapsed === undefined ? (defaultOpen ?? true) : !rememberedCollapsed)
+  const visible = open || forceOpen === true
+  return (
+    <div className="set-group" data-group-anchor={title}>
+      <button type="button" className="set-group-title" aria-expanded={visible}
+        onClick={() => {
+          const next = !visible
+          setOpen(next)
+          if (collapseKey) {
+            const map = { ...readCollapsedCached(), [collapseKey]: !next }
+            collapseCache = map
+            writeCollapsed(map, collapseStorage.set)
+          }
+        }}>
+        <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
+        {title}
+      </button>
+      {visible && children}
+    </div>
+  )
+}
+
+function BgImageControl({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const resolved = resolveBackgroundImage(value)
+  const openFile = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({ multiple: false, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }] })
+      if (selected) onChange(selected as string)
+    } catch { /* browser fallback */ }
+  }
+  return (
+    <>
+      <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{ width: '160px' }} placeholder="路径或 URL" />
+      <button className="ps-btn sm" onClick={openFile}>选择</button>
+      {value && <>
+        <div className={`set-bg-preview ${resolved.error ? 'error' : ''}`} style={{ backgroundImage: resolved.cssValue }}
+          onClick={() => onChange('')} title={resolved.error ? `加载失败：${resolved.error}；点击清除` : '点击清除'} />
+        {resolved.error && <span className="set-bg-error" role="alert">{resolved.error}</span>}
+      </>}
+    </>
+  )
+}
+
+function SpinnerMarkerControl({ mode, value, frames, onModeChange, onValueChange }: {
+  mode: string
+  value: string
+  frames: string[]
+  onModeChange: (v: string) => void
+  onValueChange: (v: string) => void
+}) {
+  const safeFrames = frames.length > 0 ? frames : ['·']
+  return (
+    <>
+      <Sel ariaLabel="标记模式" value={mode} onChange={onModeChange} options={['frame', 'custom']} />
+      {mode === 'frame'
+        ? <Sel ariaLabel="标记帧" value={safeFrames.includes(value) ? value : safeFrames[0]} onChange={onValueChange} options={safeFrames} />
+        : <Txt value={value} onChange={onValueChange} />}
+    </>
+  )
+}
+
+/** spinner 完成/取消/错误标记配套的 mode 字段名 */
+function spinnerMarkerModeKey(key: string): ThemeFieldKey | null {
+  const map: Record<string, ThemeFieldKey> = {
+    spinnerDoneMarker: 'spinnerDoneMarkerMode',
+    spinnerCancelledMarker: 'spinnerCancelledMarkerMode',
+    spinnerErrorMarker: 'spinnerErrorMarkerMode',
+  }
+  return map[key] ?? null
+}
+
+/** number 显示后缀（percent 时值 *100） */
+function formatDisplayValue(value: unknown, def: ThemeFieldDef): string {
+  const num = Number(value ?? 0)
+  const display = def.percent ? Math.round(num * 100) : num
+  return `${display}${def.suffix ?? ''}`
+}
+
+/** 控件本体（不含 Row 包装；compact 行内联复用） */
+function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
+  const { t, onChange } = ctx
+  const value = t[keyName]
+
+  if (def.control === 'bgImage') {
+    return <BgImageControl value={String(value ?? '')} onChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)} />
+  }
+
+  if (def.control === 'spinnerMarker') {
+    const modeKey = spinnerMarkerModeKey(keyName)
+    const frames = resolveSpinnerFrames(t.spinnerFramePreset, t.spinnerCustomFrames)
+    return (
+      <SpinnerMarkerControl
+        mode={modeKey ? String(t[modeKey] ?? 'frame') : 'custom'}
+        value={String(value ?? '')}
+        frames={frames}
+        onModeChange={v => { if (modeKey) onChange({ [modeKey]: v } as Partial<ThemeSettings>) }}
+        onValueChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)}
+      />
+    )
+  }
+
+  if (def.control === 'schemeChip') {
+    return (
+      <div className="set-preset-row">
+        <button type="button" className={`set-preset-chip ${value === 'light' ? 'active' : ''}`} onClick={() => onChange({ [keyName]: 'light' } as Partial<ThemeSettings>)}>浅色</button>
+        <button type="button" className={`set-preset-chip ${value === 'dark' ? 'active' : ''}`} onClick={() => onChange({ [keyName]: 'dark' } as Partial<ThemeSettings>)}>深色</button>
+      </div>
+    )
+  }
+
+  if (def.control === 'fontPicker' && def.fontRole) {
+    return <FontContributionPicker ariaLabel={def.label} value={String(value ?? '')} role={def.fontRole} settingTarget={`theme.${keyName}`} optionContributions={ctx.settingOptionEntries} onChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)} />
+  }
+
+  if (def.control === 'toolIndicator') {
+    const current = resolveToolIndicatorAsset(String(value ?? '')).id
+    const options = settingOptions(keyName, toolIndicatorOptions(), ctx)
+    return <Sel
+      ariaLabel={def.label}
+      value={current}
+      onChange={next => onChange({ [keyName]: next } as Partial<ThemeSettings>)}
+      options={withUnavailableCurrent(options, current)}
+    />
+  }
+
+  // ★ #266 刀9：原先这里有一层 `syncOnChange`（写某字段时连带写它声明的伙伴字段，例如
+  //   `inputVariant` ↔ `inputMode`）。那两个字段已随「固定命令行」删除，机制失去唯一声明方
+  //   与读取者 ⇒ 整段撤掉，控件改动只走 `onChange`（行为零变化：改造前也只有那一对在用它）。
+  const emit = (partial: Partial<ThemeSettings>) => onChange({ ...partial })
+
+  switch (def.type) {
+    case 'color':
+      { const palette = settingOptions(keyName, [], ctx)
+        return <ColorPopover value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} chips={palette.length > 0} palette={palette} /> }
+    case 'number': {
+      const min = def.minFn ? def.minFn(t as ThemeSettings) : (def.min ?? 0)
+      return (
+        <>
+          <Slider value={Number(value ?? 0)} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} min={min} max={def.max ?? 100} step={def.step} />
+          <Num value={Number(value ?? 0)} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} min={min} max={def.max} />
+          {def.suffix && <span className="set-val">{formatDisplayValue(value, def)}</span>}
+        </>
+      )
+    }
+    case 'select':
+      if (def.control === 'segmented') {
+        // T1-B：segmented 覆盖——2~3 值互斥选项用按钮组（Radix ToggleGroup 底座，链B 同款样式）
+        const current = String(value ?? '')
+        const options = settingOptions(keyName, (def.options ?? []).map(option => ({ value: option, label: def.optionLabels?.[option] ?? option })), ctx)
+        return (
+          <ToggleGroup.Root
+            type="single"
+            className="renderer-segmented"
+            aria-label={def.label}
+            value={current}
+            onValueChange={next => { if (next !== '') emit({ [keyName]: next } as Partial<ThemeSettings>) }}
+          >
+            {withUnavailableCurrent(options, current).map(option => (
+              <ToggleGroup.Item key={option.value} value={option.value} disabled={option.disabled}
+                data-state={option.value === current ? 'on' : 'off'}
+                className={`renderer-segmented-chip${option.value === current ? ' active' : ''}`}>
+                {option.label}
+              </ToggleGroup.Item>
+            ))}
+          </ToggleGroup.Root>
+        )
+      }
+      { const current = String(value ?? '')
+        const options = settingOptions(keyName, (def.options ?? []).map(option => ({ value: option, label: def.optionLabels?.[option] ?? option })), ctx)
+        return <Sel
+          ariaLabel={def.label}
+          value={current}
+          onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)}
+          options={withUnavailableCurrent(options, current)}
+        /> }
+    case 'boolean':
+      return <Sel ariaLabel={def.label} value={value ? 'on' : 'off'} onChange={v => emit({ [keyName]: v === 'on' } as Partial<ThemeSettings>)} options={[{ value: 'on', label: '开' }, { value: 'off', label: '关' }]} />
+    case 'text':
+      return <Txt value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} />
+  }
+}
+
+function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
+  const value = ctx.t[keyName]
+  const atDefault = def.default !== undefined && Object.is(value, def.default)
+  // D-trace：字段行暴露最近写入贡献者（title + data 属性，无布局影响）。
+  const provenance = lastSettingWriter(keyName)
+  const provenanceTitle = provenance
+    ? `（最后写入：${SETTING_WRITE_SOURCE_LABELS[provenance.source]}）`
+    : ''
+  return (
+    <Row label={def.label} anchor={`field:${keyName}`} className={def.control === 'fontPicker' ? 'font-setting-row' : ''} dataProv={provenance?.source}>
+      <FieldControl def={def} ctx={ctx} keyName={keyName} />
+      {def.default !== undefined && !atDefault && (
+        <button type="button" className="set-field-reset" aria-label="恢复默认"
+          title={`恢复默认${provenanceTitle}`} onClick={() => ctx.onChange({ [keyName]: def.default } as Partial<ThemeSettings>)}>↺</button>
+      )}
+      {def.hint && <div className="set-hint">{def.hint}</div>}
+    </Row>
+  )
+}
+
+function renderGroupFields(fields: ThemeFieldKey[], ctx: RenderCtx) {
+  const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  const advanced = fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  // 搜索时 advanced 字段内联展开（不藏进"高级…"，否则命中项不可见）
+  const searching = (ctx.search?.trim() ?? '').length > 0
+  const advancedRows = advanced.map(key => {
+    const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+    return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+  })
+  return (
+    <>
+      {regular.map(key => {
+        const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+        return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+      })}
+      {advanced.length > 0 && (searching
+        ? advancedRows
+        : (
+          <details className="set-advanced">
+            <summary>高级…</summary>
+            {advancedRows}
+          </details>
+        ))}
+    </>
+  )
+}
+
+function renderCompactGroup(fields: ThemeFieldKey[], ctx: RenderCtx) {
+  const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  return (
+    <div className="set-compact-row">
+      {regular.map(key => {
+        const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+        const value = ctx.t[key]
+        const atDefault = def.default !== undefined && Object.is(value, def.default)
+        return (
+          <Fragment key={key}>
+            <span className="set-compact-label">{def.label}</span>
+            <FieldControl def={def} ctx={ctx} keyName={key} />
+            {def.default !== undefined && !atDefault && (
+              <button type="button" className="set-field-reset compact" aria-label="恢复默认"
+                onClick={() => ctx.onChange({ [key]: def.default } as Partial<ThemeSettings>)}>↺</button>
+            )}
+          </Fragment>
+        )
+      })}
+      {fields.some(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced) && (
+        <details className="set-advanced">
+          <summary>高级…</summary>
+          {fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced).map(key => {
+            const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+            return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+          })}
+        </details>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 渲染某 zone 的字段区：GROUP_ORDER 提供 分区（h3）→ 组（可 compact）两级。
+ * 字段从 defs 按 group 自动收集；hidden 跳过、showIf 条件过滤。
+ */
+export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: ZoneName; ctx: RenderCtx; density?: 'basic' | 'standard' | 'all' }) {
+  const optionRegistry = getPluginSettingOptionsRegistry()
+  const settingOptionEntries = useSyncExternalStore(
+    listener => optionRegistry.subscribe(listener),
+    () => optionRegistry.getSnapshot(),
+    () => optionRegistry.getSnapshot(),
+  ).entries
+  const resolvedCtx = { ...ctx, settingOptionEntries }
+  const sections = GROUP_ORDER[zone]
+  if (!sections) return null
+  const query = ctx.search?.trim().toLowerCase() ?? ''
+  const searching = query.length > 0
+  return (
+    <>
+      {sections.map((section, si) => {
+        const groups = section.groups
+          .map(group => {
+            const fields = THEME_FIELD_KEYS.filter(key => {
+              const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+              return def.zone === zone && def.group === group.title && !def.hidden
+                && THEME_FIELD_OWNERS[key].owner === 'theme'
+                && (density !== 'basic' || def.tier === 'basic')
+                && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
+                && (!searching || def.label.toLowerCase().includes(query))
+            })
+            return { ...group, fields }
+          })
+          // 只渲染**有字段**的组（空组会画出一个只有标题、点了没东西的分类）。
+          // ★ #238 刀6：原先这里还有个 `|| section.heading === '输入区'` 的例外 —— 那是给
+          //   手写时代的中控「输入区」保留占位小标题用的。cc 分组改成派生之后，
+          //   没有可调项的子部件**根本不进 `GROUP_ORDER`**（在派生处就滤掉了），该例外失去唯一
+          //   的适用对象（全仓已无 heading 叫「输入区」的分区）⇒ 一并删除。
+          .filter(group => group.fields.length > 0)
+        if (groups.length === 0) {
+          return section.heading
+            ? <h3 key={section.heading} data-group-anchor={section.heading}>{section.heading}</h3>
+            : null
+        }
+        return (
+          <Fragment key={section.heading ?? si}>
+            {/* ★ #266 CC-09：元件标题也挂锚点 —— 左栏「中控台」的二级项是**元件名**，
+                点击要能滚到这里（原先只有组挂锚点，元件标题点了没落点）。 */}
+            {section.heading && <h3 data-group-anchor={section.heading}>{section.heading}</h3>}
+            {groups.map(group => (
+              <Group key={group.title} zone={zone} title={group.title} defaultOpen={group.defaultOpen} forceOpen={searching}>
+                {group.compact
+                  ? renderCompactGroup(group.fields, resolvedCtx)
+                  : renderGroupFields(group.fields, resolvedCtx)}
+              </Group>
+            ))}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}

@@ -1,6 +1,6 @@
 import type { PluginProcessClient } from '../infrastructure/plugins/pluginProcessClient.ts'
 import type { PromptContributionRegistry } from './prompt/promptContributionRegistry.ts'
-import type { WorkspaceRegistryStore } from '../workspace-sheets/workspaceRegistry.ts'
+import type { WorkspaceRegistryStore } from './workspaces/workspaceRegistry.ts'
 import type { PluginApplicationHost } from './application/applicationHost.ts'
 import type { CommandRegistry } from './commands/commandRegistry.ts'
 import type { ContextPanelRegistry } from './context-panel/contextPanelRegistry.ts'

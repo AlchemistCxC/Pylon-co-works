@@ -1,6 +1,6 @@
 /** 内置内容渲染器：全部直接注册到 v2 Renderer Registry。 */
 import Anser from 'anser'
-import { resolveSpinnerFramesBuiltin } from '../../../components/chat/spinnerFrames.ts'
+import { resolveSpinnerFramesBuiltin } from '../../../domains/chat/spinnerFrames.ts'
 import type {
   AnsiProvider,
   ContentPartProvider,
@@ -257,7 +257,7 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
           canRender: ({ language }) => language.trim().length > 0,
           onError: () => 'fallback',
           highlight: async (language, code) => {
-            const { highlightCodeBuiltin } = await import('../../../components/chat/codeHighlight.ts')
+            const { highlightCodeBuiltin } = await import('../../../domains/chat/codeHighlight.ts')
             return highlightCodeBuiltin(language, code)
           },
         })
