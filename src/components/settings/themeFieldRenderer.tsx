@@ -3,7 +3,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { ThemeSettings } from '../../domains/theme/themeStore'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_FIELD_OWNERS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from '../../domains/theme/themeFieldDefs'
 import ColorPopover from '../ColorPopover'
-import { readCollapsed, writeCollapsed, type CollapseMap } from './settingsChromeState.ts'
+import { useSettingsChromeStore } from '../../domains/appearance/settingsChromeStore.ts'
 import { resolveBackgroundImage } from '../../infrastructure/skin/backgroundImage'
 import { resolveSpinnerFrames } from '../../domains/chat/spinnerFrames'
 import FontContributionPicker from './FontContributionPicker.tsx'
@@ -64,24 +64,18 @@ export function Txt({ value, onChange }: { value: string; onChange: (v: string) 
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" />
 }
 
-// B1 边界修复：折叠记忆统一走 settingsChromeState（消除双读写器漂移）
-const collapseStorage: { get(k: string): string | null; set(k: string, v: string): void } = {
-  get: k => { try { return window.localStorage.getItem(k) } catch { return null } },
-  set: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 禁储静默 */ } },
-}
-
-// D-perf：折叠记忆读缓存。Group 数量 ~30，此前每次渲染每组各 JSON.parse 一次
-// localStorage（拖滑块/搜索逐键都全量重渲染）——写穿失效的单份缓存消除该开销。
-let collapseCache: CollapseMap | null = null
-function readCollapsedCached(): CollapseMap {
-  if (!collapseCache) collapseCache = readCollapsed(collapseStorage.get)
-  return collapseCache
-}
+// A-V12：折叠记忆统一走 settingsChromeStore（zustand persist 真值源，订阅式——
+// 原「每次渲染 JSON.parse localStorage + 写穿缓存」的开销由 selector 消解）。
 
 function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: string; title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
   const collapseKey = zone ? `${zone}.${title}` : undefined
-  const rememberedCollapsed = collapseKey ? readCollapsedCached()[collapseKey] : undefined
-  const [open, setOpen] = useState(rememberedCollapsed === undefined ? (defaultOpen ?? true) : !rememberedCollapsed)
+  const setGroupCollapsed = useSettingsChromeStore(s => s.setGroupCollapsed)
+  // 挂载时捕获一次记忆值：折叠态记忆是「上次离开时的状态」，不随他组操作联动重放。
+  const [open, setOpen] = useState(() => {
+    if (!collapseKey) return defaultOpen ?? true
+    const remembered = useSettingsChromeStore.getState().collapsedMap[collapseKey]
+    return remembered === undefined ? (defaultOpen ?? true) : !remembered
+  })
   const visible = open || forceOpen === true
   return (
     <div className="set-group" data-group-anchor={title}>
@@ -89,11 +83,7 @@ function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: strin
         onClick={() => {
           const next = !visible
           setOpen(next)
-          if (collapseKey) {
-            const map = { ...readCollapsedCached(), [collapseKey]: !next }
-            collapseCache = map
-            writeCollapsed(map, collapseStorage.set)
-          }
+          if (collapseKey) setGroupCollapsed(collapseKey, !next)
         }}>
         <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
         {title}

@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SessionsPanel from '../sidebar/SessionsPanel.tsx'
 import Sidebar from '../Sidebar.tsx'
-import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
+import { useRightRailStore } from '../../domains/workspace/layoutRailsStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { useSidebarContributionProps } from '../sidebar/useSidebarContributionProps.ts'
@@ -185,12 +185,12 @@ describe('showPet toggle 写 workspaceStore', () => {
       sessionSource: () => null,
       sessionBySource: () => undefined,
     }
-    useWorkspaceStore.setState({ showPet: false })
+    useRightRailStore.setState({ showPet: false })
     render(<Sidebar ctx={ctx as never} />)
     const toggle = screen.getByTitle('显示宠物')
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(toggle)
-    expect(useWorkspaceStore.getState().showPet).toBe(true)
+    expect(useRightRailStore.getState().showPet).toBe(true)
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTitle('隐藏宠物').getAttribute('aria-pressed')).toBe('true')
   })

@@ -6,7 +6,7 @@ import {
   type SettingsSectionId,
 } from './settingsDomains.ts'
 import Select from '../ui/Select.tsx'
-import type { SettingsDensity } from './settingsChromeState.ts'
+import type { SettingsDensity } from '../../domains/appearance/settingsChromeStore.ts'
 
 const DENSITY_LABELS: Readonly<Record<SettingsDensity, string>> = {
   basic: '基础',

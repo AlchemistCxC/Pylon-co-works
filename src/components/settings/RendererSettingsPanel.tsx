@@ -11,7 +11,7 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
-import type { SettingsDensity } from './settingsChromeState.ts'
+import type { SettingsDensity } from '../../domains/appearance/settingsChromeStore.ts'
 import { selectWorkbenchAppearance } from '../../domains/appearance/appearance.ts'
 import { useStore } from '../../domains/theme/themeStore.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'

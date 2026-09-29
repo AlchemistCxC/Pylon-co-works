@@ -40,7 +40,7 @@ import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
-import { readDensity, writeDensity, readPreviewCollapsed, writePreviewCollapsed, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
+import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
 import { getPluginServiceRegistry } from '../plugin-runtime/runtimeServices.ts'
 import HookDiagnosticsPanel from './settings/HookDiagnosticsPanel.tsx'
 import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
@@ -203,8 +203,8 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   // I13-W1：导航状态收敛为 activeDomain/activeSection（settingsDomains 驱动）
   // #154 阶段 4：activeDomain/activeSection/activePluginPageId 已在函数顶部由 sheet 状态派生。
   const { settingsContributionCatalog, pluginSettingsPages, rendererRegistrySnapshot, activeRendererSuiteId } = useSettingsContributionCatalog()
-  const showPet = useWorkspaceStore(s => s.showPet)
-  const setShowPet = useWorkspaceStore(s => s.setShowPet)
+  const showPet = useRightRailStore(s => s.showPet)
+  const setShowPet = useRightRailStore(s => s.setShowPet)
   const [searchQuery, setSearchQuery] = useState('')
   // #154 阶段 4：renderers 分类导航位随 sheet 状态持久化（侧栏三级项与速搜命中同源）。
   const rendererCategoryId = state.rendererCategoryId ?? 'markdown-text'
@@ -425,25 +425,15 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     })
   }
 
-  // F2：禁储环境安全存储（内存兜底，会话内可用）
-  const storage = safeStorage()
-
-  // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
-  const [density, setDensity] = useState<SettingsDensity>(() =>
-    readDensity((k) => storage.get(k)))
-  const changeDensity = (d: SettingsDensity) => {
-    setDensity(d)
-    writeDensity(d, (key, v) => storage.set(key, v))
-  }
+  // K-1：密度档 chrome 态（A-V12 收敛为 settingsChromeStore 单一持久化机制）
+  const density = useSettingsChromeStore(s => s.density)
+  const setDensity = useSettingsChromeStore(s => s.setDensity)
 
   // #116 子项 8：预览栏折叠（chrome 态，持久化；折叠后正文宽度回升）
-  const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() =>
-    readPreviewCollapsed((k) => storage.get(k)))
+  const previewCollapsed = useSettingsChromeStore(s => s.previewCollapsed)
+  const setPreviewCollapsedState = useSettingsChromeStore(s => s.setPreviewCollapsed)
   const togglePreviewCollapsed = () => {
-    setPreviewCollapsed(prev => {
-      writePreviewCollapsed(!prev, (key, v) => storage.set(key, v))
-      return !prev
-    })
+    setPreviewCollapsedState(!previewCollapsed)
   }
 
   // K-2/K-4：二级折叠展开态与收藏置顶随导航迁入 SettingsSheetSidebar（#154 阶段 4）。
@@ -478,7 +468,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
       setSearchQuery(item.label)
     }
     jumpToSection(item.section)
-    if (density !== 'all') changeDensity('all')  // D2-A：advanced 命中自动切全部档
+    if (density !== 'all') setDensity('all')  // D2-A：advanced 命中自动切全部档
     requestAnimationFrame(() => {
       // B3 边界修复：优先唯一锚定位（重名字段如多个「背景图」不再误跳第一处）
       let target: Element | null = null
@@ -730,7 +720,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
       <div className="settings-tabs-root">
         <div className="settings-body" data-settings-domain={activeDomain} data-settings-section={activeSection}>
           {!activePluginPageId && (
-            <SettingsSectionHeader section={activeSection} density={density} onDensity={changeDensity} />
+            <SettingsSectionHeader section={activeSection} density={density} onDensity={setDensity} />
           )}
           {!activePluginPageId && (previewZone || activeSection === 'renderers') && (
             <div className="set-toolbar">

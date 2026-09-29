@@ -1,19 +1,12 @@
-import { useEffect, useSyncExternalStore } from 'react'
-import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
+import { useEffect } from 'react'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
-import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { useActiveInterfaceModeContribution } from '../app/useActiveInterfaceModeContribution.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
-import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { DEFAULT_INTERFACE_MODE } from '../domains/interface/interfaceModeStore.ts'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
 import AgentSheetPageHost, { useOpenSidebarPage } from '../components/sidebar/AgentSheetPageHost.tsx'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
-
-const interfaceModeRegistry = getInterfaceModeRegistry()
-const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
-const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
 
 /**
  * AgentSheetView — agent 主工作台（W1-03 侧栏上移后只留主区）。
@@ -27,23 +20,15 @@ const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
  * 离开该会话/关闭 sheet 即清除，防 tab 重开误回只读。
  */
 export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  // W2-11：showPet 消费点切 workspaceStore（W1-01 迁出主题，防换主题/toggle 双真值）
-  const showPet = useWorkspaceStore(s => s.showPet)
+  // W2-11/A-V12：showPet 真值源为 layoutRailsStore（工作台壳层偏好，随 A-V12 并入）
+  const showPet = useRightRailStore(s => s.showPet)
   const postureSession = useReplayPostureStore(s => s.sessionId)
   // 左栏模块可以把自己的内容展开成「主区整页」——它**替换**聊天视图，但不开新 Sheet。
   // 这里只解析，不在 hook 之前早退（早退会让后面的 hook 顺序随页面开关变化）。
   const openPage = useOpenSidebarPage(sheet.state)
   // 姿态只对进入时的会话生效（非 null 且匹配 activeSession）
   const isReplay = ctx.activeSession !== null && postureSession === ctx.activeSession
-  const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
-  const modeSnapshot = useSyncExternalStore(
-    subscribeInterfaceModes,
-    getInterfaceModeSnapshot,
-    getInterfaceModeSnapshot,
-  )
-  const mode = modeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
-    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
-    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === DEFAULT_INTERFACE_MODE)!
+  const mode = useActiveInterfaceModeContribution()
   useEffect(() => {
     if (postureSession !== null && postureSession !== ctx.activeSession) {
       useReplayPostureStore.getState().clear()

@@ -10,7 +10,6 @@ import {
   serializeSheetStateV2,
   type PersistedSheetState,
 } from '../src/domains/workspace/sheetPersistence.ts'
-import { readShowPet, writeShowPet, SHOW_PET_STORAGE_KEY } from '../src/domains/workspace/showPetPersistence.ts'
 import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()
@@ -114,14 +113,13 @@ describe('sheet persistence v2 legacy compat', () => {
     expect(loaded.state).toEqual(state)
   })
 
-  // 7. showPet 独立 key roundtrip（非 envelope 持久字段）
-  it('showPet 独立 key roundtrip（非 envelope 持久字段）', () => {
+  // 7. showPet 已随 A-V12 并入 layoutRailsStore（envelope v4 字段，migrate 从旧独立 key 搬家）——
+  //    迁移行为由 src/domains/workspace/__tests__/layoutRailsStore.showPet.test.ts 覆盖；
+  //    此处保留 envelope 侧断言：v2 envelope 持久化不携带 showPet（它不在 sheet 持久化面）。
+  it('sheet envelope 不携带 showPet（壳层偏好归 layoutRailsStore）', () => {
     const storage = new MemoryStorage()
-    expect(readShowPet(storage), '缺省 true').toBe(true)
-    writeShowPet(storage, false)
-    expect(storage.getItem(SHOW_PET_STORAGE_KEY)).toBe('false')
-    expect(readShowPet(storage)).toBe(false)
-    writeShowPet(storage, true)
-    expect(readShowPet(storage)).toBe(true)
+    const serialized = serializeSheetStateV2(state, DEFAULT_SHEET_LAYOUT)
+    expect(serialized.includes("showPet")).toBe(false)
+    expect(storage.getItem(SHEET_STORAGE_KEY)).toBeNull()
   })
 })

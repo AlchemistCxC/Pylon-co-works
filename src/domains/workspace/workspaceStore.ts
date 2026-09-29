@@ -8,7 +8,6 @@ import {
   type SheetLayoutState,
   type SheetWorkspaceState,
 } from './sheetPersistence.ts'
-import { readShowPet, writeShowPet } from './showPetPersistence.ts'
 import { pushTouchedFile, type TouchedFile } from '../../infrastructure/acp/touchedFiles.ts'
 import type { SheetInput, SheetId } from '../../contracts/sheets.ts'
 import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
@@ -27,8 +26,8 @@ export function touchedFileVersionKey(context: AgentContext, path: string): stri
  * workspaceStore — Workspace Sheet 状态域。
  *
  * 承载：workspaceSheets / sheetAgentStates / 布局三字段（sidebarWidth/sidebarCollapsed/
- * rightPanelCollapsed，W1-01 F2-B 从主题迁出——预设不覆盖布局状态）与 showPet（独立
- * localStorage key，非 envelope 持久字段）。全部独立 versioned 持久化
+ * rightPanelCollapsed，W1-01 F2-B 从主题迁出——预设不覆盖布局状态）。全部独立 versioned 持久化
+ * （桌面宠物显隐已随 A-V12 并入 layoutRailsStore 的壳层偏好持久化面）
  * `pylon-workspace-sheets`（schema v2）。
  */
 
@@ -40,7 +39,6 @@ interface WorkspaceStoreState {
   sidebarWidth: number
   sidebarCollapsed: boolean
   rightPanelCollapsed: boolean
-  showPet: boolean
   /** FE-AUD-001：最近一次工作区写盘失败的可见状态（null = 无失败） */
   lastPersistError: string | null
   hydrateWorkspaceSheets: (agentIds?: readonly string[]) => void
@@ -68,7 +66,6 @@ interface WorkspaceStoreState {
   setSidebarWidth: (width: number) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   setRightPanelCollapsed: (collapsed: boolean) => void
-  setShowPet: (show: boolean) => void
 }
 
 function layoutOf(state: WorkspaceStoreState): SheetLayoutState {
@@ -105,7 +102,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
   sidebarWidth: legacyLayout.leftWidth ?? DEFAULT_SHEET_LAYOUT.sidebarWidth,
   sidebarCollapsed: legacyLayout.leftCollapsed ?? DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
   rightPanelCollapsed: legacyLayout.rightCollapsed ?? DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
-  showPet: true,
   lastPersistError: null,
   hydrateWorkspaceSheets: (agentIds) => set(() => {
     const result = loadSheetStateV2(localStorage, agentIds)
@@ -136,7 +132,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
       sidebarWidth: layout.sidebarWidth,
       sidebarCollapsed: layout.sidebarCollapsed,
       rightPanelCollapsed: layout.rightPanelCollapsed,
-      showPet: readShowPet(localStorage),
     }
   }),
   openSheet: (sheet) => {
@@ -237,8 +232,4 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     useRightRailStore.getState().setCollapsed(rightPanelCollapsed)
     set(state => commitWorkspaceMutation(state, { rightPanelCollapsed }))
   },
-  setShowPet: (show) => set(() => {
-    writeShowPet(localStorage, show)
-    return { showPet: show }
-  }),
 }))
