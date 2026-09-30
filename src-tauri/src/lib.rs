@@ -579,29 +579,29 @@ impl AppStateHandles {
             if stale_private > 0 {
                 tracing::warn!("客户端替换：清理 {stale_private} 个挂起的私有交互（旧进程已失效）");
             }
+            // #488 批⑤：终态事件载荷收敛到 permission::resolved_interaction_payload
+            // 单一构造点（原两份手拼 json! 变体之一）。
             for entry in drained_interactions {
-                let reason = if entry.kind == "approval" {
-                    serde_json::json!({
-                        "eventType": "permission.resolved",
-                        "agentId": entry.agent_id,
-                        "sessionId": entry.session_id,
-                        "requestId": entry.request_id,
-                        "clientGeneration": entry.client_generation,
-                        "optionId": "",
-                        "reason": "disconnected",
-                    })
+                let resolved = if entry.kind == "approval" {
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Permission { option_id: "" },
+                        &entry.agent_id,
+                        &entry.session_id,
+                        &entry.request_id,
+                        entry.client_generation,
+                        "disconnected",
+                    )
                 } else {
-                    serde_json::json!({
-                        "eventType": "interaction.resolved",
-                        "agentId": entry.agent_id,
-                        "sessionId": entry.session_id,
-                        "requestId": entry.request_id,
-                        "clientGeneration": entry.client_generation,
-                        "kind": entry.kind,
-                        "reason": "disconnected",
-                    })
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Interaction { kind: &entry.kind },
+                        &entry.agent_id,
+                        &entry.session_id,
+                        &entry.request_id,
+                        entry.client_generation,
+                        "disconnected",
+                    )
                 };
-                emit_event(&window, crate::event_names::INTERACTION, reason);
+                emit_event(&window, crate::event_names::INTERACTION, resolved);
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             (stale_sources, probe_candidates)
@@ -1533,15 +1533,17 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                 emit_event(
                     &window,
                     crate::event_names::INTERACTION,
-                    serde_json::json!({
-                        "eventType": "permission.resolved",
-                        "agentId": outcome.agent_id,
-                        "sessionId": outcome.session_id,
-                        "requestId": outcome.request_id.to_string(),
-                        "clientGeneration": outcome.client_generation,
-                        "optionId": outcome.option_id,
-                        "reason": "timed_out",
-                    }),
+                    // #488 批⑤：收敛到单一构造点（原超时 sweep 手拼变体）。
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Permission {
+                            option_id: &outcome.option_id,
+                        },
+                        &outcome.agent_id,
+                        &outcome.session_id,
+                        &outcome.request_id.to_string(),
+                        outcome.client_generation,
+                        "timed_out",
+                    ),
                 );
             }
             // #356：形状与断线 drain 的 interaction.resolved 同构（kind + reason），
@@ -1550,15 +1552,14 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                 emit_event(
                     &window,
                     crate::event_names::INTERACTION,
-                    serde_json::json!({
-                        "eventType": "interaction.resolved",
-                        "agentId": outcome.agent_id,
-                        "sessionId": outcome.session_id,
-                        "requestId": outcome.request_id.to_string(),
-                        "clientGeneration": outcome.client_generation,
-                        "kind": outcome.kind,
-                        "reason": "timed_out",
-                    }),
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Interaction { kind: &outcome.kind },
+                        &outcome.agent_id,
+                        &outcome.session_id,
+                        &outcome.request_id.to_string(),
+                        outcome.client_generation,
+                        "timed_out",
+                    ),
                 );
             }
         }

@@ -559,10 +559,20 @@ async fn handle_session_update<R: tauri::Runtime>(
             serde_json::Value::String(source.clone()),
         );
         if let Some(committed_event) = committed_event {
-            map.insert(
-                "canonicalEvent".to_string(),
-                serde_json::to_value(committed_event).unwrap_or(serde_json::Value::Null),
-            );
+            match serde_json::to_value(committed_event) {
+                Ok(value) => {
+                    map.insert("canonicalEvent".to_string(), value);
+                }
+                // #488 批⑤：原先 unwrap_or(Null) 静默降级——前端缺列无从对账；
+                // 保留缺列下发行为（单事件载荷缺陷不得阻断整帧），但补诊断日志。
+                Err(error) => {
+                    tracing::warn!(
+                        source = %source,
+                        %error,
+                        "canonicalEvent 序列化失败，事件缺列下发"
+                    );
+                }
+            }
         }
     }
     // C1：广播旧轨已拆除——SESSION_UPDATE 出站选路单点化于 publish_route.rs

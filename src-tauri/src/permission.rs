@@ -655,6 +655,48 @@ pub(crate) struct PrivateInteractionTimeoutOutcome {
     pub kind: String,
 }
 
+/// #488 批⑤：`permission.resolved` / `interaction.resolved` 终态事件
+/// （`event_names::INTERACTION` 频道）的**单一构造点**。收敛前是 5 处复制粘贴的
+/// json! 变体（客户端替换 drain ×2 / 超时 sweep ×2 / elicitation 完成 ×1），字段
+/// 集合各自手拼、易漂移；新增终态来源只改这里。字段口径以断线 drain 版为基准：
+/// permission 变体带 `optionId`（无值传空串），interaction 变体带 `kind`；前端按
+/// agentId+requestId+clientGeneration settle，与 session 无关。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolvedInteractionEvent<'a> {
+    Permission { option_id: &'a str },
+    Interaction { kind: &'a str },
+}
+
+pub(crate) fn resolved_interaction_payload(
+    resolved: ResolvedInteractionEvent<'_>,
+    agent_id: &str,
+    session_id: &str,
+    request_id: &str,
+    client_generation: u64,
+    reason: &str,
+) -> serde_json::Value {
+    match resolved {
+        ResolvedInteractionEvent::Permission { option_id } => serde_json::json!({
+            "eventType": "permission.resolved",
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id,
+            "clientGeneration": client_generation,
+            "optionId": option_id,
+            "reason": reason,
+        }),
+        ResolvedInteractionEvent::Interaction { kind } => serde_json::json!({
+            "eventType": "interaction.resolved",
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id,
+            "clientGeneration": client_generation,
+            "kind": kind,
+            "reason": reason,
+        }),
+    }
+}
+
 /// #356：私有交互超时的默认回包（产品裁决落在这一处）。
 /// 语义基准与各桥非承诺值表见同域正身
 /// `protocol_adapter/interaction_bridge.rs::timeout_default_response`
@@ -827,7 +869,55 @@ pub(crate) async fn sweep_interaction_timeouts(
 
 #[cfg(test)]
 mod tests {
+    use super::ResolvedInteractionEvent;
     use crate::private_interaction::PendingPrivateInteraction;
+
+    /// #488 批⑤：终态事件单一构造点的形状钉——两个变体的字段集合与既有
+    /// wire 消费面（前端按 agentId+requestId+clientGeneration settle）互钉，
+    /// 防收敛后新增来源时字段漂移。
+    #[test]
+    fn resolved_interaction_payload_pins_both_wire_shapes() {
+        let permission = super::resolved_interaction_payload(
+            ResolvedInteractionEvent::Permission { option_id: "allow" },
+            "peri",
+            "s1",
+            "7",
+            5,
+            "timed_out",
+        );
+        assert_eq!(
+            permission,
+            serde_json::json!({
+                "eventType": "permission.resolved",
+                "agentId": "peri",
+                "sessionId": "s1",
+                "requestId": "7",
+                "clientGeneration": 5,
+                "optionId": "allow",
+                "reason": "timed_out",
+            })
+        );
+        let interaction = super::resolved_interaction_payload(
+            ResolvedInteractionEvent::Interaction { kind: "elicitation" },
+            "peri",
+            "s1",
+            "7",
+            5,
+            "completed",
+        );
+        assert_eq!(
+            interaction,
+            serde_json::json!({
+                "eventType": "interaction.resolved",
+                "agentId": "peri",
+                "sessionId": "s1",
+                "requestId": "7",
+                "clientGeneration": 5,
+                "kind": "elicitation",
+                "reason": "completed",
+            })
+        );
+    }
 
     fn private_elicitation_pending() -> PendingPrivateInteraction {
         PendingPrivateInteraction {
