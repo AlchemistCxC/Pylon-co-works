@@ -379,6 +379,27 @@ mod tests {
     }
 
     #[test]
+    fn redact_absolute_path_separator_edges() {
+        // 审查补充（#444）：裸根变体与分隔符连写
+        assert_eq!(
+            redact_absolute_path("C:\\"),
+            "…/C:",
+            "盘符反斜杠裸根与 C:/ 同判"
+        );
+        assert_eq!(redact_absolute_path("//"), REDACTED, "UNC 裸根无末段");
+        assert_eq!(
+            redact_absolute_path("a//b"),
+            "a//b",
+            "相对路径内的分隔符连写不触发（非绝对）"
+        );
+        assert_eq!(
+            redact_absolute_path("/root//mixed\\dirs\\\\"),
+            "…/dirs",
+            "绝对路径混合/连续分隔符归一后取末段"
+        );
+    }
+
+    #[test]
     fn redact_absolute_path_edges() {
         assert_eq!(
             redact_absolute_path("with\0nul"),

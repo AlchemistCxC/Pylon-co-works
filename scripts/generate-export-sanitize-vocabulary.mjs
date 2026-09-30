@@ -80,10 +80,17 @@ function extractDocLines(source, signature) {
   return docLines
 }
 
+/** 剥离 Rust 注释（块注释 + 行注释），防函数体内注释里的规则形状文本被收割为规则。
+ *  朴素剥离不识别字符串内的 `//`/`/*`——词表函数体字面量为简单标识符，不出现该形状；
+ *  若未来出现，剥离产生的残缺字面量会被残留检查红灯兜底。 */
+function stripRustComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+}
+
 /** 抓取并解析 is_export_sensitive_key：exact 名单 + 后缀规则 + contains 规则。 */
 export function readExportSanitizeVocabulary() {
   const source = readFileSync(SOURCE, 'utf8')
-  const fnBody = extractBraceBlock(source, FN_SIGNATURE)
+  const fnBody = stripRustComments(extractBraceBlock(source, FN_SIGNATURE))
   if (!fnBody) {
     throw new Error(`未找到 ${FN_SIGNATURE} 函数体锚点：${SOURCE}`)
   }
@@ -91,24 +98,26 @@ export function readExportSanitizeVocabulary() {
   if (!matchesBlock) {
     throw new Error(`${FN_SIGNATURE} 缺少 matches!(...) exact 名单——写法变了，请更新本脚本而不是接受派生错误`)
   }
-  const exact = [...matchesBlock.matchAll(/"([a-z][a-z0-9_]*)"/g)].map(match => match[1])
+  const exact = [...matchesBlock.matchAll(/"([^"\n]+)"/g)].map(match => match[1])
   if (exact.length === 0) {
     throw new Error(`matches! 块内未解析到任何 exact 词表字面量：${SOURCE}`)
   }
 
   // 函数体内每一条 "..." 字面量都必须被三组规则之一消费：
-  // 出现残留字面量 = 新规则形态（starts_with 等）未接入，宁可红灯不可静默漏词。
+  // 出现残留字面量 = 新规则形态（starts_with 等、或非小写形状的新词）未接入，
+  // 宁可红灯不可静默漏词。形状放开到任意 "..."，防数字开头/连字符/大写形状漏网。
   let residual = fnBody.replace(matchesBlock, '')
   const suffixes = []
   const contains = []
-  for (const match of residual.matchAll(/\.(ends_with|contains)\("([a-z_]+)"\)/g)) {
+  for (const match of residual.matchAll(/\.(ends_with|contains)\("([^"\n]+)"\)/g)) {
     ;(match[1] === 'ends_with' ? suffixes : contains).push(match[2])
     residual = residual.replace(match[0], '')
   }
-  if (/"[a-z][a-z0-9_]*"/.test(residual)) {
+  const residualLiterals = [...residual.matchAll(/"[^"\n]*"/g)].map(match => match[0])
+  if (residualLiterals.length > 0) {
     throw new Error(
       `${FN_SIGNATURE} 内存在三组规则（exact/ends_with/contains）之外的字面量：` +
-        `${residual.match(/"[a-z][a-z0-9_]*"/g)[0]}——新规则形态请显式接入本脚本`,
+        `${residualLiterals[0]}——新规则形态请显式接入本脚本`,
     )
   }
   if (suffixes.length === 0 || contains.length === 0) {
