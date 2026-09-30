@@ -60,6 +60,23 @@ flowchart LR
 - [toolConnectorProjection](../../src/renderers/solid-workbench/toolConnectorProjection.ts)：连线身份、legacy 优先去重与 appearance 解析。布局测量、DOM 注册和卸载留在挂载组件。
 - [interactionProjection](../../src/domains/workbench/interactionProjection.ts)：interaction 的脱敏与终态保留策略。类型引用不引入反向运行时依赖，事件次序/去重仍由父 projector 管理。
 
+### 「呈现」四域边界与碎域归属（#486 项7）
+
+四个名字都带「呈现」味的域，边界按「管什么状态」切分：
+
+- **presentation**——用户对**呈现档案**的偏好（选哪套 presentation profile，zustand persist 单 store）。消费者是设置页、agent-workbench 宿主与 core/renderer 的偏好读取。
+- **appearance**——**外观运行时**的组合与派生（cc 布局、spinner 资产/动词、由 ThemeSettings 派生的外观状态、侧栏模块偏好与 settings chrome store）。它不存「偏好选了什么」之外的语义，视觉结果的组装在这里。
+- **rendererContent**——**内容 → 渲染语义**的归一契约层：各内容族 render kind catalog（text/tool/session/execution/interaction，kind 是内容契约、不等同 renderer 实现，A07）+ 内容呈现纯函数（file/reasoning 呈现、媒体源解析）+ 对统一 Renderer Registry 的产品查询门面。它不做 UI，也不持有偏好。
+- **interface**——**界面布局模式**的偏好与状态（interface mode，zustand persist 单 store），跨 workspace-sheets / settings / shell 消费。
+
+一句话：presentation 管偏好档案、appearance 管外观组合、rendererContent 管内容语义归一、interface 管布局模式；四域均不直连 IPC（传输面在 infrastructure），偏好持久化的 wire 形状变更视为公开契约变更。
+
+碎域归并结论（≤4 文件域逐个核实生产消费者后的裁决）：
+
+- `fileDispatch` → **已并入 `file`**（dispatchMessage/fileDiff 两件的消费者全部在 sheets/file，#486 项7）。
+- 保留的小域（消费者跨簇，小而内聚不是债）：pluginData（identity ×4 + plugin-runtime/sessionData ×1）、inputPrediction（renderers/infrastructure/settings 三簇）、runtime/runtimeStore（29 消费者）、search、session、tasks、overview、browser、export、interface、presentation。
+- attachment / binding / feature：**生产代码零消费者**（仅 p3RoutingRegression 测试触 feature）——「按消费者归并」对无消费者域不适用，属死代码候选，留卫生批裁决，本批不动。
+
 ## 判断是否需要继续拆分
 
 | 已核验的现状 | 维护判断 |
