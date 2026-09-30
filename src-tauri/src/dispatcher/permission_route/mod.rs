@@ -3,12 +3,15 @@
 //! `PermissionLock` 句柄别名随迁——本模块自足（委派层 → 自足模块）。
 //! 带-id 请求走审批正身（P1-3：provider 每次从活配置解析）；
 //! 缺-id 畸形请求走可观测拒绝。分支在主泵中为纯 `continue` 语义。
+//! #486 项3：钩子缝与挂起登记面拆 `hooks.rs` / `admit.rs`（语句次序不变）。
+
+mod admit;
+mod hooks;
 
 use super::interaction_route::{reject_interaction_request, resolve_agent_provider};
 use super::{AcpLock, SessionsLock};
-use crate::emit_event;
 use crate::hook_bridge::HookBridge;
-use crate::permission::{permission_response, pick_allow_option, pick_option, pick_reject_option};
+use crate::permission::{permission_response, pick_option};
 use crate::runtime::AgentRuntimeManager;
 use agent_client_protocol_schema::v1::ErrorCode as WireErrorCode;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -144,155 +147,24 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .lock()
         .map(|m| m.clone())
         .unwrap_or_else(|_| "default".to_string());
-    // API 1.3（#37）：钩子缝——先把 ACP 远端 sessionId 规范化为本地 source，
-    // 再依次派发 tool.beforeCall（gate）与 permission.request（allow/deny/modify）。
-    // 不可映射 = 可诊断跳过（fail-open 至常规审批流）；桥故障/超时/未注册不阻断。
-    // modify 仅接受原选项的过滤/重排（interpret 侧校验），后续 bypass/auto 与
-    // 前端事件均使用过滤后的选项集。
-    let local_source =
-        crate::hook_bridge::resolve_local_source(runtimes, Some(agent_id), &permission.session_id);
-    let mut effective_permission = permission.clone();
-    if let Some(local_source) = local_source {
-        let tool_payload = serde_json::json!({
-            "source": local_source,
-            "toolCallId": permission.tool_call_id,
-            "title": permission.title,
-            "prompt": permission.prompt,
-            "options": permission.options,
-        });
-        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
-            .dispatch(
-                Some(window),
-                crate::hook_bridge::HOOK_TOOL_BEFORE_CALL,
-                &local_source,
-                tool_payload,
-            )
-            .await
-        {
-            if response.get("action").and_then(serde_json::Value::as_str) == Some("cancel") {
-                let reason = response
-                    .get("reason")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("denied by tool.beforeCall hook");
-                tracing::info!(
-                    source = %local_source,
-                    tool_call_id = %permission.tool_call_id,
-                    reason = %reason,
-                    "tool.beforeCall hook denied tool call"
-                );
-                // 钩子驱动的拒绝用严格 reject 选择（无 first() 回退）：请求不含
-                // reject 语义项时不伪造 optionId（ACP-04 §5.6），落回常规流程。
-                if let Some(option_id) = pick_reject_option(&permission.options) {
-                    if client_generation.load(Ordering::Acquire) != permission.client_generation {
-                        // C4：钩子派发窗口（最长 ~3s）内客户端已换代——旧决策不得
-                        // 写到新进程同 id 请求，丢弃应答交由 agent 侧超时收敛。
-                        tracing::warn!(
-                            request_id = %request_id,
-                            "hook deny decision dropped: client generation advanced during hook dispatch"
-                        );
-                        return;
-                    }
-                    let responder = {
-                        let acp = acp.lock().await;
-                        acp.responder()
-                    };
-                    responder
-                        .respond(request_id, permission_response(option_id))
-                        .await;
-                    return;
-                }
-                tracing::warn!("tool.beforeCall 拒绝但请求无 reject 选项，跳过应答交回常规流程");
-            }
-        }
-        let permission_payload = serde_json::json!({
-            "source": local_source,
-            "provider": provider,
-            "agentId": agent_id,
-            "requestId": request_id.to_string(),
-            "toolCallId": permission.tool_call_id,
-            "title": permission.title,
-            "prompt": permission.prompt,
-            "options": permission.options,
-        });
-        if let crate::hook_bridge::HookDispatchOutcome::Answered(response) = hook_bridge
-            .dispatch(
-                Some(window),
-                crate::hook_bridge::HOOK_PERMISSION_REQUEST,
-                &local_source,
-                permission_payload,
-            )
-            .await
-        {
-            match crate::hook_bridge::interpret_permission_hook_response(
-                &response,
-                &permission.options,
-            ) {
-                crate::hook_bridge::PermissionHookDecision::Allow => {
-                    // 钩子驱动的批准用严格 allow 选择 + C4 代际复核（同 deny 路径）。
-                    if let Some(option_id) = pick_allow_option(&permission.options) {
-                        if client_generation.load(Ordering::Acquire) != permission.client_generation
-                        {
-                            tracing::warn!(
-                                request_id = %request_id,
-                                "hook allow decision dropped: client generation advanced during hook dispatch"
-                            );
-                            return;
-                        }
-                        let responder = {
-                            let acp = acp.lock().await;
-                            acp.responder()
-                        };
-                        responder
-                            .respond(request_id, permission_response(option_id))
-                            .await;
-                        return;
-                    }
-                    tracing::warn!(
-                        "permission.request 钩子允许但请求无 allow 语义项，跳过应答交回常规流程"
-                    );
-                }
-                crate::hook_bridge::PermissionHookDecision::Deny => {
-                    if let Some(option_id) = pick_reject_option(&permission.options) {
-                        if client_generation.load(Ordering::Acquire) != permission.client_generation
-                        {
-                            tracing::warn!(
-                                request_id = %request_id,
-                                "hook deny decision dropped: client generation advanced during hook dispatch"
-                            );
-                            return;
-                        }
-                        let responder = {
-                            let acp = acp.lock().await;
-                            acp.responder()
-                        };
-                        responder
-                            .respond(request_id, permission_response(option_id))
-                            .await;
-                        return;
-                    }
-                    tracing::warn!(
-                        "permission.request 钩子拒绝但请求无 reject 语义项，跳过应答交回常规流程"
-                    );
-                }
-                crate::hook_bridge::PermissionHookDecision::Modify(options) => {
-                    tracing::info!(
-                        source = %local_source,
-                        option_count = options.len(),
-                        "permission.request hook modified permission options"
-                    );
-                    effective_permission.options = options;
-                }
-                crate::hook_bridge::PermissionHookDecision::Pass => {}
-            }
-        }
-    } else {
-        tracing::warn!(
-            session_id = %permission.session_id,
-            agent_id = %agent_id,
-            request_id = %request_id,
-            "Pylon hook bridge: permission request sessionId not mappable to a local session; hooks skipped"
-        );
-    }
+    let effective_permission = match hooks::dispatch_permission_hooks(
+        window,
+        acp,
+        client_generation,
+        hook_bridge,
+        runtimes,
+        provider,
+        agent_id,
+        &permission,
+        &request_id,
+    )
+    .await
+    {
+        hooks::PermissionHookOutcome::Terminated => return,
+        hooks::PermissionHookOutcome::Proceed {
+            effective_permission,
+        } => effective_permission,
+    };
     if matches!(mode.as_str(), "bypass" | "auto") {
         tracing::info!(
             "权限模式 {mode}：自动批准工具调用 {}",
@@ -331,38 +203,14 @@ async fn handle_permission_request<R: tauri::Runtime>(
             .await;
     } else {
         remember_permission(sessions);
-        // #423：登记面单点——store 写 + queue admit（deadline 注入）+ 事件 json
-        // 构造一次完成（#98：队列是 cancel/timeout/disconnect drain 终态与冷挂载
-        // 快照的数据源；kind = "approval"，事件载荷与 pylon:interaction 同构）。
-        if let Some(runtime) = runtimes.get(agent_id) {
-            match runtime.ledger.admit_permission(
-                provider,
-                agent_id,
-                &request_id,
-                &effective_permission,
-            ) {
-                Ok((admission, interaction_event)) => {
-                    let (_, waiting) = runtime.ledger.queue().depth().unwrap_or((None, 0));
-                    tracing::trace!(
-                        agent_id = %agent_id,
-                        request_id = %request_id,
-                        promoted = matches!(admission, crate::acp::interaction_queue::AdmissionOutcome::Promoted),
-                        waiting,
-                        "interaction queue admitted permission request"
-                    );
-                    emit_event(window, crate::event_names::INTERACTION, interaction_event);
-                }
-                Err(error) => tracing::warn!("interaction queue admit failed: {error}"),
-            }
-        } else {
-            // runtime 缺席（结构性不可达：泵存活期 runtime 必在 manager）——
-            // 整体不登记（store 与 queue 恒一致，杜绝单边写入）。
-            tracing::warn!(
-                agent_id = %agent_id,
-                request_id = %request_id,
-                "permission admit skipped: runtime not found"
-            );
-        }
+        admit::admit_pending_permission(
+            window,
+            runtimes,
+            provider,
+            agent_id,
+            &request_id,
+            &effective_permission,
+        );
     }
 }
 
