@@ -8,8 +8,7 @@ import { evaluateRenderSettingCondition, default as RendererSettingField } from 
 import RendererSuitePicker from './RendererSuitePicker.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 import type { SettingsDensity } from '../../domains/appearance/settingsChromeStore.ts'
 import { selectWorkbenchAppearance } from '../../domains/appearance/appearance.ts'
@@ -256,7 +255,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const suitePreference = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[interfaceMode])
   const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
-  const mode = getInterfaceModeRegistry().resolve(interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
+  const mode = findInterfaceModeContribution(interfaceMode)
   const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
     ? resolveInterfaceModeSuite(mode, suitePreference, registrySnapshot.rendererSuites.map(entry => entry.value.id)).activeSuiteId
     : undefined
