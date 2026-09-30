@@ -111,9 +111,6 @@ fn fixture(base: &Path) -> crate::paths::DataDirs {
     crate::paths::DataDirs {
         data_root: data,
         config_root: config,
-        mode: crate::paths::StorageMode::AppData,
-        portable_requested: false,
-        fallback_reason: None,
     }
 }
 

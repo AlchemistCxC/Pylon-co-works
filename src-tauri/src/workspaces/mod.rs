@@ -381,9 +381,6 @@ mod tests {
         let dirs = crate::paths::DataDirs {
             data_root: root.clone(),
             config_root: root.clone(),
-            mode: crate::paths::StorageMode::AppData,
-            portable_requested: false,
-            fallback_reason: None,
         };
         (root, dirs)
     }

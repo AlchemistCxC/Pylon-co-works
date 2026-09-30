@@ -5,7 +5,6 @@ import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
-import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../application/transactions/openOwnedSessionTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
@@ -56,44 +55,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const [errorIsValidation, setErrorIsValidation] = useState(false)
   const [recent, setRecent] = useState<PersistedSessionSummary[]>([])
   const [showConfigEditor, setShowConfigEditor] = useState(false)
-  const [storage, setStorage] = useState<StorageDiagnostics | undefined>(undefined)
-  const [migrationBusy, setMigrationBusy] = useState(false)
-  const [migrationDismissed, setMigrationDismissed] = useState(false)
-
-  // 施工文档 §7.4/§7.8：读取启动诊断（storage 模式/迁移可用性），Overview 顶部按需提示。
-  useEffect(() => {
-    if (!IS_TAURI) return
-    let disposed = false
-    appClients.runtime.startupDiagnostics()
-      .then(raw => {
-        if (!disposed) {
-          setStorage(normalizeStartupDiagnostics(raw).storage)
-          resolveRuntimeErrors({ key: 'overview:startup-diagnostics' })
-        }
-      })
-      .catch(error => {
-        if (!disposed) reportRuntimeError('读取启动诊断', error, undefined, {
-          key: 'overview:startup-diagnostics', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-        })
-      })
-    return () => { disposed = true }
-  }, [])
-
-  const migrateToPortable = async () => {
-    if (migrationBusy) return
-    setMigrationBusy(true)
-    try {
-      await appClients.runtime.migrateAppdataToPortable()
-      setMigrationDismissed(true)
-      resolveRuntimeErrors({ key: 'overview:migrate-portable' })
-    } catch (error) {
-      reportRuntimeError('迁移 AppData 到便携目录', error, undefined, {
-        key: 'overview:migrate-portable', scope: { kind: 'sheet', id: 'overview' }, source: 'overview',
-      })
-    } finally {
-      setMigrationBusy(false)
-    }
-  }
 
   // W1-06：加载最近会话（client 已 normalize，取最近 5 个展示）
   useEffect(() => {
@@ -284,19 +245,6 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
             <div><strong>{sessions.length}</strong><span>会话</span></div>
           </div>
         </section>
-        {storage?.migrationAvailable && !migrationDismissed && (
-          <div className="overview-migration" role="status">
-            <span>检测到 AppData/AppConfig 中有旧数据，可迁移到当前便携目录。</span>
-            <div className="set-preset-row">
-              <button type="button" className="ps-btn sm primary" disabled={migrationBusy} onClick={() => void migrateToPortable()}>
-                {migrationBusy ? '迁移中…' : '迁移'}
-              </button>
-              <button type="button" className="ps-btn sm" disabled={migrationBusy} onClick={() => setMigrationDismissed(true)}>
-                暂不迁移
-              </button>
-            </div>
-          </div>
-        )}
         <section className="overview-section overview-agent-section" id="overview-agents">
           <div className="overview-section-heading">
             <div>

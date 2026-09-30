@@ -14,7 +14,7 @@
 - 自带的调试 MCP 服务器（`tools/webview2-mcp/`，2026-09-17 起随包分发）；
 - 前端资源（字体等）；
 - 零 Agent 的 `agents.yaml` 配置模板（#372 起随包：打包时由 `resources/release/agents.template.yaml` 改名收取）和便携模式启动说明；
-- `portable.flag` 与空的 `data/` 目录；
+- `portable.flag` 与空的 `data/` 目录（#482 起便携是唯一存储模式：`data/` 即唯一数据真源）；
 - 插件开发分发包 `resources/sdk/`（`dist-plugin-sdk/normal` 全量：单文件 ESM runtime + testing harness + `types/` 类型声明 + manifest schema + package.json，2026-09-01 起随包）；
 - 离线文档站 `resources/docs-site/`（#371 起随包：VitePress 离线变体静态产物，应用内 Docs Sheet（`pylon-docs://`）的数据源，与 `docs/说明书/**` markdown 并存）；
 - WebView2 兜底安装引导脚本（运行时按 Windows 自带处理，不再内置安装器——2026-09-19 决定）；
@@ -47,8 +47,8 @@
 | `docs/说明书/**` | 必须 | 全量用户说明书（2026-09-01 起随包） |
 | `agents.yaml` | 必须 | 零 Agent 配置模板（#372 起随包：仓库侧 `resources/release/agents.template.yaml` 打包时改名；包内可直接编辑预置 Agent，#326 的裸启动零 Agent 口径不变——模板不含占位 Agent） |
 | `README.txt` | 必须 | 解压后首次运行和 Hermes 说明 |
-| `portable.flag` | 必须 | 触发便携模式 |
-| `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据 |
+| `portable.flag` | 必须 | 便携标记（#482 起便携是唯一存储模式，`data/` 即数据真源；该文件保留为身份标记，不再参与模式判定） |
+| `data/` | 必须为空目录 | 首次运行时保存会话、插件、MCP 等本地数据（#482 起为唯一存储根，不可写时启动致命失败，无 AppData 回退） |
 | `tools/install-webview2.bat` | 必须 | 缺 WebView2 Runtime 时的兜底安装：优先用同目录手动放置的安装器，否则从微软官方 fwlink 联网下载 |
 
 `<version>` 必须同时来自 `package.json`、`src-tauri/tauri.conf.json` 和
