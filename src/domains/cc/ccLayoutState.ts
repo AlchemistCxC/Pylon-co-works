@@ -137,6 +137,19 @@ export function updateCcPlacementState(
   }
 }
 
+/**
+ * ★★ #266 刀4（结构 C）：显隐的**两份表**各有名字 —— 写哪一份由调用方**显式**给出。
+ *
+ * - `'base'` = **主管表**（`ccHidden`）：两种门态都生效（"藏了就是藏了"）；
+ * - `'empty'` = **空态再藏**（`ccHiddenEmpty`）：只在空态再加一层，**只能加、不能抵消**主管表
+ *   ⇒ 生效名单 = `门 ? 主管 ∪ 再藏 : 主管`（去重，见 `resolveCcHiddenWidgetIds`）。
+ *
+ * ★ 为什么把"写哪份"做成命令参数而不是让写入侧"认门"：刀 2 那版的两份表是**平权**的、
+ *   由门二选一读取 ⇒ 写入必须知道你此刻处在哪个状态，于是"在空态里改的显隐一开会话就变回去"。
+ *   开关各自写自己那一份之后，写入与门**解耦**，没有"我在哪个状态改的"这种隐性依赖。
+ */
+export type CcVisibilityTarget = 'base' | 'empty'
+
 export function setCcHiddenState(hiddenIds: string[], id: string, hidden: boolean): string[] {
   return hidden
     ? Array.from(new Set([...hiddenIds, id]))

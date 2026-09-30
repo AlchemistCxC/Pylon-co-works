@@ -189,8 +189,9 @@ const GLASS_THEME: Partial<ThemeSettings> = {
   ccHidden: [
     "cc-send-button"
   ],
-  // ★ #266 刀2：显隐的**空态切面**（与 ccHidden 同形）。空态没有会话 ⇒ 会话相关的件一律不显示
-  //   （原先这份名单硬编码在 `widgetDefinitions.ts`，现在由预设携带）。
+  // ★ #266 刀4（结构 C）：**空态再藏**（叠在主管表 `ccHidden` 之上的第二层，只能加不能抵消）。
+  //   空态没有会话 ⇒ 会话相关的件再藏一批（原先这份名单硬编码在 `widgetDefinitions.ts`，现在由预设携带）。
+  //   ★ 值一个字没动：它的父集关系（再藏 ⊇ 主管）与刀2 逐字相同 ⇒ 并集结果与改造前一致。
   ccHiddenEmpty: [
     "model",
     "reasoning",

@@ -102,7 +102,11 @@ export function reduceAppearanceCommand(
     case 'set-cc-edit-mode':
       return { ...theme, ccEditMode: command.enabled }
     case 'set-cc-hidden':
-      return settleCcHeight({ ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) })
+      // ★ #266 刀4（结构 C）：按 `target` 写**对应那一份表** —— 主管（两种门态都生效）/ 再藏（只在空态加一层）。
+      //   写入不认门（旧版两份表平权、由门二选一读 ⇒ 写入必须知道你此刻在哪个状态）。
+      return settleCcHeight(command.target === 'base'
+        ? { ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) }
+        : { ...theme, ccHiddenEmpty: setCcHiddenState(theme.ccHiddenEmpty, command.id, command.hidden) })
     case 'set-cc-height': {
       // ★ #266 刀3：下界 = 按边算取最大（算式见 `ccHeightState.resolveCcMinHeight`）。
       //   原先那条「把 ccHeight 抬到容得下输入栏」的规则（`Math.max(h, inputOffsetTop + inputHeight)`）

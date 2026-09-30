@@ -470,7 +470,7 @@ describe('#238 刀3 · 输入栏落脚处独占守卫（原「input 槽只准放
 
 describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」（元件不自己申明）', () => {
   /**
-   * 出厂预设的空态切面取值（= 刀2 之前那份语境侧名单的内容，原样搬进预设数据）。
+   * 出厂预设的**再藏表**取值（= 刀2 之前那份语境侧名单的内容，原样搬进预设数据）。
    * 这里写**字面量**而不是从 `zones/factory` 取：本文件锁的是定义表侧的规则，
    * 预设数据那份由 `ccVisibilitySliceGuard.test.ts` 钉。
    */
@@ -498,29 +498,34 @@ describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」�
     expect(isWidgetVisible('cc-command-hint', { hidden: [] })).toBe(true)
   })
 
-  it('★ 刀2 门开 / 门关**二选一**（不再是并集）：门关取常态切面，门开取空态切面', () => {
+  it('★ 刀4 门开 = **主管 ∪ 再藏**（去重）、门关 = 只主管 —— 再藏只能加、不能抵消', () => {
     const ctx = { ccHidden: ['tokens', 'cc-send-button'], ccHiddenEmpty: EMPTY_SLICE } as const
-    // 门关（非常态）：只看常态切面 —— 空态切面里那几件照常在场
+    // 门关：只看**主管表** —— 再藏表里那几件照常在场
     const active = resolveCcHiddenWidgetIds({ ...ctx, isEmpty: false })
     expect(active).toEqual(['tokens', 'cc-send-button'])
     expect(isWidgetVisible('model', { hidden: active })).toBe(true)
-    // 门开（空态）：只看空态切面 —— 常态切面的值不参与（旧并集会在这里把 tokens 也并进来）
+    // 门开：主管表 **∪** 再藏表（去重、主管在前）⇒ 主管表藏的那两件**照样**藏着
+    //   ★ 旧口径（门开只读空态表）会在这里把 tokens / cc-send-button 放出来 —— 正是 C 取消的那种能力。
     const empty = resolveCcHiddenWidgetIds({ ...ctx, isEmpty: true })
-    expect(empty).toEqual([...EMPTY_SLICE])
+    expect(empty).toEqual(['tokens', 'cc-send-button', 'model', 'reasoning', 'mode', 'cc-command-hint'])
     expect(isWidgetVisible('model', { hidden: empty })).toBe(false)
-    // 两态读的是**同一份数据的两侧**：常态切面没被空态那次读取改动（纯函数、不写回）
+    expect(isWidgetVisible('tokens', { hidden: empty }), '再藏表抵消不掉主管表').toBe(false)
+    expect(isWidgetVisible('cc-send-button', { hidden: empty }), '同上：主管表那件也不许被放出来').toBe(false)
+    // 两态读的是**同一份数据的两侧**：两份表都没被读取改动（纯函数、不写回）
     expect(ctx.ccHidden).toEqual(['tokens', 'cc-send-button'])
+    expect(ctx.ccHiddenEmpty).toEqual([...EMPTY_SLICE])
   })
 
-  it('★ 刀2 读侧是**纯二选一**：给什么读什么（空数组 = 空态不藏任何件，是显式选择）', () => {
-    expect(resolveCcHiddenWidgetIds({ ccHidden: ['tokens'], ccHiddenEmpty: [], isEmpty: true })).toEqual([])
+  it('★ 刀4 读侧是**并集**（不再二选一）：再藏表为空 ⇒ 空态与常态同名单', () => {
+    // 显式空数组 = 这份"不再多藏任何件"（注意：**不等于**空态能放出主管表藏着的件）
+    expect(resolveCcHiddenWidgetIds({ ccHidden: ['tokens'], ccHiddenEmpty: [], isEmpty: true })).toEqual(['tokens'])
     expect(resolveCcHiddenWidgetIds({ ccHidden: ['tokens'], ccHiddenEmpty: [], isEmpty: false })).toEqual(['tokens'])
-    // ★「预设没写空态切面 ⇒ 回落常态切面」**不在读侧**判（读不出"没写"与"写了空数组"的差别），
-    //   而在预设落值那一步 —— 见 `ccVisibilitySliceGuard.test.ts` 的 `inheritCcEmptySlice` 用例。
+    // ★「预设没写这一项 ⇒ 以 DEFAULTS 那 6 件为基准」**不在读侧**判（读侧只认值、读不出"写没写"），
+    //   在预设落值那一步 —— 见 `ccVisibilitySliceGuard.test.ts` 的「预设没写"再藏" ⇒ 退回 DEFAULTS 基准」用例。
   })
 
   it('详细档「隐藏」按**件声明**折进名单（组装只有一处，渲染与计数同源）', () => {
-    // 本组只验折叠（门关：isEmpty 缺省 false ⇒ 读常态切面），故空态切面给空数组占位
+    // 本组只验折叠（门关：isEmpty 缺省 false ⇒ 读主管表），故再藏表给空数组占位
     expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'compact' })).toEqual([])
     expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'full' })).toEqual([])
     expect(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' })).toEqual(['cc-command-hint'])
@@ -530,11 +535,11 @@ describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」�
     expect(isWidgetVisible('cc-command-hint', {
       hidden: resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' }),
     })).toBe(false)
-    // 切面里用户自己藏的那些原样带出（不吞不改）
+    // 名单里用户自己藏的那些原样带出（不吞不改）
     expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], ccHiddenEmpty: [], cliHintMode: 'compact' })).toEqual(['model'])
-    // 折叠在**门选出来的那份切面**之上生效（空态那一份同样受详细档管辖）
+    // 折叠在**合并后的名单**之上生效（空态那一份同样受详细档管辖）
     expect(resolveCcHiddenWidgetIds({ ccHidden: ['model'], ccHiddenEmpty: ['tokens'], isEmpty: true, cliHintMode: 'hidden' }))
-      .toEqual(['tokens', 'cc-command-hint'])
+      .toEqual(['model', 'tokens', 'cc-command-hint'])
   })
 
   it('★ 折叠只读**件声明**：管辖集由表派生，不认写死的元件 id', () => {
@@ -547,7 +552,7 @@ describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」�
     expect(declared).not.toContain('cc-send-button')
   })
 
-  it('空态由**空态切面**承担：提示在内 ⇒ 空态不显示（原由 `has-session` 条件承担）', () => {
+  it('空态由**再藏表**承担：提示在内 ⇒ 空态不显示（原由 `has-session` 条件承担）', () => {
     const emptyHidden = resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: EMPTY_SLICE, isEmpty: true, cliHintMode: 'full' })
     expect(EMPTY_SLICE).toContain('cc-command-hint')
     expect(emptyHidden).toContain('cc-command-hint')
@@ -558,7 +563,7 @@ describe('#266 ⑰ → 刀2 · 可见性 = 「盒子（切面）+ 一道门」�
     const counts = (hiddenIds: readonly string[]) => resolveVisibleStatusWidgetCount({ hiddenIds })
     expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'full' }))).toBe(5)     // 四常态 + 提示
     expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: [], cliHintMode: 'hidden' }))).toBe(4)   // 详细档隐藏 ⇒ 少提示
-    // 空态：空态切面把 5 条状态控件全挡掉 ⇒ 计数 0（空态数值不变的成因）
+    // 空态：合并后的名单（主管空 ∪ 再藏那 6 件）把 5 条状态控件全挡掉 ⇒ 计数 0（空态数值不变的成因）
     expect(counts(resolveCcHiddenWidgetIds({ ccHidden: [], ccHiddenEmpty: EMPTY_SLICE, isEmpty: true, cliHintMode: 'full' }))).toBe(0)
   })
 })

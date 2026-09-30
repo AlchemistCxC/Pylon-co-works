@@ -27,7 +27,8 @@ function dispatchAppearanceCommand(command: AppearanceCommand): void {
       state.setCcEditMode(command.enabled)
       break
     case 'set-cc-hidden':
-      state.setCcHidden(command.id, command.hidden)
+      // ★ #266 刀4：`target` 原样透传 —— 两个开关各写各的表，写入不认门
+      state.setCcHidden(command.id, command.hidden, command.target)
       break
     case 'set-cc-height':
       state.setCcHeight(command.height)

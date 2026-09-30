@@ -234,8 +234,9 @@ function normalizeThemeValues(state: Record<string, unknown>, base: object): Rec
   state.ccHeight = clampCcHeight(
     typeof state.ccHeight === 'number' ? state.ccHeight : Number((base as Record<string, unknown>).ccHeight ?? 150),
     // ★ #266 刀3：下界 = 按边算取最大（**两态各算一遍取 max**）。此处 state 已过结构对齐
-    // （`ccHidden` 必是数组、数字字段都有值；`ccHiddenEmpty` 缺省时由 `ccMinHeightInputOf`
-    // 回落常态切面）⇒ 直接当算式输入用。
+    //   （`ccHidden` 必是数组、数字字段都有值；稀疏输入下 `ccHiddenEmpty` 缺省时由
+    //   `ccMinHeightInputOf` 与常态同值 —— ★ #266 刀4 结构 C：空态 = 主管 ∪ 再藏，
+    //   所以"缺省"= 空态与主管同值，不再有"回落常态切面"那种整份替换的读法）⇒ 直接当算式输入用。
     ccMinHeightInputOf(state as { ccHidden?: readonly string[] }),
   )
   // #448 PR5：customPresets 归一随拆分移交 customPresetStore（旧键残留由 A4 白名单修剪）

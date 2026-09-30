@@ -167,7 +167,7 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     const listener = vi.fn()
     store.subscribe(listener)
 
-    store.dispatch({ type: 'set-cc-hidden', id: 'tasks', hidden: true })
+    store.dispatch({ type: 'set-cc-hidden', id: 'tasks', hidden: true, target: 'base' })
     store.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     expect(store.getSnapshot()).toMatchObject({
@@ -318,7 +318,7 @@ describe('createStaticWorkbenchAppearanceStore', () => {
       ccHidden: ['tokens'],
     }))
 
-    store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false })
+    store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false, target: 'base' })
 
     // ★ #266 刀9~11：形态固定（命令行 + 独立状态行 + 随内容增高）⇒ 最小高退化为常量 64，
     //   不再随 peri / 详细档 / 可见控件数走高（改造前 free 形态走的就是这一支）。
@@ -331,12 +331,29 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     const store = createStaticWorkbenchAppearanceStore(theme({ ccHeight: 20, modelHeight: 60 }))
 
     // 藏掉那件高的 ⇒ 行高回落到 28 ⇒ 下界 = max(64, 10+40, 15+28) = **64**
-    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: true })
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: true, target: 'base' })
     expect(store.getSnapshot()).toMatchObject({ ccHidden: ['model'], ccHeight: 64 })
 
     // 放出来 ⇒ 下边组需求 75 成为绑定项 ⇒ 下界 = **75**（同一条 ccHeight 被抬上去）
-    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: false })
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: false, target: 'base' })
     expect(store.getSnapshot()).toMatchObject({ ccHidden: [], ccHeight: 75 })
+    store.destroy()
+  })
+
+  it('★ #266 刀4（结构 C）：两个开关**各写各表** —— 主管表与再藏表互不覆盖', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({ ccHidden: [], ccHiddenEmpty: [] }))
+
+    // 开关①「隐藏」⇒ 只写主管表（两种门态都生效）
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: true, target: 'base' })
+    expect(store.getSnapshot()).toMatchObject({ ccHidden: ['model'], ccHiddenEmpty: [] })
+
+    // 开关②「空态里再藏」⇒ 只写再藏表（主管表一个字节不动）
+    store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: true, target: 'empty' })
+    expect(store.getSnapshot()).toMatchObject({ ccHidden: ['model'], ccHiddenEmpty: ['tokens'] })
+
+    // 各退各的：退主管表不影响再藏表
+    store.dispatch({ type: 'set-cc-hidden', id: 'model', hidden: false, target: 'base' })
+    expect(store.getSnapshot()).toMatchObject({ ccHidden: [], ccHiddenEmpty: ['tokens'] })
     store.destroy()
   })
 

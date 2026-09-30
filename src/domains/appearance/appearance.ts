@@ -3,6 +3,7 @@ import { getSpinnerAssetPreset, getSpinnerVerbPreset, type SpinnerAssetId } from
 import { resolveSpinnerFrames, type SpinnerMarkerMode } from '../chat/spinnerFrames.ts'
 import type { ThemeSettings } from '../theme/themeStore.ts'
 import type { CcWidgetPlacement } from '../cc/ccLayoutState.ts'
+import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'
 import type { CcEditablePropertyKey, CcPropertyCommand } from '../cc/widgetDefinitions.ts'
 
 export interface SpinnerAppearanceSnapshot {
@@ -104,7 +105,7 @@ export interface WorkbenchAppearanceSnapshot {
   ccRadius: number
   ccLayout: CcLayoutV3
   ccHidden: readonly string[]
-  /** ★ #266 刀2：显隐的空态切面（空 = 该套预设没带 ⇒ 回落 `ccHidden`） */
+  /** ★ #266 刀4（结构 C）：**空态再藏**（`ccHiddenEmpty` 字段名保留）—— 只在空态**再加一层**，只能加、不能抵消主管表 */
   ccHiddenEmpty: readonly string[]
   ccEditMode: boolean
   ccProperties: Readonly<Pick<ThemeSettings, CcEditablePropertyKey>>
@@ -114,7 +115,8 @@ export interface WorkbenchAppearanceSnapshot {
 
 export type AppearanceCommand =
   | { type: 'set-cc-edit-mode'; enabled: boolean }
-  | { type: 'set-cc-hidden'; id: string; hidden: boolean }
+  /** ★ #266 刀4：`target` 指定写**哪份表**（主管 / 再藏）—— 写入不再"认门" */
+  | { type: 'set-cc-hidden'; id: string; hidden: boolean; target: CcVisibilityTarget }
   | { type: 'set-cc-height'; height: number }
   | { type: 'update-cc-placement'; id: string; placement: Partial<CcWidgetPlacement> }
   | CcPropertyCommand
@@ -219,7 +221,8 @@ export function selectWorkbenchAppearance(
     ccRadius: theme.ccRadius,
     ccLayout: cloneCcLayout(theme.ccLayout),
     ccHidden: [...theme.ccHidden],
-    // ★ #266 刀2：空态切面同形平铺（取值二选一在 `resolveCcHiddenWidgetIds` 里，快照不预先选边）
+    // ★ #266 刀4：两份表（主管 / 再藏）同形平铺 —— "合并成生效名单"在 `resolveCcHiddenWidgetIds` 里做，
+    //   快照不预先选边（渲染侧要按门决定，工具栏两个开关还要各读各自那一份）
     ccHiddenEmpty: [...theme.ccHiddenEmpty],
     ccEditMode: theme.ccEditMode,
     ccProperties: selectCcProperties(theme),

@@ -1,8 +1,9 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatUsagePercent, formatUsageTokens } from '../../../domains/theme/tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isWidgetVisible, CC_FLOATING_WIDGET_IDS, CC_WIDGET_LABELS, ccWidgetLanding, coerceInputLanding, resolveCcHiddenWidgetIds, resolveCcWidgetGroup, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
-import { CC_REGISTERED_SLOT_IDS, type CcLayoutWidgetId, type CcWidgetPlacement } from '../../../domains/cc/ccLayoutState.ts'
+import { CC_REGISTERED_SLOT_IDS, setCcHiddenState, type CcLayoutWidgetId, type CcVisibilityTarget, type CcWidgetPlacement } from '../../../domains/cc/ccLayoutState.ts'
 import { ccMinHeightInputOf, resolveCcMinHeight, resolveCcMinWidth, resolveCcWidthGroups, type CcWidgetWidthIndex } from '../../../domains/cc/ccHeightState.ts'
+import { resolveCcShowVerdict, type CcShowVerdict, type CcShowVerdictInput } from '../../../domains/cc/ccShowVerdict.ts'
 import { resolveContextUsage } from '../../../domains/workbench/session/sessionSurface.ts'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
@@ -78,6 +79,15 @@ export function SolidControlCenter() {
   const [submitError, setSubmitError] = createSignal('')
   const [workspaceDraft, setWorkspaceDraft] = createSignal<{ name: string; path: string }>()
   const [sessionEntering, setSessionEntering] = createSignal(false)
+  /**
+   * ★★ #266 刀4：**显示前校验**的两件状态。
+   * - `availableBox`：背景板**实测**尺寸（`.control-center` 的 clientWidth / clientHeight，
+   *   由 `ResizeObserver` 回写）。`0` = 量不到 ⇒ 校验 fail-open（放行，见 `ccShowVerdict` 文件头口径 3）。
+   * - `showWarning`：被拒时**常驻**的提示；下一个动作即清（成功的显隐写入 / 切换选中元件 /
+   *   尺寸变化后重判通过 / 退出编辑）。
+   */
+  const [availableBox, setAvailableBox] = createSignal({ width: 0, height: 0 })
+  const [showWarning, setShowWarning] = createSignal<Extract<CcShowVerdict, { ok: false }>>()
   let previousSessionId: string | null = input().sessionId
   let sessionEnteringTimer: ReturnType<typeof setTimeout> | undefined
   let workspaceSelect: HTMLSelectElement | undefined
@@ -269,16 +279,18 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().replayReadonly === true || (input().preview === true && Boolean(input().sessionId))
-  // ★ #266 刀2「盒子 + 一道门」：隐藏名单 = **门**（`emptyVisual()` = 现在是不是空态）在**两份切面**里
-  //   二选一份 —— 常态切面 `ccHidden` / 空态切面 `ccHiddenEmpty`（空态切面没写 = 空 ⇒ **回落常态切面**，
-  //   不报错），再由 `resolveCcHiddenWidgetIds` 把「详细档 = 隐藏」按**件声明**折进来。
-  //   ★ 组装只有这一处（计数侧调同一个函数 ⇒ 渲染与计数同源）；不再有任何语境侧硬编码名单。
-  const hiddenWidgetIds = () => resolveCcHiddenWidgetIds({
+  // ★ #266 刀4（结构 C）：「一份**主管表** + 一份**空态再藏**」——
+  //   生效名单 = `门 ? (主管 ∪ 再藏) : 主管`（并集去重）⇒ 空态**只能多藏**，不能"放出"常态藏着的件
+  //   （旧版两份表平权、由门二选一读 ⇒ 在空态里改的显隐一开会话就变回去；本刀消除这一条）。
+  //   组装只有这一处（计数侧调同一个函数 ⇒ 渲染与计数同源）；不再有任何语境侧硬编码名单。
+  const hiddenWidgetIdsFor = (isEmpty: boolean) => resolveCcHiddenWidgetIds({
     ccHidden: appearance().ccHidden,
     ccHiddenEmpty: appearance().ccHiddenEmpty,
-    isEmpty: emptyVisual(),
+    isEmpty,
     cliHintMode: appearance().cliHintMode,
   })
+  /** 眼下生效的那一份（门 = `emptyVisual()`，含"正在进场"那一段）—— 画布在场判据与 chip 的 `＋/●` 用它。 */
+  const hiddenWidgetIds = () => hiddenWidgetIdsFor(emptyVisual())
   // ★ #266 ⑰：谓词的上下文只剩「隐藏名单（生效的那份切面）」——元件的行上不再有显隐申明，
   //   也不再按运行期条件（有没有会话 / 输入模式 / 详细档）判明。
   //   ★ #266 刀1：编辑态豁免已撤 ⇒ 上下文里不再有编辑态这一项。
@@ -304,6 +316,69 @@ export function SolidControlCenter() {
   //   本刀**只暴露、不强制**（不横向滚动、不撑宽，见规范 §7.6 形态决定 2）⇒ 没有任何 CSS 规则
   //   消费它，消费者留给刀 4 的"显示前校验"。挂成变量是为了让这个值可读、可验收。
   const minWidth = () => resolveCcMinWidth(resolveCcWidthGroups(hiddenWidgetIds(), widthIndexOf()))
+
+  // ── ★★ #266 刀4：显示前校验（点"显示"前先判"显示之后装不装得下"） ─────────────────────
+  /**
+   * 校验输入 = **两态名单**（常态 / 空态）+ 数字字段 + 件宽索引。
+   * ★ 名单由调用方给**"改完之后"**的那两份（`nextBase` / `nextExtra`）—— 判的必须是"点了之后"的态。
+   * ★ 两态与最小高下界**同口径**（`ccMinHeightInputOf` 交出的那两份：常态 = 主管表 `ccHidden`、
+   *   空态 = **主管 ∪ 再藏**）—— 本函数按 `isEmpty` 两态各取一次 `resolveCcHiddenWidgetIds`，
+   *   与 `ccMinHeightInputOf` 的并集拼装逐字同源（退改 D1 之后两处才真的同口径）；
+   *   纵向/横向都按它们各算一遍取大（实现见 `ccShowVerdict`）。
+   */
+  const showVerdictInputOf = (ccHidden: readonly string[], ccHiddenEmpty: readonly string[]): CcShowVerdictInput => ({
+    hiddenSlices: [false, true].map(isEmpty => resolveCcHiddenWidgetIds({
+      ccHidden, ccHiddenEmpty, isEmpty, cliHintMode: appearance().cliHintMode,
+    })),
+    scalars: appearance(),
+    widths: widthIndexOf(),
+  })
+  /**
+   * 校验用的**实测尺寸**（点下去的那一刻现读，不用信号里的旧值 —— 拖动高度时 `ResizeObserver`
+   * 可能还没回调）。`0` ⇒ 校验 fail-open。
+   */
+  const measuredBox = () => ({
+    width: controlCenterElement?.clientWidth ?? 0,
+    height: controlCenterElement?.clientHeight ?? 0,
+  })
+  /**
+   * ★★ #266 刀4：显隐开关的**唯一入口**（工具栏两个开关都走它）。
+   *
+   * 写"显示"方向前先过校验：`!ok` ⇒ **一条命令都不发**（主题数据一个字节不动），把结论挂成常驻提示。
+   * ★ "藏"方向不校验：藏只会让在场集合变小 ⇒ 需求单调不增，不存在"藏了反而装不下"。
+   * ★ 任何一次**成功**的写入都清掉上一次的提示（提示"常驻到下一个动作"）。
+   */
+  const requestHiddenChange = (id: CcLayoutWidgetId, hidden: boolean, target: CcVisibilityTarget) => {
+    const current = appearance()
+    // ★ 快照里的两份表是 `readonly`（`Object.freeze` 过）⇒ 写助手要的是可变形，故展开一份副本。
+    const nextBase = target === 'base' ? setCcHiddenState([...current.ccHidden], id, hidden) : current.ccHidden
+    const nextExtra = target === 'empty' ? setCcHiddenState([...current.ccHiddenEmpty], id, hidden) : current.ccHiddenEmpty
+    if (!hidden) {
+      const verdict = resolveCcShowVerdict(showVerdictInputOf(nextBase, nextExtra), measuredBox())
+      if (!verdict.ok) {
+        setShowWarning(verdict)
+        return
+      }
+    }
+    setShowWarning(undefined)
+    workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden, target })
+  }
+  // 提示常驻的清除之一：**切换选中元件**（点 chip / 关属性面板 / 退出编辑都改 `selected`）
+  createEffect(() => {
+    selected()
+    setShowWarning(undefined)
+  })
+  // 提示常驻的清除之二：**尺寸变化后重判通过**（手动加高 / 拉宽够装了 ⇒ 提示自行退场，不必再点一次）
+  // ★ 只在"量到了尺寸、且真的够装"时清 —— 量不到（0 / 未挂载）**不清**：
+  //   "量不到"是环境问题，不该把用户刚看到的提示凭空抹掉（与 verdict 的 fail-open 是两件事：
+  //   那边决定"放不放行"，这边只决定"提示还挂不挂着"）。
+  createEffect(() => {
+    const warning = showWarning()
+    if (!warning) return
+    const box = availableBox()
+    const available = warning.axis === 'height' ? box.height : box.width
+    if (Number.isFinite(available) && available > 0 && warning.needed <= available) setShowWarning(undefined)
+  })
   /**
    * ★★ #266 刀2.5：**声明式脱离**的定位（横向）。
    *
@@ -605,6 +680,21 @@ export function SolidControlCenter() {
     observer?.observe(slot)
     onCleanup(() => observer?.disconnect())
   })
+  /**
+   * ★ #266 刀4：背景板**实测**尺寸 —— 显示前校验的 `available`（`.control-center` 的
+   * clientWidth / clientHeight，含多行输入增高与状态行增高）。复用上一条同款机制
+   * （同一个 `controlCenterElement` + 同一个 `ResizeObserver` API），**不新造测量层**。
+   * ★ 实测不到（元素未挂载 / 测试环境无布局）⇒ 两个 0 ⇒ 校验 fail-open（见 `ccShowVerdict` 口径 3）。
+   */
+  onMount(() => {
+    const element = controlCenterElement
+    if (!element) return
+    const update = () => setAvailableBox({ width: element.clientWidth, height: element.clientHeight })
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update)
+    observer?.observe(element)
+    onCleanup(() => observer?.disconnect())
+  })
 
   return <div
     ref={node => { controlCenterElement = node }}
@@ -720,13 +810,24 @@ export function SolidControlCenter() {
       </div>
     )}</Show>
     <Show when={appearance().ccEditMode}>
+      {/* ★ #266 刀4：工具栏 + 提示共用一个 fixed 容器 —— 提示据此**紧贴工具栏下方**，
+          同时保证它不在 `role="toolbar"` 里面（无障碍语义不被搅乱）。 */}
+      <div class="cc-edit-toolbar-stack">
       <div class="cc-edit-toolbar" role="toolbar" aria-label="中控控件工具栏">
         <span class="cc-edit-toolbar-label">控件</span>
         <For each={CC_EDIT_TOOLBAR_IDS}>{id => {
+          // ① chip 的 `＋/●` + `dim`：按**当前生效名单**（门决定）——「你眼下看到的样子」
           const hidden = () => hiddenWidgetIds().includes(id)
+          // ② 两个开关各读**自己那一份表**（不要用合并后的名单判某个开关的态，
+          //    否则"我在哪个状态改的"这种隐性依赖会从后门回来）
+          const baseHidden = () => appearance().ccHidden.includes(id)
+          const extraHidden = () => appearance().ccHiddenEmpty.includes(id)
           return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
             <button type="button" class="cc-edit-toolbar-chip" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
-            <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
+            {/* 开关①「隐藏 / 显示」= **主管表**（两种状态都生效） */}
+            <button type="button" class="cc-chip-toggle" aria-label={`${baseHidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !baseHidden(), 'base')}>{baseHidden() ? '显示' : '隐藏'}</button>
+            {/* 开关②「空态里再藏 / 空态放出」= **再藏表**（只在空态再加一层；只能加不能抵消） */}
+            <button type="button" class="cc-chip-toggle extra" aria-label={`${extraHidden() ? '空态放出' : '空态里再藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !extraHidden(), 'empty')}>{extraHidden() ? '空态放出' : '空态里再藏'}</button>
           </span>
         }}</For>
         <button type="button" class="cc-edit-toolbar-btn" aria-label="重置控件位置" onClick={() => workbench.appearance.dispatch({ type: 'reset-cc-layout' })}>↺ 重置位置</button>
@@ -734,6 +835,14 @@ export function SolidControlCenter() {
           setSelected(undefined)
           workbench.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: false })
         }}>退出编辑</button>
+      </div>
+      {/* ★ #266 刀4：显隐被拒时的提示（常驻到下一个动作）。`role="alert"` 让它被读屏播报；
+          ★ 刻意**不放进** `role="toolbar"` 里（那会污染工具栏的语义）。数字全部来自 verdict。 */}
+      <Show when={showWarning()}>{warning => (
+        <div class="cc-edit-warning" role="alert">
+          {`还差 ${warning().needed - warning().available}px：需要 ${warning().needed}px，当前 ${warning().available}px —— ${warning().axis === 'height' ? '先加高，或先藏别的' : '先把窗口拉宽，或先藏别的'}`}
+        </div>
+      )}</Show>
       </div>
     </Show>
   </div>

@@ -130,7 +130,7 @@ export type CcMinHeightScalars = Partial<Record<CcMinHeightScalarKey, number>>
 /**
  * 最小高算式的输入。
  *
- * - `hiddenSlices` = **两种门态各自生效的隐藏名单**（常态切面 / 空态切面）；算式对每一态各算一遍、
+ * - `hiddenSlices` = **两态各自生效的隐藏名单**（常态 `ccHidden` / 空态 `ccHiddenEmpty`）；算式对每一态各算一遍、
  *   取 **max**（理由见 `resolveCcMinHeight` 的"两态取 max"）；
  * - `scalars` = 主题的数字字段表（**结构性类型** ⇒ `ThemeSettings` / `Partial<ThemeSettings>`
  *   可直接传）。算式只按定义表的 `heightField` 声明取用，**缺项按 0 计**（= 内容撑 ⇒ 结果是下界）。
@@ -144,17 +144,27 @@ export interface CcMinHeightInput {
  * 主题形态 → 算式输入（**唯一一处拼装**，免得各调用面各拼一份）。
  *
  * 泛型 + 结构性约束：`ThemeSettings` / `Partial<ThemeSettings>` / `ThemePresetState` 都可直接传。
- * 两态各取一份切面：常态 `ccHidden` / 空态 `ccHiddenEmpty`；**空态缺省（没写）⇒ 回落常态切面**
- * （与刀 2 的落值口径 `inheritCcEmptySlice` 一致 ⇒ 两边同义，不会一处当"没藏"、一处当"藏"）。
+ *
+ * ★ #266 刀4（结构 C）的两态：常态 = `ccHidden`（**主管表**）、空态 = **主管 ∪ 再藏**
+ *   （`ccHidden ∪ ccHiddenEmpty`，去重）—— 与取值侧（`resolveCcHiddenWidgetIds`）**同源同义**：
+ *   空态的第二份表**只能加、不能抵消**，所以并集才是空态真正的生效名单。
+ *   ★ 稀疏输入（`Partial<ThemeSettings>`、老数据、夹具）里 `ccHiddenEmpty` 缺省 ⇒ 视作空 ⇒
+ *     空态 = 主管（`?? []`），**不再**是旧口径的"回落常态切面"那一套说法。
  * `scalars` 的取值口径仍由算式把关（按定义表的 `heightField` 声明取、非数字按 0）。
+ *
+ * ★★ 退改 D1（2026-09-29，翻译验收后）：第二份切片**必须**是并集，否则下界与校验口径不一致。
+ *   探针实测（主管表藏掉 `input`、输入栏高 120）：并集口径下界 = **64**，旧口径 = **130**（偏高 66px）
+ *   —— 用户可见后果是「藏了输入栏容器降不下来」。出厂数据"再藏 ⊇ 主管"掩盖了它，
+ *   只有主管表藏了"再藏表里没有的件"（`input` 恰是其一）时才暴露。
  */
 export function ccMinHeightInputOf<T extends {
   readonly ccHidden?: readonly string[]
   readonly ccHiddenEmpty?: readonly string[]
 }>(theme: T): CcMinHeightInput {
   const normal = theme.ccHidden ?? []
+  const emptyState = Array.from(new Set([...normal, ...(theme.ccHiddenEmpty ?? [])]))
   return {
-    hiddenSlices: [normal, theme.ccHiddenEmpty ?? normal],
+    hiddenSlices: [normal, emptyState],
     scalars: theme as unknown as CcMinHeightScalars,
   }
 }
@@ -176,11 +186,14 @@ export function ccMinHeightInputOf<T extends {
  *    空间口径，两个方向都取 max（规范 §7.6）。
  * 2. **行数恒为 1** —— #266 刀2.5 已去掉下边组的折行 ⇒ 组高 = 该行在场件的**最大高**，
  *    **不需要**任何"折行档 / 件数阈值"（旧实现那套"在场件数 > 4 再加一行"的估算整体退场）。
- * 3. ★ **两种门态取 max**（用户 2026-09-28 定）—— 为什么不是"只按常态切面算"：**空态切面是自由的**
- *    （刀 2 刚配好），某套预设的空态完全可以**比常态在场更多**（常态藏了、空态没藏）⇒ 只按常态算会
- *    **低估空态**、显示时可能超界。取两态 max 才真的"两种门态都成立"。
- *    ★ 这仍然是**同一批运算**跑两遍（同一算式、同一批声明），只是喂进两份切面 —— 仍是"预设值 + 一道门"
- *    两层，**没有引入新概念、新字段、新阈值**：切面本来就是刀 2 的产物，门本来就是"现在是不是空态"。
+ * 3. ★ **两种门态取 max**（用户 2026-09-28 定）—— 为什么不是"只按一份名单算"：两份名单本来就不同
+ *    （刀4 结构 C 下：常态 = 主管表、空态 = 主管 ∪ 再藏），**各算一遍取 max** 是"两种门态都成立"的
+ *    直接写法；只算一份就会漏掉另一份 ⇒ 显示时可能超界。
+ *    ★ 这仍然是**同一批运算**跑两遍（同一算式、同一批声明），只是喂进两份名单 —— 仍是"预设值 + 一道门"
+ *    两层，**没有引入新概念、新字段、新阈值**：两份名单本来就是切面的产物，门本来就是"现在是不是空态"。
+ *    ★ 口径订正（退改 D1）：旧说法"空态切面是自由的、可以比常态在场更多"在 C 下**不再成立** ——
+ *      再藏只能加、不能抵消 ⇒ **空态在场 ⊆ 常态在场**（`ccMinHeightInputOf` 已按并集拼装）。
+ *      取 max 这条规则不变（两份名单仍可能不同），但绑定项实际落在**常态**那一份上。
  * 4. **`BASE_MIN_HEIGHT` 是下界（乘底）** —— 两态都算不出大值时它就是结果；它不是替代品。
  *
  * ★ 本刀**取代**了刀 9~11 的"形态收敛 ⇒ 常量 64"：那是把估算换成常量，本刀把估算升级成

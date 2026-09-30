@@ -74,16 +74,33 @@ describe('ccHeightState 最小高度（#266 刀3 · 按边算取最大 · 两态
     expect(minOf({ inputHeight: 120, modelHeight: 60 }, [['model'], ['model']])).toBe(130)
   })
 
-  it('空态切面缺省（只给一份 / 不给）⇒ 按"回落常态切面"读（与刀 2 的落值口径一致）', () => {
-    // `ccMinHeightInputOf` 是唯一拼装点：`ccHiddenEmpty` 缺省 ⇒ 与 `ccHidden` 同值（不是"没藏"）
+  it('★ 空态 = **主管 ∪ 再藏**（退改 D1）：`ccHiddenEmpty` 缺省 ⇒ 空态与主管同值', () => {
+    // `ccMinHeightInputOf` 是唯一拼装点；★ #266 刀4 结构 C：第二份切片**不是**"再藏表本身"，
+    // 而是空态真正的生效名单 = `ccHidden ∪ ccHiddenEmpty`（再藏只能加、不能抵消主管表）。
     expect(ccMinHeightInputOf({ ccHidden: ['model'] }).hiddenSlices).toEqual([['model'], ['model']])
-    expect(ccMinHeightInputOf({ ccHidden: ['model'], ccHiddenEmpty: [] }).hiddenSlices).toEqual([['model'], []])
+    // ★ 退改 D1（改口径，不是放宽）：显式空再藏表 ⇒ 空态 = 主管（旧口径会读成 `[]`，
+    //   等于"空态把主管表藏的件放出来" —— C 明确取消这种组合）
+    expect(ccMinHeightInputOf({ ccHidden: ['model'], ccHiddenEmpty: [] }).hiddenSlices).toEqual([['model'], ['model']])
+    // 并集 + 去重（相交部分不重复）
+    expect(ccMinHeightInputOf({ ccHidden: ['model', 'tokens'], ccHiddenEmpty: ['tokens', 'mode'] }).hiddenSlices)
+      .toEqual([['model', 'tokens'], ['model', 'tokens', 'mode']])
     expect(ccMinHeightInputOf({}).hiddenSlices).toEqual([[], []])
     // 两样都缺省（老数据 / 稀疏夹具）⇒ 两态同值，等价于单态
     expect(resolveCcMinHeight({ hiddenSlices: [[], []], scalars: scalarsOf({ modelHeight: 60 }) })).toBe(75)
     expect(resolveCcMinHeight(ccMinHeightInputOf({ ccHidden: [], ...scalarsOf({ modelHeight: 60 }) }))).toBe(75)
     // ★ 稀疏输入（连贴边距离字段都没给）⇒ 边距按 0 ⇒ 不再有 15 那一项（算式是"缺项按 0"）
     expect(resolveCcMinHeight(ccMinHeightInputOf({ ccHidden: [], modelHeight: 60 }))).toBe(64)
+  })
+
+  it('★ 退改 D1 探针：主管表藏掉「输入栏」⇒ 下界 64（旧口径会把输入栏放回来 ⇒ 130）', () => {
+    // 输入栏高 120、上间距 10 ⇒ 输入栏那一组需求 = 130。主管表把它藏了 ⇒ 那一组不存在，
+    // 下边组只剩 28 的行兜底（15 + 28 = 43）⇒ 落回下界 **64**。
+    // ★ 旧口径（第二份切片 = `ccHiddenEmpty` 原值 ⇒ 输入栏在空态"被放回来"）会算成 **130**，
+    //   偏高 66px —— 用户可见后果就是"藏了输入栏，容器降不下来"。
+    const theme = { ccHidden: ['input'], ccHiddenEmpty: ['model', 'reasoning', 'mode', 'tokens', 'cc-send-button', 'cc-command-hint'], inputHeight: 120, inputOffsetTop: 10, modelHeight: 28, ccMarginBottom: 15 }
+    expect(resolveCcMinHeight(ccMinHeightInputOf(theme))).toBe(64)
+    // 反证：把输入栏从主管表挪回在场（两态都看得见它）⇒ 130（证明这条读数确实由"输入栏在不在场"决定）
+    expect(resolveCcMinHeight(ccMinHeightInputOf({ ...theme, ccHidden: [] }))).toBe(130)
   })
 
   it('行高 ≥ 行兜底 28：整行都是"内容撑"件（或全藏起来）时不至于算成 0', () => {

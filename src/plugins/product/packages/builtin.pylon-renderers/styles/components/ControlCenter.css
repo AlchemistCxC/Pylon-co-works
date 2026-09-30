@@ -271,10 +271,18 @@
 
 /* ── Widget toolbar (NEW) ── */
 /* 编辑工具栏浮在屏幕中央（居中弹窗式），不紧贴中控区也不在顶部 */
-.cc-edit-toolbar {
+/* ★ #266 刀4：定位改由**公共容器**承担（工具栏 + 被拒提示同一列）—— 提示要**紧贴工具栏下方**，
+   而它又必须留在 `role="toolbar"` **之外**（无障碍语义），所以两者共用一个 fixed 容器最省事。 */
+.cc-edit-toolbar-stack {
   position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  z-index:60; display:flex; flex-direction:column; align-items:center; gap:8px;
   max-width:min(680px, 90vw);
-  z-index:60; display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.cc-edit-toolbar {
+  /* ★ #266 刀4：每行多一个开关 ⇒ 行变长。已 `flex-wrap:wrap` ⇒ 窄窗下**换行**而不是横向挤爆；
+     配套给按钮型控件 `flex:0 0 auto`（不可压缩，见本仓「窄窗」口径）。 */
+  max-width:100%;
+  display:flex; align-items:center; justify-content:center; gap:6px;
   background:var(--bg-panel,rgba(255,255,255,0.94));
   border:1px solid var(--border);
   padding:10px 16px; border-radius: 0;
@@ -284,12 +292,13 @@
   backdrop-filter:blur(16px);
 }
 .cc-edit-toolbar-label { font-size:var(--font-size-xs); color:var(--text-dim); margin-right:4px; }
-.cc-edit-toolbar-chip-wrap { display:inline-flex; align-items:center; gap:4px; }
+.cc-edit-toolbar-chip-wrap { display:inline-flex; align-items:center; gap:4px; flex:0 0 auto; }
 .cc-edit-toolbar-chip {
   font-size:var(--font-size-xs); padding:3px 9px;
   background:transparent; border:1px solid var(--border);
   border-radius: 0; cursor:pointer;
   color:var(--text); font-family:var(--mono);
+  flex:0 0 auto;
 }
 .cc-edit-toolbar-chip:hover { border-color:var(--accent); color:var(--accent); }
 .cc-edit-toolbar-chip-wrap.active .cc-edit-toolbar-chip { background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -299,17 +308,35 @@
   background:transparent; border:1px solid var(--border);
   border-radius: 0; cursor:pointer;
   color:var(--text-dim); font-family:var(--mono);
+  flex:0 0 auto;
+  white-space:nowrap;
 }
 .cc-chip-toggle:hover { border-color:var(--accent); color:var(--accent); }
+/* ★ #266 刀4：第二个开关（「空态里再藏」）—— 虚线边 + 更暗，一眼看出它与第一个**不是平级关系**
+   （它是在主管表之上**再加一层**，只能加、不能抵消）。 */
+.cc-chip-toggle.extra { border-style:dashed; }
 .cc-edit-toolbar-btn {
   font-size:var(--font-size-xs); padding:3px 9px;
   background:transparent; border:1px solid var(--border);
   border-radius: 0; cursor:pointer;
   color:var(--text);
+  flex:0 0 auto;
 }
 
 .cc-edit-toolbar-btn:hover { border-color:var(--accent); color:var(--accent); }
 .cc-edit-toolbar-btn.danger:hover { border-color:var(--tool-err,#FF6B80); color:var(--tool-err,#FF6B80); }
+
+/* ★ #266 刀4：显隐被**拒绝**时的就地提示（常驻到下一个动作；数字来自校验结论）。
+   挂在工具栏**之后**、不在 `role="toolbar"` 内。 */
+.cc-edit-warning {
+  max-width:min(680px, 90vw);
+  padding:5px 10px;
+  border:1px solid var(--tool-err,#FF6B80);
+  background:var(--bg-panel,rgba(255,255,255,0.94));
+  color:var(--tool-err,#FF6B80);
+  font-family:var(--mono); font-size:var(--font-size-xs);
+  line-height:1.5; text-align:center;
+}
 
 /* ── Blur for non-CC in edit mode ── */
 .cc-editing-app .sidebar { filter:blur(3px); opacity:0.35; pointer-events:none; }

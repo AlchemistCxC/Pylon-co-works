@@ -77,10 +77,12 @@ export interface ThemeSettings {
   modeAutoColor: string; modeEditColor: string
   ccHidden: string[]
   /**
-   * ★ #266 刀2：显隐的**空态切面**（与 `ccHidden` 同形、同区）。门（"现在是不是空态"）开时用它，
-   * 否则用 `ccHidden`（规则唯一出处：`domains/cc/widgetDefinitions.ts` 的 `resolveCcHiddenWidgetIds`）。
-   * ★ 预设**没写这一项**时不会留在"空数组"上：预设落值那一步会抄一份该预设的常态切面进来
-   * （`domains/theme/presetReducer.ts` 的 `inheritCcEmptySlice`）。写 `[]` 是显式选择（空态不藏任何件）。
+   * ★ #266 刀4（结构 C）：显隐的**空态再藏**（字段键保留不改名）。它是 `ccHidden`（**主管表**，
+   * 两种门态都生效）之下的**第二层**：只在空态**再加一层**，**只能加、不能抵消**主管表 ⇒
+   * 生效名单 = `门 ? 主管 ∪ 再藏 : 主管`（去重；规则唯一出处：
+   * `domains/cc/widgetDefinitions.ts` 的 `resolveCcHiddenWidgetIds`）。
+   * ★ 预设**没写这一项** ⇒ 该键不进 patch ⇒ 由 `DEFAULTS.ccHiddenEmpty`（出厂那 6 件）当基准
+   * （刀2 那条"缺省抄常态表"的落值回落已随刀4 删除）。
    */
   ccHiddenEmpty: string[]
   ccLayout: CcLayoutV3
