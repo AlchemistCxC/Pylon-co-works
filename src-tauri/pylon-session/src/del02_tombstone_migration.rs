@@ -198,9 +198,10 @@ fn fresh_db_gets_latest_tombstone_directly() {
 fn delete_session_writes_full_owner_tombstone() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s2").expect("touch s2");
-    repo.delete_session("s2", Some("[\"p1\",\"a1\",\"s2\"]"))
+    repo.begin_delete_session("s2", Some("[\"p1\",\"a1\",\"s2\"]"))
         .expect("delete s2");
+    repo.finalize_session_delete("s2", Some("[\"p1\",\"a1\",\"s2\"]"))
+        .expect("finalize s2");
     drop(repo);
     let conn = Connection::open(&path).expect("read file repo");
     let (owner, scope, state, rev, reason) = tombstone_row(&conn, "s2");
@@ -209,7 +210,7 @@ fn delete_session_writes_full_owner_tombstone() {
         "tombstone 记录真实 owner_key"
     );
     assert_eq!(scope, "exact");
-    assert_eq!(state, "deleted", "delete_session 终态 deleted");
+    assert_eq!(state, "deleted", "删除终态 deleted");
     assert_eq!(rev, 0, "初始 deletion_revision 0");
     assert_eq!(reason, None, "未传 reason 时 NULL");
     drop(conn);
@@ -220,11 +221,12 @@ fn delete_session_writes_full_owner_tombstone() {
 fn delete_session_without_owner_uses_session_scoped_legacy_owner() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch");
     // 旧调用路径（未携带 owner）→ 回退到唯一的会话作用域 legacy owner，
     // 不报错（DEL-02 兼容；DEL-03 起传真实 ownerKey）。
-    repo.delete_session("s1", None)
+    repo.begin_delete_session("s1", None)
         .expect("delete without owner");
+    repo.finalize_session_delete("s1", None)
+        .expect("finalize without owner");
     drop(repo);
     let conn = Connection::open(&path).expect("read");
     let (owner, scope, state, rev, _) = tombstone_row(&conn, "s1");
@@ -243,14 +245,19 @@ fn delete_session_without_owner_uses_session_scoped_legacy_owner() {
 fn delete_session_same_owner_is_idempotent_but_distinct_owners_coexist() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch");
-    repo.delete_session("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
+    repo.begin_delete_session("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
         .expect("first delete");
-    repo.delete_session("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
+    repo.finalize_session_delete("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
+        .expect("first finalize");
+    repo.begin_delete_session("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
         .expect("same owner repeat idempotent");
+    repo.finalize_session_delete("s1", Some("[\"p1\",\"a1\",\"s1\"]"))
+        .expect("same owner repeat finalize");
     // 不同 durable owner 不得被裸 session_id 主键遮蔽。
-    repo.delete_session("s1", Some("[\"p2\",\"b2\",\"s1\"]"))
+    repo.begin_delete_session("s1", Some("[\"p2\",\"b2\",\"s1\"]"))
         .expect("second owner delete");
+    repo.finalize_session_delete("s1", Some("[\"p2\",\"b2\",\"s1\"]"))
+        .expect("second owner finalize");
     drop(repo);
     let conn = Connection::open(&path).expect("read");
     let count: i64 = conn

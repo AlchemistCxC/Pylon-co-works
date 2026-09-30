@@ -81,7 +81,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
 
   entry('src/plugins/product/packages/builtin.pylon-gateway/styles/adaptive.css', 'builtin.pylon-gateway', 'adaptive', [GATEWAY_STYLE_ASSETS], 'gateway 包自适应残量：modern-gui 覆写 + status-pulse 动画（绞杀 P93 批 3）'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css', 'builtin.pylon-workspace', 'adaptive', [WORKSPACE_STYLE_ASSETS], 'workspace 包自适应残量：history/search/browser/runtime 的 mode 覆写与变量残量（绞杀 P93 批 2/4）'),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),

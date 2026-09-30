@@ -288,21 +288,6 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
-/// I14-W7：会话 tombstone 检查——deleted_sessions 命中即拒绝（迟到写不复活已删会话）。
-fn ensure_session_not_deleted(conn: &Connection, session_id: &str) -> Result<(), MessageError> {
-    let deleted: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM deleted_sessions WHERE session_id = ?1)",
-            params![session_id],
-            |row| row.get(0),
-        )
-        .map_err(MessageError::from)?;
-    if deleted {
-        return Err(MessageError::SessionDeleted(session_id.to_string()));
-    }
-    Ok(())
-}
-
 fn ensure_owner_not_deleted(
     conn: &Connection,
     owner: &crate::owner::DurableSessionOwner,
@@ -495,29 +480,6 @@ impl MsgRepo {
         get_session_state_for_owner_inner(&conn, &owner_key)
     }
 
-    /// 会话写入门闸（#155 T2 起 sessions 死表已删，touch 不再落行——生产会话行由
-    /// user_data sessions envelope 维护）。保留 tombstone gate 语义：已删除会话拒绝复活。
-    #[allow(dead_code)] // 测试/历史兼容路径保留
-    pub fn touch_session(&self, session_id: &str) -> Result<(), SessionError> {
-        let conn = self.conn.lock().map_err(lock_err)?;
-        ensure_session_not_deleted(&conn, session_id)
-            .map_err(|error| SessionError::from(error.to_string()))?;
-        Ok(())
-    }
-
-    /// D-02 + DEL-02 事务删除：写 tombstone 并清扫该 owner 的快照/事件。
-    /// tombstone 记录 owner/deletion state（§5.12）：owner_key 由调用方传入（None 时回退
-    /// 会话作用域 legacy owner）；state 恒为 deleted；同一 owner 重复删除 INSERT OR IGNORE 幂等，
-    /// 不同 owner 的 tombstone 可并存。#110 F3：exact owner 的 canonical_events 同事务清扫。
-    #[allow(dead_code)] // 测试/直通车变体：生产走 DEL-03 两阶段（begin_delete_session → finalize）
-    pub fn delete_session(
-        &self,
-        session_id: &str,
-        owner_key: Option<&str>,
-    ) -> Result<(), SessionError> {
-        self.delete_session_with_state(session_id, owner_key, "deleted")
-    }
-
     /// DEL-03（§5.13 步骤 2-4）：本地优先删除开始——同一事务内写 state='deleting'
     /// tombstone 并删除会话行；前端随后远端 close best effort 并调
     /// `finalize_session_delete` 转终态 'deleted'。'deleting' 同样被迟到写 gate（不复活）。
@@ -554,21 +516,6 @@ impl MsgRepo {
             .map_err(repo_err)?;
         }
         Ok(())
-    }
-
-    /// tombstone 当前 state（None = 无 tombstone）。测试消费（DEL-03/05）；生产 gate 只查存在性。
-    #[allow(dead_code)]
-    pub fn tombstone_state(&self, session_id: &str) -> Result<Option<String>, SessionError> {
-        let conn = self.conn.lock().map_err(lock_err)?;
-        let state: Option<String> = conn
-            .query_row(
-                "SELECT state FROM deleted_sessions WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(repo_err)?;
-        Ok(state)
     }
 
     /// 事务删除实现（tombstone state 由调用方指定：'deleting' 两阶段 / 'deleted' 终态）。
