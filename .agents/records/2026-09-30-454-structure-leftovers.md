@@ -61,3 +61,11 @@
 
 修正记录本身两处：AgentRuntimePanel 实测 443 行（非 442，末行换行口径）；「视图层 15 条已删」补注（白名单清理以条目是否真死为准，5 条建议中 4 条仍活）。
 
+
+## 合并 main（提审后）
+
+PR #462（#442 终态权威）与 #464（#448 持久化收敛）相继合入后 PR #465 冲突（L.md 预告的 Settings.tsx 邻接兑现）。解法（合并提交 `52a002e2`，保留双方语义）：
+
+- `agentWorkbenchLifecycle.ts` import 块：保留 #442 新增的 `PersistedTurnBoundary` 类型，工厂 `createSessionClient` 不回退（本批 A-V2 已收口 appClients）。
+- `Settings.tsx` 三块：#448 的内联 ZonePresetRow/预设 selector 块按本批拆分落位丢弃；**selector 改源移植进拆分组件**——GlobalPresetSection（customPresets/save/apply/remove）、settingsSectionShared 的 ZonePresetRow（zonePresetEntries）、Settings 胶水（save/prune/removeZonePresetEntry + applyCustomPreset + getState().zonePresetEntries）全部改 `useCustomPresetStore`（#448 PR5 拆库后 themeStore 不再持有该面）。
+- 合并后门禁全绿：test 662 文件/5,141 用例、layer 852 文件零越界（豁免 5）、runtime 白名单 25、build/maintenance/clippy（6 crate added: []）通过。
