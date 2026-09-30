@@ -1456,7 +1456,10 @@ fn search_hits_escapes_like_wildcards_to_literals() {
     // `_` 只命中字面含 `_` 的行（修复前 `a%`/`_` 会把 `axb` 一并拉进来）。
     let underscore_hits = repo.search_hits("_", 10).unwrap();
     assert_eq!(
-        underscore_hits.iter().map(|hit| hit.sequence).collect::<Vec<_>>(),
+        underscore_hits
+            .iter()
+            .map(|hit| hit.sequence)
+            .collect::<Vec<_>>(),
         vec![2],
         "下划线按字面量匹配，snake_case 命中而 axb 不命中"
     );

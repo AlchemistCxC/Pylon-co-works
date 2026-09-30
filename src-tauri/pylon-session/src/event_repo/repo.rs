@@ -1080,7 +1080,10 @@ impl EventRepo {
             .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
         // #487 批③：先转义转义符本身，再转义 `%`/`_`——顺序不可换（否则转义引入的
         // 反斜杠会被二次转义）。
-        let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let pattern = format!("%{escaped}%");
         let mut stmt = conn
             .prepare_cached(
