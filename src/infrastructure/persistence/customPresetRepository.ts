@@ -8,6 +8,9 @@
  * - hydrate 对账（启动挂 App.tsx hydrateDomains）：后端有值且异于本地 → 以后端
  *   为准 setState（同步 guard 防回环写）；后端无值且本地非空（含刚从旧 pylon-theme
  *   搬家的数据）→ 写穿后端（一次性持久化迁移）；
+ *   #463 前端 C-1 例外：本地 localStorage 有未同步标志（上次会话写穿失败）且本地
+ *   非空 → 本地较新（写穿失败不回滚本地），本地赢并整份重发后端（跨会话自愈），
+ *   不再无条件后端赢；本地为空不觊觎后端（宁复活不销毁，见 saveToBackend）。
  * - 写穿桥（hydrate 完成后安装）：subscribe 本地变更 → 盲写 user_data_save
  *   （latest-wins——预设变更是低频用户操作，设置面即唯一写者）；失败可见上报，
  *   本地值不回滚（下一次任意预设变更整份重发自愈）。
@@ -37,6 +40,25 @@ interface PresetSlice {
 
 const PERSISTENCE_ERROR_KEY = 'app:custom-preset-persistence'
 
+/**
+ * #463 前端 C-1：未同步标志（localStorage）。语义＝「本地存在尚未成功写入后端的
+ * 较新值」——save 成功清除、失败置位。与预设同存于 localStorage：WebView 存储被
+ * 清则标志与本地副本同失，后端权威自然接管（多机器场景不存在，user_data 是本机
+ * SQLite，唯一写者即本前端）。
+ */
+const UNSYNCED_FLAG_KEY = 'pylon-custom-presets-unsynced'
+
+function readUnsyncedFlag(): boolean {
+  try { return globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY) === '1' } catch { return false }
+}
+
+function writeUnsyncedFlag(unsynced: boolean): void {
+  try {
+    if (unsynced) globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    else globalThis.localStorage.removeItem(UNSYNCED_FLAG_KEY)
+  } catch { /* quota：最坏退化回后端赢，等价修复前行为（保存失败本就有可见上报） */ }
+}
+
 function reportPersistenceError(action: string, error: unknown): void {
   const parts = wireErrorParts(error)
   reportRuntimeError(action, parts.message.length > 0 ? new Error(parts.message) : error, undefined, {
@@ -56,15 +78,22 @@ function loadFromBackend(): Promise<UserDataEnvelopeWire | null> {
 }
 
 async function saveToBackend(slice: PresetSlice): Promise<void> {
-  await tauriInvokeTransport('user_data_save', {
-    key: BACKEND_KEY,
-    payload: {
-      version: ENVELOPE_VERSION,
-      customPresets: slice.customPresets,
-      zonePresetEntries: slice.zonePresetEntries,
-    },
-    expectedRevision: null,
-  })
+  try {
+    await tauriInvokeTransport('user_data_save', {
+      key: BACKEND_KEY,
+      payload: {
+        version: ENVELOPE_VERSION,
+        customPresets: slice.customPresets,
+        zonePresetEntries: slice.zonePresetEntries,
+      },
+      expectedRevision: null,
+    })
+    writeUnsyncedFlag(false)
+  } catch (error) {
+    // #463：失败先置标志（下次启动对账据此本地赢），上报仍由调用方完成
+    writeUnsyncedFlag(true)
+    throw error
+  }
 }
 
 /** 后端 → 本地：payload 窄化（校验器已保证结构，字段级归一在 store merge/读取方）。 */
@@ -96,9 +125,20 @@ export async function hydrateCustomPresetsFromBackend(): Promise<void> {
     if (backend) {
       const local = sliceOf(useCustomPresetStore.getState())
       if (sameSlice(backend, local)) {
+        writeUnsyncedFlag(false) // 已一致：残留标志必属陈旧（如失败的是 no-op 保存）
         installWriteThroughBridge()
         return
       }
+      // #463 前端 C-1：标志在场且本地非空 → 本地较新（上次写穿失败未回滚），
+      // 本地赢并整份重发后端（跨会话自愈）；重发失败走外层可见上报，标志保留
+      //（下次启动继续本地赢）。本地为空不进本分支：quota 下 persist 失败可能让
+      // 本地假空，此时宁信后端（复活可再删，销毁不可逆）。
+      if (readUnsyncedFlag() && (local.customPresets.length > 0 || local.zonePresetEntries.length > 0)) {
+        await saveToBackend(local)
+        installWriteThroughBridge()
+        return
+      }
+      writeUnsyncedFlag(false) // 后端赢（标志缺席或本地空）：标志失效
       syncingFromBackend = true
       try {
         useCustomPresetStore.setState(backend)

@@ -1,9 +1,11 @@
 /**
  * #448 PR2 inputPredictionSettingsRepository 测试——Tauri 模式（后端权威源）：
- * - hydrate：后端有值 → 缓存镜像；后端无值 + 旧 key 在场 → 一次性迁移（写穿 + 删旧）
+ * - hydrate：后端有值 → 缓存镜像；后端无值 + 旧 key 在场 → 一次性迁移（写穿）
  * - 迁移写穿失败 → 旧 key 保留（幂等重试）、缓存先行
  * - 后端不可用 → localStorage 值兜底（等价旧行为）且不抛（不降级启动）
- * - persist：缓存立即更新 + 盲写 user_data_save（expectedRevision=null）
+ * - persist：缓存立即更新 + 链式盲写 user_data_save（expectedRevision=null）+
+ *   影子先行（#463：legacy key 保留作恢复日志）
+ * - #463 前端 C-1：未同步标志（写穿失败置位）→ 对账影子赢 + 整份重发自愈
  * - browser 模式：hydrate no-op；persist 写 localStorage
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -34,6 +36,8 @@ import { DEFAULT_INPUT_PREDICTION_SETTINGS, INPUT_PREDICTION_SETTINGS_KEY } from
 
 let fakeInvoke: FakeInvoke
 
+const UNSYNCED_FLAG_KEY = 'pylon-input-prediction-unsynced'
+
 const LEGACY_VALUE = { ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'standalone' as const, enabled: true, baseUrl: 'https://api.example.com/v1', apiKey: 'sk-legacy', model: 'test-model' }
 
 function seedLegacyKey(): void {
@@ -44,7 +48,7 @@ beforeEach(() => {
   fakeInvoke = new FakeInvoke()
   invokeRef.current = (cmd, args) => fakeInvoke.invoke(cmd, args)
   updateCachedInputPredictionSettings(null)
-  globalThis.localStorage.removeItem(INPUT_PREDICTION_SETTINGS_KEY)
+  globalThis.localStorage.clear()
 })
 
 describe('Tauri 模式（IS_TAURI=true）', () => {
@@ -59,7 +63,7 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
     expect(cachedInputPredictionSettings().apiKey).toBe('sk-backend')
   })
 
-  it('hydrate：后端无值 + 旧 key 在场 → 写穿后端并删旧 key（一次性迁移）', async () => {
+  it('hydrate：后端无值 + 旧 key 在场 → 写穿后端（#463 起旧 key 保留转影子）', async () => {
     fakeInvoke.register('user_data_load', () => null)
     fakeInvoke.register('user_data_save', () => ({ revision: 1 }))
     seedLegacyKey()
@@ -73,7 +77,9 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
         expectedRevision: null,
       },
     })
-    expect(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)).toBeNull()
+    // #463：迁移成功后旧 key 保留（影子日志），写穿成功清未同步标志
+    expect(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)).not.toBeNull()
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
     expect(cachedInputPredictionSettings().apiKey).toBe('sk-legacy')
   })
 
@@ -100,7 +106,7 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
     expect(cachedInputPredictionSettings().apiKey).toBe('sk-legacy')
   })
 
-  it('persist：缓存立即更新 + 盲写 user_data_save（latest-wins）', async () => {
+  it('persist：缓存立即更新 + 链式盲写 user_data_save（latest-wins）+ 影子先行', async () => {
     fakeInvoke.register('user_data_save', () => ({ revision: 3 }))
     const next = { ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'off' as const }
     persistInputPredictionSettings(next)
@@ -111,15 +117,101 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
       cmd: 'user_data_save',
       args: { key: 'input-prediction', payload: expect.objectContaining({ version: 1, mode: 'off' }), expectedRevision: null },
     })
-    // Tauri 模式不写 localStorage（后端单一权威）
-    expect(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)).toBeNull()
+    // #463：Tauri 模式写影子日志（恢复源；权威仍是后端）
+    const shadow = globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)
+    expect(shadow).not.toBeNull()
+    expect(JSON.parse(shadow!)).toMatchObject({ mode: 'off' })
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
   })
 
-  it('persist：后端写穿失败 → 缓存不回滚（下一次保存整份重发自愈）', async () => {
+  it('persist：后端写穿失败 → 缓存不回滚 + 未同步标志置位（影子可证较新）', async () => {
     fakeInvoke.register('user_data_save', () => { throw new Error('db busy') })
     persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, apiKey: 'sk-keep' })
     expect(cachedInputPredictionSettings().apiKey).toBe('sk-keep')
     await new Promise(resolve => globalThis.setTimeout(resolve, 0))
     expect(cachedInputPredictionSettings().apiKey).toBe('sk-keep')
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
+    expect(cachedInputPredictionSettings()).toMatchObject({ apiKey: 'sk-keep' })
+  })
+
+  it('persist：后端写穿失败且影子写不进（quota）→ 不置标志（拿不出可证较新的值）', async () => {
+    const setItem = globalThis.localStorage.setItem.bind(globalThis.localStorage)
+    vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === INPUT_PREDICTION_SETTINGS_KEY) throw new DOMException('quota', 'QuotaExceededError')
+      setItem(key, value)
+    })
+    fakeInvoke.register('user_data_save', () => { throw new Error('db busy') })
+    persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, apiKey: 'sk-unrecoverable' })
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0))
+    expect(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)).toBeNull()
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+    vi.restoreAllMocks()
+  })
+})
+
+describe('#463 前端 C-1：未同步标志对账', () => {
+  it('标志在场且影子异于后端 → 影子赢入缓存并整份重发，成功清标志', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    fakeInvoke.register('user_data_save', () => ({ revision: 3 }))
+    const lost = { ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'off' as const, apiKey: 'sk-lost' }
+    globalThis.localStorage.setItem(INPUT_PREDICTION_SETTINGS_KEY, JSON.stringify(lost))
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await hydrateInputPredictionSettingsFromBackend()
+    // 影子赢：写穿失败会话里的较新值恢复
+    expect(cachedInputPredictionSettings()).toMatchObject({ mode: 'off', apiKey: 'sk-lost' })
+    const save = fakeInvoke.calls.find(call => call.cmd === 'user_data_save')
+    expect(save).toBeDefined()
+    expect((save!.args as { payload: { mode: string } }).payload.mode).toBe('off')
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('标志在场但影子缺席 → 后端赢并清标志（无恢复源宁信后端）', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await hydrateInputPredictionSettingsFromBackend()
+    expect(cachedInputPredictionSettings().mode).toBe('fork')
+    expect(fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')).toHaveLength(0)
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('标志在场但影子与后端一致 → 后端赢并清标志（失败的是 no-op 保存）', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    globalThis.localStorage.setItem(INPUT_PREDICTION_SETTINGS_KEY, JSON.stringify({ version: 1, mode: 'fork', enabled: true }))
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await hydrateInputPredictionSettingsFromBackend()
+    expect(cachedInputPredictionSettings().mode).toBe('fork')
+    expect(fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')).toHaveLength(0)
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('后端赢时影子对齐权威值（下次写穿失败才作恢复源）', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true, apiKey: 'sk-backend' },
+    }))
+    await hydrateInputPredictionSettingsFromBackend()
+    const shadow = globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)
+    expect(shadow).not.toBeNull()
+    expect(JSON.parse(shadow!)).toMatchObject({ mode: 'fork', apiKey: 'sk-backend' })
+  })
+
+  it('影子赢重发失败 → 可见上报、缓存保留影子、标志保留', async () => {
+    const { reportRuntimeError } = await import('../../../app/runtimeError.ts')
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    fakeInvoke.register('user_data_save', () => { throw new Error('user_data_unavailable') })
+    const lost = { ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'off' as const, apiKey: 'sk-lost' }
+    globalThis.localStorage.setItem(INPUT_PREDICTION_SETTINGS_KEY, JSON.stringify(lost))
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await expect(hydrateInputPredictionSettingsFromBackend()).resolves.toBeUndefined()
+    expect(cachedInputPredictionSettings()).toMatchObject({ mode: 'off', apiKey: 'sk-lost' })
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
+    expect(reportRuntimeError).toHaveBeenCalled()
   })
 })

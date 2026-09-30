@@ -160,6 +160,10 @@ pub(crate) struct AppState {
     pub(crate) startup: Arc<RwLock<crate::startup::StartupDiagnostics>>,
     /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
     pub(crate) approval_mode: Arc<Mutex<String>>,
+    /// #463：approval-mode 写序锁（tokio Mutex）——set_approval_mode 的内存写与
+    /// user_data 落盘全程持锁，并发 set（GUI 与 CLI 桥同进程）时磁盘必为最后一次
+    /// set（重启不回退到较早值；与 mcp_write_lock 同型）。
+    pub(crate) approval_mode_write_lock: tokio::sync::Mutex<()>,
     /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
     /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
     pub(crate) pet_write_lock: tokio::sync::Mutex<()>,
@@ -808,6 +812,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         gateway,
         startup: Arc::new(RwLock::new(startup)),
         approval_mode: Arc::new(Mutex::new("default".to_string())),
+        approval_mode_write_lock: tokio::sync::Mutex::new(()),
         browser_agent: Arc::new(crate::browser::agent::hub::BrowserAgentHub::new()),
         pet_write_lock: tokio::sync::Mutex::new(()),
         switch_lock: tokio::sync::Mutex::new(()),
