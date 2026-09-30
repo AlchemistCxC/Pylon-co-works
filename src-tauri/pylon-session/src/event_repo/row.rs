@@ -147,9 +147,10 @@ pub struct EventSearchHit {
     pub remote_session_id: Option<String>,
     pub sequence: i64,
     pub event_type: String,
-    pub occurred_at: Option<String>,
+    pub occurred_at: String,
     /// `instr(lower(列), lower(query))` 首偏移（1-based）；None = 命中列上按字面
-    /// 定位不到（如仅 event_type 列命中）。advisory：前端 v1 不消费，定位与
+    /// 定位不到——仅 event_type 列命中，或 query 含 LIKE 通配符（`%`/`_`）使
+    /// LIKE 命中而 instr 找不到字面量。advisory：前端 v1 不消费，定位与
     /// snippet 一律以投影文本为准。
     pub match_offset: Option<i64>,
 }

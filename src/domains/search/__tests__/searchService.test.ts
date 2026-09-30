@@ -100,7 +100,8 @@ describe('searchAllMessagesTauri（#445 命中行两阶段）', () => {
       messageId: 'user-1',
       agentId: 'peri',
       snippet: 'hello needle world',
-      time: '08:00:00',
+      // timeOf = toLocaleTimeString()（locale/时区敏感），期望按同一变换动态推导。
+      time: new Date('2026-08-14T00:00:00.000Z').toLocaleTimeString(),
     })
   })
 
@@ -162,8 +163,10 @@ describe('searchAllMessagesTauri（#445 命中行两阶段）', () => {
       seqStart: 8,
       seqEnd: 12,
       foldedCount: 5,
-      aggregateKind: 'delta-run',
-      foldScheme: 'v1',
+      // 实值对齐后端 turn_rollup.rs 常量（parse 读侧刻意不校验方案字符串，但
+      // 夹具不忠实会误导照抄者）。
+      aggregateKind: 'turn-rollup',
+      foldScheme: 'adjacent-delta-fold-v2',
       contentSha256: 'a'.repeat(64),
       terminal: { eventType: 'turn.completed', occurredAt: '2026-08-14T00:00:05.000Z' },
       segments: [{
@@ -186,5 +189,31 @@ describe('searchAllMessagesTauri（#445 命中行两阶段）', () => {
       messageId: 'msg-1',
       snippet: 'the needle text inside unit',
     })
+  })
+
+  it('searchHits 拒绝 → 空结果不抛（错误上报走 reportRuntimeError）', async () => {
+    repoRef.current.searchHits.mockRejectedValue(new Error('evt_search failed'))
+
+    const { results, truncated } = await searchAllMessagesTauri('needle')
+
+    expect(results).toEqual([])
+    expect(truncated).toBe(false)
+    expect(repoRef.current.listCompact).not.toHaveBeenCalled()
+  })
+
+  it('单行拉取失败 → 只跳该行，不炸整 owner', async () => {
+    repoRef.current.searchHits.mockResolvedValue([hit(3), hit(7)])
+    repoRef.current.listCompact.mockImplementation(
+      async (_ownerKey: string, afterSequence: number | null) => {
+        if (afterSequence === 2) throw new Error('evt_load_compact failed')
+        return singlePage(row(7, 'user.message', { text: 'needle on row seven' }, { text: 'needle on row seven' }))
+      },
+    )
+
+    const { results } = await searchAllMessagesTauri('needle')
+
+    expect(repoRef.current.listCompact).toHaveBeenCalledTimes(2)
+    expect(results).toHaveLength(1)
+    expect(results[0].snippet).toBe('needle on row seven')
   })
 })

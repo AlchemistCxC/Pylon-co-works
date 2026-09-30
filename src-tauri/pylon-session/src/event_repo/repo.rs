@@ -1069,9 +1069,10 @@ impl EventRepo {
     /// B6 / #445：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
     /// 大小写不敏感 LIKE，返回**命中行**定位（owner 三元组 + sequence/event_type/
     /// occurred_at + instr 偏移）。WHERE 三列与 pattern 构造与候选 owner 版一字不改
-    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐，故 raw/typed
-    /// 列命中的行 offset 必非 NULL。前端对命中行定向拉行后投影复核（匹配与命中同源）。
-    /// limit 为命中行上限。
+    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐——query 不含
+    /// LIKE 通配符（`%`/`_`）字面量时，raw/typed 列命中的行 offset 必非 NULL
+    /// （通配符命中时 instr 可能定位不到字面量，offset 为 NULL，见 `EventSearchHit`）。
+    /// 前端对命中行定向拉行后投影复核（匹配与命中同源）。limit 为命中行上限。
     pub fn search_hits(&self, query: &str, limit: u32) -> Result<Vec<EventSearchHit>, EventError> {
         let conn = self
             .conn
@@ -1101,7 +1102,7 @@ impl EventRepo {
                     remote_session_id: row.get(1)?,
                     sequence: row.get(2)?,
                     event_type: row.get(3)?,
-                    occurred_at: row.get(4)?,
+                    occurred_at: row.get::<_, String>(4)?,
                     match_offset: row
                         .get::<_, Option<i64>>(5)?
                         .or(row.get::<_, Option<i64>>(6)?),

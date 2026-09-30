@@ -61,6 +61,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/__tests__/replay/canonicalEventFeed.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceLayoutChange.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
+  // #445：搜索错误路径（searchHits/单行拉取拒绝）刻意触发 reportRuntimeError 的
+  // console.error——A 类错误路径契约。
+  'src/domains/search/__tests__/searchService.test.ts',
   'src/components/chat/__tests__/messageRenderBoundary.test.tsx',
   'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
   // #422：凭证门禁错误路径（config_verification_required / 连接测试失败）刻意触发

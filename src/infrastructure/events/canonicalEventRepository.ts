@@ -12,6 +12,9 @@
  *   缺省 true）；`turn.unit` 豁免（单元行是历史正文的唯一副本）。
  * - evt_load_compact(owner_key, after_sequence, limit, cap_typed_payload)：compact 读的
  *   **一页**（升序、前向游标；#376-b 起不再一次取回整库）。
+ * - evt_search(query, limit)：跨 owner 内容搜索命中行（#445）——owner 三元组 +
+ *   sequence/eventType/occurredAt/matchOffset；可空字段（remoteSessionId/matchOffset）
+ *   恒在场（null），无 skip 序列化。
  * - 结构化错误 { code, message }：event_revision_conflict / event_repo_corrupt /
  *   event_repo_constraint / event_repo_conflict / event_db_unavailable / event_invalid /
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
@@ -51,7 +54,7 @@ export interface CanonicalCompactPage {
 export type CanonicalEventSearchHit = CanonicalEventOwner & {
   sequence: number
   eventType: string
-  occurredAt: string | null
+  occurredAt: string
   matchOffset: number | null
 }
 

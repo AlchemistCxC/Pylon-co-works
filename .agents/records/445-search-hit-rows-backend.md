@@ -36,7 +36,8 @@ snapshotSearch、不引入 FTS5/trigram、不改 wire 命令名与参数（返�
 | `src/infrastructure/events/canonicalEventRepository.ts` | `CanonicalEventSearchHit` 类型；接口与实现 `searchOwners` → `searchHits` | 修改 |
 | `src/infrastructure/events/__tests__/canonicalEventRepository.test.ts` | invoke 形状测试改命中行；fake 随迁 | 修改 |
 | `src/domains/search/searchService.ts` | `searchAllMessagesTauri` 阶段 2 重写：定向拉行 + 合流投影 + includes 复核 | 修改 |
-| `src/domains/search/__tests__/searchService.test.ts` | 新增（6 测） | 新增 |
+| `src/domains/search/__tests__/searchService.test.ts` | 新增（8 测：6 行为 + 2 错误路径） | 新增 |
+| `vitest.setup.ts` | console.error 白名单按 A 类登记本测试文件（一行 + 注释） | 修改 |
 
 ## 方案要点
 
@@ -47,8 +48,9 @@ snapshotSearch、不引入 FTS5/trigram、不改 wire 命令名与参数（返�
   SQL 只做 `ORDER BY owner_key, sequence`，Rust 侧**稳定**排序按三元组重排（保留 owner 内
   sequence 升序）后 truncate。LIMIT 不下推 SQL——那会在三元组排序前截断、改变 owner 组成。
 - **matchOffset**：`NULLIF(instr(lower(列), lower(?query)), 0)`；SQLite `lower()` 是 ASCII
-  折叠，与 NOCASE 语义对齐，raw/typed 列命中的行 offset 必非 NULL；仅 event_type 列命中
-  时为 None。advisory 字段，前端 v1 不消费（定位与 snippet 一律以投影文本为准）。
+  折叠，与 NOCASE 语义对齐，query 不含 LIKE 通配符（`%`/`_`）字面量时 raw/typed 列命中
+  的行 offset 必非 NULL（通配符使命中而 instr 定位不到时为 None，仅 event_type 列命中
+  同为 None）。advisory 字段，前端 v1 不消费（定位与 snippet 一律以投影文本为准）。
 - **前端定向拉行**：命中行按 owner 分组、sequence 去重；每命中行一次
   `evt_load_compact(ownerKey, sequence-1, 1)`——恰好取回该位置的 compact 有效行（命中行
   自身，或覆盖它的 `turn.unit` 单元行，trim 中间态命中不丢）。回读行按 sequence 去重后
@@ -85,10 +87,11 @@ snapshotSearch、不引入 FTS5/trigram、不改 wire 命令名与参数（返�
 
 ## 证据
 
-- commit：96c21446（L.md 声明）、4bfc63ae（实现）
+- commit：96c21446（L.md 声明）、4bfc63ae（实现）、ffd2eefc（记录）、审查修订提交（见 git log）
 - 测试：`cargo test -p pylon-session --lib` 216 passed；`cargo test --lib` 970 passed；
   `bun run test` 5179 passed；`bun run check:clippy` EXIT=0；`bun run check:frontend` /
-  `bun run check:solid` EXIT=0
+  `bun run check:solid` EXIT=0（审查修订后定向复跑：search 4 + searchService/repository
+  25 全绿，fmt/clippy/lint 复验绿）
 - 手工验证：未做实机验收（纯读路径重构，行为等价由双侧单测覆盖；如需实机复验可走
   webview2-acceptance 流程）
 
@@ -98,6 +101,23 @@ snapshotSearch、不引入 FTS5/trigram、不改 wire 命令名与参数（返�
   方案**执行：后端不产 snippet（raw JSON 文本提取质量差，issue 明示首版可不做），snippet
   边界由前端 `snippetAround`（既有函数）在测试中覆盖；后端侧对应覆盖为 instr 偏移的中文
   与 ASCII 边界断言。
+- **审查后修订（2026-09-30 双子 agent 审查）**：`occurred_at` 从 `Option<String>` 收窄为
+  `String`（列 NOT NULL，wire 不再暴露恒不出现的 null 档）；测试补错误路径两测
+  （searchHits 拒绝 / 单行拉取拒绝跳行）；vitest.setup.ts console.error 白名单按 A 类登记
+  本测试文件；前端 `time` 断言改为动态期望（`toLocaleTimeString()` 是 locale/时区敏感
+  输出，硬编码字面量在非 UTC+8 机器/CI 必挂）；turn.unit 夹具 aggregateKind/foldScheme
+  对齐后端实值（`turn-rollup` / `adjacent-delta-fold-v2`）；repository 头部后端契约清单
+  补 evt_search 行。
+
+## 审查记录
+
+按用户指示派发双子 agent 审查（2026-09-30，后端 Rust / 前端 TS 各一，只读）。结论：
+后端 7 项不变量（召回保真 / wire additive / 排序截断保真 / SQL 正确性 / 测试质量 / 规范
+/ doc 一致性）全部核验通过，无 P0/P1；前端核验通过项：结果序等价、truncated 语义、去重
+正确性、无未处理拒绝、snapshot/provider/投影未动、SQL WHERE 逐字保真、null 口径与 serde
+一致。发现已全部处置：P1 messageId 契约漂移与 P2 limit 粒度收窄记入「未解问题」并留
+代码注释；其余（注释过强、时区断言、夹具实值、契约清单缺行、错误路径零覆盖、
+occurred_at 冗余 Option）已当场修复。
 
 ## 未解问题
 
@@ -105,10 +125,21 @@ snapshotSearch、不引入 FTS5/trigram、不改 wire 命令名与参数（返�
   `turn.unit`）时，后端无单行命中 → 旧版经全量投影聚合可命中、新版不命中。回合折叠后
   （L3 裁剪常态）段文本完整，无此收窄。如需覆盖，后续可在后端做相邻 delta run 的拼接
   LIKE 或前端按命中行邻域扩拉——留作后续档，不在本次 refactor 的 recall 承诺内。
+- **已知收窄 2（审查补记）**：limit 截断单元从「owner 粒度」变「命中行粒度」——单会话
+  命中行数多时会把旧版能覆盖的最多 50 个 owner 挤到少数几个；同一消息多条命中行（trim
+  中间态双命中）也各烧一个截断名额。后续可在前端做 owner 分桶或后端 per-owner 配额。
+- **messageId 契约漂移（审查 P1，潜在不现行）**：搜索结果的 `messageId` 现在是「拉回行
+  子集投影」的逻辑序号（`user-1`/`msg-2`…），不再等于会话内全量投影的 `Message.id`
+  （旧版全量拉流下两者一致）。当前唯一消费点 SearchSheetView 只写入
+  `pendingMessageLocation`，全仓无读取方——今天不炸；FE-AUD-003 导航契约落地时需改带
+  owner+sequence 锚或恢复全量序号（裁断权留仓库主）。已在 `searchService.ts` 结果装配处
+  留 ⚠️ 注释。
 - 后端 snippet（SQL `instr`+`substr` 从原文提取）留作后续优化档（issue 明示）。
 
 ## 并行交集
 
 - `src-tauri/src/session/mod.rs`：仅 evt_search 命令体 hunk；该文件其他区域未动。
+- `vitest.setup.ts`：仅 console.error 白名单追加一行（该文件是共享测试基建，按其自带
+  登记规则操作；其他 agent 若同时改白名单需 rebase 该 hunk）。
 - 共享树在途的 #444（export/sanitize 域）、#471（pack_release 域）改动未卷入本次提交；
   `src-tauri/src/lib.rs`（#463 在途）未触碰——evt_search 的命令注册行不涉及类型导入。

@@ -76,8 +76,9 @@ export async function searchAllMessagesTauri(query: string): Promise<{ results: 
     const rowBySequence = new Map<number, CanonicalEventRow>()
     await Promise.all(sequences.map(async sequence => {
       try {
-        // #445：after_sequence = sequence-1 + limit 1——恰好取回该位置的
-        // compact 有效行（命中行自身或覆盖它的单元行）。
+        // #445：after_sequence = sequence-1 + limit 1——取回该位置附近的 compact
+        // 有效行（命中行自身，或覆盖它的单元行；compact 页按 delta run 边界收口，
+        // 预算内通常 1 行，最坏为邻接整段 run）。
         const page = await repository.listCompact(ownerKey, sequence - 1, 1)
         const row = page.events[0]
         if (row) rowBySequence.set(row.sequence, row)
@@ -92,6 +93,10 @@ export async function searchAllMessagesTauri(query: string): Promise<{ results: 
     for (const message of messages) {
       const searchable = getMessageSearchText(message)
       if (!searchable.toLocaleLowerCase().includes(needle.toLocaleLowerCase())) continue
+      // ⚠️ messageId 是本次（拉回行子集）投影内的逻辑序号（user-1/msg-2…），不再
+      // 等于会话内全量投影的 Message.id——旧版全量拉流下两者一致。消费方
+      // SearchSheetView 只把它写进 pendingMessageLocation（当前无读取方）；导航
+      // 契约（FE-AUD-003）落地时需改带 owner+sequence 锚或恢复全量序号，见 #445。
       results.push({
         sessionId: session.id,
         messageId: message.id,

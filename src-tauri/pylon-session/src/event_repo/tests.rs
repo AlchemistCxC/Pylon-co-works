@@ -1391,10 +1391,7 @@ fn search_hits_returns_hit_rows_case_insensitive_and_keeps_row_granularity() {
     assert_eq!(hits[0].remote_session_id.as_deref(), Some("remote-1"));
     assert_eq!(hits[0].sequence, 1);
     assert_eq!(hits[0].event_type, "user.message");
-    assert_eq!(
-        hits[0].occurred_at.as_deref(),
-        Some("2026-08-14T00:00:00.000Z")
-    );
+    assert_eq!(hits[0].occurred_at, "2026-08-14T00:00:00.000Z");
     assert_eq!(hits[1].sequence, 2);
 
     let none = repo.search_hits("absent-term", 10).unwrap();
@@ -1487,6 +1484,7 @@ fn search_hits_orders_by_owner_triple_then_sequence_and_truncates() {
 
 /// #445 验收读数：单次搜索 IPC 载荷 = 命中行集，不再随会话行数线性放大——
 /// 300 行会话命中 2 行时，搜索返回 2 行（全量 compact 读是 300 行）。
+/// 行数是 IPC 载荷的代理读数（wire 载荷 ≈ 行数 × 单行大小），非字节级断言。
 #[test]
 fn search_hits_payload_is_hit_row_set_not_full_stream() {
     let repo = repo();
