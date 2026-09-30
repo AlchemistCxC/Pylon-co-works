@@ -31,7 +31,7 @@
  *
  * - `src/infrastructure/events/__tests__/`：`canonicalEventSink`、`canonicalEventPersistScheduler`、
  *   `canonicalEventRepository`（落盘闸口 / 调度 / 仓库读写——失败语义是"写失败"，不是"重放不等价"）
- * - `src/sheets/agent-workbench/__tests__/`：会话运行时套件（含 `terminalDelivery`，终帧投递）
+ * - `src/application/agent-workbench/__tests__/`：会话运行时套件（含 `terminalDelivery`，终帧投递）
  *
  * 若要把这些一并收进来是一次纯搬移，但会模糊"写入路径"与"重放契约"的归属，需单独确认。
  *

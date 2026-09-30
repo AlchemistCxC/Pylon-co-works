@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Session } from '../../domains/identity/identityStore.ts'
-import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalEventBatch.ts'
 import type { CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
 import { REAL_FIXTURE_SCENARIOS } from './realFixtures.ts'

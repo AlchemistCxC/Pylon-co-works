@@ -17,7 +17,7 @@
  * （信封 → 文档）。行与信封在折完之后即可回收——这正是 #376-b 分页装载要让位给 GC 的部分，
  * 故本域只从**文档**取根，不把行数组算进驻留。
  */
-import { toWorkbenchEnvelopes } from '../../../src/sheets/agent-workbench/agentWorkbenchProjection.ts'
+import { toWorkbenchEnvelopes } from '../../../src/application/agent-workbench/agentWorkbenchProjection.ts'
 import { mergeAdjacentDeltaChunks } from '../../../src/infrastructure/events/canonicalEventBatch.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, setTimelinePayloadNarrowing } from '../../../src/domains/workbench/workbenchProjector.ts'
 import { measureRetainedBytes, type RetainedBytesReport } from '../retainedHeap.ts'

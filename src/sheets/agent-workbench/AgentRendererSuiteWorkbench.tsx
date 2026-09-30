@@ -13,7 +13,7 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
-import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 import {
   agentAdvertisedModelEntries,
   agentProbeFresh,
@@ -21,8 +21,8 @@ import {
   markProbeInFlight,
   markProbeUnavailable,
   noteAgentSelectorsSnapshot,
-} from './agentAdvertisedModels.ts'
-import { AgentWorkbenchLifecycle } from './agentWorkbenchLifecycle.ts'
+} from '../../application/agent-workbench/agentAdvertisedModels.ts'
+import { AgentWorkbenchLifecycle } from '../../application/agent-workbench/agentWorkbenchLifecycle.ts'
 
 export interface WorkbenchFatalFailure {
   readonly suiteId: string
@@ -36,8 +36,8 @@ import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
-import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
-import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
+import { publishActiveWorkbenchHostPort } from '../../application/agent-workbench/activeWorkbenchHostPort.ts'
+import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from '../../application/agent-workbench/agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 

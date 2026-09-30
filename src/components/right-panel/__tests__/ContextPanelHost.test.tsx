@@ -9,7 +9,7 @@ import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetT
 import AgentContextPanel from '../AgentContextPanel.tsx'
 import { createPreviewWorkbenchServices } from '../../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchHostPort } from '../../../plugin-runtime/renderers/workbenchHostPort.ts'
-import { publishActiveWorkbenchHostPort } from '../../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
+import { publishActiveWorkbenchHostPort } from '../../../application/agent-workbench/activeWorkbenchHostPort.ts'
 import { useRightRailStore, RIGHT_RAIL_DEFAULT_WIDTH } from '../../../domains/workspace/layoutRailsStore.ts'
 
 const registrations: AsyncDisposable[] = []

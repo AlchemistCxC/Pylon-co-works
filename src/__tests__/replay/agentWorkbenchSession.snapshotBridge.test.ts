@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createWorkbenchDocument, projectWorkbench } from '../../domains/workbench/workbenchProjector.ts'
 import { normalizeSessionConfigOptions } from '../../domains/workbench/session/sessionSurface.ts'
 import { createCanonicalEvent } from '../../domains/events/eventSchema.ts'
-import { messageSnapshotToWorkbenchEnvelopes } from '../../sheets/agent-workbench/messageSnapshotProjection.ts'
+import { messageSnapshotToWorkbenchEnvelopes } from '../../application/agent-workbench/messageSnapshotProjection.ts'
 import type { Message } from '../../domains/chat/messageTypes.ts'
 import { persistMessageSnapshot } from '../../domains/chat/messagePersistence.ts'
-import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
 
 /** The shape an ACP provider advertises: every option carries its own choices. */

@@ -16,6 +16,8 @@ const retiredModules = [
 const retiredFieldPattern = /\bstreaming(?:Text|Thinking|Identity)\b/
 const retiredFieldRoots = [
   resolve(projectRoot, 'src/renderers/solid-workbench'),
+  // #486 项1：会话运行时归位 application，retired 守卫根随文件迁移；sheets 路径留守视图件。
+  resolve(projectRoot, 'src/application/agent-workbench'),
   resolve(projectRoot, 'src/sheets/agent-workbench'),
   resolve(projectRoot, 'src/domains/workbench'),
 ]

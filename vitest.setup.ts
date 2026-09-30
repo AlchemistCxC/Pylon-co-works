@@ -48,13 +48,13 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   // #442：同族（turnBoundary 权威字段行为，同一个 feed 注册噪音源）。
   'src/__tests__/replay/agentWorkbenchSession.turnBoundary.test.ts',
   'src/__tests__/replay/documentLayer.test.ts',
-  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
-  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
-  'src/sheets/agent-workbench/__tests__/agentWorkbenchSession.emptyStateFirstPrompt.test.ts',
+  'src/application/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
+  'src/application/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
+  'src/application/agent-workbench/__tests__/agentWorkbenchSession.emptyStateFirstPrompt.test.ts',
   'src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.test.tsx',
   'src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.test.tsx',
   // C 类：Renderer Suite fatal 回退链过程日志（含少量 B 类注册噪音）
-  'src/sheets/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
+  'src/application/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
   'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
   // A 类：错误路径契约
   'src/domains/identity/__tests__/identityStore.hydration.test.ts',
