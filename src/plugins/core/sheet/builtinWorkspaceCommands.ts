@@ -11,11 +11,11 @@ function boolean(value: unknown, key: string): boolean { if (typeof value !== 'b
 export function createBuiltinWorkspaceCommandDefinitions(): CommandDefinition[] {
   const base = 400
   return [
-    { id: 'layout.inspect', name: 'layout.inspect', description: '读取共享布局状态', priority: base, execute: () => { const rail = useRightRailStore.getState(); return { sidebarWidth: rail.leftRailWidth, sidebarCollapsed: rail.leftRailCollapsed, rightPanelCollapsed: rail.collapsed, rightPanelWidth: rail.width, showPet: rail.showPet } } },
+    { id: 'layout.inspect', name: 'layout.inspect', description: '读取共享布局状态', priority: base, execute: () => { const rail = useRightRailStore.getState(); return { sidebarWidth: rail.leftRailWidth, sidebarCollapsed: rail.leftRailCollapsed, rightPanelCollapsed: rail.collapsed, rightPanelWidth: rail.width } } },
     { id: 'layout.sidebar.set', name: 'layout.sidebar.set', description: '设置所有 Sheet 共享的左栏折叠状态', priority: base + 1, execute: ({ args }) => { const value = boolean(record(args).collapsed, 'collapsed'); const result = applyWorkspaceLayoutChange({ sidebarCollapsed: value }); if (!result.ok) throw new Error(result.message); return { collapsed: value } } },
     { id: 'layout.sidebar-width.set', name: 'layout.sidebar-width.set', description: '设置共享左栏宽度', priority: base + 2, execute: ({ args }) => { const width = record(args).width; if (typeof width !== 'number' || !Number.isFinite(width)) throw new Error('width 必须是数字'); const result = applyWorkspaceLayoutChange({ sidebarWidth: width }); if (!result.ok) throw new Error(result.message); return { width: useRightRailStore.getState().leftRailWidth } } },
     { id: 'layout.right-panel.set', name: 'layout.right-panel.set', description: '设置共享右栏折叠状态', priority: base + 3, execute: ({ args }) => { const value = boolean(record(args).collapsed, 'collapsed'); const result = applyWorkspaceLayoutChange({ rightPanelCollapsed: value }); if (!result.ok) throw new Error(result.message); return { collapsed: value } } },
-    { id: 'layout.pet.set', name: 'layout.pet.set', description: '设置桌宠显示状态', priority: base + 4, execute: ({ args }) => { const show = boolean(record(args).show, 'show'); useRightRailStore.getState().setShowPet(show); return { show } } },
+    // #483：`layout.pet.set`（设置桌宠显示状态）随宠物链删除退役。
     // 旧命令 `layout.agent-sidebar.set { mode: 'work' | 'chat' }` 随左栏互斥页签一并删除。
     // 现命令设置单个模块的折叠。#202 起折叠是**跨 Sheet 的应用级偏好**（全局单一真值，
     // 独立持久化 key），入参因此不再需要 sheetId；**读改写**全局映射而不是整块覆盖。

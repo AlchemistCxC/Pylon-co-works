@@ -34,7 +34,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#D77757",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -61,7 +60,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#88c0d0",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -88,7 +86,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#bb9af7",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -115,7 +112,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#ffb000",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -142,7 +138,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#7fff00",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
 ]

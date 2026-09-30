@@ -1225,7 +1225,8 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.task-tree')).toBeInTheDocument()
     expect(host.querySelector('.term-spinner')).toBeInTheDocument()
     expect(host.querySelector('.control-center')?.getAttribute('data-control-center')).toBe('production')
-    expect(host.querySelector('.pet-companion')?.getAttribute('data-fixture')).toBe('pending')
+    // #483：pet 占位（.pet-companion）随宠物链删除退役，不再挂载。
+    expect(host.querySelector('.pet-companion')).toBeNull()
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
 

@@ -63,7 +63,6 @@ describe('settings traceability contract (D-trace)', () => {
       'ccLayout',
       'custom',
       'rightWidth',
-      'showPet',
       'sidebarGroupSize',
       'spinnerCancelledMarkerMode',
       'spinnerDoneMarkerMode',

@@ -35,7 +35,6 @@ import ZonePresetSection from './settings/ZonePresetSection.tsx'
 import { Group } from './settings/settingsSectionShared.tsx'
 import { useSettingsSearchNavigation } from './settings/useSettingsSearchNavigation'
 import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
-import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { HOSTED_PLUGIN_MANAGER_PAGE_ID, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from './settings/settingsDomains'
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
@@ -90,8 +89,6 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     return session ? { agentId: session.agentId, source: session.source } : undefined
   })()
   const { settingsContributionCatalog, pluginSettingsPages, rendererRegistrySnapshot, activeRendererSuiteId } = useSettingsContributionCatalog()
-  const showPet = useRightRailStore(s => s.showPet)
-  const setShowPet = useRightRailStore(s => s.setShowPet)
   const [searchQuery, setSearchQuery] = useState('')
   // #154 阶段 4：renderers 分类导航位随 sheet 状态持久化（侧栏三级项与速搜命中同源）。
   const rendererCategoryId = state.rendererCategoryId ?? 'markdown-text'
@@ -177,16 +174,6 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         return (
           <Group title="模板库">
             <TemplateLibrary onApply={applyGlobalPresetByName} onRestore={applyGlobalPresetByName} onCustomApply={applyCustomPresetTransaction} />
-          </Group>
-        )
-      case 'pet':
-        return (
-          <Group title="宠物">
-            <div className="set-preset-row">
-              <button type="button" className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
-                {showPet ? '宠物显示中 — 点击隐藏' : '宠物已隐藏 — 点击显示'}
-              </button>
-            </div>
           </Group>
         )
       case 'window':

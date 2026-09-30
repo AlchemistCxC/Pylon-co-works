@@ -29,7 +29,6 @@ const WORKBENCH_THEME_KEYS = new Set<ThemeFieldKey>([
   'userName',
   'userPrefix',
   'userColor',
-  'showPet',
 ])
 
 const WORKBENCH_DERIVED_CSS_VARIABLES = [
@@ -189,7 +188,6 @@ function createDirtyTheme(): ThemeSettings {
     assistantDot: true,
     assistantDotGlyph: '✦',
     ccHidden: ['ekg'],
-    showPet: false,
   })
 }
 

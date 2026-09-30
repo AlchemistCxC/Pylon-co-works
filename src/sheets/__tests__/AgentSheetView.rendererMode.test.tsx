@@ -86,8 +86,6 @@ afterAll(async () => {
   if (active) await getPluginRuntime().deactivate(active.key)
 })
 
-vi.mock('../../components/PetCompanion.tsx', () => ({ default: () => null }))
-
 const ctx: SheetContext = {
   openSheet: () => 'x', focusSheet() {}, closeSheet() {},
   activeSession: 'session-1', selectSession() {},

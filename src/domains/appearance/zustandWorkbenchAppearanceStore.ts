@@ -1,19 +1,16 @@
 import { useStore } from '../theme/themeStore.ts'
-import { useRightRailStore } from '../workspace/layoutRailsStore.ts'
 import type { AppearanceCommand, WorkbenchAppearanceStore } from './appearance.ts'
 import { createVanillaWorkbenchAppearanceStore } from './workbenchAppearanceStore.ts'
 
 export function createZustandWorkbenchAppearanceStore(): WorkbenchAppearanceStore {
-  const readTheme = () => ({ ...useStore.getState(), showPet: useRightRailStore.getState().showPet })
+  // #483：showPet 随宠物链删除退役，外观快照回归纯主题 store 投影。
+  const readTheme = () => ({ ...useStore.getState() })
   return createVanillaWorkbenchAppearanceStore(
     {
       getState: readTheme,
       subscribe: listener => {
         const notify = () => { const next = readTheme(); listener(next, next) }
-        const unsubscribeTheme = useStore.subscribe(notify)
-        // showPet（A-V12 并入壳层偏好 store）变化需驱动外观投影重算。
-        const unsubscribeRails = useRightRailStore.subscribe(notify)
-        return () => { unsubscribeTheme(); unsubscribeRails() }
+        return useStore.subscribe(notify)
       },
     },
     dispatchAppearanceCommand,
