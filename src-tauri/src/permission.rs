@@ -537,9 +537,11 @@ pub(crate) async fn get_approval_mode(
 }
 
 /// #448 PR3：启动回填——从 user_data 读 approval-mode 覆盖内存默认值（"default"）。
-/// 无持久化值保持默认（首次启动，前端种子兜底）；损坏/不可用 warn 不阻断启动
-/// （degraded：本次会话内 set 仍会写穿自愈）。读走 load_sync 同步路径——
-/// 调用方（setup 钩子）在 `rt.block_on` 的 runtime 栈内，不能嵌套 block_on。
+/// 无持久化值保持默认（首次启动，前端种子兜底）；不可用 warn 不阻断启动（degraded：
+/// 本次会话内 set 仍会写穿自愈）。mode 合法性由 validate_approval_mode 在写路径前置
+/// 保证（save 拒绝非法/缺失 mode），回填处的枚举 filter 属纵深防御（手改 DB）。
+/// 读走 load_sync 同步路径——调用方（setup 钩子）在 `rt.block_on` 的 runtime 栈内，
+/// 不能嵌套 block_on。
 pub(crate) fn restore_persisted_approval_mode(state: &AppState) {
     let service = state
         .user_data_service
@@ -1622,5 +1624,9 @@ mod tests {
             .build();
         restore_persisted_approval_mode(&fresh);
         assert_eq!(*fresh.approval_mode.lock().unwrap(), "default");
+
+        // 损坏 payload（非法/缺失 mode）分支在此不可测：validate_approval_mode 前置
+        // 拒绝（approval_mode_rejects_unknown_mode_and_version 钉住），in_memory 基建
+        // 无法绕过 save 种出非法行——restore 的 mode filter 属纵深防御（手改 DB 场景）。
     }
 }

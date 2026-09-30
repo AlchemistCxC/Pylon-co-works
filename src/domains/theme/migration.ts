@@ -204,8 +204,10 @@ export function normalizeThemeMigrationState(
       if (canonical) appliedRecord[zone] = canonical
     }
   }
-  // ★ 搬家数据源透传在 themeDomainMigrate 的最终输出处（normalizeThemeValues 白名单
-  // 重建之后）——此处不透传（会被洗掉）。
+  // ★ #448 PR5：customPresets/zonePresetEntries 不在本函数输出里做任何处理——搬家
+  // 数据源由 themeStore 的 migrate 钩子 stashLegacyPresets 暂存原值（跨版本路径），
+  // customPresetStore 的 getItem 自行现场读旧键（同版本路径，zustand v5 同版本不写回）。
+  // migrate 的写回值经 partialize 白名单不含这两个字段（旧键残留由下次主题写盘修剪）。
   return normalized
 }
 

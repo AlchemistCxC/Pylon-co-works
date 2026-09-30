@@ -79,6 +79,34 @@ issue #448 规划的五个逻辑单元（单分支逐单元提交，各自独立
 - 测试：`cargo test -p pylon-session --lib user_data` → 35 passed / 0 failed；`cargo test -p pylon --lib permission::` → 19 passed / 0 failed；`bun run test` → **659 文件 / 5121 用例全绿**（基线 660 文件 / 5104：拆分后 customPresetApply 等文件用例并入新文件，净增约 20 用例）；`bun run check:all` → **exit 0**（含 lint / check:rust / check:clippy（各 crate `added: []`、基线未动）/ check:solid（运行时边界 + 分层门禁零违例））；`cargo fmt --all --check` → 干净。
 - 手工验证：未做实机运行验收（本批改动均为持久化链路且已有行为测试钉住各分支；真机 SQLite 落盘的端到端复验可按 webview2-acceptance skill 配方后补，属验收限制见下）。
 
+## 审查轮（两个独立子 agent 对抗式，用户指令派发）
+
+改动落地后（分支已推送、PR 未开时），按用户指令派发两个只读子 agent 分别审后端（Rust/契约面）与前端（数据安全优先）。裁决：后端 **PASS WITH CONCERNS**、前端初判 **FAIL**——前端 B-1 成立并已修复复验。
+
+### B-1（BLOCKER，已修复）：browser 模式同版本搬家不落盘 → 重启静默丢预设
+- **事实链**：`THEME_SCHEMA_VERSION` 仍为 11，已在 v11 的用户（多数升级态）zustand 5 同版本 hydrate **不跑 migrate** ⇒ stash 不执行 ⇒ 搬家走现场读腿；且同版本 hydrate **不写回** ⇒ 新键 `pylon-custom-presets` 当次启动不落盘；同会话任意一次 theme 写盘（partialize 白名单）就把旧 `pylon-theme` 内嵌预设字段永久修剪 ⇒ 重启现场读拿到空 ⇒ 预设清零（browser 模式无后端可救）。审查者用仓库自带 zustand 5.0.15 独立探针实证了两条腿的时序。
+- **修复**：搬家 getItem 命中即**同步落盘本键**（`customPresetStore.ts` 的 readLegacyPresetsStorageValue 内 setItem）——不依赖本会话是否发生预设动作；写失败仅意味着下次启动幂等重试。
+- **回归测试**：`customPresetStore.test.ts` 补「同版本升级态（v11）→ 现场读搬家且当场落盘，theme 写盘修剪旧键后重启不丢」用例（此前只测 version:8 跨版本 stash 腿——正是漏网原因）。
+- **根因记录**：施工期对「现场读腿为何安全」的心智模型错误（以为靠读序早于写回；真实原因是同版本不写回），错误注释已随修复更正（migration.ts / customPresetStore.ts）。
+
+### 已修的 CONCERN/NIT（审查轮随批）
+- 前端 C-2：写穿桥无在途串行化（后端 async 命令完成序无保证 + 盲写）→ 桥改 **latest-wins 链式串行**（writeChain，落盘时取最新 state 快照）。
+- 前端 C-3：两个新 hydrate 与 identity 串行且在其后（identity 失败连带跳过）→ 改 `Promise.all` 并行。
+- 后端 C-3：restore 测试注释声称「损坏 payload 不 panic」但无对应用例 → 查明这些形状过不了校验器、在 in_memory 基建下**不可测**（filter 属纵深防御）——注释与测试注释已改为如实陈述，不硬造不可达测试。
+- NIT：migration.ts 自相矛盾注释（描述已删的透传）、customPresetStore 时序模型注释——均已更正。
+
+### 登记 issue 的遗留（#463）
+- 前端 C-1：跨会话「后端赢」回滚（写穿失败的本地新变更下次启动被静默删除）。
+- 后端 C-1：并发 `set_approval_mode` 写穿乱序（内存序≠落盘序，重启回早值）。
+- 后端 C-2：落盘降级外部不可查（wire 契约决策口，留仓库主）。
+- 未修 NIT：sameSlice 的 JSON.stringify 键序敏感（后端 serde 往返重排键序致一次无谓对账重写）；runtimeClient 与后端各写 `approval-mode` 字面量；后端校验器 trim 口径与 restore filter 不一致（N1）；restore 的 lock poisoned 静默（N2）。
+
+### 复验证据
+- `node node_modules/vitest/vitest.mjs run`（3 个新测试文件）→ 21 passed；`customPresetStore.test.ts` 9 passed（含 B-1 同版本回归）。
+- `bun run test` → **659 文件 / 5122 用例全绿**；`bun run check:solid` / `lint`（0 error）/ `check:clippy`（added: []）/ `check:rust`（全部目标 0 failed）全过。中途 check:rust 一度报大批 FAILED——系 G 盘写满导致 rustc 链接 `IO failure`（假失败），清 `target/debug/incremental`（11G）后全绿，非代码问题。
+
+
+
 ## 与 spec 的偏差
 
 - spec 原计划「customPresetStore 搬家经 storage adapter 交叉读取」——实测撞上 migrate 写回经 partialize 洗字段的竞态，三层方案被否决后改为 **legacyPresetStash 暂存双保险**（见方案要点 4），并新增 `legacyPresetStash.ts`。spec 的其余方案按计划落地。
@@ -88,6 +116,7 @@ issue #448 规划的五个逻辑单元（单分支逐单元提交，各自独立
 
 1. **实机验收未做**：Tauri 下「删 localStorage 重开不丢」「CLI set 重启不回滚」的端到端真机复验（webview2-acceptance 配方）留待合并前按需补——行为已由三层单测分别钉住（后端落盘/回填、前端恢复事务、迁移分支），但真机组合时序未走查。
 2. **#321 验收判据一的「双模式持久化契约 ADR」未见 `.agents/decisions/` 落地**（最新 0034）——决议原文在 #321 评论区（2026-09-28 用户拍板）。是否补录 ADR 归仓库主裁决。
+3. **审查轮三项遗留已转 #463**（跨会话「后端赢」回滚 / 并发 set 写穿乱序 / 落盘降级外部不可查）。
 3. identity 后续阶段（`pylon:identity-changed` 广播 / `user_session_patch` 行级修订 / 删除编排单命令化 / 前端镜像降级纯缓存）按 issue 原文「另批评估」，本批未动。
 
 ## 并行交集

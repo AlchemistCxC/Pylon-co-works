@@ -219,11 +219,15 @@ export default function App() {
       // I14-W6：bootstrap 等待 identity hydration（Tauri 后端读回 / browser 本地）
       // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
       hydrateDomains: async () => {
-        await hydrateIdentityAndWorkspace(consumeLegacyProfilePayload())
         // #448 PR2/PR5：预测设置与自定义预设的同步缓存/独立 store 以后端为权威
         // hydrate（内部吞错不降级启动；失败时回落 localStorage，等价旧行为）。
-        await hydrateInputPredictionSettingsFromBackend()
-        await hydrateCustomPresetsFromBackend()
+        // 与 identity 无依赖关系——并行执行，避免 identity 失败（degraded 路径直接
+        // return）连带跳过两者，把 degraded 会话的无缓存窗口拉长（审查 C-3）。
+        await Promise.all([
+          hydrateIdentityAndWorkspace(consumeLegacyProfilePayload()),
+          hydrateInputPredictionSettingsFromBackend(),
+          hydrateCustomPresetsFromBackend(),
+        ])
         startupMark('hydrated')
       },
       fetchAgents: () => agentClient.listAgents(),

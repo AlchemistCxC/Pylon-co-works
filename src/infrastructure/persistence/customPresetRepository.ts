@@ -123,9 +123,16 @@ export async function hydrateCustomPresetsFromBackend(): Promise<void> {
 function installWriteThroughBridge(): void {
   if (bridgeInstalled) return
   bridgeInstalled = true
-  useCustomPresetStore.subscribe(state => {
+  // 审查 C-2 修复：save 链在前一写上（latest-wins 串行）——后端 async 命令不保证
+  // 按调用序完成，盲发并发会让旧切片后到覆盖新切片；链化后按订阅序落库，且
+  // 在飞期间的新快照总是最后写。失败不中断链（下一次变更重发自愈）。
+  let writeChain: Promise<void> = Promise.resolve()
+  useCustomPresetStore.subscribe(() => {
     if (syncingFromBackend) return
-    void saveToBackend(sliceOf(state)).catch(error => reportPersistenceError('保存自定义预设', error))
+    writeChain = writeChain.then(
+      () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
+      () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
+    ).catch(error => reportPersistenceError('保存自定义预设', error))
   })
 }
 

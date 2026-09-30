@@ -61,6 +61,30 @@ describe('旧 pylon-theme 一次性搬家', () => {
     expect(state.customPresets[0].id).toBe('custom-old')
     expect(state.zonePresetEntries).toHaveLength(1)
     expect(state.zonePresetEntries[0].label).toBe('我的中控')
+    // ★ B-1：搬家值当场落盘新键（不依赖本会话是否发生预设动作）
+    expect(localStorage.getItem('pylon-custom-presets')).toBeTruthy()
+  })
+
+  it('★ B-1 回归：同版本升级态（v11 不跑 migrate，stash 不执行）→ 现场读搬家且当场落盘，重启不丢', async () => {
+    const { THEME_SCHEMA_VERSION } = await import('../migration.ts')
+    localStorage.setItem('pylon-theme', JSON.stringify({
+      state: {
+        chatFontSize: 15,
+        customPresets: [{ id: 'custom-v11', name: '同版本预设', theme: { chatFontSize: 14 }, createdAt: 1, updatedAt: 1 }],
+      },
+      version: THEME_SCHEMA_VERSION,
+    }))
+    // 会话 1：同版本 → themeStore 不 migrate（stash 空）→ 搬家走现场读腿
+    const first = await freshStores()
+    expect(first.useCustomPresetStore.getState().customPresets.map(p => p.id)).toEqual(['custom-v11'])
+    // 搬家值已落盘新键——这是同版本态不丢数据的唯一保证（同版本 hydrate 不写回）
+    const persisted = localStorage.getItem('pylon-custom-presets')
+    expect(persisted, '搬家值必须当场落盘').toBeTruthy()
+    // 模拟会话 1 内发生一次 theme 写盘（partialize 白名单修剪旧键内嵌字段）
+    first.useStore.getState().setZoneField('chat', { chatFontSize: 20 })
+    // 会话 2（重启）：own 优先命中新键，与旧键是否被修剪无关
+    const second = await freshStores()
+    expect(second.useCustomPresetStore.getState().customPresets.map(p => p.id)).toEqual(['custom-v11'])
   })
 
   it('新键有数据 → 不反向覆盖（旧键残留被忽略）', async () => {

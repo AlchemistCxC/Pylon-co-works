@@ -56,33 +56,51 @@ export interface CustomPresetState {
 }
 
 /**
- * 一次性搬家：旧 `pylon-theme` 内嵌的预设字段 → 本键。**读序无关的双保险**：
- * - 优先读 legacyPresetStash（themeStore 的 migrate 钩子在写回洗掉字段前暂存的原值）；
- * - 暂存为空再现场读 pylon-theme（读取若先于 themeStore 的 migrate 写回，现场还是原值）。
- * 「本键有数据不反向覆盖」由 own 优先保证；搬家落盘新键后 own 恒在，不再走本路径。
+ * 一次性搬家：旧 `pylon-theme` 内嵌的预设字段 → 本键。
+ *
+ * 真实时序（zustand 5 persist 语义，审查 B-1 修正后的心智模型）：
+ * - **同版本**（pylon-theme 已在当前 THEME_SCHEMA_VERSION，最常见升级态）：persist
+ *   不跑 migrate ⇒ stash 为空 ⇒ 走现场读；且同版本 hydrate **不写回**——本键若不
+ *   主动落盘，本次会话内任何一次 theme 写盘就会经 partialize 白名单把旧键里的预设
+ *   字段永久修剪掉，重启后现场读拿到空 ⇒ 用户预设静默清零（browser 模式无后端可救）。
+ * - **跨版本**：persist 先跑 migrate（themeStore 钩子 stash 原值）再写回（写回值经
+ *   partialize 已洗掉预设字段）⇒ stash 兜底。
+ *
+ * 因此两条腿**命中即必须同步落盘本键**（getItem 内直接 setItem）——搬家值当场持久
+ * 化，不再依赖本会话是否发生预设动作。「本键有数据不反向覆盖」由 own 优先保证；
+ * 落盘后 own 恒在，本函数不再被走到。
  */
-function readLegacyPresetsStorageValue(): string | null {
-  try {
-    const stashed = stashedLegacyPresets()
-    if (stashed) {
-      return JSON.stringify({ state: stashed, version: 1 })
+function readLegacyPresetsStorageValue(key: string): string | null {
+  let migrated: string | null = null
+  const stashed = stashedLegacyPresets()
+  if (stashed) {
+    migrated = JSON.stringify({ state: stashed, version: 1 })
+  } else {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_THEME_STORAGE_KEY) ?? 'null') as
+        | { state?: { customPresets?: unknown; zonePresetEntries?: unknown } }
+        | null
+      const presets = legacy?.state?.customPresets
+      const zones = legacy?.state?.zonePresetEntries
+      if (Array.isArray(presets) || Array.isArray(zones)) {
+        migrated = JSON.stringify({
+          state: {
+            customPresets: Array.isArray(presets) ? presets : [],
+            zonePresetEntries: Array.isArray(zones) ? zones : [],
+          },
+          version: 1,
+        })
+      }
+    } catch {
+      migrated = null
     }
-    const legacy = JSON.parse(localStorage.getItem(LEGACY_THEME_STORAGE_KEY) ?? 'null') as
-      | { state?: { customPresets?: unknown; zonePresetEntries?: unknown } }
-      | null
-    const presets = legacy?.state?.customPresets
-    const zones = legacy?.state?.zonePresetEntries
-    if (!Array.isArray(presets) && !Array.isArray(zones)) return null
-    return JSON.stringify({
-      state: {
-        customPresets: Array.isArray(presets) ? presets : [],
-        zonePresetEntries: Array.isArray(zones) ? zones : [],
-      },
-      version: 1,
-    })
-  } catch {
-    return null
   }
+  if (migrated !== null) {
+    // ★ B-1 修复：搬家值当场落盘本键（同版本 hydrate 不写回，不主动落盘会在
+    // theme 侧首次写盘修剪旧键后丢失数据源）。写失败仅意味着下次启动重试搬家（幂等）。
+    try { localStorage.setItem(key, migrated) } catch { /* quota 受限：保持仅内存态，下次启动重试 */ }
+  }
+  return migrated
 }
 
 export const useCustomPresetStore = create<CustomPresetState>()(persist(
@@ -143,12 +161,12 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
     name: CUSTOM_PRESET_STORAGE_KEY,
     version: 1,
     storage: createJSONStorage(() => ({
-      // 本键优先（不反向覆盖）；无数据 → 搬家值（暂存优先，见函数注释）
+      // 本键优先（不反向覆盖）；无数据 → 搬家值（命中即落盘，见函数注释）
       getItem: key => {
         try {
           const own = localStorage.getItem(key)
           if (own != null) return own
-          return readLegacyPresetsStorageValue()
+          return readLegacyPresetsStorageValue(key)
         } catch { return null }
       },
       setItem: (key, value) => {
