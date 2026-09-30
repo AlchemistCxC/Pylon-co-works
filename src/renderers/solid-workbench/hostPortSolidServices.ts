@@ -1,4 +1,3 @@
-import type { Message } from '../../domains/chat/messageTypes.ts'
 import type { WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { CancelResult, CommandResult, SendResult, WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
@@ -13,45 +12,15 @@ import type { SolidWorkbenchServices } from './workbenchContracts.ts'
 import { resolveDocumentOptionEntries } from './input/workbenchOptionCatalog.ts'
 
 /**
- * P57 S2-R2：逐元素单槽 memo（{src,out}，命中条件 = length 相等 + 每项引用相等）。
+ * P57 S2-R2（#487 收窄后）：宿主投影的派生面只剩 options 目录与错误行，均为
+ * 直接引用比较的单槽 memo。
  *
  * 红线契约：split readers（host.document / host.generation）的读数每个通知都照常
  * 执行，memo 只以本次 `runtimeSnapshot(host)` 调用内真实读到的引用为键复用派生
  * 结果——不缓存合并快照、不跳过读取，微任务合并与 revision 收敛语义
- * （workbenchHostPort.test :44-99）不受影响。同一 document 引用下派生数组与
- * 逐元素包装引用稳定，下游显示链 memo 才有稳定键。
+ * （workbenchHostPort.test :44-99）不受影响。
  */
-interface ElementMemoSlot<TIn, TOut> {
-  src: readonly TIn[] | undefined
-  out: readonly TOut[] | undefined
-}
-
-function memoMapped<TIn, TOut>(
-  slot: ElementMemoSlot<TIn, TOut>,
-  source: readonly TIn[],
-  map: (item: TIn) => TOut,
-): readonly TOut[] {
-  const previousSource = slot.src
-  const previousOut = slot.out
-  if (previousOut !== undefined && previousSource === source) return previousOut
-  if (previousSource !== undefined && previousOut !== undefined && previousSource.length === source.length) {
-    let same = true
-    for (let index = 0; index < source.length; index += 1) {
-      if (previousSource[index] !== source[index]) {
-        same = false
-        break
-      }
-    }
-    if (same) { slot.src = source; return previousOut }
-  }
-  const out = Object.freeze(source.map(map))
-  slot.src = source
-  slot.out = out
-  return out
-}
-
 interface ProjectionMemo {
-  messages: ElementMemoSlot<WorkbenchDocument['messages'][number], Message>
   error?: { src: readonly WorkbenchProjectionDiagnostic[]; out: string | null }
   options: Map<string, { options: unknown; current: string | undefined; out: readonly string[] }>
 }
@@ -80,16 +49,6 @@ function optionIds(
   return out
 }
 
-function documentMessages(memo: ProjectionMemo, document: WorkbenchDocument | undefined): readonly Message[] {
-  if (!document) return []
-  return memoMapped(memo.messages, document.messages, message => ({
-    id: message.id, role: message.role, sender: message.source.provider,
-    content: message.content, time: message.time, running: message.running,
-    interruptedDraft: message.interruptedDraft,
-    draftId: message.draftId,
-  }))
-}
-
 function latestErrorDiagnostic(memo: ProjectionMemo, diagnostics: readonly WorkbenchProjectionDiagnostic[]): string | null {
   if (memo.error?.src === diagnostics) return memo.error.out
   const error = [...diagnostics].reverse().find(item => item.level === 'error')?.message ?? null
@@ -110,7 +69,6 @@ function runtimeSnapshot(host: WorkbenchHostPort, memo: ProjectionMemo): Workben
     document = host.document.getSnapshot()
     generation = host.generation.getSnapshot()
   }
-  const messages = documentMessages(memo, document)
   const terminalStatus = ['completed', 'error', 'failed', 'cancelled'].includes((document?.session.status ?? '').toLowerCase())
   // A terminal fence/summary is stronger than a stale controller flag. Once
   // observed, clear active-only metadata in the same host projection so a
@@ -120,9 +78,11 @@ function runtimeSnapshot(host: WorkbenchHostPort, memo: ProjectionMemo): Workben
   const error = document ? latestErrorDiagnostic(memo, document.diagnostics) : null
   const activeModel = document?.session.model ?? ''
   const activeMode = document?.session.mode ?? ''
+  // #487：legacy `messages` 反向投影（document → Message[]）随快照字段退役；
+  // 第三方 Suite 与内置渲染器同构读 `document.messages`。
   return Object.freeze({
     revision: generation.revision ?? document?.revision ?? 0, sessionId: document?.sessionId || null,
-    status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
+    status: error ? 'degraded' : document ? 'ready' : 'idle',
     generating,
     generationStart: generating ? generation.generationStart : 0,
     lastTokenAt: generating ? generation.lastTokenAt : undefined,
@@ -143,7 +103,7 @@ function runtimeSnapshot(host: WorkbenchHostPort, memo: ProjectionMemo): Workben
 }
 
 function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {
-  const memo: ProjectionMemo = { messages: { src: undefined, out: undefined }, options: new Map() }
+  const memo: ProjectionMemo = { options: new Map() }
   const slice = (name: WorkbenchRuntimeSlice): unknown => {
     if (name === 'capabilities') return { canAttach: host.capabilities.has('attach'), promptImage: false }
     if (name === 'tasks') return host.document.getSnapshot()?.plan.entries ?? []

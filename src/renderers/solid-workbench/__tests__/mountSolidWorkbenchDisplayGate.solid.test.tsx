@@ -133,7 +133,7 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
     }
   })
 
-  it('usage 类事件间 snapshot.messages 数组引用不变', () => {
+  it('usage 类事件间 document.messages 数组引用不变', () => {
     const services = createPreviewWorkbenchServices()
     const host = document.createElement('div')
     document.body.append(host)
@@ -147,7 +147,6 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
         envelope(1, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '问题' }] }),
       ]).document
       services.runtime.replaceDocument(base, { ownerKey: 'owner-preview', generation: 1 })
-      const messagesRef = services.runtime.getSnapshot().messages
       const documentMessagesRef = services.runtime.getSnapshot().document!.messages
       const frozenBase = services.runtime.getSnapshot().document!
 
@@ -156,7 +155,6 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
       }
 
       expect(services.runtime.getSnapshot().document!.messages).toBe(documentMessagesRef)
-      expect(services.runtime.getSnapshot().messages).toBe(messagesRef)
     } finally {
       lifecycle.destroy()
       host.remove()

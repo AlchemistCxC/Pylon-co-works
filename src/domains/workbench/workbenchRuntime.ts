@@ -1,13 +1,12 @@
-import type { Message } from '../chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
-import { normalizePlanEntries, type PlanEntryV2 } from './plan/goalModel.ts'
+import type { PlanEntryV2 } from './plan/goalModel.ts'
 import type {
   GenerationActivitySnapshot,
   GenerationPhase,
   GenerationSummary,
 } from './generationFooterContracts.ts'
 import type { WorkbenchActivityNode, WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
-import { createWorkbenchDocument, freezeDeepSnapshot, selectGoal, selectPlan } from './workbenchProjector.ts'
+import { freezeDeepSnapshot, selectGoal, selectPlan } from './workbenchProjector.ts'
 import type { JsonValue } from './events/workbenchEventSchema.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
@@ -42,7 +41,6 @@ export interface WorkbenchRuntimeSnapshot {
   /** Terminal absorption fence for the current owner/turn. */
   terminalFence?: WorkbenchTerminalFence
   status: WorkbenchRuntimeStatus
-  messages: readonly Message[]
   generating: boolean
   generationPhase?: GenerationPhase
   /** 活动轴；旧 generationPhase 仍作为兼容投影保留。 */
@@ -131,19 +129,12 @@ export interface WorkbenchDocumentApplyOptions {
 
 /** Mutable document runtime used by production composition and preview fixtures. */
 export function createWorkbenchRuntime(
-  initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>,
+  initial: Omit<WorkbenchRuntimeSnapshot, 'revision'> & { document: WorkbenchDocument },
 ): PreviewWorkbenchRuntime {
   let revision = 0
   let activeOwnerKey = initial.ownerKey
   let activeGeneration = initial.generation
-  let snapshot = freezeSnapshot(normalizeRuntimeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) }))
-  // Provenance of `snapshot.document`.  Documents derived here from legacy
-  // snapshot fields (preview fixtures, legacy-only hosts) may keep rebuilding on
-  // legacy patches.  Documents that entered through applyDocument/replaceDocument
-  // (or a setSnapshot carrying one) are authoritative projections; update()
-  // must never silently replace them — that path drops activities,
-  // interactions, extensions and semantic parts, and zeroes message sequences.
-  let documentLegacyDerived = initial.document === undefined
+  let snapshot = freezeSnapshot(normalizeRuntimeSnapshot({ ...initial, revision }))
   const listeners = new Set<() => void>()
   const sliceListeners = new Map<WorkbenchRuntimeSlice, Set<() => void>>()
   let destroyed = false
@@ -153,7 +144,9 @@ export function createWorkbenchRuntime(
     if (destroyed || runtimeSnapshotsEqual(snapshot, next)) return
     const previous = snapshot
     revision += 1
-    snapshot = freezeSnapshot({ ...next, revision, document: next.document ?? documentFromLegacy(next) })
+    // `document` 在构造后恒存在：initial 强制携带，update/applyDocument/replaceDocument
+    // 均不删除；setSnapshot 缺席时沿用上一份（宁可保留旧投影也不回退到空文档）。
+    snapshot = freezeSnapshot({ ...next, revision, document: next.document ?? snapshot.document })
     for (const listener of [...listeners]) listener()
     for (const slice of sliceListeners.keys()) {
       if (sliceChanged(previous, snapshot, slice)) {
@@ -183,25 +176,13 @@ export function createWorkbenchRuntime(
       }
     },
     setSnapshot(next) {
-      documentLegacyDerived = next.document === undefined
       publish(next)
     },
     update(patch) {
-      const next = { ...snapshot, ...patch, revision }
-      if (!Object.prototype.hasOwnProperty.call(patch, 'document') && legacyDocumentFields.some(field => Object.prototype.hasOwnProperty.call(patch, field))) {
-        if (documentLegacyDerived) {
-          next.document = documentFromLegacy(next)
-        } else {
-          console.warn('[workbench-runtime] update() 忽略 legacy 字段对 canonical document 的重建；document 只能经 applyDocument/replaceDocument 变更')
-        }
-      } else if (Object.prototype.hasOwnProperty.call(patch, 'document')) {
-        documentLegacyDerived = false
-      }
-      publish(next)
+      publish({ ...snapshot, ...patch, revision })
     },
     applyDocument(document, options = {}) {
       if (!acceptDocument(options)) return
-      documentLegacyDerived = false
       const nextDocument = freezeDocument(document, snapshot.document)
       const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
         document: nextDocument,
@@ -226,7 +207,6 @@ export function createWorkbenchRuntime(
     replaceDocument(document, options = {}) {
       const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
       if (!acceptDocument(options, true)) return
-      documentLegacyDerived = false
       const nextDocument = freezeDocument(document)
       const sessionChanged = nextDocument.sessionId !== snapshot.document?.sessionId
       const merged = mergeWorkbenchRuntimeSnapshot(snapshot, {
@@ -272,7 +252,7 @@ export function createWorkbenchRuntime(
 
 /** Preview compatibility name; production callers use createWorkbenchRuntime. */
 export function createPreviewWorkbenchRuntime(
-  initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>,
+  initial: Omit<WorkbenchRuntimeSnapshot, 'revision'> & { document: WorkbenchDocument },
 ): PreviewWorkbenchRuntime {
   return createWorkbenchRuntime(initial)
 }
@@ -290,7 +270,6 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     left.turnEpoch === right.turnEpoch &&
     terminalFencesEqual(left.terminalFence, right.terminalFence) &&
     left.status === right.status &&
-    left.messages === right.messages &&
     left.generating === right.generating &&
     left.generationPhase === right.generationPhase &&
     left.generationActivity === right.generationActivity &&
@@ -325,9 +304,9 @@ export function mergeWorkbenchRuntimeSnapshot(
   input: WorkbenchRuntimeMergeInput,
 ): WorkbenchRuntimeSnapshot {
   const document = input.document ?? previous.document
-  // #204③：legacy `messages` 派生按需门控——仅当宿主真的在用 legacy 字段（预览
-  // fixture / 预览宿主写入，数组非空）时才随文档重建；生产恒为空数组 ⇒ 零派生成本。
-  const projected = document ? legacyFieldsFromDocument(document, (previous.messages?.length ?? 0) > 0) : {}
+  // #204③→#487：legacy `messages` 派生链已退役（生产零写入者，预览面 document 化）。
+  // 这里只剩 document → 运行时字段的推导（活性/相位/状态/错误等显示证据）。
+  const projected = document ? documentDerivedFields(document) : {}
   const preserved = input.preserveGeneration ? preserveActiveGeneration(previous, projected, document) : projected
   // #213 活性权威：会话层已用回合时钟表态时，文档派生的 `generating` 一律让位——
   // 重放出的 `running` 尾行只是"没见到终态"的证据，不是"本进程在跑"的证据。
@@ -420,7 +399,6 @@ function normalizeRuntimeSnapshot(snapshot: WorkbenchRuntimeSnapshot): Workbench
 }
 
 function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
-  if (!Object.isFrozen(snapshot.messages)) snapshot.messages = Object.freeze([...snapshot.messages])
   if (!Object.isFrozen(snapshot.tasks)) snapshot.tasks = Object.freeze([...snapshot.tasks])
   if (snapshot.document && !Object.isFrozen(snapshot.document)) snapshot.document = freezeDocument(snapshot.document)
   if (snapshot.terminalFence && !Object.isFrozen(snapshot.terminalFence)) snapshot.terminalFence = Object.freeze({ ...snapshot.terminalFence })
@@ -587,79 +565,24 @@ function freezeJsonValue(value: JsonValue): JsonValue {
   return value
 }
 
-// #204③ legacy messages 派生链退役：`snapshot.messages` 在生产没有任何写入者
-// （P52 D4 后 replay commit 适配器是文档化 no-op，agentWorkbenchLifecycle.replayAdapter）
-// 与有效读取者（SolidWorkbenchApp/scheduler 的 legacy 分支都是 document 缺席时的
-// fallback，而 runtime 恒有 document；WorkbenchMessage 无 tool 角色 ⇒ tool 合并恒空转）。
-// 字段保留为**预览宿主输入**（documentFromLegacy + update({messages})，预览兼容面），
-// 派生不再执行 ⇒ 每帧 O(M) 数组重建 + 大数组冻结消失。
-// 派生里唯一仍有消费者的部分是 running 行记账（generating/phase/thinkingStart 的
-// document 侧证据）——降为无分配单趟扫描。
-interface RunningState {
-  firstRunning?: WorkbenchMessage
-  lastRunning?: WorkbenchMessage
-  runningReasoning?: WorkbenchMessage
-}
-
-const runningStateMemo = new WeakMap<readonly WorkbenchMessage[], RunningState>()
-
-function runningStateOf(source: readonly WorkbenchMessage[]): RunningState {
-  const cached = runningStateMemo.get(source)
-  if (cached) return cached
-  let firstRunning: WorkbenchMessage | undefined
-  let lastRunning: WorkbenchMessage | undefined
-  let runningReasoning: WorkbenchMessage | undefined
-  for (const message of source) {
-    if (!message.running) continue
-    firstRunning ??= message
-    lastRunning = message
-    if (message.role === 'reasoning') runningReasoning = message
-  }
-  const result: RunningState = { firstRunning, lastRunning, runningReasoning }
-  runningStateMemo.set(source, result)
-  return result
-}
-
-// Cache the remaining fields by the references and session values they consume.
-let legacyFieldsMemo: {
-  readonly messages: unknown
-  readonly activities: unknown
-  readonly diagnostics: unknown
-  readonly sessionStatus: unknown
-  readonly sessionModel: unknown
-  readonly sessionMode: unknown
+// #487：legacy 快照派生链（messages 投影、两枚 WeakMap memo、documentFromLegacy）
+// 随 `WorkbenchRuntimeSnapshot.messages` 字段退役。保留的只有 document → 运行时字段
+// 推导：running 行记账（generating/phase/thinkingStart 的 document 侧证据）、会话
+// 状态/模型/模式与错误行——页脚与状态条的显示证据来源。缓存仍按推导消费的引用键
+// 命中（freezeDocument 的 P57 S2-R1b 引用稳定契约使「同引用」成为 live 稳态），
+// 避免每次 publish 重复整段扫描。
+let documentFieldsMemo: {
+  readonly messages: WorkbenchDocument['messages']
+  readonly activities: WorkbenchDocument['activities']
+  readonly diagnostics: WorkbenchDocument['diagnostics']
+  readonly sessionStatus: WorkbenchDocument['session']['status']
+  readonly sessionModel: WorkbenchDocument['session']['model']
+  readonly sessionMode: WorkbenchDocument['session']['mode']
   readonly value: Partial<WorkbenchRuntimeSnapshot>
 } | undefined
 
-// #204③：legacy `messages` 派生（按需）。单条 WorkbenchMessage → legacy Message 按
-// 消息引用缓存（append-delta 只重投影变化行）；仅在宿主 legacy 字段非空（预览宿主/
-// fixture）时被调用，生产路径恒空数组 ⇒ 不进入。
-const legacyMessageMemo = new WeakMap<WorkbenchMessage, Message>()
-
-function legacyMessageOf(message: WorkbenchMessage): Message {
-  const cached = legacyMessageMemo.get(message)
-  if (cached) return cached
-  const projected: Message = {
-    id: message.id,
-    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
-    sender: message.source.provider, content: message.content, time: message.time, running: message.running,
-  }
-  legacyMessageMemo.set(message, projected)
-  return projected
-}
-
-const legacyMessagesMemo = new WeakMap<readonly WorkbenchMessage[], readonly Message[]>()
-
-function projectLegacyMessages(source: readonly WorkbenchMessage[]): readonly Message[] {
-  const cached = legacyMessagesMemo.get(source)
-  if (cached) return cached
-  const derived = Object.freeze(source.map(legacyMessageOf))
-  legacyMessagesMemo.set(source, derived)
-  return derived
-}
-
-function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessages: boolean): Partial<WorkbenchRuntimeSnapshot> {
-  const memo = legacyFieldsMemo
+function documentDerivedFields(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
+  const memo = documentFieldsMemo
   if (memo !== undefined
     && memo.messages === document.messages
     && memo.activities === document.activities
@@ -669,8 +592,17 @@ function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessa
     && memo.sessionMode === document.session.mode) {
     return memo.value
   }
-  const { firstRunning, lastRunning: lastRunningMessage, runningReasoning } = runningStateOf(document.messages)
-  // #204③：倒序扫描（免 `[...].reverse()` 每帧两份数组分配）；命中即返回，未命中
+  // 单趟扫描 running 行记账（首/尾 running 与在途 reasoning 行）。
+  let firstRunning: WorkbenchMessage | undefined
+  let lastRunningMessage: WorkbenchMessage | undefined
+  let runningReasoning: WorkbenchMessage | undefined
+  for (const message of document.messages) {
+    if (!message.running) continue
+    firstRunning ??= message
+    lastRunningMessage = message
+    if (message.role === 'reasoning') runningReasoning = message
+  }
+  // 倒序扫描（免 `[...].reverse()` 每帧两份数组分配）；命中即返回，未命中
   // 走满也只是无分配的整数/字符串比较。
   let error: string | null = null
   for (let index = document.diagnostics.length - 1; index >= 0; index -= 1) {
@@ -682,7 +614,7 @@ function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessa
   }
   const status = document.session.status === 'error' || document.session.status === 'degraded' || document.session.status === 'loading' || document.session.status === 'ready' || document.session.status === 'idle'
     ? document.session.status
-    : document.session.status === 'completed' ? 'ready' : 'ready'
+    : 'ready'
   let runningActivity: WorkbenchActivityNode | undefined
   for (let index = document.activities.length - 1; index >= 0; index -= 1) {
     const activity = document.activities[index]!
@@ -708,9 +640,6 @@ function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessa
       ]) ?? generationStart
     : undefined
   const value: Partial<WorkbenchRuntimeSnapshot> = {
-    // `messages` 仅在宿主 legacy 字段非空（预览宿主/fixture 兼容面）时随文档派生；
-    // 生产恒空数组 ⇒ 不派生（见 mergeWorkbenchRuntimeSnapshot 的门控）。
-    ...(deriveLegacyMessages ? { messages: projectLegacyMessages(document.messages) } : {}),
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',
@@ -727,7 +656,7 @@ function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessa
     thinkingStart: timestampOf(runningReasoning?.time),
     error,
   }
-  legacyFieldsMemo = {
+  documentFieldsMemo = {
     messages: document.messages,
     activities: document.activities,
     diagnostics: document.diagnostics,
@@ -741,7 +670,7 @@ function legacyFieldsFromDocument(document: WorkbenchDocument, deriveLegacyMessa
 
 /**
  * Reconcile a canonical document projection with the host's live generation
- * clock (P52 D3: the clock owner is the session TurnClock).  `legacyFieldsFromDocument`
+ * clock (P52 D3: the clock owner is the session TurnClock).  `documentDerivedFields`
  * is intentionally deterministic, but an in-flight projection may contain no
  * running message/activity (or may carry a transient session status).  Falling
  * back to `Date.now()` in that window makes the footer jump back to 0–1s.
@@ -845,12 +774,14 @@ function lastTimestamp(values: readonly (string | undefined)[]): number | undefi
 
 type WorkbenchDocumentSlice = NonNullable<WorkbenchRuntimeSnapshot['document']>
 
+/** document 缺席时 'messages' slice 的稳定空档（引用恒定，slice 比较天然不触发）。 */
+const EMPTY_MESSAGES: readonly WorkbenchMessage[] = []
+
 /** `selectSlice` 的全部可能产物（按 slice 名分派）。
  *  运行时按名取值天然是异构的，故用命名联合表达；调用方经 `getSlice<T>` 收窄。 */
 type WorkbenchSliceValue =
   | WorkbenchRuntimeSnapshot['document']
   | WorkbenchDocumentSlice['timeline']
-  | WorkbenchRuntimeSnapshot['messages']
   | WorkbenchDocumentSlice['messages']
   | WorkbenchDocumentSlice['activities']
   | WorkbenchDocumentSlice['interactions']
@@ -871,7 +802,7 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
   switch (slice) {
     case 'document': return document
     case 'timeline': return document?.timeline ?? []
-    case 'messages': return document?.messages ?? snapshot.messages
+    case 'messages': return document?.messages ?? EMPTY_MESSAGES
     case 'activities': return document?.activities ?? []
     case 'interactions': return document?.interactions ?? []
     case 'extensions': return document?.extensions ?? []
@@ -892,38 +823,3 @@ function sliceChanged(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSna
   if (slice === 'capabilities') return left.canAttach !== right.canAttach || left.promptImage !== right.promptImage
   return selectSlice(left, slice) !== selectSlice(right, slice)
 }
-
-function documentFromLegacy(snapshot: Omit<WorkbenchRuntimeSnapshot, 'revision'> | WorkbenchRuntimeSnapshot): WorkbenchDocument {
-  const base = createWorkbenchDocument(snapshot.sessionId ?? '')
-  const messages: WorkbenchMessage[] = snapshot.messages.map(message => ({
-    id: message.id,
-    segmentId: message.id,
-    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
-    content: message.content,
-    parts: [],
-    identity: {},
-    source: { provider: message.sender, sessionId: snapshot.sessionId ?? '', sourceId: message.sender },
-    sequence: 0,
-    running: message.running === true,
-    time: message.time,
-  }))
-  return {
-    ...base,
-    messages,
-    plan: {
-      ...base.plan,
-      entries: normalizePlanEntries(snapshot.tasks),
-    },
-    session: {
-      ...base.session,
-      status: snapshot.status,
-      model: snapshot.activeModel || undefined,
-      mode: snapshot.activeMode || undefined,
-      usage: undefined,
-    },
-  }
-}
-
-const legacyDocumentFields: readonly (keyof WorkbenchRuntimeSnapshot)[] = [
-  'sessionId', 'status', 'messages', 'activeModel', 'activeMode', 'error',
-]
