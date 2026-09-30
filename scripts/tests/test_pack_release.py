@@ -329,18 +329,23 @@ class DocsSitePackagingTests(unittest.TestCase):
     """离线文档站必须随发行包分发（#371）。
 
     Docs Sheet（pylon-docs:// scheme）的数据源就是包内 resources/docs-site/。
-    泛化遍历已自动收集该树，这里钉三件事：入口 index.html 缺失必须构建期报错
-    （而不是拖到用户打开文档时 404）、报错带出补构建命令、产物形态能过发行内容
-    审计（dist 里的 .json 会进文本审计，VitePress 产物不得触发 DRIVE_PATH/敏感键误报）。
+    收集取暂存源 src-tauri/resources/docs-site（#471：target 的 Tauri 增量拷贝
+    会残留历史哈希代际，不入包），这里钉四件事：入口 index.html 缺失必须构建期
+    报错（而不是拖到用户打开文档时 404）、报错带出补构建命令、产物形态能过发行
+    内容审计（dist 里的 .json 会进文本审计，VitePress 产物不得触发 DRIVE_PATH/
+    敏感键误报）、target 拷贝里的陈旧代际不得泄漏进收集结果。
     """
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="pylon-docs-site-pack-test-"))
         self.old_release = pack.RELEASE_DIR
+        self.old_staged = pack.DOCS_SITE_STAGED_DIR
         pack.RELEASE_DIR = self.tmp / "target" / "release"
+        pack.DOCS_SITE_STAGED_DIR = self.tmp / "src-tauri" / "resources" / "docs-site"
 
     def tearDown(self) -> None:
         pack.RELEASE_DIR = self.old_release
+        pack.DOCS_SITE_STAGED_DIR = self.old_staged
         import shutil
 
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -352,8 +357,18 @@ class DocsSitePackagingTests(unittest.TestCase):
         self.assertIn("docs:build:offline", message)
         self.assertIn("index.html", message)
 
-    def test_staged_docs_site_passes_entry_check_and_audit(self) -> None:
+    def test_guard_pins_to_staged_source_not_target_copy(self) -> None:
+        # #471 回归钉的守卫半边：仅 target 有 Tauri 拷贝（历史构建残留的常见形态）、
+        # 暂存源缺失时必须报错——守卫要钉在真正入包的源上，否则漏跑 docs:build:offline
+        # 会被上一轮的 target 残留掩盖。
         docs_dir = pack.RELEASE_DIR / "resources" / "docs-site"
+        (docs_dir / "assets").mkdir(parents=True)
+        (docs_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
+        with self.assertRaises(pack.PackError):
+            pack.require_docs_site()
+
+    def test_staged_docs_site_passes_entry_check_and_audit(self) -> None:
+        docs_dir = pack.DOCS_SITE_STAGED_DIR
         (docs_dir / "assets").mkdir(parents=True)
         (docs_dir / "index.html").write_text(
             '<!doctype html><html lang="zh-CN"><head><script src="/assets/app.js"></script></head></html>',
@@ -375,6 +390,54 @@ class DocsSitePackagingTests(unittest.TestCase):
             "resources/docs-site/assets/search-index.json",
             (docs_dir / "assets" / "search-index.json").read_text(encoding="utf-8"),
         )
+
+    def test_stale_target_copy_does_not_leak_into_collection(self) -> None:
+        # #471 主钉：0.3.4-LBI 发行轮实测 target/release/resources/docs-site 累积
+        # 4 代哈希（78 文件 vs 暂存源 56，差 22 项全进本地 zip）。此处以全量
+        # collect_source_files 钉死：walk 跳过 target 的 docs-site、暂存源逐文件入包、
+        # 其余资源（fonts 等）不受影响。重依赖（exe/loader/sdk/mcp）全用临时夹具。
+        release = pack.RELEASE_DIR
+        (release / "resources" / "fonts").mkdir(parents=True)
+        (release / "pylon.exe").write_bytes(b"fake")
+        (release / "pylon-detect.exe").write_bytes(b"fake")
+        (release / "WebView2Loader.dll").write_bytes(b"fake")
+        (release / "resources" / "fonts" / "inter.css").write_text("body{}", encoding="utf-8")
+        # target 里的 Tauri 增量拷贝：上一代的旧哈希 chunk + 过期 index.html
+        stale = release / "resources" / "docs-site" / "assets"
+        stale.mkdir(parents=True)
+        (release / "resources" / "docs-site" / "index.html").write_text("stale", encoding="utf-8")
+        (stale / "app.OLDDASH.js").write_text("stale", encoding="utf-8")
+        # 暂存源：本轮 docs:build:offline 的 rm+重铺产物
+        fresh = pack.DOCS_SITE_STAGED_DIR
+        (fresh / "assets").mkdir(parents=True)
+        (fresh / "index.html").write_text("fresh", encoding="utf-8")
+        (fresh / "assets" / "app.NEWDASH.js").write_text("fresh", encoding="utf-8")
+        # 其余重依赖夹具：SDK 三件套 + webview2-mcp exe（README 走仓内真件）
+        sdk = self.tmp / "dist-plugin-sdk" / "normal"
+        sdk.mkdir(parents=True)
+        for name in sorted(pack.DEV_SDK_REQUIRED):
+            (sdk / name).write_text("fake", encoding="utf-8")
+        old_sdk, old_mcp = pack.DEV_SDK_DIR, pack.MCP_RELEASE_DIR
+        pack.DEV_SDK_DIR = sdk
+        pack.MCP_RELEASE_DIR = self.tmp / "mcp-target" / "release"
+        try:
+            pack.MCP_RELEASE_DIR.mkdir(parents=True)
+            (pack.MCP_RELEASE_DIR / pack.MCP_EXE_NAME).write_bytes(b"fake")
+            files = pack.collect_source_files("0.0.0")
+        finally:
+            pack.DEV_SDK_DIR, pack.MCP_RELEASE_DIR = old_sdk, old_mcp
+        rels = [rel for _source, rel in files]
+        self.assertIn("resources/docs-site/index.html", rels)
+        self.assertIn("resources/docs-site/assets/app.NEWDASH.js", rels)
+        self.assertNotIn("resources/docs-site/assets/app.OLDDASH.js", rels)
+        self.assertEqual(
+            [rel for rel in rels if rel.startswith("resources/docs-site/")],
+            [
+                "resources/docs-site/index.html",
+                "resources/docs-site/assets/app.NEWDASH.js",
+            ],
+        )
+        self.assertIn("resources/fonts/inter.css", rels)
 
 
 class WebView2BootstrapperTests(unittest.TestCase):

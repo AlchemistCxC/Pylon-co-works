@@ -57,7 +57,7 @@ pub use repo::EventRepo;
 pub use repo::RollupTrimReport;
 pub use row::{
     CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult, EventPage,
-    EventSearchOwner,
+    EventSearchHit,
 };
 pub use service::EventService;
 

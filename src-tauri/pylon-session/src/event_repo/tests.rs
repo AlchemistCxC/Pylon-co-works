@@ -1354,14 +1354,22 @@ fn legacy_tombstone_conservatively_blocks_all_owners_for_same_source() {
 }
 
 #[test]
-fn search_owners_matches_content_case_insensitive_and_dedupes() {
+fn search_hits_returns_hit_rows_case_insensitive_and_keeps_row_granularity() {
     let repo = repo();
-    let hit = parse_canonical_event(&event_json(
+    let hit_a = parse_canonical_event(&event_json(
         "peri",
         "s1",
         1,
         "user.message",
         serde_json::json!({"text": "Needle in raw payload"}),
+    ))
+    .unwrap();
+    let hit_b = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        2,
+        "user.message",
+        serde_json::json!({"text": "second needle row"}),
     ))
     .unwrap();
     let miss = parse_canonical_event(&event_json(
@@ -1372,19 +1380,139 @@ fn search_owners_matches_content_case_insensitive_and_dedupes() {
         serde_json::json!({"text": "nothing here"}),
     ))
     .unwrap();
-    repo.append_events(&[hit.clone(), hit], None)
-        .expect("append hit");
+    repo.append_events(&[hit_a, hit_b], None).expect("append");
     repo.append_events(&[miss], None).expect("append miss");
 
-    let owners = repo.search_owners("NEEDLE", 10).unwrap();
-    assert_eq!(owners.len(), 1, "内容匹配去重后只剩一个 owner");
-    assert_eq!(owners[0].profile_id, "p1");
-    assert_eq!(owners[0].agent_id, "peri");
-    assert_eq!(owners[0].local_session_id, "s1");
-    assert_eq!(owners[0].remote_session_id.as_deref(), Some("remote-1"));
+    let hits = repo.search_hits("NEEDLE", 10).unwrap();
+    assert_eq!(hits.len(), 2, "命中行按行返回（不再去重到 owner）");
+    assert_eq!(hits[0].profile_id, "p1");
+    assert_eq!(hits[0].agent_id, "peri");
+    assert_eq!(hits[0].local_session_id, "s1");
+    assert_eq!(hits[0].remote_session_id.as_deref(), Some("remote-1"));
+    assert_eq!(hits[0].sequence, 1);
+    assert_eq!(hits[0].event_type, "user.message");
+    assert_eq!(hits[0].occurred_at, "2026-08-14T00:00:00.000Z");
+    assert_eq!(hits[1].sequence, 2);
 
-    let none = repo.search_owners("absent-term", 10).unwrap();
+    let none = repo.search_hits("absent-term", 10).unwrap();
     assert!(none.is_empty());
+}
+
+#[test]
+fn search_hits_matches_chinese_query_and_reports_exact_offsets() {
+    let repo = repo();
+    // raw_payload 序列化文本 = `{"text":"中文检索词在此"}`，"检索词" 首偏移 = 12
+    //（1-based 字符位：`{"text":"` 占 9 位）。
+    let chinese = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        1,
+        "user.message",
+        serde_json::json!({"text": "中文检索词在此"}),
+    ))
+    .unwrap();
+    let ascii = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        2,
+        "user.message",
+        serde_json::json!({"text": "Needle in raw payload"}),
+    ))
+    .unwrap();
+    repo.append_events(&[chinese], None).expect("append");
+    repo.append_events(&[ascii], None).expect("append");
+
+    let hits = repo.search_hits("检索词", 10).unwrap();
+    assert_eq!(hits.len(), 1, "中文按 UTF-8 原文精确匹配");
+    assert_eq!(hits[0].sequence, 1);
+    assert_eq!(hits[0].match_offset, Some(12), "instr 偏移落在原文首字符");
+
+    let folded = repo.search_hits("needle", 10).unwrap();
+    assert_eq!(folded.len(), 1);
+    assert_eq!(
+        folded[0].match_offset,
+        Some(10),
+        "ASCII 折叠命中（lower+NOCASE 对齐）偏移非空"
+    );
+
+    // 仅 event_type 命中（payload 无该词）→ 行返回但 offset 为 None。
+    let type_only = repo.search_hits("user.message", 10).unwrap();
+    assert_eq!(type_only.len(), 2);
+    assert!(type_only.iter().all(|hit| hit.match_offset.is_none()));
+}
+
+#[test]
+fn search_hits_orders_by_owner_triple_then_sequence_and_truncates() {
+    let repo = repo();
+    let mut rows = Vec::new();
+    for (agent, local, sequence) in [
+        ("zeta", "s1", 5),
+        ("alpha", "s2", 1),
+        ("alpha", "s2", 2),
+        ("alpha", "s1", 9),
+    ] {
+        rows.push(
+            parse_canonical_event(&event_json(
+                agent,
+                local,
+                sequence,
+                "user.message",
+                serde_json::json!({"text": format!("needle {sequence}")}),
+            ))
+            .unwrap(),
+        );
+    }
+    // append 批次不允许跨 owner：按 (agent, local) 分组写入。
+    rows.sort_by_key(|row| (row.agent_id.clone(), row.local_session_id.clone()));
+    for group in
+        rows.chunk_by(|a, b| a.agent_id == b.agent_id && a.local_session_id == b.local_session_id)
+    {
+        repo.append_events(group, None).expect("append");
+    }
+
+    let hits = repo.search_hits("needle", 3).unwrap();
+    let seen: Vec<(String, i64)> = hits
+        .iter()
+        .map(|hit| (hit.local_session_id.clone(), hit.sequence))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![("s1".into(), 9), ("s2".into(), 1), ("s2".into(), 2),],
+        "按 (profile, agent, local) 排序后截断，owner 内 sequence 升序"
+    );
+}
+
+/// #445 验收读数：单次搜索 IPC 载荷 = 命中行集，不再随会话行数线性放大——
+/// 300 行会话命中 2 行时，搜索返回 2 行（全量 compact 读是 300 行）。
+/// 行数是 IPC 载荷的代理读数（wire 载荷 ≈ 行数 × 单行大小），非字节级断言。
+#[test]
+fn search_hits_payload_is_hit_row_set_not_full_stream() {
+    let repo = repo();
+    let mut rows = Vec::new();
+    for sequence in 1..=300 {
+        let text = if sequence == 128 || sequence == 256 {
+            "needle here".to_string()
+        } else {
+            format!("filler row {sequence}")
+        };
+        rows.push(
+            parse_canonical_event(&event_json(
+                "peri",
+                "s1",
+                sequence,
+                "user.message",
+                serde_json::json!({"text": text}),
+            ))
+            .unwrap(),
+        );
+    }
+    repo.append_events(&rows, None).expect("append");
+    let owner_key = serde_json::to_string(&["p1", "peri", "s1"]).unwrap();
+
+    let hits = repo.search_hits("needle", 50).unwrap();
+    let full_stream = repo.load_events_compact(&owner_key).unwrap();
+    assert_eq!(hits.len(), 2, "IPC 行数 = 命中行数");
+    assert_eq!(full_stream.len(), 300, "对照：全量读 = 会话总行数");
 }
 
 #[test]

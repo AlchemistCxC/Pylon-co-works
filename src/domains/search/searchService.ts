@@ -1,19 +1,23 @@
 /**
  * searchService — 跨会话搜索统一入口。
  *
- * A1-c P5/B6：Tauri 模式分两阶段 canonical 搜索——后端 evt_search 在
- * raw/typed payload + eventType 上 LIKE 出候选 owner（limit 50），前端对候选
- * owner loadAll → projectMessagesFromCanonical → 消息文本精确匹配（不再逐会话
- * 全量拉取，也不再依赖 messages 表 / msg_search（B7 已删除该命令）。
- * browser 模式回退本地快照扫描（snapshotSearch）。
+ * A1-c P5/B6 + #445：Tauri 模式两阶段 canonical 搜索——后端 evt_search 在
+ * raw/typed payload + eventType 上 LIKE 出**命中行**（owner 定位 + sequence，limit 50），
+ * 前端按 owner 分组后对命中行定向 `evt_load_compact` 拉行 → projectMessagesFromCanonical
+ * → 消息文本精确复核。匹配与命中同源（投影复核），IPC 从「候选 owner 全量流」降为
+ * 「命中行集」。browser 模式回退本地快照扫描（snapshotSearch）。
  */
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { useIdentityStore, type Session } from '../identity/identityStore.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
 import { getMessageSearchText } from '../chat/messageSearchIndex.ts'
-import { toCanonicalOwnerKey, type CanonicalEventOwner } from '../events/eventSchema.ts'
+import { toCanonicalOwnerKey } from '../events/eventSchema.ts'
 import { projectMessagesFromCanonical } from '../events/messageProjection.ts'
-import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
+import type { CanonicalEventRow } from '../events/canonicalEventRow.ts'
+import {
+  tauriCanonicalEventRepository,
+  type CanonicalEventSearchHit,
+} from '../../infrastructure/events/canonicalEventRepository.ts'
 import { collectSnapshotKeys, snapshotSearch, type SnapshotSearchResult } from './snapshotSearch.ts'
 import type { SearchProvider } from '../../contracts/searchProvider.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
@@ -35,7 +39,7 @@ function snippetAround(text: string, needle: string): string {
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
 }
 
-/** Tauri 模式：两阶段 canonical 搜索（内置实现，core.search.tauri 包装）。 */
+/** Tauri 模式：命中行两阶段搜索（内置实现，core.search.tauri 包装）。 */
 export async function searchAllMessagesTauri(query: string): Promise<{ results: SearchHitUi[]; truncated: boolean }> {
   const needle = query.trim()
   if (!needle) return { results: [], truncated: false }
@@ -49,34 +53,50 @@ export async function searchAllMessagesTauri(query: string): Promise<{ results: 
       localSessionId: session.source,
     }), session)
   }
-  // 阶段 1：后端内容 LIKE 出候选 owner（payload/eventType；不做消息级语义）
-  let candidates: CanonicalEventOwner[] = []
+  // 阶段 1：后端命中行（payload/eventType；recall 与候选 owner 版一致）
+  let hits: CanonicalEventSearchHit[] = []
   try {
-    candidates = await repository.searchOwners(needle, BACKEND_SEARCH_LIMIT)
+    hits = await repository.searchHits(needle, BACKEND_SEARCH_LIMIT)
   } catch (error) {
     reportRuntimeError('canonical 内容搜索失败', error)
   }
-  // 阶段 2：候选 owner 全量投影后按消息搜索文本精确匹配
-  const loaded = await Promise.all(candidates.map(async owner => {
-    const ownerKey = toCanonicalOwnerKey(owner)
-    const session = sessionByOwner.get(ownerKey)
-    if (!session) return null
-    try {
-      // #81 L2：投影读走 compact（单元展开在 effectiveCanonicalProjectionEvents 内完成）。
-      const rows = await repository.loadAllPreferUnits(ownerKey)
-      return { session, messages: projectMessagesFromCanonical(rows) }
-    } catch (error) {
-      reportRuntimeError(`读取 canonical 历史失败（${session.id}）`, error)
-      return { session, messages: [] }
-    }
-  }))
+  // 阶段 2：按 owner 分组去重 sequence，定向单行 compact 读（单元覆盖的行由
+  // compact 语义解析出单元行）→ 该 owner 行集合流投影 → 消息搜索文本精确复核。
+  const sequencesByOwner = new Map<string, number[]>()
+  for (const hit of hits) {
+    const ownerKey = toCanonicalOwnerKey(hit)
+    const sequences = sequencesByOwner.get(ownerKey) ?? []
+    if (!sequences.includes(hit.sequence)) sequences.push(hit.sequence)
+    sequencesByOwner.set(ownerKey, sequences)
+  }
   const results: SearchHitUi[] = []
-  for (const item of loaded) {
-    if (!item) continue
-    const { session, messages } = item
+  for (const [ownerKey, sequences] of sequencesByOwner) {
+    const session = sessionByOwner.get(ownerKey)
+    if (!session) continue
+    const rowBySequence = new Map<number, CanonicalEventRow>()
+    await Promise.all(sequences.map(async sequence => {
+      try {
+        // #445：after_sequence = sequence-1 + limit 1——取回该位置附近的 compact
+        // 有效行（命中行自身，或覆盖它的单元行；compact 页按 delta run 边界收口，
+        // 预算内通常 1 行，最坏为邻接整段 run）。
+        const page = await repository.listCompact(ownerKey, sequence - 1, 1)
+        const row = page.events[0]
+        if (row) rowBySequence.set(row.sequence, row)
+      } catch (error) {
+        reportRuntimeError(`读取 canonical 命中行失败（${session.id}）`, error)
+      }
+    }))
+    if (rowBySequence.size === 0) continue
+    const rows = [...rowBySequence.values()].sort((a, b) => a.sequence - b.sequence)
+    // #81 L2：投影读走 compact 语义（单元展开在 effectiveCanonicalProjectionEvents 内完成）。
+    const messages = projectMessagesFromCanonical(rows)
     for (const message of messages) {
       const searchable = getMessageSearchText(message)
       if (!searchable.toLocaleLowerCase().includes(needle.toLocaleLowerCase())) continue
+      // ⚠️ messageId 是本次（拉回行子集）投影内的逻辑序号（user-1/msg-2…），不再
+      // 等于会话内全量投影的 Message.id——旧版全量拉流下两者一致。消费方
+      // SearchSheetView 只把它写进 pendingMessageLocation（当前无读取方）；导航
+      // 契约（FE-AUD-003）落地时需改带 owner+sequence 锚或恢复全量序号，见 #445。
       results.push({
         sessionId: session.id,
         messageId: message.id,

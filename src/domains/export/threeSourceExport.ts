@@ -13,12 +13,12 @@
  *
  * 纪律（方案书 §2 阶段 M0）：
  * - 只读取证：不修改任何业务语义；三源全部经只读路径采集。
- * - 脱敏导出：镜像 Rust `pylon-foundations/src/sanitize.rs` 的 Strip 语义——敏感 key（rawInput/rawOutput/
- *   prompt/persona/headers/env/authorization/password/cookie/credential，以及含
- *   token/apikey/api_key/secret 的键名）整体剔除；字符串值含 secret 形态（分隔符变体 /
- *   sk-、ghp_、xoxb-、akia、eyj 前缀）整体 [REDACTED]。保留工具身份字段（toolCallId/
- *   title/kind/status/tool name）作为取证证据；聊天正文保留（仅 secret 形态值被
- *   REDACTED）。
+ * - 脱敏导出：镜像 Rust `pylon-foundations/src/sanitize.rs` 的 Strip 语义——敏感 key（exact
+ *   词表 + token/apikey/api_key 后缀 + secret contains，单源生成物
+ *   canonicalExportSanitizeVocabulary.generated.ts）整体剔除；字符串值含 secret 形态
+ *   （分隔符变体 / sk-、ghp_、xoxb-、akia、eyj 前缀）整体 [REDACTED]。保留工具身份字段
+ *   （toolCallId/title/kind/status/tool name）作为取证证据；聊天正文保留（仅 secret 形态值
+ *   被 REDACTED）。
  *
  * 三源 join 键（explorer 调查确认）：
  *   localStorage：`pylon-msgs-<Session.id>`（v1 envelope，兼容旧裸数组）。
@@ -42,6 +42,11 @@ import type { CanonicalEventPage } from '../../infrastructure/events/canonicalEv
 import type { CanonicalEventRow } from '../events/canonicalEventRow.ts'
 import type { ExportSource } from '../../contracts/exportSource.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import {
+  EXPORT_SANITIZE_CONTAINS,
+  EXPORT_SANITIZE_EXACT_KEYS,
+  EXPORT_SANITIZE_SUFFIXES,
+} from './canonicalExportSanitizeVocabulary.generated.ts'
 
 export function listExportSources(): ExportSource[] {
   return getPluginServiceRegistry().list<ExportSource>('export')
@@ -53,21 +58,23 @@ function resolveExportSource(sourceName: ExportSource['sourceName']): ExportSour
 
 // ============================================================================
 // 脱敏（镜像 src-tauri/pylon-foundations/src/sanitize.rs：
-// is_export_sensitive_key + sanitize_value_content；一致性由
-// scripts/sanitize-vocabulary.test.mts 门禁看守）
+// is_export_sensitive_key + sanitize_value_content）。key 词表单源自
+// canonicalExportSanitizeVocabulary.generated.ts（#444 批次②，Rust 为单源）；
+// 值正则不生成（Rust regex 与 JS 方言差异），一致性由
+// scripts/sanitize-vocabulary.test.mts 门禁看守
 // ============================================================================
 
 const REDACTED = '[REDACTED]'
 
-/** 镜像 Rust is_export_sensitive_key：命中即整个 key 剔除（Strip 策略）。 */
+/** 镜像 Rust is_export_sensitive_key：命中即整个 key 剔除（Strip 策略）。
+ *  词表三组规则（exact/后缀/contains）消费构建期生成物，此处只做规则组合。 */
 export function isSensitiveExportKey(key: string): boolean {
   const lower = key.toLowerCase()
-  if (
-    lower === 'rawinput' || lower === 'rawoutput' || lower === 'prompt' || lower === 'persona'
-    || lower === 'headers' || lower === 'env' || lower === 'authorization' || lower === 'password'
-    || lower === 'cookie' || lower === 'credential' || lower === 'tokenvalue'
-  ) return true
-  return lower.endsWith('token') || lower.endsWith('apikey') || lower.endsWith('api_key') || lower.includes('secret')
+  return (
+    (EXPORT_SANITIZE_EXACT_KEYS as readonly string[]).includes(lower)
+    || EXPORT_SANITIZE_SUFFIXES.some(suffix => lower.endsWith(suffix))
+    || EXPORT_SANITIZE_CONTAINS.some(frag => lower.includes(frag))
+  )
 }
 
 const SENSITIVE_KEY_PATTERN = /(?:password|secret|token|api_key|apikey|authorization|client_secret|access_token|x-api-key|prompt|persona)\s*[:=："＝"]|bearer\s/
@@ -82,6 +89,8 @@ export function containsSensitiveValue(value: string): boolean {
 /**
  * 绝对路径形态（盘符 / UNC / 根相对）→ 收窄为 `…/目录名`，避免全路径外泄；
  * 非绝对路径原样保留。与交接声明"不输出绝对路径"对齐。
+ * Rust 侧镜像：pylon-foundations/src/sanitize.rs redact_absolute_path（#444 批次③），
+ * 两侧以同一组期望值单测互钉。
  */
 export function redactAbsolutePath(path: string): string {
   if (path.includes('\0')) return REDACTED

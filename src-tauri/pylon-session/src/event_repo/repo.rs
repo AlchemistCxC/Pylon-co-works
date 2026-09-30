@@ -14,7 +14,7 @@ use super::normalize::{normalize_kernel_event, now_millis};
 use super::provenance::{owner_triple, provenance_code};
 use super::row::{
     map_event_row, CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult,
-    EventPage, EventSearchOwner, KernelEventInput,
+    EventPage, EventSearchHit, KernelEventInput,
 };
 use super::EventError;
 
@@ -1066,17 +1066,14 @@ impl EventRepo {
         Ok(export)
     }
 
-    /// B6：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
-    /// 大小写不敏感 LIKE，返回去重后的候选 owner（前端再对候选 owner loadAll +
-    /// 消息投影 + 消息文本精确匹配）。limit 为候选 owner 上限。
-    /// v15：owner 分维列不落库——DISTINCT 收窄到 (owner_key, remote_session_id)，
-    /// 三元组经 `owner_triple` 派生后按 (profile, agent, local) 排序截断（与 v14
-    /// 的 SQL ORDER BY 语义一致）。
-    pub fn search_owners(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<EventSearchOwner>, EventError> {
+    /// B6 / #445：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
+    /// 大小写不敏感 LIKE，返回**命中行**定位（owner 三元组 + sequence/event_type/
+    /// occurred_at + instr 偏移）。WHERE 三列与 pattern 构造与候选 owner 版一字不改
+    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐——query 不含
+    /// LIKE 通配符（`%`/`_`）字面量时，raw/typed 列命中的行 offset 必非 NULL
+    /// （通配符命中时 instr 可能定位不到字面量，offset 为 NULL，见 `EventSearchHit`）。
+    /// 前端对命中行定向拉行后投影复核（匹配与命中同源）。limit 为命中行上限。
+    pub fn search_hits(&self, query: &str, limit: u32) -> Result<Vec<EventSearchHit>, EventError> {
         let conn = self
             .conn
             .lock()
@@ -1084,37 +1081,48 @@ impl EventRepo {
         let pattern = format!("%{query}%");
         let mut stmt = conn
             .prepare_cached(
-                "SELECT DISTINCT owner_key, remote_session_id
+                "SELECT owner_key, remote_session_id, sequence, event_type, occurred_at,
+                        NULLIF(instr(lower(raw_payload), lower(?2)), 0),
+                        NULLIF(instr(lower(COALESCE(typed_payload, '')), lower(?2)), 0)
                  FROM canonical_events
                  WHERE event_type LIKE ?1 COLLATE NOCASE
                     OR raw_payload LIKE ?1 COLLATE NOCASE
-                    OR COALESCE(typed_payload, '') LIKE ?1 COLLATE NOCASE",
+                    OR COALESCE(typed_payload, '') LIKE ?1 COLLATE NOCASE
+                 ORDER BY owner_key, sequence",
             )
             .map_err(EventError::from)?;
         let rows = stmt
-            .query_map(params![pattern], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            .query_map(params![pattern, query], |row| {
+                let owner_key: String = row.get(0)?;
+                let (profile_id, agent_id, local_session_id) = owner_triple(&owner_key);
+                Ok(EventSearchHit {
+                    profile_id,
+                    agent_id,
+                    local_session_id,
+                    remote_session_id: row.get(1)?,
+                    sequence: row.get(2)?,
+                    event_type: row.get(3)?,
+                    occurred_at: row.get::<_, String>(4)?,
+                    match_offset: row
+                        .get::<_, Option<i64>>(5)?
+                        .or(row.get::<_, Option<i64>>(6)?),
+                })
             })
             .map_err(EventError::from)?;
-        let mut candidates = Vec::new();
+        let mut hits = Vec::new();
         for row in rows {
-            let (owner_key, remote_session_id) = row.map_err(EventError::from)?;
-            let (profile_id, agent_id, local_session_id) = owner_triple(&owner_key);
-            candidates.push(EventSearchOwner {
-                profile_id,
-                agent_id,
-                local_session_id,
-                remote_session_id,
-            });
+            hits.push(row.map_err(EventError::from)?);
         }
-        candidates.sort_by(|a, b| {
+        // 与候选 owner 版（v15）一致的排序截断语义：按 (profile, agent, local) 排序
+        // 后截断；稳定排序保留 SQL 侧 owner 内 sequence 升序。
+        hits.sort_by(|a, b| {
             (&a.profile_id, &a.agent_id, &a.local_session_id).cmp(&(
                 &b.profile_id,
                 &b.agent_id,
                 &b.local_session_id,
             ))
         });
-        candidates.truncate(limit as usize);
-        Ok(candidates)
+        hits.truncate(limit as usize);
+        Ok(hits)
     }
 }

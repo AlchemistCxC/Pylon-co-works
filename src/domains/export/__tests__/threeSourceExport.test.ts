@@ -134,6 +134,13 @@ describe('redactAbsolutePath', () => {
     expect(redactAbsolutePath('/root/proj')).toBe('…/proj')
     expect(redactAbsolutePath('relative/dir')).toBe('relative/dir')
   })
+
+  it('裸根变体与分隔符连写（与 Rust redact_absolute_path_separator_edges 同值互钉）', () => {
+    expect(redactAbsolutePath('C:\\')).toBe('…/C:')
+    expect(redactAbsolutePath('//')).toBe('[REDACTED]')
+    expect(redactAbsolutePath('a//b')).toBe('a//b')
+    expect(redactAbsolutePath('/root//mixed\\dirs\\\\')).toBe('…/dirs')
+  })
 })
 
 describe('sanitizeIdentityExport', () => {

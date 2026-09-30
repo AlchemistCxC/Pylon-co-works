@@ -135,15 +135,24 @@ pub struct CompactEventPage {
     pub next_after_sequence: Option<i64>,
 }
 
-/// evt_search 候选 owner（B6）：内容命中 canonical_events 的 owner 三元组 +
-/// remote_session_id（前端据此 loadAll 后做消息级精确过滤）。
+/// evt_search 命中行（#445）：内容命中 canonical_events 的行定位 + owner 三元组。
+/// 前端只对命中行定向拉行（`evt_load_compact`）后投影复核，不再按候选 owner 全量
+/// 拉事件流——匹配与命中同源，IPC 载荷从「候选 owner 全量行」降为「命中行集」。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EventSearchOwner {
+pub struct EventSearchHit {
     pub profile_id: String,
     pub agent_id: String,
     pub local_session_id: String,
     pub remote_session_id: Option<String>,
+    pub sequence: i64,
+    pub event_type: String,
+    pub occurred_at: String,
+    /// `instr(lower(列), lower(query))` 首偏移（1-based）；None = 命中列上按字面
+    /// 定位不到——仅 event_type 列命中，或 query 含 LIKE 通配符（`%`/`_`）使
+    /// LIKE 命中而 instr 找不到字面量。advisory：前端 v1 不消费，定位与
+    /// snippet 一律以投影文本为准。
+    pub match_offset: Option<i64>,
 }
 
 /// Forensic export deliberately bypasses JSON decoding so one corrupt row can be isolated without

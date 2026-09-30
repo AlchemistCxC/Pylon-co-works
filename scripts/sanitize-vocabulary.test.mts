@@ -2,16 +2,18 @@
 //
 // 前端 `src/domains/export/threeSourceExport.ts` 的脱敏实现**镜像** Rust
 // `src-tauri/pylon-foundations/src/sanitize.rs` 的 Strip 语义（三源取证导出与
-// obs05-07 DEV 观测共用），此前两侧各自手工维护、无任何机制阻止漂移——本次
-// 深挖确认词表当前碰巧一致，但 Rust 侧新增一个敏感词，前端取证导出就会
-// 漏脱敏。本文件把两侧钉成门禁事实（先例：`acp-vocabulary.test.mts`）：
-//   1. `is_export_sensitive_key` 的 exact 名单 ≡ `isSensitiveExportKey` 行为
-//      （从 Rust 源码提取词表构造期望谓词，对探针集与 TS 函数全等比对——
-//      双向：Rust 加词 / TS 改行为任一侧漂移即红）；
+// obs05-07 DEV 观测共用）。批次②后 key 词表已单源化：TS 侧
+// canonicalExportSanitizeVocabulary.generated.ts 由
+// generate-export-sanitize-vocabulary.mjs 从 Rust 源码生成（--check 门禁在
+// check:frontend 链），本文件继续看守「生成物 ↔ 行为 ↔ Rust 源」三方互证：
+//   1. `is_export_sensitive_key` 的 exact 名单 ≡ 生成物 EXPORT_SANITIZE_EXACT_KEYS
+//      ≡ `isSensitiveExportKey` 行为（双向：Rust 加词 / 生成物失同步 /
+//      TS 改行为任一侧漂移即红）；
 //   2. 后缀/contains 规则（token / apikey / api_key / secret）同上；
-//   3. SENSITIVE_KEY_PATTERN / BARE_SECRET_PATTERN 两条值正则：两侧字面量
-//      均可提取（防解析失效静默放行），且 JS 重放语义等价（已知字面差异
-//      `bearer\s+` vs `bearer\s` 对 is_match 语义等价，允许）。
+//   3. SENSITIVE_KEY_PATTERN / BARE_SECRET_PATTERN 两条值正则（有意不生成，
+//      Rust regex 与 JS 方言差异）：两侧字面量均可提取（防解析失效静默放行），
+//      且 JS 重放语义等价（已知字面差异 `bearer\s+` vs `bearer\s` 对 is_match
+//      语义等价，允许）。
 //
 // 有意不镜像（非漂移，勿加门禁）：Rust `is_sensitive_key`（Redact 表，含
 // attachment/header + 8KiB 截断）是 runtime_log 语义，前端不做 Redact。
@@ -27,6 +29,11 @@ import {
   containsSensitiveValue,
   isSensitiveExportKey,
 } from '../src/domains/export/threeSourceExport.ts'
+import {
+  EXPORT_SANITIZE_CONTAINS,
+  EXPORT_SANITIZE_EXACT_KEYS,
+  EXPORT_SANITIZE_SUFFIXES,
+} from '../src/domains/export/canonicalExportSanitizeVocabulary.generated.ts'
 
 const readSource = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
 
@@ -73,14 +80,7 @@ function parseRustRegexLiterals(sanitizeRs: string): string[] {
   return [...sanitizeRs.matchAll(/Regex::new\(\s*r#?"([\s\S]*?)"#?\s*[,)]/g)].map(match => match[1]!)
 }
 
-// ── TS 侧词表（行为导入 + 源码字面量） ────────────────────────────────────────
-
-/** TS 函数体内 `lower === 'x'` exact 名单。 */
-function parseTsExactKeys(threeSourceTs: string): string[] {
-  const fnBody = extractBraceBlock(threeSourceTs, 'export function isSensitiveExportKey')
-  if (!fnBody) return []
-  return [...fnBody.matchAll(/lower === '([a-z][a-z0-9_]*)'/g)].map(match => match[1]!)
-}
+// ── TS 侧词表（行为导入 + 生成物导入） ────────────────────────────────────────
 
 function parseTsRegexLiterals(threeSourceTs: string): string[] {
   const sensitive = threeSourceTs.match(/const SENSITIVE_KEY_PATTERN = \/(.*)\/\r?\n/)
@@ -96,7 +96,7 @@ const threeSourceTs = readSource(THREE_SOURCE_TS)
 describe('sanitize 词表跨语言一致性（#444）', () => {
   const rustFnBody = extractBraceBlock(sanitizeRs, 'pub fn is_export_sensitive_key')
   const rustExact = parseRustExactKeys(sanitizeRs)
-  const tsExact = parseTsExactKeys(threeSourceTs)
+  const tsExact = [...EXPORT_SANITIZE_EXACT_KEYS]
 
   it('Rust 解析非空（书写形状重构时红灯而非静默放行）', () => {
     expect(rustFnBody).not.toBe('')
@@ -104,16 +104,16 @@ describe('sanitize 词表跨语言一致性（#444）', () => {
     expect(tsExact.length).toBeGreaterThanOrEqual(11)
   })
 
-  it('exact 名单双向精确一致', () => {
+  it('exact 名单：生成物与 Rust 源双向精确一致', () => {
     expect([...tsExact].sort()).toEqual([...rustExact].sort())
   })
 
   const rustRules = parseRustSuffixRules(rustFnBody)
 
-  it('后缀与 contains 规则一致，且 TS 函数行为与 Rust 词表构造的期望谓词全等', () => {
-    // TS 侧规则从行为函数核对（endsWith × 3 + includes × 1 的既定形状）。
-    expect(rustRules.suffixes).toEqual(['token', 'apikey', 'api_key'])
-    expect(rustRules.contains).toEqual(['secret'])
+  it('后缀与 contains 规则：生成物与 Rust 源一致，且 TS 函数行为与 Rust 词表构造的期望谓词全等', () => {
+    expect([...EXPORT_SANITIZE_SUFFIXES]).toEqual(rustRules.suffixes)
+    expect([...EXPORT_SANITIZE_CONTAINS]).toEqual(rustRules.contains)
+    // TS 侧规则形状（endsWith × 3 + includes × 1 的既定形状）由生成物钉住。
 
     const expectedPredicate = (rawKey: string): boolean => {
       const key = rawKey.toLowerCase()

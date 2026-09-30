@@ -12,6 +12,9 @@
  *   缺省 true）；`turn.unit` 豁免（单元行是历史正文的唯一副本）。
  * - evt_load_compact(owner_key, after_sequence, limit, cap_typed_payload)：compact 读的
  *   **一页**（升序、前向游标；#376-b 起不再一次取回整库）。
+ * - evt_search(query, limit)：跨 owner 内容搜索命中行（#445）——owner 三元组 +
+ *   sequence/eventType/occurredAt/matchOffset；可空字段（remoteSessionId/matchOffset）
+ *   恒在场（null），无 skip 序列化。
  * - 结构化错误 { code, message }：event_revision_conflict / event_repo_corrupt /
  *   event_repo_constraint / event_repo_conflict / event_db_unavailable / event_invalid /
  *   event_session_deleted（DEL-04 tombstone gate，迟到写拒绝）。
@@ -41,6 +44,18 @@ export interface CanonicalEventPage {
 export interface CanonicalCompactPage {
   events: CanonicalEventRow[]
   nextAfterSequence: number | null
+}
+
+/**
+ * #445：evt_search 命中行（owner 维字段与 CanonicalEventOwner 相同，additive 扩展）。
+ * `matchOffset` 为命中列上 `instr(lower(col), lower(query))` 首偏移（1-based；null =
+ * 仅 event_type 列命中或通配符命中）——advisory，前端定位与 snippet 以投影文本为准。
+ */
+export type CanonicalEventSearchHit = CanonicalEventOwner & {
+  sequence: number
+  eventType: string
+  occurredAt: string
+  matchOffset: number | null
 }
 
 export interface CanonicalEventRawExport {
@@ -121,8 +136,9 @@ export interface CanonicalEventRepository {
   listCompact(ownerKey: string, afterSequence: number | null, limit?: number): Promise<CanonicalCompactPage>
   /** 单行取证导出：不解析损坏 JSON，返回数据库中的原始文本。 */
   exportRaw(eventId: string): Promise<CanonicalEventRawExport | null>
-  /** B6：跨 owner 内容搜索候选 owner（payload/eventType LIKE）；前端再做消息级过滤。 */
-  searchOwners(query: string, limit?: number): Promise<CanonicalEventOwner[]>
+  /** #445：跨 owner 内容搜索命中行（payload/eventType LIKE）；前端对命中行定向
+   * 拉行后投影复核（匹配与命中同源）。 */
+  searchHits(query: string, limit?: number): Promise<CanonicalEventSearchHit[]>
 }
 
 const DEFAULT_PAGE_LIMIT = 100
@@ -243,8 +259,8 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       return invoke<CanonicalEventRawExport | null>('evt_export_raw', { eventId })
         .catch(rejectCanonicalEventRepositoryError)
     },
-    async searchOwners(query, limit = 50) {
-      return invoke<CanonicalEventOwner[]>('evt_search', {
+    async searchHits(query, limit = 50) {
+      return invoke<CanonicalEventSearchHit[]>('evt_search', {
         query,
         limit,
       }).catch(rejectCanonicalEventRepositoryError)

@@ -485,7 +485,12 @@ pub(crate) async fn respond_interaction(
 /// 设置权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
 /// #448 PR3：后端为持久化权威——内存更新后写穿 user_data（approval-mode key）。
 /// 落盘失败降级为「内存生效 + warn」（审批语义不因落盘失败被拒绝；代价是重启
-/// 回到旧值，可见日志可查）。
+/// 回到旧值，可见日志可查；外部可查性为 #463 审查项 3，留 wire 契约决策口）。
+/// #463 后端 C-1：内存写与落盘全程持 `approval_mode_write_lock`——并发 set
+/// （GUI 与 CLI 桥同进程）串行化，磁盘必为最后一次 set（tokio Mutex 公平取锁，
+/// 临界区内无基于旧值的读改写，故锁序即生效序）。
+#[allow(clippy::await_holding_invalid_type)]
+// approval_mode_write_lock 跨 await：串行「内存写→落盘」全窗口，防写完成序可逆（与 config_write_lock 同型）
 #[tauri::command]
 pub(crate) async fn set_approval_mode(
     state: tauri::State<'_, AppState>,
@@ -496,6 +501,7 @@ pub(crate) async fn set_approval_mode(
             "unknown approval mode: {mode}"
         )));
     }
+    let _write_guard = state.approval_mode_write_lock.lock().await;
     *state.approval_mode.lock().map_err(|e| e.to_string())? = mode.clone();
     let service = state
         .user_data_service
@@ -1628,5 +1634,64 @@ mod tests {
         // 损坏 payload（非法/缺失 mode）分支在此不可测：validate_approval_mode 前置
         // 拒绝（approval_mode_rejects_unknown_mode_and_version 钉住），in_memory 基建
         // 无法绕过 save 种出非法行——restore 的 mode filter 属纵深防御（手改 DB 场景）。
+    }
+
+    /// #463 后端 C-1：并发 set 写穿串行——多轮两任务并发 set 不同 mode，join 后
+    /// 磁盘终值 == 内存终值。锁窗口下确定性成立（后取锁者的内存值与其落盘值一致）；
+    /// 修复前两个盲写 save 完成序可逆，磁盘可停在较早 set（本用例对该回归面敏感）。
+    #[test]
+    fn set_approval_mode_concurrent_writes_keep_disk_equal_to_memory() {
+        use tauri::Manager;
+        let shared = std::sync::Arc::new(
+            crate::session::UserDataService::in_memory().expect("user service"),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(shared.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async {
+            for round in 0..16 {
+                let (first, second) = if round % 2 == 0 {
+                    ("auto", "bypass")
+                } else {
+                    ("bypass", "auto")
+                };
+                let app_ref = &app;
+                tokio::join!(
+                    async {
+                        set_approval_mode(app_ref.state::<crate::AppState>(), first.into())
+                            .await
+                            .expect("first set must succeed")
+                    },
+                    async {
+                        set_approval_mode(app_ref.state::<crate::AppState>(), second.into())
+                            .await
+                            .expect("second set must succeed")
+                    },
+                );
+                let memory = app
+                    .state::<crate::AppState>()
+                    .approval_mode
+                    .lock()
+                    .unwrap()
+                    .clone();
+                assert!(
+                    memory == first || memory == second,
+                    "内存终值必须是两次 set 之一：round {round}"
+                );
+                let envelope = shared
+                    .load_sync(crate::session::user_data::UserDataKey::ApprovalMode)
+                    .expect("load")
+                    .expect("persisted");
+                assert_eq!(
+                    envelope.payload["mode"], memory,
+                    "磁盘终值必须等于内存终值：round {round}"
+                );
+            }
+        });
     }
 }

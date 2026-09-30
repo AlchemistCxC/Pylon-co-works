@@ -878,16 +878,18 @@ pub(crate) async fn evt_export_raw(
         .map_err(PylonError::from)
 }
 
-/// B6：跨 owner 内容搜索候选（raw/typed payload + eventType LIKE，大小写不敏感）。
-/// 返回去重 owner 列表（limit 缺省 50）——前端对候选 owner loadAll 后做消息级过滤。
+/// B6 / #445：跨 owner 内容搜索命中行（raw/typed payload + eventType LIKE，大小写
+/// 不敏感）。返回命中行定位（owner 三元组 + sequence/eventType/occurredAt/matchOffset，
+/// limit 缺省 50）——前端对命中行定向 `evt_load_compact` 拉行后投影复核，不再按候选
+/// owner 全量拉事件流。
 #[tauri::command]
 pub(crate) async fn evt_search(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: Option<u32>,
-) -> Result<Vec<EventSearchOwner>, PylonError> {
+) -> Result<Vec<EventSearchHit>, PylonError> {
     require_event_service(&state)?
-        .search_owners(query, limit.unwrap_or(50))
+        .search_hits(query, limit.unwrap_or(50))
         .await
         .map_err(PylonError::from)
 }

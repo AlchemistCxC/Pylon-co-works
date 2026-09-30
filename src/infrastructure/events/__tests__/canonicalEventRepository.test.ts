@@ -194,20 +194,28 @@ describe('tauriCanonicalEventRepository', () => {
     expect(list).toHaveBeenNthCalledWith(3, OWNER_KEY, 3, 1)
   })
 
-  it('searchOwners 走 evt_search 命令并返回候选 owner', async () => {
+  it('searchHits 走 evt_search 命令并返回命中行（#445 additive 形状）', async () => {
     invokeMock.mockResolvedValueOnce([{
       profileId: 'p1',
       agentId: 'peri',
       localSessionId: 'local:s1',
       remoteSessionId: 'remote-1',
+      sequence: 3,
+      eventType: 'user.message',
+      occurredAt: '2026-08-14T00:00:00.000Z',
+      matchOffset: 12,
     }])
     const repo = tauriCanonicalEventRepository()
-    const owners = await repo.searchOwners('needle', 50)
-    expect(owners).toEqual([{
+    const hits = await repo.searchHits('needle', 50)
+    expect(hits).toEqual([{
       profileId: 'p1',
       agentId: 'peri',
       localSessionId: 'local:s1',
       remoteSessionId: 'remote-1',
+      sequence: 3,
+      eventType: 'user.message',
+      occurredAt: '2026-08-14T00:00:00.000Z',
+      matchOffset: 12,
     }])
     expect(invokeMock).toHaveBeenCalledWith('evt_search', { query: 'needle', limit: 50 })
   })
@@ -290,7 +298,7 @@ describe('loadCanonicalEventsIncremental（#81 L1 双读修复）', () => {
       // 就如实返回单页全量（不是空页），避免双件语义自相矛盾。
       async listCompact() { return { events: rows, nextAfterSequence: null } },
       async exportRaw() { return null },
-      async searchOwners() { return [] },
+      async searchHits() { return [] },
     }
     return { repository, loadAll: repository.loadAll }
   }
