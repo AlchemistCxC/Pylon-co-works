@@ -75,7 +75,7 @@ flowchart LR
 
 - `fileDispatch` → **已并入 `file`**（dispatchMessage/fileDiff 两件的消费者全部在 sheets/file，#486 项7）。
 - 保留的小域（消费者跨簇，小而内聚不是债）：pluginData（identity ×4 + plugin-runtime/sessionData ×1）、inputPrediction（renderers/infrastructure/settings 三簇）、runtime/runtimeStore（29 消费者）、search、session、tasks、overview、browser、export、interface、presentation。
-- attachment / binding / feature：**生产代码零消费者**（仅 p3RoutingRegression 测试触 feature）——「按消费者归并」对无消费者域不适用，属死代码候选，留卫生批裁决，本批不动。
+- attachment / binding / feature：**生产代码零消费者**（仅 p3RoutingRegression 回归测试触 binding；feature 连测试引用都为零）——「按消费者归并」对无消费者域不适用，属死代码候选，留卫生批裁决，本批不动。
 
 ## 判断是否需要继续拆分
 
