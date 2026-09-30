@@ -20,7 +20,43 @@ on:
 # 语义两者等价（均只保行号级调试信息，测试失败证据只需 file:line）。
 
 jobs:
+  # ★ #469：判定"这次改动是否只碰了**簿记类**文件"
+  #   白名单是**正向**的（只列免 CI 的）；任何没列出的路径都会照常触发重活 ——
+  #   含 `docs/说明书/**` / `CONTEXT.md` / `.agents/dev-standards.md`（它们是
+  #   `check-doc-links` / `check-hook-anchor-parity` 的输入，改它们必须跑 CI）。
+  #   改这份白名单等于改门禁范围，属**显式动作**。
+  changes:
+    name: 判定改动面
+    runs-on: ubuntu-latest
+    outputs:
+      bookkeeping_only: ${{ steps.detect.outputs.bookkeeping_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "没有可用的比较基点 ⇒ 按「不只是簿记」处理（照常跑重活）"
+            echo "bookkeeping_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE_SHA" HEAD)
+          echo "改动文件："; echo "$files"
+          others=$(echo "$files" | grep -vE '^(AGENTS\.md|README\.md|\.agents/L\.md|\.agents/(BOARD\.md|records/|decisions/|spec/|templates/))' || true)
+          if [ -z "$others" ]; then
+            echo "bookkeeping_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bookkeeping_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   frontend:
+    needs: changes
+    if: needs.changes.outputs.bookkeeping_only != 'true'
     name: 前端静态门禁（lint + tsc + build）
     runs-on: windows-latest
     timeout-minutes: 20
@@ -105,6 +141,8 @@ jobs:
   # #193：vitest 分片矩阵——606 文件 / 4439 用例对半分片并行，前端测试段
   # 墙钟减半。transform 缓存让两个分片共享转译结果。
   frontend-test:
+    needs: changes
+    if: needs.changes.outputs.bookkeeping_only != 'true'
     name: 前端测试（vitest 分片 ${{ matrix.shard }}/2）
     runs-on: windows-latest
     timeout-minutes: 20
@@ -177,6 +215,8 @@ jobs:
         run: bun run test --shard=${{ matrix.shard }}/2
 
   rust-test:
+    needs: changes
+    if: needs.changes.outputs.bookkeeping_only != 'true'
     name: Rust（fmt + 测试 + 构建）
     runs-on: windows-latest
     timeout-minutes: 45
@@ -316,6 +356,8 @@ jobs:
           if-no-files-found: warn
 
   rust-clippy:
+    needs: changes
+    if: needs.changes.outputs.bookkeeping_only != 'true'
     name: Rust（clippy 基线门禁）
     runs-on: windows-latest
     timeout-minutes: 45
@@ -424,6 +466,8 @@ jobs:
           if-no-files-found: warn
 
   rust-shadow:
+    needs: changes
+    if: needs.changes.outputs.bookkeeping_only != 'true'
     name: Rust（ACP shadow parity）
     runs-on: windows-latest
     timeout-minutes: 45
@@ -501,3 +545,24 @@ jobs:
       # A9 shadow parity：两次隔离的 SDK fixture 运行比对 wire/canonical/projection/终态/背压。
       - name: ACP shadow parity（check:acp-shadow）
         run: bun run check:acp-shadow
+
+  # ★ #469：**恒有产出**的门禁总闸 —— ruleset 里**唯一**的必需检查。
+  #   重活真跑了就汇总结果；簿记类改动下它们全 skipped ⇒ 这里直接成功。
+  #   ★ 必须 `if: always()` + `needs:` 全列，否则"上游失败 ⇒ 本作业不跑"会让 gate 一起没了。
+  ci-gate:
+    name: 门禁总闸
+    if: always()
+    needs: [changes, frontend, frontend-test, rust-test, rust-clippy, rust-shadow]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 汇总
+        shell: bash
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          set -euo pipefail
+          echo "各作业结果：$RESULTS"
+          case "$RESULTS" in
+            *failure*|*cancelled*) echo "::error::有作业失败或被取消"; exit 1 ;;
+          esac
+          echo "门禁通过（skipped 按不适用处理）"
