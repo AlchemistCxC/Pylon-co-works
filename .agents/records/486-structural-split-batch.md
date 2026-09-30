@@ -51,6 +51,22 @@
 - 既有测试：断言零改动零弱化；仅 import 路径随项1 搬移重写。
 - 已知既有失败（与本期无关）：`dispatcher::interaction_route::tests::resolve_agent_provider_follows_live_config` 需先构建 fake-agent bin（环境性，构建后绿）。
 
+## 审查轮（两个独立子 agent 对抗式，全程只读逐行对照）
+
+裁定：7 PR 全部 APPROVE / APPROVE WITH NITS，零 REQUEST CHANGES；共同红线（wire/持久化/公开契约/事件投影语义、测试断言零弱化）全部成立。
+
+已处置（P3 即修）：
+- 维护地图事实修正：p3RoutingRegression 测试触的是 **binding** 而非 feature（feature 连测试引用都为零）→ #501 分支 5e2b7651。
+- perf-bench projectorSuite 接线锚点行号随四分失效 → 更新实体位路径 + 溯源注记 → #499 分支 15150742。
+- pylon-acp 残留的 Win32_System_JobObjects feature（装配单源后无消费者）→ 裁剪 → #492 分支 9a38a01f。
+- 互钉测试 K03 requiresRunning 覆盖盲区：分析为**可证明的不可达分支**（message 族 seq<prev 必先触发折叠段），论证留档于测试头注，不设无意义用例。
+
+留档不修（行为等价/风格层，P3）：
+- session_update.rs 编排层代复核与 resolve 末尾代复核背靠背执行两次（无调度点，行为等价纯冗余）；
+- hooks.rs 的 clone 与 resolve_local_source 次序对调（纯操作无 await，等价）；
+- acp 侧日志的 last_os_error 在 CloseHandle 之后取（Win32 不保证 CloseHandle 不改 last error，理论差异，文案逐字未动）；
+- 若干随拆分携带的裸 too_many_arguments 豁免（原函数级豁免随迁，与仓内既有风格一致）。
+
 ## 遗留与后续
 
 - attachment/binding/feature 三域生产零消费者 → 死代码候选，待卫生批裁决（维护地图已记录）。
