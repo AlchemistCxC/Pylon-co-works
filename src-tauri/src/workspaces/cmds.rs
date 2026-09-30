@@ -121,10 +121,12 @@ pub(crate) async fn list_workspace_entries(
     let include_hidden = include_hidden.unwrap_or(false);
     // #488 批④：目录枚举是走盘的阻塞 fs，与 workspace_search 同口径经
     // spawn_blocking 移出 async 运行时。
-    tokio::task::spawn_blocking(move || workspace::list_entries(&root, &relative_path, include_hidden))
-        .await
-        .map_err(|error| PylonError::Workspace(error.to_string()))?
-        .map_err(|error| PylonError::Workspace(error.to_string()))
+    tokio::task::spawn_blocking(move || {
+        workspace::list_entries(&root, &relative_path, include_hidden)
+    })
+    .await
+    .map_err(|error| PylonError::Workspace(error.to_string()))?
+    .map_err(|error| PylonError::Workspace(error.to_string()))
 }
 
 #[tauri::command]

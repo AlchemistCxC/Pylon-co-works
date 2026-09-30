@@ -898,7 +898,9 @@ mod tests {
             })
         );
         let interaction = super::resolved_interaction_payload(
-            ResolvedInteractionEvent::Interaction { kind: "elicitation" },
+            ResolvedInteractionEvent::Interaction {
+                kind: "elicitation",
+            },
             "peri",
             "s1",
             "7",

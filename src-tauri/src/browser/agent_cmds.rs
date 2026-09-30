@@ -643,8 +643,9 @@ pub(crate) async fn browser_agent_save_page(
                 let dir = dirs.data_root.join("agent-pages");
                 let bytes = mhtml.into_bytes();
                 tokio::task::spawn_blocking(move || {
-                    std::fs::create_dir_all(&dir)
-                        .map_err(|error| PylonError::Protocol(format!("创建存档目录失败: {error}")))?;
+                    std::fs::create_dir_all(&dir).map_err(|error| {
+                        PylonError::Protocol(format!("创建存档目录失败: {error}"))
+                    })?;
                     let path = dir.join(format!(
                         "pylon-page-{}.mhtml",
                         std::time::SystemTime::now()

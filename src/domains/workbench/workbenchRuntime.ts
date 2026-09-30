@@ -31,7 +31,7 @@ export interface WorkbenchRuntimeSnapshot {
   /**
    * #213 活性权威。`'kernel'` = 内核在途回合标记就本 source 表态（ADR-0017，
    * 优先级最高）；`'clock'` = 会话层已用**本进程回合时钟**就该 owner/source 表态，
-   * 文档派生的 `generating`（`legacyFieldsFromDocument` 的 `firstRunning`）不得覆盖它；
+   * 文档派生的 `generating`（`documentDerivedFields` 的 `firstRunning`）不得覆盖它；
    * `'document'`（缺省）= 无时钟宿主（preview / legacy host / 浏览器 mock）按文档形状推断。
    *
    * 重放出来的 `running` 尾行只说明「没有见到终态」，不说明「本进程在跑」——把两者混为一谈
