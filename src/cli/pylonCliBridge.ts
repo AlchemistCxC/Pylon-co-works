@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../infrastructure/tauri/env.ts'
+import { logError } from '../domains/diagnostics/frontendLogSink.ts'
 import { getPylonCliService, getPylonCliTool } from './pylonCliRuntime.ts'
 import { errorMessage } from './pylonCliService.ts'
 
@@ -39,7 +40,7 @@ async function install(): Promise<() => void> {
         requestId: request.requestId,
         error: errorMessage(error),
       }),
-    ).catch(error => console.error('Pylon CLI response failed', error))
+    ).catch(error => logError('Pylon CLI 回包失败', error))
       .finally(() => controllers.delete(request.requestId))
   })
   const unlistenCancel = await listen<CliFrontendCancel>('pylon:cli-cancel', event => {

@@ -34,6 +34,8 @@ function previewWorkbenchDocument(): WorkbenchDocument {
         title: message.toolName,
         semanticKind: message.toolKind,
         status: message.toolStatus === 'in_progress' ? 'running' : message.toolStatus === 'failed' ? 'failed' : 'completed',
+        orphan: false,
+        sequence: index + 1,
       })
       continue
     }

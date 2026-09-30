@@ -17,6 +17,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../tauri/env.ts'
+import { logWarn, logError } from '../../domains/diagnostics/frontendLogSink.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import { HOOK_NAMES, type HookInvocationResult, type HookName } from '../../plugin-runtime/hooks/hookTypes.ts'
@@ -51,7 +52,7 @@ async function executeHook(
 ): Promise<HookInvocationResult<Record<string, unknown>>> {
   const hookName = KNOWN_HOOK_NAMES.has(request.hook) ? (request.hook as HookName) : undefined
   if (!hookName) {
-    console.warn(`Pylon hook bridge received unknown anchor: ${request.hook}`)
+    logWarn(`Pylon hook 桥收到未知锚点：${request.hook}`)
     return passThroughResult(request.payload)
   }
   const session = resolveSession(request.sessionId)
@@ -88,7 +89,7 @@ async function install(): Promise<() => void> {
         requestId: request.requestId,
         error: error instanceof Error ? error.message : String(error),
       }),
-    ).catch(error => console.error('Pylon hook response failed', error))
+    ).catch(error => logError('Pylon hook 回包失败', error))
       .finally(() => controllers.delete(request.requestId))
   })
   const unlistenCancel = await listen<HookFrontendCancel>('pylon:hook-cancel', event => {
@@ -96,7 +97,7 @@ async function install(): Promise<() => void> {
   })
   // registry 增量同步：插件激活/停用改变钩子面时重推（Rust 侧只对已注册锚点派发）。
   const unsubscribeRegistry = getHookRuntime().registry.subscribe(() => {
-    void syncHookRegistry().catch(error => console.error('Pylon hook registry sync failed', error))
+    void syncHookRegistry().catch(error => logError('Pylon hook 注册表同步失败', error))
   })
   await syncHookRegistry()
   await invoke('pylon_hook_ready')

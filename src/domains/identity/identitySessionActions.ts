@@ -1,6 +1,7 @@
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../contracts/agentCommandSet.ts'
 import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION } from './sessionPersistence'
 import { clearSessionUiState } from '../chat/sessionUiState'
+import { logError } from '../diagnostics/frontendLogSink.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
@@ -335,7 +336,7 @@ export function createSessionActions(accessor: IdentityStoreAccessor): Pick<Iden
             return
           }
         } catch (error) {
-          console.error('从后端读取 Sessions 失败，仅以本地缓存只读降级', error)
+          logError('从后端读取 Sessions 失败，仅以本地缓存只读降级', error)
           get().hydrateSessionsLocal()
           updateIdentityCacheMeta('sessions', 'stale')
           set(state => ({
@@ -374,7 +375,7 @@ export function createSessionActions(accessor: IdentityStoreAccessor): Pick<Iden
           sessionsHydrated: true,
         })
       } catch (error) {
-        console.error('Session 持久化读取失败', error)
+        logError('Session 持久化读取失败', error)
         set({ sessions: [], turns: [], sessionHydration: { kind: 'corrupt', message: error instanceof Error ? error.message : '会话数据损坏' }, sessionsHydrated: true })
       }
     },
