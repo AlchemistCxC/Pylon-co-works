@@ -1,7 +1,7 @@
 /**
  * env — Tauri 运行时探测单点（H1）。
  *
- * 此前 App/ChatView/PetCompanion/backgroundImage/Settings 五处各自 typeof window 判断，
+ * 此前 App/ChatView/backgroundImage/Settings 等处各自 typeof window 判断，
  * 形态不一（双条件/单条件/参数化）。统一收敛于此，探测字段变更只改一处。
  */
 

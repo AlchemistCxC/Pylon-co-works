@@ -28,7 +28,7 @@ const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
   // 外观
   'templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right',
   // 工作区
-  'window', 'pet', 'history', 'backup',
+  'window', 'history', 'backup',
   // Agent 与连接
   'agent', 'session', 'gateway', 'prediction',
   // 插件
@@ -44,7 +44,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(SETTINGS_DOMAINS.map(d => d.label)).toEqual(['外观', '工作区', 'Agent 与连接', '插件'])
     expect(SETTINGS_DOMAINS.map(d => d.sections)).toEqual([
       ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'],
-      ['window', 'pet', 'history', 'backup'],
+      ['window', 'history', 'backup'],
       ['agent', 'session', 'gateway', 'prediction'],
       ['pluginManager', 'hookDiagnostics'],
     ])

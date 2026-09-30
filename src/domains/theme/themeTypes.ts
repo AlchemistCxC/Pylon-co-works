@@ -9,8 +9,8 @@ import type { CcLayoutV3 } from '../cc/ccLayoutState.ts'
 export interface ThemeSettings {
   /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
   accent: string
-  /** 布局骨架显隐（CC 单流模式入口）：tab 条 / 侧栏 / 宠物 */
-  showTabBar: boolean; showSidebar: boolean; showPet: boolean
+  /** 布局骨架显隐（CC 单流模式入口）：tab 条 / 侧栏（#483：showPet 随宠物链删除退役） */
+  showTabBar: boolean; showSidebar: boolean
   transparency: number; bgBlur: number; globalFont: string; codeFont: string; globalFontSize: number
   globalBgImage: string; globalBgColor: string; uiScheme: string
   titlebarBg: string; titlebarTextColor: string

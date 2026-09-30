@@ -68,23 +68,25 @@ describe('ISSUE-13 W2 当前域内 section 导航', () => {
     }
   })
 
-  it('切到工作区 → 分区为窗口/宠物/历史保留/配置备份；选窗口渲染窗口尺寸块', () => {
+  it('切到工作区 → 分区为窗口/历史保留/配置备份；选窗口渲染窗口尺寸块', () => {
     mountSettingsSheet({ domain: 'workspace' })
-    for (const section of ['窗口', '宠物', '历史保留', '配置备份']) {
+    // #483：宠物分区随宠物链删除退役。
+    for (const section of ['窗口', '历史保留', '配置备份']) {
       expect(navButton(section)).toBeInTheDocument()
     }
+    expect(nav().queryByRole('button', { name: '宠物' })).toBeNull()
     expect(nav().queryByRole('button', { name: '模板库' })).toBeNull()
     fireEvent.click(navButton('窗口'))
     expect(screen.getByText('当前尺寸')).toBeInTheDocument()
   })
 
-  it('showPet 只有工作区 › 宠物一个可编辑入口，旧主题字段不再重复渲染', () => {
+  it('showPet 无任何设置入口（#483 宠物链删除后的防复活钉）', () => {
     const view = mountSettingsSheet()
     expect(screen.queryByText('桌面宠物')).toBeNull()
     view.unmount()
     mountSettingsSheet({ domain: 'workspace' })
-    fireEvent.click(navButton('宠物'))
-    expect(screen.getByRole('button', { name: /宠物显示中|宠物已隐藏/ })).toBeInTheDocument()
+    expect(nav().queryByRole('button', { name: '宠物' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /宠物显示中|宠物已隐藏/ })).toBeNull()
   })
 
   it('切到 Agent 与连接 → 分区为 Agent/会话/Gateway；选 Agent 渲染当前 Agent 区', () => {

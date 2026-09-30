@@ -252,7 +252,6 @@ export function buildGitDiff(): string {
     '+++ b/src/sheets/AgentSheetView.tsx\n' +
     '@@ -21,7 +21,7 @@ export default function AgentSheetView({ ctx }) {\n' +
     '         <ChatView sessionId={ctx.activeSession} />\n' +
-    '         {showPet && <PetCompanion rightInset={ctx.rightInset} />}\n' +
     '-        <ControlCenter sessionId={ctx.activeSession} />\n' +
     '+        {isReplay ? <ReplayContinueBar /> : <ControlCenter sessionId={ctx.activeSession} />}\n' +
     '       </div>\n'

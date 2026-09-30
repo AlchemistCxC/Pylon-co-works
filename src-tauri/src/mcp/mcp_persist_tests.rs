@@ -97,9 +97,6 @@ async fn set_mcp_servers_persists_to_disk_and_restores() {
     let dirs = crate::paths::DataDirs {
         data_root: dir.clone(),
         config_root: dir.clone(),
-        mode: crate::paths::StorageMode::AppData,
-        portable_requested: false,
-        fallback_reason: None,
     };
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
