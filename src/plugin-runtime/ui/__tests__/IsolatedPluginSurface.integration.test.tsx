@@ -24,11 +24,12 @@ interface BundledReactPlugin {
 }
 
 const instances: PluginInstance[] = []
-let react18Plugin: BundledReactPlugin
-let react19Plugin: BundledReactPlugin
+let alphaPlugin: BundledReactPlugin
+let betaPlugin: BundledReactPlugin
 
-// P91 批08：react18 实际版本从依赖清单派生，替代硬编码 '18.3.1'
-const REACT18_VERSION = (JSON.parse(readFileSync(resolve('node_modules/react18/package.json'), 'utf8') as string) as { version: string }).version
+// #484：react18 别名已删，双版本共存面收窄为「两个自包含 bundle（各自内联一份 React
+// 实例）」——隔离语义（独立 root、独立事件监听、卸载其一不影响另一）仍由本测试覆盖。
+const REACT_VERSION = (JSON.parse(readFileSync(resolve('node_modules/react/package.json'), 'utf8') as string) as { version: string }).version
 
 // P91 §12 bundle 缓存：esbuild 产物按 (source + args) 内容寻址落 tmp，前后用例/运行间复用，
 // 命中即跳过 spawn；加载仍走 data URL，与既有机制一致。
@@ -39,7 +40,7 @@ function cachedBundlePath(source: string, args: readonly string[]): string {
   return join(BUNDLE_CACHE_DIR, `react-plugin-${key}.js`)
 }
 
-async function buildReactPlugin(alias?: Record<string, string>): Promise<BundledReactPlugin> {
+async function buildReactPlugin(label: string): Promise<BundledReactPlugin> {
   const source = `
         import React from 'react'
         import { createRoot } from 'react-dom/client'
@@ -57,7 +58,7 @@ async function buildReactPlugin(alias?: Record<string, string>): Promise<Bundled
             return React.createElement(
               'button',
               { 'data-events': String(events) },
-              'isolated React ' + React.version,
+              'isolated ${label} ' + React.version,
             )
           }
           root.render(React.createElement(PluginView))
@@ -70,7 +71,6 @@ async function buildReactPlugin(alias?: Record<string, string>): Promise<Bundled
     '--format=esm',
     '--platform=browser',
     '--define:process.env.NODE_ENV="production"',
-    ...Object.entries(alias ?? {}).map(([from, to]) => `--alias:${from}=${to}`),
   ]
   const cachePath = cachedBundlePath(source, args)
   let output: Buffer
@@ -86,9 +86,9 @@ async function buildReactPlugin(alias?: Record<string, string>): Promise<Bundled
 }
 
 beforeAll(async () => {
-  ;[react18Plugin, react19Plugin] = await Promise.all([
-    buildReactPlugin({ react: 'react18', 'react-dom': 'react-dom18' }),
-    buildReactPlugin(),
+  ;[alphaPlugin, betaPlugin] = await Promise.all([
+    buildReactPlugin('alpha'),
+    buildReactPlugin('beta'),
   ])
 })
 
@@ -109,29 +109,28 @@ async function installSurface(id: string, plugin: BundledReactPlugin): Promise<P
 }
 
 describe('isolated plugin UI roots', () => {
-  it('runs actual self-contained React 18 and React 19 bundles together and fully unmounts one owner', async () => {
-    expect(react18Plugin.version).toBe(REACT18_VERSION)
-    expect(react19Plugin.version).toMatch(/^19\./)
-    const react18 = await installSurface('test.react18', react18Plugin)
-    await installSurface('test.react19', react19Plugin)
+  it('runs two self-contained React bundles together and fully unmounts one owner', async () => {
+    expect(alphaPlugin.version).toBe(REACT_VERSION)
+    expect(betaPlugin.version).toBe(REACT_VERSION)
+    const alpha = await installSurface('test.alpha', alphaPlugin)
+    await installSurface('test.beta', betaPlugin)
     const view = render(<>
-      <IsolatedPluginSurface surfaceId="test.react18.surface" />
-      <IsolatedPluginSurface surfaceId="test.react19.surface" />
+      <IsolatedPluginSurface surfaceId="test.alpha.surface" />
+      <IsolatedPluginSurface surfaceId="test.beta.surface" />
     </>)
 
-    expect(await view.findByText(`isolated React ${REACT18_VERSION}`)).toBeInTheDocument()
-    expect(await view.findByText(`isolated React ${react19Plugin.version}`)).toBeInTheDocument()
-    expect(view.container.querySelector(`[data-plugin-react-version="${REACT18_VERSION}"]`)).not.toBeNull()
-    expect(view.container.querySelector(`[data-plugin-react-version="${react19Plugin.version}"]`)).not.toBeNull()
+    expect(await view.findByText(`isolated alpha ${REACT_VERSION}`)).toBeInTheDocument()
+    expect(await view.findByText(`isolated beta ${REACT_VERSION}`)).toBeInTheDocument()
+    expect(view.container.querySelectorAll(`[data-plugin-react-version="${REACT_VERSION}"]`)).toHaveLength(2)
 
     window.dispatchEvent(new Event('pylon:test-plugin-ui'))
-    await waitFor(() => expect(view.getByText(`isolated React ${REACT18_VERSION}`)).toHaveAttribute('data-events', '1'))
-    await waitFor(() => expect(view.getByText(`isolated React ${react19Plugin.version}`)).toHaveAttribute('data-events', '1'))
+    await waitFor(() => expect(view.getByText(`isolated alpha ${REACT_VERSION}`)).toHaveAttribute('data-events', '1'))
+    await waitFor(() => expect(view.getByText(`isolated beta ${REACT_VERSION}`)).toHaveAttribute('data-events', '1'))
 
-    await deactivatePluginInstance(react18)
-    instances.splice(instances.indexOf(react18), 1)
-    await waitFor(() => expect(view.queryByText(`isolated React ${REACT18_VERSION}`)).toBeNull())
+    await deactivatePluginInstance(alpha)
+    instances.splice(instances.indexOf(alpha), 1)
+    await waitFor(() => expect(view.queryByText(`isolated alpha ${REACT_VERSION}`)).toBeNull())
     window.dispatchEvent(new Event('pylon:test-plugin-ui'))
-    await waitFor(() => expect(view.getByText(`isolated React ${react19Plugin.version}`)).toHaveAttribute('data-events', '2'))
+    await waitFor(() => expect(view.getByText(`isolated beta ${REACT_VERSION}`)).toHaveAttribute('data-events', '2'))
   })
 })

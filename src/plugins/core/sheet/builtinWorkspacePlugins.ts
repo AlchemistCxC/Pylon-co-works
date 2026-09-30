@@ -11,7 +11,6 @@ import {
 } from '../../../workspace-sheets/settingsSheetState.ts'
 
 const AgentSheetView = lazy(() => import('../../../sheets/AgentSheetView.tsx'))
-const PrismManagerSheetView = lazy(() => import('../../../sheets/PrismManagerSheetView.tsx'))
 const RuntimeSheetView = lazy(() => import('../../../sheets/RuntimeSheetView.tsx'))
 const FileSheetView = lazy(() => import('../../../sheets/file/FileSheetView.tsx'))
 const OverviewSheetView = lazy(() => import('../../../sheets/OverviewSheetView.tsx'))
@@ -73,8 +72,6 @@ function defineWorkspace(
 
 export const BUILTIN_WORKSPACE_TYPES: readonly WorkspaceTypeDefinition<unknown>[] = [
   { kind: 'agent', label: 'Agent', singleton: true, getSingletonKey: agentSingleton, sidebarMode: 'workspace', component: lazyWorkspace(AgentSheetView), sidebar: lazyPanel(Sidebar), createInitialState: deserializeAgentWorkspaceState, serialize: serializeAgentWorkspaceState, deserialize: deserializeAgentWorkspaceState },
-  // #228 批次B：Prism 页是演示形态（ps-demo-notice），label/title 加「（演示）」标识。
-  defineWorkspace({ kind: 'prism', label: 'Prism（演示）', singleton: true, getSingletonKey: singleton('prism'), sidebarMode: 'sheet', component: lazyWorkspace(PrismManagerSheetView), launch: { kind: 'prism', title: 'Prism（演示）', description: '管理实例、Profiles 与扩展（演示预览，尚未接入 Prism API）', launchable: true, icon: 'boxes', category: 'system', categoryLabel: '系统与管理', categoryOrder: 30, order: 30, keywords: ['manage', 'profile', 'instance', '实例', '档案', '扩展', '演示'] } }),
   defineWorkspace({ kind: 'runtime', label: 'Runtime', singleton: true, getSingletonKey: singleton('runtime'), sidebarMode: 'sheet', component: lazyWorkspace(RuntimeSheetView), launch: { kind: 'runtime', title: 'Runtime', description: '运行日志与启动诊断', launchable: true, icon: 'activity', category: 'observe', categoryLabel: '观察与诊断', categoryOrder: 20, order: 30, keywords: ['log', 'debug', 'diagnostic', '运行日志', '诊断', '日志'] } }),
   defineWorkspace({ kind: 'file', label: 'File', singleton: false, getSingletonKey: fileSingleton, sidebarMode: 'sheet', component: lazyWorkspace(FileSheetView), launch: { kind: 'file', title: 'File', description: '工作区文件、SCM 与搜索', launchable: true, icon: 'folder-tree', category: 'work', categoryLabel: '工作台', categoryOrder: 10, order: 10, keywords: ['git', 'scm', 'code', '文件', '工作区', '搜索文件'] } }),
   defineWorkspace({ kind: 'overview', label: 'Overview', singleton: true, getSingletonKey: singleton('overview'), sidebarMode: 'sheet', component: lazyWorkspace(OverviewSheetView), launch: { kind: 'overview', title: 'Overview', description: '工作状态与最近会话概览', launchable: true, icon: 'layout-dashboard', category: 'observe', categoryLabel: '观察与诊断', categoryOrder: 20, order: 10, keywords: ['dashboard', 'summary', '概览', '总览', '工作台'] } }),

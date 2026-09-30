@@ -411,8 +411,8 @@
    移出可见性与 tab 序——宽度裁剪挡得住像素，挡不住键盘焦点。visibility 会继承到
    所有后代，因此不需要逐个 Sheet 列举内部节点。
 
-   注意 padding：各 Sheet 的左栏自带内边距（gateway/search/history 的 px-3、ps-nav 的
-   padding），box-sizing:border-box 下即使 width:0，盒子也不可能小于 padding 之和——
+   注意 padding：各 Sheet 的左栏自带内边距（gateway/search/history 的 px-3 等），
+   box-sizing:border-box 下即使 width:0，盒子也不可能小于 padding 之和——
    实测 Gateway 折叠后残留 24px。折叠态必须把内边距一并归零，否则「折叠 = 0 宽」不成立。
 
    用 `*` 兜住所有后代而不是只写外壳：visibility 会被后代显式 `visibility:visible`
