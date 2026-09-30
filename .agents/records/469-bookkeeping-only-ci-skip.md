@@ -75,6 +75,7 @@ AGENTS.md  README.md  .agents/L.md  .agents/BOARD.md
 | ruleset 改后 JSON | ✗ **未产出**（无 admin 权限，见上） |
 | ruleset 收敛后「允许合并」端到端 | ✗ **未达成**（同上）。样本 PR #474 当前 base 为 `ci/469-bookkeeping-skip`（其检查全绿但无需合并）；ruleset 收敛后需把它 base 改成 `main` 再验 |
 | `#266` 刀 5 的 L.md 遗留撤掉 | ◑ 条目已在样本笔撤掉；该笔合入需 ruleset 先收敛 |
+| **`push` 到 main 的事件路径**（`changes` 取 `github.event.before`；施工单 §四 第 2 步「确认 `门禁总闸` 在 main 上产出」） | ✗ **未验证** —— 本会话未合并任何 PR，故没有任何 push-to-main 运行。该分支的 bash 逻辑（非全零 `before`、`git diff before HEAD`）只在代码审查层面成立，未被执行过 |
 
 ## 测试处置
 
@@ -97,7 +98,8 @@ AGENTS.md  README.md  .agents/L.md  .agents/BOARD.md
 1. **ruleset 收敛未执行**（权限），故 #469 的最终目标尚未生效，「允许合并」的端到端证据待补。
 2. 样本 PR #474 的 base 现为 `ci/469-bookkeeping-skip`，ruleset 收敛后需改为 `main` 才有意义。
 3. 本地分支与远端因网络不可达而 SHA 不同（内容一致）；网络恢复后 `git fetch` + 对齐即可。
-4. CI 既有告警：`actions/checkout@v4` 目标是 Node 20、被强制跑在 Node 24（`##[warning]`），所有 job 均有，非本次引入，未处理。
+4. **`push` 到 main 的事件路径未实测**（见验收表末行）：`ci.yml` 合入后第一次 main push 才能验证；若该路径有问题，表现是 main 上的 run 红或 `changes` 报错，不阻塞任何 PR（main push 无需合并），修法局部。
+5. CI 既有告警：`actions/checkout@v4` 目标是 Node 20、被强制跑在 Node 24（`##[warning]`），所有 job 均有，非本次引入，未处理。
 
 ## 并行交集
 
