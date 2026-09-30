@@ -282,7 +282,7 @@ fn tombstone_gate_and_delete_semantics_baseline() {
     // 1) 删除单事务（DEL-03 两阶段）：DELETE snapshots + INSERT OR IGNORE tombstone；
     // 2) 删除后 evt_append → EventError::SessionDeleted（迟到写不复活）；
     // 3) 重复删除幂等（INSERT OR IGNORE，不报未知错误）；
-    // 4) canonical_events 行不随删除删除（append-only 事件流独立于 sessions 行）。
+    // 4) exact owner 删除联动清扫 canonical_events（#110 F3：append-only 契约已废）。
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
 

@@ -406,7 +406,7 @@ fn delete_session_writes_tombstone_and_keeps_canonical_events() {
         .unwrap();
     assert_eq!(
         events, 0,
-        "无事件场景保持 0；删除不清理 canonical_events 行"
+        "本场景未写入事件：删除后计数保持 0（exact owner 联动清扫的语义由 del03 覆盖）"
     );
 }
 

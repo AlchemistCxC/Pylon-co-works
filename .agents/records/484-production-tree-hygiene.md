@@ -4,7 +4,7 @@
 
 - issue：#484（refactor/hygiene）
 - 分支：`kumo/484-hygiene`（基于 main `df6cd864`；工作原落在共享链提交 `d4054745`，cherry-pick 为本分支 `ce68af08`）
-- 提交范围：`df6cd864..ce68af08`
+- 提交范围：`df6cd864..a4dcd5a7` + 审查收尾提交（共享链上有等价内容提交，随共享分支另行合并）
 - 日期：2026-10-01
 
 ## 目标与范围
@@ -75,3 +75,16 @@
 - 共享树曾被 #487（workbench legacy 退役，并行在途）的中间态污染（tsc `messages` 类型错、4 个 workbench/solid 测试文件红）——本批的全量前端验证在与提交等价的干净 worktree 执行：`git worktree` @ `d4054745` + `tsc -b` + `vite build` + `check:bundle` 全绿；本批改动面定向测试（28 文件 136 用例）在共享树亦全绿。
 - Rust 侧执行门禁时共享树先后被 #487（前端域）与 #488（`browser/agent_cmds.rs` E0277 等 Rust 在途）污染，全链 `check:rust`/`check:clippy` 在共享树无法收敛；单 crate 测试在共享树两次全绿（pylon-session 215/0、pylon 970/0），clippy 在干净 worktree 以独立 `CARGO_TARGET_DIR` 复跑完成 6 crate 基线比对（`added: []`）。CI 为最终全量门禁。
 - PR：分支 `kumo/484-hygiene`（只含本批提交），CI 在干净环境复跑全量门禁作最终裁决。
+
+## 审查轮（双子 agent：对抗式 + 残留扫描，2026-10-01）
+
+两份独立审查一致结论：六项裁决本体成立、语义等价性经对抗核验（幂等/迟到写/tombstone 字段断言均实际执行，迟到写断言改走生产写路径后更强）、CI 六项全绿。findings 与处置：
+
+- **[P1] SheetTabStrip 覆盖缺口无在案承接**（原指向的 Solid 化 issue #279 已关闭，`Closes #484` 后悬空）→ 登记 **#498** 承接。
+- **[P1] `renderSheetTabStrip` 死导出**（SheetTabStrip.solid.tsx 挂载工厂，唯一消费者是被删 React 薄桥）→ 已删；连带修正「与 React 版逐行为同构」悬空注释。
+- **[P1] Sidebar.css 模块区块「占位体型」死样式组**（`.sidebar-block-list/-row/-status/-switch/-metrics/-summary/-cta` 族，mockBlocks 配套，零生产消费者；外壳 `.sidebar-block-body` 族有 SettingsPreview/Sidebar 消费，保留）→ 已删；`Sidebar.blocks.css.test.ts` 字号同源断言的两选择器随删。
+- **[P1] 维护地图仍写 `check:deps`** → 改 `check:immer`。
+- **[P2] 注释/样例漂移**：msg_repo mod.rs 两处引用已删 `ensure_session_not_deleted`（改存在性 gate 口径）、del01 头注释第 4 条与 #110 F3 联动清扫断言矛盾（基线遗留，改正确口径）、msg_repo tests.rs 弱断言误导注释、code-stats SKILL.md 与 audit-maintenance.test.mts 的 mockBlocks/acp_transcript 样例（后者换 `src-tauri/tests/integration.rs`——vendor 分支已无源码样例可指）→ 全部清理。
+- **[P2] 跨 React 大版本共存回归保护随别名删除而消失** → 接受（PR 已声明收窄）；bun.lock 的 scheduler 收敛 0.23.2→0.27.0 属正常锁解析。
+
+验证：`Sidebar.blocks.css.test.ts` + `audit-maintenance.test.mts` 25/25 绿（worktree）。

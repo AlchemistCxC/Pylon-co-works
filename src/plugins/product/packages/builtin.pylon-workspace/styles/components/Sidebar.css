@@ -178,32 +178,6 @@
 .sidebar-block[data-collapsed="true"] > .sidebar-block-body { grid-template-rows:0fr; opacity:0; pointer-events:none; }
 .sidebar-block-body-surface { display:flex; flex-direction:column; min-height:0; }
 
-/* 模块区块的占位体型：列表 / 列表+开关 / 计数量表 / 摘要+动作。
-   这四条服务于 `sidebar/blocks/mockBlocks.tsx`；真实能力落地时按需替换。 */
-.sidebar-block-list { margin:0; padding:var(--ui-space-2) var(--ui-space-3); list-style:none; display:flex; flex-direction:column; gap:2px; }
-.sidebar-block-row { display:flex; align-items:center; gap:var(--ui-space-2); min-height:32px; padding:0 var(--ui-space-1); }
-.sidebar-block-status { width:6px; height:6px; flex:0 0 6px; border-radius:50%; background:var(--text-dim); }
-.sidebar-block-row[data-state="running"] .sidebar-block-status { background:var(--tool-run,var(--accent)); }
-.sidebar-block-row[data-state="paused"] .sidebar-block-status { opacity:.45; }
-.sidebar-block-row-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; gap:1px; }
-.sidebar-block-row-name { font-size:var(--sidebar-name-size, 14px); color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sidebar-block-row-meta { font:var(--sidebar-meta-size, 11px)/1.4 var(--mono); color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sidebar-block-switch { position:relative; width:24px; height:13px; flex:0 0 24px; border:1px solid var(--border); border-radius:var(--ui-radius-pill); background:var(--bg-input); }
-.sidebar-block-switch::after { content:''; position:absolute; top:1px; left:1px; width:9px; height:9px; border-radius:50%; background:var(--text-dim); }
-.sidebar-block-row[data-enabled="true"] .sidebar-block-switch { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 22%,transparent); }
-.sidebar-block-row[data-enabled="true"] .sidebar-block-switch::after { left:auto; right:1px; background:var(--accent); }
-.sidebar-block-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
-.sidebar-block-metric { display:flex; flex-direction:column; gap:2px; }
-.sidebar-block-metric strong { font:600 15px/1.2 var(--mono); color:var(--text); }
-.sidebar-block-metric span { font-size:var(--sidebar-meta-size, 11px); color:var(--text-dim); }
-.sidebar-block-progress { grid-column:1/-1; height:4px; background:var(--bg-input); border:1px solid var(--border); overflow:hidden; }
-.sidebar-block-progress > span { display:block; height:100%; background:var(--accent); }
-.sidebar-block-summary { display:flex; align-items:center; justify-content:space-between; gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); }
-/* #250：CTA 永不收缩、永不换行——窄栏挤压由 meta 组（min-w-0 + ellipsis）承担，
-   按钮被压到竖排溢出属期望外行为。 */
-.sidebar-block-cta { min-height:24px; padding:0 var(--ui-space-2); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); font-size:11px; white-space:nowrap; flex-shrink:0; }
-.sidebar-block-cta:disabled { opacity:.5; }
-
 .sidebar-actions { display:flex; gap:2px; }
 .sidebar-actions button { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius: 0; font-size:15px; }
 .sidebar-actions button:hover { background:var(--bg-hover); color:var(--text); }
