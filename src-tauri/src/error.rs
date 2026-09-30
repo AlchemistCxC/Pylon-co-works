@@ -84,7 +84,7 @@ pub enum PylonError {
     #[error(transparent)]
     Retention(#[from] pylon_session::retention::RetentionError),
     /// 边界直述错误（#317 批次二：原 `Result<_, String>` 命令面收编——
-    /// hook/cli 桥、窗口捕获、插件进程管理、MCP 落盘、portable 迁移）。
+    /// hook/cli 桥、窗口捕获、插件进程管理、MCP 落盘）。
     /// message 保留原文案；机器码统一 `command_error`（原裸 String 无码，此为净新增）。
     #[error("{0}")]
     Command(String),

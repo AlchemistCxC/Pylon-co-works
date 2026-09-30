@@ -10,7 +10,7 @@
       agents.yaml              # 零 Agent 配置模板（仓库侧 agents.template.yaml，包内改名）
       README.txt
       portable.flag
-      data/                    # 空目录，触发 portable 模式
+      data/                    # 空目录，即唯一数据根（#482：便携唯一存储，flag 仅身份标记）
       tools/install-webview2.bat             # 缺 WebView2 Runtime 时的联网兜底安装
       resources/runtime/git/...              # Hermes 专用 PortableGit（完整运行时，仅 --with-runtime）
       resources/sdk/pylon-plugin-sdk.js     # 离线插件 SDK（纯浏览器 ESM）
@@ -719,7 +719,7 @@ def build_staging(version: str, files: list[tuple[Path, str]]) -> Path:
         shutil.rmtree(staging_root)
     staging_root.mkdir(parents=True)
 
-    # 空 data/ + portable.flag：ZIP 解压后首次启动即请求 portable。
+    # 空 data/ + portable.flag：data/ 即唯一数据根（#482），flag 仅身份标记不参与判定。
     (staging_root / "data").mkdir()
     (staging_root / "portable.flag").touch()
 

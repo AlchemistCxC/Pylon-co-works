@@ -230,9 +230,7 @@ runtimeInstanceId
 └─ state.json      # 启用状态、active version、版本历史等
 ```
 
-Windows 非便携模式的 `<config_root>` 通常位于当前用户的 AppConfig / Roaming 配置目录。
-
-便携模式下，插件数据会随 Pylon 的便携数据根目录保存。
+Pylon 仅支持便携存储模式（#482）：`<config_root>` 即可执行程序旁的 `data\` 目录，插件数据随 Pylon 的便携数据根目录保存，无 AppData/AppConfig 回退。
 
 不要手工修改：
 

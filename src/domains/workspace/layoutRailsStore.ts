@@ -42,7 +42,7 @@ interface RightRailState {
   background: RightRailBackgroundPresentation | null
   setCollapsed: (collapsed: boolean) => void
   setLeftRailWidth: (width: number) => void
-  setLeftRailCollapsed: (leftRailCollapsed: boolean) => void
+  setLeftRailCollapsed: (collapsed: boolean) => void
   setWidth: (width: number) => void
   setActivePanel: (panelId: string | null) => void
   setBackground: (background: RightRailBackgroundPresentation | null) => void
