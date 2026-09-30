@@ -9,7 +9,7 @@ use super::normalize::{mark_replay_import, normalize_kernel_event, parse_canonic
 use super::repo::{EventRepo, RollupTrimReport};
 use super::row::{
     CanonicalEventRawExport, CanonicalEventRow, CompactEventPage, EventAppendResult, EventPage,
-    EventSearchOwner, KernelEventInput, ReplayJournalIngestResult,
+    EventSearchHit, KernelEventInput, ReplayJournalIngestResult,
 };
 use super::EventError;
 use crate::owner::DurableSessionOwner;
@@ -504,14 +504,14 @@ impl EventService {
             })?
     }
 
-    /// B6：跨 owner 内容搜索候选（前端消息级精确过滤的第二阶段数据源）。
-    pub async fn search_owners(
+    /// B6 / #445：跨 owner 内容搜索命中行（前端定向拉行 + 投影复核的数据源）。
+    pub async fn search_hits(
         &self,
         query: String,
         limit: u32,
-    ) -> Result<Vec<EventSearchOwner>, EventError> {
+    ) -> Result<Vec<EventSearchHit>, EventError> {
         let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || repo.search_owners(&query, limit))
+        tokio::task::spawn_blocking(move || repo.search_hits(&query, limit))
             .await
             .map_err(|error| {
                 EventError::Unavailable(format!("event repo search task failed: {error}"))

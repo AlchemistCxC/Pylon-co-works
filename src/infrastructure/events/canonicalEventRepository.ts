@@ -43,6 +43,18 @@ export interface CanonicalCompactPage {
   nextAfterSequence: number | null
 }
 
+/**
+ * #445：evt_search 命中行（owner 维字段与 CanonicalEventOwner 相同，additive 扩展）。
+ * `matchOffset` 为命中列上 `instr(lower(col), lower(query))` 首偏移（1-based；null =
+ * 仅 event_type 列命中或通配符命中）——advisory，前端定位与 snippet 以投影文本为准。
+ */
+export type CanonicalEventSearchHit = CanonicalEventOwner & {
+  sequence: number
+  eventType: string
+  occurredAt: string | null
+  matchOffset: number | null
+}
+
 export interface CanonicalEventRawExport {
   eventId: string
   ownerKey: string
@@ -121,8 +133,9 @@ export interface CanonicalEventRepository {
   listCompact(ownerKey: string, afterSequence: number | null, limit?: number): Promise<CanonicalCompactPage>
   /** 单行取证导出：不解析损坏 JSON，返回数据库中的原始文本。 */
   exportRaw(eventId: string): Promise<CanonicalEventRawExport | null>
-  /** B6：跨 owner 内容搜索候选 owner（payload/eventType LIKE）；前端再做消息级过滤。 */
-  searchOwners(query: string, limit?: number): Promise<CanonicalEventOwner[]>
+  /** #445：跨 owner 内容搜索命中行（payload/eventType LIKE）；前端对命中行定向
+   * 拉行后投影复核（匹配与命中同源）。 */
+  searchHits(query: string, limit?: number): Promise<CanonicalEventSearchHit[]>
 }
 
 const DEFAULT_PAGE_LIMIT = 100
@@ -243,8 +256,8 @@ export function tauriCanonicalEventRepository(): CanonicalEventRepository {
       return invoke<CanonicalEventRawExport | null>('evt_export_raw', { eventId })
         .catch(rejectCanonicalEventRepositoryError)
     },
-    async searchOwners(query, limit = 50) {
-      return invoke<CanonicalEventOwner[]>('evt_search', {
+    async searchHits(query, limit = 50) {
+      return invoke<CanonicalEventSearchHit[]>('evt_search', {
         query,
         limit,
       }).catch(rejectCanonicalEventRepositoryError)
