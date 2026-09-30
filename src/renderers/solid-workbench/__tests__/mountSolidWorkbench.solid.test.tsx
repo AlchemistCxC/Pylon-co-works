@@ -1469,8 +1469,8 @@ describe('mountSolidWorkbench', () => {
 
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-    // 正控：编辑工具栏已出现 —— 否则下面那句"仍然只有 input"会因为"根本没进编辑态"而假绿
-    await screen.findByRole('toolbar', { name: '中控控件工具栏' })
+    // 正控：编辑左列已出现 —— 否则下面那句"仍然只有 input"会因为"根本没进编辑态"而假绿
+    await screen.findByRole('group', { name: '中控元件' })
     // ★ 刀1 反转自 CC-02「4 个状态控件豁免可见」：编辑态不再豁免
     //   ⇒ 空态名单里的件仍**不在场**（清单才是它们唯一的入口）
     expect([...emptyState.querySelectorAll('[data-widget-id]')].map(el => el.getAttribute('data-widget-id'))).toEqual(['input'])
@@ -1954,11 +1954,11 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 24, offsetY: -8 })
   })
 
-  it('中控编辑工具栏可隐藏、恢复、重置并退出', async () => {
+  it('中控编辑左列可隐藏、恢复、重置并退出', async () => {
     const { host, services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-    expect(await screen.findByRole('toolbar', { name: '中控控件工具栏' })).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: '中控元件' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '隐藏 模型' }))
     await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toContain('model'))
     // ★ 刀1：编辑态下被藏件**不在场**（旧行为是「在场 + 淡显」）
@@ -1974,7 +1974,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
 
     fireEvent.click(screen.getByRole('button', { name: '退出中控编辑' }))
     await waitFor(() => expect(services.appearance.getSnapshot().ccEditMode).toBe(false))
-    expect(screen.queryByRole('toolbar', { name: '中控控件工具栏' })).toBeNull()
+    expect(screen.queryByRole('group', { name: '中控元件' })).toBeNull()
   })
 
   it('属性面板可编辑顺序、偏移和 schema 外观字段', async () => {
@@ -2011,8 +2011,9 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
     const { services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
     fireEvent.click(await screen.findByRole('button', { name: '输入栏 属性' }))
-    const panel = () => document.querySelector<HTMLElement>('.cc-prop-panel')!
-    // 输入栏自己的可编辑项（面板顶部那三个「布局」项不算在内）
+    // ★ 刀5：属性项改为**行内展开区**（`.cc-edit-row-props`），选择器随结构换；断言口径不变。
+    const panel = () => document.querySelector<HTMLElement>('.cc-edit-row-props')!
+    // 输入栏自己的可编辑项（展开区顶部那三个「布局」项不算在内）
     const editableLabels = () => [...panel().querySelectorAll('.cc-prop-field')]
       .map(el => el.querySelector('label')?.textContent ?? '')
       .filter(label => !['顺序', '水平微调', '垂直微调'].includes(label))

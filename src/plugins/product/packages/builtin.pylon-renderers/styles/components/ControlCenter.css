@@ -252,16 +252,8 @@
 .cc-widget.cc-edit:hover { box-shadow:inset 0 0 0 2px var(--accent,#D77757); }
 .cc-widget.cc-selected { outline:2px solid var(--accent) !important; outline-offset:2px; }
 
-/* ── Property panel ── */
-.cc-prop-panel { position:fixed; left:0; top:32px; bottom:0; width:250px; background:var(--bg-panel); border-right:1px solid var(--border); z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15); display:flex; flex-direction:column; }
-.cc-prop-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--border); }
-.cc-prop-header span { font-size:var(--font-size-lg); font-weight:700; color:var(--text); }
-.cc-prop-header button { background:none; border:none; color:var(--text-dim); font-size:var(--font-size-1xl); cursor:pointer; padding:2px 6px; }
-.cc-prop-header button:hover { color:var(--text); }
-.cc-prop-body { flex:1; overflow-y:auto; padding:16px; }
-.cc-prop-footer { padding:12px 16px; border-top:1px solid var(--border); }
-.cc-prop-footer .ps-btn { width:100%; background:var(--accent); color:#fff; border:none; padding:8px; border-radius: 0; cursor:pointer; font-size:var(--font-size-base); }
-.cc-prop-footer .ps-btn:hover { opacity:0.9; }
+/* ── 属性字段（★ #266 刀5：只在**行内展开区** `.cc-edit-row-props` 里用 —— 改造前那套
+   「独立属性面板」的容器（`.cc-prop-panel` / `-header` / `-body` / `-footer`）已随左列整族删除）── */
 .cc-prop-sec { font-size:var(--font-size-xs); font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px; padding-top:12px; border-top:1px solid var(--border); }
 .cc-prop-sec:first-child { border-top:none; padding-top:0; margin-top:0; }
 .cc-prop-field { display:flex; align-items:center; gap:8px; padding:5px 0; }
@@ -269,40 +261,54 @@
 .cc-prop-field .set-num { width:64px; }
 .cc-prop-field .set-preset-row { flex:1; }
 
-/* ── Widget toolbar (NEW) ── */
-/* 编辑工具栏浮在屏幕中央（居中弹窗式），不紧贴中控区也不在顶部 */
-/* ★ #266 刀4：定位改由**公共容器**承担（工具栏 + 被拒提示同一列）—— 提示要**紧贴工具栏下方**，
-   而它又必须留在 `role="toolbar"` **之外**（无障碍语义），所以两者共用一个 fixed 容器最省事。 */
-.cc-edit-toolbar-stack {
-  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-  z-index:60; display:flex; flex-direction:column; align-items:center; gap:8px;
-  max-width:min(680px, 90vw);
-}
-.cc-edit-toolbar {
-  /* ★ #266 刀4：每行多一个开关 ⇒ 行变长。已 `flex-wrap:wrap` ⇒ 窄窗下**换行**而不是横向挤爆；
-     配套给按钮型控件 `flex:0 0 auto`（不可压缩，见本仓「窄窗」口径）。 */
-  max-width:100%;
-  display:flex; align-items:center; justify-content:center; gap:6px;
-  background:var(--bg-panel,rgba(255,255,255,0.94));
-  border:1px solid var(--border);
-  padding:10px 16px; border-radius: 0;
-  box-shadow:0 8px 32px rgba(0,0,0,0.24);
+/* ── ★★ #266 刀5：编辑清单 = **左侧一列**（一列到底 · 行内展开）──
+   替换改造前的「底部横栏（`.cc-edit-toolbar*`）+ 独立属性面板（`.cc-prop-panel`）」两族。
+   定位沿用属性面板那套（`fixed` / `left:0` / `top:32px` / `bottom:0`），宽度 250 → **280px**、纵向可滚。
+   ⚠ 它渲染在中控槽位**之外**（组件根改成 fragment）：空态那条 `.is-empty { transform: translateY(-50%) }`
+   会给 `position:fixed` 的后代**建立包含块**（CSS Transforms 规范）⇒ 列会相对"中控那一条带"定位并被压扁。
+   见 `.agents/records/266-cc-edit-column-and-drag-threshold.md`。 */
+.cc-edit-column {
+  position:fixed; left:0; top:32px; bottom:0; width:280px;
+  display:flex; flex-direction:column;
+  background:var(--bg-panel); border-right:1px solid var(--border);
+  z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15);
   font-family:var(--mono);
-  flex-wrap:wrap;
-  backdrop-filter:blur(16px);
 }
-.cc-edit-toolbar-label { font-size:var(--font-size-xs); color:var(--text-dim); margin-right:4px; }
-.cc-edit-toolbar-chip-wrap { display:inline-flex; align-items:center; gap:4px; flex:0 0 auto; }
-.cc-edit-toolbar-chip {
+.cc-edit-column-header {
+  padding:12px 14px; border-bottom:1px solid var(--border);
+  font-size:var(--font-size-xs); font-weight:700; color:var(--text-dim);
+  letter-spacing:0.5px; text-transform:uppercase;
+}
+.cc-edit-column-list { flex:1; min-height:0; overflow-y:auto; padding:6px 0; }
+/* 行 = 元件名 + 两个开关。**允许换行**（本仓「窄窗」口径：按钮型控件不可压缩，
+   宁可换行也不横向挤爆）—— 与下边组那种"不折行"的规则无关，别混。 */
+.cc-edit-row { border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.cc-edit-row-main { display:flex; align-items:center; gap:4px; flex-wrap:wrap; padding:5px 10px; }
+.cc-edit-row-name {
+  flex:1 1 auto; min-width:0; text-align:left; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;
   font-size:var(--font-size-xs); padding:3px 9px;
   background:transparent; border:1px solid var(--border);
   border-radius: 0; cursor:pointer;
   color:var(--text); font-family:var(--mono);
+}
+.cc-edit-row-name:hover { border-color:var(--accent); color:var(--accent); }
+.cc-edit-row.active .cc-edit-row-name { background:var(--accent); color:#fff; border-color:var(--accent); }
+.cc-edit-row.dim .cc-edit-row-name { opacity:0.4; text-decoration:line-through; }
+/* 行内展开区（顺序 / 水平微调 / 垂直微调 + 该元件自己的外观字段） */
+.cc-edit-row-props { padding:2px 10px 10px; }
+.cc-edit-column-footer { display:flex; flex-wrap:wrap; gap:6px; padding:10px 12px; border-top:1px solid var(--border); }
+.cc-edit-column-btn {
+  font-size:var(--font-size-xs); padding:3px 9px;
+  background:transparent; border:1px solid var(--border);
+  border-radius: 0; cursor:pointer;
+  color:var(--text);
   flex:0 0 auto;
 }
-.cc-edit-toolbar-chip:hover { border-color:var(--accent); color:var(--accent); }
-.cc-edit-toolbar-chip-wrap.active .cc-edit-toolbar-chip { background:var(--accent); color:#fff; border-color:var(--accent); }
-.cc-edit-toolbar-chip-wrap.dim .cc-edit-toolbar-chip { opacity:0.4; text-decoration:line-through; }
+.cc-edit-column-btn:hover { border-color:var(--accent); color:var(--accent); }
+.cc-edit-column-btn.danger:hover { border-color:var(--tool-err,#FF6B80); color:var(--tool-err,#FF6B80); }
+
+/* 两个显隐开关（刀4 立；刀5 起长在左列的**行内**，样式不变） */
 .cc-chip-toggle {
   font-size:var(--font-size-2xs); padding:1px 6px;
   background:transparent; border:1px solid var(--border);
@@ -315,27 +321,18 @@
 /* ★ #266 刀4：第二个开关（「空态里再藏」）—— 虚线边 + 更暗，一眼看出它与第一个**不是平级关系**
    （它是在主管表之上**再加一层**，只能加、不能抵消）。 */
 .cc-chip-toggle.extra { border-style:dashed; }
-.cc-edit-toolbar-btn {
-  font-size:var(--font-size-xs); padding:3px 9px;
-  background:transparent; border:1px solid var(--border);
-  border-radius: 0; cursor:pointer;
-  color:var(--text);
-  flex:0 0 auto;
-}
-
-.cc-edit-toolbar-btn:hover { border-color:var(--accent); color:var(--accent); }
-.cc-edit-toolbar-btn.danger:hover { border-color:var(--tool-err,#FF6B80); color:var(--tool-err,#FF6B80); }
 
 /* ★ #266 刀4：显隐被**拒绝**时的就地提示（常驻到下一个动作；数字来自校验结论）。
-   挂在工具栏**之后**、不在 `role="toolbar"` 内。 */
+   ★ 刀5：从「工具栏下方」挪进**左列内部**（列表与列底按钮之间），宽度随列、可折行。 */
 .cc-edit-warning {
-  max-width:min(680px, 90vw);
+  flex:0 0 auto;
+  margin:0 12px 8px;
   padding:5px 10px;
   border:1px solid var(--tool-err,#FF6B80);
   background:var(--bg-panel,rgba(255,255,255,0.94));
   color:var(--tool-err,#FF6B80);
   font-family:var(--mono); font-size:var(--font-size-xs);
-  line-height:1.5; text-align:center;
+  line-height:1.5;
 }
 
 /* ── Blur for non-CC in edit mode ── */

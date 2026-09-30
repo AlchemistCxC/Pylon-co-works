@@ -137,8 +137,11 @@ describe('#266 刀2.5 · 下边组不折行 + 脱离件定位（CSS 侧守卫）
       expect(block, `${selector} 又折行了（行数会变 2 ⇒ 刀3 的高度算式失效）`).not.toContain('flex-wrap:wrap')
       expect(block, `${selector} 缺 flex-wrap:nowrap`).toContain('flex-wrap:nowrap')
     }
-    // 正控：编辑工具条那个 `flex-wrap:wrap` 与下边组无关，本刀**保留**它（不顺手改别的）
-    expect(allDeclarations(controlCenterCss, '.cc-edit-toolbar')).toContain('flex-wrap:wrap')
+    // 正控：编辑左列里同样折行的两处 `flex-wrap:wrap` 与下边组无关，本刀**保留**它们
+    // （不顺手改别的）。★ #266 刀5：原正控指向的 `.cc-edit-toolbar` 已随「底部横栏 → 左侧一列」
+    // 删除 ⇒ 改指新列的同款容器，**口径不变**：证明上面那两条断言不是"全文件都没有 wrap"的空断言。
+    expect(allDeclarations(controlCenterCss, '.cc-edit-row-main')).toContain('flex-wrap:wrap')
+    expect(allDeclarations(controlCenterCss, '.cc-edit-column-footer')).toContain('flex-wrap:wrap')
   })
 
   it('脱离件的定位规则在：绝对定位 + 纵向基准变量（允许重叠的前提）', () => {
@@ -179,3 +182,39 @@ describe('2026-09-23 · 权限语义色四条必须带槽位作用域前缀（�
     expect(generic).toContain('color:var(--text-dim)')
   })
 })
+
+/**
+ * ★★ #266 刀5 · 空态**不得**隐藏编辑左列（CSS 侧守卫）。
+ *
+ * 为什么要有它：刀5 把「底部横栏 + 独立属性面板」换成**左侧一列**，并要求"空态下进编辑器也能用"
+ * ⇒ 改造前那两条空态隐藏（`.is-empty … .cc-edit-toolbar` / `.cc-prop-panel`）已删。
+ * 这条守卫钉的是「**空态只隐藏背景板与高度手柄**」这件事：它**没有任何一行能跑到**（jsdom 不加载
+ * 样式表，`checkVisibility` 拿不到真相），若没有它，"哪天有人把编辑 UI 的空态隐藏加回来"在
+ * lint / tsc / check:solid / 其它测试**四层都看不见**。
+ * ★ 将来真要改回去，**改这条测试就是一个显式动作**（口径同上面那条 `.cc-command-hint`）。
+ */
+describe('#266 刀5 · 空态只隐藏背景板与高度手柄，不隐藏编辑左列（CSS 侧守卫）', () => {
+  it('空态作用域下带 `display:none` 的选择器一律不点名编辑 UI', () => {
+    const hidden = emptyStateHiddenSelectors(chromeCss)
+    // 前提可见：这两条隐藏**仍在**（否则下面的"没点名编辑 UI"会变成空断言）
+    expect(hidden).toContain('.solid-workbench-control-center-slot.is-empty .cc-bg')
+    expect(hidden).toContain('.solid-workbench-control-center-slot.is-empty .cc-edit-hdr')
+    for (const selector of hidden) {
+      expect(selector, `空态不得隐藏编辑 UI：${selector}`)
+        .not.toMatch(/cc-edit-column|cc-edit-row|cc-edit-warning|cc-edit-toolbar|cc-prop-panel/)
+    }
+  })
+})
+
+/** 空态作用域里带 `display:none` 的选择器（逐条拆开；先剥注释 —— 注释会提到被删的类名）。 */
+function emptyStateHiddenSelectors(source: string): string[] {
+  const stripped = source.replaceAll(/\/\*[\s\S]*?\*\//g, '')
+  const selectors: string[] = []
+  for (const match of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const [, selectorText, body] = match
+    if (!selectorText.includes('.is-empty')) continue
+    if (!/display:\s*none/.test(body)) continue
+    selectors.push(...selectorText.split(',').map(part => part.trim()))
+  }
+  return selectors
+}

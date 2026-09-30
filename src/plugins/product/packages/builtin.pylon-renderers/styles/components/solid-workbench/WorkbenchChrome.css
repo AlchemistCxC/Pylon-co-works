@@ -409,10 +409,13 @@
   transform: translateY(-50%);
   --cc-empty-content-width: min(720px, calc(100% - 32px));
 }
+/* ★ #266 刀5：空态那两条编辑 UI 隐藏（`.cc-edit-toolbar` / `.cc-prop-panel`）**已删** ——
+   这两族 DOM 由「左侧一列」取代，而左列的显示条件只认编辑态（`.cc-editing`）、与空态无关
+   ⇒ 空态下进编辑器同样看得到、用得着。
+   `.cc-bg` / `.cc-edit-hdr` 的隐藏**照旧保留**：`.cc-edit-hdr` 是高度拖拽手柄，本刀**故意不动**它，
+   空态下仍不显示（空态的几何是另一套规则）。 */
 .solid-workbench-control-center-slot.is-empty .cc-bg,
-.solid-workbench-control-center-slot.is-empty .cc-edit-hdr,
-.solid-workbench-control-center-slot.is-empty .cc-edit-toolbar,
-.solid-workbench-control-center-slot.is-empty .cc-prop-panel { display: none; }
+.solid-workbench-control-center-slot.is-empty .cc-edit-hdr { display: none; }
 .solid-workbench-control-center-slot.is-empty .cc-widget[data-widget-id='tokens'] { display: none; }
 .solid-workbench-control-center-slot.is-empty .cc-body {
   box-sizing: border-box;

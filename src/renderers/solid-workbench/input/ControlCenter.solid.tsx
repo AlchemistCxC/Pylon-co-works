@@ -36,6 +36,12 @@ const INFO_LANDING = ccWidgetLanding('model')
  */
 const CC_EDIT_TOOLBAR_IDS: readonly CcLayoutWidgetId[] = [...CC_WIDGET_IDS, ...CC_REGISTERED_SLOT_IDS]
 
+/**
+ * ★ #266 刀5：编辑态拖拽的**位移阈值**（直线距离，px）—— 越过它才算拖拽，阈值内松开只算选中。
+ * 3px 的依据：见 `.agents/records/266-cc-visibility-drag-threshold.md`（翻译定值；实机手感复核）。
+ */
+const CC_DRAG_THRESHOLD_PX = 3
+
 // 04b：空态极简 —— 空态工作区选择器隐藏保留（用户 2026-09-19 拍板「先隐藏」）。
 // 置 true 即恢复显示；选择器实现（EmptyWorkspaceControl）与它用到的命令全部保留。
 const SHOW_EMPTY_WORKSPACE_CONTROL = false
@@ -520,8 +526,17 @@ export function SolidControlCenter() {
     const startY = event.clientY
     const pointerId = event.pointerId
     const start = appearance().ccLayout.placements[id]
+    // ★★ #266 刀5：**拖动阈值**（直线距离，px）——「点一下」永远只是选中：
+    //   越阈值前**一次 `updatePlacement` 都不发** ⇒ 不写 offset，`markZoneCustom` 因此也不会被触发
+    //   （0 偏移写入也会把它标记成"自定义过"）。判定是"**越过阈值即进入拖拽**"，不是"等到 pointerup 才判"
+    //   —— 后者会让"按下后拖 30px 再松开"整段作废。
+    let dragging = false
     const move = (next: PointerEvent) => {
       if (next.pointerId !== pointerId) return
+      if (!dragging) {
+        if (Math.hypot(next.clientX - startX, next.clientY - startY) < CC_DRAG_THRESHOLD_PX) return
+        dragging = true
+      }
       // ★ #238 刀4：**走带守卫的入口**（原先这里是直连 dispatch，会绕过占区不叠加约束）。
       updatePlacement(id, {
         offsetX: start.offsetX + next.clientX - startX,
@@ -696,7 +711,12 @@ export function SolidControlCenter() {
     onCleanup(() => observer?.disconnect())
   })
 
-  return <div
+  // ★★ #266 刀5：根节点改成 **fragment** —— 编辑左列必须渲染在槽位**外面**。
+  //   为什么：空态那条 `.is-empty { transform: translateY(-50%) }` 会给 `position:fixed` 的后代
+  //   **建立包含块**（CSS Transforms 规范）⇒ 列会相对"中控那一条带"定位并被压扁（实测见开发记录）。
+  //   槽位自身的几何、类名、`data-*`、内联变量**一个字节不动**（只是不再是根）。
+  return <>
+  <div
     ref={node => { controlCenterElement = node }}
     // ★ #266 刀9：`cli-mode` 常量类（原先由 `inputMode === 'cli'` 决定；输入已固定命令行）。
     class={`solid-workbench-control-center-slot control-center cli-mode${appearance().ccEditMode ? ' cc-editing' : ''}${emptyVisual() ? ' is-empty' : ''}${sessionEntering() ? ' is-session-entering' : ''}${submitting() ? ' is-session-creating' : ''}`}
@@ -784,68 +804,72 @@ export function SolidControlCenter() {
       <div class="cc-input-slot"><For each={idsForLanding(INPUT_LANDING)}>{renderWidget}</For></div>
       <div class="cc-status-row"><Show when={SHOW_EMPTY_WORKSPACE_CONTROL && emptyVisual()}><EmptyWorkspaceControl /></Show><Show when={statusRowContent()}>{statusGroup()}</Show></div>
     </div>
-    <Show when={appearance().ccEditMode && selected()}>{id => (
-      <div class="cc-prop-panel" role="dialog" aria-label={`${CC_WIDGET_LABELS[id()]} 属性`}>
-        <div class="cc-prop-header"><span>{CC_WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
-        <div class="cc-prop-body">
-          <div class="cc-prop-sec">布局</div>
-          <div class="cc-prop-field"><label>顺序</label><input type="number" class="set-num" aria-label="控件顺序" min="0" max="99" step="1" value={appearance().ccLayout.placements[id()].order} onInput={event => {
-            const value = event.currentTarget.valueAsNumber
-            if (Number.isFinite(value)) updatePlacement(id(), { order: value })
-          }} /></div>
-          <div class="cc-prop-field"><label>水平微调</label><input type="number" class="set-num" aria-label="水平微调" min="-48" max="48" step="1" value={appearance().ccLayout.placements[id()].offsetX} onInput={event => {
-            const value = event.currentTarget.valueAsNumber
-            if (Number.isFinite(value)) updatePlacement(id(), { offsetX: value })
-          }} /><span>px</span></div>
-          <div class="cc-prop-field"><label>垂直微调</label><input type="number" class="set-num" aria-label="垂直微调" min="-16" max="16" step="1" value={appearance().ccLayout.placements[id()].offsetY} onInput={event => {
-            const value = event.currentTarget.valueAsNumber
-            if (Number.isFinite(value)) updatePlacement(id(), { offsetY: value })
-          }} /><span>px</span></div>
-          <For each={propertyFields(id())}>{(field, index) => renderPropertyField(field, index())}</For>
-        </div>
-        <div class="cc-prop-footer"><button type="button" class="ps-btn sm" onClick={() => {
-          setSelected(undefined)
-          workbench.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: false })
-        }}>退出自定义</button></div>
-      </div>
-    )}</Show>
-    <Show when={appearance().ccEditMode}>
-      {/* ★ #266 刀4：工具栏 + 提示共用一个 fixed 容器 —— 提示据此**紧贴工具栏下方**，
-          同时保证它不在 `role="toolbar"` 里面（无障碍语义不被搅乱）。 */}
-      <div class="cc-edit-toolbar-stack">
-      <div class="cc-edit-toolbar" role="toolbar" aria-label="中控控件工具栏">
-        <span class="cc-edit-toolbar-label">控件</span>
+  </div>
+  {/* ★★ #266 刀5：编辑清单 = **左侧一列**（一列到底 · 行内展开），替换刀4 的底部横栏 + 独立属性面板。
+      显示条件 = **编辑态**（与空态无关）⇒ 空态下进编辑器同样在（见 WorkbenchChrome.css 的两条空态规则）。
+      语义：这是一份**列表/面板**，**不是** `role="toolbar"`（刀4 的提示留在它内部、不落在工具栏语义里）。 */}
+  <Show when={appearance().ccEditMode}>
+    <div class="cc-edit-column" role="group" aria-label="中控元件">
+      <div class="cc-edit-column-header">中控元件</div>
+      <div class="cc-edit-column-list">
         <For each={CC_EDIT_TOOLBAR_IDS}>{id => {
-          // ① chip 的 `＋/●` + `dim`：按**当前生效名单**（门决定）——「你眼下看到的样子」
+          // ① 行首的 `＋/●` + `dim`：按**当前生效名单**（门决定）——「你眼下看到的样子」
           const hidden = () => hiddenWidgetIds().includes(id)
           // ② 两个开关各读**自己那一份表**（不要用合并后的名单判某个开关的态，
           //    否则"我在哪个状态改的"这种隐性依赖会从后门回来）
           const baseHidden = () => appearance().ccHidden.includes(id)
           const extraHidden = () => appearance().ccHiddenEmpty.includes(id)
-          return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
-            <button type="button" class="cc-edit-toolbar-chip" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
-            {/* 开关①「隐藏 / 显示」= **主管表**（两种状态都生效） */}
-            <button type="button" class="cc-chip-toggle" aria-label={`${baseHidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !baseHidden(), 'base')}>{baseHidden() ? '显示' : '隐藏'}</button>
-            {/* 开关②「空态里再藏 / 空态放出」= **再藏表**（只在空态再加一层；只能加不能抵消） */}
-            <button type="button" class="cc-chip-toggle extra" aria-label={`${extraHidden() ? '空态放出' : '空态里再藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !extraHidden(), 'empty')}>{extraHidden() ? '空态放出' : '空态里再藏'}</button>
-          </span>
+          return <div class={`cc-edit-row${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
+            <div class="cc-edit-row-main">
+              <button type="button" class="cc-edit-row-name" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(selected() === id ? undefined : id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
+              {/* 开关①「隐藏 / 显示」= **主管表**（两种状态都生效） */}
+              <button type="button" class="cc-chip-toggle" aria-label={`${baseHidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !baseHidden(), 'base')}>{baseHidden() ? '显示' : '隐藏'}</button>
+              {/* 开关②「空态里再藏 / 空态放出」= **再藏表**（只在空态再加一层；只能加不能抵消） */}
+              <button type="button" class="cc-chip-toggle extra" aria-label={`${extraHidden() ? '空态放出' : '空态里再藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => requestHiddenChange(id, !extraHidden(), 'empty')}>{extraHidden() ? '空态放出' : '空态里再藏'}</button>
+            </div>
+            {/* 行内展开区：**同一时刻只有一行** —— 展开态就是 `selected` 那一份真值
+                （点行 ⇒ 选中并展开；点另一行 ⇒ 换过去；再点同一行 ⇒ 收起）。
+                `role="dialog"` + 名字沿用改造前的属性面板，不新增无障碍契约。 */}
+            <Show when={selected() === id}>
+              <div class="cc-edit-row-props" role="dialog" aria-label={`${CC_WIDGET_LABELS[id]} 属性`}>
+                <div class="cc-prop-sec">布局</div>
+                <div class="cc-prop-field"><label>顺序</label><input type="number" class="set-num" aria-label="控件顺序" min="0" max="99" step="1" value={appearance().ccLayout.placements[id].order} onInput={event => {
+                  const value = event.currentTarget.valueAsNumber
+                  if (Number.isFinite(value)) updatePlacement(id, { order: value })
+                }} /></div>
+                <div class="cc-prop-field"><label>水平微调</label><input type="number" class="set-num" aria-label="水平微调" min="-48" max="48" step="1" value={appearance().ccLayout.placements[id].offsetX} onInput={event => {
+                  const value = event.currentTarget.valueAsNumber
+                  if (Number.isFinite(value)) updatePlacement(id, { offsetX: value })
+                }} /><span>px</span></div>
+                <div class="cc-prop-field"><label>垂直微调</label><input type="number" class="set-num" aria-label="垂直微调" min="-16" max="16" step="1" value={appearance().ccLayout.placements[id].offsetY} onInput={event => {
+                  const value = event.currentTarget.valueAsNumber
+                  if (Number.isFinite(value)) updatePlacement(id, { offsetY: value })
+                }} /><span>px</span></div>
+                <For each={propertyFields(id)}>{(field, index) => renderPropertyField(field, index())}</For>
+              </div>
+            </Show>
+          </div>
         }}</For>
-        <button type="button" class="cc-edit-toolbar-btn" aria-label="重置控件位置" onClick={() => workbench.appearance.dispatch({ type: 'reset-cc-layout' })}>↺ 重置位置</button>
-        <button type="button" class="cc-edit-toolbar-btn danger" aria-label="退出中控编辑" onClick={() => {
-          setSelected(undefined)
-          workbench.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: false })
-        }}>退出编辑</button>
       </div>
-      {/* ★ #266 刀4：显隐被拒时的提示（常驻到下一个动作）。`role="alert"` 让它被读屏播报；
-          ★ 刻意**不放进** `role="toolbar"` 里（那会污染工具栏的语义）。数字全部来自 verdict。 */}
+      {/* ★ #266 刀4：显隐被拒时的提示（常驻到下一个动作），列内、列底按钮之上。
+          `role="alert"` 让它被读屏播报；数字全部来自 verdict。 */}
       <Show when={showWarning()}>{warning => (
         <div class="cc-edit-warning" role="alert">
           {`还差 ${warning().needed - warning().available}px：需要 ${warning().needed}px，当前 ${warning().available}px —— ${warning().axis === 'height' ? '先加高，或先藏别的' : '先把窗口拉宽，或先藏别的'}`}
         </div>
       )}</Show>
+      {/* ★ #266 刀5：**唯一**的退出入口 —— 改造前有**两处**（属性面板 footer 的「退出自定义」
+          与这枚「退出编辑」），本刀收敛到一处。 */}
+      <div class="cc-edit-column-footer">
+        <button type="button" class="cc-edit-column-btn" aria-label="重置控件位置" onClick={() => workbench.appearance.dispatch({ type: 'reset-cc-layout' })}>↺ 重置位置</button>
+        <button type="button" class="cc-edit-column-btn danger" aria-label="退出中控编辑" onClick={() => {
+          setSelected(undefined)
+          workbench.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: false })
+        }}>退出编辑</button>
       </div>
-    </Show>
-  </div>
+    </div>
+  </Show>
+  </>
 }
 
 function placementStyle(placement: CcWidgetPlacement): JSX.CSSProperties {
