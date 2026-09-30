@@ -6,25 +6,16 @@ import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'
 import type { CcWidgetPlacement } from '../cc/ccLayoutState.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { THEME_SETTING_KEYS, ZONE_FIELDS } from './themeFieldDefs.ts'
-import {
-  cleanupZonePresetEntries,
-  createZonePresetEntryId,
-  normalizeZonePresetEntries,
-  pickZoneFields,
-  removeZonePresetEntryReducer,
-  type ZonePresetEntry,
-} from './zones/index.ts'
 import { clampCcHeight, ccMinHeightInputOf } from '../cc/ccHeightState.ts'
 import { THEME_SCHEMA_VERSION, alignThemeStructure, themeDomainMigrate } from './migration.ts'
+import { stashLegacyPresets } from './legacyPresetStash.ts'
 import { DEFAULTS } from './themeDefaults.ts'
 import { useInterfaceModeStore } from '../interface/interfaceModeStore.ts'
 import { defaultPresetForInterfaceMode } from './presets/index.ts'
-import type { CustomPreset } from './customPresets.ts'
 import { reportLegacyProfilePayload } from '../../app/bootstrap/hydrateIdentityAndWorkspace.ts'
 import {
   applyZonePresetReducer,
   assembleGlobalPresetReducer,
-  removeCustomPresetReducer,
   setGlobalPresetReducer,
   setZoneFieldReducer,
   type AssembleGlobalPresetOptions,
@@ -32,8 +23,6 @@ import {
 } from './presetReducer.ts'
 import type { Profile } from '../identity/identityStore.ts'
 import { recordSettingWrites, type SettingWriteSource } from './settingProvenance.ts'
-import type { PresetApplyResult } from './presetBundle.ts'
-import { applyCustomPresetAction, saveCustomPresetAction } from './presetActions.ts'
 import type { ThemeSettings } from './themeTypes.ts'
 
 export type { ThemeSettings } from './themeTypes.ts'
@@ -49,13 +38,6 @@ export type { ThemeSettings } from './themeTypes.ts'
  * presentation-preferences 等独立 persist 域——「唯一持久化域」说法已废）。
  */
 export type ThemeState = ThemeSettings & {
-  customPresets: CustomPreset[]
-  /**
-   * 刀6（#206）：区域预设池的**自定义条目**（值快照）。出厂条目是构建时派生的派生表
-   * （`src/zones/zonePresetPool.ts`），不入库；本切片只存用户自建的那些。
-   * 与 `customPresets` 同属 `pylon-theme` 持久化家族（同一个键、同一份白名单）。
-   */
-  zonePresetEntries: ZonePresetEntry[]
   setCcEditMode: (enabled: boolean) => void
   setCcHeight: (height: number) => void
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
@@ -78,19 +60,6 @@ export type ThemeState = ThemeSettings & {
    * 两条默认预设（无引用表）回落上面那条。
    */
   assembleGlobalPreset: (slices: readonly GlobalPresetZoneSlice[], options?: AssembleGlobalPresetOptions) => void
-  saveCustomPreset: (name: string, id?: string) => string
-  applyCustomPreset: (id: string) => Promise<PresetApplyResult>
-  removeCustomPreset: (id: string) => void
-  /**
-   * 刀6（#206）：「存当前为自定义区域预设」——把该 zone 当前值快照
-   * （`ZONE_FIELDS[zone]` 字段集）存成池里的一条自定义条目，返回新条目 id；
-   * 名称空 ⇒ 返回 null（不抛，按钮本就按此禁用）。
-   */
-  saveZonePresetEntry: (mode: ZonePresetEntry['mode'], zone: ZonePresetEntry['zone'], label: string) => string | null
-  /** 刀6（#206）Q8：读入容错 + 自动清理自定义条目值快照里的已删字段键（无变化则不动状态）。 */
-  pruneZonePresetEntries: () => void
-  /** 刀7 前置（#211）：删除一条自定义区域预设条目（出厂条目不可删；引用它的区域失去基准）。 */
-  removeZonePresetEntry: (id: string) => void
 }
 
 // clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
@@ -119,12 +88,11 @@ const THEME_MIGRATION_DEFAULTS = {
 }
 
 export const useStore = create<ThemeState>()(persist(
-  (set, get) => ({
+  set => ({
   ...DEFAULTS,
 
-  customPresets: [],
-
-  zonePresetEntries: [],
+  // #448 PR5：customPresets/zonePresetEntries 已拆独立域 customPresetStore
+  // （pylon-custom-presets 键 + 后端 custom-presets user_data 权威）。
 
   // D-trace：写入溯源——source 由调用方声明（用户编辑/呈现风格/界面模式…），
   // 缺省 user-edit。记录在漏斗出口完成，reducer 保持纯函数。
@@ -216,46 +184,9 @@ export const useStore = create<ThemeState>()(persist(
     }))
     set(state => assembleGlobalPresetReducer(state, slices, options))
   },
-  // 预设事务动作已下沉 domains/theme/presetActions.ts（结构审查 A-V5）：此处只留 set/get 注入薄壳
-  saveCustomPreset: (name, id) => saveCustomPresetAction(name, id, { get, set }),
-  applyCustomPreset: id => applyCustomPresetAction(id, { get, set }),
-
-  removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
-
-  // 刀6（#206）：区域预设池的自定义条目。捕获口径与「应用」完全对称——
-  // 存 = pickZoneFields(当前主题, zone)，应用 = 把这份快照交回 applyZonePreset，
-  // 因此「存当前 → 应用」对界面是幂等的（出厂条目走同一动作、同一切法）。
-  saveZonePresetEntry: (mode, zone, label) => {
-    const cleanLabel = label.trim()
-    if (!cleanLabel) return null
-    const state = get()
-    const existing = normalizeZonePresetEntries(state.zonePresetEntries)
-    const id = createZonePresetEntryId(mode, zone, Date.now(), existing.map(entry => entry.id))
-    const entry: ZonePresetEntry = {
-      id,
-      mode,
-      zone,
-      label: cleanLabel.slice(0, 40),
-      values: structuredClone(pickZoneFields(state, zone)),
-    }
-    set({ zonePresetEntries: [...existing, entry] })
-    return id
-  },
-  pruneZonePresetEntries: () => set(state => {
-    const entries = cleanupZonePresetEntries(normalizeZonePresetEntries(state.zonePresetEntries))
-    return entries === state.zonePresetEntries ? {} : { zonePresetEntries: entries }
-  }),
-  // 刀7 前置（#211）：纯计算在 zones/zonePresetPool.ts，此处只留 set(dispatch) 薄壳
-  //（形态照 removeCustomPreset）；未命中时 reducer 原样回引用 ⇒ 不写状态。
-  removeZonePresetEntry: (id) => set(state => {
-    const current = Array.isArray(state.zonePresetEntries) ? state.zonePresetEntries : []
-    const patch = removeZonePresetEntryReducer({
-      zonePresetEntries: current,
-      appliedPreset: state.appliedPreset,
-      custom: state.custom,
-    }, id)
-    return patch.zonePresetEntries === current ? {} : patch
-  }),
+  // #448 PR5：saveCustomPreset/applyCustomPreset/removeCustomPreset/saveZonePresetEntry/
+  // pruneZonePresetEntries/removeZonePresetEntry 已迁 customPresetStore（跨 store
+  // 事务经 presetActions 合成视图注入，快照/回滚语义不变）。
 }),
 { name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
   // G9（1C L1）：主题写盘失败可见（ErrorCenter 指纹去重聚合为一次性告警）
@@ -276,7 +207,12 @@ export const useStore = create<ThemeState>()(persist(
     },
     removeItem: key => localStorage.removeItem(key),
   })),
-  migrate: (persisted, version) => themeDomainMigrate(persisted, THEME_MIGRATION_DEFAULTS, version),
+  migrate: (persisted, version) => {
+    // #448 PR5：旧 pylon-theme 内嵌的预设字段在 migrate 写回时会被 partialize
+    // 白名单洗掉——先原样暂存（customPresetStore 的搬家读暂存，读序无关）。
+    stashLegacyPresets(persisted)
+    return themeDomainMigrate(persisted, THEME_MIGRATION_DEFAULTS, version)
+  },
   /**
    * ★★ #238 刀2：读盘后的**结构对齐**每次读盘无条件跑（不依赖版本号）。
    *
@@ -292,12 +228,12 @@ export const useStore = create<ThemeState>()(persist(
   partialize: (state) => {
     // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden 对象）+ 显式 meta。
     // 取代"排除式 partialize"——杜绝新增 action/临时字段误持久化，并修剪迁移遗留的旧键。
+    // #448 PR5：customPresets/zonePresetEntries 移出白名单——拆独立 customPresetStore
+    // 后旧键内嵌的这两字段会在下一次主题写盘时被本白名单修剪（搬家在新 store 侧完成）。
     const persisted: Record<string, unknown> = {}
     for (const key of THEME_SETTING_KEYS) persisted[key] = state[key]
     persisted.appliedPreset = state.appliedPreset
     persisted.custom = state.custom
-    persisted.customPresets = state.customPresets
-    persisted.zonePresetEntries = state.zonePresetEntries
     return persisted
   },
   onRehydrateStorage: () => state => {

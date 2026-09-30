@@ -407,6 +407,21 @@ impl EventService {
             })?
     }
 
+    /// #442 Step1：回合边界判据的 tail 行（升序；cap 由调用方给定，正常 ≤512）。
+    /// 供 load 响应顶层 `turnBoundary` 的 journal 侧合成（账本为空时的回退数据面）。
+    pub async fn turn_boundary_rows(
+        &self,
+        owner_key: String,
+        cap: u32,
+    ) -> Result<Vec<crate::turn_boundary::TurnBoundaryRow>, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.turn_boundary_rows(&owner_key, cap))
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo turn boundary task failed: {error}"))
+            })?
+    }
+
     /// #81 L2 / #376-b：compact 读**分页**（单元 + 未覆盖行；升序、前向游标）。
     /// `cap_typed_payload` 语义同 `list_events`。
     pub async fn load_events_compact_page(

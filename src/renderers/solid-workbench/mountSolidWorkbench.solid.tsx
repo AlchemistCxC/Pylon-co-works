@@ -18,6 +18,7 @@ import { createStreamingDisplayScheduler } from './streamingDisplayScheduler.ts'
 import { createStreamingDisplayPublishCostRecorder, registerStreamingDisplayDiagnostics } from './streamingDiagnostics.ts'
 import { clearMarkdownRenderModelCache } from './chat/markdownRenderModel.ts'
 import { createPredictionRouter } from '../../domains/inputPrediction/inputPredictionSettings.ts'
+import { cachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import { createStandalonePredictionProvider } from '../../infrastructure/prediction/predictionStandalone.ts'
 
 /** #212 判据 C 的初值：没有行被观察到增长（冻结实例，避免每次 setSignal 造新对象）。 */
@@ -143,6 +144,9 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     predictionProvider: createPredictionRouter({
       forkProvider: services.predictionProvider ?? hostPort.predictionProvider,
       standaloneProvider: createStandalonePredictionProvider(),
+      // #448 PR2：同步消费面统一走域内缓存（Tauri 权威在 SQLite；未 hydrate 时
+      // 缓存回落 localStorage，与直读旧行为等价）。
+      settings: cachedInputPredictionSettings,
     }),
     paused: pausedSignal,
     revealingRows,

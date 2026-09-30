@@ -161,6 +161,14 @@ async fn complete_session_load_replay_is_imported_into_the_empty_kernel_journal(
     assert_eq!(result["authority"], "recovery-import");
     assert_eq!(result["journalCoverage"], "unverified-import");
     assert_eq!(result["collection"]["complete"], true);
+    // #442 Step1：load 响应顶层 `turnBoundary`（账本为空 ⇒ journal 探测回退轨）。
+    // 导入行只有 user.message 锚点 ⇒ kind=open + 当前回合起点时间戳。
+    assert_eq!(result["turnBoundary"]["kind"], "open");
+    assert!(
+        result["turnBoundary"]["startedAtMs"].is_u64(),
+        "open 回合必须给出起点时间戳"
+    );
+    assert!(result["turnBoundary"].get("endedAtMs").is_none());
 
     let owner = TestHarness::owner_key("profile-1", "fake-acp-trace", "local:replay-import");
     let events = harness.journal_json(&owner, 10).await;

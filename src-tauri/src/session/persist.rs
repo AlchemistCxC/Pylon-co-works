@@ -18,6 +18,12 @@ struct PersistedSessionLoadResult {
     /// #99：冷挂载 turn 快照（turnState/terminalCause/sequence/lastError/
     /// replayLoading）——前端恢复只凭本响应，不依赖一次性 Tauri event。
     turn: Option<serde_json::Value>,
+    /// #442 Step1：最新回合边界（kind + 两端时间戳，camelCase wire
+    /// `turnBoundary`）。账本有记录即权威（journal 终态行的落盘时序不再影响
+    /// 结论——前端「或」判定的时序裂缝解法）；账本为空（重启后的历史会话）
+    /// 走 journal tail 判据合成（照抄前端 `latestTurnBoundary`，ADR-0029）。
+    /// None = 无会话映射或 journal 探测失败（前端回退现有判定轨）。
+    turn_boundary: Option<pylon_session::TurnBoundary>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -54,6 +60,51 @@ fn replay_journal_commit_outcome(status: &str) -> &'static str {
 fn replay_load_error_code(error: &crate::acp::AcpError) -> &'static str {
     // #317 批次二 2c：词汇表单源化到 AcpError::code()（本函数保留为回放语义命名点）。
     error.code()
+}
+
+/// #442 Step1：账本记录 → `turnBoundary`（账本存在即权威：有 terminal 即收敛、
+/// 无即在途，journal 终态行的落盘时序不参与结论——这正是前端跨源「或」判定
+/// 被迫存在的时序裂缝，账本路径下按构造消除）。
+fn ledger_turn_boundary(turn: &crate::acp::turn_ledger::TurnRecord) -> pylon_session::TurnBoundary {
+    match &turn.terminal {
+        Some(terminal) => pylon_session::TurnBoundary {
+            kind: pylon_session::TurnBoundaryKind::Terminal,
+            started_at_ms: Some(turn.started_at_ms),
+            ended_at_ms: Some(terminal.settled_at_ms),
+        },
+        None => pylon_session::TurnBoundary {
+            kind: pylon_session::TurnBoundaryKind::Open,
+            started_at_ms: Some(turn.started_at_ms),
+            ended_at_ms: None,
+        },
+    }
+}
+
+/// #442 Step1：journal tail 判据合成 `turnBoundary`（账本为空的回退数据面：
+/// 重启后的历史会话、或本进程从未 prompt 过该 source）。查询失败降级为字段
+/// 缺省（前端回退现有判定轨），不阻塞 load 响应。
+async fn journal_turn_boundary(
+    state: &AppState,
+    owner_key: &str,
+) -> Option<pylon_session::TurnBoundary> {
+    let event_service = crate::session::event_service_of(state).ok()?;
+    match event_service
+        .turn_boundary_rows(
+            owner_key.to_string(),
+            pylon_session::turn_boundary::BOUNDARY_TAIL_CAP,
+        )
+        .await
+    {
+        Ok(rows) => pylon_session::turn_boundary::derive_turn_boundary(&rows),
+        Err(error) => {
+            tracing::warn!(
+                owner = %owner_key,
+                error = %error,
+                "turnBoundary journal probe failed; omitting field (frontend keeps its fallback track)"
+            );
+            None
+        }
+    }
 }
 
 /// load_persisted_session 各失败臂共用的收敛：先回滚本次临时 slot，回滚成功
@@ -413,7 +464,18 @@ pub(crate) async fn load_persisted_session(
             };
             // #99：冷挂载 turn 快照——在 replay_loading 清位后从后端权威状态
             // （turn 账本 + ingress 序列 cursor + lastError）合成。
-            let turn_snapshot = runtime.cold_mount_turn_snapshot(&source).await;
+            // #442 Step1：turnBoundary 与快照出自同一份账本读（cold_mount_facts）；
+            // 账本为空时走 journal tail 判据（`journal_turn_boundary`）。
+            let (turn_snapshot, turn_boundary) = match runtime.cold_mount_facts(&source).await {
+                Some((snapshot, record)) => {
+                    let boundary = match record {
+                        Some(turn) => Some(ledger_turn_boundary(&turn)),
+                        None => journal_turn_boundary(state.inner(), &owner_key).await,
+                    };
+                    (Some(snapshot), boundary)
+                }
+                None => (None, None),
+            };
             serde_json::to_value(PersistedSessionLoadResult {
                 response,
                 replay: replay.events,
@@ -426,6 +488,7 @@ pub(crate) async fn load_persisted_session(
                 import,
                 diagnostics,
                 turn: turn_snapshot,
+                turn_boundary,
             })
             .map_err(|error| PylonError::from(error.to_string()))
         }
@@ -537,6 +600,55 @@ mod tests {
         assert_eq!(
             replay_load_error_code(&crate::acp::AcpError::ReplayStreamClosed),
             "replay_transport_error"
+        );
+    }
+
+    /// #442 Step1：账本记录 → `turnBoundary` 的 wire 映射契约——有 terminal 即
+    /// `terminal`（两端时间戳 = 记录 startedAtMs + settledAtMs），无即在途
+    /// `open`（只给起点）。账本存在即权威，journal 行不参与该分支。
+    #[test]
+    fn ledger_turn_boundary_maps_record_to_wire_boundary() {
+        use crate::acp::turn_ledger::{
+            TurnKey, TurnPhase, TurnRecord, TurnTerminal, TurnTerminalCause,
+        };
+
+        fn record(terminal: Option<TurnTerminal>) -> TurnRecord {
+            TurnRecord {
+                key: TurnKey {
+                    local_session_id: "local:s".to_string(),
+                    remote_session_id: "remote-1".to_string(),
+                    generation: 1,
+                    turn_id: 7,
+                }
+                .snapshot(),
+                phase: if terminal.is_some() {
+                    TurnPhase::Terminal
+                } else {
+                    TurnPhase::Prompting
+                },
+                started_at_ms: 100,
+                terminal,
+                last_ingress_seq: 0,
+                saw_text: false,
+                saw_tool: false,
+                saw_thinking: false,
+            }
+        }
+
+        let open = super::ledger_turn_boundary(&record(None));
+        assert_eq!(
+            serde_json::to_value(&open).unwrap(),
+            serde_json::json!({"kind": "open", "startedAtMs": 100})
+        );
+
+        let settled = super::ledger_turn_boundary(&record(Some(TurnTerminal {
+            cause: TurnTerminalCause::Completed,
+            settled_at_ms: 250,
+            detail: None,
+        })));
+        assert_eq!(
+            serde_json::to_value(&settled).unwrap(),
+            serde_json::json!({"kind": "terminal", "startedAtMs": 100, "endedAtMs": 250})
         );
     }
 }

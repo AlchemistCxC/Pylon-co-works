@@ -860,6 +860,7 @@ pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::er
     setup_restore_pet(app, &dirs); // 〔静默〕宠物存档缺失/损坏保持新宠物
     setup_restore_mcp_config(app, &dirs); // 〔静默〕MCP 配置缺失/损坏/非法保持空配置
     setup_install_persistence_services(app, &dirs)?; // 〔致命〕Kernel 三 service 打开/安装失败（就绪屏障）
+    setup_restore_approval_mode(app); // 〔可见〕#448 PR3：落盘值回填内存；失败保持默认 warn
     setup_restore_gateway_instances(app, &dirs); // 〔可见〕实例/凭据恢复失败保留原文件继续
     setup_wire_gateway_registry(app); // 无失败路径（HTTP client 构建失败降级默认 client）
     let connecting = setup_start_dispatchers(app, &window); // 无失败路径；返回默认 agent 是否 Connecting
@@ -1076,6 +1077,15 @@ fn setup_install_persistence_services(
     tracing::info!("Kernel persistence services ready: {}", db_path.display());
     crate::startup_timing::mark("persistence_ready");
     Ok(())
+}
+
+/// 阶段 10b（#448 PR3）：approval-mode 从 user_data 回填内存态（此前该值纯内存，
+/// 跨重启持久化只在前端 localStorage——任何不经 webview 的 set（CLI 桥）重启后被
+/// 前端旧值静默覆盖，#321 决议确认的漂移路径；现后端为权威：启动读回 + set 写穿）。
+/// 语义与降级见 `permission::restore_persisted_approval_mode`（回填在 service 装好
+/// 之后立刻做：任何 get/set 命令到达前内存态已就位）。
+fn setup_restore_approval_mode(app: &tauri::App) {
+    crate::permission::restore_persisted_approval_mode(app.state::<AppState>().inner());
 }
 
 /// 阶段 11：I12-W4 gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）

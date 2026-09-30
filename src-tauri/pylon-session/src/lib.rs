@@ -12,6 +12,7 @@ pub use msg_repo::connect;
 pub mod owner;
 pub mod persistence_bootstrap;
 pub mod retention;
+pub mod turn_boundary;
 pub mod turn_rollup;
 pub mod user_data;
 
@@ -21,6 +22,8 @@ pub use error::SessionError;
 // （TS 侧仅测试本地硬拷贝期望值，不构成漂移面）。
 pub use event_repo::{MAX_FOLDED_CHUNKS, MAX_FOLD_BYTES};
 pub use owner::DurableSessionOwner;
+// #442 Step1：回合边界判据与 wire 形状单源（宿主 load 响应的 turnBoundary 组装消费）。
+pub use turn_boundary::{TurnBoundary, TurnBoundaryKind};
 
 /// B1.2 结构化错误 wire 形状的单源实现：`{ "code", "message" }` 两键 map。
 /// 本 crate 四个仓库错误类型（EventError/MessageError/UserDataError/RetentionError）

@@ -22,6 +22,7 @@ import { PRESET_ZONES, requireZoneRefs } from '../../presetReducer.ts'
 import { expandGlobalPresetZoneRefs } from '../../../../application/transactions/applyGlobalPreset.ts'
 import { DEFAULTS } from '../../themeDefaults.ts'
 import { useStore } from '../../themeStore.ts'
+import { useCustomPresetStore } from '../../customPresetStore.ts'
 import { useInterfaceModeStore } from '../../../interface/interfaceModeStore.ts'
 import { mountSettingsSheet } from '../../../../test/settingsSheetHarness.tsx'
 import { resetStores } from '../../../../test/resetStores.ts'
@@ -146,19 +147,19 @@ describe('B3 出厂条目不进 zonePresetEntries（结构性闸门）', () => {
     expect(factoryIds.size, '出厂条目 id 去重后 = 10 套预设名').toBe(10)
 
     const assertNoFactoryIds = (stage: string) => {
-      for (const entry of useStore.getState().zonePresetEntries) {
+      for (const entry of useCustomPresetStore.getState().zonePresetEntries) {
         expect(factoryIds.has(entry.id), `${stage}：出厂条目 ${entry.id} 混进了用户条目数组`).toBe(false)
       }
     }
 
     assertNoFactoryIds('起点')
     useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
-    const id = useStore.getState().saveZonePresetEntry('gui', 'sidebar', '我的侧栏')!
-    expect(useStore.getState().zonePresetEntries.map(entry => entry.id)).toEqual([id])
+    const id = useCustomPresetStore.getState().saveZonePresetEntry('gui', 'sidebar', '我的侧栏')!
+    expect(useCustomPresetStore.getState().zonePresetEntries.map(entry => entry.id)).toEqual([id])
     assertNoFactoryIds('存之后')
 
-    useStore.getState().removeZonePresetEntry(id)
-    expect(useStore.getState().zonePresetEntries).toHaveLength(0)
+    useCustomPresetStore.getState().removeZonePresetEntry(id)
+    expect(useCustomPresetStore.getState().zonePresetEntries).toHaveLength(0)
     assertNoFactoryIds('删之后')
   })
 })

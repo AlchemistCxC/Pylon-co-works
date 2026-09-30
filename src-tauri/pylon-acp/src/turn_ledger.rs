@@ -600,6 +600,29 @@ impl TurnLedger {
         }
     }
 
+    /// #442 Step3：防御结算候选的回合身份——与 [`Self::settle_active_for_session`]
+    /// 同一选择序（同会话三元组下 turn_id 最小者；prompt_gate 保证至多一个在途，
+    /// 二者实际指向同一候选）。供调用方在 `Published` 后取整记录广播 turn-settled。
+    /// 只读，不动账本。
+    pub fn active_turn_id_for_session(
+        &self,
+        local_session_id: &str,
+        remote_session_id: &str,
+        generation: u64,
+    ) -> Option<u64> {
+        let tables = self.lock();
+        tables
+            .active
+            .keys()
+            .filter(|key| {
+                key.local_session_id == local_session_id
+                    && key.remote_session_id == remote_session_id
+                    && key.generation == generation
+            })
+            .map(|key| key.turn_id)
+            .min()
+    }
+
     /// #420：该本地会话下 generation ≠ 当前的在途残留计数（快照 anomaly 判据）。
     /// 正常情况下客户端替换（generation bump）经 [`Self::drop_generation`] 整体
     /// 清理，此值恒 0；>0 即旧代际在途漏过了清理——继续驻留会以幽灵在途污染
