@@ -9,7 +9,7 @@ import MessageSearchBar from './MessageSearchBar'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes'
 import type { SessionUiKey } from '../../domains/workbench/sessionUiStore.ts'
-import type { WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import type { WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import {
   getActiveWorkbenchHostPort,
   subscribeActiveWorkbenchHostPort,

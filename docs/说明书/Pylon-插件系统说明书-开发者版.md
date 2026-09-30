@@ -868,7 +868,7 @@ context.contextPanel.register({
 | `scope: 'global'` | 任何 Sheet 都能用；当没有任何面板声明当前 Sheet 种类时，它是默认选中的兜底。 |
 | `when` | **硬闸门**：为假时面板不出现在切换器里。它表达「此刻这个面板没有意义」（例如无会话时不显示），与「适不适合这个 Sheet」是两条轴。异常按「不显示」处理并记录一条运行错误。 |
 
-没显式选过时的默认顺序：**亲和当前 Sheet 种类的面板 → 第一个 `global` 面板 → 列表第一个**。用户一旦在切换器里选过，那次选择跨 Sheet 保持（`rightRailStore.activePanelId`），切 Sheet 不会把它抢回默认值。右栏头部的切换器列出全部通过 `when` 的面板；**切换器的标签是宿主渲染的，插件不画自己的标签行**。
+没显式选过时的默认顺序：**亲和当前 Sheet 种类的面板 → 第一个 `global` 面板 → 列表第一个**。用户一旦在切换器里选过，那次选择跨 Sheet 保持（`layoutRailsStore.activePanelId`），切 Sheet 不会把它抢回默认值。右栏头部的切换器列出全部通过 `when` 的面板；**切换器的标签是宿主渲染的，插件不画自己的标签行**。
 
 `order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`。**两类隔离面的输入与回传事件不同**：左栏模块经 `host:input` 接收含 `presentation` / `collapsed` / `pageOpen` / `blockAction` 的可序列化宿主状态，用受控的 `host:*` 事件请求选择会话或创建会话；右栏面板经 `host:input` 接收 `{ workspaceKind, sheet, activeSessionId, values }`（`sheet` 是当前 Sheet 的 `{ id, kind, title, agentId?, metadata? }` 投影，`values` 是面板 settings 适配器的当前值快照），回传事件词表为 `host:collapse` / `host:select-session` / `settings:set` / `settings:remove`（后两者写/删面板内嵌设置，见 SDK 出口 `CONTEXT_PANEL_SURFACE_EVENTS`）。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 

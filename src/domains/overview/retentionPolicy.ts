@@ -43,7 +43,7 @@ export interface RetentionPolicy {
 /** D-15 默认：永久保存（不执行自动清理）。 */
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = { mode: 'permanent' }
 
-/** 独立 localStorage key（非主题 envelope，与 showPet 持久化模式一致）。 */
+/** 独立 localStorage key（非主题 envelope；策略值属 overview 域自有持久化面）。 */
 export const RETENTION_STORAGE_KEY = 'pylon-history-retention'
 
 export interface StorageLike {

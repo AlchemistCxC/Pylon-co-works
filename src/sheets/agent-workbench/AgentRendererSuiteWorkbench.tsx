@@ -1,4 +1,4 @@
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../domains/identity/identityStore.ts'
@@ -10,7 +10,7 @@ import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/
 import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { createAgentWorkbenchSessionRuntime, workbenchSessionBindingKey } from './agentWorkbenchSession.ts'
@@ -40,8 +40,6 @@ import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { createTauriChatClient } from '../../infrastructure/acp/chatClient.ts'
-import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -88,16 +86,16 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
       setModel: async (context, modelId) => {
         await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'model', model: modelId },
-          () => createTauriChatClient().setConfigOption({ ...context, key: 'model', value: modelId }))
+          () => appClients.chat.setConfigOption({ ...context, key: 'model', value: modelId }))
       },
       setMode: async (context, modeId) => {
         await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'mode', mode: modeId },
-          () => createTauriChatClient().setMode({ ...context, mode: modeId }))
+          () => appClients.chat.setMode({ ...context, mode: modeId }))
       },
       setConfigOption: async (context, key, value) => {
         if (typeof value !== 'string' && typeof value !== 'boolean') throw new Error('config_value_unsupported')
         await sessionRuntimeRef.current?.runSessionControl(context, { kind: 'option', id: key, value },
-          () => createTauriChatClient().setConfigOption({ ...context, key, value }))
+          () => appClients.chat.setConfigOption({ ...context, key, value }))
       },
       discardSession: discardAgentWorkbenchSession,
       async openResource(session, resource) {
@@ -146,7 +144,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!sheetAgentId) return
     if (agentProbeFresh(sheetAgentId) || agentProbeInFlight(sheetAgentId)) return
     markProbeInFlight(sheetAgentId, true)
-    createSessionClient({ invoke: tauriInvokeTransport })
+    appClients.session()
       .probeAgentSelectors({ agentId: sheetAgentId })
       .then(snapshot => {
         noteAgentSelectorsSnapshot(sheetAgentId, snapshot)

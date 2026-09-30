@@ -104,12 +104,12 @@ function themeRecords(): SettingsContributionRecord[] {
       diagnostics: [],
     })
   }
-  // showPet is owned by workspaceStore; retain one canonical page-owned route
+  // showPet is owned by layoutRailsStore (A-V12); retain one canonical page-owned route
   // so Theme compatibility metadata cannot create a second editable field.
   records.push({
     source: 'page-owned', ownerId: 'workspace.showPet', namespace: 'page-owned', fieldKey: 'showPet', label: '桌面宠物',
     canonicalRoute: { domain: 'workspace', section: 'pet', field: 'showPet' }, placementSource: 'host-policy', active: true,
-    consumerTrace: { ownerDefinition: 'workspaceStore.showPet', settingsControl: 'Settings workspace pet toggle', storeOrPreview: 'WorkspaceStore.setShowPet', productionConsumer: 'Workbench appearance', visibleResult: 'Solid pet visibility' },
+    consumerTrace: { ownerDefinition: 'layoutRailsStore.showPet', settingsControl: 'Settings workspace pet toggle', storeOrPreview: 'layoutRailsStore.setShowPet', productionConsumer: 'Workbench appearance', visibleResult: 'Solid pet visibility' },
     diagnostics: [],
   })
   return records

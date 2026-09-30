@@ -1,9 +1,8 @@
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import type { SessionCreateInput } from '../../domains/workbench/workbenchCommandFacade.ts'
-import { createSessionClient } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/session/sessionStateSync.ts'
 import { collectProfilePersona } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
@@ -59,9 +58,7 @@ export async function createAgentWorkbenchSession(
 
   try {
     const profile = useIdentityStore.getState().profiles.find(item => item.id === session.profileId)
-    const response = await requestNewSession(session, createSessionClient({
-      invoke: tauriInvokeTransport,
-    }), () => ({
+    const response = await requestNewSession(session, appClients.session(), () => ({
       persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
       model: request?.model || profile?.model,
       ...(request?.reasoningLevel ? { reasoningLevel: request.reasoningLevel } : {}),
@@ -89,9 +86,7 @@ export async function discardAgentWorkbenchSession(sessionId: string): Promise<v
   const session = useIdentityStore.getState().sessions.find(item => item.id === sessionId)
   if (!session) return
   try {
-    await createSessionClient({
-      invoke: tauriInvokeTransport,
-    }).closeSession({ agentId: session.agentId, source: session.source })
+    await appClients.session().closeSession({ agentId: session.agentId, source: session.source })
   } catch (error) {
     reportRuntimeError('回滚空态新会话', error)
   } finally {

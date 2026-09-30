@@ -87,8 +87,8 @@ export function installCanonicalHookProjection(): () => void {
   return installation
 }
 
-/** 测试隔离用:解绑当前安装并允许重装。 */
-export function resetCanonicalHookProjectionForTests(): void {
+/** 显式卸载（与 install 返回的解订函数同一语义）；幂等安装单例允许重装。测试隔离复用本入口。 */
+export function uninstallCanonicalHookProjection(): void {
   installation?.()
   installation = undefined
 }

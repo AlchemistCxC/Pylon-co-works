@@ -1,18 +1,10 @@
 import type { SessionConfigOption } from '../../../domains/workbench/session/sessionSurface.ts'
+import type { WorkbenchOptionEntry } from '../../../plugin-runtime/renderers/workbenchRendererFactory.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
 
-/**
- * Provider-neutral option entry used by the control-center selectors.
- *
- * ACP providers do not agree on the shape of a choice (some use `id`, some
- * use `value`, and a few return a nested `valueId`).  Keep the wire value and
- * the human label separate so the UI can be friendly without ever sending a
- * translated label back to an agent.
- */
-export interface WorkbenchOptionEntry {
-  readonly id: string
-  readonly label: string
-}
+// WorkbenchOptionEntry 的类型正身已上移 plugin-runtime（B-2a：工厂契约面）；
+// 本目录消费 DEFAULT_*_OPTIONS 常量与选择器逻辑。
+export type { WorkbenchOptionEntry } from '../../../plugin-runtime/renderers/workbenchRendererFactory.ts'
 
 export type WorkbenchOptionKind = 'model' | 'mode' | 'reasoning'
 

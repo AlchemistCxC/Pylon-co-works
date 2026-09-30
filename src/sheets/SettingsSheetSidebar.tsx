@@ -14,7 +14,7 @@ import {
 import { GROUP_ORDER } from '../domains/theme/themeFieldDefs'
 import { useStore } from '../domains/theme/themeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
-import { readPinned, writePinned, PINNED_LIMIT, safeStorage } from '../components/settings/settingsChromeState.ts'
+import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { useSettingsContributionCatalog } from '../components/settings/useSettingsContributionCatalog.ts'
 import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
@@ -29,7 +29,6 @@ import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
  */
 export default function SettingsSheetSidebar({ sheet, state }: WorkspaceViewProps<SettingsSheetState>) {
   const { pluginSettingsPages } = useSettingsContributionCatalog()
-  const storage = safeStorage()
   // K-2：二级折叠导航展开态（session 内 UI 态；打开设置默认收起）
   const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(new Set())
   const toggleNavSection = (section: string) => {
@@ -40,15 +39,9 @@ export default function SettingsSheetSidebar({ sheet, state }: WorkspaceViewProp
       return next
     })
   }
-  // K-4：收藏置顶（拍板 D4-A hover 星标；上限 PINNED_LIMIT=3）
-  const [pinned, setPinned] = useState<readonly string[]>(() => readPinned(k => storage.get(k)))
-  const togglePinned = (section: string) => {
-    const next = pinned.includes(section)
-      ? pinned.filter(id => id !== section)
-      : [...pinned, section].slice(-PINNED_LIMIT)
-    setPinned(next)
-    writePinned(next, (key, v) => storage.set(key, v))
-  }
+  // K-4：收藏置顶（拍板 D4-A hover 星标；上限 PINNED_LIMIT=3；A-V12 收敛 settingsChromeStore）
+  const pinned = useSettingsChromeStore(s => s.pinned)
+  const togglePinned = useSettingsChromeStore(s => s.togglePinned)
   // #116 子项 9：重置主题两段式确认（原 Settings.tsx 页脚语义整体迁入）
   const [confirmResetTheme, setConfirmResetTheme] = useState(false)
   const reset = () => { resetThemeForActiveInterfaceMode() }

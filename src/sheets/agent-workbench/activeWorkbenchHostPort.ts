@@ -1,4 +1,4 @@
-import type { WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import type { WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 
 const activePorts = new Map<string, WorkbenchHostPort>()
 const listeners = new Map<string, Set<() => void>>()

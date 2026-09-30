@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, House, RotateCw } from 'lucide-react'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { createDocsClient, type DocsSheetSnapshot } from '../../infrastructure/tauri/docsClient'
+import { appClients } from '../../app/appClients.ts'
+import type { DocsSheetSnapshot } from '../../infrastructure/tauri/docsClient'
 import { useModalOverlayOpen } from '../../app/modalOverlayStore'
 import { reportRuntimeError } from '../../app/runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
@@ -19,7 +19,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * fail-closed 取消，壳层不代开系统浏览器。
  */
 
-const DOCS_CLIENT = createDocsClient({ invoke: tauriInvokeTransport })
+const DOCS_CLIENT = appClients.docs
 
 const IDLE_SNAPSHOT: DocsSheetSnapshot = { phase: 'idle', error: null, visible: true }
 

@@ -1,11 +1,9 @@
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../app/appClients.ts'
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { invoke } from '@tauri-apps/api/core'
 import { refreshSessionsBackend, useIdentityStore } from '../domains/identity/identityStore'
 import { reportRuntimeError } from '../app/runtimeError'
-import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
 import { runSessionNotificationHook } from '../application/transactions/sessionHookTransactions'
 
@@ -72,14 +70,11 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const del = async () => {
     if (!window.confirm(`删除会话“${session.name}”？此操作无法撤销。`)) return
-    const sessionClient = createSessionClient({ invoke: tauriInvokeTransport })
+    const sessionClient = appClients.session()
     const result = await removeSessionTransaction(sessionId, {
       findSession: id => useIdentityStore.getState().sessions.find(s => s.id === id),
       // DEL-03（§5.13 本地优先）：OwnerKey = [profileId, agentId, localSessionId]（与 eventSchema 同纪律）
-      deleteSessionLocal: s => invoke('user_session_delete', {
-        sessionId: s.id,
-        ownerKey: sessionDurableOwnerKey(s),
-      }),
+      deleteSessionLocal: s => sessionClient.deleteUserSessionLocal({ sessionId: s.id, ownerKey: sessionDurableOwnerKey(s) }),
       refreshSessionsBackend,
       // tombstone 成功后立即封住在途 canonical 写；revision 刷新可能仍在等待。
       markSessionDeleting: id => {
@@ -102,10 +97,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
         ? sessionClient.deleteSessionAgentSide({ agentId: s.agentId, source: s.source, periId: s.periId })
         : Promise.resolve(),
       // DEL-03 终态化：deleting → deleted（best effort）
-      finalizeSessionDelete: s => invoke('user_session_delete_finalize', {
-        sessionId: s.id,
-        ownerKey: sessionDurableOwnerKey(s),
-      }),
+      finalizeSessionDelete: s => sessionClient.finalizeUserSessionDelete({ sessionId: s.id, ownerKey: sessionDurableOwnerKey(s) }),
       removeSession: id => useIdentityStore.getState().removeSession(id),
       clearMessages: id => clearMessageStorage(id, localStorage),
       reportError: (action, error) => reportRuntimeError(action, error),

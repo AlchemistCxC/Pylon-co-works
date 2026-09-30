@@ -24,7 +24,7 @@ vi.mock('../../../infrastructure/events/pluginEventBusHost.ts', () => ({
 }))
 
 import type { CanonicalConversationEvent } from '../../../domains/events/eventSchema'
-import { canonicalAnchorFor, installCanonicalHookProjection, projectCanonicalEventToHooks, resetCanonicalHookProjectionForTests } from '../canonicalHookProjection'
+import { canonicalAnchorFor, installCanonicalHookProjection, projectCanonicalEventToHooks, uninstallCanonicalHookProjection } from '../canonicalHookProjection'
 
 function canonicalEvent(eventType: CanonicalConversationEvent['eventType'], typedPayload?: unknown, identity?: { toolCallId?: string }): CanonicalConversationEvent {
   return {
@@ -46,7 +46,7 @@ beforeEach(() => {
   invokeMock.mockClear()
   subscribeSpy.mockClear()
   sessionsRef.current = []
-  resetCanonicalHookProjectionForTests()
+  uninstallCanonicalHookProjection()
 })
 
 describe('canonicalAnchorFor 映射表', () => {
@@ -102,7 +102,7 @@ describe('projectCanonicalEventToHooks 派发', () => {
     unsubscribe1()
     unsubscribe2()
     // 解订后须显式 reset 才重装（installation 引用同一 disposable）。
-    resetCanonicalHookProjectionForTests()
+    uninstallCanonicalHookProjection()
     installCanonicalHookProjection()
     expect(subscribeSpy).toHaveBeenCalledTimes(2)
   })

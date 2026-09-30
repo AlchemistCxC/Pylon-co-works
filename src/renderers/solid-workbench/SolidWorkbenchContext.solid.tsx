@@ -5,7 +5,7 @@ import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCo
 import type { WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
-import type { WorkbenchHostPort } from './workbenchHostPort.ts'
+import type { WorkbenchHostPort } from '../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { InputPredictionProvider } from '../../infrastructure/prediction/inputPredictionProvider.ts'
 

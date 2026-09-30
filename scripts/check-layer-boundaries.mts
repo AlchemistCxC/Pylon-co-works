@@ -78,11 +78,6 @@ const RULES: LayerRule[] = [
     scopeRoots: ['src/plugin-runtime/'],
     forbiddenPathIncludes: VIEW_DIRS,
     allowlist: {
-      // 已知债（B-2 遗留，评审轮裁决）：WorkbenchRendererFactory 契约闭包深嵌 WorkbenchHostPort
-      //（463 行、类型面横跨 domains/workbench），整体倒置需独立立项。
-      'src/plugin-runtime/renderers/rendererSuiteTypes.ts': 'renderer 工厂契约类型边（已知债，独立立项倒置）',
-      // workspaceController 是视图编排实现（open/close sheet）；port 化随 workspaceStore 域化跟进（B-2 记录）。
-      'src/plugin-runtime/workspaces/pluginWorkspaceApi.ts': 'workspace 控制器值边（port 化待办，B-2）',
     },
   },
   {

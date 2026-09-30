@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { tauriInvokeTransport } from '../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../app/appClients.ts'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles } from 'lucide-react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry, type Session } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError'
-import { createAgentClient } from '../infrastructure/acp/agentClient'
-import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { normalizeStartupDiagnostics, type StorageDiagnostics } from '../infrastructure/tauri/runtimeLogContracts'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../application/transactions/openOwnedSessionTransaction'
@@ -18,7 +15,8 @@ import { recentPersistedSessions, type PersistedSessionSummary } from '../domain
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../contracts/agentEntry.ts'
-import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
+import { useActiveInterfaceModeContribution } from '../app/useActiveInterfaceModeContribution.ts'
+import { INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import TacticalCommandDeck, { type TacticalPanel } from './TacticalCommandDeck.tsx'
 
 function relativeTime(timestamp: number): string {
@@ -42,7 +40,9 @@ function relativeTime(timestamp: number): string {
  * 挂载后的 controller lifecycle 承担——listener 就绪后才 load）。
  */
 export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  const tactical = useInterfaceModeStore(state => state.interfaceMode === 'tactical-blue')
+  // A-V9：指挥台 UI 按 contribution 能力位挂载，不再特判模式 id——
+  // 任何声明 overview.command-deck 能力的模式（内置或插件）获得等价 Overview 指挥台。
+  const commandDeck = useActiveInterfaceModeContribution().capabilities?.[INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK] === true
   const [tacticalPanel, setTacticalPanel] = useState<TacticalPanel>('home')
   const agents = useIdentityStore(s => s.agents)
   const sessions = useIdentityStore(s => s.sessions)
@@ -64,7 +64,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    invoke('startup_diagnostics')
+    appClients.runtime.startupDiagnostics()
       .then(raw => {
         if (!disposed) {
           setStorage(normalizeStartupDiagnostics(raw).storage)
@@ -83,7 +83,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (migrationBusy) return
     setMigrationBusy(true)
     try {
-      await invoke('migrate_appdata_to_portable')
+      await appClients.runtime.migrateAppdataToPortable()
       setMigrationDismissed(true)
       resolveRuntimeErrors({ key: 'overview:migrate-portable' })
     } catch (error) {
@@ -99,7 +99,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    const client = createSessionClient({ invoke: tauriInvokeTransport })
+    const client = appClients.session()
     client.listPersistedSessions().then(all => {
       if (!disposed) {
         setRecent(recentPersistedSessions(all))
@@ -118,7 +118,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     setSwitchingId(agent.id)
     setError('')
     setErrorIsValidation(false)
-    const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
+    const agentClient = appClients.agent()
     const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
@@ -213,7 +213,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <div className="overview-sheet" data-tactical-panel={tactical ? tacticalPanel : undefined}>
+    <div className="overview-sheet" data-tactical-panel={commandDeck ? tacticalPanel : undefined}>
       {/* #154：左列几何（宽度/竖直分割线/折叠可见性）归布局层的 .sidebar；本类只管内容样式。 */}
       <aside className="sidebar overview-sidebar" aria-label="Overview 分区">
           <div className="overview-sidebar-head">
@@ -231,7 +231,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
         </aside>
       <main className="overview-main">
       <div className="overview-shell">
-        {tactical && <>
+        {commandDeck && <>
           {tacticalPanel === 'home' ? <TacticalCommandDeck
             agents={agents.length} connected={connectedCount} workspaces={workspaces.length}
             sessions={localRecent.length + persistedRecent.length} busy={switchingId !== null}
@@ -387,7 +387,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
               <Folder size={17} aria-hidden="true" />
             </div>
             {workspaces.length === 0 ? (
-              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>{tactical ? '请先进入 Agent 工作台，在左栏创建第一个工作区。' : '从左栏创建第一个工作区'}</span></div>
+              <div className="overview-list-empty"><Folder size={20} aria-hidden="true" /><span>{commandDeck ? '请先进入 Agent 工作台，在左栏创建第一个工作区。' : '从左栏创建第一个工作区'}</span></div>
             ) : (
               <div className="overview-workspace-list">
                 {[...workspaces].sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, 5).map(workspace => {

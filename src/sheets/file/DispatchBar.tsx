@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../app/runtimeError'
-import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import type { Session } from '../../domains/identity/identityStore'
 
@@ -82,7 +81,7 @@ export default function DispatchBar({
       truncated: false,
     })
     try {
-      await createChatClient({ invoke: tauriInvokeTransport }).sendMessage({ agentId: ownerSession.agentId, profileId: ownerSession.profileId, source: targetSource, content: message, persona: '', sessionPrompt: '', attachments: [] })
+      await appClients.chat.sendMessage({ agentId: ownerSession.agentId, profileId: ownerSession.profileId, source: targetSource, content: message, persona: '', sessionPrompt: '', attachments: [] })
       // invoke 已发出（同步创建成功即清）——不等 resolve，保留选区
       onInstructionChange('')
     } catch (err) {

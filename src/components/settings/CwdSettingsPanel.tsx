@@ -6,10 +6,9 @@
  * - MCP 选项来自 agent 级暴露列表（get_mcp_servers）；
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { FolderSearch, X } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import type { Workspace } from '../../domains/workspace/workspaceEntities'
@@ -84,7 +83,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
 
   useEffect(() => {
     let disposed = false
-    createAgentClient({ invoke: tauriInvokeTransport })
+    appClients.agent()
       .getMcpServers()
       .then(list => {
         if (!disposed) {

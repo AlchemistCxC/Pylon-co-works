@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
-import { createAgentClient } from '../../infrastructure/acp/agentClient'
+import type { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 
@@ -34,7 +34,7 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
     setValidationError(null)
     setStatus({ kind: 'saving' })
     try {
-      const client = createAgentClient({ invoke: tauriInvokeTransport })
+      const client = appClients.agent()
       await saveWithVoucherRetry(client, agentId, config)
       // 后端事务已原子提交 agents 域；前端刷新 agent 列表与工具字典，保持设置页一致。
       const list = await client.listAgents()

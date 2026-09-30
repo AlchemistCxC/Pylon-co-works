@@ -1,3 +1,8 @@
+/**
+ * WorkbenchHostPort——宿主↔渲染器套件的端口契约（B-2a 自 renderers/solid-workbench 上移）。
+ * 归属 plugin-runtime：它是渲染器套件扩展面的一部分（插件套件消费的 seam），
+ * 实现与装配仍在视图/宿主侧；视图侧 workbenchContracts 对消费面 re-export 保面。
+ */
 import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, SessionCreateResult, ExportSessionInput, CommandResult, WorkbenchSessionCreationReader } from '../../domains/workbench/workbenchCommandFacade.ts'

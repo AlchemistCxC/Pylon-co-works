@@ -1,5 +1,5 @@
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
-import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
+import { appClients } from '../../app/appClients.ts'
+import type { SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { buildSendMessagePayload } from '../../domains/chat/sessionRuntime.ts'
@@ -7,7 +7,6 @@ import { collectProfilePersona } from '../../plugins/core/sessionCreation/builti
 import { createWorkbenchSessionCreationStore, type WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import { setSessionModel } from '../../domains/chat/sessionModel.ts'
 import { setSessionMode } from '../../domains/chat/sessionMode.ts'
-import { createInteractionResponseTransport } from '../../infrastructure/acp/interactionTransport.ts'
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../domains/agent/agentContext.ts'
 import { sendMessageWithStream } from '../../domains/chat/streamingSend.ts'
@@ -65,21 +64,19 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
       // P52 D4：原 controller requestCancel 状态机迁入。begin-cancel 去重
       // （非生成态不调后端）由调用方 generating 守卫承担（footer 只在 running
       // 时渲染 onStop）；后端取消结果的收敛由终帧（pylon:error cancelled）驱动。
-      void createChatClient({ invoke: tauriInvokeTransport })
+      void appClients.chat
         .cancelPrompt({ agentId, source })
         .catch(error => { reportRuntimeError('取消生成', error) })
     },
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
     setConfigOption: async (context, key, value) => {
-      await createChatClient({ invoke: tauriInvokeTransport })
+      await appClients.chat
         .setConfigOption({ agentId: context.agentId, source: context.source, key, value })
     },
     resolveConfigOption: () => undefined,
     resolveInteraction: () => undefined,
-    respondInteraction: (request, answer) => createInteractionResponseTransport({
-      invoke: tauriInvokeTransport,
-    }).respond(request, answer),
+    respondInteraction: (request, answer) => appClients.interactionResponse().respond(request, answer),
     async openResource() { throw new Error('production_command_not_connected') },
     async revealResource() { throw new Error('production_command_not_connected') },
     async createSession() { throw new Error('production_command_not_connected') },

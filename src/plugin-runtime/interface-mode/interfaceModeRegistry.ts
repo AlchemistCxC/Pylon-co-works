@@ -43,13 +43,17 @@ export function validateInterfaceModeContribution(
     validateSurfaceId(contribution.shellSurface.surfaceId, `Interface Mode ${contribution.id} shell`)
     if (contribution.shellSurface.placement !== 'before-workspace'
       && contribution.shellSurface.placement !== 'overlay') {
-      throw new Error(`Interface Mode shell placement 非法：${contribution.id}`)
+      throw new Error(`Interface Mode ${contribution.id} shell placement 非法`)
     }
+  }
+  if (contribution.sceneSurface) {
+    validateSurfaceId(contribution.sceneSurface.surfaceId, `Interface Mode ${contribution.id} scene`)
   }
   return Object.freeze({
     ...contribution,
     workbench: Object.freeze({ ...contribution.workbench }),
     ...(contribution.shellSurface ? { shellSurface: Object.freeze({ ...contribution.shellSurface }) } : {}),
+    ...(contribution.sceneSurface ? { sceneSurface: Object.freeze({ ...contribution.sceneSurface }) } : {}),
   })
 }
 

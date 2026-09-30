@@ -8,7 +8,7 @@ import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
-import { createSolidWorkbenchServicesFromHostPort } from '../hostPortSolidServices.ts'
+import { createSolidWorkbenchServicesFromHostPort } from '../../../renderers/solid-workbench/hostPortSolidServices.ts'
 
 function runtime() {
   return createPreviewWorkbenchRuntime({

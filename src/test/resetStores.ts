@@ -16,7 +16,9 @@ import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.t
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
 import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
+import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
 import '../app/bootstrap/identityCrossDomainWiring'
+import '../app/bootstrap/workspaceControllerWiring'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
@@ -29,6 +31,11 @@ export function resetStores(): void {
   } catch {
     // The state update happens before persist's storage write.  Ignore only
     // the storage exception here; production actions retain their error path.
+  }
+  try {
+    useSettingsChromeStore.setState(useSettingsChromeStore.getInitialState(), true)
+  } catch {
+    // 同 useRightRailStore：persist 存储故障不应把测试间重置变成跨用例失败。
   }
   useIdentityStore.setState(useIdentityStore.getInitialState(), true)
   useRuntimeStore.setState(useRuntimeStore.getInitialState(), true)

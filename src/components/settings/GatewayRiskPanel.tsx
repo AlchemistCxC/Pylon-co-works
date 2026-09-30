@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
-import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
-import { tauriInvokeTransport } from '../../infrastructure/acp/tauriTransport.ts'
+import { appClients } from '../../app/appClients.ts'
 import type { AdapterInstance } from '../../infrastructure/tauri/gatewayClient'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 
 // FE-AUD-008：typed client 收口 gateway 域 command literal
-const gatewayClient = createGatewayClient({ invoke: tauriInvokeTransport })
+const gatewayClient = appClients.gateway()
 
 const credentialLabel = (status: AdapterInstance['credentialStatus']): string =>
   status === 'configured' ? '已配置' : status === 'invalid' ? '损坏' : '未配置'

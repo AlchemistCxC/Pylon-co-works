@@ -1,6 +1,5 @@
 import { useState, useEffect, lazy, Suspense, useRef, useSyncExternalStore } from 'react'
 import SheetLayout from './workspace-sheets/SheetLayout'
-import TacticalScene from './sheets/TacticalScene'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './domains/theme/themeStore'
 import { flushIdentityBackend, useIdentityStore } from './domains/identity/identityStore'
@@ -12,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
+import { appClients } from './app/appClients.ts'
 import { loadWindowSize, persistWindowSize } from './infrastructure/persistence/windowSizePersistence'
 import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
 import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
@@ -25,12 +25,11 @@ import { projectSkinDocumentRoot } from './infrastructure/skin/skinProjection'
 import { getSkinRuntime, pickThemeBaseline } from './infrastructure/skin/skinRuntimeServices'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './contracts/agentTypes'
-import { createAgentClient } from './infrastructure/acp/agentClient'
-import { createRuntimeClient } from './infrastructure/tauri/runtimeClient'
 import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
 import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
 import './app/bootstrap/identityCrossDomainWiring'
+import './app/bootstrap/workspaceControllerWiring'
 import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
 import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
@@ -57,8 +56,8 @@ import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts
 import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
-import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { DEFAULT_INTERFACE_MODE } from './domains/interface/interfaceModeStore.ts'
+import { useActiveInterfaceModeContribution } from './app/useActiveInterfaceModeContribution.ts'
+import { InterfaceModeSceneHost } from './sheets/interfaceModeScenes.tsx'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
 import { persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
@@ -106,9 +105,9 @@ function LazyDialogFallback() {
   )
 }
 
-// FE-AUD-008：typed client 收口 command literal（注入真实 transport）
-const agentClient = createAgentClient({ invoke: tauriInvokeTransport })
-const runtimeClient = createRuntimeClient({ invoke: tauriInvokeTransport })
+// FE-AUD-008 / A-V2：组装期统一 client 集（app/appClients），视图层不再自造 client。
+const agentClient = appClients.agent()
+const runtimeClient = appClients.runtime
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
@@ -135,8 +134,7 @@ export default function App() {
     getInterfaceModeSnapshot,
     getInterfaceModeSnapshot,
   )
-  const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
-    ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === DEFAULT_INTERFACE_MODE)!
+  const interfaceModeContribution = useActiveInterfaceModeContribution()
   const quickInterfaceMode = interfaceModeQuickTarget(interfaceMode)
   // Shell Recipe（ADR-0003）：激活期已硬校验引用；此处订阅仅保证插件热换后
   // 数据属性跟随 registry 快照更新。解析兜底 classic，瞬态不崩壳。
@@ -493,9 +491,11 @@ export default function App() {
 
   return (
     <div className="app" ref={appSkinRef} {...resolved.dataAttributes} data-interface-mode={interfaceMode} data-presentation-profile={presentationProfileId} data-shell-sidebar-side={shellRecipe.sidebarSide} data-shell-context-side={shellRecipe.contextPanelSide}>
-      {/* 结构审查 A-V9 遗留：装饰场景仍按模式 id 特判。registry 化方向 = InterfaceModeContribution
-          增加 sceneSurface 声明位，插件模式才能获得等价装饰能力（独立小改动，评审轮裁决）。 */}
-      {interfaceMode === 'tactical-blue' && <TacticalScene />}
+      {/* 装饰场景按 InterfaceModeContribution.sceneSurface 声明位挂载（A-V9 完全体）：
+          宿主场景注册表解析 surfaceId，插件贡献的模式声明同一 id 即获得等价装饰层。 */}
+      {interfaceModeContribution.sceneSurface && (
+        <InterfaceModeSceneHost surfaceId={interfaceModeContribution.sceneSurface.surfaceId} />
+      )}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}

@@ -38,15 +38,8 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/domains/chat/sessionMode.ts',
   'src/domains/chat/sessionModel.ts',
   'src/domains/chat/streamingSend.ts',
-  'src/components/PetCompanion.tsx',
-  'src/components/SessionSettings.tsx',
-  'src/components/Settings.tsx',
-  'src/components/settings/AgentConfigEditor.tsx',
-  'src/components/settings/AgentRuntimePanel.tsx',
-  'src/components/settings/ConfigOptionsPanel.tsx',
-  'src/components/settings/CwdSettingsPanel.tsx',
-  'src/components/settings/GatewayRiskPanel.tsx',
-  // #154 区块栈线把会话删除/导出接线自 Sidebar.tsx 迁入该 hook（removeSessionTransaction
+            'src/components/settings/CwdSettingsPanel.tsx',
+    // #154 区块栈线把会话删除/导出接线自 Sidebar.tsx 迁入该 hook（removeSessionTransaction
   // 端口 + createSessionClient 直发，形态不变）——条目随代码迁移，Sidebar.tsx 已无直发。
   'src/components/sidebar/useSidebarContributionProps.ts',
   'src/infrastructure/events/canonicalEventRepository.ts',
@@ -61,8 +54,7 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   // 静默），与 hookBridgeDispatcher 同形态的基础设施级 IPC 缝，不构成产品 domain
   // client 依赖方向。
   'src/app/startupTiming.ts',
-  'src/sheets/agent-workbench/agentWorkbenchLifecycle.ts',
-  'src/infrastructure/skin/skinHostPorts.ts',
+    'src/infrastructure/skin/skinHostPorts.ts',
   'src/devtools/obs/threeSourceExportTrigger.ts', // obs04 收敛迁名（结构全修批）,
   'src/plugin-runtime/pluginCompositionRoot.ts',
   'src/plugin-runtime/process/processRuntimeServices.ts',
@@ -72,19 +64,12 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   // #351 根目录归类：三件随代码迁移自 src 根（原条目路径见 git 历史），直发面不变。
   'src/infrastructure/persistence/retentionPolicyRepository.ts',
   'src/infrastructure/persistence/userDataRepository.ts',
-  'src/infrastructure/persistence/workspaceEntityStore.ts',  'src/sheets/agent-workbench/agentWorkbenchCommands.ts',
-  // #177 选择器空态探测：一次性 session client 读 Agent 广告的 configOptions 后即弃，
+  'src/infrastructure/persistence/workspaceEntityStore.ts',    // #177 选择器空态探测：一次性 session client 读 Agent 广告的 configOptions 后即弃，
   // 与 agentWorkbenchSessionCreation.ts 同形态（UI 侧装配 session client 直发）。
   'src/sheets/agent-workbench/AgentRendererSuiteWorkbench.tsx',
-  'src/sheets/agent-workbench/agentWorkbenchSessionCreation.ts',
-  'src/sheets/browser/BrowserSheetView.tsx',
-  'src/sheets/file/DispatchBar.tsx',
-  'src/sheets/file/legacyFileProvider.ts',
-  'src/sheets/gateway/GatewaySheetView.tsx',
-  'src/sheets/history/HistorySheetView.solid.tsx',
-  'src/sheets/OverviewSheetView.tsx',
-  'src/sheets/RuntimeSheetView.tsx',
-  'src/workspace-sheets/activateAgentSheet.ts',
+        'src/sheets/file/legacyFileProvider.ts',
+      'src/sheets/OverviewSheetView.tsx',
+    'src/workspace-sheets/activateAgentSheet.ts',
   // #317 内联 invoke 适配器收口：共享 transport（26 文件的内联适配器替换为同一
   // 引用，收窄而非扩大直发面）——与 hookBridgeDispatcher 同形态的基础设施级
   // IPC 缝，按先例登记。
