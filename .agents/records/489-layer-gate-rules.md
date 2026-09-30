@@ -21,7 +21,7 @@
 
 ## 方案要点
 
-- **批准条文 → 7 个规则实例**：规则 1（infra→domains 运行时值，`typeOnlyExempt: true`）；规则 2 拆入向（视图/domains→kernel）与出向（kernel→app/application/plugin-runtime/infrastructure/domains，bootstrap 装配豁免 15 条）；规则 3 拆 domains→四层（批准的最低限度，豁免 14 条）+ 按现状依赖图核准的三个扩展：cli→视图层（2 豁免）、application→视图层（净禁令）、app→视图层（1 豁免）。
+- **批准条文 → 7 个规则实例**：规则 1（infra→domains 运行时值，`typeOnlyExempt: true`）；规则 2 拆入向（视图/domains→kernel）与出向（kernel→app/application/plugin-runtime/infrastructure/domains，bootstrap 装配豁免 14 条——14 个 file→target 键覆盖 15 条违规边，`KernelRoot.tsx` 两处引 `applicationRuntimeServices` 合一）；规则 3 拆 domains→四层（批准的最低限度，豁免 14 条）+ 按现状依赖图核准的三个扩展：cli→视图层（2 豁免）、application→视图层（净禁令）、app→视图层（1 豁免）。
 - **type-only 判定**（`isTypeOnlyImport`）：语句级 `import type`/`export type`，或花括号内全部 inline `type` 修饰符；语句头回溯以「最近的 `\nimport`/`\nexport`/`;import`/`;export`」定位，找不到语句头时**从严按运行时值**。修复过程中发现文件首语句（其前无换行）会误判为运行时值，已处理（窗口触到文件头仍无关键词时按首语句处理）。
 - **边级豁免 `allowEdges`**（`${file} -> ${target}` 键）：文件级 allowlist 豁免面过宽，57 条存量豁免全部用边级、逐条带理由（who/why 以类别前缀 + 括注清偿方向表达）。
 - **豁免陈旧检测**：违规边消失（改道/搬迁）后豁免条目变成死豁免，门禁直接红并提示删条——防止死豁免长期占位。首跑即抓出 **6 条死条目**：存量 5 条（`domains → 视图层` 的 chat 三件——结构全修批搬迁后已无视图层 import；`contracts → 实现` 的 sheets.ts/agentCommandSet.ts 两条——其边不在禁令集合内永不触发）+ 勘察误计 1 条（`interactionTransport.ts → agentContracts.ts` 实为多行 `import type`，粗判脚本误计为运行时值），均已删并留注释。
@@ -31,7 +31,7 @@
 
 | 验收项 | 结果 |
 | --- | --- |
-| 三条规则机器化，负向验证 fixture 能红 | ✅ 5 个临时 fixture 触发 6 处越界（application→视图 / cli→视图 / 视图·domains→kernel / domains→四层 / infra→domains 运行时值 / kernel→五层），exit 1；同 fixture 内 `import type { Session }` 边**未**触发（type-only 豁免生效）；删 fixture 后恢复绿 |
+| 三条规则机器化，负向验证 fixture 能红 | ✅ 首轮 5 个临时 fixture 触发 6 处越界（六条规则 label 全部命中），exit 1；同 fixture 内 `import type { Session }` 边**未**触发（type-only 豁免生效）；审查轮补 app→视图层 fixture 并修复 inline 判定后复验：6 个 fixture 触发 **7 处越界（7 条新规则 label 各命中一次）**，`import { type Session }`（全 inline type）与 `import type` 均不触发；删 fixture 后恢复绿 |
 | 存量豁免每条带 who/why 理由 | ✅ 边级 57 条全部带理由 |
 | 陈旧豁免检测 | ✅ 6 条死条目抓出并删除（含存量 5 条） |
 | 门禁脚本头注同步刻意不管清单 | ✅ |
@@ -44,7 +44,7 @@
 ## 证据
 
 - 门禁正向：`bun scripts/check-layer-boundaries.mts` → `分层边界门禁通过：852 个生产文件，11 条规则零越界（文件级豁免 0 条、边级豁免 57 条，均有理由登记且无陈旧条目）`，exit 0。
-- 门禁负向：fixture 期输出 `分层边界门禁失败：6 处越界`（六条规则 label 全部命中），exit 1。
+- 门禁负向：fixture 期输出 `分层边界门禁失败：7 处越界`（7 条新规则 label 各命中一次；含审查轮补验的 app→视图层与 inline-all-type 豁免核验），exit 1。
 - `bun run check:solid` → 全链（tsc solid + 10 个边界/契约门禁脚本）exit 0。
 - `bun run check:frontend` → exit 0（lint / csp / canonical-types / retention-policy / export-sanitize-vocabulary / ipc / first-party-styles / tailwind-tokens / example-plugin / wasm / vitest / build / bundle / solid-smoke / docs / immer / production-excludes 全链）。
 - `bun run test` → `Test Files 661 passed | 1 skipped (662)`、`Tests 5179 passed | 1 skipped | 1 todo (5181)`，exit 0。
@@ -53,6 +53,11 @@
 ## 与 spec 的偏差
 
 无实质偏差。spec 勘察读数中「24 运行时值」被门禁精确检测修正为 23（多行 `import type` 误计），已在方案要点说明。
+
+## 审查轮（2026-10-01，用户指令派发两轴子 agent）
+
+- **Standards 轴：REQUEST CHANGES**（已处置）——硬违规 1 处：`isTypeOnlyImport` 的「全 inline type」分支为死代码（花括号组 `([^}]*)` 占据捕获组 1，引号处 `\1` 反向引用回引到花括号内容而非引号字符，永不命中），注释与记录却声称支持。修复：引号处改为不用反向引用的双引号形态 `(?:'(?:\.[^']*)'|"(?:\.[^"]*)")`，并以 inline-all-type fixture 实测豁免生效。判断题 2 处：头注引用不入库的 spec 路径（已改为指向 issue #489 + 「不入库工作文档」）；commit 前缀 `refactor` vs `enhancement`（保留不改——§4 禁改写历史，语义可辨）。
+- **Spec 轴：APPROVE WITH NITS**（已处置）——kernel 出向豁免计数文档误写 15 实为 14（已改，注明 14 键覆盖 15 边）；app→视图层规则补 fixture 验证（7/7 label 命中）；两处声明过的轻微超条文（陈旧检测机制、kernel 禁令集合纳入 domains）经复核不违反「先立规后清债」，保留。负向验证复做：红（exit 1）；抽查 6 条豁免条目与真实 import 形态相符；工作树恢复干净。
 
 ## 未解问题
 

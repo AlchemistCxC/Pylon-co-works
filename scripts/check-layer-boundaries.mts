@@ -6,8 +6,8 @@
  * 这一维：视图层（components/sheets/workspace-sheets/renderers）与三层非视图代码
  * （domains / plugin-runtime / infrastructure）以及 contracts 之间的 import 禁令。
  *
- * #489 起纳入（2026-10-01 维护者批准的三条规则，证据见 .agents/spec/audit-20261001/
- * C-frontend-domain.md §3.3/§3.6）：
+ * #489 起纳入（2026-10-01 维护者批准的三条规则，见 issue #489；审计证据 §3.3/§3.6 在
+ * 不入库的 2026-10-01 结构审查工作文档）：
  * 1. infrastructure 不得 import domains 的运行时值（`import type` type-only 边豁免）；
  * 2. kernel 只能被 app 挂载：domains 与视图层不得 import src/kernel/**；kernel 自身对
  *    app/application/plugin-runtime/infrastructure 的既有引用按 bootstrap 装配语义豁免；
@@ -282,7 +282,9 @@ function isTypeOnlyImport(text: string, matchStart: number, matchEnd: number): b
   if (stmt < 0 && windowStart > 0) return false
   const head = win.slice(stmt + 1).trimStart()
   if (/^(?:import|export)\s+type\b/.test(head)) return true
-  const brace = /^(?:import|export)\s*\{([^}]*)\}\s*from\s*$/.exec(head)
+  // head 以模块说明符的收尾引号结束（matchEnd = 说明符闭引号），故 from 后要吃掉说明符再锚串尾。
+  // 注意 ([^}]*) 是捕获组 1（取花括号内 item 用），引号处不能用 \1 反向引用（会回引花括号内容）。
+  const brace = /^(?:import|export)\s*\{([^}]*)\}\s*from\s*(?:'(?:\.[^']*)'|"(?:\.[^"]*)")\s*$/.exec(head)
   if (brace) {
     const items = brace[1]!.split(',').map(s => s.trim()).filter(Boolean)
     if (items.length > 0 && items.every(i => /^type\s/.test(i))) return true
