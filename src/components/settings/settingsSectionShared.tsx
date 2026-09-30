@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { useStore } from '../../domains/theme/themeStore'
+import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { zonePresetsFor, isCustomZonePresetEntry, type ZonePresetEntry } from '../../domains/theme/zones/index.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 
@@ -33,7 +33,7 @@ export function ZonePresetRow({ zone, interfaceMode, activeName, isDirty, onAppl
   onSaveCurrent: (zone: ZonePresetEntry['zone'], name: string) => void
   onRemoveEntry: (id: string) => void
 }) {
-  const customEntries = useStore(s => s.zonePresetEntries)
+  const customEntries = useCustomPresetStore(s => s.zonePresetEntries)
   const entries = zonePresetsFor(interfaceMode, zone, customEntries)
   const [entryName, setEntryName] = useState('')
   // 刀7 前置（#211）：行内两段式确认的待删条目（照全局自定义预设先例，不常驻、不开模态）

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetStores } from '../../../test/resetStores.ts'
 import TemplateLibrary from '../TemplateLibrary.tsx'
 import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useCustomPresetStore } from '../../../domains/theme/customPresetStore.ts'
 
 vi.mock('../../SettingsPreview.tsx', () => ({
   default: () => <div data-testid="settings-preview" />,
@@ -13,7 +14,7 @@ describe('TemplateLibrary global presets', () => {
   beforeEach(() => resetStores())
 
   it('点击自定义模板按 canonical id 应用主题，而不是展示名称', async () => {
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'custom-42', name: '我的同名模板', theme: { chatFontSize: 19 }, createdAt: 1, updatedAt: 1,
     }] })
     render(<TemplateLibrary onApply={vi.fn()} onRestore={vi.fn()} />)
@@ -25,7 +26,7 @@ describe('TemplateLibrary global presets', () => {
   })
 
   it('把旧版 bare id 归一化后再交给应用 transaction', async () => {
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'legacy-42', name: '旧版模板', theme: { chatFontSize: 18 }, createdAt: 1, updatedAt: 1,
     }] })
     const onCustomApply = vi.fn(async () => ({
@@ -39,7 +40,7 @@ describe('TemplateLibrary global presets', () => {
   })
 
   it('把 provider 失败结果显示为可操作的错误，而不是静默成功', async () => {
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'custom-failed', name: '失败模板', theme: { chatFontSize: 19 }, createdAt: 1, updatedAt: 1,
     }] })
     const onCustomApply = vi.fn(async () => ({

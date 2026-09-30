@@ -57,7 +57,9 @@ export interface ReplayMetadata {
 /** 冷挂载 turn 状态（后端 `TurnLedger` 最近一条会话快照）。 */
 export interface ColdMountTurnState {
   readonly phase?: string
-  readonly terminal?: { readonly cause?: string; readonly detail?: string }
+  /** 回合起点（毫秒）。#442 Step1 透传——elapsed 判定臂由后端字段替代的输入。 */
+  readonly startedAtMs?: number
+  readonly terminal?: { readonly cause?: string; readonly settledAtMs?: number; readonly detail?: string }
   readonly key?: {
     readonly localSessionId?: string
     readonly remoteSessionId?: string
@@ -104,6 +106,25 @@ export interface PersistedSessionLoadResult {
   diagnostics: readonly unknown[]
   /** #110 F4：冷挂载 turn 快照（畸形/缺失 → undefined，绝不抛）。 */
   turn?: ColdMountTurnSnapshot
+  /**
+   * #442 Step1：load 响应顶层 `turnBoundary`——后端权威的**最新回合边界**
+   * （kind + 两端时间戳）。账本有记录即权威（journal 终态行的落盘时序不再参与
+   * 结论，前端跨源「或」判定在此字段可用时退役）；账本为空时为 journal tail
+   * 判据（照抄前端 `latestTurnBoundary`，ADR-0029）。缺失/畸形 → undefined
+   * （前端回退现有判定轨）。
+   */
+  turnBoundary?: PersistedTurnBoundary
+}
+
+/** #442 Step1：最新回合边界形态（后端 `pylon-session::turn_boundary` 的 wire 投影）。 */
+export type PersistedTurnBoundaryKind = 'terminal' | 'open' | 'unknown'
+
+export interface PersistedTurnBoundary {
+  readonly kind: PersistedTurnBoundaryKind
+  /** 回合起点（terminal = 闭合回合的起点；open = 当前在途回合的起点；unknown 缺省）。 */
+  readonly startedAtMs?: number
+  /** 回合终点（仅 terminal 且耗时两端可测时存在）。 */
+  readonly endedAtMs?: number
 }
 
 function finiteNonNegativeInteger(value: unknown): number | null {
@@ -121,6 +142,23 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
+ * #442 Step1：`turnBoundary` 逐字段类型守卫——kind 三值枚举，时间戳必须非负安全
+ * 整数；畸形键丢弃（缺失不伪造），整体缺失返回 undefined（调用方不留空键，
+ * 前端回退现有判定轨）。
+ */
+function normalizeTurnBoundary(raw: unknown): PersistedTurnBoundary | undefined {
+  if (!isRecord(raw)) return undefined
+  if (raw.kind !== 'terminal' && raw.kind !== 'open' && raw.kind !== 'unknown') return undefined
+  const startedAtMs = finiteNonNegativeInteger(raw.startedAtMs)
+  const endedAtMs = finiteNonNegativeInteger(raw.endedAtMs)
+  return {
+    kind: raw.kind,
+    ...(startedAtMs !== null ? { startedAtMs } : {}),
+    ...(endedAtMs !== null ? { endedAtMs } : {}),
+  }
+}
+
+/**
  * #110 F4：冷挂载 turn 快照归一化——只透传已知字段，且每个字段都过类型守卫；
  * 非对象/null 返回 undefined（缺失不伪造）。未知扩展字段不进入返回值
  * （该快照是权威事实投影，不是 raw 回放通道）。
@@ -135,6 +173,7 @@ export function normalizeColdMountTurnSnapshot(raw: unknown): ColdMountTurnSnaps
     const terminal = isRecord(turnCandidate.terminal)
       ? {
           ...(nonEmptyString(turnCandidate.terminal.cause) !== undefined ? { cause: nonEmptyString(turnCandidate.terminal.cause)! } : {}),
+          ...(finiteNonNegativeInteger(turnCandidate.terminal.settledAtMs) !== null ? { settledAtMs: finiteNonNegativeInteger(turnCandidate.terminal.settledAtMs)! } : {}),
           ...(nonEmptyString(turnCandidate.terminal.detail) !== undefined ? { detail: nonEmptyString(turnCandidate.terminal.detail)! } : {}),
         }
       : undefined
@@ -148,6 +187,7 @@ export function normalizeColdMountTurnSnapshot(raw: unknown): ColdMountTurnSnaps
       : undefined
     turn = {
       ...(nonEmptyString(turnCandidate.phase) !== undefined ? { phase: nonEmptyString(turnCandidate.phase)! } : {}),
+      ...(finiteNonNegativeInteger(turnCandidate.startedAtMs) !== null ? { startedAtMs: finiteNonNegativeInteger(turnCandidate.startedAtMs)! } : {}),
       ...(terminal !== undefined ? { terminal } : {}),
       ...(key !== undefined ? { key } : {}),
     }
@@ -208,6 +248,7 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
     ? record.replayJournalStatus
     : 'metadata-unavailable'
   const turn = normalizeColdMountTurnSnapshot(record.turn)
+  const turnBoundary = normalizeTurnBoundary(record.turnBoundary)
 
   return {
     response: 'response' in record ? record.response : raw,
@@ -289,6 +330,8 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
     // #110 F4：冷挂载 turn 快照级联透传（此前被归一化器丢弃，冷挂载链路拿不到
     // turn 事实，状态条只能退回不完整的本地推断）。缺失时不留空键。
     ...(turn !== undefined ? { turn } : {}),
+    // #442 Step1：权威回合边界级联透传（缺失时不留空键，前端回退现有判定轨）。
+    ...(turnBoundary !== undefined ? { turnBoundary } : {}),
   }
 }
 

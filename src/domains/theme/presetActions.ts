@@ -27,11 +27,17 @@ import {
 import { createFirstPartyPresetProviderRegistry } from './firstPartyPresetProviders.ts'
 import { recordSettingWrites } from './settingProvenance.ts'
 import type { ThemeState } from './themeStore.ts'
+import type { CustomPresetState } from './customPresetStore.ts'
 
-/** store 注入面：与 zustand set/get 形态结构等价（不引运行时，只约束用法子集）。 */
+/**
+ * store 注入面：与 zustand set/get 形态结构等价（不引运行时，只约束用法子集）。
+ * #448 PR5：预设切片拆独立 store 后，这里是**合成视图**——get 合并 themeStore 与
+ * customPresetStore，set 由注入方按字段路由（customPresets/zonePresetEntries 落
+ * customPresetStore，主题字段落 themeStore）；事务骨架（快照/回滚/串行队列）零改动。
+ */
 export interface PresetStoreApi {
-  get: () => ThemeState
-  set: (partial: Partial<ThemeState> | ((state: ThemeState) => Partial<ThemeState>)) => void
+  get: () => ThemeState & CustomPresetState
+  set: (partial: Partial<ThemeState & CustomPresetState> | ((state: ThemeState & CustomPresetState) => Partial<ThemeState & CustomPresetState>)) => void
 }
 
 let customPresetApplyRevision = 0

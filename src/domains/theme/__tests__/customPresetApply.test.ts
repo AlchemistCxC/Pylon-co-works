@@ -1,21 +1,25 @@
 // @vitest-environment jsdom
 // D-fix 回归：自定义预设"切换后未生效"——store 级应用链路（v2 bundle 提交 +
 // 静默失败可见化）。三段：正常应用、持久化往返后应用、失效 id 必须可见报告。
+// #448 PR5：预设列表/动作已拆 customPresetStore（主题字段仍在 themeStore）。
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStore } from '../themeStore.ts'
+import { useCustomPresetStore } from '../customPresetStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
-import { THEME_SCHEMA_VERSION, themeDomainMigrate } from '../migration.ts'
+import { normalizeCustomPresets } from '../customPresets.ts'
 import { createPresetBundle } from '../presetBundle.ts'
 import { getRendererSettingsStore } from '../../../plugin-runtime/runtimeServices.ts'
 
 function snapshotState() {
-  const state = useStore.getState()
+  const theme = useStore.getState()
+  const presets = useCustomPresetStore.getState()
   return JSON.parse(JSON.stringify({
     theme: Object.fromEntries([
       'chatFontSize', 'chatFont', 'toolIndicator', 'toolIndicatorRun', 'toolIndicatorOk',
       'toolIndicatorErr', 'assistantDot', 'assistantDotGlyph', 'appliedPreset', 'custom',
-      'customPresets', 'ccHeight',
-    ].map(key => [key, (state as unknown as Record<string, unknown>)[key]])),
+      'ccHeight',
+    ].map(key => [key, (theme as unknown as Record<string, unknown>)[key]])),
+    customPresets: presets.customPresets,
   }))
 }
 
@@ -35,13 +39,13 @@ describe('custom preset apply (D-fix)', () => {
       assistantDot: true,
       assistantDotGlyph: '◆',
     })
-    const id = store.saveCustomPreset('指示器回归')
+    const id = useCustomPresetStore.getState().saveCustomPreset('指示器回归')
 
     // 漂移现场：改字段 + 应用一个内置全局预设（与真实"切换"路径一致）
     useStore.getState().setZoneField('chat', { chatFontSize: 12, assistantDotGlyph: '■' })
     useStore.getState().setGlobalPreset('nord', { chatFontSize: 14 })
 
-    await useStore.getState().applyCustomPreset(id)
+    await useCustomPresetStore.getState().applyCustomPreset(id)
 
     const state = useStore.getState()
     expect(state.chatFontSize).toBe(19)
@@ -58,9 +62,9 @@ describe('custom preset apply (D-fix)', () => {
   it('returns an applied result after the complete provider transaction settles', async () => {
     const store = useStore.getState()
     store.setZoneField('chat', { chatFontSize: 21 })
-    const id = store.saveCustomPreset('结果回归')
+    const id = useCustomPresetStore.getState().saveCustomPreset('结果回归')
 
-    const result = await useStore.getState().applyCustomPreset(id)
+    const result = await useCustomPresetStore.getState().applyCustomPreset(id)
     expect(result).toMatchObject({ status: 'applied', id })
     if (result.status !== 'applied') throw new Error('custom preset unexpectedly failed')
     expect(result.providers).toEqual(expect.arrayContaining(['builtin.theme', 'builtin.presentation', 'builtin.renderer-settings']))
@@ -68,7 +72,7 @@ describe('custom preset apply (D-fix)', () => {
   })
 
   it('rejects a custom bundle without a valid Theme contribution instead of resetting to defaults', async () => {
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'custom-invalid-bundle', name: '损坏预设', theme: { chatFontSize: 29 }, createdAt: 1, updatedAt: 1,
       bundle: {
         manifestVersion: 2, id: 'custom-invalid-bundle', name: '损坏预设', source: 'user',
@@ -79,7 +83,7 @@ describe('custom preset apply (D-fix)', () => {
     }] as never })
     useStore.getState().setZoneField('chat', { chatFontSize: 29 })
 
-    const result = await useStore.getState().applyCustomPreset('custom-invalid-bundle')
+    const result = await useCustomPresetStore.getState().applyCustomPreset('custom-invalid-bundle')
     expect(result).toMatchObject({ status: 'failed', id: 'custom-invalid-bundle', failedProvider: 'builtin.theme', rolledBack: true })
     expect(useStore.getState().chatFontSize).toBe(29)
   })
@@ -88,7 +92,7 @@ describe('custom preset apply (D-fix)', () => {
     const rendererStore = getRendererSettingsStore()
     const beforeRenderer = rendererStore.getSnapshot()
     useStore.getState().setZoneField('chat', { chatFontSize: 17 })
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'custom-renderer-failure', name: '渲染器失败', theme: { chatFontSize: 29 }, createdAt: 1, updatedAt: 1,
       bundle: createPresetBundle({
         id: 'custom-renderer-failure', name: '渲染器失败', now: 1, theme: { chatFontSize: 29 },
@@ -104,7 +108,7 @@ describe('custom preset apply (D-fix)', () => {
       originalReplace(values, unavailable)
     })
     try {
-      const result = await useStore.getState().applyCustomPreset('custom-renderer-failure')
+      const result = await useCustomPresetStore.getState().applyCustomPreset('custom-renderer-failure')
       expect(result).toMatchObject({ status: 'failed', failedProvider: 'builtin.renderer-settings', rolledBack: true })
       expect(useStore.getState().chatFontSize).toBe(17)
       expect(rendererStore.getSnapshot()).toMatchObject({ values: beforeRenderer.values, unavailable: beforeRenderer.unavailable })
@@ -114,24 +118,17 @@ describe('custom preset apply (D-fix)', () => {
     }
   })
 
-  it('applies after a persistence roundtrip (localStorage rehydrate + migrate)', async () => {
-    const store = useStore.getState()
-    store.setZoneField('chat', { chatFontSize: 20, toolIndicatorRun: 'hourglass' })
-    const id = store.saveCustomPreset('往返回归')
+  it('applies after a persistence roundtrip (customPresetStore rehydrate + merge 归一)', async () => {
+    useStore.getState().setZoneField('chat', { chatFontSize: 20, toolIndicatorRun: 'hourglass' })
+    const id = useCustomPresetStore.getState().saveCustomPreset('往返回归')
 
-    const persisted = JSON.parse(JSON.stringify(useStore.getState()))
-    const migrated = themeDomainMigrate(persisted, {
-      base: useStore.getState(),
-      appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-      custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
-      ccLayout: useStore.getState().ccLayout,
-    }, THEME_SCHEMA_VERSION) as Record<string, unknown>
-
-    // 模拟重放水后的 store：customPresets 来自迁移产物
-    useStore.setState({ customPresets: migrated.customPresets as never })
+    // 模拟新键持久化往返：序列化 → 反序列化 → store merge 的领域归一
+    // （#448 PR5：customPresets 归一职责自 themeDomainMigrate 移交本 store）
+    const persisted = JSON.parse(JSON.stringify(useCustomPresetStore.getState().customPresets))
+    useCustomPresetStore.setState({ customPresets: normalizeCustomPresets(persisted) })
     useStore.getState().setZoneField('chat', { chatFontSize: 12 })
 
-    await useStore.getState().applyCustomPreset(id)
+    await useCustomPresetStore.getState().applyCustomPreset(id)
     expect(useStore.getState().chatFontSize).toBe(20)
     expect(useStore.getState().toolIndicatorRun).toBe('hourglass')
     expect(useStore.getState().appliedPreset.chat).toBe(id)
@@ -143,7 +140,7 @@ describe('custom preset apply (D-fix)', () => {
     rendererStore.setOverride('kind.tool.read.density', 'compact')
     rendererStore.markUnavailable('kind.tool.read.status', 'legacy')
     const id = 'custom-partial-renderer'
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id, name: '局部 Renderer', theme: { chatFontSize: 18 }, createdAt: 1, updatedAt: 1,
       bundle: createPresetBundle({
         id, name: '局部 Renderer', now: 1, theme: { chatFontSize: 18 },
@@ -151,7 +148,7 @@ describe('custom preset apply (D-fix)', () => {
       }),
     }] as never })
 
-    const result = await useStore.getState().applyCustomPreset(id)
+    const result = await useCustomPresetStore.getState().applyCustomPreset(id)
     expect(result.status).toBe('applied')
     expect(rendererStore.getSnapshot().values).toMatchObject({
       'kind.tool.read.maxWidth': 720,
@@ -162,21 +159,21 @@ describe('custom preset apply (D-fix)', () => {
   })
 
   it('normalizes a legacy bare id at the click boundary', async () => {
-    useStore.setState({ customPresets: [{
+    useCustomPresetStore.setState({ customPresets: [{
       id: 'custom-legacy-id', name: '旧 id', theme: { chatFontSize: 21 }, createdAt: 1, updatedAt: 1,
     }] })
-    const result = await useStore.getState().applyCustomPreset('legacy-id')
+    const result = await useCustomPresetStore.getState().applyCustomPreset('legacy-id')
     expect(result).toMatchObject({ status: 'applied', id: 'custom-legacy-id' })
     expect(useStore.getState().chatFontSize).toBe(21)
   })
 
   it('serializes rapid custom preset clicks so the later revision wins', async () => {
-    useStore.setState({ customPresets: [
+    useCustomPresetStore.setState({ customPresets: [
       { id: 'custom-first', name: '先', theme: { chatFontSize: 16 }, createdAt: 1, updatedAt: 1 },
       { id: 'custom-second', name: '后', theme: { chatFontSize: 22 }, createdAt: 2, updatedAt: 2 },
     ] })
-    const first = useStore.getState().applyCustomPreset('custom-first')
-    const second = useStore.getState().applyCustomPreset('custom-second')
+    const first = useCustomPresetStore.getState().applyCustomPreset('custom-first')
+    const second = useCustomPresetStore.getState().applyCustomPreset('custom-second')
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult.status).toBe('applied')
     expect(secondResult.status).toBe('applied')
@@ -189,7 +186,7 @@ describe('custom preset apply (D-fix)', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const before = snapshotState()
-      await useStore.getState().applyCustomPreset('custom-does-not-exist')
+      await useCustomPresetStore.getState().applyCustomPreset('custom-does-not-exist')
       expect(spy).toHaveBeenCalled()
       expect(snapshotState()).toEqual(before)
     } finally {

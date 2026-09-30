@@ -18,7 +18,7 @@ import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.t
 import { useIdentityStore, type Session } from '../../domains/identity/identityStore.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore.ts'
 import { reportRuntimeDiagnostic, reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import type { ColdMountTurnSnapshot, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
+import type { ColdMountTurnSnapshot, PersistedTurnBoundary, ReplayMetadata } from '../../infrastructure/acp/sessionClient.ts'
 import { sessionResponseObject } from '../../infrastructure/acp/chatContracts.ts'
 import { applySessionStateResponse } from '../../domains/session/sessionStateSync.ts'
 import { CHAT_REPLAY_TRACE_CONTRACT, recordChatReplayTrace, replayErrorCode, safeContentEvidence } from '../../domains/chat/chatReplayTrace.ts'
@@ -318,7 +318,8 @@ export class AgentWorkbenchLifecycle {
       // load 后 canonical journal 可能发现 bind 读漏掉的终态事件——通知宿主 refresh。
       // #99 账本快照随 outcome 一起交宿主：journal 读可能早于终态行落盘，账本是
       // 不依赖一次性 Tauri event 的终态证据（见 refresh 的 ledgerTurn 说明）。
-      this.onCanonicalRefresh?.(session, outcome.canonicalRevision, outcome.turn)
+      // #442 Step1：权威 turnBoundary 一并交下（「或」判定在字段可用时退役）。
+      this.onCanonicalRefresh?.(session, outcome.canonicalRevision, outcome.turn, outcome.turnBoundary)
     }
     catch (error) {
       if (this.coordinator.currentGeneration(session.source) !== loadGeneration) return
@@ -378,7 +379,7 @@ export class AgentWorkbenchLifecycle {
   }
 
   /** load 完成信号（宿主接 sessionRuntime.refresh）。 */
-  onCanonicalRefresh?: (session: Session, canonicalRevision: number, turn?: ColdMountTurnSnapshot) => void
+  onCanonicalRefresh?: (session: Session, canonicalRevision: number, turn?: ColdMountTurnSnapshot, turnBoundary?: PersistedTurnBoundary) => void
   /** #358：load 成功后的会话响应（协商目录）交宿主投影进工作台文档；未接线时静默跳过。 */
   onSessionLoadResponse?: (session: Session, response: unknown) => void
 }

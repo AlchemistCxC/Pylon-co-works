@@ -321,7 +321,18 @@ impl AgentRuntime {
     /// - `replayLoading`：session/load 回放进行中标志（replay progress 输入）。
     ///
     /// 会话映射不存在时返回 None（调用方不得伪造空快照）。
-    pub(crate) async fn cold_mount_turn_snapshot(&self, source: &str) -> Option<serde_json::Value> {
+    ///
+    /// #442 Step1：本方法为**单次读取**，除 JSON 快照体外同时归还类型化最新
+    /// 账本记录（load 顶层 `turnBoundary` 的账本侧合成输入）——两份事实出自
+    /// 同一账本读，避免「快照说在途、边界说已收敛」的响应内自相矛盾（两次
+    /// 读取之间发生 settle 的竞态）。仅要快照体的调用方（契约测试）取 `.0`。
+    pub(crate) async fn cold_mount_facts(
+        &self,
+        source: &str,
+    ) -> Option<(
+        serde_json::Value,
+        Option<crate::acp::turn_ledger::TurnRecord>,
+    )> {
         let (peri_id, generation, replay_loading) = {
             let sessions = self.sessions.lock().ok()?;
             let session = sessions.get(source)?;
@@ -337,9 +348,11 @@ impl AgentRuntime {
             .ok()
             .and_then(|state| state.last_error.clone());
         let sequence = self.acp.lock().await.backend.telemetry.snapshot();
-        let turn = self
+        let ledger_turn = self
             .turn_ledger
-            .latest_session_snapshot(source, &peri_id, generation)
+            .latest_session_snapshot(source, &peri_id, generation);
+        let turn = ledger_turn
+            .as_ref()
             .and_then(|record| serde_json::to_value(record).ok());
         // #420/ADR-0034：在途事实单源化——`turn` 记录无 terminal 即在途
         // （与 latest_session_snapshot 的「在途优先」选择器同口径，无第二来源）。
@@ -367,18 +380,21 @@ impl AgentRuntime {
                  drop_generation should have cleared them (ADR-0034 diagnostic)"
             );
         }
-        Some(serde_json::json!({
-            "source": source,
-            "periId": peri_id,
-            "generation": generation,
-            "turn": turn,
-            "turnInFlight": turn_in_flight,
-            "turnInFlightAnomaly": turn_in_flight_anomaly,
-            "turnInFlightAnomalies": self.turn_in_flight_anomalies.load(Ordering::Relaxed),
-            "sequence": serde_json::to_value(sequence).unwrap_or(serde_json::Value::Null),
-            "replayLoading": replay_loading,
-            "lastError": last_error,
-        }))
+        Some((
+            serde_json::json!({
+                "source": source,
+                "periId": peri_id,
+                "generation": generation,
+                "turn": turn,
+                "turnInFlight": turn_in_flight,
+                "turnInFlightAnomaly": turn_in_flight_anomaly,
+                "turnInFlightAnomalies": self.turn_in_flight_anomalies.load(Ordering::Relaxed),
+                "sequence": serde_json::to_value(sequence).unwrap_or(serde_json::Value::Null),
+                "replayLoading": replay_loading,
+                "lastError": last_error,
+            }),
+            ledger_turn,
+        ))
     }
 
     /// O1：prompt 锁表随会话生命周期收敛（单 key 移除）——映射删除 = 该 source
@@ -524,8 +540,8 @@ mod tests {
                 3,
             ),
         );
-        let snapshot = runtime
-            .cold_mount_turn_snapshot("local:c1")
+        let (snapshot, _) = runtime
+            .cold_mount_facts("local:c1")
             .await
             .expect("session mapping exists");
         assert_eq!(snapshot["periId"], serde_json::json!("peri-c1"));
@@ -572,8 +588,8 @@ mod tests {
 
         // ① 在途：账本 begin 即单源事实，无 anomaly。
         runtime.turn_ledger.begin(key.clone(), 10);
-        let snapshot = runtime
-            .cold_mount_turn_snapshot("local:c2")
+        let (snapshot, _) = runtime
+            .cold_mount_facts("local:c2")
             .await
             .expect("session mapping exists");
         assert_eq!(snapshot["turnInFlight"], serde_json::json!(true));
@@ -588,8 +604,8 @@ mod tests {
                 .settle(&key, crate::acp::TurnTerminalCause::Completed, 20, None,),
             crate::acp::SettleOutcome::Published
         );
-        let snapshot = runtime
-            .cold_mount_turn_snapshot("local:c2")
+        let (snapshot, _) = runtime
+            .cold_mount_facts("local:c2")
             .await
             .expect("session mapping exists");
         assert_eq!(snapshot["turnInFlight"], serde_json::json!(false));
@@ -605,15 +621,15 @@ mod tests {
             turn_id: 3,
         };
         runtime.turn_ledger.begin(stale_key, 5);
-        let snapshot = runtime
-            .cold_mount_turn_snapshot("local:c2")
+        let (snapshot, _) = runtime
+            .cold_mount_facts("local:c2")
             .await
             .expect("session mapping exists");
         assert_eq!(snapshot["turnInFlight"], serde_json::json!(false));
         assert_eq!(snapshot["turnInFlightAnomaly"], serde_json::json!(true));
         assert_eq!(snapshot["turnInFlightAnomalies"], serde_json::json!(1));
         // 连续查询累计计数单调。
-        let _ = runtime.cold_mount_turn_snapshot("local:c2").await;
+        let _ = runtime.cold_mount_facts("local:c2").await;
         assert_eq!(
             runtime.turn_in_flight_anomalies.load(Ordering::Acquire),
             2,

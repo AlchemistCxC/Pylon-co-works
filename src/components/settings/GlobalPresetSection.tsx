@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../../domains/theme/themeStore'
+import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { resolveRuntimeErrors } from '../../app/runtimeError'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../../application/transactions/applyGlobalPreset.ts'
 import { normalizeCustomPresetId } from '../../domains/theme/customPresets'
@@ -22,10 +23,10 @@ export default function GlobalPresetSection({ isSearching, children }: {
   children?: React.ReactNode
 }) {
   const globalStatus = useStore(s => deriveGlobalStatus(s))
-  const customPresets = useStore(s => s.customPresets)
-  const applyCustomPreset = useStore(s => s.applyCustomPreset)
-  const saveCustomPreset = useStore(s => s.saveCustomPreset)
-  const removeCustomPreset = useStore(s => s.removeCustomPreset)
+  const customPresets = useCustomPresetStore(s => s.customPresets)
+  const applyCustomPreset = useCustomPresetStore(s => s.applyCustomPreset)
+  const saveCustomPreset = useCustomPresetStore(s => s.saveCustomPreset)
+  const removeCustomPreset = useCustomPresetStore(s => s.removeCustomPreset)
   const currentInterfaceMode = useInterfaceModeStore(s => s.interfaceMode)
   const modeBucket = INTERFACE_MODE_PRESET_BUCKET[currentInterfaceMode]
   /** #116 子项 7：预设行兜底 chip 的口径见 presets.ts 的 fallbackPresetChip。 */

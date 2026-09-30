@@ -5,6 +5,7 @@ import { GLOBAL_PRESETS } from '../presets/index.ts'
 import { effectivePresetTheme } from '../zones/index.ts'
 import { ZONE_FIELDS } from '../themeFieldDefs.ts'
 import type { ThemeSettings } from '../themeStore'
+import type { CustomPreset } from '../customPresets.ts'
 import {
   applyCustomPresetReducer,
   applyZonePresetReducer,
@@ -61,7 +62,7 @@ describe('applyCustomPresetReducer — 业务状态隔离 + ccLayout 归一化�
   const preset = {
     id: 'custom-isolation',
     name: '隔离测试',
-    theme: poisonedTheme as unknown as ThemePresetState['customPresets'][number]['theme'],
+    theme: poisonedTheme as unknown as CustomPreset['theme'],
     createdAt: 1,
     updatedAt: 1,
   }

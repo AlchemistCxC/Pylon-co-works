@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ZoneGroupFields } from './settings/themeFieldRenderer'
 import { useStore } from '../domains/theme/themeStore'
+import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../domains/theme/themeStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../domains/theme/customPresets'
@@ -76,9 +77,9 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const applyZonePreset = useStore(s => s.applyZonePreset)
   // 刀6（#206）：区域预设池自定义条目的存入口 + Q8 落盘清理（每次打开设置过一遍，
   // 读入容错也在此收口；无变化不写状态）。
-  const saveZonePresetEntry = useStore(s => s.saveZonePresetEntry)
-  const pruneZonePresetEntries = useStore(s => s.pruneZonePresetEntries)
-  const removeZonePresetEntry = useStore(s => s.removeZonePresetEntry)
+  const saveZonePresetEntry = useCustomPresetStore(s => s.saveZonePresetEntry)
+  const pruneZonePresetEntries = useCustomPresetStore(s => s.pruneZonePresetEntries)
+  const removeZonePresetEntry = useCustomPresetStore(s => s.removeZonePresetEntry)
   useEffect(() => { pruneZonePresetEntries() }, [pruneZonePresetEntries])
   const currentInterfaceMode = useInterfaceModeStore(s => s.interfaceMode)
   const sessions = useIdentityStore(s => s.sessions)
@@ -133,7 +134,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
     if (!modeBucket) return
     const id = saveZonePresetEntry(modeBucket, zone, name)
     if (!id) return
-    const entry = useStore.getState().zonePresetEntries.find(item => item.id === id)
+    const entry = useCustomPresetStore.getState().zonePresetEntries.find(item => item.id === id)
     const theme = entry ? resolveZonePresetEntryTheme(entry) : null
     if (theme) applyZonePreset(zone, id, theme)
   }
@@ -142,7 +143,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
   const applyGlobalPresetByName = (name: string) => {
     applyGlobalPresetTransaction(name)
   }
-  const applyCustomPresetStore = useStore(s => s.applyCustomPreset)
+  const applyCustomPresetStore = useCustomPresetStore(s => s.applyCustomPreset)
   const applyCustomPresetTransaction = (requestedId: string): Promise<PresetApplyResult> =>
     applyCustomPresetStore(normalizeCustomPresetId(requestedId))
 

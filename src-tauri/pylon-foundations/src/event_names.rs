@@ -14,6 +14,10 @@ pub const SESSION_UPDATE: &str = "pylon:update";
 pub const SESSION_DONE: &str = "pylon:done";
 /// 回合失败（§4.3，{source, error}）。
 pub const SESSION_ERROR: &str = "pylon:error";
+/// #442 Step3：账本 settle 广播（{source, turn: TurnRecord}）——内核终态事实的
+/// 收敛主轨（与 Channel 注册生命周期无关，仅 CAS Published 时至多一次）；
+/// done/error 帧退化为正文/usage 载体。
+pub const TURN_SETTLED: &str = "pylon:turn-settled";
 /// 用户消息回显（§4.4，{source, content, replay?, injectActivated?}；不投平台）。
 pub const USER_ECHO: &str = "pylon:user";
 /// #98：session/fork 完成（{parentSource, parentPeriId, childSource, periId,
@@ -55,6 +59,7 @@ pub const ALL_EVENT_NAMES: &[&str] = &[
     SESSION_UPDATE,
     SESSION_DONE,
     SESSION_ERROR,
+    TURN_SETTLED,
     USER_ECHO,
     INTERACTION,
     INTERACTION_REJECTED,

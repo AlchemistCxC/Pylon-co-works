@@ -2685,3 +2685,101 @@ fn rollup_trim_refolds_with_the_scheme_recorded_on_the_unit() {
         .count();
     assert_eq!(plain_rows, 0, "覆盖行已删除");
 }
+
+// ---- #442 Step1：turnBoundary journal 探测（tail 行投影 + 判据组合）----
+
+fn user_chunk(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "update": { "sessionUpdate": "user_message_chunk", "content": { "text": text } }
+    })
+}
+
+fn done_update() -> serde_json::Value {
+    serde_json::json!({ "update": { "sessionUpdate": "done" } })
+}
+
+#[test]
+fn turn_boundary_rows_keep_only_boundary_kinds_in_ascending_order() {
+    let repo = repo();
+    repo.ingest_kernel_events(vec![
+        kernel_input(user_chunk("hi")),
+        kernel_input(done_update()),
+        kernel_input(user_chunk("second")),
+    ])
+    .expect("batch ingest");
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+
+    let rows = repo
+        .turn_boundary_rows(&owner_key, 512)
+        .expect("boundary rows");
+    let kinds: Vec<(i64, &str)> = rows
+        .iter()
+        .map(|r| (r.sequence, r.event_type.as_str()))
+        .collect();
+    // 只含判据四类型（user.message / turn.completed / turn.unit），升序；
+    // 时间戳列随行返回（span 扫描的输入）。
+    assert_eq!(
+        kinds,
+        vec![
+            (1, "user.message"),
+            (2, "turn.completed"),
+            (3, "turn.unit"),
+            (4, "user.message"),
+        ]
+    );
+    assert!(rows
+        .iter()
+        .all(|r| r.occurred_at.is_some() && r.received_at.is_some()));
+}
+
+#[test]
+fn journal_turn_boundary_open_when_latest_boundary_is_anchor() {
+    let repo = repo();
+    repo.ingest_kernel_events(vec![
+        kernel_input(user_chunk("hi")),
+        kernel_input(done_update()),
+        kernel_input(user_chunk("second")),
+    ])
+    .expect("batch ingest");
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    let rows = repo.turn_boundary_rows(&owner_key, 512).unwrap();
+    let boundary = crate::turn_boundary::derive_turn_boundary(&rows).unwrap();
+    assert_eq!(boundary.kind, crate::turn_boundary::TurnBoundaryKind::Open);
+    assert!(
+        boundary.started_at_ms.is_some(),
+        "open 回合必须给出当前起点"
+    );
+    assert_eq!(boundary.ended_at_ms, None);
+}
+
+#[test]
+fn journal_turn_boundary_terminal_when_journal_ends_on_terminal_row() {
+    let repo = repo();
+    repo.ingest_kernel_events(vec![
+        kernel_input(user_chunk("hi")),
+        kernel_input(done_update()),
+    ])
+    .expect("batch ingest");
+    let owner_key = serde_json::to_string(&["p1", "peri", "local:s1"]).unwrap();
+    let rows = repo.turn_boundary_rows(&owner_key, 512).unwrap();
+    let boundary = crate::turn_boundary::derive_turn_boundary(&rows).unwrap();
+    assert_eq!(
+        boundary.kind,
+        crate::turn_boundary::TurnBoundaryKind::Terminal
+    );
+    assert!(boundary.started_at_ms.is_some());
+    assert!(boundary.ended_at_ms.is_some());
+}
+
+#[test]
+fn journal_turn_boundary_unknown_on_empty_journal() {
+    let repo = repo();
+    let owner_key = serde_json::to_string(&["p1", "ghost", "local:none"]).unwrap();
+    let rows = repo.turn_boundary_rows(&owner_key, 512).unwrap();
+    assert!(rows.is_empty());
+    let boundary = crate::turn_boundary::derive_turn_boundary(&rows).unwrap();
+    assert_eq!(
+        boundary.kind,
+        crate::turn_boundary::TurnBoundaryKind::Unknown
+    );
+}
