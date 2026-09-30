@@ -134,7 +134,7 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
     expect(cachedInputPredictionSettings()).toMatchObject({ apiKey: 'sk-keep' })
   })
 
-  it('persist：后端写穿失败且影子写不进（quota）→ 不置标志（拿不出可证较新的值）', async () => {
+  it('persist：后端写穿失败且影子写不进（quota）→ 仍置标志（审查轮修正：宁可多置待自愈）', async () => {
     const setItem = globalThis.localStorage.setItem.bind(globalThis.localStorage)
     vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
       if (key === INPUT_PREDICTION_SETTINGS_KEY) throw new DOMException('quota', 'QuotaExceededError')
@@ -144,7 +144,8 @@ describe('Tauri 模式（IS_TAURI=true）', () => {
     persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, apiKey: 'sk-unrecoverable' })
     await new Promise(resolve => globalThis.setTimeout(resolve, 0))
     expect(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)).toBeNull()
-    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+    // 失败一律置位：若影子恰与后端一致属 no-op 失败多置，hydrate 等值检查自愈清除
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
     vi.restoreAllMocks()
   })
 })
@@ -213,5 +214,69 @@ describe('#463 前端 C-1：未同步标志对账', () => {
     expect(cachedInputPredictionSettings()).toMatchObject({ mode: 'off', apiKey: 'sk-lost' })
     expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
     expect(reportRuntimeError).toHaveBeenCalled()
+  })
+
+  it('标志在场但影子损坏 → 后端赢并清标志（不恢复垃圾）', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    globalThis.localStorage.setItem(INPUT_PREDICTION_SETTINGS_KEY, '{broken json')
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await hydrateInputPredictionSettingsFromBackend()
+    expect(cachedInputPredictionSettings().mode).toBe('fork')
+    expect(fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')).toHaveLength(0)
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('审查轮收口：迁移写穿入链——标志在场时迁移成功清标志', async () => {
+    fakeInvoke.register('user_data_load', () => null)
+    fakeInvoke.register('user_data_save', () => ({ revision: 1 }))
+    seedLegacyKey()
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    await hydrateInputPredictionSettingsFromBackend()
+    expect(fakeInvoke.calls.some(call => call.cmd === 'user_data_save')).toBe(true)
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('审查轮收口：影子赢重发在飞期间的用户保存入链串行，最终落库为较新的用户值', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 2, payload: { version: 1, mode: 'fork', enabled: true },
+    }))
+    fakeInvoke.register('user_data_save', () => ({ revision: 9 }))
+    fakeInvoke.setDelay('user_data_save', 10)
+    const lost = { ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'off' as const, apiKey: 'sk-lost' }
+    globalThis.localStorage.setItem(INPUT_PREDICTION_SETTINGS_KEY, JSON.stringify(lost))
+    globalThis.localStorage.setItem(UNSYNCED_FLAG_KEY, '1')
+    const hydrating = hydrateInputPredictionSettingsFromBackend()
+    // 重发已入飞（10ms 延迟窗口），此刻用户保存较新值 → 排到链上重发之后
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0))
+    expect(fakeInvoke.calls.some(call => call.cmd === 'user_data_save')).toBe(true)
+    persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'fork' as const, apiKey: 'sk-new' })
+    await hydrating
+    await new Promise(resolve => globalThis.setTimeout(resolve, 30))
+    const saves = fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')
+    expect(saves.length).toBeGreaterThanOrEqual(2)
+    expect((saves[0]!.args as { payload: { apiKey: string } }).payload.apiKey).toBe('sk-lost')
+    expect((saves.at(-1)!.args as { payload: { apiKey: string } }).payload.apiKey).toBe('sk-new')
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBeNull()
+  })
+
+  it('审查轮修正：影子写失败的后续保存不清先前合法置位的标志（恢复源保留）', async () => {
+    fakeInvoke.register('user_data_save', () => { throw new Error('backend down') })
+    // 第一次保存：影子写成功、后端失败 → 标志置位（shadow=V1 可证较新）
+    persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'off' as const, apiKey: 'sk-v1' })
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0))
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
+    // 第二次保存：影子写失败（quota）、后端也失败 → 标志必须保持（V1 仍是恢复源）
+    const setItem = globalThis.localStorage.setItem.bind(globalThis.localStorage)
+    vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === INPUT_PREDICTION_SETTINGS_KEY) throw new DOMException('quota', 'QuotaExceededError')
+      setItem(key, value)
+    })
+    persistInputPredictionSettings({ ...DEFAULT_INPUT_PREDICTION_SETTINGS, mode: 'fork' as const, apiKey: 'sk-v2' })
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0))
+    vi.restoreAllMocks()
+    expect(globalThis.localStorage.getItem(UNSYNCED_FLAG_KEY)).toBe('1')
+    expect(JSON.parse(globalThis.localStorage.getItem(INPUT_PREDICTION_SETTINGS_KEY)!)).toMatchObject({ mode: 'off' })
   })
 })

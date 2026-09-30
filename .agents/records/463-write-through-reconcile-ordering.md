@@ -78,11 +78,39 @@
 - spec 未写 `saveChain`：施工中发现 input-prediction 裸 `void save()` 的完成序可逆会污染标志语义（旧值后到清标志）且属 448 审查 C-2 已在 customPreset 修掉的同类面，按既有先例补链式串行并更新模块 docstring（原「盲写 latest-wins」表述与事实不符，顺手更正）。
 - 其余按 spec 落地。
 
+## 审查轮（两个独立只读子 agent，用户指令派发）
+
+改动落地并推送后，按用户指令派发两个独立审查 agent（后端锁序/契约面、前端数据安全优先）。裁决：后端 **PASS WITH CONCERNS**、前端 **PASS WITH CONCERNS**，零 BLOCKER。审查报告要点与处置：
+
+### 已修（审查轮随批，提交见 PR）
+
+- **前端 CONCERN-1（真 bug）**：`persistInputPredictionSettings` 影子写失败的后续保存会**清除**先前合法置位的未同步标志（`!shadowed → writeUnsyncedFlag(false)`），销毁既有恢复源（注释语义是「不置」，代码做的是「清除」）。修正：失败路径不再主动清标志——失败一律由 `invokeUserDataSave` 置位；「影子==后端的 no-op 失败」多置一次无害（hydrate 等值检查自愈清除）。宁可多置待自愈，不可清除仍有效的恢复源。原「quota 不置标志」用例翻转为新契约断言。
+- **前端 CONCERN-2（两 repository 启动窗口竞态）**：hydrate 自愈重发绕过串行队列/先于桥安装，窗口期用户保存与之完成序竞争可静默回退。修正：customPreset 写穿链提升为模块级 `enqueueWriteThrough`（链链接执行时取 store 最新快照），本地赢腿与迁移腿改为**先装桥再入链重发**；input-prediction 影子赢重发与迁移写穿入 `saveChain`，链接执行时取缓存最新值。窗口期用户变更不再被重发快照覆盖。
+- **后端 NIT**：`approval_mode_write_lock` 字段注释「磁盘必为最后一次 set」补降级例外（最后一次 set 落盘失败除外）。
+- **文档 NIT**：说明书「三者均走 user_data_load/save 命令面」对 approval-mode 写路径不精确——改为如实区分（approval-mode 写经 `set_approval_mode` 内部 `service.save`，不经通用命令）。
+- **注释 NIT**：input-prediction 模块 docstring / hydrate 函数头「删旧 key」等过时表述随手更正。
+
+### 登记（不动，待仓库主裁决）
+
+- **后端 CONCERN**：`user_data_save` 通用命令可对 `approval-mode` key 盲写绕锁（`session/mod.rs` 的 `UserDataKey::parse` 接受该 key，`validate_approval_mode` 只查形状）——不写内存、不持锁，理论上磁盘/内存可静默分叉。全仓前端无此调用（approval-mode 前端写路径仅 `set_approval_mode`），属本提交前既有面，spec 已将通用命令并发面划出范围。建议方向：对 ApprovalMode key 拒绝（返回专用错误码强制走 `set_approval_mode`）或内部转发持锁路径；可与审查项 3（degraded 外部可查）同批裁决。已回写 issue #463 评论区。
+
+### 审查轮测试（新增 6 + 翻转 1）
+
+- customPreset：重发在飞期间用户变更经桥入链、最终落库最新切片（setDelay 构造在飞窗口）；标志+sameSlice 一致 → 清标志不重发。
+- inputPrediction：影子赢重发在飞期间用户保存入链串行、最终落库较新用户值；影子写失败的后续保存不清先前标志（CONCERN-1 回归钉）；迁移写穿入链成功清标志；标志+影子损坏 → 后端赢清标志。
+- 翻转：quota 影子写不进 → 原「不置标志」改「仍置标志（待自愈）」。
+
+### 复验证据
+
+- `node node_modules/vitest/vitest.mjs run src/infrastructure/persistence` → **7 文件 63 passed / 0 failed**（审查轮前 57）。
+- `cargo test --lib permission::` → **20 passed / 0 failed**；改动文件 rustfmt 0 diff、eslint 0 项、clippy pylon crate added: []。
+
 ## 未解问题
 
 1. **项 3（degraded 外部可查）留仓库主**：`pylon approval set` 成功但落盘失败时调用方不可探测（wire 契约变更：set 返回持久化标志 / get 附健康位，CLI 消费方需同步）。本 issue 不关闭，作决策口。
-2. quota 长期故障下的复合失败残余（见方案要点 5），如需进一步收口需先有可观测面（依赖项 3 裁决）。
-3. 实机验收（后端宕机→本地新预设→重启不丢的端到端真机时序）未走查，与 #448 记录同口径留按需补。
+2. **审查轮新增登记**：`user_data_save` 通用命令对 `approval-mode` key 的盲写绕锁面（见审查轮节）——拒绝或转发持锁路径，建议与项 3 同批裁决。
+3. quota 长期故障下的复合失败残余（见方案要点 5），如需进一步收口需先有可观测面（依赖项 3 裁决）；影子陈旧较后端回退一个设置项的复合序列亦属此类（保存时有可见上报，非静默）。
+4. 实机验收（后端宕机→本地新预设→重启不丢的端到端真机时序）未走查，与 #448 记录同口径留按需补。
 
 ## 并行交集
 

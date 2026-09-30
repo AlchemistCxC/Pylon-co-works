@@ -28,7 +28,7 @@ import { IS_TAURI } from '../tauri/env'
 import { wireErrorParts } from '../tauri/errorPayload'
 import { tauriInvokeTransport } from '../acp/tauriTransport.ts'
 import { reportRuntimeError } from '../../app/runtimeError.ts'
-import { updateCachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
+import { updateCachedInputPredictionSettings, cachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import {
   DEFAULT_INPUT_PREDICTION_SETTINGS,
   INPUT_PREDICTION_SETTINGS_KEY,
@@ -55,8 +55,9 @@ const PERSISTENCE_ERROR_KEY = 'app:input-prediction-persistence'
 
 /**
  * #463 前端 C-1：未同步标志。语义＝「影子（legacy key）里存在尚未成功写入后端的
- * 较新值」——后端 save 成功清除、失败置位（且仅当影子写成功，quota 下影子缺席
- * 时不置位：拿不出可证较新的值，宁信后端）。
+ * 较新值」——后端 save 成功清除、失败置位。审查轮修正：失败一律置位（影子写
+ * 失败的保存也不例外）；若彼时影子恰与后端一致，属 no-op 失败多置，下次 hydrate
+ * 等值检查会自愈清除——宁可多置待自愈，不可主动清除仍有效的恢复源。
  */
 const UNSYNCED_FLAG_KEY = 'pylon-input-prediction-unsynced'
 
@@ -106,7 +107,8 @@ async function invokeUserDataSave(settings: InputPredictionSettings): Promise<vo
 /**
  * 启动 hydrate（挂 App.tsx hydrateDomains，Tauri-only）：
  * - 后端有值 → normalize 入缓存；
- * - 后端无值 → 旧 localStorage key 一次性迁移（写穿 + 删旧；失败保留旧 key 幂等重试）；
+ * - 后端无值 → 旧 localStorage key 一次性迁移写穿（成功后保留转影子；失败保留
+ *   旧 key 幂等重试）；
  * - 后端不可用/损坏 → localStorage 值兜底入缓存（等价旧行为）+ 可见上报。
  * 任意失败不抛（不阻断启动）。
  */
@@ -122,7 +124,16 @@ export async function hydrateInputPredictionSettingsFromBackend(): Promise<void>
         const shadow = readShadowSettings()
         if (shadow && JSON.stringify(shadow) !== JSON.stringify(backendSettings)) {
           updateCachedInputPredictionSettings(shadow)
-          await invokeUserDataSave(shadow)
+          // 审查轮收口：重发入 saveChain 与用户保存串行；链接执行时取缓存最新值
+          //（persist 同步更新缓存），启动窗口内的用户保存不会被影子旧值后到覆盖。
+          saveChain = saveChain.then(
+            () => invokeUserDataSave(cachedInputPredictionSettings() ?? shadow),
+            () => invokeUserDataSave(cachedInputPredictionSettings() ?? shadow),
+          ).catch(error => {
+            const parts = wireErrorParts(error)
+            reportPersistenceError('恢复输入预测设置', parts.message.length > 0 ? new Error(parts.message) : error)
+          })
+          await saveChain
           return
         }
         writeUnsyncedFlag(false) // 影子缺席或与后端一致：无未同步数据，后端赢
@@ -162,24 +173,27 @@ async function migrateLegacyLocalStorage(): Promise<void> {
     return
   }
   updateCachedInputPredictionSettings(settings)
-  try {
-    await invokeUserDataSave(settings)
-    // #463：迁移成功后旧 key 保留转影子日志（不再删除）——后端权威下次 hydrate
-    // 照常接管，影子只作写穿失败时的恢复源（下次启动幂等重试分支亦不再进入：
-    // 后端已有值）。
-  } catch (error) {
+  // 审查轮收口：迁移写穿入 saveChain 与用户保存串行（窗口期用户写不会被迁移值
+  // 后到覆盖）；成功清标志、失败置标志均在 invokeUserDataSave 内，上报在链尾。
+  // #463：迁移后旧 key 保留转影子日志（不再删除）——后端权威下次 hydrate 照常
+  // 接管，影子只作写穿失败时的恢复源。
+  saveChain = saveChain.then(
+    () => invokeUserDataSave(settings),
+    () => invokeUserDataSave(settings),
+  ).catch(error => {
     // 写穿失败：缓存已入（先显示），旧 key 保留（下次启动重试迁移）
     const parts = wireErrorParts(error)
     reportPersistenceError('迁移输入预测设置到后端', parts.message.length > 0 ? new Error(parts.message) : error)
-  }
+  })
+  await saveChain
 }
 
 /**
  * 保存（设置面板唯一写者）：缓存立即更新（同步消费面下帧可见）+ Tauri 写穿后端 /
  * browser 写 localStorage。Tauri 模式先写影子（#463 恢复源），后端写穿经 latest-wins
- * 链式串行（#463——后端 async 命令完成序无保证，盲发并发会让旧值后到覆盖新值并
- * 清掉未同步标志；链化后按调用序落库），失败可见上报并置未同步标志（影子可证
- * 较新，下次启动对账恢复重发），不回滚内存（下次保存整份重发自愈）。
+ * 链式串行（#463——后端 async 命令完成序无保证，盲发并发会让旧值后到覆盖新值；
+ * 链化后按调用序落库），失败可见上报并置未同步标志（影子可证较新，下次启动对账
+ * 恢复重发），不回滚内存（下次保存整份重发自愈）。
  */
 let saveChain: Promise<void> = Promise.resolve()
 
@@ -190,18 +204,18 @@ export function persistInputPredictionSettings(settings: InputPredictionSettings
     saveInputPredictionSettings(normalized)
     return
   }
-  // 影子先行且仅写成功才参与对账：quota 下写不进就保持无标志（拿不出可证较新
-  // 的值，宁信后端）；后端 save 的标志跟踪在 invokeUserDataSave 内。
-  let shadowed = false
+  // 影子先行（quota 下写不进则影子保持旧值）；后端 save 的标志跟踪在
+  // invokeUserDataSave 内。
   try {
     saveInputPredictionSettings(normalized)
-    shadowed = true
   } catch { /* 影子缺席可接受 */ }
   saveChain = saveChain.then(
     () => invokeUserDataSave(normalized),
     () => invokeUserDataSave(normalized),
   ).catch(error => {
-    if (!shadowed) writeUnsyncedFlag(false) // 影子没写成：本次失败无恢复源，不置标志
+    // 审查轮修正：失败路径不主动清标志——invokeUserDataSave 已置位。影子写失败
+    //（quota）时本次虽拿不出可证的较新值，但先前合法置位的标志（其影子仍较新）
+    // 不得清除；「影子==后端的 no-op 失败」多置一次无害（hydrate 等值检查自愈清除）。
     const parts = wireErrorParts(error)
     reportPersistenceError('保存输入预测设置', parts.message.length > 0 ? new Error(parts.message) : error)
   })

@@ -114,6 +114,21 @@ let syncingFromBackend = false
 let bridgeInstalled = false
 
 /**
+ * latest-wins 写穿链（#448 审查 C-2 引入；#463 审查轮提升为模块级）——hydrate
+ * 自愈重发与用户变更同链串行，且链链接执行时重取 store 最新快照：启动窗口内
+ * 的用户变更不会被重发快照覆盖（后到者必含更新内容）。失败不中断链。
+ */
+let writeChain: Promise<void> = Promise.resolve()
+
+function enqueueWriteThrough(action: string): Promise<void> {
+  writeChain = writeChain.then(
+    () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
+    () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
+  ).catch(error => reportPersistenceError(action, error))
+  return writeChain
+}
+
+/**
  * 启动对账 + 安装写穿桥（挂 App.tsx hydrateDomains，Tauri-only）。内部吞错不抛
  * （不阻断启动，等价旧行为：localStorage 值继续可用，后端留待下次对账）。
  */
@@ -130,12 +145,14 @@ export async function hydrateCustomPresetsFromBackend(): Promise<void> {
         return
       }
       // #463 前端 C-1：标志在场且本地非空 → 本地较新（上次写穿失败未回滚），
-      // 本地赢并整份重发后端（跨会话自愈）；重发失败走外层可见上报，标志保留
+      // 本地赢并整份重发后端（跨会话自愈）；重发失败由链尾可见上报，标志保留
       //（下次启动继续本地赢）。本地为空不进本分支：quota 下 persist 失败可能让
       // 本地假空，此时宁信后端（复活可再删，销毁不可逆）。
+      // 先装桥再入链重发（#463 审查轮）：窗口期用户变更同链串行，且链接执行时
+      // 取最新快照，不会被重发快照覆盖。
       if (readUnsyncedFlag() && (local.customPresets.length > 0 || local.zonePresetEntries.length > 0)) {
-        await saveToBackend(local)
         installWriteThroughBridge()
+        await enqueueWriteThrough('恢复自定义预设')
         return
       }
       writeUnsyncedFlag(false) // 后端赢（标志缺席或本地空）：标志失效
@@ -149,9 +166,11 @@ export async function hydrateCustomPresetsFromBackend(): Promise<void> {
       return
     }
     // 后端无值：本地非空（含旧 pylon-theme 搬家产物）→ 一次性持久化迁移写穿
+    //（同样先装桥入链：迁移写与窗口期用户写串行，落库取最新快照）
     const local = sliceOf(useCustomPresetStore.getState())
     if (local.customPresets.length > 0 || local.zonePresetEntries.length > 0) {
-      await saveToBackend(local)
+      installWriteThroughBridge()
+      await enqueueWriteThrough('恢复自定义预设')
     }
   } catch (error) {
     reportPersistenceError('恢复自定义预设', error)
@@ -163,16 +182,10 @@ export async function hydrateCustomPresetsFromBackend(): Promise<void> {
 function installWriteThroughBridge(): void {
   if (bridgeInstalled) return
   bridgeInstalled = true
-  // 审查 C-2 修复：save 链在前一写上（latest-wins 串行）——后端 async 命令不保证
-  // 按调用序完成，盲发并发会让旧切片后到覆盖新切片；链化后按订阅序落库，且
-  // 在飞期间的新快照总是最后写。失败不中断链（下一次变更重发自愈）。
-  let writeChain: Promise<void> = Promise.resolve()
+  // 审查 C-2 修复：save 链在前一写上（latest-wins 串行，见 enqueueWriteThrough）
   useCustomPresetStore.subscribe(() => {
     if (syncingFromBackend) return
-    writeChain = writeChain.then(
-      () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
-      () => saveToBackend(sliceOf(useCustomPresetStore.getState())),
-    ).catch(error => reportPersistenceError('保存自定义预设', error))
+    void enqueueWriteThrough('保存自定义预设')
   })
 }
 

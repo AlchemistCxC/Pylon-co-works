@@ -172,4 +172,40 @@ describe('#463 前端 C-1：未同步标志对账', () => {
     await new Promise(resolve => globalThis.setTimeout(resolve, 0))
     expect(localStorage.getItem(FLAG_KEY)).toBeNull()
   })
+
+  it('标志在场但本地与后端已一致 → 清标志不重发（no-op 失败的自愈）', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 4, payload: { version: 1, customPresets: [PRESET_A], zonePresetEntries: [] },
+    }))
+    const { hydrateCustomPresetsFromBackend, useCustomPresetStore } = await load()
+    useCustomPresetStore.setState({ customPresets: [PRESET_A as never], zonePresetEntries: [] })
+    localStorage.setItem(FLAG_KEY, '1')
+    await hydrateCustomPresetsFromBackend()
+    expect(fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')).toHaveLength(0)
+    expect(localStorage.getItem(FLAG_KEY)).toBeNull()
+  })
+
+  it('审查轮收口：重发在飞期间的用户变更经桥入链，最终落库为最新切片', async () => {
+    fakeInvoke.register('user_data_load', () => ({
+      version: 1, revision: 4, payload: { version: 1, customPresets: [PRESET_B], zonePresetEntries: [] },
+    }))
+    fakeInvoke.register('user_data_save', () => ({ revision: 5 }))
+    fakeInvoke.setDelay('user_data_save', 10)
+    const { hydrateCustomPresetsFromBackend, useCustomPresetStore } = await load()
+    useCustomPresetStore.setState({ customPresets: [PRESET_A as never], zonePresetEntries: [] })
+    localStorage.setItem(FLAG_KEY, '1')
+    const hydrating = hydrateCustomPresetsFromBackend()
+    // 重发已入飞（10ms 延迟窗口），此刻用户改本地 → 桥把新变更排到链上
+    await new Promise(resolve => globalThis.setTimeout(resolve, 0))
+    expect(fakeInvoke.calls.some(call => call.cmd === 'user_data_save')).toBe(true)
+    useCustomPresetStore.setState({ customPresets: [PRESET_A as never, PRESET_B as never], zonePresetEntries: [] })
+    await hydrating
+    // 排干链上重发之后的桥链接
+    await new Promise(resolve => globalThis.setTimeout(resolve, 30))
+    const saves = fakeInvoke.calls.filter(call => call.cmd === 'user_data_save')
+    expect(saves.length).toBeGreaterThanOrEqual(2)
+    const last = saves.at(-1)!.args as { payload: { customPresets: { id: string }[] } }
+    expect(last.payload.customPresets.map(preset => preset.id)).toEqual(['custom-a', 'custom-b'])
+    expect(localStorage.getItem(FLAG_KEY)).toBeNull()
+  })
 })
