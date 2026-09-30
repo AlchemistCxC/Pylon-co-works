@@ -50,7 +50,7 @@
 
 ## 未解问题
 
-1. **预存竞态测试（非本批引入，待登记）**：`dispatcher::reactions::tests::prompt_path_sink_methods_match_direct_pet_calls` 在高负载下会挂——两个 `PetState` 构造点相隔微秒，而 `PetState::default` 打真实墙钟（`pet-core/src/lib.rs:619` `last_tick_at_ms: now_ms`），毫秒跳变即拆散「Debug 快照全等」断言（实测失败输出两边**仅差 1ms 时间戳**，其余字段全同；本轮空载重跑即绿）。 characterization 断言应先归零两个时间戳字段再比较。与 #490 无接触面，未顺手修。
+1. **预存竞态测试（非本批引入，已登记 #504）**：`dispatcher::reactions::tests::prompt_path_sink_methods_match_direct_pet_calls` 在高负载下会挂——两个 `PetState` 构造点相隔微秒，而 `PetState::default` 打真实墙钟（`pet-core/src/lib.rs:619` `last_tick_at_ms: now_ms`），毫秒跳变即拆散「Debug 快照全等」断言（实测失败输出两边**仅差 1ms 时间戳**，其余字段全同；本轮空载重跑即绿）。 characterization 断言应先归零两个时间戳字段再比较。与 #490 无接触面，未顺手修。
 2. **平台 binding `idle_minutes` 缺省 1440 是否随 #490 翻转**：本批按「不动」处置（见范围），留维护者裁断。
 
 ## 并行交集
