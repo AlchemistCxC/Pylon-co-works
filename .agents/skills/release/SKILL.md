@@ -51,6 +51,7 @@ python scripts/pack_release.py --bump <确认的版本号> --build
 
 ## 坑（本仓实测）
 
+- **构建机 python**：2026-09-30 起系统 `python`/`python3`/`py` 已修复为 uv 托管 CPython 3.12（`~/.local/bin` 无后缀 shim 前置于 WindowsApps + HKCU `PythonCore\3.12` 影子注册覆盖死掉的 `F:\Python`，详见 `.agents/records/2026-09-30-release-0.3.4-LBI.md` §踩坑）。若复发（典型症状：静默无输出、exit 49）：改用全路径 `$APPDATA/uv/python/cpython-3.12-windows-x86_64-none/python.exe`，并把该目录前置到 PATH 再跑构建链（bun 子进程里的裸 `python` 也要靠它）。
 - **tag 必须在 main 上**：打在未合并分支的 tag 会被 release.yml 的 main 归属守卫拒掉。
 - **tag 错位 = 静默错发**：CI 校验 tag = `package.json` = `tauri.conf.json`，`--bump` 保证一致性，**不要手改版本号文件**。
 - **网络/代理**：git 推送走 `git config --global http.proxy`；`gh` 命令**不读 git 代理配置**，需 `export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`（端口以实际代理为准）。
