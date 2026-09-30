@@ -20,6 +20,7 @@
   - 项4 上帝组件 → `src/renderers/solid-workbench/WorkbenchContent.solid.tsx` 拆出滚动状态机模块。
   - 项7 碎域合并 → `src/domains/` 小域归并 + `docs/说明书/Pylon-模块维护地图.md` 呈现域边界段。
   - **不碰**：`src/workspace-sheets/**`、`src/components/**`、`src-tauri/pylon-session/**`、theme 域。规格 `.agents/spec/486-structural-split-batch.md`。
+  - **进展（2026-10-02 收工）**：七项全部落地为独立 PR——#492（项5）/ #493（项6）/ #495（项1）/ #499（项2）/ #500（项4）/ #501（项7）/ #507（项3）。两个子 agent 对抗审查全通过（零 REQUEST CHANGES），4 项 P3 即修、4 项留档（明细见 .agents/records/486-structural-split-batch.md 审查轮）。**合并后撤本条**；项3 与 #488-⑤ 同文件，按既定约定机械合并。
   - **进展（2026-10-01）**：项5 已完成 → PR **#492**（分支 `kumo/486-5-jobobject-single-source`）。⚠️ 共享 HEAD 竞态复盘：项5 提交（78d277a2）一度落在 #487/#488 分支基座上，对方已声明「基于 78d277a2 不重触」——PR #492 是该项在干净基线（df6cd864）上的正式载体，两边内容一致谁先合并都无冲突。**本批后续各项改在独立 worktree `../pylon-486-wt` 施工，共享树让给 #484/#487/#488**；项3 与 #488-⑤ 同文件（dispatcher/mod.rs、lib.rs），以对方「先行提交」为基线再做机械合并。
 
 - [kumo] #361+#362+#363 单 PR 批次（三个 issue 逐项完成后各派子 agent 审查）：
