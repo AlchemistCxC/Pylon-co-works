@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, waitFor } from '@solidjs/testing-library'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
-import { CC_WIDGET_LABELS } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_IDS, CC_WIDGET_LABELS, CC_REGISTERED_SLOT_IDS } from '../../../domains/cc/widgetDefinitions.ts'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { mountSolidControlCenterPreview } from '../__fixtures__/mountSolidControlCenterPreview.solid.tsx'
 import { createBuiltinCcWidgetPluginDefinition } from '../../../plugins/core/cc/builtinCcWidgetPlugin.ts'
@@ -249,7 +249,7 @@ describe('mountSolidControlCenterPreview', () => {
 
       // ★ 刀1 反转自 CC-02「编辑模式豁免」：空态名单里的件进了编辑态**同样不在场**
       //   （正控：编辑工具栏必须已出现，否则"仍然为空"是假绿）
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
       expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
       expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
       // 甲：选择器在编辑态仍不显示
@@ -285,7 +285,7 @@ describe('mountSolidControlCenterPreview', () => {
       // ★ 本刀的核心行为：编辑态不再豁免 ⇒ 被藏件在 DOM 里**不存在**。
       //   ★ 反转自 CC-02 旧断言（编辑态「在场 + 淡显」）。
       //   正控：编辑工具栏必须已出现，否则"仍然为空"是假绿。
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
       expect(controlCenter?.querySelector('.cc-send-button')).toBeNull()
       destroy()
     } finally {
@@ -312,13 +312,13 @@ describe('mountSolidControlCenterPreview', () => {
       expect(controlCenter).not.toBeNull()
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
 
       // 画布上不存在（新语义：它回来了才说明清单这个入口真的管用）
       expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
 
       // 清单如实：该格标 dim、开关写着「显示 X」
-      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+      const chipWrap = (id: string) => [...(host.querySelectorAll<HTMLElement>('.cc-edit-row') ?? [])]
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
       expect(chipWrap('model')?.classList.contains('dim')).toBe(true)
       const toggle = chipWrap('model')?.querySelector<HTMLButtonElement>('.cc-chip-toggle')
@@ -359,9 +359,9 @@ describe('mountSolidControlCenterPreview', () => {
 
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
-      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+      const chipWrap = (id: string) => [...(host.querySelectorAll<HTMLElement>('.cc-edit-row') ?? [])]
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
-      const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-toolbar-chip')?.textContent?.trim().at(0)
+      const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-row-name')?.textContent?.trim().at(0)
 
       // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
       // 清单是它唯一的入口，故这里的"如实"就是隐藏件的全部可见信息。
@@ -454,16 +454,16 @@ describe('mountSolidControlCenterPreview', () => {
       Object.defineProperty(controlCenter as HTMLElement, 'clientHeight', { configurable: true, get: () => box.height })
       Object.defineProperty(controlCenter as HTMLElement, 'clientWidth', { configurable: true, get: () => box.width })
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
       // 前提：model 被两态都藏着 ⇒ 画布上不在场
       expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
       // 前提：尺寸**确实**被钉住了（量不到就会 fail-open ⇒ 这条用例会变成"假绿"）
       expect(controlCenter?.clientHeight, '夹具前提：实测高度已被钉成 64').toBe(64)
 
-      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+      const chipWrap = (id: string) => [...(host.querySelectorAll<HTMLElement>('.cc-edit-row') ?? [])]
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
       const baseToggle = (id: string) => chipWrap(id)?.querySelector<HTMLButtonElement>('.cc-chip-toggle')
-      const notice = () => controlCenter?.querySelector<HTMLElement>('.cc-edit-warning')
+      const notice = () => host.querySelector<HTMLElement>('.cc-edit-warning')
       // "数据逐字未变"的判据：整个外观快照的 JSON 串（含两份表 + 高度）
       const snapshotJson = () => JSON.stringify(services.appearance.getSnapshot())
       const before = snapshotJson()
@@ -478,8 +478,8 @@ describe('mountSolidControlCenterPreview', () => {
       expect(notice()?.getAttribute('role')).toBe('alert')
       expect(notice()?.textContent).toContain('还差 11px')
       expect(notice()?.textContent).toContain('先加高')
-      // ★ 提示不在 `role="toolbar"` 里面（无障碍语义不被搅乱）
-      expect(controlCenter?.querySelector('[role="toolbar"] .cc-edit-warning')).toBeNull()
+      // ★ 刀5：提示落在**左列内部**（列是列表/面板语义，不是 `role="toolbar"`）
+      expect(host.querySelector('.cc-edit-column .cc-edit-warning'), '提示要落在列内').not.toBeNull()
 
       // 手动加高（模拟用户拖高背景板）到够装 ⇒ 再点一次成功，且提示随之退场
       box.height = 80
@@ -509,12 +509,12 @@ describe('mountSolidControlCenterPreview', () => {
 
     try {
       const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
-      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(host.querySelector('[data-control-center="production"]')).not.toBeNull()
       services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
-      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
 
       const toggles = (id: string) => {
-        const wrap = [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+        const wrap = [...(host.querySelectorAll<HTMLElement>('.cc-edit-row') ?? [])]
           .find(item => item.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
         return [...(wrap?.querySelectorAll<HTMLButtonElement>('.cc-chip-toggle') ?? [])]
       }
@@ -532,6 +532,191 @@ describe('mountSolidControlCenterPreview', () => {
       fireEvent.click(toggles('model')[0]!)
       await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toEqual(['model']))
       expect(services.appearance.getSnapshot().ccHiddenEmpty, '写主管表不许连带写再藏表').toEqual(['tokens'])
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  // ── ★★ #266 刀5：拖动阈值（"点击只选中、不挪件"） ────────────────────────────────
+  it('★ 刀5 拖动阈值：按下后微动 2px 松开 ⇒ 件不挪（零位移写入）、该区不被标自定义，但选中照旧生效', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    services.appearance.setTheme(structuredClone(DEFAULTS))
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      const model = await waitFor(() => {
+        const value = host.querySelector<HTMLElement>('[data-widget-id="model"]')
+        expect(value).not.toBeNull()
+        return value!
+      })
+      // ★ 预览用的**静态外观表**不携带 `custom` 这个键（置位发生在 zustand
+      //   `themeStore.updateCcPlacement`，预览路径不过它）⇒ 判据取"**一条 `update-cc-placement`
+      //   都没发**"——那正是 `markZoneCustom` 的唯一触发点。真值 `custom.cc` 在实机里读（本单 §八.4）。
+      const dispatchSpy = vi.spyOn(services.appearance, 'dispatch')
+      const placementsDispatched = () => dispatchSpy.mock.calls
+        .map(([command]) => command)
+        .filter(command => command.type === 'update-cc-placement')
+      expect(placementsDispatched(), '夹具前提：此前没有任何位移写入').toHaveLength(0)
+
+      fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
+      // 选中在**按下时**就生效（阈值管的只是"挪不挪"）⇒ 该行 active + 行内展开
+      expect(host.querySelector('.cc-edit-row.active .cc-edit-row-name')?.getAttribute('aria-label')).toBe('模型 属性')
+      expect(host.querySelector('.cc-edit-row.active .cc-edit-row-props')).not.toBeNull()
+
+      // 直线距离 ≈ 2px（< 3px 阈值）内松开
+      fireEvent.pointerMove(window, { clientX: 12, clientY: 20, pointerId: 1 })
+      fireEvent.pointerUp(window, { pointerId: 1 })
+
+      expect(placementsDispatched(), '阈值内松开：一次 `update-cc-placement` 都不许发').toHaveLength(0)
+      expect(services.appearance.getSnapshot().ccLayout.placements.model, '阈值内松开不得写任何 offset')
+        .toMatchObject({ offsetX: 0, offsetY: 0 })
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀5 拖动阈值：移动 ≥3px ⇒ 位移正确（与起点差一致）', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    services.appearance.setTheme(structuredClone(DEFAULTS))
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      const model = await waitFor(() => {
+        const value = host.querySelector<HTMLElement>('[data-widget-id="model"]')
+        expect(value).not.toBeNull()
+        return value!
+      })
+
+      fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
+      // 阈值内先动一下：不许有任何写入（否则"越过阈值才进拖拽"会退化成"按下即拖"）
+      fireEvent.pointerMove(window, { clientX: 12, clientY: 20, pointerId: 1 })
+      expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 0, offsetY: 0 })
+      // ★ 恰好 3px = 阈值边界：**越过阈值那一刻**就该进入拖拽（不是"等到 pointerup 才判"）
+      fireEvent.pointerMove(window, { clientX: 13, clientY: 20, pointerId: 1 })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 3, offsetY: 0 }))
+
+      // 继续拖到 (20,8)：位移 = 与**起点**的差，不是"从阈值那一刻起算"
+      fireEvent.pointerMove(window, { clientX: 20, clientY: 8, pointerId: 1 })
+      await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 10, offsetY: -12 }))
+      fireEvent.pointerUp(window, { pointerId: 1 })
+
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  // ── ★★ #266 刀5：左列的行内展开互斥 ──────────────────────────────────────────
+  it('★ 刀5 行内展开互斥：展开 A 后点 B ⇒ 只有 B 展开；再点 B ⇒ 收起', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    services.appearance.setTheme(structuredClone(DEFAULTS))
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
+
+      const rowName = (id: keyof typeof CC_WIDGET_LABELS) => {
+        const label = `${CC_WIDGET_LABELS[id]} 属性`
+        return [...host.querySelectorAll<HTMLButtonElement>('.cc-edit-row-name')]
+          .find(button => button.getAttribute('aria-label') === label)!
+      }
+      // 展开里的**全部**行内展开区（按无障碍名报出来，便于"只有一行"这句能被核对）
+      const expanded = () => [...host.querySelectorAll<HTMLElement>('.cc-edit-row-props')]
+        .map(element => element.getAttribute('aria-label'))
+
+      fireEvent.click(rowName('model'))
+      await waitFor(() => expect(expanded()).toEqual(['模型 属性']))
+      // 换一行：A 收起、B 展开（**同一时刻只有一行**）
+      fireEvent.click(rowName('reasoning'))
+      await waitFor(() => expect(expanded()).toEqual(['思考强度 属性']))
+      // 再点同一行 ⇒ 收起（没有展开区）
+      fireEvent.click(rowName('reasoning'))
+      await waitFor(() => expect(expanded()).toEqual([]))
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀5 空态 + 编辑态：左列同样在、行数与开关齐（空态下够得着编辑器）', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    services.appearance.setTheme(structuredClone(DEFAULTS))
+
+    try {
+      // ★ sessionId: null = 空态（本文件默认就是空态，这里显式写出来表明意图）
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
+      expect(host.querySelector('[data-control-center="production"]')?.classList.contains('is-empty')).toBe(true)
+      // 编辑态之前：列不在（显示条件 = 编辑态）
+      expect(host.querySelector('.cc-edit-column')).toBeNull()
+
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      const column = await waitFor(() => {
+        const value = host.querySelector<HTMLElement>('.cc-edit-column')
+        expect(value).not.toBeNull()
+        return value!
+      })
+      // 行 = 内置轨 6 + 注册轨占槽 1（都由定义表派生）
+      expect(column.querySelectorAll('.cc-edit-row')).toHaveLength(CC_WIDGET_IDS.length + CC_REGISTERED_SLOT_IDS.length)
+      // 两个开关与列底两枚按钮都在（空态下"够得着"= 不只是画出来，还能用）
+      expect(column.querySelectorAll('.cc-chip-toggle')).toHaveLength((CC_WIDGET_IDS.length + CC_REGISTERED_SLOT_IDS.length) * 2)
+      expect(column.querySelector('[aria-label="重置控件位置"]')).not.toBeNull()
+      expect(column.querySelector('[aria-label="退出中控编辑"]')).not.toBeNull()
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀5 退出编辑**只剩一处**（列底那枚；属性面板那个「退出自定义」已删）', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    services.appearance.setTheme(structuredClone(DEFAULTS))
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(host.querySelector('.cc-edit-column')).not.toBeNull())
+      // 先展开一行（改造前的第二处退出就长在展开出来的属性面板 footer 里）
+      fireEvent.click(host.querySelectorAll<HTMLButtonElement>('.cc-edit-row-name')[0]!)
+
+      const exitButtons = [...host.querySelectorAll<HTMLButtonElement>('button')]
+        .filter(button => (button.textContent ?? '').includes('退出'))
+      expect(exitButtons.map(button => button.getAttribute('aria-label'))).toEqual(['退出中控编辑'])
+      expect(host.textContent).not.toContain('退出自定义')
       destroy()
     } finally {
       services.destroy()
