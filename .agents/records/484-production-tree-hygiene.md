@@ -58,7 +58,7 @@
 | `cargo test -p pylon-session --lib` | ✅ 215 passed / 0 failed |
 | `cargo test -p pylon --lib`（主 crate，含 del03） | ✅ 见评论区数字 |
 | `bun run check:rust` 全链 | ✅ 见评论区（干净 Rust 树上执行） |
-| `bun run check:clippy`（基线外新增诊断） | ✅ `added: []` |
+| `bun run check:clippy`（基线外新增诊断） | ✅ 干净 worktree 复跑：6 crate `added: []`（pylon/pylon-core/pylon-acp/pylon-session/pylon-foundations/pet-core 全部 exit 0） |
 | 干净 worktree `tsc -b` + `vite build` | ✅ exit 0（共享树上 tsc/vitest 红为 #487 在途中间态所致，与本批无关） |
 | `bun run check:bundle` 体积对照 | ✅ `first-party-pylon-workspace` 235,216 → 223,122 B（gzip 56,058 → 54,063）；**总 gzip（js）1,521,689 → 1,514,131（−7,558 B）** |
 | 每条删除「删除前引用扫描为零」 | ✅ 见 issue 评论区逐条证据 |
@@ -73,5 +73,5 @@
 ## 证据
 
 - 共享树曾被 #487（workbench legacy 退役，并行在途）的中间态污染（tsc `messages` 类型错、4 个 workbench/solid 测试文件红）——本批的全量前端验证在与提交等价的干净 worktree 执行：`git worktree` @ `d4054745` + `tsc -b` + `vite build` + `check:bundle` 全绿；本批改动面定向测试（28 文件 136 用例）在共享树亦全绿。
-- Rust 侧执行门禁时共享树无 Rust 在途脏文件，`check:rust`/`check:clippy` 结论直接有效。
+- Rust 侧执行门禁时共享树先后被 #487（前端域）与 #488（`browser/agent_cmds.rs` E0277 等 Rust 在途）污染，全链 `check:rust`/`check:clippy` 在共享树无法收敛；单 crate 测试在共享树两次全绿（pylon-session 215/0、pylon 970/0），clippy 在干净 worktree 以独立 `CARGO_TARGET_DIR` 复跑完成 6 crate 基线比对（`added: []`）。CI 为最终全量门禁。
 - PR：分支 `kumo/484-hygiene`（只含本批提交），CI 在干净环境复跑全量门禁作最终裁决。
