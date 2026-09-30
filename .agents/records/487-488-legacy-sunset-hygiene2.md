@@ -89,7 +89,7 @@
 - 12 处 console 收敛：identitySessionActions ×2 / identityProfileActions ×1 /
   hookBridgeDispatcher ×3（英文→中文）/ skinRuntimeServices ×1 / pylonCliBridge ×1
   （英文→中文）/ App.tsx ×3；workbenchRuntime.ts:195 已随 #487 消失（13−1）。
-- main.tsx 自身 4 处启动期 console 保留（早于接线/桥失败诊断，不在 issue 清单）。
+- main.tsx 自身 4 处启动期 console 保留：不在 issue 清单的 13 处之内（范围纪律；接线 `installTauriFrontendLogSink()` 本身已是 main.tsx 模块体第一条语句，这 4 处实际晚于它——审查轮修正措辞）。
 - 测试：frontendLogSink 端口 2 用例（console 透传 + 换装/故障回落）。
 - 验证：`vitest run src/domains src/infrastructure src/cli src/app` 255 文件/2047
   用例全绿；check:maintenance exit 0；lint 0 error。
@@ -99,20 +99,25 @@
 - 新 `pylon-foundations/src/await_guard.rs`：`HeldAcrossAwait<T>` newtype
   （Deref/DerefMut 透传，无 Drop 实现——锁获取/释放时序零变化，这是唯一允许
   的用法：包住既有守卫绑定，不改加锁/放锁语句结构）。
-- 26 处 `#[allow(clippy::await_holding_invalid_type)]` 全数删除（锁序注释保留为
-  普通 `//` 注释——「剩余每处有锁序注释」判据达成）；30+ 守卫绑定（clippy
-  逐点报出，含同函数多锁：lifecycle/mod ×6、control ×3、wait ×3）包裹
-  `HeldAcrossAwait::new`。pylon-acp/client.rs（Mutex<Receiver> 持锁消费）与
-  平台测试（prompt_gate）一并收口。
-- 机械保障：`scripts/check-await-holding.mjs`——规则 1 全域禁裸 allow；规则 2
-  `HeldAcrossAwait::new` 出现点与 INVENTORY 对账（17 文件 36 处，含定义文件
-  自示例 1 处），增删必须同步登记。并入 `check:clippy` npm 链与 CI rust-clippy
-  job（ci.yml 补一步）。
+- 基线口径（审查轮修正）：代码内 `#[allow(clippy::await_holding_invalid_type)]`
+  实为 **28 处**（issue 原文与首批提交写 26，系审计口径偏差；另 4 处为文档中的
+  文字提及）。28 处全数删除（锁序注释保留为普通 `//` 注释——「剩余每处有锁序
+  注释」判据达成）；clippy 逐点报出的守卫绑定（28 个 allow 位点下实际 **35 个**
+  守卫——同函数多锁逐守卫拆账：lib.rs 1→2、control 2→3、wait 1→3、lifecycle/mod
+  3→6）包裹 `HeldAcrossAwait::new`。pylon-acp/client.rs（Mutex<Receiver> 持锁
+  消费）与平台测试（prompt_gate）一并收口。**豁免机制替换 28→0，显式声明点
+  28→35**——验收判据「显著少于 26」按字面未达成，达成的是「机制替换 + 全量
+  显式声明 + 机械对账」，已在 issue 评论区声明该口径差。
+- 机械保障：`scripts/check-await-holding.mjs`——规则 1 全域禁裸 allow（正则
+  覆盖合并列表/cfg_attr/内属性变体）；规则 2 按 `HeldAcrossAwait` **类型名**
+  计数（含 use 行，防 `use ... as X` 别名绕过）与 INVENTORY 对账（17 文件 57 处，
+  审查轮从 `::new` 计数 36 处加固），增删必须同步登记。并入 `check:clippy`
+  npm 链与 CI rust-clippy job（ci.yml 补一步）。
 - clippy.toml：六条目补 `allow-invalid = true`（pylon-foundations 无 tokio 依赖图
   时 clippy 1.98 发「不可达类型」元告警；该旗只静默元告警，lint 本身在类型
   可达的 crate 照常生效）。
-- 前后对照：豁免 26 → **0**；`bun run check:clippy` exit 0（基线 `added: []`
-  ×6 crate + 对账通过）。
+- 前后对照：裸 allow 豁免 **28 → 0**（见上口径修正）；`bun run check:clippy`
+  exit 0（基线 `added: []` ×6 crate + 对账通过）。
 - 踩坑：await_guard 初版 `&*self.0` 撞 `clippy::explicit_auto_deref`、函数内
   `use std::ops::Deref as _` 撞 `unused_imports`（泛型约束已让方法可调）——
   改为裸方法调用 `self.0.deref()` 后全绿。
@@ -140,3 +145,41 @@
 - #486 项3（dispatcher/lib.rs/session 拆分）与本批在 lib.rs/dispatcher/session
   有文件域重叠：本批先行入库，项3 请基于本基线机械合并（await_guard 导入行与
   HeldAcrossAwait 包裹随函数走）。
+
+## 审查轮（三个独立子 agent 并行，用户指令派发）
+
+结论：#487 批 APPROVE WITH NITS；①③④⑤⑥ 批 APPROVE WITH NITS（2 MINOR）；
+②⑦ 批 REQUEST CHANGES（1 MAJOR 文档失同步）。已处置：
+
+- **[MAJOR·已修] dev-standards.md:78 仍教「函数级 #[allow]」**——与本批新门禁
+  正面矛盾。已改述为 HeldAcrossAwait 收口 + 对账清单口径；维护地图同步补
+  check-await-holding 门禁链描述、`await_guard.rs` 单源行、frontendLogSink 登记。
+- **[MINOR·已修] ⑤ 注释错述基线**：原 `unwrap_or(Null)` 是**列值为 null** 下发
+  （前端 cursor 对 null 归一失败会整帧丢弃并报错），不是「缺列」；本批改为缺列
+  干净下发 + warn。dispatcher/mod.rs 注释已改述，并在 PR/issue 显式声明为 ⑤
+  红线的预期内例外（该分支当前不可达，CanonicalEventRow 全字段可序列化）。
+- **[MINOR·已修] ④ MHTML JoinError 早退**：`?` 绕过 `cx.error(denial(...))`
+  信封出口。已并入 save_result 的 Err 流，与 fs 失败同出口。
+- **[MINOR·已修] 基线豁免 26→28 口径**：见 ②节修正；issue 评论区已澄清
+  （allow 28→0 / 显式声明点 28→35 双口径）。
+- **[MINOR·已修] check 脚本加固**：规则 1 改正则（覆盖合并列表/cfg_attr/内属性）；
+  规则 2 改按类型名计数（防 use 别名绕过）；删死代码 replace。
+- **[MINOR·已修] #487 守卫不变式收窄**：`PreviewWorkbenchRuntime.update` patch
+  类型收窄为 `Omit<…, 'revision' | 'document'>`（守卫测试头注承诺的不变式落到
+  类型层）；`agentWorkbenchSession.updateRuntimeState` 的 document 剥离防御位
+  随之成为死代码并删除（旧逻辑本就是丢弃 patch 里的 document，语义等价）。
+- **[NIT·已修]** ③ 注释四处 #487→#488 笔误；frontendLogSink detail 格式化
+  （对象 JSON.stringify 回落 String，不再 `[object Object]`；console 回落传原始
+  (message, detail)）；EMPTY_MESSAGES 冻结；hostPortSolidServices「legacy runtime
+  arrays」过时注释；DisplayGate 测试头注释。
+- **[NIT·记录不改]** ⑥ 提交信息写「12 文件」实为 11（历史不重写，本记录更正）；
+  paths.rs `migration_available` 的两次目录扫描仍在 async 线程（存量、量小，
+  移交后续）；超长 query LIKE pattern 阈值因转义减半（病态输入理论项）；
+  tauri frontendLogSink 实现侧零测试（端口层 2 用例已钉行为）。
+- 审查确认无问题项：② 锁时序零变化逐异形点核验成立（wait.rs 两处/client.rs
+  临时守卫/control.rs Deref 均等价）；① 宏表 shared/app_only 与基线逐字段一致
+  无错分；③ 转义在真实 SQLite 上验证（含 NOCASE 叠加）；#487 推导等价性、
+  漏改 grep 零残留、测试断言未弱化（净 −1 即 D3 用例）。
+
+审查轮门禁复跑：`bun run check:clippy` exit 0（加固后对账 17 文件/57 处）、
+tsc ×2 0 错、`cargo check -p pylon` 过、check:docs/maintenance 过。
