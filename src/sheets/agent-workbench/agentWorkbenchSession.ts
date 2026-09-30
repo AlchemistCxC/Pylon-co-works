@@ -256,12 +256,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.update(patch)
       return
     }
-    const { document: _ignoredDocument, ...generationPatch } = patch
+    // #487 后 update() 类型层禁止携带 document（纯字段补丁），此处无需再剥离。
     runtime.applyDocument(current.document, {
       ownerKey: binding.ownerKey,
       generation: binding.generation,
       preserveGeneration: false,
-      generationPatch,
+      generationPatch: patch,
     })
   }
 

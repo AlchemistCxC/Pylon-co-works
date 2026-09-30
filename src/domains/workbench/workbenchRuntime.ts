@@ -91,7 +91,9 @@ export interface WorkbenchRuntime {
 
 export interface PreviewWorkbenchRuntime extends WorkbenchRuntime {
   setSnapshot(snapshot: WorkbenchRuntimeSnapshot): void
-  update(patch: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision'>>): void
+  /** 纯字段补丁：不允许携带 `document`（换文档走 applyDocument/replaceDocument/携带
+   *  document 的 setSnapshot——类型层收窄即守卫测试头注承诺的不变式）。 */
+  update(patch: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision' | 'document'>>): void
   destroy(): void
   applyDocument(document: WorkbenchDocument, options?: WorkbenchDocumentApplyOptions): void
   replaceDocument(document: WorkbenchDocument, options?: WorkbenchDocumentApplyOptions): void
@@ -774,8 +776,8 @@ function lastTimestamp(values: readonly (string | undefined)[]): number | undefi
 
 type WorkbenchDocumentSlice = NonNullable<WorkbenchRuntimeSnapshot['document']>
 
-/** document 缺席时 'messages' slice 的稳定空档（引用恒定，slice 比较天然不触发）。 */
-const EMPTY_MESSAGES: readonly WorkbenchMessage[] = []
+/** document 缺席时 'messages' slice 的稳定空档（引用恒定且冻结，slice 比较天然不触发）。 */
+const EMPTY_MESSAGES: readonly WorkbenchMessage[] = Object.freeze([])
 
 /** `selectSlice` 的全部可能产物（按 slice 名分派）。
  *  运行时按名取值天然是异构的，故用命名联合表达；调用方经 `getSlice<T>` 收窄。 */

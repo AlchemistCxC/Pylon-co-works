@@ -1069,7 +1069,7 @@ impl EventRepo {
     /// B6 / #445：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
     /// 大小写不敏感 LIKE，返回**命中行**定位（owner 三元组 + sequence/event_type/
     /// occurred_at + instr 偏移）。WHERE 三列与 pattern 构造与候选 owner 版一字不改
-    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐。#487 批③：query
+    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐。#488 批③：query
     /// 中的 LIKE 通配符（`%`/`_`）与转义符 `\` 一律按**字面量**匹配（`ESCAPE '\'`），
     /// 用户输入不再被解释成通配符；instr 定位仍用原 query，offset 语义不变。
     /// 前端对命中行定向拉行后投影复核（匹配与命中同源）。limit 为命中行上限。
@@ -1078,7 +1078,7 @@ impl EventRepo {
             .conn
             .lock()
             .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
-        // #487 批③：先转义转义符本身，再转义 `%`/`_`——顺序不可换（否则转义引入的
+        // #488 批③：先转义转义符本身，再转义 `%`/`_`——顺序不可换（否则转义引入的
         // 反斜杠会被二次转义）。
         let escaped = query
             .replace('\\', "\\\\")

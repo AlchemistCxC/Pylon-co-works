@@ -21,13 +21,27 @@ export function installTauriFrontendLogSink(): void {
 }
 
 function push(level: 'warn' | 'error', message: string, detail?: unknown): Promise<unknown> {
-  const merged = detail === undefined
-    ? message
-    : `${message}: ${detail instanceof Error ? detail.message : String(detail)}`
+  const merged = detail === undefined ? message : `${message}: ${formatDetail(detail)}`
   return invoke('push_frontend_log', { level, message: merged })
     .catch(() => {
       // 静默降级回 console（限流 / 桥故障）：单条日志的落点偏好不值得惊动用户。
+      // 回落传原始 (message, detail)——devtools 侧结构不丢。
       if (level === 'error') console.error(message, detail)
       else console.warn(message, detail)
     })
+}
+
+/** detail 并入 message 的格式化：Error 取 message；对象走 JSON.stringify（失败
+ * 或循环引用回落 String()——不得因日志格式化抛错）。 */
+function formatDetail(detail: unknown): string {
+  if (detail instanceof Error) return detail.message
+  if (typeof detail === 'string') return detail
+  if (typeof detail === 'object' && detail !== null) {
+    try {
+      return JSON.stringify(detail) ?? String(detail)
+    } catch {
+      return String(detail)
+    }
+  }
+  return String(detail)
 }

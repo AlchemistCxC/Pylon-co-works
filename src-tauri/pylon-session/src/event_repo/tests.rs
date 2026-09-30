@@ -1401,7 +1401,7 @@ fn search_hits_returns_hit_rows_case_insensitive_and_keeps_row_granularity() {
 #[test]
 fn search_hits_escapes_like_wildcards_to_literals() {
     let repo = repo();
-    // #487 批③：`%`/`_`/`\` 是用户文本的一部分，不是通配符——只匹配字面出现。
+    // #488 批③：`%`/`_`/`\` 是用户文本的一部分，不是通配符——只匹配字面出现。
     let percent_row = parse_canonical_event(&event_json(
         "peri",
         "s1",

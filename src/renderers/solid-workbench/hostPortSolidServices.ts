@@ -95,7 +95,7 @@ function runtimeSnapshot(host: WorkbenchHostPort, memo: ProjectionMemo): Workben
     // Keep the host-port projection provider-neutral: ACP choices are carried
     // in the canonical session option surface, not in renderer-local stores.
     // A third-party Suite therefore sees the same model/mode catalogue as the
-    // built-in Solid renderer even when its legacy runtime arrays are empty.
+    // built-in Solid renderer even when the document carries no options.
     availableModels: optionIds(memo, document, 'model', activeModel), activeModel,
     availableModes: optionIds(memo, document, 'mode', activeMode), activeMode,
     canAttach: host.capabilities.has('attach'), promptImage: false, error, document,

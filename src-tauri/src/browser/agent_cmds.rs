@@ -658,7 +658,10 @@ pub(crate) async fn browser_agent_save_page(
                     Ok(path)
                 })
                 .await
-                .map_err(|error| PylonError::Protocol(format!("MHTML 存档任务失败: {error}")))?
+                // JoinError（任务 panic/运行时关停）并入 Err 流并与内层 fs 结果
+                // 展平：与 fs 失败同走下方 cx.error(denial(...)) 信封出口，不早退。
+                .map_err(|error| PylonError::Protocol(format!("MHTML 存档任务失败: {error}")))
+                .and_then(std::convert::identity)
             }
             Err(error) => Err(PylonError::Protocol(error)),
         };
