@@ -99,6 +99,7 @@ impl InstanceState {
 // 不预检凭据，避免 W1 无凭据存储时状态机不可测。
 // ============================================================================
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 
@@ -526,9 +527,9 @@ impl GatewayInstanceService {
 
     /// remove：route 占用 → route_in_use；运行中（Starting/Connected/Stopping）
     /// → invalid_transition（须先 stop）；Stopped/Error 直接移除（残余 runtime 取消）。
-    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：实例生命周期迁移必须整体串行
+    // lifecycle_lock 跨 await：实例生命周期迁移必须整体串行
     pub(crate) async fn remove(&self, id: &str) -> Result<(), GatewayInstanceError> {
-        let _guard = self.lifecycle_lock.lock().await;
+        let _guard = HeldAcrossAwait::new(self.lifecycle_lock.lock().await);
         let in_use = self
             .route_guard
             .read()
@@ -556,17 +557,17 @@ impl GatewayInstanceService {
     }
 
     /// start：Starting/Connected 幂等返回；Stopping 拒绝；Stopped/Error 启动新任务。
-    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：start 序列整体串行
+    // lifecycle_lock 跨 await：start 序列整体串行
     pub(crate) async fn start(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
-        let _guard = self.lifecycle_lock.lock().await;
+        let _guard = HeldAcrossAwait::new(self.lifecycle_lock.lock().await);
         self.start_impl(id, false).await
     }
 
     /// restart：Stopped/Connected/Error 重启（取消旧 runtime、递增 generation）；
     /// Starting/Stopping 拒绝。
-    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：restart 序列整体串行
+    // lifecycle_lock 跨 await：restart 序列整体串行
     pub(crate) async fn restart(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
-        let _guard = self.lifecycle_lock.lock().await;
+        let _guard = HeldAcrossAwait::new(self.lifecycle_lock.lock().await);
         self.start_impl(id, true).await
     }
 
@@ -733,9 +734,9 @@ impl GatewayInstanceService {
     /// stop：Stopped/Stopping 幂等返回；其余状态取消 runtime 后落 Stopped。
     /// W1 不 await join（收敛验证属 W2）；后台 task 退出经 finalize 清理，
     /// generation guard 防旧覆盖。
-    #[allow(clippy::await_holding_invalid_type)] // lifecycle_lock 跨 await：stop 序列整体串行
+    // lifecycle_lock 跨 await：stop 序列整体串行
     pub(crate) async fn stop(&self, id: &str) -> Result<AdapterInstance, GatewayInstanceError> {
-        let _guard = self.lifecycle_lock.lock().await;
+        let _guard = HeldAcrossAwait::new(self.lifecycle_lock.lock().await);
         let mut registry = self.registry.write().await;
         let managed = registry
             .get_mut(id)

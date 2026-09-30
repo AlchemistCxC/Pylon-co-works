@@ -41,7 +41,7 @@
     "check:immer": "bun scripts/check-immer-imports.mjs",
     "check:acp-shadow": "node scripts/check-acp-shadow-parity.mjs",
     "check:rust": "cd src-tauri && cargo build -p pylon-fake-agent --features test-agent && cargo test -p pylon-fake-agent --features test-agent && cargo test --workspace --lib && cargo build && cd .. && bun run check:acp-shadow && cargo fmt --all --manifest-path src-tauri/Cargo.toml --check",
-    "check:clippy": "node scripts/check-clippy.mjs",
+    "check:clippy": "node scripts/check-clippy.mjs && node scripts/check-await-holding.mjs",
     "check:all": "bun run check:frontend && bun run check:rust && bun run check:clippy && bun run check:solid",
     "check:bundle": "bun scripts/check-bundle-size.mjs",
     "check:first-party-styles": "bun scripts/check-first-party-style-ownership.mts",

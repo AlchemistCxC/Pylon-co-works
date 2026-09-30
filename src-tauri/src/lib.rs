@@ -68,6 +68,7 @@ use agent::runtime::AgentLifecycleStatus;
 use agent_config::AgentDef;
 use gateway::GatewayCore;
 use prism::PrismClient;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use runtime::{AgentRuntime, AgentRuntimeManager};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -1297,16 +1298,15 @@ fn setup_spawn_default_agent_connect(app: &tauri::App, default_runtime_connectin
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
     crate::startup_timing::mark("default_agent_connect_started");
     // spawn 块内锁序 switch_lock→agent_lifecycle：后台初始连接须与手动 switch/reconnect 串行（同 reconnect_agent）。
-    #[allow(clippy::await_holding_invalid_type)]
     tokio::spawn(async move {
         let state = app_handle.state::<AppState>();
         // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
-        let _switch_guard = state.inner().switch_lock.lock().await;
+        let _switch_guard = HeldAcrossAwait::new(state.inner().switch_lock.lock().await);
         let runtime = match handles.active_runtime() {
             Some(runtime) => runtime,
             None => return,
         };
-        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
         let Some(connect_window) = connect_window else {
             tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
             return;

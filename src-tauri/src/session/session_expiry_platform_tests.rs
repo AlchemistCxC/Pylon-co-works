@@ -1,5 +1,6 @@
 // #245：文件自 crate 根迁入本目录；crate 根 glob 与原 `use super::*` 同名集。
 use crate::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 // `crate::*` 只给到 crate 根的绑定；#363-4 新增的超时可注入形态没有根绑定，
 // 显式引入（`crate::session` 的 `pub(crate) use expiry::*` 会带出来）。
 use crate::session::check_session_expiry_with;
@@ -190,7 +191,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
 }
 
 /// #363-4：prompt 闸门被占用时，该连接的全部会话本轮跳过。
-#[allow(clippy::await_holding_invalid_type)] // 测试本体：持 prompt_gate 模拟在途 prompt
+// 测试本体：持 prompt_gate 模拟在途 prompt
 #[tokio::test]
 async fn sessions_of_a_busy_prompt_gate_are_exempt() {
     let state = state_with_initial_acp().await;
@@ -203,7 +204,7 @@ async fn sessions_of_a_busy_prompt_gate_are_exempt() {
         sessions.insert("local".to_string(), local);
     }
     // 持有闸门（模拟在途 prompt）
-    let _gate = runtime.prompt_gate.clone().lock_owned().await;
+    let _gate = HeldAcrossAwait::new(runtime.prompt_gate.clone().lock_owned().await);
 
     check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
     assert!(

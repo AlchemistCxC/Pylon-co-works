@@ -4,6 +4,7 @@
 //! ACP-02：options 从 `Vec<String>` 升级为 [`PermissionOption`]（typed wire），
 //! kind/name 宽容保留、optionId 原值不正规化（§5.5）。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
@@ -489,7 +490,6 @@ pub(crate) async fn respond_interaction(
 /// #463 后端 C-1：内存写与落盘全程持 `approval_mode_write_lock`——并发 set
 /// （GUI 与 CLI 桥同进程）串行化，磁盘必为最后一次 set（tokio Mutex 公平取锁，
 /// 临界区内无基于旧值的读改写，故锁序即生效序）。
-#[allow(clippy::await_holding_invalid_type)]
 // approval_mode_write_lock 跨 await：串行「内存写→落盘」全窗口，防写完成序可逆（与 config_write_lock 同型）
 #[tauri::command]
 pub(crate) async fn set_approval_mode(
@@ -501,7 +501,7 @@ pub(crate) async fn set_approval_mode(
             "unknown approval mode: {mode}"
         )));
     }
-    let _write_guard = state.approval_mode_write_lock.lock().await;
+    let _write_guard = HeldAcrossAwait::new(state.approval_mode_write_lock.lock().await);
     *state.approval_mode.lock().map_err(|e| e.to_string())? = mode.clone();
     let service = state
         .user_data_service

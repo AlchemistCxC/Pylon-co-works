@@ -1,6 +1,7 @@
 //! 插件包安装/回滚/卸载事务：两阶段 stage/commit/abort + recover 恢复
 //! （D-split 自 plugin_cmds.rs；行为零变化）。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -31,13 +32,13 @@ pub(crate) async fn write_lock() -> tokio::sync::MutexGuard<'static, ()> {
 /// JoinHandle 的意外终止（后台任务 panic / runtime 关停取消）在此映射为
 /// `PluginError::Transaction` 上抛——不允许 panic 穿透 command 线程，
 /// 前端只会见到结构化 PylonError。
-#[allow(clippy::await_holding_invalid_type)] // 插件写事务骨架：写锁跨 spawn_blocking await，install/uninstall 整体串行（#261 设计）
+// 插件写事务骨架：写锁跨 spawn_blocking await，install/uninstall 整体串行（#261 设计）
 async fn run_plugin_write<T, F>(app: &AppHandle, op: F) -> Result<T, PylonError>
 where
     F: FnOnce(PathBuf) -> Result<T, PluginError> + Send + 'static,
     T: Send + 'static,
 {
-    let _guard = write_lock().await;
+    let _guard = HeldAcrossAwait::new(write_lock().await);
     let root = root(app)?;
     let result = tauri::async_runtime::spawn_blocking(move || op(root))
         .await
