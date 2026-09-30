@@ -22,7 +22,9 @@ futures-util = "0.3"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# JobObjects feature 随 #486 项5（JobObject 装配单源下沉 pylon-foundations）裁掉；
+# Foundation/Threading 仍被 agent_detection 的测试探针（CloseHandle/OpenProcess）使用。
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 # #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
 [lints]
