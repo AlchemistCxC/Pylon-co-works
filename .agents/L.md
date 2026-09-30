@@ -4,6 +4,10 @@
 
 > **只留在途。** 本文件的价值是「谁正在改哪些文件」；已完工的条目占用读取代价，并且**文件越长、两边各自追加就越容易冲突**（本文件历史上多次成为合并冲突点）。所以自己的 issue 合入后即可移除自己的条目。2026-09-16 及以前的条目（其 issue 均已有 `.agents/records/` 开发记录）已归档到仓外 `../Docs/Archive/L-archive-20260918.md`；2026-09-17 至 2026-09-25 的已完工条目（#110/#315/#316/#317 批次一/ADR 通审等）已归档到仓外 `../Docs/Archive/L-archive-20260925.md`；2026-09-26 撤下的已完工 [kumo] 条目（#324/#331/#334-336/#338/#339/#325-329，issue 均已 CLOSED 且改动已并入 main）已归档到 `../Docs/Archive/L-archive-20260926.md`；[Codex] #155 T3 已随 PR #347 并入 main 撤下。
 
+- [kumo] **#487+#488 双 issue 批（分支 `kumo/487-488-legacy-sunset-hygiene2`，基于 78d277a2）**：
+  - #487 workbench legacy 快照面退役 → `src/domains/workbench/workbenchRuntime.ts` + 其 `__tests__` + 预览宿主/fixture 消费点（勘察后定）；**不碰** `workbenchProjector.ts`（#486 项2 域）。
+  - #488 七项卫生 → ① `src-tauri/src/lib.rs` AppState 段（:148+252 一带，与 #486 项3 的 :1567 长函数区不相邻）② await-holding 豁免治理（触 `src-tauri/src/{permission,lib}.rs`、`dispatcher/crash_reconnect.rs`、`gateway/**`、`lifecycle/**`、`pet/cmds.rs`、`plugin_cmds/transaction.rs`、`session/**`、`pylon-acp/src/client.rs` + 新增守卫模块/清单测试）③ `pylon-session/src/event_repo/repo.rs` LIKE 转义（**#486 声明不碰 pylon-session，此为 488 issue 明示项**）④ `paths.rs:477`、`browser/agent_cmds.rs:652`、`workspaces/cmds.rs:129` spawn_blocking ⑤ `dispatcher/mod.rs:583`+`lib.rs:1532/1549` json! 合并（与 #486 项3 同文件，本批先行提交，项3 届时基于新基线机械合并）⑥ `src/domains/theme/zones/factory/*.ts` 头注 ⑦ 前端 logSink 端口 + identity/hookBridge/skinRuntime/pylonCliBridge/workbenchRuntime/App.tsx 的 console 出口收敛。
+  - **不碰**：`src-tauri/vendor/**`（#484 在途）、`pylon-foundations/**`、`pylon-core/**`、`pylon-acp/src/process.rs`（#486 项5 已入库不重触）、`src/workspace-sheets/**`、`src/components/**`。
 - [kumo] **#486 结构拆分批（7 项逐项小步 PR，分支 `kumo/486-N-*` 均基于 github/main）**，逐项声明域：
   - 项5 JobObject 单源 → 新 `src-tauri/pylon-foundations/src/job_object.rs` + foundations `lib.rs`/`Cargo.toml` + `pylon-core/src/agent_detection/probe.rs` + `pylon-acp/src/process.rs`。
   - 项6 scan 拆分 → `pylon-core/src/agent_detection/scan.rs`（+ 该目录新子模块文件与 `agent_detection/mod.rs` 声明行）。
