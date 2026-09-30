@@ -10,6 +10,7 @@ pub mod atomic_write;
 pub mod child_command;
 pub mod event_names;
 pub mod git;
+pub mod job_object;
 pub mod sanitize;
 pub mod time;
 pub mod workspace;
