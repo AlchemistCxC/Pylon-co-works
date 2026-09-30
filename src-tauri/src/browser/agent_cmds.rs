@@ -635,28 +635,35 @@ pub(crate) async fn browser_agent_save_page(
             Ok(mhtml) => mhtml,
             Err(error) => return cx.error(denial("save_page_failed", error)).await,
         };
-        let save_result = state
-            .inner()
-            .data_dirs_cloned()
-            .map_err(PylonError::Protocol)
-            .and_then(|dirs| {
+        let byte_length = mhtml.len();
+        // #488 批④：MHTML 落盘是阻塞 fs（可能几 MB），与 workspace_search 同口径
+        // 经 spawn_blocking 移出 async 运行时。
+        let save_result = match state.inner().data_dirs_cloned() {
+            Ok(dirs) => {
                 let dir = dirs.data_root.join("agent-pages");
-                std::fs::create_dir_all(&dir)
-                    .map_err(|error| PylonError::Protocol(format!("创建存档目录失败: {error}")))?;
-                let path = dir.join(format!(
-                    "pylon-page-{}.mhtml",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or(0)
-                ));
-                std::fs::write(&path, mhtml.as_bytes())
-                    .map_err(|error| PylonError::Protocol(format!("写 MHTML 失败: {error}")))?;
-                Ok(path)
-            });
+                let bytes = mhtml.into_bytes();
+                tokio::task::spawn_blocking(move || {
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|error| PylonError::Protocol(format!("创建存档目录失败: {error}")))?;
+                    let path = dir.join(format!(
+                        "pylon-page-{}.mhtml",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0)
+                    ));
+                    std::fs::write(&path, bytes)
+                        .map_err(|error| PylonError::Protocol(format!("写 MHTML 失败: {error}")))?;
+                    Ok(path)
+                })
+                .await
+                .map_err(|error| PylonError::Protocol(format!("MHTML 存档任务失败: {error}")))?
+            }
+            Err(error) => Err(PylonError::Protocol(error)),
+        };
         match save_result {
             Ok(path) => {
-                cx.ok(serde_json::json!({ "ok": true, "driver": "cdp", "path": path.to_string_lossy(), "byteLength": mhtml.len() }))
+                cx.ok(serde_json::json!({ "ok": true, "driver": "cdp", "path": path.to_string_lossy(), "byteLength": byte_length }))
                     .await
             }
             Err(error) => cx.error(denial("save_page_failed", error.to_string())).await,

@@ -509,8 +509,17 @@ pub(crate) async fn migrate_appdata_to_portable(
             "portable_migration_unavailable: 迁移条件不满足".into(),
         ));
     }
-    migrate_appdata_to_portable_staged(&app_data_dir, &app_config_dir, &dirs.data_root)
-        .map_err(PylonError::Command)?;
+    // #488 批④：staged 迁移是整目录树复制（阻塞 fs），与 workspace_search 同口径
+    // 经 spawn_blocking 移出 async 运行时。
+    let portable_root = dirs.data_root.clone();
+    let app_data = app_data_dir.clone();
+    let app_config = app_config_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        migrate_appdata_to_portable_staged(&app_data, &app_config, &portable_root)
+    })
+    .await
+    .map_err(|error| PylonError::Command(error.to_string()))?
+    .map_err(PylonError::Command)?;
     Ok(serde_json::json!({ "migrated": true }))
 }
 
