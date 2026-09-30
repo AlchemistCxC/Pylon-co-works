@@ -4,7 +4,7 @@
 
 - issue：#490（enhancement；维护者裁决 2026-10-01：默认值改 0）
 - 分支：`kumo/490-idle-reclaim-opt-in`（独立 worktree `C:/Project/prism-team-workdir/pylon-490`——G: 盘满余 237MB，且共享树 `session_expiry_platform_tests.rs` 属 #488-② 在途域）
-- 基准提交：`ea82ac88`（github/main）
+- 提交范围：`ea82ac88..81aecc68`（基准 `ea82ac88` = github/main；`fe912f5a` 主体 + `81aecc68` 记录补引用）
 - 日期：2026-10-01
 
 ## 目标与范围
@@ -47,6 +47,11 @@
 - commit：见分支 `kumo/490-idle-reclaim-opt-in`（`ea82ac88` 基线上单提交）
 - 测试：`cargo test --workspace --lib`（worktree 冷编译，`CARGO_INCREMENTAL=0`）→ **exit 0，9 目标合计 1662 passed / 0 failed / 4 ignored**（pylon 964 / pylon-acp 186 / fake-agent 9 / pylon-session 216 / 其余 187+92+36+22）；`cargo fmt --all --check` → exit 0；`node scripts/check-clippy.mjs` → 基线外零新增（见提交信息附注）
 - 环境前置（与被测面无关）：worktree 复制共享树既有 `dist/`（`tauri::generate_context!` 编译期要求 `../dist` 存在，CI 同款前置）+ `cargo build -p pylon-fake-agent --features test-agent`（`--lib` 不构建 bin-only crate，test_utils 需要它）
+
+## 与 spec 的偏差
+
+- spec「未决问题」预写的「平台 binding `idle_minutes` 是否翻转」按预案保持不动并已在 issue/PR 评论区明示——无实施偏差。
+- spec 未预写、实施中新增：① 同文件另外三处陈旧注释修正（§6.2 授权，见改动清单）；② 验证期发现预存竞态测试并登记 **#504**；③ 审查子 agent（双轴）三条判断题的处置——头注「两条路径都先重建连接」措辞修正为区分两路自愈（会话路 = revive、连接路 = 懒重连）、本节与元信息「提交范围」的模板补齐、以及「B10.3 不可 grep」误报的驳回（`lib.rs:1262`、`session/mod.rs:480` 等十几处在案）。
 
 ## 未解问题
 

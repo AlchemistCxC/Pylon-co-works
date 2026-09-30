@@ -20,11 +20,11 @@
 //!
 //! #490：**回收默认关闭**（[`DEFAULT_GUI_IDLE_TIMEOUT_SECS`] = `0`），显式 opt-in。
 //! 维持 24 小时默认的核心论据——「GUI prompt 路径没有断线自动重连，回收之后用户要
-//! 手动救」——已被 #379 推翻：`ensure_connected_for_send`（`session/mod.rs`）在
-//! 发送/建会话前懒重连，两条路径回收过后下一次发送都会先重建连接再继续。自动回收
-//! 由此失去必要性：默认让闲置会话与 agent 子进程常驻，「隔天回来继续用」是零成本
-//! 路径；资源受限部署设 `PYLON_SESSION_IDLE_TIMEOUT_SECS` 为正秒数即恢复本文件全部
-//! 链路。零会话口径与 `platform_may_route_to` 保活守卫保留不动。
+//! 手动救」——已被 #379 推翻：会话回收只删映射，下次发送经 `known_peri_id` 自愈
+//! （见上）；连接回收断掉的线，如今也由 `ensure_connected_for_send`（`session/mod.rs`）
+//! 在发送/建会话前懒重建。自动回收由此失去必要性：默认让闲置会话与 agent 子进程
+//! 常驻，「隔天回来继续用」是零成本路径；资源受限部署设 `PYLON_SESSION_IDLE_TIMEOUT_SECS`
+//! 为正秒数即恢复本文件全部链路。零会话口径与 `platform_may_route_to` 保活守卫保留不动。
 
 use super::*;
 
@@ -39,8 +39,8 @@ pub(crate) const GUI_IDLE_TIMEOUT_ENV: &str = "PYLON_SESSION_IDLE_TIMEOUT_SECS";
 ///
 /// 24 小时默认当年取「与无 binding 会话隐式默认（`idle_minutes` 缺省 1440 分钟）
 /// 一致」的保守值，前提是 GUI 发送打到已回收的连接上是硬错误。#379 落地
-/// `ensure_connected_for_send` 后该前提不再成立：回收后首次发送会先懒重连再继续，
-/// 「隔天回来继续用」不依赖后台回收。于是默认翻转——闲置会话与 agent 子进程常驻
+/// `ensure_connected_for_send` 后该前提不再成立：连接被回收后首次发送会先懒重连
+/// 再继续，「隔天回来继续用」不依赖后台回收。于是默认翻转——闲置会话与 agent 子进程常驻
 /// （内存/句柄的常驻代价由用户显式承担），资源受限部署设正秒数换回自动释放。
 /// 非法值回退本值同样落在「关闭」：opt-in 只认合法正数，笔误不会误启回收。
 pub(crate) const DEFAULT_GUI_IDLE_TIMEOUT_SECS: u64 = 0;
