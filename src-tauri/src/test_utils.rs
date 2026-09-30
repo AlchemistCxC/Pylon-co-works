@@ -106,6 +106,7 @@ pub(crate) struct TestStateBuilder {
     gateway: Arc<GatewayCore>,
     startup: Arc<RwLock<crate::startup::StartupDiagnostics>>,
     approval_mode: String,
+    user_data_service: Option<Arc<crate::session::UserDataService>>,
     workspaces: Arc<Mutex<HashMap<String, crate::workspaces::Workspace>>>,
     data_dirs: Arc<OnceLock<crate::paths::DataDirs>>,
 }
@@ -125,6 +126,7 @@ impl TestStateBuilder {
                 crate::startup::StartupDiagnostics::test_default(),
             )),
             approval_mode: "default".to_string(),
+            user_data_service: None,
             workspaces: Arc::new(Mutex::new(HashMap::new())),
             data_dirs: Arc::new(OnceLock::new()),
         }
@@ -170,6 +172,16 @@ impl TestStateBuilder {
         self
     }
 
+    /// #448 PR3：注入 user data service（approval-mode 写穿路径测试用）；
+    /// 缺省 None（service 未就绪 → 写穿降级 warn 的既有默认行为）。
+    pub(crate) fn with_user_data_service(
+        mut self,
+        service: Arc<crate::session::UserDataService>,
+    ) -> Self {
+        self.user_data_service = Some(service);
+        self
+    }
+
     /// 施工文档 §2.3：注入本次启动的 DataDirs（路径消费者测试用）。
     pub(crate) fn with_data_dirs(self, dirs: crate::paths::DataDirs) -> Self {
         let _ = self.data_dirs.set(dirs);
@@ -198,6 +210,12 @@ impl TestStateBuilder {
         });
         // 测试专属字段覆盖（build_app_state 只承载 run() 生产语义的公共部分）：
         *state.approval_mode.lock().expect("approval lock") = self.approval_mode;
+        if let Some(service) = self.user_data_service {
+            *state
+                .user_data_service
+                .lock()
+                .expect("user data service lock") = Some(service);
+        }
         *state.workspaces.lock().expect("workspaces lock") = Arc::into_inner(self.workspaces)
             .expect("workspaces Arc must be unique")
             .into_inner()

@@ -1,8 +1,8 @@
 // 迁移自 scripts/test-theme-migration.mts（P91 A1）
-// ★ #266 刀9：`themeDomainMigrate` 的 `inputVariant↔inputMode` 联动用例已随字段删除退场
-//   ⇒ 该函数在本文件不再被引用，import 同步收窄。
+// ★ #266 刀9：`themeDomainMigrate` 的 `inputVariant↔inputMode` 联动用例已随字段删除退场。
+//   #448 PR5 起该函数重新入列（钉住「预设字段不进最终 migrate 输出」的拆分契约）。
 import { describe, expect, it } from 'vitest'
-import { normalizeThemeMigrationState } from '../migration.ts'
+import { normalizeThemeMigrationState, themeDomainMigrate } from '../migration.ts'
 import { DEFAULT_CC_LAYOUT } from '../../cc/ccLayoutState.ts'
 import { GLOBAL_PRESETS } from '../presets/index.ts'
 import { effectivePresetTheme } from '../zones/index.ts'
@@ -63,32 +63,16 @@ describe('normalizeThemeMigrationState A1 映射矩阵（迁移自 scripts/test-
     expect(view.ccLayout).toEqual(DEFAULT_CC_LAYOUT)
   })
 
-  it('A1 命名空间：非 custom- 前缀 id 重前缀；损坏项丢弃；sessions 原样透传', () => {
-    const customPresets = view.customPresets as Array<Record<string, unknown>>
-    expect(customPresets.length).toBe(1)
-    expect(customPresets[0]).toEqual({
-      id: 'custom-ok',
-      name: 'Valid',
-      theme: { transparency: 0.7 },
-      createdAt: 10,
-      updatedAt: 11,
-      bundle: {
-        manifestVersion: 2,
-        id: 'custom-ok',
-        name: 'Valid',
-        source: 'user',
-        createdAt: 10,
-        updatedAt: 11,
-        contributions: {
-          'builtin.theme': {
-            ownerPluginId: 'builtin.pylon-shell',
-            providerVersion: 1,
-            policy: 'complete',
-            payload: { transparency: 0.7 },
-          },
-        },
-      },
-    })
+  it('A1 命名空间：migrate 函数输出无损透传预设字段（#448 PR5——写回由 partialize 洗、搬家由 stash 保）', () => {
+    // 契约分工：themeDomainMigrate 的输出（normalizeThemeValues 是 Object.assign
+    // 原地合并，非白名单重建）无损透传 customPresets；「pylon-theme 不再持久化预设」
+    // 由 themeStore 的 partialize 白名单保证；搬家数据源由 migrate 钩子暂存
+    // （legacyPresetStash——写回发生在读取之后时现场值已被洗，暂存兜底）。
+    const finalOutput = themeDomainMigrate({
+      transparency: 0.5,
+      customPresets: [{ id: 'ok', name: 'Valid', theme: { transparency: 0.7 }, createdAt: 10, updatedAt: 11 }],
+    }, { ...defaults, ccLayout: DEFAULT_CC_LAYOUT } as never, 0)
+    expect(Array.isArray(finalOutput.customPresets)).toBe(true)
     expect(migrated.sessions).toEqual([{ id: 'must remain outside theme conclusion' }])
   })
 
@@ -96,7 +80,7 @@ describe('normalizeThemeMigrationState A1 映射矩阵（迁移自 scripts/test-
     const empty = normalizeThemeMigrationState({}, defaults)
     expect(empty.appliedPreset).toEqual(defaults.appliedPreset)
     expect(empty.custom).toEqual(defaults.custom)
-    expect(empty.customPresets).toEqual([])
+    expect('customPresets' in empty).toBe(false) // 输入无该字段时不注入
     expect('ccPositions' in empty).toBe(false) // 空状态不得出现 ccPositions
     expect(empty.ccLayout).toEqual(DEFAULT_CC_LAYOUT)
   })

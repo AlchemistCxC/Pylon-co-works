@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useStore } from '../../domains/theme/themeStore'
+import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { GLOBAL_PRESETS } from '../../domains/theme/presets/index.ts'
 import { effectivePresetTheme } from '../../domains/theme/zones/index.ts'
 import { THEME_DEFAULTS } from '../../domains/theme/themeFieldDefs'
@@ -23,8 +23,8 @@ export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
   onRestore: (presetName: string) => void | Promise<void>
   onCustomApply?: (presetId: string) => Promise<PresetApplyResult>
 }) {
-  const customPresets = useStore(s => s.customPresets)
-  const applyCustomPreset = useStore(s => s.applyCustomPreset)
+  const customPresets = useCustomPresetStore(s => s.customPresets)
+  const applyCustomPreset = useCustomPresetStore(s => s.applyCustomPreset)
   const [applyingId, setApplyingId] = useState<string | null>(null)
   const applyingRef = useRef<string | null>(null)
   const [applyFeedback, setApplyFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
