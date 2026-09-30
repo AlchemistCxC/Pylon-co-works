@@ -1,5 +1,6 @@
 //! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；C1：值内容脱敏 + markdown 注入转义；
-//! R21：脱敏实现统一到 crate::sanitize，此处 re-export 保持调用面）。
+//! R21：脱敏实现统一到 crate::sanitize，此处 re-export 保持调用面；
+//! #444 批次③：sanitize 后追加绝对路径收窄段，与前端取证导出脱敏强度对齐）。
 
 use crate::agent::runtime::session_mapping_matches;
 use crate::error::PylonError;
@@ -7,7 +8,7 @@ use crate::AppState;
 
 #[cfg(test)]
 pub(crate) use crate::sanitize::is_export_sensitive_key;
-pub(crate) use crate::sanitize::sanitize_export_messages;
+pub(crate) use crate::sanitize::{redact_export_absolute_paths, sanitize_export_messages};
 
 /// C1：行内转义（title/status/peri_id 注入面）——换行折叠为空格，`#` 转义。
 fn escape_inline(value: &str) -> String {
@@ -195,7 +196,9 @@ pub(crate) async fn export_session(
         ));
     }
     let messages = replay.events;
-    let safe_messages = sanitize_export_messages(&messages);
+    // #444 批次③：两段式脱敏（Strip 敏感 key + 值内容检测 → 绝对路径收窄），
+    // 与前端取证导出（sanitizeExportValue → 路径收窄）同构。
+    let safe_messages = redact_export_absolute_paths(&sanitize_export_messages(&messages));
     let content = match format.as_str() {
         "markdown" => format_export_markdown(&peri_id, &safe_messages),
         _ => serde_json::to_string_pretty(&safe_messages)
@@ -307,6 +310,26 @@ mod tests {
         let safe = sanitize_export_messages(&messages);
         assert_eq!(safe[0]["update"]["detail"], "[REDACTED]");
         assert_eq!(safe[0]["update"]["path"], "safe");
+    }
+
+    #[test]
+    fn export_pipeline_narrows_absolute_paths_after_strip() {
+        // #444 批次③：export_session 的两段式脱敏接线表征——路径收窄必须跟随
+        // sanitize 之后（本测试与命令体内的调用顺序逐字对应）。
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "title": "read_file",
+                "rawInput": "{\"path\":\"G:/ws/secret.txt\"}",
+                "locations": [{ "path": "G:/ws/src/main.rs" }]
+            }
+        })];
+        let safe = redact_export_absolute_paths(&sanitize_export_messages(&messages));
+        let text = serde_json::to_string(&safe).unwrap();
+        assert!(!text.contains("rawInput"), "敏感 key 剔除先行");
+        assert!(!text.contains("G:/ws"), "绝对路径不得整段外泄");
+        assert!(text.contains("…/main.rs"), "幸存字段收窄为 …/末段");
     }
 
     #[test]

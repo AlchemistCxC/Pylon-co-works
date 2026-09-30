@@ -204,6 +204,56 @@ pub fn sanitize_export_messages(messages: &[Value]) -> Vec<Value> {
         .collect()
 }
 
+/// #444 批次③：绝对路径形态（盘符 / UNC / 根相对）→ 收窄为 `…/目录名`，避免全路径
+/// 外泄；非绝对路径原样保留。逐行为镜像前端 threeSourceExport.ts `redactAbsolutePath`
+/// （两侧以同一组期望值单测互钉；NUL 字节 → REDACTED 与前端一致）。
+pub fn redact_absolute_path(path: &str) -> String {
+    if path.contains('\0') {
+        return REDACTED.to_string();
+    }
+    let bytes = path.as_bytes();
+    let drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\');
+    if !drive_absolute && !path.starts_with('/') && !path.starts_with('\\') {
+        return path.to_string();
+    }
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let last = trimmed
+        .split(['/', '\\'])
+        .rev()
+        .find(|segment| !segment.is_empty());
+    match last {
+        Some(segment) => format!("…/{segment}"),
+        None => REDACTED.to_string(),
+    }
+}
+
+/// #444 批次③：export 管线第二阶段——对 sanitize 后的消息树做绝对路径收窄。
+/// 对齐前端取证管线「sanitizeExportValue → 路径收窄」两段式；仅改字符串值，
+/// 结构保形（对象/数组递归，其余字面量恒等）。
+pub fn redact_export_absolute_paths(messages: &[Value]) -> Vec<Value> {
+    messages
+        .iter()
+        .map(|value| redact_value_paths(value.clone()))
+        .collect()
+}
+
+fn redact_value_paths(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_absolute_path(&text)),
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .map(|(key, value)| (key, redact_value_paths(value)))
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(values.into_iter().map(redact_value_paths).collect()),
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +357,108 @@ mod tests {
                 "{secret} 必须命中"
             );
         }
+    }
+
+    #[test]
+    fn redact_absolute_path_mirrors_frontend_expectations() {
+        // 期望值与 src/domains/export/__tests__/threeSourceExport.test.ts 同源互钉（#444 批次③）
+        assert_eq!(
+            redact_absolute_path("G:/Project/ws/prism-desktop"),
+            "…/prism-desktop"
+        );
+        assert_eq!(
+            redact_absolute_path("C:\\Users\\me\\prism-desktop"),
+            "…/prism-desktop"
+        );
+        assert_eq!(
+            redact_absolute_path("//server/share/prism-desktop"),
+            "…/prism-desktop"
+        );
+        assert_eq!(redact_absolute_path("/root/proj"), "…/proj");
+        assert_eq!(redact_absolute_path("relative/dir"), "relative/dir");
+    }
+
+    #[test]
+    fn redact_absolute_path_edges() {
+        assert_eq!(
+            redact_absolute_path("with\0nul"),
+            REDACTED,
+            "NUL 字节必须 REDACTED"
+        );
+        assert_eq!(redact_absolute_path("/"), REDACTED, "裸根无末段 → REDACTED");
+        assert_eq!(redact_absolute_path("\\"), REDACTED);
+        assert_eq!(
+            redact_absolute_path("C:/"),
+            "…/C:",
+            "盘符根保留盘符为末段（与 TS 一致）"
+        );
+        assert_eq!(redact_absolute_path("C:\\foo\\"), "…/foo", "尾分隔符剥离");
+        assert_eq!(
+            redact_absolute_path("C:"),
+            "C:",
+            "无分隔符的盘符前缀不算绝对路径"
+        );
+        assert_eq!(redact_absolute_path(""), "");
+        assert_eq!(
+            redact_absolute_path("你好/世界"),
+            "你好/世界",
+            "多字节相对路径不误伤"
+        );
+        assert_eq!(
+            redact_absolute_path("/single"),
+            "…/single",
+            "单段根路径同样收窄"
+        );
+    }
+
+    #[test]
+    fn redact_export_absolute_paths_walks_strings_and_keeps_shape() {
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "title": "read_file",
+                "locations": [{ "path": "G:\\Project\\ws\\src\\main.rs", "line": 3 }],
+                "detail": "see relative/dir and plain text",
+                "count": 2,
+                "flag": null
+            }
+        })];
+        let narrowed = redact_export_absolute_paths(&messages);
+        assert_eq!(
+            narrowed[0]["update"]["locations"][0]["path"],
+            json!("…/main.rs"),
+            "绝对路径收窄为末段目录名"
+        );
+        assert_eq!(
+            narrowed[0]["update"]["detail"],
+            json!("see relative/dir and plain text"),
+            "相对路径/普通文本原样保留"
+        );
+        assert_eq!(
+            narrowed[0]["update"]["count"],
+            json!(2),
+            "非字符串字面量恒等"
+        );
+        assert_eq!(narrowed[0]["sessionId"], json!("peri-1"), "对象结构保形");
+    }
+
+    #[test]
+    fn redact_export_absolute_paths_composes_after_strip() {
+        // export_session 管线顺序（sanitize → 路径收窄）的接线表征：敏感 key 剔除
+        // 先行，路径收窄只作用于幸存字段。
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "rawInput": "{\"path\":\"G:/secrets/key.txt\"}",
+                "locations": [{ "path": "G:/secrets/visible.txt" }]
+            }
+        })];
+        let safe = redact_export_absolute_paths(&sanitize_export_messages(&messages));
+        let text = serde_json::to_string(&safe).unwrap();
+        assert!(!text.contains("rawInput"), "敏感 key 剔除先行");
+        assert!(!text.contains("secrets"), "幸存字段中的绝对路径必须收窄");
+        assert!(text.contains("…/visible.txt"));
     }
 }
