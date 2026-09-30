@@ -30,7 +30,8 @@ const EMPTY_CREATE_DRAFT: AgentCreateDraftInput = { id: '', name: '', exe: '', p
 
 /**
  * AgentCreateForm — 新建 Agent 表单（A-V4 拆分自 AgentRuntimePanel，JSX 逐字随迁）。
- * 草稿自持（随开合重置——与原「成功后清空」等价）；提交经 onCreate 走面板侧事务
+ * 草稿自持，随表单卸载重置（创建成功后收起=清空，与旧一致；用户手动「收起新建」
+ * 也会重置——与旧实现「收起保留草稿」不等价，见 #454 PR 披露）；提交经 onCreate 走面板侧事务
  * （校验/CAS/嵌入式降级在面板，成功后面板收起表单即重置草稿）。
  */
 export default function AgentCreateForm({ busy, onCreate }: {

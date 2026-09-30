@@ -49,4 +49,15 @@
 
 ## 审查轮
 
-（子 agent 审查结论回填于下）
+独立子 agent 只读复审（对照 R1/R2 口径）：**总裁决「可 PR」**。8 项逐项核销全部「已修」（含派发表键集合与旧 switch case 值 set-identical 的机械比对、identityStore 三处动作逐字 diff、A-V2 各调用点生命周期逐一对照）；门禁七项独立复测与记录声称一致。
+
+处置其发现（提交见 `git log`）：
+
+1. **CONCERN-1（已修）**：W9 拆分时 chat 分区被过度同构加上 `<h3>`（旧 case 'chat' 无标题）——删除 label 传参恢复原 DOM。
+2. **CONCERN-2（披露）**：AgentCreateForm 草稿随「收起新建」卸载重置，与旧实现「收起保留草稿」不等价（创建成功路径等价、失败保留等价）；注释已如实化，PR 描述披露。
+3. **NOTE-3（已清 1 条）**：runtime 白名单中 `Settings.tsx` 死条目删除（其 pylon:agent-switched 派发已随 W9 迁 settingsAgentActions）；审查者建议的另 4 条经复核**保留**——CwdSettingsPanel/OverviewSheetView/activateAgentSheet/useSidebarContributionProps 仍在构造 `pylon:*` CustomEvent，条目未死。
+4. **NOTE-4（已修）**：AgentConfigEditor 的 `createAgentClient` 收窄为 `import type`。
+5. NOTE-5/6 复核确认非变更（settingsAgentActions 的 per-call client 不触 revision 缓存；候选草稿内联逐字段一致）。
+
+修正记录本身两处：AgentRuntimePanel 实测 443 行（非 442，末行换行口径）；「视图层 15 条已删」补注（白名单清理以条目是否真死为准，5 条建议中 4 条仍活）。
+

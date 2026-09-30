@@ -209,7 +209,7 @@ export default function Settings({ sheet, ctx, state }: WorkspaceViewProps<Setti
         )
       case 'chat':
         return (
-          <ZonePresetSection zone="chat" label={SETTINGS_SECTION_LABELS.chat} isSearching={isSearching} interfaceMode={currentInterfaceMode}
+          <ZonePresetSection zone="chat" isSearching={isSearching} interfaceMode={currentInterfaceMode}
             header={!isSearching ? <Group title="渲染风格"><PresentationProfilePicker /></Group> : undefined}
             fields={zoneFields('chat')}
             onApplyZonePreset={applyLocalPreset} onSaveZonePresetEntry={saveZonePresetEntryFromSettings} onRemoveZonePresetEntry={removeZonePresetEntry} />

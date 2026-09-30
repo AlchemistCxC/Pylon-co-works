@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { appClients } from '../../app/appClients.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
-import { createAgentClient } from '../../infrastructure/acp/agentClient'
+import type { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 

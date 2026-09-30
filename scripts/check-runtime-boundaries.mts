@@ -38,8 +38,7 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   'src/domains/chat/sessionMode.ts',
   'src/domains/chat/sessionModel.ts',
   'src/domains/chat/streamingSend.ts',
-      'src/components/Settings.tsx',
-        'src/components/settings/CwdSettingsPanel.tsx',
+            'src/components/settings/CwdSettingsPanel.tsx',
     // #154 区块栈线把会话删除/导出接线自 Sidebar.tsx 迁入该 hook（removeSessionTransaction
   // 端口 + createSessionClient 直发，形态不变）——条目随代码迁移，Sidebar.tsx 已无直发。
   'src/components/sidebar/useSidebarContributionProps.ts',
