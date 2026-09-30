@@ -11,6 +11,12 @@ import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSem
 // 封存段后到达「不同 provider 身份」的迟到 delta，message 族按流连续 append 进原段
 // （'AB'），reasoning 族因 append 谓词要求 running/同身份终态而开新段（'A','B'）。
 // 该差异由「provider 显式边界」用例显式钉住，防止无意识漂移。
+//
+// 审查轮备注（requiresRunning 参数差）：message 族 K03 的 requiresRunning=false
+// 在可达状态空间内被折叠段覆盖——append 蕴含 continues，而 seq < prev.sequence
+// 必然满足折叠条件 seq < max(prevSeq, terminalFence)，故「封存 previous + 落穿
+// 栅栏」的输入恒先走折叠、K03 不会以非 running previous 触达。两族的
+// requiresRunning 差异因此是防御性参数而非可达行为差异，不设独立用例。
 
 const base = {
   provider: 'peri',
