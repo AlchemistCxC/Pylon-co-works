@@ -28,7 +28,9 @@ const importStatementRe = new RegExp(
   + /|import\s*\(\s*['"]([^'"]+)['"]\s*\)/.source
   + /|import\s*['"]([^'"]+)['"]/.source
   + /|export\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/.source
-  + /|export\s+\*\s+from\s*['"]([^'"]+)['"]/.source,
+  + /|export\s+\*\s+from\s*['"]([^'"]+)['"]/.source
+  + /|export\s+\*\s+as\s+[\w$]+\s+from\s*['"]([^'"]+)['"]/.source
+  + /|import\s+(?:type\s+)?[\w$]+\s*,\s*\*\s+as\s+[\w$]+\s*from\s*['"]([^'"]+)['"]/.source,
   'g',
 )
 
@@ -39,16 +41,16 @@ export interface CoreImportHit {
   readonly symbols: readonly string[]
 }
 
-/** 分支组位：A 命名导入 ns/def/named/spec；B 单导入 ns/def/spec；C 动态 spec；D 副作用 spec；E re-export named/spec；F re-export-all spec。 */
+/** 分支组位：A 命名导入 ns/def/named/spec；B 单导入 ns/def/spec；C 动态 spec；D 副作用 spec；E re-export named/spec；F re-export-all spec；G re-export-ns spec；H 默认+命名空间混合 spec。 */
 export function findCoreImports(source: string): CoreImportHit[] {
   const hits: CoreImportHit[] = []
   for (const match of source.matchAll(importStatementRe)) {
-    const [, nsA, defA, namedA, specA, nsB, defB, specB, specC, specD, namedE, specE, specF] = match
-    const spec = specA ?? specB ?? specC ?? specD ?? specE ?? specF
+    const [, nsA, defA, namedA, specA, nsB, defB, specB, specC, specD, namedE, specE, specF, specG, specH] = match
+    const spec = specA ?? specB ?? specC ?? specD ?? specE ?? specF ?? specG ?? specH
     if (!spec || !spec.includes('plugins/core/')) continue
     const symbols: string[] = []
     const named = namedA ?? namedE
-    if (nsA || nsB || defA || defB || specC || specD || specF) symbols.push('*')
+    if (nsA || nsB || defA || defB || specC || specD || specF || specG || specH) symbols.push('*')
     if (named) {
       for (const piece of named.split(',')) {
         const name = piece.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim()
@@ -131,6 +133,8 @@ for (const fixture of [
   "import('../plugins/core/sessionCreation/builtinSessionCreation.ts')",
   "import '../plugins/core/sessionCreation/builtinSessionCreation.ts'",
   "export * from '../plugins/core/sessionCreation/builtinSessionCreation.ts'",
+  "export * as coreBundle from '../plugins/core/sessionCreation/builtinSessionCreation.ts'",
+  "import builtinDefault, * as coreNs from '../plugins/core/sessionCreation/builtinSessionCreation.ts'",
 ]) {
   assert.equal(findCorePluginFaceViolations(fixture, new Set(['*'])).length, 1, fixture)
 }

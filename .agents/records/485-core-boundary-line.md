@@ -42,6 +42,8 @@
 | `tsc` 主配置 + solid 配置 | ✅ 双绿（worktree 需先 `build:wasm` 生成产物） |
 | 相关单测 | ✅ `src/components/settings src/sheets` 609 通过；`src/__tests__ src/app` 842 通过；`src/components src/domains/interface src/plugin-runtime/interface-mode` 437 通过 |
 
+注：609 一格在部分环境为 608/609——`src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx` 存在环境相关 flaky，基线 df6cd864 同文件单跑更红（3 failed），失败与本提交无关（独立审查者复测归因）。
+
 ## 测试处置
 
 无既有测试修改/删除。guard 脚本内嵌负向 fixture 扩展（见改动清单）。
@@ -59,6 +61,11 @@
 
 - `src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx` 存在 3 行 `plugins/product` 直连（QA smoke 挂载件）——不在本次管辖（裁决字面只扩 sheets），留作后续若扩管辖 renderers 时的已知存量。
 - agent-workbench 三件的白名单条目在 #486 项1 将 `src/sheets/agent-workbench/**` 迁 `src/application/agent-workbench/**` 后随迁失效（application 非视图不入管辖），届时由搬移方移除条目（L.md 已互相声明）。
+- `src/app/**` 除 App.tsx 单文件不入 guard 扫描，「builtin 只住 app 连接件」在 app 层是约定非门禁——与裁决字面一致，后续扩管辖时再议。
+
+## 独立审查结论（子 agent，APPROVE）
+
+行为等价性（含 `resolve` 按 `contributionId === normalized.id` 与原 `value.id` 谓词等价、DEFAULT 兜底腿深相等微差论证）、guard 正确性（25 形态 bun 实测）、白名单完整性（全仓 9 文件与「4 改道 + 5 白名单 + 3 非视图」精确吻合）、约束遵守（`src/plugins/**` 零改动）、负向验证自证（注入红/白名单改名红/恢复绿）均 PASS。审查建议「guard 正则补 `export * as ns from` 与 `import def, * as ns from` 两分支 + fixture」已采纳（审查后追加提交）；「609 补注 flaky」已采纳。
 
 ## 并行交集
 
