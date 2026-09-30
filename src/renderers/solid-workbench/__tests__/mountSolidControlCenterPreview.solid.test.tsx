@@ -343,7 +343,7 @@ describe('mountSolidControlCenterPreview', () => {
     const services = createPreviewWorkbenchServices()
     const theme = structuredClone(DEFAULTS)
     theme.inputSubmitButtonMode = 'inline'
-    // ★ 刀2：门开（空态）时读的是**空态切面**；常态切面一件都没藏。
+    // ★ 刀4：门开（空态）时读的是**主管 ∪ 再藏**（这里主管表为空 ⇒ 结果 = 再藏表那 6 件）。
     theme.ccHidden = []
     theme.ccHiddenEmpty = [...PRESET_EMPTY_SLICE]
     services.appearance.setTheme(theme)
@@ -352,7 +352,7 @@ describe('mountSolidControlCenterPreview', () => {
       const destroy = mountSolidControlCenterPreview({ host, services, sessionId: null })
       const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
       expect(controlCenter).not.toBeNull()
-      // 前提：这里是**空态切面**在藏件，常态切面 ccHidden 里一件都没有。
+      // 前提：这里是**再藏表**在藏件，主管表 ccHidden 里一件都没有。
       // ⇒ 工具栏若读裸常态切面，就会把这几格报成「● 显示着」——同一个事实两处判据，正是本单病灶。
       expect(theme.ccHidden).not.toContain('model')
       expect(theme.ccHiddenEmpty).toContain('model')
@@ -363,14 +363,14 @@ describe('mountSolidControlCenterPreview', () => {
         .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
       const chipMark = (id: string) => chipWrap(id)?.querySelector('.cc-edit-toolbar-chip')?.textContent?.trim().at(0)
 
-      // 切面里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
+      // 名单里的每一件：工具栏那一格如实说「隐藏」（＋ / dim）—— ★ 刀1 起画布上它已不在场，
       // 清单是它唯一的入口，故这里的"如实"就是隐藏件的全部可见信息。
       await waitFor(() => expect(chipWrap('model')?.classList.contains('dim')).toBe(true))
       for (const id of PRESET_EMPTY_SLICE) {
         expect(chipWrap(id)?.classList.contains('dim')).toBe(true)
         expect(chipMark(id)).toBe('＋')
       }
-      // 不在切面里的输入栏仍是「● 显示着」—— 挡住"这条用例恒为全部隐藏"
+      // 不在名单里的输入栏仍是「● 显示着」—— 挡住"这条用例恒为全部隐藏"
       expect(chipWrap('input')?.classList.contains('dim')).toBe(false)
       expect(chipMark('input')).toBe('●')
       destroy()
@@ -381,11 +381,12 @@ describe('mountSolidControlCenterPreview', () => {
     }
   })
 
-  it('★ 刀2 门开 / 门关读的是**两份切面**：同一份主题，空态缺席的件只在门关时在场', async () => {
+  it('★ 刀4 门开 = 主管 ∪ 再藏、门关 = 只主管：再藏表**放不出**主管表藏着的件', async () => {
     const runtime = new TestPluginRuntime()
     const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
     const services = createPreviewWorkbenchServices()
-    // 常态切面藏 tokens；空态切面藏 model 与 command-hint（刻意与常态**不同**：并集会两边都藏）
+    // 主管表藏 tokens；再藏表藏 model 与 command-hint（两份**刻意不同**：
+    //   旧口径下"门开只读再藏表"会把 tokens 放出来 —— 那正是结构 C 取消的能力）
     const theme = structuredClone(DEFAULTS)
     theme.ccHidden = ['tokens']
     theme.ccHiddenEmpty = ['model', 'cc-command-hint']
@@ -405,22 +406,136 @@ describe('mountSolidControlCenterPreview', () => {
     }
 
     try {
-      // 门关（有会话）：常态切面生效 ⇒ tokens 不在场、model 在场
+      // 门关（有会话）：只主管表 ⇒ tokens 不在场、model 在场（再藏表不参与）
       const active = await mountWith('preview-session')
       await waitFor(() => expect(active.present('model')).toBe(true))
-      expect(active.present('tokens'), '门关：常态切面藏的件不在场').toBe(false)
-      expect(active.present('cc-command-hint'), '门关：空态切面（写了 model / command-hint）不参与').toBe(true)
+      expect(active.present('tokens'), '门关：主管表藏的件不在场').toBe(false)
+      expect(active.present('cc-command-hint'), '门关：再藏表不参与').toBe(true)
       active.dispose()
 
-      // 门开（空态）：空态切面生效 ⇒ model / command-hint 不在场，而常态切面藏的 tokens 反而在场
+      // 门开（空态）：主管 ∪ 再藏 ⇒ 三件全不在场
       const empty = await mountWith(null)
       await waitFor(() => expect(empty.present('model')).toBe(false))
-      expect(empty.present('cc-command-hint'), '门开：空态切面藏的件不在场').toBe(false)
-      expect(empty.present('tokens'), '门开：常态切面不参与（旧并集会把它也藏掉）').toBe(true)
+      expect(empty.present('cc-command-hint'), '门开：再藏表藏的件不在场').toBe(false)
+      expect(empty.present('tokens'), '门开：主管表藏的件**照样**不在场（再藏抵消不掉主管表）').toBe(false)
       expect(empty.present('input')).toBe(true)
       empty.dispose()
     } finally {
       services.destroy()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀4 显示前校验：装不下 ⇒ **不发命令**（数据逐字未变）+ 就地出提示；加高后重点 ⇒ 成功', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputSubmitButtonMode = 'inline'
+    // 两态都藏着那件高的（modelHeight 60）⇒ 眼下需求 = 下界 64；
+    // 点「显示」（主管表）之后 → 常态那一边的模型在场 ⇒ 需求抬到 ccMarginBottom 15 + 60 = 75。
+    theme.modelHeight = 60
+    theme.ccHidden = ['model']
+    theme.ccHiddenEmpty = ['model']
+    services.appearance.setTheme(theme)
+
+    // jsdom 没有布局（尺寸恒 0 ⇒ 本该 fail-open）。把背景板的实测尺寸钉成可控值，
+    // 才能验"装不下就被拒"这条核心判据。
+    // ★ 钉在**元素实例**上（不是 `Element.prototype`）：jsdom 的 clientHeight/Width 取值器
+    //   不在 Element.prototype 上，原型级 spy 拦不住；实例自有属性则必定覆盖继承链。
+    const box = { width: 900, height: 64 }
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      expect(controlCenter).not.toBeNull()
+      Object.defineProperty(controlCenter as HTMLElement, 'clientHeight', { configurable: true, get: () => box.height })
+      Object.defineProperty(controlCenter as HTMLElement, 'clientWidth', { configurable: true, get: () => box.width })
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+      // 前提：model 被两态都藏着 ⇒ 画布上不在场
+      expect(controlCenter?.querySelector('[data-widget-id="model"]')).toBeNull()
+      // 前提：尺寸**确实**被钉住了（量不到就会 fail-open ⇒ 这条用例会变成"假绿"）
+      expect(controlCenter?.clientHeight, '夹具前提：实测高度已被钉成 64').toBe(64)
+
+      const chipWrap = (id: string) => [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+        .find(wrap => wrap.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
+      const baseToggle = (id: string) => chipWrap(id)?.querySelector<HTMLButtonElement>('.cc-chip-toggle')
+      const notice = () => controlCenter?.querySelector<HTMLElement>('.cc-edit-warning')
+      // "数据逐字未变"的判据：整个外观快照的 JSON 串（含两份表 + 高度）
+      const snapshotJson = () => JSON.stringify(services.appearance.getSnapshot())
+      const before = snapshotJson()
+
+      // 装不下（需要 75 > 当前 64）⇒ 拒：一条命令都不发
+      fireEvent.click(baseToggle('model') as HTMLButtonElement)
+      await waitFor(() => expect(notice()).not.toBeNull())
+      expect(snapshotJson(), '被拒时数据必须**逐字未变**').toBe(before)
+      expect(services.appearance.getSnapshot().ccHidden).toEqual(['model'])
+      expect(controlCenter?.querySelector('[data-widget-id="model"]'), '被拒 ⇒ 它仍不在场').toBeNull()
+      // 提示带数字 + 两个出路（文案由 verdict 的 needed / available 拼出）
+      expect(notice()?.getAttribute('role')).toBe('alert')
+      expect(notice()?.textContent).toContain('还差 11px')
+      expect(notice()?.textContent).toContain('先加高')
+      // ★ 提示不在 `role="toolbar"` 里面（无障碍语义不被搅乱）
+      expect(controlCenter?.querySelector('[role="toolbar"] .cc-edit-warning')).toBeNull()
+
+      // 手动加高（模拟用户拖高背景板）到够装 ⇒ 再点一次成功，且提示随之退场
+      box.height = 80
+      fireEvent.click(baseToggle('model') as HTMLButtonElement)
+      await waitFor(() => expect(controlCenter?.querySelector('[data-widget-id="model"]')).not.toBeNull())
+      expect(services.appearance.getSnapshot().ccHidden).toEqual([])
+      expect(notice(), '成功的写入要清掉上一次的提示').toBeNull()
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
+      await runtime.deactivate(instance.identity.key)
+    }
+  })
+
+  it('★ 刀4 两个开关各写各表（DOM 读数）：一个按钮只动主管表、另一个只动再藏表', async () => {
+    const runtime = new TestPluginRuntime()
+    const instance = await runtime.activateBuiltin(createBuiltinCcWidgetPluginDefinition())
+    const host = document.createElement('div')
+    document.body.append(host)
+    const services = createPreviewWorkbenchServices()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputSubmitButtonMode = 'inline'
+    theme.ccHidden = []
+    theme.ccHiddenEmpty = []
+    services.appearance.setTheme(theme)
+
+    try {
+      const destroy = mountSolidControlCenterPreview({ host, services, sessionId: 'preview-session' })
+      const controlCenter = host.querySelector<HTMLElement>('[data-control-center="production"]')
+      services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+      await waitFor(() => expect(controlCenter?.querySelector('.cc-edit-toolbar')).not.toBeNull())
+
+      const toggles = (id: string) => {
+        const wrap = [...(controlCenter?.querySelectorAll<HTMLElement>('.cc-edit-toolbar-chip-wrap') ?? [])]
+          .find(item => item.textContent?.includes(CC_WIDGET_LABELS[id as keyof typeof CC_WIDGET_LABELS]))
+        return [...(wrap?.querySelectorAll<HTMLButtonElement>('.cc-chip-toggle') ?? [])]
+      }
+
+      // 两个开关的标签各自独立（不许都叫「隐藏 / 显示」—— 那会让人以为两者平权）
+      expect(toggles('model').map(button => button.textContent)).toEqual(['隐藏', '空态里再藏'])
+
+      // 开关②「空态里再藏」⇒ 只有再藏表变，主管表一个字节不动
+      fireEvent.click(toggles('tokens')[1]!)
+      await waitFor(() => expect(services.appearance.getSnapshot().ccHiddenEmpty).toEqual(['tokens']))
+      expect(services.appearance.getSnapshot().ccHidden, '写再藏表不许连带写主管表').toEqual([])
+      expect(toggles('tokens').map(button => button.textContent)).toEqual(['隐藏', '空态放出'])
+
+      // 开关①「隐藏」⇒ 只有主管表变，再藏表保持
+      fireEvent.click(toggles('model')[0]!)
+      await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toEqual(['model']))
+      expect(services.appearance.getSnapshot().ccHiddenEmpty, '写主管表不许连带写再藏表').toEqual(['tokens'])
+      destroy()
+    } finally {
+      services.destroy()
+      host.remove()
       await runtime.deactivate(instance.identity.key)
     }
   })

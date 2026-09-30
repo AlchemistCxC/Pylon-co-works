@@ -34,21 +34,16 @@ export function filterPresetTheme(value: Record<string, unknown> | Partial<Theme
 }
 
 /**
- * ★ #266 刀2：**预设没写空态切面 ⇒ 抄它自己的常态切面**（「缺省回落常态切面」的落点）。
+ * ★★ #266 刀4（结构 C）：**"预设没写空态 ⇒ 抄它自己的常态表"这条回落已删除**（`inheritCcEmptySlice` 退场）。
  *
- * 为什么回落放在**这一步**而不是读名单那一步（`resolveCcHiddenWidgetIds`）：
- * - 读侧要判"没写"，就得让空态切面能是 `undefined`；而 `DEFAULTS` 必须给每个主题字段一个值
- *   （`themeDefaults.test` 的"每字段都有默认值" + skin contract 的"fixture 不得缺字段"两条硬约束），
- *   所以经过装配后永远读不出"没写" —— 只有**预设数据本身**（这里）还留着"这个键在不在"。
- * - 于是读侧保持一条规则：门开取空态切面、门关取常态切面（纯二选一，不夹带第二套语义）。
+ * 旧口径（刀2 立）：预设没写 `ccHiddenEmpty` ⇒ 落值时抄该预设的 `ccHidden`。
+ * 新口径：**读侧做并集**（`门开 ? 主管 ∪ 再藏 : 主管`，见 `resolveCcHiddenWidgetIds`）⇒
+ * 不需要"缺省回落"这种东西；预设没写"再藏" ⇒ 该键不进 patch ⇒ 由 `DEFAULTS.ccHiddenEmpty`
+ * （出厂那 6 件）兜底当**再藏基准**。
  *
- * 判据只看**键在不在**：写了就用写的（`ccHiddenEmpty: []` = 空态什么都不藏，合法且有意义），
- * 没写才回落。非 cc 区 / 两样都没写 ⇒ 原样返回（由 `DEFAULTS` 铺底）。
+ * ★ **口径变化（点名）**：老的自定义预设（不带 `ccHiddenEmpty` 键）的空态，从"抄常态表"变成
+ *   "主管 ∪ 基准 6 件"。项目当前无用户（规范 §7.9-②），接受此变化。
  */
-export function inheritCcEmptySlice(theme: Partial<ThemeSettings>): Partial<ThemeSettings> {
-  if (theme.ccHiddenEmpty !== undefined || theme.ccHidden === undefined) return theme
-  return { ...theme, ccHiddenEmpty: [...(theme.ccHidden as readonly string[])] }
-}
 
 /** W2-15（F3-B）：全量主题 → 相对 DEFAULTS 的 delta（过滤与默认相等键；自定义预设存储用） */
 export function toThemeDelta(theme: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
@@ -83,8 +78,8 @@ export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePreset
  *
  * ★ #266 刀3：下界由"常量 64"换成**按边算取最大**（`resolveCcMinHeight`）⇒ 入参要先补上
  *   `DEFAULTS` 的数字字段（预设切面是**稀疏**的，缺项会让算式按 0 算、下界偏小）。
- * ★ 在场集合口径 = **两态各算一遍取 max**（`ccMinHeightInputOf` 交出常态 + 空态两份切面，
- *   `resolveCcMinHeight` 逐态各算一遍取大 ⇒ 下界由**要求更高的那一份**决定，常态 / 空态都可能
+ * ★ 在场集合口径 = **两态各算一遍取 max**（`ccMinHeightInputOf` 交出常态 / 空态两份名单，
+ *   `resolveCcMinHeight` 逐态各算一遍取大 ⇒ 下界由**要求更高的那一份**决定，两态都可能
  *   成为绑定项；见 `ccHeightState.resolveCcMinHeight` 的口径说明）。
  */
 export function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
@@ -156,7 +151,7 @@ export function applyZonePresetReducer(
   presetName: string,
   presetTheme: Partial<ThemeSettings>,
 ): ThemePresetPatch {
-  const theme = inheritCcEmptySlice(filterPresetTheme(presetTheme))
+  const theme = filterPresetTheme(presetTheme)
   return {
     ...theme,
     // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
@@ -171,7 +166,7 @@ export function applyZonePresetReducer(
 
 /** 切换全局预设：全 PRESET_ZONES 记名 + 全 custom 清零 + 恢复规范排布 */
 export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSettings>): ThemePresetPatch {
-  const filteredTheme = inheritCcEmptySlice(filterPresetTheme(theme))
+  const filteredTheme = filterPresetTheme(theme)
   const presetDefaults = filterPresetTheme(DEFAULTS)
   return {
     ...presetDefaults,
@@ -341,7 +336,7 @@ export function applyCustomPresetReducer(
   const source = explicitTheme
     ?? state.customPresets.find(item => item.id === id)?.theme
   if (!source) return null
-  const theme = inheritCcEmptySlice(filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>))
+  const theme = filterPresetTheme(normalizeThemeState(pickCustomPresetTheme(source) as Record<string, unknown>) as Record<string, unknown>)
   return {
     ...filterPresetTheme(DEFAULTS),
     ...theme,

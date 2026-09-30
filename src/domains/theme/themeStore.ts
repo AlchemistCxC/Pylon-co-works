@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
+import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'
 import type { CcWidgetPlacement } from '../cc/ccLayoutState.ts'
 import { markZoneCustom } from './themePresetState.ts'
 import { THEME_SETTING_KEYS, ZONE_FIELDS } from './themeFieldDefs.ts'
@@ -59,7 +60,11 @@ export type ThemeState = ThemeSettings & {
   setCcHeight: (height: number) => void
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
-  setCcHidden: (id: string, hidden: boolean) => void
+  /**
+   * ★ #266 刀4（结构 C）：`target` = 写**哪一份表** —— `'base'` 主管（两种门态都生效）/
+   * `'empty'` 空态再藏（只在空态再加一层，只能加、不能抵消）。写入因此**不认门**。
+   */
+  setCcHidden: (id: string, hidden: boolean, target: CcVisibilityTarget) => void
   resetTheme: () => void
   /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
@@ -142,14 +147,17 @@ export const useStore = create<ThemeState>()(persist(
     ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
     ...markZoneCustom(state, 'cc'),
   })),
-  setCcHidden: (id, hidden) => set(state => {
-    const ccHidden = setCcHiddenState(state.ccHidden, id, hidden)
-    // ★ #266 刀3：显隐一变必须重过 clamp —— 这里写的正是**常态切面**，它一变、常态那一份算式就变。
-    //   但下界取「两态中要求更高的那一份」（见 ccHeightState.resolveCcMinHeight）⇒ 常态变矮**不一定**
-    //   抬得动下界：空态那一份可能仍咬住，所以"藏一件 ⇒ 最小高变小"**不再必然成立**。
-    const ccHeight = clampCcHeight(state.ccHeight, ccMinHeightInputOf({ ...state, ccHidden }))
+  setCcHidden: (id, hidden, target) => set(state => {
+    // ★ #266 刀4（结构 C）：按 `target` 写对应那一份表（主管 / 再藏），两份互不覆盖。
+    const next = target === 'base'
+      ? { ...state, ccHidden: setCcHiddenState(state.ccHidden, id, hidden) }
+      : { ...state, ccHiddenEmpty: setCcHiddenState(state.ccHiddenEmpty, id, hidden) }
+    // ★ #266 刀3：显隐一变必须重过 clamp，且下界用**更新后**的两份表算。
+    //   下界取「两态中要求更高的那一份」（见 ccHeightState.resolveCcMinHeight）⇒ 常态变矮**不一定**
+    //   抬得动下界：另一份可能仍咬住，所以"藏一件 ⇒ 最小高变小"**不再必然成立**。
+    const ccHeight = clampCcHeight(state.ccHeight, ccMinHeightInputOf(next))
     return {
-      ccHidden,
+      ...(target === 'base' ? { ccHidden: next.ccHidden } : { ccHiddenEmpty: next.ccHiddenEmpty }),
       ccHeight,
       ...markZoneCustom(state, 'cc'),
     }
