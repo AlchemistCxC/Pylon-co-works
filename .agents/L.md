@@ -4,6 +4,16 @@
 
 > **只留在途。** 本文件的价值是「谁正在改哪些文件」；已完工的条目占用读取代价，并且**文件越长、两边各自追加就越容易冲突**（本文件历史上多次成为合并冲突点）。所以自己的 issue 合入后即可移除自己的条目。2026-09-16 及以前的条目（其 issue 均已有 `.agents/records/` 开发记录）已归档到仓外 `../Docs/Archive/L-archive-20260918.md`；2026-09-17 至 2026-09-25 的已完工条目（#110/#315/#316/#317 批次一/ADR 通审等）已归档到仓外 `../Docs/Archive/L-archive-20260925.md`；2026-09-26 撤下的已完工 [kumo] 条目（#324/#331/#334-336/#338/#339/#325-329，issue 均已 CLOSED 且改动已并入 main）已归档到 `../Docs/Archive/L-archive-20260926.md`；[Codex] #155 T3 已随 PR #347 并入 main 撤下。
 
+- [kumo] **#486 结构拆分批（7 项逐项小步 PR，分支 `kumo/486-N-*` 均基于 github/main）**，逐项声明域：
+  - 项5 JobObject 单源 → 新 `src-tauri/pylon-foundations/src/job_object.rs` + foundations `lib.rs`/`Cargo.toml` + `pylon-core/src/agent_detection/probe.rs` + `pylon-acp/src/process.rs`。
+  - 项6 scan 拆分 → `pylon-core/src/agent_detection/scan.rs`（+ 该目录新子模块文件与 `agent_detection/mod.rs` 声明行）。
+  - 项3 超长函数 → `src-tauri/src/dispatcher/{mod.rs,permission_route.rs}`（新增同目录子模块）、`src-tauri/src/lib.rs`、`src-tauri/src/session/{create.rs,persist.rs}`（新增子模块）。
+  - 项1 归位 → `src/sheets/agent-workbench/**` 迁 `src/application/agent-workbench/**`（纯搬移 + 全仓 import 重写 + 门禁豁免随迁），视图件 `AgentRendererSuiteWorkbench.tsx` 留守。
+  - 项2 projector 四分 → `src/domains/workbench/workbenchProjector.ts` 拆 4 文件 + reduceMessage/reduceReasoning 去重（对照测试不动断言）。
+  - 项4 上帝组件 → `src/renderers/solid-workbench/WorkbenchContent.solid.tsx` 拆出滚动状态机模块。
+  - 项7 碎域合并 → `src/domains/` 小域归并 + `docs/说明书/Pylon-模块维护地图.md` 呈现域边界段。
+  - **不碰**：`src/workspace-sheets/**`、`src/components/**`、`src-tauri/pylon-session/**`、theme 域。规格 `.agents/spec/486-structural-split-batch.md`。
+
 - [kumo] #361+#362+#363 单 PR 批次（三个 issue 逐项完成后各派子 agent 审查）：
   - #361 → `src-tauri/src/main.rs`（crate 级 GUI 子系统属性）。**不碰**其他 `[[bin]]` 入口（`pylon-cli`/`pylon-detect`/`pylon-fake-agent` 仍为 console）。
   - #362 → 新 `src-tauri/src/logging/**`、`src-tauri/src/runtime_log/mod.rs`（Layer 自反馈隔离）、`src-tauri/src/session/mod.rs`（仅 :406-434 lag warn 节流区段）、`src-tauri/src/paths.rs`（日志目录）、`src-tauri/Cargo.toml`（+`tracing-appender`）、`src-tauri/vendor/acp/ORIGIN.md`（出处登记）。
