@@ -2,8 +2,9 @@
  * stage-docs-site.mjs — 离线文档站构建 + 暂存进 Tauri 资源树（#371）。
  *
  * 以 `PYLON_DOCS_OFFLINE=1` 构建 docs/（base 回根、裁 Web 字体——系统衬线回退
- * 在 theme/custom.css），产物整体拷入 src-tauri/resources/docs-site/，随后由
- * `tauri build` 经 bundle.resources 带进发行包、`pylon-docs://` scheme 消费。
+ * 在 theme/custom.css），产物整体拷入 src-tauri/resources/docs-site/。发行 zip
+ * 由此处的暂存源直接收集（#471——不经过 target 的 Tauri 增量拷贝，旧哈希代际
+ * 不入包）；bundle.resources 声明仍保留，供运行时 `pylon-docs://` 资源解析。
  * 暂存形态沿用 build-plugin-sdk.mjs 的离线版先例（rm + cpSync）。
  *
  * 三条构建期守卫把「离线形态走样」挡在打包前，不拖到用户打开 Sheet 才暴露：

@@ -42,7 +42,7 @@
 | `resources/sdk/pylon-plugin-sdk.js` | 必须 | 插件 SDK 单文件 ESM runtime：无 Node/源码环境的相对 import 目标；由 `bun run build:plugin-sdk` 生成 |
 | `resources/sdk/pylon-plugin-manifest.schema.json` | 必须 | `pylon-plugin.json` 编辑器校验/补全 schema |
 | `resources/sdk/testing.js`、`types/**`、`package.json` | 必须 | 插件开发分发包全量其余部分（2026-09-01 起，打包器从 `dist-plugin-sdk/normal` 收集；缺 `pylon-plugin-sdk.js`/`testing.js`/schema 时打包失败） |
-| `resources/docs-site/**` | 必须 | 离线文档站（#371）：`PYLON_DOCS_OFFLINE=1` 构建的 VitePress 静态产物（base 回根、裁 Web 字体，约 2.4 MB），由 `bun run docs:build:offline` 暂存 `src-tauri/resources/docs-site/`、Tauri 资源拷贝带入；缺 `index.html` 时打包失败 |
+| `resources/docs-site/**` | 必须 | 离线文档站（#371）：`PYLON_DOCS_OFFLINE=1` 构建的 VitePress 静态产物（base 回根、裁 Web 字体，约 2.4 MB），由 `bun run docs:build:offline` 暂存 `src-tauri/resources/docs-site/`、打包器取暂存源入包（#471：跳过 target 的 Tauri 增量拷贝，防历史哈希代际残留）；缺 `index.html` 时打包失败 |
 | `README.md` | 必须 | 项目说明（仓库根 README，2026-09-01 起随包） |
 | `docs/说明书/**` | 必须 | 全量用户说明书（2026-09-01 起随包） |
 | `agents.yaml` | 必须 | 零 Agent 配置模板（#372 起随包：仓库侧 `resources/release/agents.template.yaml` 打包时改名；包内可直接编辑预置 Agent，#326 的裸启动零 Agent 口径不变——模板不含占位 Agent） |
@@ -89,7 +89,7 @@ bun run release:portable
 
 1. 构建前端（`build:wasm` + `tsc -b` + vite build）；
 2. 生成正常版与离线版 SDK（打包器从正常版 `dist-plugin-sdk/normal` 全量收取进包；离线版仅作构建期 64 KiB 守卫产物，Tauri 打包的最小集被显式跳过）；
-3. 构建离线文档站并暂存（`docs:build:offline`：以 `PYLON_DOCS_OFFLINE=1` 跑 vitepress build，守卫 index.html 存在、无大字体分块、无 Pages 前缀，产物拷入 `src-tauri/resources/docs-site/`——必须在下一步 Tauri 构建之前，资源拷贝才会带上它）；
+3. 构建离线文档站并暂存（`docs:build:offline`：以 `PYLON_DOCS_OFFLINE=1` 跑 vitepress build，守卫 index.html 存在、无大字体分块、无 Pages 前缀，产物拷入 `src-tauri/resources/docs-site/`——打包器直接取该暂存源入包（#471），须在打包步之前完成）；
 4. 构建 Tauri release（不生成安装器；`beforeBuildCommand` 会再执行一次 `bun run build`）；
 5. 构建 `pylon-detect.exe`；
 6. 构建 `tools/webview2-mcp` 的 release 二进制（`cargo build --manifest-path tools/webview2-mcp/Cargo.toml --release`）；

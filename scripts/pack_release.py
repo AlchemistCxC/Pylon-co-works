@@ -68,6 +68,9 @@ RELEASE_DIR = _TARGET_ROOT / "release"
 TEMPLATE_DIR = REPO_DIR / "resources" / "release"
 HERMES_RUNTIME_DIR = SRC_TAURI_DIR / "resources" / "runtime"
 HERMES_RUNTIME_TREE = HERMES_RUNTIME_DIR / "git"
+# 离线文档站（#371）的暂存源：stage-docs-site.mjs 每轮 rm+重铺保证新鲜。
+# 打包从这里收（#471），不从 target 的 Tauri 增量拷贝收——那上面旧哈希代际永不清理。
+DOCS_SITE_STAGED_DIR = SRC_TAURI_DIR / "resources" / "docs-site"
 OUT_ROOT = REPO_DIR / "release"
 
 EXE_NAME = "pylon.exe"
@@ -466,6 +469,20 @@ def append_tree_files(
             files.append((full, f"{package_root.rstrip('/')}/{rel}"))
 
 
+def collect_docs_site() -> list[tuple[Path, str]]:
+    """离线文档站（#371）取暂存源而非 target 的 Tauri 拷贝（#471）。
+
+    Tauri 对 bundle.resources 的 target/release/resources 拷贝是增量合并：
+    哈希文件名的旧代 chunk 永不清理，本地反复构建会把历史代际全带进 zip
+    （0.3.4-LBI 实测本地 manifest 304 项 vs CI 282 项，差 22 项全为
+    docs-site/assets 旧哈希变体）。暂存源每轮由 stage-docs-site.mjs rm+重铺
+    保证新鲜，取源即与 CI 全新 checkout 同构，且对 target 区文件锁免疫。
+    """
+    files: list[tuple[Path, str]] = []
+    append_tree_files(files, DOCS_SITE_STAGED_DIR, "resources/docs-site")
+    return files
+
+
 def collect_dev_sdk() -> list[tuple[Path, str]]:
     """收集完整插件开发 SDK（dist-plugin-sdk/normal 全量）到 resources/sdk/。
 
@@ -551,17 +568,17 @@ def resolve_webview2_loader() -> Path:
 def require_docs_site() -> None:
     """离线文档站（#371）显式存在性检查。
 
-    收集本身由下方对 resources 的泛化遍历自然覆盖（docs-site 不在跳过名单），
-    这里只钉「入口文件必须在」：缺产物说明构建链漏跑 `bun run docs:build:offline`
-    （或 tauri build 早于暂存），应用内 Docs Sheet 会整站 404——按 webview2-mcp
+    收集走暂存源 DOCS_SITE_STAGED_DIR（#471：target 的 Tauri 增量拷贝残留历史
+    哈希代际，不入包），这里钉「入口文件必须在暂存源」：缺产物说明构建链漏跑
+    `bun run docs:build:offline`，应用内 Docs Sheet 会整站 404——按 webview2-mcp
     的既有规矩，构建期报错，不拖到用户打开文档时才暴露。
     """
-    entry = RELEASE_DIR / "resources" / "docs-site" / "index.html"
+    entry = DOCS_SITE_STAGED_DIR / "index.html"
     if not entry.is_file():
         raise PackError(
             f"缺少离线文档站入口: {entry}。\n"
             "请先运行 bun run docs:build:offline（release:portable 已内置该步），"
-            "再重新 tauri build --no-bundle。"
+            "再重新打包。"
         )
 
 
@@ -612,7 +629,10 @@ def collect_source_files(version: str, with_runtime: bool = False) -> list[tuple
             rel = full.relative_to(RELEASE_DIR).as_posix()
             if rel.startswith("resources/sdk/"):
                 continue  # SDK 由 dist-plugin-sdk 全量提供，跳过 Tauri 最小集
+            if rel.startswith("resources/docs-site/"):
+                continue  # 文档站由暂存源提供（collect_docs_site，#471），跳过增量拷贝的残留代际
             files.append((full, rel))
+    files.extend(collect_docs_site())
 
     # Hermes PortableGit runtime：默认排除（2026-08-31 用户决定——bash 已在标准路径
     # C:\Program Files\Git，发行包不再内置完整运行时；--with-runtime 可恢复）。
