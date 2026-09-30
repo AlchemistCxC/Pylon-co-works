@@ -398,10 +398,7 @@ fn delete_session_writes_tombstone_and_keeps_canonical_events() {
         .expect("delete");
     repo.finalize_session_delete("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("finalize");
-    assert_eq!(
-        tombstone_state(&repo, "s1").as_deref(),
-        Some("deleted")
-    );
+    assert_eq!(tombstone_state(&repo, "s1").as_deref(), Some("deleted"));
     assert_eq!(tombstone_state(&repo, "ghost"), None);
     let conn = repo.conn.lock().unwrap();
     let events: i64 = conn

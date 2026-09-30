@@ -133,6 +133,9 @@ tauri = { version = "2", features = ["test", "unstable"] }
 # #106 P5：tests/ 集成目标是独立 crate，按需声明（与常规依赖同版本）。
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+# #484：pylon-session 的 tombstone_state 测试断言 API 仅在 test-support feature 下存在，
+# 经 dev-dependencies union 进测试构建；生产（cargo build）不含该 feature 与方法。
+pylon-session = { path = "pylon-session", features = ["test-support"] }
 
 # #106 P1：测试专用假 ACP agent 见 `pylon-fake-agent` member crate（#382 迁出：
 # 同包 bin 会隐式链接本 crate 的 lib，编一个 2100 行夹具要连带整棵 Tauri 依赖树）。

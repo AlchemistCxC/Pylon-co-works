@@ -518,6 +518,23 @@ impl MsgRepo {
         Ok(())
     }
 
+    /// tombstone 当前 state（None = 无 tombstone）。#484：仅测试断言可见（feature
+    /// `test-support`，由消费方 dev-dependencies 启用）——生产 gate 只查存在性，
+    /// 生产二进制不含本方法；本 crate 内测试用 SQL 直查。
+    #[cfg(feature = "test-support")]
+    pub fn tombstone_state(&self, session_id: &str) -> Result<Option<String>, SessionError> {
+        let conn = self.conn.lock().map_err(lock_err)?;
+        let state: Option<String> = conn
+            .query_row(
+                "SELECT state FROM deleted_sessions WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(repo_err)?;
+        Ok(state)
+    }
+
     /// 事务删除实现（tombstone state 由调用方指定：'deleting' 两阶段 / 'deleted' 终态）。
     /// #155 T2 起 sessions 死表已删：本事务清扫快照 + 写 tombstone +（exact owner 时）
     /// 联动清扫 canonical_events。
