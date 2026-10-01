@@ -55,7 +55,14 @@ export function mountReactIsland(container: HTMLElement): ReactIslandHandle {
   const root = createRoot(container)
   return {
     render: element => root.render(element),
-    dispose: () => root.unmount(),
+    // 卸载延迟到宏任务：本 dispose 由 Solid onCleanup 触发，而 Solid 子树常在 React
+    // 渲染/卸载提交期被回收——同步 unmount 会撞 React「渲染期同步卸载」告警并留竞态
+    // （与 TemplateLibraryPreviewIsland / WorkspaceTitlebarPluginIsland 同款处理）。
+    // 容器随宿主子树一起移除，延迟卸载无泄漏面。
+    dispose: () => {
+      const rootToUnmount = root
+      setTimeout(() => rootToUnmount.unmount(), 0)
+    },
   }
 }
 

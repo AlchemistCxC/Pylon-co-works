@@ -1,11 +1,12 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import {
   collectElicitationValues,
   parseElicitationFields,
-} from '../ElicitationRequestCard.tsx'
+} from '../ElicitationRequestCard.solid.tsx'
 
 /**
- * #316：elicitation form 卡的 schema 解析与值收集纯函数测试。
+ * #316：elicitation form 卡的 schema 解析与值收集纯函数测试（#515 迁移为 .solid.test：导入改指 Solid 实体，断言集原样保留）。
  *
  * 官方契约：requestedSchema 是受限 JSON Schema（扁平 properties 原语
  * string/number/boolean/enum + default + required）；超出原语子集 → 降级

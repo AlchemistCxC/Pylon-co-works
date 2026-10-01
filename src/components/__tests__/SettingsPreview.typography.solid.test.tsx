@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react'
+// #515：迁移自 SettingsPreview.typography.test.tsx（React RTL → Solid 实体直连；
+// 断言集原样保留，无改写点）。
+import { cleanup, render } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
-import SettingsPreview from '../SettingsPreview.tsx'
+import SettingsPreview from '../SettingsPreview.solid.tsx'
 
 afterEach(cleanup)
 
 describe('SettingsPreview tool typography', () => {
   it('keeps tool names as prose and marks path/command summaries as code', () => {
-    const { container } = render(<SettingsPreview zone="global" />)
+    const { container } = render(() => <SettingsPreview zone="global" />)
 
     const names = [...container.querySelectorAll('.pv-tool-row .term-tool-name')]
     expect(names.map(node => node.textContent)).toEqual(['Read', 'Bash', 'Edit'])

@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// #515 改写点登记：AgentSettingsSection 已迁 Solid 实体并经 React 岛挂载——岛首渲异步
+// （原 React 同步提交），同步断言改 await findBy（findByTestId 先等岛落地，其余断言
+// 原样保留；断言集不缩减）。
 import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
@@ -39,26 +42,29 @@ describe('Settings Agent onboarding', () => {
     })
   })
 
-  it('进入 Agent 设置即挂载运行时发现入口，无需先展开高级组', () => {
+  it('进入 Agent 设置即挂载运行时发现入口，无需先展开高级组', async () => {
     mountSettingsSheet({ domain: 'agents-connections', section: 'agent' })
 
+    await screen.findByTestId('agent-runtime-panel')
     expect(screen.getByTestId('agent-runtime-panel')).toBeInTheDocument()
   })
 
-  it('错误恢复入口把目标 Agent 传给运行时管理面板', () => {
+  it('错误恢复入口把目标 Agent 传给运行时管理面板', async () => {
     mountSettingsSheet({ domain: 'agents-connections', section: 'agent', agentId: 'peri' })
 
+    await screen.findByTestId('agent-runtime-panel')
     expect(screen.getByTestId('agent-runtime-panel')).toHaveAttribute('data-agent-id', 'peri')
   })
 
   // #326：零 Agent 是合法首跑状态。此前该卡片回落硬编码 'peri'，会在没有这个 Agent 时
   // 显示一个不存在的名字/ID（与「预置必然失败的占位 Agent」同一类病）。
-  it('零 Agent 时当前 Agent 概况如实空态，不伪造 Agent', () => {
+  it('零 Agent 时当前 Agent 概况如实空态，不伪造 Agent', async () => {
     // 走生产路径：list_agents 返回空表 → store 清空 activeAgent（不是直接塞 ''）
     useIdentityStore.getState().setAgents([])
     expect(useIdentityStore.getState().activeAgent).toBe('')
     mountSettingsSheet({ domain: 'agents-connections', section: 'agent' })
 
+    await screen.findByTestId('agent-runtime-panel')
     expect(screen.getByText('尚未配置 Agent')).toBeInTheDocument()
     expect(screen.queryByText('peri')).toBeNull()
     expect(screen.getByText('状态：未配置')).toBeInTheDocument()

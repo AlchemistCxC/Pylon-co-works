@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react'
+// #515：迁移自 Sidebar.agentSessions.test.tsx（React RTL → Solid 实体直连）。改写点登记：
+// ① SessionsPanel/挂载改 Solid 实体直连，rerender（RTL 无）改信号驱动 props 重渲；
+// ② useSidebarContributionProps（React hook，.ts 保留类型导出）改测实体导出的
+// createSidebarContributionProps（Solid 形态，逻辑同源内联）。断言集与 DOM 契约不缩减。
+import { fireEvent, render, screen } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import SessionsPanel from '../sidebar/SessionsPanel.tsx'
+import SessionsPanel from '../sidebar/SessionsPanel.solid.tsx'
+import { createSidebarContributionProps } from '../Sidebar.solid.tsx'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
-import { useSidebarContributionProps } from '../sidebar/useSidebarContributionProps.ts'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 
@@ -52,17 +57,23 @@ function panelProps(overrides: Partial<AgentSidebarContributionProps> = {}): Age
   }
 }
 
-describe('会话面板运行点（data-running 按 liveGeneratingSources）', () => {
-  afterEach(async () => {
-    const { cleanup } = await import('@testing-library/react')
-    cleanup()
-  })
+/** RTL rerender 的 Solid 等价：props 信号驱动重渲（JSX spread 按信号追踪）。 */
+function PanelHarness(props: { get: () => AgentSidebarContributionProps }) {
+  return <SessionsPanel {...props.get()} />
+}
 
+afterEach(async () => {
+  const { cleanup } = await import('@solidjs/testing-library')
+  cleanup()
+})
+
+describe('会话面板运行点（data-running 按 liveGeneratingSources）', () => {
   it('无 cwd 会话：source 在 live 列表 → 运行点亮；不在 → 无 data-running', () => {
-    const { rerender } = render(<SessionsPanel {...panelProps({ liveGeneratingSources: ['src-1'] })} />)
+    const [panel, setPanel] = createSignal(panelProps({ liveGeneratingSources: ['src-1'] }))
+    render(() => <PanelHarness get={panel} />)
     expect(document.querySelector('.session-dot')!.getAttribute('data-running')).toBe('true')
 
-    rerender(<SessionsPanel {...panelProps({ liveGeneratingSources: [] })} />)
+    setPanel(panelProps({ liveGeneratingSources: [] }))
     expect(document.querySelector('.session-dot')!.hasAttribute('data-running')).toBe(false)
   })
 
@@ -79,27 +90,19 @@ describe('会话面板运行点（data-running 按 liveGeneratingSources）', ()
       hookPluginIds: [],
     }
     const bound = session({ workspaceId: 'workspace-1' })
-    const { rerender } = render(
-      <SessionsPanel {...panelProps({ workspaces: [workspace], sessions: [bound], liveGeneratingSources: ['src-1'] })} />,
-    )
+    const [panel, setPanel] = createSignal(panelProps({ workspaces: [workspace], sessions: [bound], liveGeneratingSources: ['src-1'] }))
+    render(() => <PanelHarness get={panel} />)
     expect(document.querySelector('.session-dot')!.getAttribute('data-running')).toBe('true')
 
-    rerender(
-      <SessionsPanel {...panelProps({ workspaces: [workspace], sessions: [bound], liveGeneratingSources: ['other'] })} />,
-    )
+    setPanel(panelProps({ workspaces: [workspace], sessions: [bound], liveGeneratingSources: ['other'] }))
     expect(document.querySelector('.session-dot')!.hasAttribute('data-running')).toBe(false)
   })
 })
 
 describe('会话交互保留', () => {
-  afterEach(async () => {
-    const { cleanup } = await import('@testing-library/react')
-    cleanup()
-  })
-
   it('设置回调携带会话 id；删除按钮已从行上撤出（收进设置）', () => {
     const onOpenSessionSettings = vi.fn()
-    render(<SessionsPanel {...panelProps({ onOpenSessionSettings })} />)
+    render(() => <SessionsPanel {...panelProps({ onOpenSessionSettings })} />)
 
     fireEvent.click(screen.getByRole('button', { name: '会话一 会话设置' }))
     expect(onOpenSessionSettings).toHaveBeenCalledWith('s1')
@@ -107,7 +110,7 @@ describe('会话交互保留', () => {
   })
 
   it('置顶的会话排在所属工作区最前（即使它更久没活跃）', () => {
-    // 排序在 props 接线处（置顶优先 → 最近活跃），因此直接对那只钩子下断言：
+    // 排序在 props 接线处（置顶优先 → 最近活跃），因此直接对那只接线函数下断言：
     // 走 Sidebar 反而要先把会话模块注册进插件注册表，测到的是别的东西。
     const workspace = { id: 'w1', agentId: 'peri', name: 'Pylon', rootPath: 'G:/Pylon', createdAt: 1, lastActiveAt: 1, skills: [], mcpServerIds: [], hookPluginIds: [] }
     useIdentityStore.setState({
@@ -135,23 +138,22 @@ describe('会话交互保留', () => {
       sessionBySource: () => undefined,
     }
     const Probe = () => {
-      const props = useSidebarContributionProps(ctx as never)
-      return <div data-testid="order">{props.sessions.map(item => item.name).join(',')}</div>
+      const props = createSidebarContributionProps(ctx as never)
+      return <div data-testid="order">{props().sessions.map(item => item.name).join(',')}</div>
     }
-    render(<Probe />)
+    render(() => <Probe />)
     expect(screen.getByTestId('order').textContent).toBe('置顶的,最近活跃')
   })
 
   it('双击进入重命名，Enter 提交回调', () => {
     const onRenameSession = vi.fn()
-    render(<SessionsPanel {...panelProps({ onRenameSession })} />)
+    render(() => <SessionsPanel {...panelProps({ onRenameSession })} />)
     fireEvent.doubleClick(screen.getByText('会话一'))
     const input = screen.getByDisplayValue('会话一') as HTMLInputElement
     // #515：SessionsPanel 实体已 Solid 化，受控 input 走 onInput——fireEvent.change 的
-    // change 事件触不到，改派 input 事件（RTL-react 的 fireEvent 自带 act 包装）。
+    // change 事件触不到，改派 input 事件。
     fireEvent.input(input, { target: { value: '新名字' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onRenameSession).toHaveBeenCalledWith('s1', '新名字')
   })
 })
-

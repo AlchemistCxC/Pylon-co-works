@@ -74,7 +74,8 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/components/settings/__tests__/AgentConfigEditor.solid.test.tsx',
   'src/components/settings/__tests__/GatewayRiskPanel.solid.test.tsx',
   'src/components/settings/__tests__/PluginManager.test.tsx',
-  'src/components/__tests__/ErrorCenter.test.tsx',
+  // #515：实体已迁 ErrorCenter.solid.tsx，测试随之改名（错误路径契约，白名单跟随）。
+  'src/components/__tests__/ErrorCenter.solid.test.tsx',
   'src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx',
   'src/components/__tests__/SheetErrorBoundary.test.tsx',
   'src/domains/theme/__tests__/customPresetApply.test.ts',
@@ -84,8 +85,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/plugin-runtime/renderers/__tests__/workbenchHostPort.test.ts',
   'src/sheets/file/__tests__/FileTabView.readonly.test.tsx',
   'src/sheets/file/__tests__/gitPanelAcceptance.test.tsx',
-  'src/sheets/gateway/__tests__/gatewayRouteSave.integration.test.tsx',
-  'src/sheets/gateway/__tests__/gatewaySheetView.ui.test.tsx',
+  // #515：gateway 两测试随实体迁移改名 .solid.test.tsx（同一错误路径契约，白名单跟随）。
+  'src/sheets/gateway/__tests__/gatewayRouteSave.integration.solid.test.tsx',
+  'src/sheets/gateway/__tests__/gatewaySheetView.ui.solid.test.tsx',
   'src/sheets/__tests__/OverviewSheetView.visual.solid.test.tsx',
   'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.test.tsx',
   'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.test.tsx',

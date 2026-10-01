@@ -90,7 +90,9 @@ describe('SessionSettings 表单同步（session-settings-lifecycle 契约）', 
 
     const save = screen.getByRole('button', { name: '保存修改' })
     expect(save).toBeDisabled()
-    fireEvent.change(nameInput(), { target: { value: '改名' } })
+    // #515：SessionSettings 实体已 Solid 化，受控 input 走 onInput——fireEvent.change 的
+    // change 事件触不到，改派 input 事件（与 Sidebar.agentSessions.solid.test 同款改写）。
+    fireEvent.input(nameInput(), { target: { value: '改名' } })
     expect(save).toBeEnabled()
   })
 

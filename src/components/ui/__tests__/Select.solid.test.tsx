@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react'
-import { useState } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Select from '../Select.tsx'
+// #515：迁移自 Select.test.tsx（React RTL → Solid 实体直连；断言集原样保留，无改写点）。
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import Select from '../Select.solid.tsx'
+
+afterEach(cleanup)
 
 const options = [
   { value: 'auto', label: '自动选择' },
@@ -12,8 +15,8 @@ const options = [
 ]
 
 function Harness() {
-  const [value, setValue] = useState('auto')
-  return <Select id="renderer-select" ariaLabel="渲染引擎" value={value} options={options} onChange={setValue} />
+  const [value, setValue] = createSignal('auto')
+  return <Select id="renderer-select" ariaLabel="渲染引擎" value={value()} options={options} onChange={setValue} />
 }
 
 describe('Select', () => {
@@ -22,7 +25,7 @@ describe('Select', () => {
   })
 
   it('提供 combobox/listbox/option ARIA 并通过点击提交值', () => {
-    render(<Harness />)
+    render(() => <Harness />)
     const trigger = screen.getByRole('combobox', { name: '渲染引擎' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(trigger)
@@ -36,7 +39,7 @@ describe('Select', () => {
   })
 
   it('支持方向键、Home/End、Enter 与 Escape，并跳过禁用项', () => {
-    render(<Harness />)
+    render(() => <Harness />)
     const trigger = screen.getByRole('combobox', { name: '渲染引擎' })
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
@@ -56,7 +59,7 @@ describe('Select', () => {
   })
 
   it('支持首字母检索与 disabled 门禁', () => {
-    render(<Harness />)
+    render(() => <Harness />)
     const trigger = screen.getByRole('combobox', { name: '渲染引擎' })
     fireEvent.keyDown(trigger, { key: 'r' })
     fireEvent.keyDown(trigger, { key: 'Enter' })
