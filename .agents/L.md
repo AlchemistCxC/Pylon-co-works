@@ -4,6 +4,8 @@
 
 - [kumo] **#504 flaky test 修复（2026-10-01）**：域＝`src-tauri/pet-core/src/lib.rs`（新增测试用墙钟归零 helper）＋ `src-tauri/src/dispatcher/reactions.rs`（表征测试比较前归一化）＋ `.agents/{spec,records}/504-*`。不碰 `src-tauri/Cargo.toml`、前端、说明书。
 
+- [kumo] **#498 SheetTabStrip.solid 行为测试补齐（2026-10-01）**：域＝`src/workspace-sheets/__tests__/{sheetTabOverflow,sheetTabStripAgentSwitch,sheetTabStripStatusMatrix}.solid.test.tsx`（三个新文件，不碰生产行为）＋ `vitest.setup.ts` console.error 白名单**换一行**（旧 React 条目→新 solid 条目）。窄域，与 #515 无文件交叠（vitest.setup.ts 一行改动请 #515 注意）；不碰 `src-tauri/`。
+
 - [kumo] **#515 前端全量 Solid 化（ADR-0035 执行，2026-10-01）**：域＝`src/` 全前端生产树与测试——zustand 14 store→Solid 原生、全部 React 组件→`.solid.tsx`、`main.tsx`/`App`/`kernel`/`host` 翻转、插件契约类型、`package.json` React/zustand/radix 依赖退役、vite/vitest/tsconfig/eslint/边界门禁脚本、`docs/说明书/` 前端表述。**避让 [Codex] 域**：`src/components/settings/{AgentCreateForm,AgentRuntimePanel,useAgentDetection,useAgentCandidateProvisioning}*` 及其测试、`src/domains/agent/` 不动。spec：`.agents/spec/515-frontend-solid-endgame-execution.md`。不碰 `src-tauri/`。
 
 > 规则（AGENTS.md §2.3-4）：并行多 agent 施工时，在此声明施工范围以应对冲突（文件互相改写、连带提交等），**写入后立刻提交本文件**使其他 agent 可见。只追写，不覆写，留言简洁。
