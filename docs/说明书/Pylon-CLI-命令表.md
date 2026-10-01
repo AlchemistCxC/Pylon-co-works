@@ -58,8 +58,8 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 | `session messages <sessionId>` | `--after-seq`、`--limit` | journal 消息查询（增量分页，AI 驱动闭环） |
 | `session config set <agentId> <sessionId> <key> <value>` | — | 会话级配置选项（模型/思考档位等） |
 | `session export <agentId> <periId> <outputPath>` | `--format` | 会话 journal 导出 |
-| `approval get` | — | 读取当前全局审批模式（bypass/auto/edit/default） |
-| `approval set <mode>` | — | 设置全局审批模式（外部自动化总开关）；#448 起写穿 user_data 跨重启持久化（后端为权威，GUI 重启不再回滚 CLI 设置） |
+| `approval get` | — | 读取当前全局审批模式 + 落盘健康位：返回 `{ mode, persisted }`（bypass/auto/edit/default；`persisted=false` 即当前值尚未被 SQLite 持有——落盘降级，重启会回退，#463） |
+| `approval set <mode>` | — | 设置全局审批模式，返回 `{ mode, persisted }` 快照；#448 起写穿 user_data 跨重启持久化（后端为权威，GUI 重启不再回滚 CLI 设置）；#463 起落盘失败仍内存生效但 `persisted=false` 外部可查（不再只可查后端日志）。approval-mode 为保留键：`user_data save` 对它拒绝（`user_data_reserved_key`），必经本命令持锁演化 |
 | `interaction list` | — | 全部挂起交互快照：权限请求（`kind: approval`）与私有交互（elicitation/ask-user/exit-plan，#230），含应答所需 identity、`kind`、options 与 prompt 摘要 |
 | `interaction respond <requestId> <optionId>` | `--args`（`values`/`text`） | 应答挂起交互（optionId 经白名单校验；`kind` 取列表条目透传；ask-user/elicitation 自由作答可省 optionId 改传 values/text，#230） |
 | `workspace registry list` | — | 列出注册表工作区（Workspace 实体，非打开的 Sheet） |

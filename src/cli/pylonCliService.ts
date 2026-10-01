@@ -324,12 +324,13 @@ export class PylonCliService {
           if (!cancelled) throw new Error(`Session 不存在或无法取消：${sessionId}`)
           return { sessionId, cancelled }
         })
+      // #463 审查项 3：get/set 均透传后端快照 {mode, persisted}——persisted=false
+      // 即落盘降级（重启回退），外部可查（不再回显入参，mode 由后端确认）。
       case 'approval get':
-        return { mode: await this.ports.approval.get() }
+        return await this.ports.approval.get()
       case 'approval set': {
         const mode = optionalString(args, 'mode') ?? stringArg(args, 'mode', 0)
-        await this.ports.approval.set(mode)
-        return { mode }
+        return await this.ports.approval.set(mode)
       }
       case 'interaction list':
         return this.ports.interactions.list()

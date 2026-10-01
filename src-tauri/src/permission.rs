@@ -486,7 +486,9 @@ pub(crate) async fn respond_interaction(
 /// 设置权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
 /// #448 PR3：后端为持久化权威——内存更新后写穿 user_data（approval-mode key）。
 /// 落盘失败降级为「内存生效 + warn」（审批语义不因落盘失败被拒绝；代价是重启
-/// 回到旧值，可见日志可查；外部可查性为 #463 审查项 3，留 wire 契约决策口）。
+/// 回到旧值）。#463 审查项 3（degraded 外部可查，已落地）：降级不再只可查后端
+/// 日志——返回值与 get 均携带 `persisted` 健康位（内存值是否已被 SQLite 持有），
+/// CLI 消费方可据此探测「set 成功但重启会回滚」。
 /// #463 后端 C-1：内存写与落盘全程持 `approval_mode_write_lock`——并发 set
 /// （GUI 与 CLI 桥同进程）串行化，磁盘必为最后一次 set（tokio Mutex 公平取锁，
 /// 临界区内无基于旧值的读改写，故锁序即生效序）。
@@ -495,7 +497,7 @@ pub(crate) async fn respond_interaction(
 pub(crate) async fn set_approval_mode(
     state: tauri::State<'_, AppState>,
     mode: String,
-) -> Result<(), PylonError> {
+) -> Result<ApprovalModeSnapshot, PylonError> {
     if !matches!(mode.as_str(), "bypass" | "auto" | "edit" | "default") {
         return Err(PylonError::Protocol(format!(
             "unknown approval mode: {mode}"
@@ -511,7 +513,7 @@ pub(crate) async fn set_approval_mode(
     match service {
         Some(service) => {
             let payload = serde_json::json!({ "version": 1, "mode": mode });
-            if let Err(error) = service
+            match service
                 .save(
                     crate::session::user_data::UserDataKey::ApprovalMode,
                     payload,
@@ -519,27 +521,51 @@ pub(crate) async fn set_approval_mode(
                 )
                 .await
             {
-                tracing::warn!("approval mode 落盘失败（内存已生效，重启回退）：{error}");
+                Ok(_) => state.approval_mode_persisted.store(true, Ordering::Release),
+                Err(error) => {
+                    state
+                        .approval_mode_persisted
+                        .store(false, Ordering::Release);
+                    tracing::warn!("approval mode 落盘失败（内存已生效，重启回退）：{error}");
+                }
             }
         }
         None => {
+            state
+                .approval_mode_persisted
+                .store(false, Ordering::Release);
             tracing::warn!("approval mode 落盘跳过：user data service 未就绪（内存已生效）");
         }
     }
-    Ok(())
+    Ok(ApprovalModeSnapshot {
+        persisted: state.approval_mode_persisted.load(Ordering::Acquire),
+        mode,
+    })
 }
 
-/// CLI 增强（contract.bridge 前置）：读取当前全局审批模式。
+/// #463 审查项 3：approval-mode wire 快照。`persisted` = 内存当前值是否已被
+/// SQLite 持有（或从未偏离持久层）——false 即 degraded（重启回退），外部可查。
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ApprovalModeSnapshot {
+    pub mode: String,
+    pub persisted: bool,
+}
+
+/// CLI 增强（contract.bridge 前置）：读取当前全局审批模式 + 落盘健康位。
 /// 此前只有 set 无 get——外部自动化无法确认模式即盲跑。
 #[tauri::command]
 pub(crate) async fn get_approval_mode(
     state: tauri::State<'_, AppState>,
-) -> Result<String, PylonError> {
-    state
+) -> Result<ApprovalModeSnapshot, PylonError> {
+    let mode = state
         .approval_mode
         .lock()
         .map(|mode| mode.clone())
-        .map_err(|e| PylonError::Protocol(format!("approval mode lock poisoned: {e}")))
+        .map_err(|e| PylonError::Protocol(format!("approval mode lock poisoned: {e}")))?;
+    Ok(ApprovalModeSnapshot {
+        persisted: state.approval_mode_persisted.load(Ordering::Acquire),
+        mode,
+    })
 }
 
 /// #448 PR3：启动回填——从 user_data 读 approval-mode 覆盖内存默认值（"default"）。
@@ -548,6 +574,9 @@ pub(crate) async fn get_approval_mode(
 /// 保证（save 拒绝非法/缺失 mode），回填处的枚举 filter 属纵深防御（手改 DB）。
 /// 读走 load_sync 同步路径——调用方（setup 钩子）在 `rt.block_on` 的 runtime 栈内，
 /// 不能嵌套 block_on。
+/// #463 审查项 3：同步维护 `approval_mode_persisted` 健康位——回填成功/无持久值
+/// （默认即权威）→ true；envelope 缺合法 mode / 读失败 / service 未就绪 → false
+/// （内存默认值未被磁盘有效持有，degraded 外部可查）。
 pub(crate) fn restore_persisted_approval_mode(state: &AppState) {
     let service = state
         .user_data_service
@@ -555,6 +584,9 @@ pub(crate) fn restore_persisted_approval_mode(state: &AppState) {
         .ok()
         .and_then(|slot| slot.clone());
     let Some(service) = service else {
+        state
+            .approval_mode_persisted
+            .store(false, Ordering::Release);
         tracing::warn!("approval-mode 恢复跳过：user data service 未就绪");
         return;
     };
@@ -569,14 +601,28 @@ pub(crate) fn restore_persisted_approval_mode(state: &AppState) {
                 Some(mode) => {
                     if let Ok(mut slot) = state.approval_mode.lock() {
                         *slot = mode.to_string();
+                        state.approval_mode_persisted.store(true, Ordering::Release);
                         tracing::info!("approval mode 已从 user_data 恢复：{mode}");
                     }
                 }
-                None => tracing::warn!("approval-mode envelope 缺少合法 mode，保持默认"),
+                None => {
+                    state
+                        .approval_mode_persisted
+                        .store(false, Ordering::Release);
+                    tracing::warn!("approval-mode envelope 缺少合法 mode，保持默认");
+                }
             }
         }
-        Ok(None) => {} // 无持久化值：保持 default，前端首次种子兜底
-        Err(error) => tracing::warn!("approval-mode 恢复失败（保持默认）：{error}"),
+        Ok(None) => {
+            // 无持久化值：保持 default，前端首次种子兜底——默认值与磁盘无偏离，健康。
+            state.approval_mode_persisted.store(true, Ordering::Release);
+        }
+        Err(error) => {
+            state
+                .approval_mode_persisted
+                .store(false, Ordering::Release);
+            tracing::warn!("approval-mode 恢复失败（保持默认）：{error}");
+        }
     }
 }
 
@@ -1629,7 +1675,7 @@ mod tests {
     }
 
     /// #448 PR3：set_approval_mode 写穿 user_data（后端权威）。内存与 SQLite 落盘
-    /// 都生效；校验器拒绝垃圾 mode。
+    /// 都生效；校验器拒绝垃圾 mode。#463 审查项 3：返回快照与 get 均带 persisted=true。
     #[test]
     fn set_approval_mode_persists_to_user_data() {
         use tauri::Manager;
@@ -1646,9 +1692,16 @@ mod tests {
         tokio::runtime::Runtime::new()
             .expect("tokio runtime")
             .block_on(async {
-                set_approval_mode(app.state::<crate::AppState>(), "auto".into())
+                let snapshot = set_approval_mode(app.state::<crate::AppState>(), "auto".into())
                     .await
                     .expect("set must succeed");
+                assert_eq!(snapshot.mode, "auto");
+                assert!(snapshot.persisted, "落盘成功必须健康位 true");
+                let view = get_approval_mode(app.state::<crate::AppState>())
+                    .await
+                    .expect("get must succeed");
+                assert_eq!(view.mode, "auto");
+                assert!(view.persisted);
             });
         // 内存态生效
         assert_eq!(
@@ -1664,7 +1717,8 @@ mod tests {
     }
 
     /// #448 PR3：service 未就绪（启动极早期）→ 写穿降级 warn，内存仍生效；
-    /// 非法 mode 仍然拒绝。
+    /// 非法 mode 仍然拒绝。#463 审查项 3：降级健康位 persisted=false 外部可查
+    /// （set 返回值与 get 一致）。
     #[test]
     fn set_approval_mode_degrades_to_memory_without_service() {
         use tauri::Manager;
@@ -1675,13 +1729,23 @@ mod tests {
         app.manage(state);
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async {
-            set_approval_mode(app.state::<crate::AppState>(), "edit".into())
+            let snapshot = set_approval_mode(app.state::<crate::AppState>(), "edit".into())
                 .await
                 .expect("set must succeed（降级不拒绝）");
+            assert_eq!(snapshot.mode, "edit");
+            assert!(
+                !snapshot.persisted,
+                "service 未就绪必须暴露 degraded（persisted=false）"
+            );
             let error = set_approval_mode(app.state::<crate::AppState>(), "yolo".into())
                 .await
                 .expect_err("garbage mode must be rejected");
             assert!(error.to_string().contains("unknown approval mode"));
+            let view = get_approval_mode(app.state::<crate::AppState>())
+                .await
+                .expect("get must succeed");
+            assert_eq!(view.mode, "edit");
+            assert!(!view.persisted, "get 健康位与 set 返回一致");
         });
         assert_eq!(
             *app.state::<crate::AppState>().approval_mode.lock().unwrap(),
@@ -1691,8 +1755,10 @@ mod tests {
 
     /// #448 PR3：启动回填——set 写穿落盘的值经 restore_persisted_approval_mode
     /// 回填内存（重启等价路径）；无持久化值保持默认；损坏 payload（手改 DB）不 panic。
+    /// #463 审查项 3：回填成功/无持久值 → persisted=true。
     #[test]
     fn restore_persisted_approval_mode_reads_back_written_value() {
+        use std::sync::atomic::Ordering;
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let shared = std::sync::Arc::new(
             crate::session::UserDataService::in_memory().expect("user service"),
@@ -1713,8 +1779,12 @@ mod tests {
             .build();
         restore_persisted_approval_mode(&state);
         assert_eq!(*state.approval_mode.lock().unwrap(), "bypass");
+        assert!(
+            state.approval_mode_persisted.load(Ordering::Acquire),
+            "回填成功必须健康位 true"
+        );
 
-        // 无持久化值（空 service，模拟首次启动）→ 保持构造默认
+        // 无持久化值（空 service，模拟首次启动）→ 保持构造默认；默认即权威 → true
         let fresh = crate::test_utils::TestStateBuilder::bare()
             .with_user_data_service(std::sync::Arc::new(
                 crate::session::UserDataService::in_memory().expect("user service"),
@@ -1722,10 +1792,27 @@ mod tests {
             .build();
         restore_persisted_approval_mode(&fresh);
         assert_eq!(*fresh.approval_mode.lock().unwrap(), "default");
+        assert!(fresh.approval_mode_persisted.load(Ordering::Acquire));
 
         // 损坏 payload（非法/缺失 mode）分支在此不可测：validate_approval_mode 前置
         // 拒绝（approval_mode_rejects_unknown_mode_and_version 钉住），in_memory 基建
         // 无法绕过 save 种出非法行——restore 的 mode filter 属纵深防御（手改 DB 场景）。
+    }
+
+    /// #463 审查项 3：service 未就绪时启动回填 → persisted=false（内存默认值未被
+    /// 磁盘有效持有，degraded 外部可查）；set 落盘 save-Err 分支同属 degraded，
+    /// 但 in_memory 基建无法注入 save 失败（与 #448 审查 C-3 同口径：不可达分支
+    /// 不硬造测试），该臂由 None-service 臂 + save Ok 臂夹逼语义。
+    #[test]
+    fn restore_without_service_marks_persisted_false() {
+        use std::sync::atomic::Ordering;
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        restore_persisted_approval_mode(&state);
+        assert_eq!(*state.approval_mode.lock().unwrap(), "default");
+        assert!(
+            !state.approval_mode_persisted.load(Ordering::Acquire),
+            "service 未就绪必须暴露 degraded"
+        );
     }
 
     /// #463 后端 C-1：并发 set 写穿串行——多轮两任务并发 set 不同 mode，join 后
@@ -1755,14 +1842,20 @@ mod tests {
                 let app_ref = &app;
                 tokio::join!(
                     async {
-                        set_approval_mode(app_ref.state::<crate::AppState>(), first.into())
-                            .await
-                            .expect("first set must succeed")
+                        let snapshot =
+                            set_approval_mode(app_ref.state::<crate::AppState>(), first.into())
+                                .await
+                                .expect("first set must succeed");
+                        assert_eq!(snapshot.mode, first);
+                        assert!(snapshot.persisted, "落盘全成功场景健康位必须 true");
                     },
                     async {
-                        set_approval_mode(app_ref.state::<crate::AppState>(), second.into())
-                            .await
-                            .expect("second set must succeed")
+                        let snapshot =
+                            set_approval_mode(app_ref.state::<crate::AppState>(), second.into())
+                                .await
+                                .expect("second set must succeed");
+                        assert_eq!(snapshot.mode, second);
+                        assert!(snapshot.persisted);
                     },
                 );
                 let memory = app

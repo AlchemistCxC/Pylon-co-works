@@ -192,6 +192,11 @@ declare_app_state! {
         gateway: Arc<GatewayCore>,
         /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
         approval_mode: Arc<Mutex<String>>,
+        /// #463 审查项 3：approval-mode 落盘健康位——内存当前值是否已被 SQLite 持有
+        /// （或从未偏离持久层）。set 落盘成功 / 启动回填成功 / 无持久值（默认即权威）
+        /// → true；set 落盘失败 / 回填失败 / service 未就绪 → false。经 set/get 的
+        /// ApprovalModeSnapshot.persisted 暴露给 CLI 消费方（degraded 外部可查）。
+        approval_mode_persisted: Arc<std::sync::atomic::AtomicBool>,
         /// M3 EVT-02：canonical 事件仓库 service（与消息同库 canonical_events 表 v6，
         /// 方案书 §5.10 append-only 事件流）。与 message/user-data 作为同一 readiness
         /// unit 串行打开；生产 setup 返回后必为 Some。dispatcher 对有 durable owner 的
@@ -218,7 +223,8 @@ declare_app_state! {
         /// #463：approval-mode 写序锁（tokio Mutex）——set_approval_mode 的内存写与
         /// user_data 落盘全程持锁，并发 set（GUI 与 CLI 桥同进程）时磁盘必为最后一次
         /// set（重启不回退到较早值；与 mcp_write_lock 同型。最后一次 set 落盘失败除外
-        /// ——降级路径见 set_approval_mode docstring 与 #463 审查项 3 决策口）。
+        /// ——降级路径见 set_approval_mode docstring，健康位经
+        /// approval_mode_persisted 对外可查，#463 审查项 3 已落地）。
         approval_mode_write_lock: tokio::sync::Mutex<()>,
         /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
         /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
@@ -824,6 +830,7 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
         gateway,
         startup: Arc::new(RwLock::new(startup)),
         approval_mode: Arc::new(Mutex::new("default".to_string())),
+        approval_mode_persisted: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         approval_mode_write_lock: tokio::sync::Mutex::new(()),
         browser_agent: Arc::new(crate::browser::agent::hub::BrowserAgentHub::new()),
         pet_write_lock: tokio::sync::Mutex::new(()),

@@ -560,6 +560,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
         let runtimes = handles.runtimes.clone();
         let gateway = handles.gateway.clone();
         let approval_mode = handles.approval_mode.clone();
+        let approval_mode_persisted = handles.approval_mode_persisted.clone();
         let event_service_slot = handles.event_service.clone();
         let event_service = event_service_slot.lock().ok().and_then(|slot| slot.clone());
         let message_service_slot = handles.message_service.clone();
@@ -606,6 +607,7 @@ impl<R: tauri::Runtime> NotificationPump<R> {
                 runtime_logs,
                 gateway: gateway.clone(),
                 approval_mode: approval_mode.clone(),
+                approval_mode_persisted,
                 event_service: event_service_slot,
                 message_service: message_service_slot,
                 hook_bridge: hook_bridge.clone(),
