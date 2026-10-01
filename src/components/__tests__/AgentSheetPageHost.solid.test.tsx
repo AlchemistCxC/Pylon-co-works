@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react'
+// #515：AgentSheetPageHost 测试的 Solid 版（断言集与 React 版逐一对应，未缩减）。
+// 改写点登记：
+// - 组件 render 用 `@solidjs/testing-library`（传函数）；`useOpenSidebarPage` 仍是 React
+//   hook（消费方 AgentSheetView.tsx 未迁），其两条例证用 `@testing-library/react` 渲染
+//   React 探针组件（无 JSX，经 createElement 构造，避免 Solid 文件里出现 React JSX）；
+// - 注册表贡献组件（React 面）以 createElement 构造，岛内由 React 渲染。
+import { fireEvent, render as renderReact, screen } from '@testing-library/react'
+import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import AgentSheetPageHost, { useOpenSidebarPage } from '../sidebar/AgentSheetPageHost.tsx'
+import { cleanup, render } from '@solidjs/testing-library'
+import AgentSheetPageHost from '../sidebar/AgentSheetPageHost.solid.tsx'
+import { useOpenSidebarPage } from '../sidebar/useOpenSidebarPage.ts'
 import { resetStores } from '../../test/resetStores'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
@@ -43,7 +52,7 @@ function register(contribution: Partial<AgentSidebarContribution> & { id: string
 
 /** 观察贡献拿到的 presentation——「区块小样 / 主区整页」是同一组件两种体量。 */
 function PresentationProbe(props: Partial<AgentSidebarContributionProps>) {
-  return <div data-testid="probe">{props.presentation}</div>
+  return createElement('div', { 'data-testid': 'probe' }, props.presentation)
 }
 
 beforeEach(() => {
@@ -58,23 +67,25 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   while (disposals.length > 0) void disposals.pop()!.dispose()
 })
 
 describe('AgentSheet 主区整页宿主', () => {
-  it('渲染页面标题与内容，并以 presentation=page 交给同一个贡献组件', () => {
+  it('渲染页面标题与内容，并以 presentation=page 交给同一个贡献组件', async () => {
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
+    render(() => <AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     expect(screen.getByRole('heading', { name: '定时任务' })).toBeInTheDocument()
-    expect(screen.getByTestId('probe')).toHaveTextContent('page')
+    // 改写点：岛内容经 React 并发调度（createRoot.render 宏任务）落地，同步断言改 findBy。
+    expect(await screen.findByTestId('probe')).toHaveTextContent('page')
   })
 
   it('「返回」只清整页状态（折叠已迁出为全局偏好，与 Sheet 级整页互不牵挂，issue #202）', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
+    render(() => <AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     fireEvent.click(screen.getByRole('button', { name: '返回聊天' }))
     expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { activePageId: null })
@@ -84,7 +95,7 @@ describe('AgentSheet 主区整页宿主', () => {
     const patchSheetState = vi.fn()
     useWorkspaceStore.setState({ patchSheetState })
     register({ id: 'scheduled', label: '定时', page: { title: '定时任务' }, component: PresentationProbe })
-    render(<AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
+    render(() => <AgentSheetPageHost page={getAgentSidebarRegistry().list()[0]} ctx={ctx} sheet={{ id: SHEET_ID }} />)
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(patchSheetState).toHaveBeenCalledWith(SHEET_ID, { activePageId: null })
@@ -96,9 +107,9 @@ describe('AgentSheet 主区整页宿主', () => {
 
     function Probe() {
       const page = useOpenSidebarPage(state)
-      return <div data-testid="resolved">{page ? page.id : 'none'}</div>
+      return createElement('div', { 'data-testid': 'resolved' }, page ? page.id : 'none')
     }
-    render(<Probe />)
+    renderReact(createElement(Probe))
     expect(screen.getByTestId('resolved')).toHaveTextContent('none')
   })
 
@@ -106,9 +117,9 @@ describe('AgentSheet 主区整页宿主', () => {
     const state = { activePageId: 'gone' }
     function Probe() {
       const page = useOpenSidebarPage(state)
-      return <div data-testid="resolved">{page ? page.id : 'none'}</div>
+      return createElement('div', { 'data-testid': 'resolved' }, page ? page.id : 'none')
     }
-    render(<Probe />)
+    renderReact(createElement(Probe))
     expect(screen.getByTestId('resolved')).toHaveTextContent('none')
   })
 })

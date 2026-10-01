@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import SearchPanel from '../sidebar/SearchPanel.tsx'
+// #515：SearchPanel 测试的 Solid 版（断言集与 React 版逐一对应，未缩减）。
+// 改写点登记：
+// - `@testing-library/react` → `@solidjs/testing-library`（render 传函数）；
+// - 受控输入的 `fireEvent.change` → `fireEvent.input`（Solid 的受控 input 走 onInput）。
+import { cleanup, fireEvent, render, screen, within } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import SearchPanel from '../sidebar/SearchPanel.solid.tsx'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
+
+afterEach(cleanup)
 
 function session(overrides: Partial<WorkspaceSession> & { id: string; name: string }): WorkspaceSession {
   return {
@@ -41,18 +47,18 @@ function props(overrides: Partial<AgentSidebarContributionProps> = {}): AgentSid
 }
 
 const type = (text: string) => {
-  fireEvent.change(screen.getByRole('textbox', { name: '搜索会话' }), { target: { value: text } })
+  fireEvent.input(screen.getByRole('textbox', { name: '搜索会话' }), { target: { value: text } })
 }
 
 describe('搜索模块（独立面板）', () => {
   it('未输入时给提示、不出结果', () => {
-    render(<SearchPanel {...props({ sessions: [session({ id: 's1', name: '会话一' })] })} />)
+    render(() => <SearchPanel {...props({ sessions: [session({ id: 's1', name: '会话一' })] })} />)
     expect(screen.getByText(/开始搜索/)).toBeInTheDocument()
     expect(screen.queryByRole('tree', { name: '搜索结果' })).toBeNull()
   })
 
   it('按会话名命中并按工作区分组，显示命中计数', () => {
-    render(<SearchPanel {...props({
+    render(() => <SearchPanel {...props({
       workspaces: [workspace],
       sessions: [
         session({ id: 's1', name: '讨论终端风格', workspaceId: 'workspace-1' }),
@@ -73,7 +79,7 @@ describe('搜索模块（独立面板）', () => {
   })
 
   it('工作区名命中时列出该工作区的全部会话（对应 VSCode 搜到文件名即列该文件）', () => {
-    render(<SearchPanel {...props({
+    render(() => <SearchPanel {...props({
       workspaces: [workspace],
       sessions: [
         session({ id: 's1', name: '甲', workspaceId: 'workspace-1' }),
@@ -85,7 +91,7 @@ describe('搜索模块（独立面板）', () => {
   })
 
   it('无命中时给空态，不渲染结果树', () => {
-    render(<SearchPanel {...props({ sessions: [session({ id: 's1', name: '会话一' })] })} />)
+    render(() => <SearchPanel {...props({ sessions: [session({ id: 's1', name: '会话一' })] })} />)
     type('zzz')
     expect(screen.getByText(/没有匹配/)).toBeInTheDocument()
     expect(screen.queryByRole('tree', { name: '搜索结果' })).toBeNull()
@@ -93,7 +99,7 @@ describe('搜索模块（独立面板）', () => {
 
   it('点击命中项选中该会话；清除按钮清空查询并回到提示态', () => {
     const onSelectSession = vi.fn()
-    render(<SearchPanel {...props({ onSelectSession, sessions: [session({ id: 's1', name: '会话一' })] })} />)
+    render(() => <SearchPanel {...props({ onSelectSession, sessions: [session({ id: 's1', name: '会话一' })] })} />)
     type('会话')
     fireEvent.click(screen.getByRole('treeitem', { name: /会话一/ }))
     expect(onSelectSession).toHaveBeenCalledWith('s1')
@@ -104,7 +110,7 @@ describe('搜索模块（独立面板）', () => {
   })
 
   it('当前会话在结果里标为选中', () => {
-    render(<SearchPanel {...props({ activeSessionId: 's1', sessions: [session({ id: 's1', name: '会话一' })] })} />)
+    render(() => <SearchPanel {...props({ activeSessionId: 's1', sessions: [session({ id: 's1', name: '会话一' })] })} />)
     type('会话')
     expect(screen.getByRole('treeitem', { name: /会话一/ })).toHaveClass('active')
   })

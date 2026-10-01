@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+// #515：ContextPanelHost / AgentContextPanel 测试的 Solid 版（断言集与 React 版逐一对应，未缩减）。
+// 改写点登记：
+// - 实体直连（ContextPanelHost.solid / AgentContextPanel.solid），render 用
+//   `@solidjs/testing-library`；**fireEvent 保留 RTL-react 版**（自带 act 包装，React 岛内
+//   的贡献组件状态更新不会落成 console.error 噪音）；
+// - 岛内贡献体经 React 并发调度落地：同步 getBy 断言改 findBy/waitFor（语义等价）；
+// - 受控输入的 `fireEvent.change` → `fireEvent.input`（Solid 的受控 input 走 onInput）；
+// - React 版 `view.rerender(...)` → Solid 信号重推 ctx props（Solid 无 rerender API）。
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import ContextPanelHost from '../ContextPanelHost.tsx'
+import { cleanup, render } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
+import ContextPanelHost from '../ContextPanelHost.solid.tsx'
+import AgentContextPanel from '../AgentContextPanel.solid.tsx'
 import { getContextPanelRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes.ts'
-import AgentContextPanel from '../AgentContextPanel.tsx'
 import { createPreviewWorkbenchServices } from '../../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchHostPort } from '../../../plugin-runtime/renderers/workbenchHostPort.ts'
 import { publishActiveWorkbenchHostPort } from '../../../application/agent-workbench/activeWorkbenchHostPort.ts'
@@ -38,25 +49,29 @@ const ctx: SheetContext = {
 }
 
 afterEach(async () => {
+  cleanup()
   await Promise.all(registrations.splice(0).map(registration => registration.dispose()))
   useRightRailStore.getState().setWidth(RIGHT_RAIL_DEFAULT_WIDTH)
   vi.restoreAllMocks()
 })
 
+/** React 贡献组件桩（无 JSX：本文件是 Solid 编译面，React 面在岛内渲染）。 */
+const panelStub = (text: string) => () => createElement('div', null, text)
+
 describe('ContextPanelHost', () => {
-  it('同 ID 插件热替换后重置旧错误边界并渲染健康实现', () => {
+  it('同 ID 插件热替换后重置旧错误边界并渲染健康实现', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const registry = getContextPanelRegistry()
     const oldIdentity = createPluginIdentity('test.context.hot', 'old')
     const nextIdentity = createPluginIdentity('test.context.hot', 'next')
     const BrokenPanel = () => { throw new Error('old broken panel') }
-    const HealthyPanel = () => <div>热替换后的健康面板</div>
+    const HealthyPanel = () => createElement('div', null, '热替换后的健康面板')
     registrations.push(registry.register(oldIdentity, {
       id: 'hot-panel', workspaceKind: sheet.kind, label: '热替换', order: 100,
       renderKind: 'first-party-react', component: BrokenPanel,
     }))
-    render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
-    expect(screen.getByRole('alert')).toHaveTextContent('此插件面板暂时不可用')
+    render(() => <ContextPanelHost sheet={sheet} ctx={ctx} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('此插件面板暂时不可用')
 
     const transaction = registry.beginShadowTransaction(nextIdentity, oldIdentity.key)
     transaction.register({
@@ -65,24 +80,24 @@ describe('ContextPanelHost', () => {
     }, { contributionId: 'hot-panel', priority: 100 })
     act(() => { registrations.push(...transaction.commit()) })
 
-    expect(screen.getByText('热替换后的健康面板')).toBeInTheDocument()
+    await screen.findByText('热替换后的健康面板')
   })
 
-  it('把生产主题中的右栏宽度注入布局 CSS 变量', () => {
+  it('把生产主题中的右栏宽度注入布局 CSS 变量', async () => {
     const registry = getContextPanelRegistry()
     const identity = createPluginIdentity('test.context.width', 'run-1')
     registrations.push(registry.register(identity, {
       id: 'width-panel', workspaceKind: sheet.kind, label: '宽度', order: 100,
-      renderKind: 'first-party-react', component: () => <div>宽度内容</div>,
+      renderKind: 'first-party-react', component: panelStub('宽度内容'),
     }))
     useRightRailStore.getState().setWidth(347)
 
-    render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
+    render(() => <ContextPanelHost sheet={sheet} ctx={ctx} />)
 
-    expect(screen.getByRole('complementary')).toHaveStyle({ '--right-width': '347px' })
+    expect(await screen.findByRole('complementary')).toHaveStyle({ '--right-width': '347px' })
   })
 
-  it('agent 搜索消费当前 Suite Host Port 的 document 与会话 UI 状态', () => {
+  it('agent 搜索消费当前 Suite Host Port 的 document 与会话 UI 状态', async () => {
     const services = createPreviewWorkbenchServices()
     const agentSheet = { ...sheet, kind: 'agent' }
     const agentCtx = { ...ctx, activeSession: 'preview-session' }
@@ -95,10 +110,10 @@ describe('ContextPanelHost', () => {
     })
     const release = publishActiveWorkbenchHostPort(agentSheet.id, hostPort)
 
-    render(<AgentContextPanel sheet={agentSheet} ctx={agentCtx} />)
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索消息' }), { target: { value: '迁移结果' } })
+    render(() => <AgentContextPanel sheet={agentSheet} ctx={agentCtx} />)
+    fireEvent.input(await screen.findByRole('textbox', { name: '搜索消息' }), { target: { value: '迁移结果' } })
 
-    expect(screen.getByText('1/1')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('1/1')).toBeInTheDocument())
     expect(hostPort.sessionUi.get('search-query', '')).toBe('迁移结果')
     release()
     services.destroy()
@@ -115,27 +130,31 @@ describe('ContextPanelHost', () => {
       ...services, ...binding, binding: () => binding,
     })
     const release = publishActiveWorkbenchHostPort(agentSheet.id, hostPort)
-    const view = render(<AgentContextPanel sheet={agentSheet} ctx={{ ...ctx, activeSession: 'session-a' }} />)
+    // React 版的 rerender 语义改写：ctx 经信号重推（Solid 无 rerender API）。
+    const [liveCtx, setLiveCtx] = createSignal<SheetContext>({ ...ctx, activeSession: 'session-a' })
+    render(() => <AgentContextPanel sheet={agentSheet} ctx={liveCtx()} />)
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索消息' }), { target: { value: 'first query' } })
+    const searchBox = () => screen.getByRole('textbox', { name: '搜索消息' })
+    await waitFor(() => expect(searchBox()).toBeInTheDocument())
+    fireEvent.input(searchBox(), { target: { value: 'first query' } })
     binding = { ...binding, sessionOwnerKey: 'owner-b', sessionId: 'session-b' }
-    view.rerender(<AgentContextPanel sheet={agentSheet} ctx={{ ...ctx, activeSession: 'session-b' }} />)
-    await waitFor(() => expect(screen.getByRole('textbox', { name: '搜索消息' })).toHaveValue(''))
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索消息' }), { target: { value: 'second query' } })
+    setLiveCtx({ ...ctx, activeSession: 'session-b' })
+    await waitFor(() => expect(searchBox()).toHaveValue(''))
+    fireEvent.input(searchBox(), { target: { value: 'second query' } })
 
     binding = { ...binding, sessionOwnerKey: 'owner-a', sessionId: 'session-a' }
-    view.rerender(<AgentContextPanel sheet={agentSheet} ctx={{ ...ctx, activeSession: 'session-a' }} />)
-    await waitFor(() => expect(screen.getByRole('textbox', { name: '搜索消息' })).toHaveValue('first query'))
+    setLiveCtx({ ...ctx, activeSession: 'session-a' })
+    await waitFor(() => expect(searchBox()).toHaveValue('first query'))
     release()
     services.destroy()
   })
 
-  it('按 order 渲染贡献标签并隔离单个贡献的渲染错误', () => {
+  it('按 order 渲染贡献标签并隔离单个贡献的渲染错误', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const registry = getContextPanelRegistry()
     const identity = createPluginIdentity('test.context.host', 'run-1')
     const BrokenPanel = () => { throw new Error('broken contribution') }
-    const HealthyPanel = () => <div>健康面板内容</div>
+    const HealthyPanel = () => createElement('div', null, '健康面板内容')
 
     registrations.push(registry.register(identity, {
       id: 'broken',
@@ -154,15 +173,15 @@ describe('ContextPanelHost', () => {
       component: HealthyPanel,
     }))
 
-    render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
+    render(() => <ContextPanelHost sheet={sheet} ctx={ctx} />)
 
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['故障', '正常'])
-    expect(screen.getByRole('alert')).toHaveTextContent('此插件面板暂时不可用')
+    await waitFor(() => expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['故障', '正常']))
+    expect(await screen.findByRole('alert')).toHaveTextContent('此插件面板暂时不可用')
     fireEvent.click(screen.getByRole('tab', { name: '正常' }))
-    expect(screen.getByText('健康面板内容')).toBeInTheDocument()
+    await screen.findByText('健康面板内容')
   })
 
-  it('切换器列出全部可显示面板，且跨 Sheet 种类也能切（种类只定默认）', () => {
+  it('切换器列出全部可显示面板，且跨 Sheet 种类也能切（种类只定默认）', async () => {
     const registry = getContextPanelRegistry()
     const identity = createPluginIdentity('test.context.switcher', 'run')
     registrations.push(registry.register(identity, {
@@ -171,7 +190,7 @@ describe('ContextPanelHost', () => {
       label: '本 Sheet 面板',
       order: 100,
       renderKind: 'first-party-react',
-      component: () => <div>本 Sheet 面板内容</div>,
+      component: panelStub('本 Sheet 面板内容'),
     }))
     registrations.push(registry.register(identity, {
       id: 'file-only',
@@ -179,19 +198,18 @@ describe('ContextPanelHost', () => {
       label: 'File 面板',
       order: 200,
       renderKind: 'first-party-react',
-      component: () => <div>File 面板内容</div>,
+      component: panelStub('File 面板内容'),
     }))
 
-    render(<ContextPanelHost sheet={sheet} ctx={ctx} />)
+    render(() => <ContextPanelHost sheet={sheet} ctx={ctx} />)
 
     // 用户实机报「侧栏内部没有切换侧栏种类的按钮」：只列可用面板时，单面板 Sheet 只剩一个
     // 撑满的标签，看起来是标题。现在两个都列、都能切——种类只决定默认选中谁。
-    const tabs = screen.getAllByRole('tab')
-    expect(tabs.map(tab => tab.textContent)).toEqual(['本 Sheet 面板', 'File 面板'])
-    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
-    fireEvent.click(tabs[1])
-    expect(screen.getByText('File 面板内容')).toBeInTheDocument()
-    expect(screen.queryByText('本 Sheet 面板内容')).toBeNull()
+    await waitFor(() => expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['本 Sheet 面板', 'File 面板']))
+    expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('tab', { name: 'File 面板' }))
+    await screen.findByText('File 面板内容')
+    await waitFor(() => expect(screen.queryByText('本 Sheet 面板内容')).toBeNull())
     // 选择落到 store：这是「用户显式选过」的凭据（跨 Sheet 保持 / 重载后记得）。
     expect(useRightRailStore.getState().activePanelId).toBe('file-only')
     // 右栏内部的折叠钮已删除（折叠由标题栏那一个负责），头部只剩切换器。
@@ -200,7 +218,7 @@ describe('ContextPanelHost', () => {
       .toEqual(['context-panel-tabs'])
   })
 
-  it('没显式选过时，默认选中与当前 Sheet 种类亲和的面板', () => {
+  it('没显式选过时，默认选中与当前 Sheet 种类亲和的面板', async () => {
     const registry = getContextPanelRegistry()
     const identity = createPluginIdentity('test.context.affinity', 'run')
     registrations.push(registry.register(identity, {
@@ -209,7 +227,7 @@ describe('ContextPanelHost', () => {
       order: 50,
       scope: 'global',
       renderKind: 'first-party-react',
-      component: () => <div>全局面板内容</div>,
+      component: panelStub('全局面板内容'),
     }))
     registrations.push(registry.register(identity, {
       id: 'affine-panel',
@@ -217,12 +235,13 @@ describe('ContextPanelHost', () => {
       label: '亲和面板',
       order: 900,
       renderKind: 'first-party-react',
-      component: () => <div>亲和面板内容</div>,
+      component: panelStub('亲和面板内容'),
     }))
 
-    render(<ContextPanelHost sheet={sheet} ctx={ctx} activePanelId={null} />)
+    render(() => <ContextPanelHost sheet={sheet} ctx={ctx} activePanelId={null} />)
 
     // 亲和优先于 order 更靠前的 global 面板。
-    expect(screen.getByText('亲和面板内容')).toBeInTheDocument()
+    await screen.findByText('亲和面板内容')
+    expect(within(document.body).queryByText('全局面板内容')).toBeNull()
   })
 })

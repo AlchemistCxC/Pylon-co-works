@@ -147,7 +147,9 @@ describe('会话交互保留', () => {
     render(<SessionsPanel {...panelProps({ onRenameSession })} />)
     fireEvent.doubleClick(screen.getByText('会话一'))
     const input = screen.getByDisplayValue('会话一') as HTMLInputElement
-    fireEvent.change(input, { target: { value: '新名字' } })
+    // #515：SessionsPanel 实体已 Solid 化，受控 input 走 onInput——fireEvent.change 的
+    // change 事件触不到，改派 input 事件（RTL-react 的 fireEvent 自带 act 包装）。
+    fireEvent.input(input, { target: { value: '新名字' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onRenameSession).toHaveBeenCalledWith('s1', '新名字')
   })
