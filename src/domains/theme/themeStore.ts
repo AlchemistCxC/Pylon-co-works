@@ -1,5 +1,5 @@
-import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'
@@ -87,35 +87,35 @@ const THEME_MIGRATION_DEFAULTS = {
   ccLayout: DEFAULTS.ccLayout,
 }
 
-export const useStore = create<ThemeState>()(persist(
-  set => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const themeKernel = createSolidStoreKernel<ThemeState>({
   ...DEFAULTS,
 
   // #448 PR5：customPresets/zonePresetEntries 已拆独立域 customPresetStore
   // （pylon-custom-presets 键 + 后端 custom-presets user_data 权威）。
 
   // D-trace：写入溯源——source 由调用方声明（用户编辑/呈现风格/界面模式…），
-  // 缺省 user-edit。记录在漏斗出口完成，reducer 保持纯函数。
+  // 记录在漏斗出口完成，reducer 保持纯函数。
   // 刀7 §六（#214）：source 同时决定**这次写入算不算「用户触碰」**（是否置该 zone 的 custom）
   setZoneField: (zone, partial, source = 'user-edit') => {
     recordSettingWrites(source, zone, Object.keys(partial))
-    set(state => setZoneFieldReducer(state, zone, partial, sourceMarksZoneCustom(source)))
+    themeKernel.setState(state => setZoneFieldReducer(state, zone, partial, sourceMarksZoneCustom(source)))
   },
-  setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
-  setCcHeight: (height) => set(state => {
+  setCcEditMode: (enabled) => themeKernel.setState({ ccEditMode: enabled }),
+  setCcHeight: (height) => themeKernel.setState(state => {
     // D1：ccHeight 经布局约束漏斗归一化（★ #266 刀3：下界 = 按边算取最大，见 ccHeightState.resolveCcMinHeight）
     const ccHeight = clampCcHeight(height, ccMinHeightInputOf(state))
     return { ccHeight, ...markZoneCustom(state, 'cc') }
   }),
-  updateCcPlacement: (id, partial) => set(state => ({
+  updateCcPlacement: (id, partial) => themeKernel.setState(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
     ...markZoneCustom(state, 'cc'),
   })),
-  resetCcLayout: () => set(state => ({
+  resetCcLayout: () => themeKernel.setState(state => ({
     ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
     ...markZoneCustom(state, 'cc'),
   })),
-  setCcHidden: (id, hidden, target) => set(state => {
+  setCcHidden: (id, hidden, target) => themeKernel.setState(state => {
     // ★ #266 刀4（结构 C）：按 `target` 写对应那一份表（主管 / 再藏），两份互不覆盖。
     const next = target === 'base'
       ? { ...state, ccHidden: setCcHiddenState(state.ccHidden, id, hidden) }
@@ -137,17 +137,17 @@ export const useStore = create<ThemeState>()(persist(
     // 未登记模式（tactical-blue、插件未登记模式）没有默认预设 ⇒ 回落整份 DEFAULTS（不报错、不悬空）。
     const target = defaultPresetForInterfaceMode(useInterfaceModeStore.getState().interfaceMode)
     if (!target) {
-      set(structuredClone(DEFAULTS))
+      themeKernel.setState(structuredClone(DEFAULTS))
       return
     }
     // 覆盖范围与原来的「整份 DEFAULTS」逐字一致（含非预设域字段 sidebarWidth / rightWidth），
     // 只把**预设域字段**换成默认预设的值；ccLayout 归一与 ccHeight 收敛沿用「应用预设」同一套算法。
     // 名字传空串 = 沿用 resetZone 的「无基准」态：默认预设不进列表，若记名，预设行会因认不出它
-    // 而亮出兜底 chip「未知预设」——那正是刀6/07a 要避免的悬空。
-    set({ ...structuredClone(DEFAULTS), ...setGlobalPresetReducer('', target.theme) })
+    // 而亮出兜底的「未知预设」chip——那正是刀6/07a 要避免的悬空。
+    themeKernel.setState({ ...structuredClone(DEFAULTS), ...setGlobalPresetReducer('', target.theme) })
   },
 
-  resetZone: (zone) => set(state => {
+  resetZone: (zone) => themeKernel.setState(state => {
     const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
     // 只重置标量主题字段；ccLayout/ccHidden 等对象字段走专用动作（避免误清用户排布）
     const reset = Object.fromEntries(
@@ -166,35 +166,39 @@ export const useStore = create<ThemeState>()(persist(
     }
   }),
 
-  // 六个预设动作：纯计算在 domains/theme/presetReducer.ts，此处只留 set(reducer(state, args)) 薄壳
+  // 六个预设动作：纯计算在 domains/theme/presetReducer.ts，此处只留 setState(reducer(state, args)) 薄壳
   applyZonePreset: (zone, presetName, presetTheme) => {
     recordSettingWrites('zone-preset', zone, Object.keys(presetTheme))
-    set(state => applyZonePresetReducer(state, zone, presetName, presetTheme))
+    themeKernel.setState(state => applyZonePresetReducer(state, zone, presetName, presetTheme))
   },
   setGlobalPreset: (name, theme) => {
     recordSettingWrites('global-preset', '*', Object.keys({ ...DEFAULTS, ...theme }))
-    set(() => setGlobalPresetReducer(name, theme))
+    themeKernel.setState(() => setGlobalPresetReducer(name, theme))
   },
-  // 刀1（#223）：逐区域装配薄壳——纯计算在 presetReducer，这里只记溯源 + set(reducer(state, args))
+  // 刀1（#223）：逐区域装配薄壳——纯计算在 presetReducer，这里只记溯源 + setState(reducer(state, args))
   assembleGlobalPreset: (slices, options = {}) => {
     recordSettingWrites('global-preset', '*', Object.keys({
       ...DEFAULTS,
       ...Object.assign({}, ...slices.map(slice => slice.theme)),
       ...(options.profileTokens ?? {}),
     }))
-    set(state => assembleGlobalPresetReducer(state, slices, options))
+    themeKernel.setState(state => assembleGlobalPresetReducer(state, slices, options))
   },
   // #448 PR5：saveCustomPreset/applyCustomPreset/removeCustomPreset/saveZonePresetEntry/
   // pruneZonePresetEntries/removeZonePresetEntry 已迁 customPresetStore（跨 store
   // 事务经 presetActions 合成视图注入，快照/回滚语义不变）。
-}),
-{ name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
+})
+
+attachSolidPersist(themeKernel, {
+  name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
   // G9（1C L1）：主题写盘失败可见（ErrorCenter 指纹去重聚合为一次性告警）
-  storage: createJSONStorage(() => ({
-    getItem: key => localStorage.getItem(key),
+  storage: {
+    getItem: key => resolveLocalStorage()?.getItem(key) ?? null,
     setItem: (key, value) => {
+      const storage = resolveLocalStorage()
+      if (!storage) return
       try {
-        localStorage.setItem(key, value)
+        storage.setItem(key, value)
         resolveRuntimeErrors({ key: 'app:theme-persistence', source: 'theme.persistence' })
       } catch (error) {
         // 写盘失败可见（ErrorCenter 指纹去重聚合）；不 throw——内存态继续（1C）
@@ -205,8 +209,8 @@ export const useStore = create<ThemeState>()(persist(
         })
       }
     },
-    removeItem: key => localStorage.removeItem(key),
-  })),
+    removeItem: key => resolveLocalStorage()?.removeItem(key),
+  },
   migrate: (persisted, version) => {
     // #448 PR5：旧 pylon-theme 内嵌的预设字段在 migrate 写回时会被 partialize
     // 白名单洗掉——先原样暂存（customPresetStore 的搬家读暂存，读序无关）。
@@ -216,10 +220,10 @@ export const useStore = create<ThemeState>()(persist(
   /**
    * ★★ #238 刀2：读盘后的**结构对齐**每次读盘无条件跑（不依赖版本号）。
    *
-   * 挂钩为什么选 `merge` 而不是 `onRehydrateStorage`：zustand 的 hydrate 用**原始 set**
-   * 落 `merge` 的返回值（不触发写盘），只有真的跑过 `migrate` 才 `setItem()` ——
+   * 挂钩为什么选 `merge` 而不是 onRehydrateStorage：hydrate 用 merge 的返回值落
+   * **原始 set**（不触发写盘），只有真的跑过 `migrate` 才 `setItem()` ——
    * 所以对齐**不产生任何额外写盘 / 订阅广播**；且 `migrate → merge` 的顺序保证
-   * 它跑在一次性语义转换之后。
+   * 它跑在一次性语义转换之后（attachSolidPersist 同款顺序）。
    *
    * 语义：缺项补默认、多余项忽略、**用户手调的 offsetX/offsetY/order 与已设字段值一律保留**
    * （既定口径：「布局归一化不是把用户排布拍平」）。幂等，见 `alignThemeStructure`。
@@ -239,13 +243,15 @@ export const useStore = create<ThemeState>()(persist(
   onRehydrateStorage: () => state => {
   // FE-AUD-002：旧 pylon-theme 内嵌 profile 一次性迁移到独立 pylon-profiles key
   // （迁移逻辑在 hydrateProfiles：新 key 存在时旧数据不反向覆盖）
-  const legacy = state as unknown as { profiles?: Profile[]; activeProfileId?: string }
+  const legacy = state as unknown as { profiles?: Profile[]; activeProfileId?: string } | undefined
   const legacyArg =
     legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0
       ? { profiles: legacy.profiles, activeProfileId: typeof legacy.activeProfileId === 'string' ? legacy.activeProfileId : legacy.profiles[0].id }
       : undefined
   // P31：persist 只报告 legacy payload；跨域 hydration 唯一由 application bootstrap 触发。
   reportLegacyProfilePayload(legacyArg)
-}}))
+}})
+
+export const useStore: ZustandHook<ThemeState> = createReactStoreHook(themeKernel)
 
 

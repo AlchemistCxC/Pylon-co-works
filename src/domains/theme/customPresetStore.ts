@@ -18,8 +18,8 @@
  * custom 标记——经 `presetCombinedApi`（合成 get + 按字段路由 set）注入
  * presetActions/presetReducer 既有纯函数，事务骨架零改动。
  */
-import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
 import type { CustomPreset } from './customPresets.ts'
 import type { ThemeState } from './themeStore.ts'
 import { useStore } from './themeStore.ts'
@@ -103,8 +103,8 @@ function readLegacyPresetsStorageValue(key: string): string | null {
   return migrated
 }
 
-export const useCustomPresetStore = create<CustomPresetState>()(persist(
-  (set, get) => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const customPresetKernel = createSolidStoreKernel<CustomPresetState>({
     customPresets: [],
     zonePresetEntries: [],
 
@@ -118,14 +118,14 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
       // reducer 同时产出主题侧回写（appliedPreset/custom 标记）与预设列表删除
       const patch = removeCustomPresetReducer(presetCombinedApi().get(), id)
       useStore.setState({ appliedPreset: patch.appliedPreset, custom: patch.custom })
-      set({ customPresets: patch.customPresets })
+      customPresetKernel.setState({ customPresets: patch.customPresets })
     },
 
     saveZonePresetEntry: (mode, zone, label) => {
       const cleanLabel = label.trim()
       if (!cleanLabel) return null
       const theme = useStore.getState()
-      const existing = normalizeZonePresetEntries(get().zonePresetEntries)
+      const existing = normalizeZonePresetEntries(customPresetKernel.getState().zonePresetEntries)
       const id = createZonePresetEntryId(mode, zone, Date.now(), existing.map(entry => entry.id))
       const entry: ZonePresetEntry = {
         id,
@@ -134,15 +134,15 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
         label: cleanLabel.slice(0, 40),
         values: structuredClone(pickZoneFields(theme, zone)),
       }
-      set({ zonePresetEntries: [...existing, entry] })
+      customPresetKernel.setState({ zonePresetEntries: [...existing, entry] })
       return id
     },
-    pruneZonePresetEntries: () => set(state => {
+    pruneZonePresetEntries: () => customPresetKernel.setState(state => {
       const entries = cleanupZonePresetEntries(normalizeZonePresetEntries(state.zonePresetEntries))
       return entries === state.zonePresetEntries ? {} : { zonePresetEntries: entries }
     }),
     removeZonePresetEntry: (id) => {
-      const current = Array.isArray(get().zonePresetEntries) ? get().zonePresetEntries : []
+      const current = Array.isArray(customPresetKernel.getState().zonePresetEntries) ? customPresetKernel.getState().zonePresetEntries : []
       const patch = removeZonePresetEntryReducer({
         zonePresetEntries: current,
         appliedPreset: useStore.getState().appliedPreset,
@@ -154,24 +154,25 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
       if (patch.appliedPreset !== undefined) themePatch.appliedPreset = patch.appliedPreset
       if (patch.custom !== undefined) themePatch.custom = patch.custom
       if (Object.keys(themePatch).length > 0) useStore.setState(themePatch)
-      set({ zonePresetEntries: patch.zonePresetEntries })
+      customPresetKernel.setState({ zonePresetEntries: patch.zonePresetEntries })
     },
-  }),
-  {
+})
+
+attachSolidPersist(customPresetKernel, {
     name: CUSTOM_PRESET_STORAGE_KEY,
     version: 1,
-    storage: createJSONStorage(() => ({
+    storage: {
       // 本键优先（不反向覆盖）；无数据 → 搬家值（命中即落盘，见函数注释）
       getItem: key => {
         try {
-          const own = localStorage.getItem(key)
+          const own = resolveLocalStorage()?.getItem(key)
           if (own != null) return own
-          return readLegacyPresetsStorageValue(key)
+          return readLegacyPresetsStorageValue(CUSTOM_PRESET_STORAGE_KEY)
         } catch { return null }
       },
       setItem: (key, value) => {
         try {
-          localStorage.setItem(key, value)
+          resolveLocalStorage()?.setItem(key, value)
           resolveRuntimeErrors({ key: 'app:custom-preset-persistence', source: 'customPreset.persistence' })
         } catch (error) {
           // 写盘失败可见（ErrorCenter 聚合）；不 throw——内存态继续（与 themeStore 同语义）
@@ -182,8 +183,8 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
           })
         }
       },
-      removeItem: key => localStorage.removeItem(key),
-    })),
+      removeItem: key => resolveLocalStorage()?.removeItem(key),
+    },
     // 预设切片无版本化 schema：持久化形状即领域类型 + 领域归一（customPresets 的
     // id namespace 迁移 / zonePresetEntries 的值快照清洗——自 themeDomainMigrate
     // 移交，#448 PR5）。旧 pylon-theme 侧仅保留 appliedPreset 引用一致性改写。
@@ -202,8 +203,9 @@ export const useCustomPresetStore = create<CustomPresetState>()(persist(
       customPresets: state.customPresets,
       zonePresetEntries: state.zonePresetEntries,
     }),
-  },
-))
+})
+
+export const useCustomPresetStore: ZustandHook<CustomPresetState> = createReactStoreHook(customPresetKernel)
 
 /** 合成 store api：get = 两 store 合并视图；set 按字段路由（预设切片 ⇄ 主题字段）。 */
 function presetCombinedApi() {

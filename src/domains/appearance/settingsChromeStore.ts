@@ -10,8 +10,8 @@
  * 旧 key 一次性搬家（首读时）：pylon-settings-{density,preview-collapsed,collapse,pinned}
  * → pylon-settings-chrome（envelope v1），搬完即删旧 key。
  */
-import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, type PersistStringStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
 
 export type SettingsDensity = 'basic' | 'standard' | 'all'
 const DENSITIES: readonly SettingsDensity[] = ['basic', 'standard', 'all']
@@ -133,57 +133,61 @@ function migrateLegacySettingsChrome(storage: Storage): LegacyChromeSeed {
 const legacySeed = migrateLegacySettingsChrome(safeLocalStorage())
 const hasLegacySeed = Object.keys(legacySeed).length > 0
 
-export const useSettingsChromeStore = create<SettingsChromeState>()(persist(
-  (set, get) => ({
-    density: 'standard',
-    previewCollapsed: false,
-    collapsedMap: {},
-    pinned: [],
-    setDensity: density => set({ density: normalizeDensity(density) }),
-    setPreviewCollapsed: previewCollapsed => set({ previewCollapsed }),
-    setGroupCollapsed: (key, collapsed) => set({ collapsedMap: { ...get().collapsedMap, [key]: collapsed } }),
-    togglePinned: section => {
-      const current = get().pinned
-      // 与旧 writePinned 语义一致：新置顶排在末尾，超限丢最旧（保最后 PINNED_LIMIT 个）。
-      const next = current.includes(section)
-        ? current.filter(id => id !== section)
-        : [...current, section].slice(-PINNED_LIMIT)
-      set({ pinned: normalizePinned(next) })
-    },
-  }),
-  {
-    name: 'pylon-settings-chrome',
-    version: 1,
-    storage: createJSONStorage(() => {
-      const storage = safeLocalStorage()
-      return {
-        getItem: key => { try { return storage.getItem(key) } catch { return null } },
-        setItem: (key, value) => { try { storage.setItem(key, value) } catch { /* 禁储静默 */ } },
-        removeItem: key => { try { storage.removeItem(key) } catch { /* best effort */ } },
-      }
-    }),
-    // 恒跑的 merge 负责规范化（zustand 只在版本号错位时才调 migrate——同版本损坏
-    // envelope 也必须被收敛到合法形状，chrome 态缺省即兜底）。
-    merge: (persisted, current) => {
-      const state = (persisted && typeof persisted === 'object')
-        ? persisted as Partial<SettingsChromeState>
-        : {}
-      return {
-        ...current,
-        density: normalizeDensity(state.density),
-        previewCollapsed: state.previewCollapsed === true,
-        collapsedMap: normalizeCollapseMap(state.collapsedMap),
-        pinned: normalizePinned(Array.isArray(state.pinned) ? state.pinned : []),
-      }
-    },
-    partialize: state => ({
-      density: state.density,
-      previewCollapsed: state.previewCollapsed,
-      collapsedMap: state.collapsedMap,
-      pinned: state.pinned,
-    }),
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const settingsChromeKernel = createSolidStoreKernel<SettingsChromeState>({
+  density: 'standard',
+  previewCollapsed: false,
+  collapsedMap: {},
+  pinned: [],
+  setDensity: density => settingsChromeKernel.setState({ density: normalizeDensity(density) }),
+  setPreviewCollapsed: previewCollapsed => settingsChromeKernel.setState({ previewCollapsed }),
+  setGroupCollapsed: (key, collapsed) => settingsChromeKernel.setState({ collapsedMap: { ...settingsChromeKernel.getState().collapsedMap, [key]: collapsed } }),
+  togglePinned: section => {
+    const current = settingsChromeKernel.getState().pinned
+    // 与旧 writePinned 语义一致：新置顶排在末尾，超限丢最旧（保最后 PINNED_LIMIT 个）。
+    const next = current.includes(section)
+      ? current.filter(id => id !== section)
+      : [...current, section].slice(-PINNED_LIMIT)
+    settingsChromeKernel.setState({ pinned: normalizePinned(next) })
   },
-))
+})
+
+const safeLocalStorageWrapper: PersistStringStorage = (() => {
+  const storage = safeLocalStorage()
+  return {
+    getItem: key => { try { return storage.getItem(key) } catch { return null } },
+    setItem: (key, value) => { try { storage.setItem(key, value) } catch { /* 禁储静默 */ } },
+    removeItem: key => { try { storage.removeItem(key) } catch { /* best effort */ } },
+  }
+})()
+
+attachSolidPersist(settingsChromeKernel, {
+  name: 'pylon-settings-chrome',
+  version: 1,
+  storage: safeLocalStorageWrapper,
+  // 恒跑的 merge 负责规范化（zustand 只在版本号错位时才调 migrate——同版本损坏
+  // envelope 也必须被收敛到合法形状，chrome 态缺省即兜底）。
+  merge: (persisted, current) => {
+    const state = (persisted && typeof persisted === 'object')
+      ? persisted as Partial<SettingsChromeState>
+      : {}
+    return {
+      ...current,
+      density: normalizeDensity(state.density),
+      previewCollapsed: state.previewCollapsed === true,
+      collapsedMap: normalizeCollapseMap(state.collapsedMap),
+      pinned: normalizePinned(Array.isArray(state.pinned) ? state.pinned : []),
+    }
+  },
+  partialize: state => ({
+    density: state.density,
+    previewCollapsed: state.previewCollapsed,
+    collapsedMap: state.collapsedMap,
+    pinned: state.pinned,
+  }),
+})
+
+export const useSettingsChromeStore: ZustandHook<SettingsChromeState> = createReactStoreHook(settingsChromeKernel)
 
 // 首跑搬家：legacy 值存在 ⇒ 写穿新 envelope（persist 同步落盘），旧 key 已在上文删除。
 if (hasLegacySeed) {

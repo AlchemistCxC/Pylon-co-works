@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
 import { createSheetState, sheetReducer } from './sheetState.ts'
 import {
   DEFAULT_SHEET_LAYOUT,
@@ -94,7 +95,8 @@ function commitWorkspaceMutation(state: WorkspaceStoreState, patch: Partial<Work
   return state.lastPersistError ? { ...patch, lastPersistError: null } : patch
 }
 
-export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const workspaceKernel = createSolidStoreKernel<WorkspaceStoreState>({
   workspaceSheets: createSheetState(),
   sheetAgentStates: {},
   touchedFiles: {},
@@ -103,7 +105,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
   sidebarCollapsed: legacyLayout.leftCollapsed ?? DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
   rightPanelCollapsed: legacyLayout.rightCollapsed ?? DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
   lastPersistError: null,
-  hydrateWorkspaceSheets: (agentIds) => set(() => {
+  hydrateWorkspaceSheets: (agentIds) => workspaceKernel.setState(() => {
     const result = loadSheetStateV2(localStorage, agentIds)
     // v1→v2 迁移：sidebarWidth 从旧主题一次性搬家（读失败回退默认 250）
     let sidebarWidth = result.layout.sidebarWidth
@@ -135,52 +137,52 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     }
   }),
   openSheet: (sheet) => {
-    const state = get()
+    const state = workspaceKernel.getState()
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'open', sheet, now: Date.now() })
-    set(commitWorkspaceMutation(state, { workspaceSheets }))
+    workspaceKernel.setState(commitWorkspaceMutation(state, { workspaceSheets }))
     return workspaceSheets.activeSheetId
   },
-  focusSheet: (id) => set(state => {
+  focusSheet: (id) => workspaceKernel.setState(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'focus', id, now: Date.now() })
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  toggleSheetPin: (id) => set(state => {
+  toggleSheetPin: (id) => workspaceKernel.setState(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'togglePin', id, now: Date.now() })
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  closeSheet: (id) => set(state => {
+  closeSheet: (id) => workspaceKernel.setState(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'close', id, now: Date.now() })
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  closeOtherSheets: (id) => set(state => {
+  closeOtherSheets: (id) => workspaceKernel.setState(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeOthers', id, now: Date.now() })
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  closeRightSheets: (id) => set(state => {
+  closeRightSheets: (id) => workspaceKernel.setState(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeRight', id, now: Date.now() })
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
   reopenSheet: () => {
-    const state = get()
+    const state = workspaceKernel.getState()
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'reopen', now: Date.now() })
-    set(commitWorkspaceMutation(state, { workspaceSheets }))
+    workspaceKernel.setState(commitWorkspaceMutation(state, { workspaceSheets }))
     return workspaceSheets.activeSheetId
   },
-  recordTouchedFile: (context, file) => set(state => {
+  recordTouchedFile: (context, file) => workspaceKernel.setState(state => {
     const contextKey = toAgentContextKey(context)
     const versionKey = touchedFileVersionKey(context, file.path)
     const touchedFiles = { ...state.touchedFiles, [contextKey]: pushTouchedFile(state.touchedFiles[contextKey] ?? [], { ...file, source: context.source }) }
     const touchVersions = { ...state.touchVersions, [versionKey]: (state.touchVersions[versionKey] ?? 0) + 1 }
     return { touchedFiles, touchVersions }
   }),
-  patchSheetMetadata: (id, partial) => set(state => {
+  patchSheetMetadata: (id, partial) => workspaceKernel.setState(state => {
     const sheets = state.workspaceSheets.sheets.map(sheet => sheet.id === id
       ? { ...sheet, metadata: { ...sheet.metadata, ...partial }, lastFocusedAt: Date.now() }
       : sheet)
     const workspaceSheets = { ...state.workspaceSheets, sheets }
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  patchSheetState: (id, partial) => set(state => {
+  patchSheetState: (id, partial) => workspaceKernel.setState(state => {
     const sheets = state.workspaceSheets.sheets.map(sheet => {
       if (sheet.id !== id) return sheet
       const definition = resolveWorkspace(sheet.kind)
@@ -192,14 +194,14 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     const workspaceSheets = { ...state.workspaceSheets, sheets }
     return commitWorkspaceMutation(state, { workspaceSheets })
   }),
-  setSheetAgentState: (agentId, partial) => set(state => {
+  setSheetAgentState: (agentId, partial) => workspaceKernel.setState(state => {
     const sheetAgentStates = {
       ...state.sheetAgentStates,
       [agentId]: { ...state.sheetAgentStates[agentId], ...partial },
     }
     return commitWorkspaceMutation(state, { sheetAgentStates })
   }),
-  pruneAgentSheets: (agentIds) => set(state => {
+  pruneAgentSheets: (agentIds) => workspaceKernel.setState(state => {
     const allowed = new Set(agentIds)
     const sheets = state.workspaceSheets.sheets.filter(sheet =>
       sheet.kind !== 'agent' || (sheet.agentId !== undefined && allowed.has(sheet.agentId)))
@@ -209,27 +211,29 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
       Object.entries(state.sheetAgentStates).filter(([agentId]) => allowed.has(agentId)))
     return commitWorkspaceMutation(state, { workspaceSheets, sheetAgentStates })
   }),
-  patchSheetAgentState: (agentId, partial) => set(state => {
+  patchSheetAgentState: (agentId, partial) => workspaceKernel.setState(state => {
     const sheetAgentStates = {
       ...state.sheetAgentStates,
       [agentId]: { ...state.sheetAgentStates[agentId], ...partial },
     }
     return commitWorkspaceMutation(state, { sheetAgentStates })
   }),
-  patchSheetAgentStates: (agentStates) => set(state => commitWorkspaceMutation(state, { sheetAgentStates: agentStates })),
+  patchSheetAgentStates: (agentStates) => workspaceKernel.setState(state => commitWorkspaceMutation(state, { sheetAgentStates: agentStates })),
   setSidebarWidth: (sidebarWidth) => {
     // 兼容旧调用方：布局真值已迁移到 rightRailStore，workspace 字段仅保留
     // versioned snapshot/旧插件读取桥，不能再让两套状态分叉。
     useRightRailStore.getState().setLeftRailWidth(sidebarWidth)
-    set(state => commitWorkspaceMutation(state, { sidebarWidth }))
+    workspaceKernel.setState(state => commitWorkspaceMutation(state, { sidebarWidth }))
   },
   // 左栏是应用布局，而不是 Sheet 内容。所有 Sheet 共享这一份持久化状态。
   setSidebarCollapsed: (sidebarCollapsed) => {
     useRightRailStore.getState().setLeftRailCollapsed(sidebarCollapsed)
-    set(state => commitWorkspaceMutation(state, { sidebarCollapsed }))
+    workspaceKernel.setState(state => commitWorkspaceMutation(state, { sidebarCollapsed }))
   },
   setRightPanelCollapsed: (rightPanelCollapsed) => {
     useRightRailStore.getState().setCollapsed(rightPanelCollapsed)
-    set(state => commitWorkspaceMutation(state, { rightPanelCollapsed }))
+    workspaceKernel.setState(state => commitWorkspaceMutation(state, { rightPanelCollapsed }))
   },
-}))
+})
+
+export const useWorkspaceStore: ZustandHook<WorkspaceStoreState> = createReactStoreHook(workspaceKernel)

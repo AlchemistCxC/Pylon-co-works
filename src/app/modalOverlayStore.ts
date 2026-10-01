@@ -1,5 +1,6 @@
-import { create } from 'zustand'
 import { useEffect } from 'react'
+import { createSolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../host/reactStoreShim'
 
 /**
  * modalOverlayStore —— 「有遮挡主区的模态覆盖层打开」这一事实。
@@ -17,15 +18,18 @@ interface ModalOverlayState {
   setOverlayOpen: (key: string, open: boolean) => void
 }
 
-export const useModalOverlayStore = create<ModalOverlayState>(set => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const kernel = createSolidStoreKernel<ModalOverlayState>({
   openKeys: new Set<string>(),
-  setOverlayOpen: (key, open) => set(state => {
+  setOverlayOpen: (key, open) => kernel.setState(state => {
     const next = new Set(state.openKeys)
     if (open) next.add(key)
     else next.delete(key)
     return { openKeys: next }
   }),
-}))
+})
+
+export const useModalOverlayStore: ZustandHook<ModalOverlayState> = createReactStoreHook(kernel)
 
 /** 任一已声明的模态覆盖层处于打开状态。 */
 export function useModalOverlayOpen(): boolean {
