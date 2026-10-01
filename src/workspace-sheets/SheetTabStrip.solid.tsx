@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
-import { Portal, render } from 'solid-js/web'
+import { Portal } from 'solid-js/web'
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
@@ -39,7 +39,7 @@ function resolveSheetTitle(
   return `${agentName}\\${profileName}`
 }
 
-/** SheetTabStrip — 页签条（#279 第 3 梯队 Solid 化实体；与 React 版逐行为同构）。 */
+/** SheetTabStrip — 页签条（#279 第 3 梯队 Solid 化实体）。 */
 export default function SheetTabStrip(p: { latest: () => SheetTabStripProps }) {
   const value = p.latest
   // 事件回调/异步路径取最新 props（untrack：不把 props 信号泄进依赖集）。
@@ -322,10 +322,4 @@ function SheetKindMark(props: { kind: string; modern: boolean }) {
       <span class="sheet-tab-kind-mark sheet-tab-kind-icon" aria-hidden="true"><LucideIcon name={iconName()} size={14} strokeWidth={1.8} /></span>
     </Show>
   )
-}
-
-
-/** React 薄桥（SheetTabStrip.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderSheetTabStrip(container: HTMLElement, latest: () => SheetTabStripProps): () => void {
-  return render(() => <SheetTabStrip latest={latest} />, container)
 }

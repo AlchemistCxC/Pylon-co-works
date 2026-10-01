@@ -492,7 +492,7 @@ impl MsgRepo {
     }
 
     /// DEL-03（§5.13）：删除终态化——deleting → deleted。幂等：不存在/已终态均为 no-op。
-    /// 失败不阻断：tombstone 保持 'deleting' 仍被 ensure_session_not_deleted gate（不复活）。
+    /// 失败不阻断：tombstone 保持 'deleting' 仍被存在性 gate（迟到写不复活）。
     pub fn finalize_session_delete(
         &self,
         session_id: &str,
@@ -609,7 +609,7 @@ impl MsgRepo {
     ///
     /// 只扫 `state='deleted'` 且 `owner_scope='exact'` 的墓碑：`deleting` 是两阶段
     /// 中间态（远端 close 尚未收尾，可能仍需取证），legacy 墓碑无 owner 维。
-    /// **墓碑行本身不删**——迟到写 gate（`ensure_session_not_deleted`）依赖其存在性，
+    /// **墓碑行本身不删**——迟到写 gate（ensure_owner_not_deleted 与 event_repo 追加 gate）依赖其存在性，
     /// 删墓碑等于允许已删会话复活。
     pub fn purge_tombstoned_events(
         &self,

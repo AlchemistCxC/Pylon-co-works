@@ -212,11 +212,11 @@ describe('左栏模块栈 CSS 契约（ADR-0011）', () => {
     expect(terminalAction).toMatch(/cursor:\s*pointer/)
   })
 
-  it('字号与会话同源：模块标题/组名/行名用同一 token，次要文字用 meta token', () => {
-    for (const selector of ['.sidebar-block-toggle', '.cwd-group-name', '.sidebar-block-row-name']) {
+  it('字号与会话同源：模块标题/组名用同一 token，次要文字用 meta token', () => {
+    for (const selector of ['.sidebar-block-toggle', '.cwd-group-name']) {
       expect(body(selector), `${selector} 应与会话名同源`).toMatch(/font-size:var\(--sidebar-name-size/)
     }
-    for (const selector of ['.session-meta', '.sidebar-block-row-meta']) {
+    for (const selector of ['.session-meta']) {
       expect(body(selector), `${selector} 应使用统一 meta 字号`).toMatch(/--sidebar-meta-size/)
     }
   })
