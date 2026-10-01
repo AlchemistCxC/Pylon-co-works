@@ -1,5 +1,6 @@
 // #245：文件自 crate 根迁入本目录；crate 根 glob 与原 `use super::*` 同名集。
 use crate::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 // `crate::*` 只给到 crate 根的绑定；#363-4 新增的超时可注入形态没有根绑定，
 // 显式引入（`crate::session` 的 `pub(crate) use expiry::*` 会带出来）。
 use crate::session::check_session_expiry_with;
@@ -94,20 +95,21 @@ async fn disabled_gui_timeout_reclaims_nothing() {
     );
 }
 
-/// 超时解析是纯函数：缺省 / 0 关闭 / 显式值 / 非法值回退。
+/// 超时解析是纯函数：#490 起缺省 = 关闭；显式 `0` 关闭 / 显式正数生效 / 非法值回退
+/// 默认（即同样落关闭——opt-in 只认合法正数，笔误不会误启回收）。
 #[test]
 fn gui_idle_timeout_parsing() {
-    use crate::session::expiry::{gui_idle_timeout_from, DEFAULT_GUI_IDLE_TIMEOUT_SECS};
+    use crate::session::expiry::gui_idle_timeout_from;
     assert_eq!(
         gui_idle_timeout_from(None),
-        Some(std::time::Duration::from_secs(
-            DEFAULT_GUI_IDLE_TIMEOUT_SECS
-        ))
+        None,
+        "#490：缺省 = 关闭（回收是显式 opt-in，#379 懒重连使其失去必要性）"
     );
     assert_eq!(gui_idle_timeout_from(Some("0")), None, "0 关闭");
     assert_eq!(
         gui_idle_timeout_from(Some("300")),
-        Some(std::time::Duration::from_secs(300))
+        Some(std::time::Duration::from_secs(300)),
+        "显式设值仍生效（opt-in 路径）"
     );
     assert_eq!(
         gui_idle_timeout_from(Some("  60  ")),
@@ -116,10 +118,8 @@ fn gui_idle_timeout_parsing() {
     );
     assert_eq!(
         gui_idle_timeout_from(Some("不是数字")),
-        Some(std::time::Duration::from_secs(
-            DEFAULT_GUI_IDLE_TIMEOUT_SECS
-        )),
-        "非法值回退默认"
+        None,
+        "非法值回退默认 = 0 = 关闭"
     );
 }
 
@@ -190,7 +190,7 @@ async fn session_with_a_pending_interaction_is_exempt() {
 }
 
 /// #363-4：prompt 闸门被占用时，该连接的全部会话本轮跳过。
-#[allow(clippy::await_holding_invalid_type)] // 测试本体：持 prompt_gate 模拟在途 prompt
+// 测试本体：持 prompt_gate 模拟在途 prompt
 #[tokio::test]
 async fn sessions_of_a_busy_prompt_gate_are_exempt() {
     let state = state_with_initial_acp().await;
@@ -203,7 +203,7 @@ async fn sessions_of_a_busy_prompt_gate_are_exempt() {
         sessions.insert("local".to_string(), local);
     }
     // 持有闸门（模拟在途 prompt）
-    let _gate = runtime.prompt_gate.clone().lock_owned().await;
+    let _gate = HeldAcrossAwait::new(runtime.prompt_gate.clone().lock_owned().await);
 
     check_session_expiry_with(&state, Some(std::time::Duration::from_secs(60))).await;
     assert!(

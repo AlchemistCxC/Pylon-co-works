@@ -47,7 +47,7 @@ PERF_SCALE=s bun scripts/perf-bench.mts
 | `streaming-reveal` | `StreamingRevealEngine` | `src/renderers/solid-workbench/streamingDisplayScheduler.ts:4` |
 | `markdown-parse` | `parseMarkdown` | `src/renderers/solid-workbench/chat/markdownRenderModel.ts:7,494` |
 | `markdown-highlight` | `highlightBlockWithLezer`（Lezer，纯 JS；**不经 wasm**） | `src/components/chat/codeHighlight.ts:76` |
-| `projector` | `projectWorkbench` | `src/domains/workbench/workbenchProjector.ts:444` |
+| `projector` | `projectWorkbench` | `src/domains/workbench/workbenchProjectorReducer.ts（#486 项2 四分后实体位；原 workbenchProjector.ts:444，经门面再导出）` |
 | `projector`（live，#449） | `reduceWorkbenchEvent` | `src/domains/workbench/workbenchProjector.ts:423`（经 `agentWorkbenchSession.applyLive` 每信封调用） |
 | `events` | `normalizeRawEvent` | `src/domains/events/canonicalNormalizer.ts:196` |
 | `display-chain`（#441/#449） | `toSolidMessage`→`prepareMessages`→`buildMessageLookups`→`buildChatRowDescriptors`→`reuseMessageListItems` | `src/renderers/solid-workbench/WorkbenchContent.solid.tsx:177-222` |

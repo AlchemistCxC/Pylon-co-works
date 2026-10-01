@@ -9,8 +9,7 @@ import {
 } from '../../plugin-runtime/runtimeServices.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 
 /**
@@ -43,7 +42,7 @@ export function useSettingsContributionCatalog() {
   )
   const activeRendererSuiteId = (() => {
     const modeId = useInterfaceModeStore.getState().interfaceMode
-    const mode = getInterfaceModeRegistry().resolve(modeId)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === modeId)
+    const mode = findInterfaceModeContribution(modeId)
     return mode?.workbench.renderKind === 'renderer-suite'
       ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
       : undefined

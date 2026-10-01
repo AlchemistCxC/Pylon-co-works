@@ -341,11 +341,10 @@ export function createStreamingDisplayScheduler(
     armTimer(updateIntervalMs)
   }
 
-  /** 当前快照对下「待揭示」流的合并行文本（D3：同 key 跨两列表取更长文本，只算一行）。 */
+  /** 当前快照对下「待揭示」流的合并行文本（canonical document.messages 单列表）。 */
   const streamRowsOf = (snapshot: WorkbenchRuntimeSnapshot): Array<{ key: string, text: string }> => {
     const plans = new Map<string, StreamRowPlan>()
-    collectStreamRowPlans([], snapshot.messages, plans)
-    if (snapshot.document !== undefined) collectStreamRowPlans([], snapshot.document.messages, plans)
+    collectStreamRowPlans([], snapshot.document?.messages ?? [], plans)
     return [...plans].map(([key, plan]) => ({ key, text: plan.nextText }))
   }
 
@@ -472,7 +471,7 @@ export function createStreamingDisplayScheduler(
       return
     }
 
-    // budgeted：把引擎的本拍决策写回两个列表（D3：同 key 共用同一决策）。
+    // budgeted：把引擎的本拍决策写回 document.messages（同 key 行共用同一决策）。
     // 决策是增量尾巴（wasm 侧只发本拍新增，O(新增)/拍 过界），不是整条揭示前缀。
     const plans = pendingRowPlans(displayed, target)
     const decisions = new Map<string, StreamingRevealRow>()
@@ -490,7 +489,6 @@ export function createStreamingDisplayScheduler(
     }
 
     replaceKeySet(midRevealKeys, pendingKeys)
-    const legacyMessages = applyRowDecisions(displayed.messages, target.messages, decisions)
     const documentMessages = applyRowDecisions(
       displayed.document?.messages ?? [],
       target.document?.messages ?? [],
@@ -504,7 +502,6 @@ export function createStreamingDisplayScheduler(
       : undefined
     publishSnapshot({
       ...target,
-      messages: legacyMessages,
       ...(document ? { document } : {}),
     }, timestamp, {
       kind: 'budgeted',
@@ -704,16 +701,14 @@ function preserveDisplayedPrefix(
     || displayed.ownerKey !== next.ownerKey
     || displayed.generation !== next.generation
     || displayed.turnEpoch !== next.turnEpoch) return next
-  const messages = preserveMessagePrefixes(displayed.messages, next.messages)
   const documentMessages = displayed.document && next.document
     ? preserveMessagePrefixes(displayed.document.messages, next.document.messages)
     : next.document?.messages
   const document = next.document && documentMessages !== next.document.messages
     ? { ...next.document, messages: documentMessages as WorkbenchDocument['messages'] } : next.document
-  if (messages === next.messages && document === next.document) return next
+  if (document === next.document) return next
   return {
     ...next,
-    messages,
     ...(document ? { document } : {}),
   }
 }
@@ -762,9 +757,7 @@ function hasActiveTextStream(snapshot: WorkbenchRuntimeSnapshot): boolean {
   // #213：本进程没有在途回合时，文档里遗留的 `running` 行不算"流在跑"——否则一批
   // 非文本更新会被一个已死回合拖进节流档。
   if (snapshot.generating !== true) return false
-  return snapshot.messages.some(message => (
-    (message.role === 'assistant' || message.role === 'reasoning') && message.running === true
-  )) || Boolean(snapshot.document?.messages.some(message => (
+  return Boolean(snapshot.document?.messages.some(message => (
     (message.role === 'assistant' || message.role === 'reasoning') && message.running === true
   )))
 }
@@ -773,20 +766,19 @@ function hasPendingTextGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
 ): boolean {
-  // D3：与引擎欠账同一口径（归并双列表），避免两处判据分叉。
+  // D3：与引擎欠账同一口径（归并 document.messages），避免两处判据分叉。
   return pendingRowPlans(current, next).size > 0
 }
 
-/** 一行待揭示文本的计费/决策单元（D3：同 id+role 出现在两个列表时只算一行）。 */
+/** 一行待揭示文本的计费/决策单元（按 id+role 归并，一行只算一次）。 */
 interface StreamRowPlan {
   readonly previousText: string
   readonly nextText: string
 }
 
 /**
- * 收集"待揭示"行：只认 assistant/reasoning 的前缀增长。
- * 两个列表（legacy `messages` 与 canonical `document.messages`）按 id+role 归并：
- * 同一行只计费一次、只决策一次（D3）——否则双列表同源时欠账与预算双双翻倍。
+ * 收集"待揭示"行：只认 assistant/reasoning 的前缀增长，按 id+role 归并——
+ * 同一行只计费一次、只决策一次（D3）。
  */
 function collectStreamRowPlans(
   current: readonly DisplayMessage[],
@@ -810,7 +802,7 @@ function collectStreamRowPlans(
 }
 
 /**
- * 当前快照对下所有待揭示行的归并集合。
+ * 当前快照对下所有待揭示行的归并集合（canonical document.messages 单列表）。
  * 注：`current.document` 缺失而 `next.document` 存在属于整发转换（`requiresReplacementFlush`），
  * 不会走到插值；此处与预算决策的应用保持同一条件，避免两处判据分叉。
  */
@@ -819,7 +811,6 @@ function pendingRowPlans(
   next: WorkbenchRuntimeSnapshot,
 ): Map<string, StreamRowPlan> {
   const plans = new Map<string, StreamRowPlan>()
-  collectStreamRowPlans(current.messages, next.messages, plans)
   if (next.document !== undefined) {
     collectStreamRowPlans(current.document?.messages ?? [], next.document.messages, plans)
   }
@@ -843,15 +834,13 @@ function replaceKeySet(target: Set<string>, source: readonly string[]): void {
  * #212 判据 C：把「同一行文本在两次发布之间变长」记进 `into`。
  *
  * 只认**已存在**行（同一 id+role 之前就在显示态里）的前缀增长：首次出现的行没有参照物，
- * 「新」不等于「在长」——它的活性由权威判据（运行时在途回合）负责。两份列表（legacy
- * `messages` 与 canonical `document.messages`）同源时按同一 key 记账，天然去重。
+ * 「新」不等于「在长」——它的活性由权威判据（运行时在途回合）负责。
  */
 function noteObservedGrowth(
   current: WorkbenchRuntimeSnapshot,
   next: WorkbenchRuntimeSnapshot,
   into: Set<string>,
 ): void {
-  collectObservedGrowth(current.messages, next.messages, into)
   if (next.document !== undefined) {
     collectObservedGrowth(current.document?.messages ?? [], next.document.messages, into)
   }
@@ -891,11 +880,9 @@ function requiresReplacementFlush(
     || current.turnEpoch !== next.turnEpoch) return true
   if (current.document?.sessionId !== next.document?.sessionId) return true
 
-  if (requiresImmediateReplacement(current.messages, next.messages)
-    || current.document && next.document && requiresImmediateReplacement(current.document.messages, next.document.messages)
+  if (current.document && next.document && requiresImmediateReplacement(current.document.messages, next.document.messages)
     || current.document === undefined !== (next.document === undefined)) return true
 
-  if (hasNonPrefixMessageChange(current.messages, next.messages)) return true
   if (current.document && next.document && hasNonPrefixMessageChange(current.document.messages, next.document.messages)) return true
   return false
 }
@@ -957,9 +944,8 @@ function isStreamMessage(message: DisplayMessage): boolean {
 }
 
 /**
- * 把本拍决策写回一个列表：同一 id+role 的行共用同一决策（D3），
- * 因此两列表同源时不会各自推进一次，聚合也不会翻倍。
- * 决策对某列表不可用（双列表短暂分叉，见 `resolveTailValue`）时该列表本拍保守不动，
+ * 把本拍决策写回 document.messages 列表：同一 id+role 的行共用同一决策（D3）。
+ * 决策对某行不可用（目标文本与镜像短暂分叉，见 `resolveTailValue`）时该行本拍保守不动，
  * 绝不整发、不回退。
  */
 function applyRowDecisions<T extends DisplayMessage>(
@@ -991,13 +977,13 @@ function applyRowDecisions<T extends DisplayMessage>(
 
 /**
  * 决策（增量尾巴 + 拍后揭示位）对单个列表的落地值。决策的语义内容是
- * 「合并目标文本（两列表取更长）的已揭示前缀现在有 `revealedLength` 个 UTF-16 单元」：
+ * 「目标文本的已揭示前缀现在有 `revealedLength` 个 UTF-16 单元」：
  * - 本列表恰在拍前揭示位上（常态）：追加 tail 即得揭示前缀；本列表目标放不下
- *   整个结果（双列表短暂分叉）时截到本列表自己的目标——已揭示的 canonical 前缀
+ *   整个结果（目标与镜像短暂分叉）时截到本列表自己的目标——已揭示的前缀
  *   只会更长，不让任何新文本提前上屏；
  * - 本列表落后于拍前揭示位（分叉）：直接追加会留缺口，改为自愈——目标仍延伸
  *   显示文本时推进到 min(本列表目标, 揭示位)，不回退、不越过合并揭示位；
- * - 其余（回退/收缩类异常，或显示态超前于引擎）⇒ `undefined`，该列表本拍保守不动。
+ * - 其余（回退/收缩类异常，或显示态超前于引擎）⇒ `undefined`，该行本拍保守不动。
  */
 function resolveTailValue(
   previousText: string,

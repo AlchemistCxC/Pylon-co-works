@@ -54,6 +54,10 @@ export const DIRECT_INVOKE_ALLOWLIST = new Set([
   // 静默），与 hookBridgeDispatcher 同形态的基础设施级 IPC 缝，不构成产品 domain
   // client 依赖方向。
   'src/app/startupTiming.ts',
+  // #488 批⑦ 前端诊断日志出口：fire-and-forget 推后端 push_frontend_log（失败
+  // 静默降级回 console），与 hookBridgeDispatcher 同形态的基础设施级诊断 IPC 缝，
+  // 不构成产品 domain client 依赖方向。
+  'src/infrastructure/tauri/frontendLogSink.ts',
     'src/infrastructure/skin/skinHostPorts.ts',
   'src/devtools/obs/threeSourceExportTrigger.ts', // obs04 收敛迁名（结构全修批）,
   'src/plugin-runtime/pluginCompositionRoot.ts',

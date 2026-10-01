@@ -143,8 +143,8 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
 
   it('patchSheetState 经 workspace codec 更新并持久化 Agent 左栏整页状态', () => {
     const id = openAgentSheet('peri')
-    useWorkspaceStore.getState().patchSheetState(id, { activePageId: 'builtin.sidebar.module.scheduled' })
-    const expected = { activePageId: 'builtin.sidebar.module.scheduled' }
+    useWorkspaceStore.getState().patchSheetState(id, { activePageId: 'builtin.sidebar.module.search' })
+    const expected = { activePageId: 'builtin.sidebar.module.search' }
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
     expect(readPersisted().state.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
 
@@ -154,8 +154,8 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
 
   it('上一代形状（折叠映射同住 Sheet 状态）经 codec 收敛：折叠不再出现在 Sheet 状态（零迁移，issue #202）', () => {
     const id = openAgentSheet('peri')
-    useWorkspaceStore.getState().patchSheetState(id, { blockCollapsed: { 'builtin.sidebar.module.tasks': true }, activePageId: 'builtin.sidebar.module.scheduled' })
-    const expected = { activePageId: 'builtin.sidebar.module.scheduled' }
+    useWorkspaceStore.getState().patchSheetState(id, { blockCollapsed: { 'builtin.sidebar.module.sessions': true }, activePageId: 'builtin.sidebar.module.search' })
+    const expected = { activePageId: 'builtin.sidebar.module.search' }
     expect(readPersisted().state.sheets.find(sheet => sheet.id === id)?.state).toEqual(expected)
 
     useWorkspaceStore.getState().hydrateWorkspaceSheets(['peri'])

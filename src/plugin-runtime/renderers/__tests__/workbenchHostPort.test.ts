@@ -6,15 +6,23 @@ import { createStaticWorkbenchAppearanceStore } from '../../../domains/appearanc
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
 import { createSolidWorkbenchServicesFromHostPort } from '../../../renderers/solid-workbench/hostPortSolidServices.ts'
+
+function suiteMessage(id: string): WorkbenchMessage {
+  return {
+    id, segmentId: id, role: 'assistant', content: id, parts: [], identity: {},
+    source: { provider: 'test', sourceId: id }, sequence: 1, running: false, time: '2026-01-01T00:00:00.000Z',
+  }
+}
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
-    sessionId: 's1', status: 'ready', messages: [], generating: false,
+    sessionId: 's1', status: 'ready', generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '',
     availableModes: [], activeMode: '', canAttach: true, promptImage: false, error: null,
+    document: createWorkbenchDocument('s1'),
   })
 }
 
@@ -22,7 +30,11 @@ describe('WorkbenchHostPort', () => {
   it('keeps projection references stable when two workbenches are read alternately', () => {
     const sources = ['a', 'b'].map(id => {
       const source = runtime()
-      source.update({ messages: [{ id, role: 'assistant', sender: id, content: id, time: '10:00' }], activeModel: id })
+      source.replaceDocument({
+        ...createWorkbenchDocument(id),
+        session: { ...createWorkbenchDocument(id).session, model: id },
+        messages: [suiteMessage(id)],
+      }, { ownerKey: id, generation: 1 })
       const host = createWorkbenchHostPort({
         runtime: source, appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
         sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
@@ -34,10 +46,10 @@ describe('WorkbenchHostPort', () => {
     for (let pass = 0; pass < 3; pass++) {
       sources.forEach(({ services }, index) => {
         const next = services.runtime.getSnapshot()
-        expect(next.messages).toBe(snapshots[index].messages)
+        expect(next.document?.messages).toBe(snapshots[index].document?.messages)
         expect(next.availableModels).toBe(snapshots[index].availableModels)
         expect(next.availableModes).toBe(snapshots[index].availableModes)
-        expect(next.messages[0].content).toBe(index === 0 ? 'a' : 'b')
+        expect(next.document?.messages[0]?.content).toBe(index === 0 ? 'a' : 'b')
       })
     }
     sources.forEach(({ source }) => source.destroy())
@@ -163,14 +175,15 @@ describe('WorkbenchHostPort', () => {
     }
     source.replaceDocument({ ...source.getSnapshot().document!, messages: [messageA, messageB] }, { ownerKey: 'owner-a', generation: 1 })
 
-    // 同一 document 引用下的重复 getSnapshot：读取照常执行，派生数组与元素复用。
+    // 同一 document 引用下的重复 getSnapshot：读取照常执行，document 与派生目录引用复用。
     const first = services.getSnapshot()
     const second = services.getSnapshot()
-    expect(second.messages).toBe(first.messages)
-    expect(second.messages[0]).toBe(first.messages[0])
-    expect(second.messages[1]).toBe(first.messages[1])
+    expect(second.document?.messages).toBe(first.document?.messages)
+    expect(second.document?.messages[0]).toBe(first.document?.messages[0])
+    expect(second.document?.messages[1]).toBe(first.document?.messages[1])
+    expect(second.availableModels).toBe(first.availableModels)
 
-    // 单元素内容变化：派生数组换新、内容更新（单槽 memo 未命中即全量重建）。
+    // 单元素内容变化：document 换新、内容更新照常透出。
     const frozenDocument = source.getSnapshot().document!
     const [frozenA, frozenB] = frozenDocument.messages
     source.replaceDocument({
@@ -178,8 +191,8 @@ describe('WorkbenchHostPort', () => {
       messages: [frozenA, { ...frozenB, content: 'two updated' }],
     }, { ownerKey: 'owner-a', generation: 1 })
     const third = services.getSnapshot()
-    expect(third.messages).not.toBe(first.messages)
-    expect(third.messages[1]?.content).toBe('two updated')
+    expect(third.document?.messages).not.toBe(first.document?.messages)
+    expect(third.document?.messages[1]?.content).toBe('two updated')
     source.destroy()
   })
 

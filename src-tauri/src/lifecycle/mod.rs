@@ -30,6 +30,7 @@
 //! （持 active runtime 的 agent_lifecycle，仅杀被移除且非 active 的 runtime，
 //! 与 switch 的清理集合不相交），不在 R9 的 switch_lock 串行范围内。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::sync::Arc;
 
 use crate::acp::AcpClient;
@@ -256,7 +257,7 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // C7/R9：switch_lock→agent_lifecycle 跨 await 串行是 LifecycleOp 状态机设计（模块文档）
+// C7/R9：switch_lock→agent_lifecycle 跨 await 串行是 LifecycleOp 状态机设计（模块文档）
 pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -265,7 +266,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
     let inner = state.inner();
     // C7：switch/reconnect 串行锁——并发 switch 不得交叉 kill 同一批旧进程。
     // R9：LifecycleOp 统一序列的"取锁"步（switch_lock → agent_lifecycle，见模块文档）。
-    let _switch_guard = inner.switch_lock.lock().await;
+    let _switch_guard = HeldAcrossAwait::new(inner.switch_lock.lock().await);
     // P3：先查 registry 确认 agent 存在，再 get_or_create——未知 agent 直接报错，
     // 不得留下幽灵 runtime（disconnected 且永不连接的空注册项）。
     if !agent_exists_in_registry(inner, &name) {
@@ -278,7 +279,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
-    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
     // C7：锁后复查——目标 runtime 的生命周期锁排队期间状态可能已推进（并发
     // 连接/自动重连完成），拿到锁后按现状决策，不得盲杀在途连接。
     let target_status = runtime
@@ -333,7 +334,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // C7/R9：与 switch_agent 共用串行锁，防交叉杀进程
+// C7/R9：与 switch_agent 共用串行锁，防交叉杀进程
 pub(crate) async fn reconnect_agent(
     state: tauri::State<'_, AppState>,
     window: tauri::Window,
@@ -341,14 +342,14 @@ pub(crate) async fn reconnect_agent(
     let inner = state.inner();
     // C7：switch/reconnect 串行锁（与 switch_agent 共用，防交叉杀进程）。
     // R9：LifecycleOp 统一序列"取锁"步（switch_lock → agent_lifecycle，见模块文档）。
-    let _switch_guard = inner.switch_lock.lock().await;
+    let _switch_guard = HeldAcrossAwait::new(inner.switch_lock.lock().await);
     let active_id = inner
         .active_agent
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
     let runtime = inner.runtimes.get_or_create(&active_id);
-    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
     let agent = inner.get_active_agent()?;
     inner
         .connect_and_replace(
@@ -364,14 +365,14 @@ pub(crate) async fn reconnect_agent(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // C7/R9：restart 属 LifecycleOp 统一序列，须与 switch/reconnect 串行
+// C7/R9：restart 属 LifecycleOp 统一序列，须与 switch/reconnect 串行
 pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
     agent_id: String,
 ) -> Result<serde_json::Value, PylonError> {
     let inner = state.inner();
-    let _switch_guard = inner.switch_lock.lock().await;
+    let _switch_guard = HeldAcrossAwait::new(inner.switch_lock.lock().await);
     let active_id = inner
         .active_agent
         .lock()
@@ -383,7 +384,7 @@ pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
         )));
     }
     let runtime = inner.runtimes.get_or_create(&agent_id);
-    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
     let agent = agent_from_registry(inner, &agent_id)?;
     let handles = AppStateHandles::from_state(inner);
     do_connect_and_replace(

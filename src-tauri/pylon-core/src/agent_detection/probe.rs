@@ -43,26 +43,14 @@ pub(crate) struct VersionProbeOutcome {
 }
 
 #[cfg(windows)]
-pub(crate) struct ProbeJobObject {
-    handle: windows_sys::Win32::Foundation::HANDLE,
-}
-
-#[cfg(windows)]
-impl Drop for ProbeJobObject {
-    fn drop(&mut self) {
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
-    }
-}
-
-#[cfg(windows)]
-unsafe impl Send for ProbeJobObject {}
+use pylon_foundations::job_object::KillOnCloseJob;
 
 pub(crate) struct ManagedProbeChild {
     child: tokio::process::Child,
     pid: Option<u32>,
     reaped: bool,
     #[cfg(windows)]
-    job: Option<ProbeJobObject>,
+    job: Option<KillOnCloseJob>,
 }
 
 impl ManagedProbeChild {
@@ -79,37 +67,15 @@ impl ManagedProbeChild {
         }
     }
 
+    // 装配正身在 `pylon_foundations::job_object`（#486 项5 单源）；本函数只保留
+    // 探测侧的原契约：静默回退 None（无日志、无诊断），失败由 taskkill 兜底路径接住。
     #[cfg(windows)]
-    fn attach_job(child: &tokio::process::Child) -> Option<ProbeJobObject> {
-        use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        };
-
-        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if job.is_null() {
-            return None;
-        }
-        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let configured = unsafe {
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const core::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        let Some(process) = child.raw_handle() else {
-            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
-            return None;
-        };
-        if configured == 0 || unsafe { AssignProcessToJobObject(job, process) } == 0 {
-            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
-            return None;
-        }
-        Some(ProbeJobObject { handle: job })
+    fn attach_job(child: &tokio::process::Child) -> Option<KillOnCloseJob> {
+        // 原实现先建 job 再取 raw handle；`raw_handle()` 为 None 仅发生在子进程
+        // 尚未 spawn / 已被收割时（探测路径恒已 spawn），顺序调整无行为差异。
+        let process = child.raw_handle()?;
+        // SAFETY：句柄取自刚 spawn 的探测子进程，有效且本进程持有完全权限。
+        unsafe { KillOnCloseJob::attach_process(process) }.ok()
     }
 
     pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {

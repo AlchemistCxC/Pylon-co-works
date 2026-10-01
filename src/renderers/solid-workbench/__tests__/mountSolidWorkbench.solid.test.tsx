@@ -33,6 +33,25 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove()
 })
 
+/** #487：预览面与生产同构——以 canonical running 行模拟流式输出
+ *  （原 `update({messages})` legacy 通道已随快照字段退役）。 */
+function streamInto(
+  services: ReturnType<typeof createPreviewWorkbenchServices>,
+  id: string,
+  content: string,
+  generationPatch?: Record<string, unknown>,
+): void {
+  const base = services.runtime.getSnapshot().document!
+  services.runtime.applyDocument({
+    ...base,
+    messages: [{
+      id, segmentId: id, role: 'assistant', content, parts: [], identity: {},
+      source: { provider: 'peri', sourceId: 'peri' }, sequence: 1,
+      running: true, time: '2026-08-26T10:00:00.000Z',
+    }],
+  }, generationPatch === undefined ? {} : { generationPatch: generationPatch as never })
+}
+
 
 function mountPreview(capabilities?: WorkbenchCapabilitySnapshot, options: { reducedMotion?: boolean } = {}) {
   const host = document.createElement('div')
@@ -368,7 +387,7 @@ describe('mountSolidWorkbench', () => {
       expect(await screen.findByRole('button', { name: '回到底部' })).toBeInTheDocument()
       scrollIntoView.mockClear()
 
-      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '用户上滚后的新输出', time: '10:00', running: true }] })
+      streamInto(services, 'm-scroll', '用户上滚后的新输出')
       await Promise.resolve()
       pump.flush()
       expect(scrollIntoView).not.toHaveBeenCalled()
@@ -382,7 +401,7 @@ describe('mountSolidWorkbench', () => {
 
       scrollIntoView.mockClear()
       scrollTo.mockClear()
-      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '恢复跟随后继续输出', time: '10:00', running: true }] })
+      streamInto(services, 'm-scroll', '恢复跟随后继续输出')
       await Promise.resolve()
       pump.flush()
       expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
@@ -431,7 +450,7 @@ describe('mountSolidWorkbench', () => {
       model.height = 1_300
       pump.flush()
       // 反馈事件按写迹判为 programmatic-feedback：跟随保持，不出现「抢滚动失效」。
-      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: 'sticky 续跟的新输出', time: '10:00', running: true }] })
+      streamInto(services, 'm-scroll', 'sticky 续跟的新输出')
       await Promise.resolve()
       pump.flush()
       expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
@@ -562,7 +581,7 @@ describe('mountSolidWorkbench', () => {
 
       // 动画分帧期间流式内容推进：revision effect 排队的 applyFollow 被守卫吞掉。
       pump.flush()
-      services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: '动画期间的新输出', time: '10:00', running: true }] })
+      streamInto(services, 'm-scroll', '动画期间的新输出')
       await Promise.resolve()
       pump.flush()
       pump.flush()
@@ -575,7 +594,7 @@ describe('mountSolidWorkbench', () => {
       await waitFor(async () => {
         pump.flush()
         resumeTick += 1
-        services.runtime.update({ messages: [{ id: 'm-scroll', role: 'assistant', sender: 'peri', content: `到达后的输出 ${resumeTick}`, time: '10:00', running: true }] })
+        streamInto(services, 'm-scroll', `到达后的输出 ${resumeTick}`)
         await Promise.resolve()
         pump.flush()
         expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' })
@@ -925,7 +944,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
       ownerKey: 'owner-preview', generation: 1, sessionId: 'preview-session',
     })
-    services.runtime.update({ messages: [{ id: 'm-poem', role: 'assistant', sender: 'peri', content: poem, time: '10:00', running: true }], generating: true })
+    streamInto(services, 'm-poem', poem)
     const streamingBody = await waitFor(() => {
       const body = host.querySelector('.term-row-assistant .term-assistant-body')
       expect(body).not.toBeNull()
@@ -955,7 +974,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(finalDocument, {
       ownerKey: 'owner-preview', generation: 2, sessionId: 'preview-session',
     })
-    services.runtime.update({ messages: [], generating: false })
+    services.runtime.update({ generating: false })
 
     const finalBody = await waitFor(() => {
       const body = host.querySelector(`[data-message-id="${finalDocument.messages[0]!.id}"] .term-assistant-body`)
@@ -1016,15 +1035,8 @@ describe('mountSolidWorkbench', () => {
       event: { type: 'reasoning.delta', parts: [{ kind: 'text', text: '工具旁的思考' }] },
     })
     const canonical = projectWorkbench([reasoning]).document
-    const legacyTool = {
-      id: 'legacy-tool-row', role: 'tool' as const, sender: 'peri', content: '', time: 't',
-      toolName: 'Read', toolStatus: 'running', running: true,
-    }
-    services.runtime.update({
-      document: canonical,
-      messages: [legacyTool],
-      generating: true,
-    })
+    // #487：legacy tool 行通道已退役——canonical 思考行是唯一渲染来源（P52 D5）。
+    services.runtime.applyDocument(canonical, { generationPatch: { generating: true } })
 
     await waitFor(() => expect(host.querySelectorAll('.term-row-reasoning')).toHaveLength(1))
     expect(host).toHaveTextContent('工具旁的思考')
@@ -1690,7 +1702,7 @@ describe('mountSolidWorkbench', () => {
   it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {
     const { host, services, lifecycle } = mountPreview()
     lifecycle.pause()
-    services.runtime.update({ messages: [{ id: 'm-paused', role: 'assistant', sender: 'peri', content: '暂停期间的新文本', time: '10:00', running: true }], tokenCount: 99 })
+    streamInto(services, 'm-paused', '暂停期间的新文本', { tokenCount: 99 })
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
 
     expect(host.querySelector('[data-paused="true"]')).toBeInTheDocument()

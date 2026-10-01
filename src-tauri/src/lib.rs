@@ -68,6 +68,7 @@ use agent::runtime::AgentLifecycleStatus;
 use agent_config::AgentDef;
 use gateway::GatewayCore;
 use prism::PrismClient;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use runtime::{AgentRuntime, AgentRuntimeManager};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -140,95 +141,137 @@ pub(crate) fn emit_event_all<R, W>(
     }
 }
 
-/// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）+ gateway（B10.1）。
-/// per-agent 字段（acp/notification_task/session_creation/agent_lifecycle/
-/// client_generation/prompt_locks/sessions/agent_runtime/auto_reconnect_active）
-/// 全部收进 AgentRuntimeManager（runtime.rs），命令层按 active_agent 解析 runtime。
-/// R1 拆分：字段 pub(crate) 供子模块（session/dispatcher/lifecycle 等）访问。
-pub(crate) struct AppState {
-    pub(crate) runtimes: Arc<AgentRuntimeManager>,
-    pub(crate) agents: Arc<Mutex<HashMap<String, AgentDef>>>,
-    pub(crate) active_agent: Arc<Mutex<String>>,
-    pub(crate) pet: Arc<Mutex<pet::PetState>>,
-    pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
-    pub(crate) runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
-    /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
-    pub(crate) browser_agent: Arc<crate::browser::agent::hub::BrowserAgentHub>,
-    pub(crate) prism: PrismClient,
-    pub(crate) gateway: Arc<GatewayCore>,
-    /// R5（P1-3）：启动诊断快照（run() 构建主体；#482 起 storage 模式诊断已随
-    /// AppData 双模式退役，快照只含配置来源与分域错误）。
-    pub(crate) startup: Arc<RwLock<crate::startup::StartupDiagnostics>>,
-    /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
-    pub(crate) approval_mode: Arc<Mutex<String>>,
-    /// #463：approval-mode 写序锁（tokio Mutex）——set_approval_mode 的内存写与
-    /// user_data 落盘全程持锁，并发 set（GUI 与 CLI 桥同进程）时磁盘必为最后一次
-    /// set（重启不回退到较早值；与 mcp_write_lock 同型。最后一次 set 落盘失败除外
-    /// ——降级路径见 set_approval_mode docstring 与 #463 审查项 3 决策口）。
-    pub(crate) approval_mode_write_lock: tokio::sync::Mutex<()>,
-    /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
-    /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
-    pub(crate) pet_write_lock: tokio::sync::Mutex<()>,
-    /// C7：switch/reconnect 串行锁——并发 switch 不交叉杀进程（一个 switch
-    /// 未完成前另一个 switch 不得 kill 同一批旧进程）。
-    pub(crate) switch_lock: tokio::sync::Mutex<()>,
-    /// C8：MCP 写序锁（tokio Mutex）——set_mcp_servers 写 runtime_mcp + 落盘
-    /// 全程持锁，并发设置时磁盘必为最后一次设置（重启不回滚到旧配置）。
-    pub(crate) mcp_write_lock: tokio::sync::Mutex<()>,
-    /// Phase 3：配置写序锁（tokio Mutex）——update_agents_config 读当前→生成候选→
-    /// 校验→写盘→内存提交全程持锁，两个写请求不基于同一旧版本互相覆盖。
-    pub(crate) config_write_lock: tokio::sync::Mutex<()>,
-    /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
-    pub(crate) browser: Arc<browser::BrowserManager>,
-    /// #371：文档 Sheet 管理（离线文档站子 WebView；setup() 注入主窗口）。
-    pub(crate) docs_sheet: Arc<docs_sheet::DocsSheetManager>,
-    /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
-    /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
-    /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
-    /// （send_prompt_core None 路径）miss 时回退全量重算并回填（E3 自愈：启动
-    /// 恢复路径直写 runtime_mcp 不经 set_mcp_servers，缓存为 None，首次读取即回填）。
-    pub(crate) mcp_wire: Mutex<Option<Vec<serde_json::Value>>>,
-    /// R8（P2-3）：前端日志限流窗口（每秒上限，超限丢弃）。
-    pub(crate) frontend_log_throttle: Mutex<runtime_log::FrontendLogThrottle>,
-    /// I14-W1：消息仓库 service（SQLite，app_data_dir/pylon-data-v1.sqlite3）。
-    /// setup() readiness barrier 内创建目录 → open/migrate → 填入本槽；生产 setup
-    /// 返回后必为 Some，任一 service 失败会阻止半可用 Kernel 启动。None 仅用于
-    /// 构造期/测试，命令层仍防御性返回 message_db_unavailable。
-    pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
-    /// I14-W5：用户数据仓库 service（与消息同库 user_data 表，versioned
-    /// Profile/Session/activeProfileId）。与 message/event 作为同一 readiness unit
-    /// 串行打开；生产 setup 返回后必为 Some。
-    pub(crate) user_data_service: Arc<Mutex<Option<Arc<crate::session::UserDataService>>>>,
-    /// M3 EVT-02：canonical 事件仓库 service（与消息同库 canonical_events 表 v6，
-    /// 方案书 §5.10 append-only 事件流）。与 message/user-data 作为同一 readiness
-    /// unit 串行打开；生产 setup 返回后必为 Some。
-    pub(crate) event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
-    /// I12-W4：gateway 实例 registry 与状态机（W1 已建；setup 加载持久化配置、
-    /// 注册 factory 与 route guard）。
-    pub(crate) gateway_instances: crate::gateway::instance::GatewayInstanceService,
-    /// I12-W4：实例配置持久化路径（app_data_dir/pylon-gateway-instances.json）；
-    /// None（测试）→ 管理命令跳过持久化（内存态仍生效）。
-    pub(crate) gateway_instance_store_path: Arc<Mutex<Option<std::path::PathBuf>>>,
-    /// I12-W5：加密凭据存储（W3 已建；setup 打开，set_credentials 命令与 start 解析用）。
-    /// None = 打开失败（blocked，命令报 credential_store_error）。
-    pub(crate) gateway_credentials:
-        Arc<Mutex<Option<Arc<crate::gateway::credentials::CredentialStore>>>>,
-    /// CWD-03：Workspace 实体注册表（id → Workspace；跨 Agent 共享，owner 仅溯源）。
-    pub(crate) workspaces: Arc<Mutex<HashMap<String, crate::workspaces::Workspace>>>,
-    /// 施工文档 §2.3：本次启动的数据/配置目录（setup() 最前面解析一次）。
-    /// 所有 SQLite/插件/MCP/gateway/pet 路径消费者必须经 `data_dirs()` 读取，
-    /// 禁止在运行期重复 `resolve_data_dirs()`。
-    pub(crate) data_dirs: Arc<OnceLock<crate::paths::DataDirs>>,
-    /// Phase 8: plugin-owned subprocesses and JSON-RPC pending requests.
-    pub(crate) plugin_processes: Arc<crate::plugin_process::PluginProcessSupervisor>,
-    /// Stage 10: current-user local IPC bridge into the live Web Kernel.
-    pub(crate) pylon_cli: Arc<crate::pylon_cli::PylonCliBridge>,
-    /// P55：kernel hook 桥（pending oneshot 挂表 + ready 握手 + registry 闸）。
-    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
-    /// #422：连接测试凭证登记（B1 保存门禁后端化）——test_agent_candidate
-    /// 成功握手记录 (agent_id, launch 指纹)；update_agents_config 保存
-    /// launch 指纹变更的候选前查表（无凭证 fail-closed 拒绝）。
-    pub(crate) verified_agent_fingerprints: Arc<lifecycle::verification::VerificationVouchers>,
+/// #488 批①：AppState / AppStateHandles 单源字段表。此前两份清单（两个结构体
+/// 定义 × `from_state` 拷贝清单）人肉同步，字段增删要三处一致且无机械保障；改为
+/// 同一张表生成两个结构体与 `from_state`——共享字段增删只改这张表，漏改任何一侧
+/// 即编译错误，「Handles 是 AppState 的字段子集」成为结构事实而非约定。
+macro_rules! declare_app_state {
+    (
+        shared { $( $(#[$shared_meta:meta])* $shared_field:ident : $shared_ty:ty ),* $(,)? }
+        app_only { $( $(#[$app_meta:meta])* $app_field:ident : $app_ty:ty ),* $(,)? }
+    ) => {
+        /// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）+ gateway（B10.1）。
+        /// per-agent 字段（acp/notification_task/session_creation/agent_lifecycle/
+        /// client_generation/prompt_locks/sessions/agent_runtime/auto_reconnect_active）
+        /// 全部收进 AgentRuntimeManager（runtime.rs），命令层按 active_agent 解析 runtime。
+        /// R1 拆分：字段 pub(crate) 供子模块（session/dispatcher/lifecycle 等）访问。
+        pub(crate) struct AppState {
+            $( $(#[$shared_meta])* pub(crate) $shared_field: $shared_ty, )*
+            $( $(#[$app_meta])* pub(crate) $app_field: $app_ty, )*
+        }
+
+        /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
+        /// Tauri manage 的 state 不能 move 进闭包，只能 clone 字段；
+        /// start_notification_dispatcher / do_connect_and_replace / 自动重连共用。
+        /// per-agent 状态经 [`Self::active_runtime`] / 参数传入的 runtime 访问。
+        /// R1 拆分：字段 pub(crate)（dispatcher/lifecycle 子模块访问）。
+        /// #488 批①：字段集与 AppState 同表生成（见 `declare_app_state`），子集关系
+        /// 编译期互钉；`from_state` 一并生成，新增共享字段不可能漏拷贝。
+        pub(crate) struct AppStateHandles {
+            $( $(#[$shared_meta])* pub(crate) $shared_field: $shared_ty, )*
+        }
+
+        impl AppStateHandles {
+            fn from_state(state: &AppState) -> Self {
+                Self {
+                    $( $shared_field: state.$shared_field.clone(), )*
+                }
+            }
+        }
+    };
+}
+
+declare_app_state! {
+    shared {
+        runtimes: Arc<AgentRuntimeManager>,
+        agents: Arc<Mutex<HashMap<String, AgentDef>>>,
+        active_agent: Arc<Mutex<String>>,
+        pet: Arc<Mutex<pet::PetState>>,
+        runtime_logs: Arc<runtime_log::RuntimeLogHub>,
+        gateway: Arc<GatewayCore>,
+        /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
+        approval_mode: Arc<Mutex<String>>,
+        /// M3 EVT-02：canonical 事件仓库 service（与消息同库 canonical_events 表 v6，
+        /// 方案书 §5.10 append-only 事件流）。与 message/user-data 作为同一 readiness
+        /// unit 串行打开；生产 setup 返回后必为 Some。dispatcher 对有 durable owner 的
+        /// 事件必须先 append 再发布（Option 仅保留测试构造兼容与防御性诊断）。
+        event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
+        /// I14-W1：消息仓库 service（SQLite，app_data_dir/pylon-data-v1.sqlite3）。
+        /// ACP session-level snapshots (commands/mode) share the message DB and
+        /// are persisted when providers update them asynchronously. setup() readiness
+        /// barrier 内创建目录 → open/migrate → 填入本槽；生产 setup 返回后必为
+        /// Some，任一 service 失败会阻止半可用 Kernel 启动。None 仅用于构造期/测试，
+        /// 命令层仍防御性返回 message_db_unavailable。
+        message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
+        /// P55：kernel hook 桥（pending oneshot 挂表 + ready 握手 + registry 闸）。
+        hook_bridge: Arc<crate::hook_bridge::HookBridge>,
+    }
+    app_only {
+        runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
+        /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
+        browser_agent: Arc<crate::browser::agent::hub::BrowserAgentHub>,
+        prism: PrismClient,
+        /// R5（P1-3）：启动诊断快照（run() 构建主体；#482 起 storage 模式诊断已随
+        /// AppData 双模式退役，快照只含配置来源与分域错误）。
+        startup: Arc<RwLock<crate::startup::StartupDiagnostics>>,
+        /// #463：approval-mode 写序锁（tokio Mutex）——set_approval_mode 的内存写与
+        /// user_data 落盘全程持锁，并发 set（GUI 与 CLI 桥同进程）时磁盘必为最后一次
+        /// set（重启不回退到较早值；与 mcp_write_lock 同型。最后一次 set 落盘失败除外
+        /// ——降级路径见 set_approval_mode docstring 与 #463 审查项 3 决策口）。
+        approval_mode_write_lock: tokio::sync::Mutex<()>,
+        /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
+        /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
+        pet_write_lock: tokio::sync::Mutex<()>,
+        /// C7：switch/reconnect 串行锁——并发 switch 不交叉杀进程（一个 switch
+        /// 未完成前另一个 switch 不得 kill 同一批旧进程）。
+        switch_lock: tokio::sync::Mutex<()>,
+        /// C8：MCP 写序锁（tokio Mutex）——set_mcp_servers 写 runtime_mcp + 落盘
+        /// 全程持锁，并发设置时磁盘必为最后一次设置（重启不回滚到旧配置）。
+        mcp_write_lock: tokio::sync::Mutex<()>,
+        /// Phase 3：配置写序锁（tokio Mutex）——update_agents_config 读当前→生成候选→
+        /// 校验→写盘→内存提交全程持锁，两个写请求不基于同一旧版本互相覆盖。
+        config_write_lock: tokio::sync::Mutex<()>,
+        /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
+        browser: Arc<browser::BrowserManager>,
+        /// #371：文档 Sheet 管理（离线文档站子 WebView；setup() 注入主窗口）。
+        docs_sheet: Arc<docs_sheet::DocsSheetManager>,
+        /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
+        /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
+        /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
+        /// （send_prompt_core None 路径）miss 时回退全量重算并回填（E3 自愈：启动
+        /// 恢复路径直写 runtime_mcp 不经 set_mcp_servers，缓存为 None，首次读取即回填）。
+        mcp_wire: Mutex<Option<Vec<serde_json::Value>>>,
+        /// R8（P2-3）：前端日志限流窗口（每秒上限，超限丢弃）。
+        frontend_log_throttle: Mutex<runtime_log::FrontendLogThrottle>,
+        /// I14-W5：用户数据仓库 service（与消息同库 user_data 表，versioned
+        /// Profile/Session/activeProfileId）。与 message/event 作为同一 readiness
+        /// unit 串行打开；生产 setup 返回后必为 Some。
+        user_data_service: Arc<Mutex<Option<Arc<crate::session::UserDataService>>>>,
+        /// I12-W4：gateway 实例 registry 与状态机（W1 已建；setup 加载持久化配置、
+        /// 注册 factory 与 route guard）。
+        gateway_instances: crate::gateway::instance::GatewayInstanceService,
+        /// I12-W4：实例配置持久化路径（app_data_dir/pylon-gateway-instances.json）；
+        /// None（测试）→ 管理命令跳过持久化（内存态仍生效）。
+        gateway_instance_store_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+        /// I12-W5：加密凭据存储（W3 已建；setup 打开，set_credentials 命令与 start 解析用）。
+        /// None = 打开失败（blocked，命令报 credential_store_error）。
+        gateway_credentials:
+            Arc<Mutex<Option<Arc<crate::gateway::credentials::CredentialStore>>>>,
+        /// CWD-03：Workspace 实体注册表（id → Workspace；跨 Agent 共享，owner 仅溯源）。
+        workspaces: Arc<Mutex<HashMap<String, crate::workspaces::Workspace>>>,
+        /// 施工文档 §2.3：本次启动的数据/配置目录（setup() 最前面解析一次）。
+        /// 所有 SQLite/插件/MCP/gateway/pet 路径消费者必须经 `data_dirs()` 读取，
+        /// 禁止在运行期重复 `resolve_data_dirs()`。
+        data_dirs: Arc<OnceLock<crate::paths::DataDirs>>,
+        /// Phase 8: plugin-owned subprocesses and JSON-RPC pending requests.
+        plugin_processes: Arc<crate::plugin_process::PluginProcessSupervisor>,
+        /// Stage 10: current-user local IPC bridge into the live Web Kernel.
+        pylon_cli: Arc<crate::pylon_cli::PylonCliBridge>,
+        /// #422：连接测试凭证登记（B1 保存门禁后端化）——test_agent_candidate
+        /// 成功握手记录 (agent_id, launch 指纹)；update_agents_config 保存
+        /// launch 指纹变更的候选前查表（无凭证 fail-closed 拒绝）。
+        verified_agent_fingerprints: Arc<lifecycle::verification::VerificationVouchers>,
+    }
 }
 
 impl AppState {
@@ -243,28 +286,6 @@ impl AppState {
     pub(crate) fn data_dirs_cloned(&self) -> Result<crate::paths::DataDirs, String> {
         self.data_dirs().cloned()
     }
-}
-
-/// 供 async 闭包/静态辅助持有的 AppState 字段子集。
-/// Tauri manage 的 state 不能 move 进闭包，只能 clone 字段；
-/// start_notification_dispatcher / do_connect_and_replace / 自动重连共用。
-/// per-agent 状态经 [`Self::active_runtime`] / 参数传入的 runtime 访问。
-/// R1 拆分：字段 pub(crate)（dispatcher/lifecycle 子模块访问）。
-pub(crate) struct AppStateHandles {
-    pub(crate) runtimes: Arc<AgentRuntimeManager>,
-    pub(crate) agents: Arc<Mutex<HashMap<String, AgentDef>>>,
-    pub(crate) active_agent: Arc<Mutex<String>>,
-    pub(crate) pet: Arc<Mutex<pet::PetState>>,
-    pub(crate) runtime_logs: Arc<runtime_log::RuntimeLogHub>,
-    pub(crate) gateway: Arc<GatewayCore>,
-    pub(crate) approval_mode: Arc<Mutex<String>>,
-    /// Production setup readiness barrier 后必为 Some；Option 仅保留测试构造兼容与
-    /// 防御性诊断。dispatcher 对有 durable owner 的事件必须先 append 再发布。
-    pub(crate) event_service: Arc<Mutex<Option<Arc<crate::session::EventService>>>>,
-    /// ACP session-level snapshots (commands/mode) share the message DB and
-    /// are persisted when providers update them asynchronously.
-    pub(crate) message_service: Arc<Mutex<Option<Arc<crate::session::MessageService>>>>,
-    pub(crate) hook_bridge: Arc<crate::hook_bridge::HookBridge>,
 }
 
 /// acp 意外崩溃判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
@@ -311,21 +332,6 @@ fn apply_announce_override(
 }
 
 impl AppStateHandles {
-    fn from_state(state: &AppState) -> Self {
-        Self {
-            runtimes: state.runtimes.clone(),
-            agents: state.agents.clone(),
-            active_agent: state.active_agent.clone(),
-            pet: state.pet.clone(),
-            runtime_logs: state.runtime_logs.clone(),
-            gateway: state.gateway.clone(),
-            approval_mode: state.approval_mode.clone(),
-            event_service: state.event_service.clone(),
-            message_service: state.message_service.clone(),
-            hook_bridge: state.hook_bridge.clone(),
-        }
-    }
-
     /// 当前 active agent 的 runtime（无 active agent 时返回 None）。
     fn active_runtime(&self) -> Option<Arc<AgentRuntime>> {
         let id = self.active_agent.lock().ok()?.clone();
@@ -580,29 +586,31 @@ impl AppStateHandles {
             if stale_private > 0 {
                 tracing::warn!("客户端替换：清理 {stale_private} 个挂起的私有交互（旧进程已失效）");
             }
+            // #488 批⑤：终态事件载荷收敛到 permission::resolved_interaction_payload
+            // 单一构造点（原两份手拼 json! 变体之一）。
             for entry in drained_interactions {
-                let reason = if entry.kind == "approval" {
-                    serde_json::json!({
-                        "eventType": "permission.resolved",
-                        "agentId": entry.agent_id,
-                        "sessionId": entry.session_id,
-                        "requestId": entry.request_id,
-                        "clientGeneration": entry.client_generation,
-                        "optionId": "",
-                        "reason": "disconnected",
-                    })
+                let resolved = if entry.kind == "approval" {
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Permission { option_id: "" },
+                        &entry.agent_id,
+                        &entry.session_id,
+                        &entry.request_id,
+                        entry.client_generation,
+                        "disconnected",
+                    )
                 } else {
-                    serde_json::json!({
-                        "eventType": "interaction.resolved",
-                        "agentId": entry.agent_id,
-                        "sessionId": entry.session_id,
-                        "requestId": entry.request_id,
-                        "clientGeneration": entry.client_generation,
-                        "kind": entry.kind,
-                        "reason": "disconnected",
-                    })
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Interaction {
+                            kind: &entry.kind,
+                        },
+                        &entry.agent_id,
+                        &entry.session_id,
+                        &entry.request_id,
+                        entry.client_generation,
+                        "disconnected",
+                    )
                 };
-                emit_event(&window, crate::event_names::INTERACTION, reason);
+                emit_event(&window, crate::event_names::INTERACTION, resolved);
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             (stale_sources, probe_candidates)
@@ -1228,16 +1236,15 @@ fn setup_spawn_default_agent_connect(app: &tauri::App, default_runtime_connectin
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
     crate::startup_timing::mark("default_agent_connect_started");
     // spawn 块内锁序 switch_lock→agent_lifecycle：后台初始连接须与手动 switch/reconnect 串行（同 reconnect_agent）。
-    #[allow(clippy::await_holding_invalid_type)]
     tokio::spawn(async move {
         let state = app_handle.state::<AppState>();
         // 锁序：switch_lock → agent_lifecycle（同 reconnect_agent/switch_agent）。
-        let _switch_guard = state.inner().switch_lock.lock().await;
+        let _switch_guard = HeldAcrossAwait::new(state.inner().switch_lock.lock().await);
         let runtime = match handles.active_runtime() {
             Some(runtime) => runtime,
             None => return,
         };
-        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
         let Some(connect_window) = connect_window else {
             tracing::warn!("主窗口不存在，跳过默认 agent 后台初始连接");
             return;
@@ -1471,15 +1478,17 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                 emit_event(
                     &window,
                     crate::event_names::INTERACTION,
-                    serde_json::json!({
-                        "eventType": "permission.resolved",
-                        "agentId": outcome.agent_id,
-                        "sessionId": outcome.session_id,
-                        "requestId": outcome.request_id.to_string(),
-                        "clientGeneration": outcome.client_generation,
-                        "optionId": outcome.option_id,
-                        "reason": "timed_out",
-                    }),
+                    // #488 批⑤：收敛到单一构造点（原超时 sweep 手拼变体）。
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Permission {
+                            option_id: &outcome.option_id,
+                        },
+                        &outcome.agent_id,
+                        &outcome.session_id,
+                        &outcome.request_id.to_string(),
+                        outcome.client_generation,
+                        "timed_out",
+                    ),
                 );
             }
             // #356：形状与断线 drain 的 interaction.resolved 同构（kind + reason），
@@ -1488,15 +1497,16 @@ fn setup_spawn_permission_timeout_watcher(app: &tauri::App) {
                 emit_event(
                     &window,
                     crate::event_names::INTERACTION,
-                    serde_json::json!({
-                        "eventType": "interaction.resolved",
-                        "agentId": outcome.agent_id,
-                        "sessionId": outcome.session_id,
-                        "requestId": outcome.request_id.to_string(),
-                        "clientGeneration": outcome.client_generation,
-                        "kind": outcome.kind,
-                        "reason": "timed_out",
-                    }),
+                    crate::permission::resolved_interaction_payload(
+                        crate::permission::ResolvedInteractionEvent::Interaction {
+                            kind: &outcome.kind,
+                        },
+                        &outcome.agent_id,
+                        &outcome.session_id,
+                        &outcome.request_id.to_string(),
+                        outcome.client_generation,
+                        "timed_out",
+                    ),
                 );
             }
         }

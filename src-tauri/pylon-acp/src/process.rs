@@ -127,27 +127,12 @@ where
     }
 }
 
-/// Windows：内核级进程树清理句柄。关闭句柄即终止 job 内全部进程（含子进程
-/// 后续派生的整棵进程树，成员资格自动继承）。
+/// Windows：内核级进程树清理句柄。装配正身在
+/// [`pylon_foundations::job_object::KillOnCloseJob`]（#486 项5 单源，此前为本文件的
+/// 手抄 unsafe 块）；关闭句柄即终止 job 内全部进程（含子进程后续派生的整棵进程树，
+/// 成员资格自动继承）。
 #[cfg(windows)]
-struct JobObject {
-    handle: windows_sys::Win32::Foundation::HANDLE,
-}
-
-#[cfg(windows)]
-impl Drop for JobObject {
-    fn drop(&mut self) {
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
-    }
-}
-
-// HANDLE 是内核对象句柄（数字 token），跨线程移动/共享安全；裸指针本身非
-// Send/Sync，显式标记（CloseHandle 线程安全，AcpClient 需保持 Send/Sync 供
-// tokio::spawn 使用）。
-#[cfg(windows)]
-unsafe impl Send for JobObject {}
-#[cfg(windows)]
-unsafe impl Sync for JobObject {}
+use pylon_foundations::job_object::KillOnCloseJob;
 
 /// 被管理的 ACP 子进程（acp/mod.rs 的 `AcpClient.child` 持有）。
 pub struct ManagedChild {
@@ -155,7 +140,7 @@ pub struct ManagedChild {
     /// Windows：进程树清理 job。句柄关闭即终止整棵进程树（KILL_ON_JOB_CLOSE）；
     /// 创建/挂接失败时为 None，kill 时回退 taskkill。
     #[cfg(windows)]
-    job: Option<JobObject>,
+    job: Option<KillOnCloseJob>,
 }
 
 impl ManagedChild {
@@ -180,53 +165,24 @@ impl ManagedChild {
 
     /// Windows：spawn 后立即把子进程挂进 KILL_ON_JOB_CLOSE job。赋值发生在子进程
     /// 完成初始化（读 stdin）之前，其后续派生的进程自动继承 job 成员资格；
-    /// 任一环节失败仅记 warn 并回退 taskkill（不阻塞 spawn）。
+    /// 任一环节失败仅记 warn 并回退 taskkill（不阻塞 spawn）。三段失败文案与
+    /// 原手抄实现逐字一致（`JobAttachFailure` 的 Display 给出失败的原生 API 名）。
     #[cfg(windows)]
     fn attach_job(&mut self) {
         use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        };
         let Some(child) = self.child.as_ref() else {
             return;
         };
-        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if job.is_null() {
-            tracing::warn!(
-                "ACP: CreateJobObjectW failed ({}); taskkill fallback",
+        match unsafe {
+            // SAFETY：句柄取自刚 spawn 的 agent 子进程（AsRawHandle），有效且本进程持有完全权限。
+            KillOnCloseJob::attach_process(child.as_raw_handle())
+        } {
+            Ok(job) => self.job = Some(job),
+            Err(failure) => tracing::warn!(
+                "ACP: {failure} ({}); taskkill fallback",
                 std::io::Error::last_os_error()
-            );
-            return;
+            ),
         }
-        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let set_ok = unsafe {
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const core::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        if set_ok == 0 {
-            tracing::warn!(
-                "ACP: SetInformationJobObject failed ({}); taskkill fallback",
-                std::io::Error::last_os_error()
-            );
-            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
-            return;
-        }
-        if unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0 {
-            tracing::warn!(
-                "ACP: AssignProcessToJobObject failed ({}); taskkill fallback",
-                std::io::Error::last_os_error()
-            );
-            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
-            return;
-        }
-        self.job = Some(JobObject { handle: job });
     }
 
     pub fn take_stdin(&mut self) -> Result<std::process::ChildStdin, AcpError> {

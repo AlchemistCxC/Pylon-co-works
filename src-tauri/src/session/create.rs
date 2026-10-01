@@ -3,6 +3,7 @@
 
 use super::persist::{run_load_with_replay_capture, ReplayLoadArgs, ReplayLoadOutcome};
 use super::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 /// R32：会话槽位替换——上限检查 + 插入新 SessionInfo +
 /// 返回被替换的旧会话（None = 新槽位）。`allow_same_source_replace`：
 /// true = 同 source 替换不占新名额（load_persisted_session 既有语义）；
@@ -1047,7 +1048,7 @@ async fn create_session_slot(
 /// close 旧 peri，close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的
 /// 幽灵映射），并以 pylon:session-recreated 广播告知前端新 peri_id。
 /// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
-#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：映射复活/建立与并发 create/close 串行（G2-04）
+// session_creation 跨 await：映射复活/建立与并发 create/close 串行（G2-04）
 pub(crate) async fn ensure_session_mapping(
     assembly: &SessionAssembly<'_>,
     known_peri_id: Option<&str>,
@@ -1060,7 +1061,7 @@ pub(crate) async fn ensure_session_mapping(
         profile_id,
         ..
     } = *assembly;
-    let _creation_guard = runtime.session_creation.lock().await;
+    let _creation_guard = HeldAcrossAwait::new(runtime.session_creation.lock().await);
     if let Some(health) = runtime
         .binding_health
         .lock()
@@ -1514,7 +1515,7 @@ pub(crate) fn restore_previous_slot(
     clippy::too_many_arguments,
     reason = "IPC 契约签名：参数与 wire 面一一对应不可折叠；摘除条件 = 改为 payload 结构体并同步前端调用方"
 )]
-#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：会话建立序列（守卫/上限/RPC/插入/close 旧）整体串行
+// session_creation 跨 await：会话建立序列（守卫/上限/RPC/插入/close 旧）整体串行
 pub(crate) async fn new_session<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     // #379：懒重连的状态播报需要窗口（Tauri 注入，前端 wire 不变）。
@@ -1558,7 +1559,7 @@ pub(crate) async fn new_session<R: tauri::Runtime>(
         "Session creation started",
         serde_json::Map::new(),
     );
-    let _creation_guard = runtime.session_creation.lock().await;
+    let _creation_guard = HeldAcrossAwait::new(runtime.session_creation.lock().await);
     // CWD-03：Workspace 绑定优先（root_path 单一来源）；未绑定走 cwd 缺省链。
     let (session_cwd, workspace_id) =
         crate::workspaces::resolve_session_cwd(state.inner(), cwd, workspace_id)?;

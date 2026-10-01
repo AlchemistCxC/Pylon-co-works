@@ -148,15 +148,18 @@ pub(crate) async fn route_elicitation_complete<R: tauri::Runtime>(
             emit_event(
                 window,
                 crate::event_names::INTERACTION,
-                serde_json::json!({
-                    "eventType": "interaction.resolved",
-                    "agentId": agent_id,
-                    "sessionId": pending.session_id,
-                    "requestId": request_id_text,
-                    "clientGeneration": pending.client_generation,
-                    "kind": "elicitation",
-                    "reason": "completed",
-                }),
+                // #488 批⑤：收敛到 permission::resolved_interaction_payload 单一构造点
+                //（原 elicitation 完成手拼变体；形状与其余终态来源同构）。
+                crate::permission::resolved_interaction_payload(
+                    crate::permission::ResolvedInteractionEvent::Interaction {
+                        kind: "elicitation",
+                    },
+                    agent_id,
+                    &pending.session_id,
+                    &request_id_text,
+                    pending.client_generation,
+                    "completed",
+                ),
             );
         }
     } else {

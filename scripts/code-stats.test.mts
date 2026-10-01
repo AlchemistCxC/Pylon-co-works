@@ -196,7 +196,7 @@ describe('测试文件判据', () => {
     expect(isTestPathTs('src/test/resetStores.ts')).toBe(true)
     expect(isTestPathTs('src/test-utils/tauriCoreMock.ts')).toBe(true)
     expect(isTestPathTs('src/a/x.spec.tsx')).toBe(true)
-    expect(isTestPathTs('src/components/sidebar/blocks/mockBlocks.tsx')).toBe(false)
+    expect(isTestPathTs('src/demo/demoData.ts')).toBe(false)
     expect(isTestPathTs('src/a/component.ts')).toBe(false)
   })
 

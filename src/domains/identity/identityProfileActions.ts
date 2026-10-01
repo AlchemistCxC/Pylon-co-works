@@ -1,5 +1,6 @@
 import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile } from './profilePersistence'
 import { normalizeSessions } from './sessionPersistence'
+import { logError } from '../../contracts/frontendLogSink.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
 import {
@@ -150,7 +151,7 @@ export function createProfileActions(accessor: IdentityStoreAccessor): Pick<Iden
             return
           }
         } catch (error) {
-          console.error('从后端读取 Profile 失败，仅以本地缓存只读降级', error)
+          logError('从后端读取 Profile 失败，仅以本地缓存只读降级', error)
           get().hydrateProfilesLocal(legacy)
           updateIdentityCacheMeta('profiles', 'stale')
           set(state => ({

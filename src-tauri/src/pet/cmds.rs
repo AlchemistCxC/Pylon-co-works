@@ -3,6 +3,7 @@
 use crate::error::PylonError;
 use crate::pet;
 use crate::AppState;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::Manager;
@@ -31,7 +32,7 @@ pub(crate) fn persist_pet_if_possible(app: &tauri::AppHandle, pet: &pet::PetStat
 /// `spawn_blocking` 在阻塞线程池执行，不阻塞 async 运行时。
 /// 失败只 warn（尽力持久化语义，与同步路径一致）。
 /// O20：返回是否真正写盘成功——失败时调用方不得刷新节流时间戳（可重试）。
-#[allow(clippy::await_holding_invalid_type)] // R6a/O20：pet_write_lock 跨 spawn_blocking await 保证写序（fs 写在阻塞池，锁只做内存序列化外的写盘串行）
+// R6a/O20：pet_write_lock 跨 spawn_blocking await 保证写序（fs 写在阻塞池，锁只做内存序列化外的写盘串行）
 pub(crate) async fn persist_pet_async(state: &AppState) -> bool {
     let path = match pet_persist_path(state) {
         Ok(path) => path,
@@ -40,7 +41,7 @@ pub(crate) async fn persist_pet_async(state: &AppState) -> bool {
             return false;
         }
     };
-    let _write_guard = state.pet_write_lock.lock().await;
+    let _write_guard = HeldAcrossAwait::new(state.pet_write_lock.lock().await);
     // 显式块限定 pet 锁守卫作用域：序列化（内存，微秒级）后立即释放，
     // 绝不把 std MutexGuard 带过 spawn_blocking await（跨 await 不 Send）。
     let json = {

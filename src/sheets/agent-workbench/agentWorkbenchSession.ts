@@ -169,7 +169,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const listenTerminalFallback = dependencies.listenTerminalFallback ?? defaults.listenTerminalFallback
   const listenTurnSettled = dependencies.listenTurnSettled ?? defaultTurnSettledListener
   const runtime = createWorkbenchRuntime({
-    sessionId: null, status: 'idle', messages: [],
+    sessionId: null, status: 'idle',
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
     availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false,
     promptImage: false, error: null, document: createWorkbenchDocument(''),
@@ -256,12 +256,12 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.update(patch)
       return
     }
-    const { document: _ignoredDocument, ...generationPatch } = patch
+    // #487 后 update() 类型层禁止携带 document（纯字段补丁），此处无需再剥离。
     runtime.applyDocument(current.document, {
       ownerKey: binding.ownerKey,
       generation: binding.generation,
       preserveGeneration: false,
-      generationPatch,
+      generationPatch: patch,
     })
   }
 

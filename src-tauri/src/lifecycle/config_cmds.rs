@@ -6,17 +6,18 @@
 use super::*;
 use crate::error::PylonError;
 use crate::AppState;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：reload 全程与连接状态机串行，防 reload 撕裂在途连接
-                                             // L13/锁面例外：reload 是 registry 操作，只持 active runtime 的 agent_lifecycle、
-                                             // 不持 switch_lock（R9 锁序表外的 C6 例外，见 lifecycle/mod.rs 模块文档）——清理集合与 switch 不相交。
+// agent_lifecycle 跨 await：reload 全程与连接状态机串行，防 reload 撕裂在途连接
+// L13/锁面例外：reload 是 registry 操作，只持 active runtime 的 agent_lifecycle、
+// 不持 switch_lock（R9 锁序表外的 C6 例外，见 lifecycle/mod.rs 模块文档）——清理集合与 switch 不相交。
 pub(crate) async fn reload_agents(
     state: tauri::State<'_, AppState>,
     config_path: Option<String>,
 ) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
-    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
     let new_agents = if let Some(path) = config_path {
         crate::agent_config::load_from_path(std::path::Path::new(&path))?
     } else {
@@ -109,7 +110,7 @@ pub(crate) async fn update_agents_config(
 /// `effective_config_path()`（`config_path_override=None`，行为不变）；测试注入
 /// 临时配置路径，不再 `set_var` 进程全局 `PYLON_AGENTS_CONFIG`（进程级 env 变异
 /// 与并行测试竞态）。
-#[allow(clippy::await_holding_invalid_type)] // config_write_lock 跨 await：串行「读→校验→写盘→提交」全窗口，防基于旧版本互相覆盖
+// config_write_lock 跨 await：串行「读→校验→写盘→提交」全窗口，防基于旧版本互相覆盖
 pub(crate) async fn update_agents_config_via(
     state: tauri::State<'_, AppState>,
     scope: String,
@@ -121,7 +122,7 @@ pub(crate) async fn update_agents_config_via(
     use crate::agent_config::ConfigError;
     let inner = state.inner();
     // 写序锁：读当前→生成候选→校验→写盘→内存提交全程串行，防基于旧版本互相覆盖
-    let _write_guard = inner.config_write_lock.lock().await;
+    let _write_guard = HeldAcrossAwait::new(inner.config_write_lock.lock().await);
     // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
     let path = match config_path_override {
         Some(path) => path,
@@ -256,7 +257,7 @@ pub(crate) async fn update_agents_config_via(
 /// 不写 `data/agents.yaml`，不写 AppData。走与 `update_agents_config` 相同的
 /// 候选校验、原子写盘、内存提交与 gateway reload。
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // 同 update_agents_config_via：config_write_lock 串行初始化事务全窗口
+// 同 update_agents_config_via：config_write_lock 串行初始化事务全窗口
 pub(crate) async fn initialize_agents_config(
     state: tauri::State<'_, AppState>,
     agent_id: Option<String>,
@@ -264,7 +265,7 @@ pub(crate) async fn initialize_agents_config(
 ) -> Result<serde_json::Value, PylonError> {
     use crate::agent_config::ConfigError;
     let inner = state.inner();
-    let _write_guard = inner.config_write_lock.lock().await;
+    let _write_guard = HeldAcrossAwait::new(inner.config_write_lock.lock().await);
 
     // 1. 仅 embedded source 允许初始化（已有外部配置时直接走 update_agents_config）
     if crate::agent_config::effective_config_path().is_some() {
