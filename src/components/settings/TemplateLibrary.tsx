@@ -1,145 +1,28 @@
-import { useMemo, useRef, useState } from 'react'
-import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
-import { GLOBAL_PRESETS } from '../../domains/theme/presets/index.ts'
-import { effectivePresetTheme } from '../../domains/theme/zones/index.ts'
-import { THEME_DEFAULTS } from '../../domains/theme/themeFieldDefs'
-import SettingsPreview from '../SettingsPreview'
-import type { ThemeSettings } from '../../domains/theme/themeStore'
-import { themeToCssVars } from './templateThemeVars.ts'
-import { createPresetBundle, presetCoverage, type PresetApplyResult } from '../../domains/theme/presetBundle.ts'
-import { normalizeCustomPresetId } from '../../domains/theme/customPresets.ts'
+import SolidMount from '../../host/SolidMount'
+import type { PresetApplyResult } from '../../domains/theme/presetBundle.ts'
 
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。
  *
- * 官方预设 + 用户自定义两分区；预览 = 对 delta 计算 { ...THEME_DEFAULTS, ...delta }
- * 的内存态 cssVars 注入预览容器局部 style（复用 SettingsPreview 渲染——不触全局 store，
- * hover 不写 store）；点击才应用（setGlobalPreset / applyCustomPreset）；「恢复此模板
- * 默认」重应用当前模板 delta（清手调字段）。
+ * #515：实体已迁 `TemplateLibrary.solid.tsx`，本文件是 React 世界薄桥（批7 拆除）。
+ * 预览本体经实体的 glob 缝挂 SettingsPreview React 岛（TemplateLibraryPreviewIsland）。
  */
 
-export default function TemplateLibrary({ onApply, onRestore, onCustomApply }: {
+export interface TemplateLibraryProps {
   onApply: (presetName: string) => void | Promise<void>
   onRestore: (presetName: string) => void | Promise<void>
   onCustomApply?: (presetId: string) => Promise<PresetApplyResult>
-}) {
-  const customPresets = useCustomPresetStore(s => s.customPresets)
-  const applyCustomPreset = useCustomPresetStore(s => s.applyCustomPreset)
-  const [applyingId, setApplyingId] = useState<string | null>(null)
-  const applyingRef = useRef<string | null>(null)
-  const [applyFeedback, setApplyFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
-  const official = useMemo(() => GLOBAL_PRESETS.map(preset => {
-    // 刀3（#223）：预设不再自带 `theme` ⇒ 走有效值视图。
-    // ★ 只算**一次**、两处共用：显示用的主题与 `createPresetBundle` 落盘的主题必须同源。
-    const theme = effectivePresetTheme(preset)
-    return {
-      id: `official:${preset.name}`,
-      name: preset.name,
-      label: preset.label,
-      interfaceMode: preset.interfaceMode,
-      theme: { ...THEME_DEFAULTS, ...theme } as Partial<ThemeSettings>,
-      bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, source: 'builtin', theme: theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
-    }
-  }), [])
-  // 刀5（#201）：官方模板分组跟随预设归属表（GUI / 终端 两桶）
-  const officialGui = official.filter(preset => preset.interfaceMode === 'gui')
-  const officialTerminal = official.filter(preset => preset.interfaceMode === 'terminal')
+}
 
-  const custom = useMemo(() => customPresets.map(preset => ({
-    id: `custom:${preset.id}`,
-    name: preset.id,
-    label: preset.name,
-    theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
-    bundle: preset.bundle,
-  })), [customPresets])
+/** Solid 实体的模块接口（React 类型图内的唯一事实，与实体侧逐字段一致）。 */
+interface TemplateLibrarySolidModule {
+  renderTemplateLibrary(container: HTMLElement, latest: () => TemplateLibraryProps): () => void
+}
 
-  const applyTemplate = async (template: { id: string; name: string }) => {
-    if (applyingRef.current) return
-    const custom = template.id.startsWith('custom:')
-    applyingRef.current = template.id
-    setApplyingId(template.id)
-    setApplyFeedback(null)
-    try {
-      if (custom) {
-        const result = await (onCustomApply
-          ? onCustomApply(normalizeCustomPresetId(template.name))
-          : applyCustomPreset(normalizeCustomPresetId(template.name)))
-        if (result.status === 'applied') {
-          setApplyFeedback({
-            kind: 'success',
-            message: result.unavailable && result.unavailable.length > 0
-              ? `自定义预设已应用（不可用提供者：${result.unavailable.join('、')}）`
-              : '自定义预设已应用',
-          })
-        } else {
-          setApplyFeedback({ kind: 'error', message: `自定义预设应用失败（${result.failedProvider}）：${result.message}` })
-        }
-      } else {
-        await onApply(template.name)
-        setApplyFeedback({ kind: 'success', message: '预设已应用' })
-      }
-    } catch (error) {
-      setApplyFeedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
-    } finally {
-      applyingRef.current = null
-      setApplyingId(null)
-    }
-  }
+const modules = import.meta.glob<TemplateLibrarySolidModule>('./TemplateLibrary.solid.tsx', { eager: true })
+const solidModule = modules['./TemplateLibrary.solid.tsx']
+if (!solidModule) throw new Error('TemplateLibrary Solid 实体未进入 Vite module graph')
 
-  const renderCard = (template: { id: string; name: string; label: string; theme: Partial<ThemeSettings>; bundle?: import('../../domains/theme/presetBundle.ts').PresetBundleV2 }) => (
-    <div
-      key={template.id}
-      className="template-card"
-    >
-      <div className="template-preview" style={themeToCssVars(template.theme)}>
-        <SettingsPreview zone="global" />
-      </div>
-      <div className="template-actions">
-        <button type="button" className="template-apply" disabled={applyingId !== null} aria-busy={applyingId === template.id || undefined} onClick={() => { void applyTemplate(template) }}>
-          {applyingId === template.id ? '应用中…' : '应用'}
-        </button>
-        {!template.id.startsWith('custom:') && (
-          <button type="button" className="template-restore" onClick={() => onRestore(template.name)}>恢复此模板默认</button>
-        )}
-      </div>
-      <div className="template-label">{template.label}</div>
-      <div className="template-coverage" aria-label="预设覆盖范围">
-        {presetCoverage(template.bundle).map(item => <span key={item.id}
-          className={`is-${item.state}`}
-          title={item.policy ? `${item.policy === 'complete' ? '完整' : '局部'}覆盖：显式 ${item.explicit}，默认 ${item.defaulted}，不可用 ${item.unavailable}` : undefined}>
-          <i aria-hidden="true" />{item.label}{item.state === 'missing'
-            ? ' · 未记录'
-            : item.state === 'unavailable'
-              ? ` · 不可用 ${item.unavailable}`
-              : item.state === 'excluded'
-                ? ' · 不纳入预设'
-              : item.defaulted > 0
-                ? ` · ${item.explicit} 显式 / ${item.defaulted} 默认`
-                : ` · ${item.explicit} 显式`}{item.policy === 'partial' ? ' · 局部' : ''}
-        </span>)}
-      </div>
-    </div>
-  )
-
-  return (
-    <div className="template-library">
-      {applyFeedback && <div className={`template-apply-feedback is-${applyFeedback.kind}`} role={applyFeedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{applyFeedback.message}</div>}
-      <div className="template-section">
-        <div className="file-section-title">官方模板 · GUI</div>
-        <div className="template-grid">{officialGui.map(renderCard)}</div>
-      </div>
-      <div className="template-section">
-        <div className="file-section-title">官方模板 · 终端</div>
-        <div className="template-grid">{officialTerminal.map(renderCard)}</div>
-      </div>
-      <div className="template-section">
-        <div className="file-section-title">自定义模板</div>
-        {custom.length === 0 ? (
-          <p className="file-section-hint">还没有自定义模板</p>
-        ) : (
-          <div className="template-grid">{custom.map(renderCard)}</div>
-        )}
-      </div>
-    </div>
-  )
+export default function TemplateLibrary(props: TemplateLibraryProps) {
+  return <SolidMount initial={props} mount={(container, latest) => solidModule.renderTemplateLibrary(container, latest)} />
 }

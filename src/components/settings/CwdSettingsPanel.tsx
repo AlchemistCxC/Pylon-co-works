@@ -1,292 +1,31 @@
+import SolidMount from '../../host/SolidMount'
+import type { Workspace } from '../../domains/workspace/workspaceEntities'
+
 /**
  * CwdSettingsPanel — 工作区（cwd）设置面板。
  *
  * 职责：
  * - skills / MCP 选择的编辑与保存；
- * - MCP 选项来自 agent 级暴露列表（get_mcp_servers）；
+ * - MCP 选项来自 agent 级暴露列表（get_mcp_servers）。
+ *
+ * #515：实体已迁 `CwdSettingsPanel.solid.tsx`，本文件是 React 世界薄桥（批7 拆除）。
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { appClients } from '../../app/appClients.ts'
-import { FolderSearch, X } from 'lucide-react'
-import { open } from '@tauri-apps/plugin-dialog'
-import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import type { Workspace } from '../../domains/workspace/workspaceEntities'
-import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
-import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
-import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
-interface McpOption { id?: string; name?: string; transport?: string; enabled?: boolean; disabled?: boolean }
-
-function parseList(value: string): string[] {
-  return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]
+export interface CwdSettingsPanelProps {
+  workspace: Workspace
+  onClose: () => void
+  showHeader?: boolean
 }
 
-/** 已激活插件 id 列表（hook opt-in picker 数据源；快照经字符串原语保持引用稳定）。 */
-function useActivePluginIds(): string[] {
-  const runtime = getPluginRuntime()
-  const joined = useSyncExternalStore(
-    listener => runtime.subscribe(listener),
-    () => runtime.snapshot().active.map(identity => identity.pluginId).join('\u0000'),
-  )
-  return useMemo(() => joined.split('\u0000').filter(Boolean), [joined])
+/** Solid 实体的模块接口（React 类型图内的唯一事实，与实体侧逐字段一致）。 */
+interface CwdSettingsPanelSolidModule {
+  renderCwdSettingsPanel(container: HTMLElement, latest: () => CwdSettingsPanelProps): () => void
 }
 
-function ListPreview({ value, onChange, empty }: { value: string; onChange: (value: string) => void; empty: string }) {
-  const items = parseList(value)
-  if (items.length === 0) return <span className="cwd-tag-empty">{empty}</span>
-  return <div className="cwd-tag-list" role="list">{items.map(item => (
-    <button key={item} type="button" role="listitem" className="cwd-tag" title={`移除 ${item}`} onClick={() => onChange(items.filter(candidate => candidate !== item).join(', '))}>
-      <span>{item}</span><X size={11} aria-hidden="true" />
-    </button>
-  ))}</div>
-}
+const modules = import.meta.glob<CwdSettingsPanelSolidModule>('./CwdSettingsPanel.solid.tsx', { eager: true })
+const solidModule = modules['./CwdSettingsPanel.solid.tsx']
+if (!solidModule) throw new Error('CwdSettingsPanel Solid 实体未进入 Vite module graph')
 
-function StructuredIdField({ label, value, onChange, placeholder, empty }: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  empty: string
-}) {
-  const items = parseList(value)
-  return <>
-    <input className="settings-control" aria-label={`${label}（逗号分隔）`} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} />
-    <small>可输入多个 id（逗号分隔），下面的标签可单独移除。</small>
-    <ListPreview value={value} onChange={onChange} empty={empty} />
-    {items.length > 0 && <span className="set-hint" aria-live="polite">已选择 {items.length} 项</span>}
-  </>
-}
-
-export default function CwdSettingsPanel({ workspace, onClose, showHeader = true }: { workspace: Workspace; onClose: () => void; showHeader?: boolean }) {
-  const updateWorkspace = useWorkspaceEntityStore(s => s.updateWorkspace)
-  const [name, setName] = useState(workspace.name)
-  const [rootPath, setRootPath] = useState(workspace.rootPath)
-  const [skills, setSkills] = useState(workspace.skills.join(', '))
-  const [hookIds, setHookIds] = useState<string[]>([...workspace.hookPluginIds])
-  const activePluginIds = useActivePluginIds()
-  const [mcpIds, setMcpIds] = useState<Set<string>>(new Set(workspace.mcpServerIds))
-  const [mcpOptions, setMcpOptions] = useState<McpOption[]>([])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [saveErrorIsValidation, setSaveErrorIsValidation] = useState(false)
-
-  useEffect(() => {
-    setName(workspace.name)
-    setRootPath(workspace.rootPath)
-    setSkills(workspace.skills.join(', '))
-    setHookIds([...workspace.hookPluginIds])
-    setMcpIds(new Set(workspace.mcpServerIds))
-    setSaveError(null)
-    setSaveErrorIsValidation(false)
-  }, [workspace.id, workspace.name, workspace.rootPath, workspace.skills, workspace.hookPluginIds, workspace.mcpServerIds])
-
-  useEffect(() => {
-    let disposed = false
-    appClients.agent()
-      .getMcpServers()
-      .then(list => {
-        if (!disposed) {
-          setMcpOptions(list as McpOption[])
-          resolveRuntimeErrors({ key: `cwd:${workspace.id}:mcp` })
-        }
-      })
-      .catch(error => {
-        if (!disposed) reportRuntimeError('读取 MCP 配置', error, undefined, {
-          key: `cwd:${workspace.id}:mcp`, scope: { kind: 'operation', id: `cwd:${workspace.id}:mcp` }, source: 'settings.cwd',
-        })
-      })
-    return () => { disposed = true }
-  }, [workspace.id])
-
-  const dirty = useMemo(() => (
-    name.trim() !== workspace.name
-    || rootPath.trim() !== workspace.rootPath
-    || parseList(skills).join('\u0000') !== workspace.skills.join('\u0000')
-    || [...hookIds].sort().join('\u0000') !== [...workspace.hookPluginIds].sort().join('\u0000')
-    || [...mcpIds].sort().join('\u0000') !== [...workspace.mcpServerIds].sort().join('\u0000')
-  ), [hookIds, mcpIds, name, rootPath, skills, workspace])
-
-  const mcpCapabilities = useMemo(() => buildCapabilityOptions(
-    'mcp',
-    mcpOptions.flatMap(option => {
-      const id = option.id ?? option.name ?? ''
-      return id ? [{ id, label: option.name ?? id, source: 'agent' }] : []
-    }),
-    [...mcpIds],
-  ), [mcpIds, mcpOptions])
-
-  const pickRootPath = async () => {
-    try {
-      const selected = await open({ directory: true, multiple: false, title: '更换工作区文件夹' })
-      if (typeof selected === 'string') {
-        setRootPath(selected)
-        setSaveError(null)
-        setSaveErrorIsValidation(false)
-      }
-    } catch (error) {
-      setSaveErrorIsValidation(false)
-      setSaveError('无法打开文件夹选择器，详情见右下角错误中心')
-      reportRuntimeError('打开工作区选择器', error, undefined, {
-        key: `cwd:${workspace.id}:picker`, scope: { kind: 'operation', id: `cwd:${workspace.id}:picker` }, source: 'settings.cwd',
-      })
-    }
-  }
-
-  const cancel = () => {
-    if (dirty && typeof window.confirm === 'function' && !window.confirm('放弃未保存的工作区设置？')) return
-    onClose()
-  }
-
-  const save = async () => {
-    if (!name.trim()) { setSaveErrorIsValidation(true); setSaveError('工作区名称不能为空'); return }
-    if (!isAbsolutePath(rootPath.trim())) { setSaveErrorIsValidation(true); setSaveError('工作目录必须是绝对路径'); return }
-    setSaving(true)
-    setSaveError(null)
-    setSaveErrorIsValidation(false)
-    try {
-      await updateWorkspace(workspace.id, {
-        name: name.trim(),
-        rootPath: rootPath.trim(),
-        skills: parseList(skills),
-        mcpServerIds: [...mcpIds],
-        hookPluginIds: hookIds,
-      })
-      resolveRuntimeErrors({ key: `cwd:${workspace.id}:save` })
-      onClose()
-    } catch (error) {
-      setSaveErrorIsValidation(false)
-      setSaveError('保存工作区设置失败，详情见右下角错误中心')
-      reportRuntimeError('保存工作区设置', error, undefined, {
-        key: `cwd:${workspace.id}:save`, scope: { kind: 'sheet', id: workspace.id }, source: 'settings.cwd',
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="cwd-settings settings-surface">
-      {showHeader && (
-        <div className="cwd-settings-head">
-          <span className="cwd-group-name">{workspace.name}</span>
-          <button className="cwd-settings-close" onClick={cancel} title="关闭工作区设置" aria-label="关闭工作区设置"><X size={14} aria-hidden="true" /></button>
-        </div>
-      )}
-
-      <section className="cwd-settings-section" aria-labelledby="cwd-basic-title">
-        <div className="cwd-settings-section-head">
-          <div><h3 id="cwd-basic-title">基本信息</h3><p>名称用于识别；目录决定新会话的默认工作位置。</p></div>
-        </div>
-        <label className="sess-field">
-          <span>工作区名称</span>
-          <input aria-label="工作区名称" className="settings-control" value={name} onChange={event => setName(event.target.value)} />
-        </label>
-
-        <label className="sess-field">
-          <span>工作目录</span>
-          <div className="cwd-path-control">
-            <input aria-label="工作目录" className="settings-control cwd-root-input" value={rootPath} onChange={event => setRootPath(event.target.value)} />
-            <button type="button" className="settings-action cwd-path-picker" onClick={() => void pickRootPath()} aria-label="重新选择工作目录"><FolderSearch size={14} aria-hidden="true" /><span>选择</span></button>
-          </div>
-          <small>更改后仅影响新建会话；已有会话保留自己的目录快照。</small>
-        </label>
-      </section>
-
-      <section className="cwd-settings-section" aria-labelledby="cwd-capabilities-title">
-        <div className="cwd-settings-section-head">
-          <div><h3 id="cwd-capabilities-title">新会话能力</h3><p>由插件系统在创建会话时注入 Tool、MCP、Skill 等能力提示。</p><p><strong>仅在新建会话时生效；已有会话保持不变。</strong></p></div>
-        </div>
-        <label className="sess-field">
-          <span>Skills（逗号分隔）</span>
-          <StructuredIdField label="Skills" value={skills} onChange={setSkills} placeholder="code-review, trpg-master" empty="尚未指定 Skill" />
-        </label>
-
-        <div className="sess-field">
-          <span>Hook 插件（会话 opt-in）</span>
-          <small>勾选的插件才有权在本工作区新建会话中执行钩子；快照随会话创建固定。</small>
-          {hookIds.filter(id => !activePluginIds.includes(id)).map(id => (
-            <label key={id} className="cwd-check">
-              <input type="checkbox" checked disabled readOnly aria-label={`保留未激活 Hook 插件 ${id}`} />
-              <span>{id}（未激活，保留声明）</span>
-              <button
-                type="button"
-                className="settings-action"
-                aria-label={`移除未激活 Hook 插件 ${id}`}
-                onClick={() => setHookIds(current => current.filter(candidate => candidate !== id))}
-              >
-                移除
-              </button>
-            </label>
-          ))}
-          {activePluginIds.length === 0 && hookIds.every(id => !activePluginIds.includes(id)) && (
-            <div className="set-hint">暂无已激活插件可供勾选。</div>
-          )}
-          {activePluginIds.map(id => {
-            const checked = hookIds.includes(id)
-            return (
-              <label key={id} className="cwd-check">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  aria-label={`Hook 插件 ${id}`}
-                  onChange={event => {
-                    setHookIds(current => (
-                      event.target.checked ? [...current, id] : current.filter(candidate => candidate !== id)
-                    ))
-                  }}
-                />
-                <span>{id}</span>
-              </label>
-            )
-          })}
-        </div>
-
-        <div className="sess-field">
-        <span>MCP 服务</span>
-        {mcpOptions.length === 0 && (
-          <div className="set-hint">
-            当前 Agent 未提供可选 MCP 服务。
-            <button
-              type="button"
-              className="settings-action"
-              style={{ marginLeft: 8 }}
-              onClick={() => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
-                detail: { domain: 'agents-connections', section: 'agent' },
-              }))}
-            >
-              配置 Agent
-            </button>
-          </div>
-        )}
-        {mcpCapabilities.map(option => {
-          const key = option.id
-          const checked = option.enabled
-          return (
-            <label key={key} className="cwd-check">
-              <input type="checkbox" checked={checked} onChange={e => {
-                const next = new Set(mcpIds)
-                if (e.target.checked) next.add(key)
-                else next.delete(key)
-                setMcpIds(next)
-              }} />
-              <span>{option.label}（{mcpOptions.find(candidate => (candidate.id ?? candidate.name) === key)?.transport ?? '不可用'}）{option.available ? '' : ` · ${option.diagnostic}`}</span>
-            </label>
-          )
-        })}
-      </div>
-      </section>
-
-      {saveError && (saveErrorIsValidation
-        ? <div className="set-hint cwd-settings-error" role="alert">{saveError}</div>
-        : <div className="set-hint cwd-settings-error" role="status">{saveError}</div>)}
-      <div className="cwd-settings-footer">
-        <span className={`cwd-settings-dirty ${dirty ? 'active' : ''}`} role="status">{dirty ? '有未保存的更改' : '所有更改已保存'}</span>
-        <div className="sess-field-actions">
-          <button className="settings-action" onClick={cancel}>取消</button>
-          <button className="settings-action primary" disabled={saving || !dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存更改'}</button>
-        </div>
-      </div>
-    </div>
-  )
+export default function CwdSettingsPanel(props: CwdSettingsPanelProps) {
+  return <SolidMount initial={props} mount={(container, latest) => solidModule.renderCwdSettingsPanel(container, latest)} />
 }
