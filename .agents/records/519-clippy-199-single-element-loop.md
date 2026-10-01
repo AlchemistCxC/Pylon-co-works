@@ -36,8 +36,11 @@
 | 修复后单 crate clippy 零告警 | ✅ pylon-core 0 warning / 0 error |
 | 全量 `bun run check:clippy`（1.99.0） | ✅ 全 crate `added: []`，await-holding 通过，exit 0 |
 | `cargo test -p pylon-core`（行为不变） | ✅ 137 passed / 0 failed |
-| #517 CI clippy job 转绿 | ⏳ 推送后由 CI 复验 |
-| #516/#518 CI clippy job 转绿 | ⏳ 同修复 cherry-pick 后由 CI 复验 |
+| #517 CI clippy job 转绿 | ✅ pass 8m24s（run 36896359120） |
+| #516/#518 CI clippy job 转绿 | ✅ #516 pass 9m35s、#518 pass 8m53s（cherry-pick 后各自 run） |
+| #516/#518 全门禁 | ✅ 均 6/6 绿 |
+
+> #517 同 run 的前端三项红**非本 issue 面**：为分支上在途 #515 批 0/批 0.5（`kumo/prometheus` 上 2026-10-02 00:29 提交的 zustand→Solid 就地置换）的进行中遗留（`src/host/reactStoreShim.ts` 2 条死 eslint-disable 指令 + vitest 4 用例：shim 会话切换不重置、defaultPresets 重置主题 3 条），归 #515 施工域，本记录不处置（已在 PR #517 留诊断评论）。
 
 ## 测试处置
 
