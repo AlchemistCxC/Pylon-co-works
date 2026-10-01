@@ -32,8 +32,8 @@ const INVENTORY = new Map([
   ['src-tauri/src/pet/cmds.rs', 2], // use + pet_write_lock：写盘串行
   ['src-tauri/src/plugin_cmds/transaction.rs', 2], // use + 插件写事务锁：install/uninstall 整体串行
   ['src-tauri/src/session/control.rs', 4], // use + session_creation（close/create 串行）+ acp 锁内 cancel ×2
-  ['src-tauri/src/session/create.rs', 3], // use + session_creation：建立序列整体串行 ×2
-  ['src-tauri/src/session/persist.rs', 2], // use + session_creation：load/恢复串行
+  ['src-tauri/src/session/create/mod.rs', 3], // use + session_creation：建立序列整体串行 ×2（#486 项3 自 create.rs 拆分随迁）
+  ['src-tauri/src/session/persist/load.rs', 2], // use + session_creation：load/恢复串行（#486 项3 自 persist.rs 拆分随迁）
   ['src-tauri/src/session/mod.rs', 3], // use + agent_lifecycle：双检查懒连接 ×2
   ['src-tauri/src/session/prompt/wait.rs', 4], // use + prompt_lock + prompt_gate 单飞 + cancel 闭包 acp 锁
   ['src-tauri/src/session/session_expiry_platform_tests.rs', 2], // use + 测试本体持 prompt_gate

@@ -3,8 +3,9 @@
 //
 // 后端注册面与前端调用面双向静态比对，消灭「前端调了未注册命令 / 后端注册了
 // 无人消费的命令」两类接缝漂移：
-//   1. 后端面：解析 src-tauri/src/lib.rs 的 `generate_handler![...]` 注册表，
-//      取每项 `crate::模块::函数` 的函数名（tauri 命令名 = 函数名，snake_case）。
+//   1. 后端面：解析注册表源（lib.rs / commands.rs，取首个含 `generate_handler![`
+//      的文件；#486 项3 起 240 行清单可原样居 commands.rs）的 `generate_handler![...]`
+//      注册表，取每项 `crate::模块::函数` 的函数名（tauri 命令名 = 函数名，snake_case）。
 //   2. 前端面：扫描 src/**/*.{ts,tsx} 的 `invoke('name')` / `invoke("name")` /
 //      `invoke<T>('name')` / `transport.invoke('name')` 首参字面量。
 //   3. 比对：
@@ -32,12 +33,31 @@ function resolveRepoRoot() {
 
 // ── 后端面：generate_handler! 注册表 ──────────────────────────────────────────
 
+/** 注册表源候选：常规在 lib.rs；#486 项3 把 240 行清单原样拆入 commands.rs——
+ * 取首个含 `generate_handler![` 的文件，注册面迁到哪都受检查。 */
+const REGISTRY_SOURCE_CANDIDATES = ["src-tauri/src/lib.rs", "src-tauri/src/commands.rs"];
+
+function readBackendRegistrySource(): string {
+  for (const rel of REGISTRY_SOURCE_CANDIDATES) {
+    let text: string;
+    try {
+      text = readFileSync(join(root, rel), "utf8");
+    } catch {
+      continue;
+    }
+    if (text.includes("generate_handler![")) return text;
+  }
+  throw new Error(
+    `generate_handler![ not found in any of: ${REGISTRY_SOURCE_CANDIDATES.join(", ")}`,
+  );
+}
+
 /** 解析 generate_handler! 注册表，返回命令名集合（函数名）。 */
-export function parseBackendRegistry(libRs: string): Set<string> {
-  const start = libRs.indexOf("generate_handler![");
-  if (start < 0) throw new Error("generate_handler! not found in lib.rs");
-  const depthEnd = libRs.indexOf("]", start);
-  const body = libRs.slice(start + "generate_handler![".length, depthEnd);
+export function parseBackendRegistry(source: string): Set<string> {
+  const start = source.indexOf("generate_handler![");
+  if (start < 0) throw new Error("generate_handler! not found in backend registry source");
+  const depthEnd = source.indexOf("]", start);
+  const body = source.slice(start + "generate_handler![".length, depthEnd);
   const names = new Set<string>();
   for (const match of body.matchAll(/crate::[A-Za-z0-9_:]+::([A-Za-z0-9_]+)/g)) {
     names.add(match[1]!);
@@ -184,8 +204,7 @@ function main(): number {
   if (process.argv.includes("--self-test")) {
     return runSelfTest();
   }
-  const libRs = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
-  const backend = parseBackendRegistry(libRs);
+  const backend = parseBackendRegistry(readBackendRegistrySource());
   const { invocations, literals } = scanFrontendInvocations(join(root, "src"));
   const { unregistered, uncalled } = compare(backend, invocations, literals, IPC_EXEMPT);
 
