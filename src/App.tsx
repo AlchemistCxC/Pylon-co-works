@@ -3,6 +3,7 @@ import SheetLayout from './workspace-sheets/SheetLayout'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './domains/theme/themeStore'
 import { flushIdentityBackend, useIdentityStore } from './domains/identity/identityStore'
+import { logWarn, logError } from './contracts/frontendLogSink'
 import { useRuntimeStore } from './domains/runtime/runtimeStore'
 import { useWorkspaceStore } from './domains/workspace/workspaceStore'
 import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
@@ -360,7 +361,7 @@ export default function App() {
     if (!IS_TAURI) return
     const win = getCurrentWindow()
     const saved = loadWindowSize(localStorage)
-    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(error => console.warn('恢复上次窗口尺寸失败', error))
+    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(error => logWarn('恢复上次窗口尺寸失败', error))
     let timer: number | null = null
     let disposed = false
     const unlisten = win.onResized(({ payload }) => {
@@ -478,7 +479,7 @@ export default function App() {
         return
       }
       await win.destroy()
-    }).then(fn => { unlisten = fn }).catch(error => console.error('注册窗口关闭 flush 失败', error))
+    }).then(fn => { unlisten = fn }).catch(error => logError('注册窗口关闭 flush 失败', error))
     return () => { unlisten?.() }
   }, [])
   const profilesOpen = showProfileEdit
@@ -524,7 +525,7 @@ export default function App() {
         quickSwitchLabel={quickInterfaceMode?.label}
         onToggleInterfaceMode={quickInterfaceMode ? () => activateInterfaceMode(quickInterfaceMode.id) : undefined}
         onMinimize={() => appWindow.minimize()}
-        onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => console.error('全屏切换失败', error))}
+        onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => logError('全屏切换失败', error))}
         onCloseWindow={() => void closeWindowWithFlush()}
       />
       {interfaceModeContribution.shellSurface?.placement === 'before-workspace' && (

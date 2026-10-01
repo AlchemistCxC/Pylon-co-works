@@ -19,7 +19,6 @@ import { createAgentWorkbenchSessionRuntime } from '../../application/agent-work
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
-import type { WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 
 function session(id: string, source: string): Session {
   return {
@@ -76,8 +75,8 @@ const TERMINATED = [
 
 /** 无时钟宿主（preview / legacy）：不申报 livenessSource，行为必须是文档派生。 */
 function bareRuntime(): ReturnType<typeof createWorkbenchRuntime> {
-  const initial: Omit<WorkbenchRuntimeSnapshot, 'revision'> = {
-    sessionId: 'local:live', status: 'ready', messages: [],
+  const initial = {
+    sessionId: 'local:live', status: 'ready' as const,
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
     availableModels: [], activeModel: '', availableModes: [], activeMode: '',
     canAttach: false, promptImage: false, error: null,

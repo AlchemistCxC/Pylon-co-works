@@ -106,15 +106,7 @@ export interface StartupDiagnostics {
   prism: StartupDiagnosticEntry | null
   defaultAgentId?: string
   configSource?: { kind: string; fileName?: string }
-  /** 施工文档 §7.4：存储模式诊断（setup 解析 DataDirs 后写入） */
-  storage?: StorageDiagnostics
-}
-
-export interface StorageDiagnostics {
-  mode: 'portable' | 'app_data' | string
-  portableRequested: boolean
-  fallbackReason?: string
-  migrationAvailable: boolean
+  // #482：storage 模式诊断随 AppData 双模式退役——便携是唯一存储模式。
 }
 
 function normalizeDiagnosticEntry(value: unknown): StartupDiagnosticEntry | null {
@@ -123,16 +115,6 @@ function normalizeDiagnosticEntry(value: unknown): StartupDiagnosticEntry | null
   return {
     status,
     ...(typeof value.message === 'string' && value.message.length > 0 ? { message: value.message } : {}),
-  }
-}
-
-function normalizeStorageDiagnostics(value: unknown): StorageDiagnostics | undefined {
-  if (!isPlainObject(value)) return undefined
-  return {
-    mode: typeof value.mode === 'string' ? value.mode : 'app_data',
-    portableRequested: value.portableRequested === true,
-    ...(typeof value.fallbackReason === 'string' && value.fallbackReason.length > 0 ? { fallbackReason: value.fallbackReason } : {}),
-    migrationAvailable: value.migrationAvailable === true,
   }
 }
 
@@ -146,6 +128,5 @@ export function normalizeStartupDiagnostics(raw: unknown): StartupDiagnostics {
     ...(isPlainObject(raw.configSource)
       ? { configSource: { kind: typeof raw.configSource.kind === 'string' ? raw.configSource.kind : 'unknown', ...(typeof raw.configSource.fileName === 'string' ? { fileName: raw.configSource.fileName } : {}) } }
       : {}),
-    ...(normalizeStorageDiagnostics(raw.storage) ? { storage: normalizeStorageDiagnostics(raw.storage)! } : {}),
   }
 }

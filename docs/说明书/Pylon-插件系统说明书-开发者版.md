@@ -840,7 +840,7 @@ context.sidebar.registerAgentSidebarContribution({
 
 **整页渲染的是同一个贡献组件**，只是 `presentation: 'page'`——不需要维护两份组件，两种体量共享同一批数据与回调。整页**替换该 Sheet 的聊天视图，但不是新 Sheet**：左栏仍是该 Sheet 的左栏，Esc 或页面头部「返回」回到聊天。
 
-**内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）、以及四个 mock 模块（定时 / 自动化 / 任务 / 扩展）。**模块自己拥有自己的查询**——block 体量不下发查询词，插件想过滤自己的内容就在自己的组件里存；page 体量的 `host:input` 会携带宿主头部页面搜索框的当前词 `query?`（宿主当前恒传空串，协议位保留）。
+**内置模块参考**：`builtin.sidebar.module.search`（搜索——**独立模块**，VSCode 搜索侧栏那一类专属面板：自持查询、按工作区分组的命中结果、清除与命中计数；它**不过滤**会话列表，二者是两回事）、`builtin.sidebar.module.sessions`（会话，`alwaysOpen`）。**模块自己拥有自己的查询**——block 体量不下发查询词，插件想过滤自己的内容就在自己的组件里存；page 体量的 `host:input` 会携带宿主头部页面搜索框的当前词 `query?`（宿主当前恒传空串，协议位保留）。
 
 **顺序与显隐**是跨 Sheet 的界面偏好，存放在独立键 `pylon-sidebar-modules-v1`（**不是** `pylon-workspace-layout-v3`）：用户在左栏**长按模块头拖拽**改顺序，在「设置 → 侧栏 → 模块」里改显隐；`alwaysOpen` 的模块不可隐藏、也不参与排序（钉在栈底，拖拽落点被钳在钉区之前）；偏好里指向已卸载模块的 id 被忽略（插件停用不会留下悬挂项）。次序偏好在收纳时统一收敛，因此手改过的旧偏好同样不会把常驻模块排到前面。
 

@@ -23,8 +23,6 @@ export function createRuntimeClient(transport: ClientTransport) {
     clearRuntimeLogs: (): Promise<unknown> => transport.invoke('clear_runtime_logs'),
     /** B2：RuntimeSheet 挂载/卸载驱动后端 live 推送闸门。 */
     setRuntimeLogLive: (enabled: boolean): Promise<unknown> => transport.invoke('set_runtime_log_live', { enabled }),
-    /** A-V2\uFF1AAppData \u2192 \u4FBF\u643A\u76EE\u5F55\u4E00\u6B21\u6027\u8FC1\u79FB\uFF08Overview \u5B58\u50A8\u8FC1\u79FB\u5165\u53E3\uFF09\u3002 */
-    migrateAppdataToPortable: (): Promise<unknown> => transport.invoke('migrate_appdata_to_portable'),
   }
 }
 

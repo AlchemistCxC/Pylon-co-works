@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import { createFakeWorkbenchCommandFacade } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createPreviewWorkbenchRuntime } from '../../../domains/workbench/workbenchRuntime.ts'
+import { createWorkbenchDocument } from '../../../domains/workbench/workbenchProjector.ts'
 import { createStaticWorkbenchAppearanceStore } from '../../../domains/appearance/workbenchAppearanceStore.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { createSessionUiStore } from '../../../domains/workbench/sessionUiStore.ts'
@@ -10,9 +11,10 @@ import { clearErrors, getDiagnosticErrors, getErrorHistory, getErrors } from '..
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
-    sessionId: 'session-a', status: 'ready', messages: [], generating: false,
+    sessionId: 'session-a', status: 'ready', generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [], availableModels: [], activeModel: '',
     availableModes: [], activeMode: '', canAttach: true, promptImage: false, error: null,
+    document: createWorkbenchDocument('session-a'),
   })
 }
 

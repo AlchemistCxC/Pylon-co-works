@@ -109,7 +109,6 @@ export interface WorkbenchAppearanceSnapshot {
   ccHiddenEmpty: readonly string[]
   ccEditMode: boolean
   ccProperties: Readonly<Pick<ThemeSettings, CcEditablePropertyKey>>
-  showPet: boolean
   spinner: SpinnerAppearanceSnapshot
 }
 
@@ -226,7 +225,6 @@ export function selectWorkbenchAppearance(
     ccHiddenEmpty: [...theme.ccHiddenEmpty],
     ccEditMode: theme.ccEditMode,
     ccProperties: selectCcProperties(theme),
-    showPet: theme.showPet,
     spinner: {
       framePreset: theme.spinnerFramePreset,
       frames: [...frames],

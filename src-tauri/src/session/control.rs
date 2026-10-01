@@ -2,6 +2,7 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 #[tauri::command]
 pub(crate) async fn set_mode(
     state: tauri::State<'_, AppState>,
@@ -264,7 +265,7 @@ pub(crate) async fn close_session_rpc(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // session_creation 串行 close 与 create；cancel 在 acp 锁内发送（方案 5，防写入新 ACP）
+// session_creation 串行 close 与 create；cancel 在 acp 锁内发送（方案 5，防写入新 ACP）
 pub(crate) async fn close_session(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -273,7 +274,7 @@ pub(crate) async fn close_session(
     // OWNER-02（§5.8）：显式 agentId 正向 owner 路由（会话存在才可 close）。
     let owner = SessionOwner::new(&agent_id, &source);
     let runtime = state.inner().resolve_owner_runtime(&owner)?;
-    let _creation_guard = runtime.session_creation.lock().await;
+    let _creation_guard = HeldAcrossAwait::new(runtime.session_creation.lock().await);
     let generation = state.current_generation(&runtime);
     let peri_id = state.get_peri_id(&runtime, &source)?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
@@ -281,7 +282,7 @@ pub(crate) async fn close_session(
     // 方案 5：cancel 在 acp 锁内发送，replacement（同样持 acp 锁）无法插入——
     // 旧 periId 的 cancel 不会写入新 ACP。
     {
-        let acp = runtime.acp.lock().await;
+        let acp = HeldAcrossAwait::new(runtime.acp.lock().await);
         let _ = acp.cancel_session(&peri_id).await;
     }
     // 方案 6：统一 close RPC 入口（close_via_rpc 判定 + params + method-not-found
@@ -410,7 +411,7 @@ pub(crate) async fn agent_session_delete(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // ACP-05：acp 锁内判 generation 再发 cancel，replacement 持同锁无法插入
+// ACP-05：acp 锁内判 generation 再发 cancel，replacement 持同锁无法插入
 pub(crate) async fn cancel_prompt(
     state: tauri::State<'_, AppState>,
     agent_id: String,
@@ -429,7 +430,7 @@ pub(crate) async fn cancel_prompt(
     // 不会写入新 ACP）；发送失败返回结构化错误（cancel≠close：失败不清理会话
     // 映射，也不假装 agent 已处理——settle 由 prompt 路径异步收敛）。
     {
-        let acp = runtime.acp.lock().await;
+        let acp = HeldAcrossAwait::new(runtime.acp.lock().await);
         if state.current_generation(&runtime) != generation {
             return Err(PylonError::Protocol(format!(
                 "stale ACP client generation: expected {generation}"

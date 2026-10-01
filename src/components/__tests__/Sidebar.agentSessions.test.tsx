@@ -2,17 +2,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SessionsPanel from '../sidebar/SessionsPanel.tsx'
-import Sidebar from '../Sidebar.tsx'
-import { useRightRailStore } from '../../domains/workspace/layoutRailsStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore'
 import { useSidebarContributionProps } from '../sidebar/useSidebarContributionProps.ts'
-import { resetStores } from '../../test/resetStores'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 
 // 下沉自 scripts/test-agent-sidebar.mts（P91 A2）：面板运行点读 liveGeneratingSources、
-// 会话交互保留、showPet toggle 写 workspaceStore（原为源码 token 断言）。
+// 会话交互保留（showPet toggle 测试已随 #483 宠物链删除退役）。
 
 function session(overrides: Partial<WorkspaceSession> = {}): WorkspaceSession {
   return {
@@ -156,42 +153,3 @@ describe('会话交互保留', () => {
   })
 })
 
-describe('showPet toggle 写 workspaceStore', () => {
-  afterEach(async () => {
-    const { cleanup } = await import('@testing-library/react')
-    cleanup()
-  })
-
-  it('点击宠物切换写 store 且 aria-pressed 反映，AgentSheet 消费同源', () => {
-    localStorage.clear()
-    resetStores()
-    useIdentityStore.setState({
-      activeAgent: 'peri',
-      activeProfileId: 'default',
-      profiles: [{ id: 'default', name: 'Default', persona: '', model: '' }],
-      sessions: [],
-    })
-    const ctx = {
-      openSheet: () => null,
-      focusSheet: () => {},
-      closeSheet: () => {},
-      activeSession: null,
-      selectSession: () => {},
-      openProfileEdit: () => {},
-      openSessionSettings: () => {},
-      sidebarCollapsed: false,
-      rightInset: 0,
-      ccEditMode: false,
-      sessionSource: () => null,
-      sessionBySource: () => undefined,
-    }
-    useRightRailStore.setState({ showPet: false })
-    render(<Sidebar ctx={ctx as never} />)
-    const toggle = screen.getByTitle('显示宠物')
-    expect(toggle.getAttribute('aria-pressed')).toBe('false')
-    fireEvent.click(toggle)
-    expect(useRightRailStore.getState().showPet).toBe(true)
-    expect(toggle.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTitle('隐藏宠物').getAttribute('aria-pressed')).toBe('true')
-  })
-})

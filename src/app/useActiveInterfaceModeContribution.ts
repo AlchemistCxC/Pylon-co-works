@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { DEFAULT_INTERFACE_MODE, useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import type { InterfaceModeContribution } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { findInterfaceModeContribution } from './interfaceModeLookup.ts'
 
 const interfaceModeRegistry = getInterfaceModeRegistry()
 const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
@@ -18,6 +18,6 @@ export function useActiveInterfaceModeContribution(): InterfaceModeContribution 
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const snapshot = useSyncExternalStore(subscribeInterfaceModes, getInterfaceModeSnapshot, getInterfaceModeSnapshot)
   return snapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
-    ?? BUILTIN_INTERFACE_MODES.find(contribution => contribution.id === interfaceMode)
-    ?? BUILTIN_INTERFACE_MODES.find(contribution => contribution.id === DEFAULT_INTERFACE_MODE)!
+    ?? findInterfaceModeContribution(interfaceMode)
+    ?? findInterfaceModeContribution(DEFAULT_INTERFACE_MODE)!
 }

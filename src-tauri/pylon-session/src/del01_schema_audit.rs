@@ -279,13 +279,12 @@ fn fk_inventory_baseline() {
 #[test]
 fn tombstone_gate_and_delete_semantics_baseline() {
     // 行为基线（§5.12 tombstone 规则 + B7 canonical 唯一数据源）：
-    // 1) delete_session 单事务：DELETE sessions + INSERT OR IGNORE tombstone；
+    // 1) 删除单事务（DEL-03 两阶段）：DELETE snapshots + INSERT OR IGNORE tombstone；
     // 2) 删除后 evt_append → EventError::SessionDeleted（迟到写不复活）；
     // 3) 重复删除幂等（INSERT OR IGNORE，不报未知错误）；
-    // 4) canonical_events 行不随 delete_session 删除（append-only 事件流独立于 sessions 行）。
+    // 4) canonical_events 行不随删除删除（append-only 事件流独立于 sessions 行）。
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch s1");
 
     // 先写入一条 canonical_events 行（独立于 sessions 行的 owner 化事件流）。
     let evt = parse_canonical_event(&serde_json::json!({
@@ -303,8 +302,10 @@ fn tombstone_gate_and_delete_semantics_baseline() {
     let evt_repo = EventRepo::open(&path).expect("open event repo");
     evt_repo.append_events(&[evt], None).expect("append e1");
 
-    repo.delete_session("s1", Some(r#"["p","a","s1"]"#))
+    repo.begin_delete_session("s1", Some(r#"["p","a","s1"]"#))
         .expect("delete s1");
+    repo.finalize_session_delete("s1", Some(r#"["p","a","s1"]"#))
+        .expect("finalize s1");
 
     // 删除后 evt_append → EventError::SessionDeleted（tombstone gate，不复活）。
     let late = parse_canonical_event(&serde_json::json!({
@@ -330,8 +331,10 @@ fn tombstone_gate_and_delete_semantics_baseline() {
     }
 
     // 重复删除幂等（INSERT OR IGNORE tombstone，不报未知错误）。
-    repo.delete_session("s1", Some(r#"["p","a","s1"]"#))
+    repo.begin_delete_session("s1", Some(r#"["p","a","s1"]"#))
         .expect("repeat delete is idempotent");
+    repo.finalize_session_delete("s1", Some(r#"["p","a","s1"]"#))
+        .expect("repeat finalize is idempotent");
     // 释放写连接（Windows 上不 drop 无法删除文件）。
     drop(repo);
     drop(evt_repo);
@@ -345,7 +348,7 @@ fn tombstone_gate_and_delete_semantics_baseline() {
         .expect("count tombstone");
     assert_eq!(
         tombstone, 1,
-        "delete_session 必须写入 tombstone 且重复删除不产生第二行"
+        "删除必须写入 tombstone 且重复删除不产生第二行"
     );
     let events: i64 = conn
         .query_row("SELECT COUNT(*) FROM canonical_events", [], |row| {

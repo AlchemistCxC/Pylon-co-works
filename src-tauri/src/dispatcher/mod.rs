@@ -559,10 +559,24 @@ async fn handle_session_update<R: tauri::Runtime>(
             serde_json::Value::String(source.clone()),
         );
         if let Some(committed_event) = committed_event {
-            map.insert(
-                "canonicalEvent".to_string(),
-                serde_json::to_value(committed_event).unwrap_or(serde_json::Value::Null),
-            );
+            match serde_json::to_value(committed_event) {
+                Ok(value) => {
+                    map.insert("canonicalEvent".to_string(), value);
+                }
+                // #488 批⑤（审查修正措辞）：原先 unwrap_or(Null) 是**列值为 null**
+                // 下发——前端 cursor 对 null 归一失败会整帧丢弃并报消费错误；本批
+                // 改为**缺列**干净下发（前端按无 canonicalEvent 转发该帧）+ 后端
+                // warn 诊断。这是 ⑤ 红线「字段集合逐字保持」的预期内例外（该失败
+                // 分支当前不可达：CanonicalEventRow 全字段可序列化），已在 PR/issue
+                // 显式声明。
+                Err(error) => {
+                    tracing::warn!(
+                        source = %source,
+                        %error,
+                        "canonicalEvent 序列化失败，事件缺列下发"
+                    );
+                }
+            }
         }
     }
     // C1：广播旧轨已拆除——SESSION_UPDATE 出站选路单点化于 publish_route.rs

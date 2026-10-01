@@ -142,8 +142,9 @@ describe('normalizeStartupDiagnostics', () => {
       prism: { status: 'ready' },
     })
     expect(diagnostics.agentConfig).toEqual({ status: 'ready' })
-    const broken = normalizeStartupDiagnostics({ agentConfig: null, gatewayConfig: null, prism: null, storage: 'bad' })
-    expect(broken.storage).toBeUndefined()
+    // #482：storage 模式诊断已退役，多余字段不得混入归一结果。
+    const withUnknownFields = normalizeStartupDiagnostics({ agentConfig: null, gatewayConfig: null, prism: null, storage: 'bad' })
+    expect(Object.keys(withUnknownFields).sort()).toEqual(['agentConfig', 'gatewayConfig', 'prism'])
   })
 })
 

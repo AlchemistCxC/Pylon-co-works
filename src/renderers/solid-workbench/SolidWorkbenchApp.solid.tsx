@@ -5,8 +5,6 @@
  */
 import { ErrorBoundary } from 'solid-js'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
-import { prepareMessages } from '../../domains/chat/messagePipeline.ts'
-import type { Message, RenderMessage } from '../../domains/chat/messageTypes.ts'
 import { WorkbenchContent } from './WorkbenchContent.solid.tsx'
 
 // Compatibility export for the existing interaction kind contract/tests.
@@ -31,6 +29,3 @@ export function SolidWorkbenchApp(props: SolidWorkbenchAppProps) {
   )
 }
 
-export function previewRenderMessages(messages: readonly Message[]): readonly RenderMessage[] {
-  return prepareMessages([...messages])
-}

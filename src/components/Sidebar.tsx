@@ -1,8 +1,7 @@
 import { Fragment, Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronsUpDown, PawPrint, SlidersHorizontal } from 'lucide-react'
+import { ChevronsUpDown, SlidersHorizontal } from 'lucide-react'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
-import { useRightRailStore } from '../domains/workspace/layoutRailsStore'
 
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -77,8 +76,6 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
   const setActiveProfile = useIdentityStore(s => s.setActiveProfile)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const activeSession = ctx.activeSession
-  const showPet = useRightRailStore(s => s.showPet)
-  const setShowPet = useRightRailStore(s => s.setShowPet)
 
   const sharedProps = useSidebarContributionProps(ctx)
 
@@ -430,7 +427,6 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
         ))}
         </div>
         <button type="button" className="profile-edit" title="编辑当前 Profile" aria-label="编辑当前 Profile" onClick={ctx.openProfileEdit}><SlidersHorizontal size={15} aria-hidden="true" /></button>
-        <button type="button" className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-label={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}><PawPrint size={15} aria-hidden="true" /></button>
       </div>
     </aside>
   )

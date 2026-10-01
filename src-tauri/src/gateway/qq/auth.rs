@@ -7,6 +7,7 @@
 //! 本模块不读 env、不依赖 tauri）。已接线（B10.2）：QqAuth/get_gateway_url 由
 //! QQ 适配器与 WS 循环消费。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -57,7 +58,7 @@ impl QqAuth {
     }
 
     /// 获取有效 token，必要时刷新
-    #[allow(clippy::await_holding_invalid_type)] // refresh_lock 单飞：跨 await 持锁保证并发刷新只打一次 token 接口（double-check 模式）
+    // refresh_lock 单飞：跨 await 持锁保证并发刷新只打一次 token 接口（double-check 模式）
     pub async fn get_token(&self) -> Result<String, String> {
         // 快速路径: token 未过期
         {
@@ -70,7 +71,7 @@ impl QqAuth {
         }
 
         // 需要刷新 — 拿锁
-        let _lock = self.refresh_lock.lock().await;
+        let _lock = HeldAcrossAwait::new(self.refresh_lock.lock().await);
 
         // Double-check（可能被其他协程刷新了）
         {
@@ -202,7 +203,7 @@ mod tests {
     /// 单飞逻辑测试：无缓存 token 时 N 个并发 get_token 全部阻塞在 refresh_lock，
     /// 由唯一一次刷新写入（本测试注入）的 token 经 double-check 服务，
     /// 不产生任何额外刷新请求（额外刷新会打到真实 QQ API 而失败）。
-    #[allow(clippy::await_holding_invalid_type)] // 测试即单飞语义本体：测试进程持 refresh_lock 模拟唯一刷新者
+    // 测试即单飞语义本体：测试进程持 refresh_lock 模拟唯一刷新者
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_get_token_singleflight_no_extra_refresh() {
         let auth = std::sync::Arc::new(QqAuth::new(
@@ -212,7 +213,7 @@ mod tests {
         ));
 
         // 模拟唯一一次刷新者：先持有 refresh_lock
-        let lock_guard = auth.refresh_lock.lock().await;
+        let lock_guard = HeldAcrossAwait::new(auth.refresh_lock.lock().await);
 
         const N: usize = 32;
         let (tx, mut rx) = tokio::sync::mpsc::channel(N);

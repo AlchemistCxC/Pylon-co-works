@@ -1069,25 +1069,31 @@ impl EventRepo {
     /// B6 / #445：跨 owner 内容搜索——在 raw_payload / typed_payload / event_type 上做
     /// 大小写不敏感 LIKE，返回**命中行**定位（owner 三元组 + sequence/event_type/
     /// occurred_at + instr 偏移）。WHERE 三列与 pattern 构造与候选 owner 版一字不改
-    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐——query 不含
-    /// LIKE 通配符（`%`/`_`）字面量时，raw/typed 列命中的行 offset 必非 NULL
-    /// （通配符命中时 instr 可能定位不到字面量，offset 为 NULL，见 `EventSearchHit`）。
+    /// （recall 不变）；`lower()` 是 ASCII 折叠，与 NOCASE 语义对齐。#488 批③：query
+    /// 中的 LIKE 通配符（`%`/`_`）与转义符 `\` 一律按**字面量**匹配（`ESCAPE '\'`），
+    /// 用户输入不再被解释成通配符；instr 定位仍用原 query，offset 语义不变。
     /// 前端对命中行定向拉行后投影复核（匹配与命中同源）。limit 为命中行上限。
     pub fn search_hits(&self, query: &str, limit: u32) -> Result<Vec<EventSearchHit>, EventError> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
-        let pattern = format!("%{query}%");
+        // #488 批③：先转义转义符本身，再转义 `%`/`_`——顺序不可换（否则转义引入的
+        // 反斜杠会被二次转义）。
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
         let mut stmt = conn
             .prepare_cached(
                 "SELECT owner_key, remote_session_id, sequence, event_type, occurred_at,
                         NULLIF(instr(lower(raw_payload), lower(?2)), 0),
                         NULLIF(instr(lower(COALESCE(typed_payload, '')), lower(?2)), 0)
                  FROM canonical_events
-                 WHERE event_type LIKE ?1 COLLATE NOCASE
-                    OR raw_payload LIKE ?1 COLLATE NOCASE
-                    OR COALESCE(typed_payload, '') LIKE ?1 COLLATE NOCASE
+                 WHERE event_type LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR raw_payload LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR COALESCE(typed_payload, '') LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                  ORDER BY owner_key, sequence",
             )
             .map_err(EventError::from)?;

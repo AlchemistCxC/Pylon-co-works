@@ -112,9 +112,6 @@ export const THEME_FIELD_DEFS = {
   // 布局显隐并入 global zone（布局骨架组渲染在全局 tab），layout zone 无独立 tab/预设
   showTabBar: { ...B('global', '工作区标签栏'), default: true, group: "布局骨架" },
   showSidebar: { ...B('global', '左侧栏'), default: true, group: "布局骨架" },
-  // Compatibility value retained for legacy theme/preset payloads; the
-  // editable owner is workspaceStore's dedicated Pet section.
-  showPet: { ...B('global', '桌面宠物'), default: true, group: "布局骨架", hidden: true, hint: '由工作区 › 宠物统一编辑；旧主题值仅作兼容读取' },
 
   // ── sidebar ──
   sidebarBg: { ...C('sidebar', '侧栏背景色'), default: 'rgba(0,0,0,0.02)', group: "背景", semanticRole: 'surface.panel', semanticSource: true },
@@ -361,7 +358,6 @@ export type ThemeFieldOwner = 'theme' | 'workspace-layout' | 'right-rail'
 
 const THEME_FIELD_OWNER_OVERRIDES: Readonly<Partial<Record<ThemeFieldKey, ThemeFieldOwner>>> = Object.freeze({
   sidebarWidth: 'workspace-layout',
-  showPet: 'workspace-layout',
   rightWidth: 'right-rail',
 })
 

@@ -15,6 +15,11 @@ rusqlite = { version = "0.40", default-features = false, features = ["bundled", 
 pylon-canonical-types = { path = "../pylon-canonical-types" }
 pylon-foundations = { path = "../pylon-foundations" }
 
+# #484：跨 crate 测试断言 tombstone 中间态专用（本 crate 内测试直接 SQL 查询，不走此口）。
+# 消费方（pylon）经 dev-dependencies 启用，生产构建不含该 API。
+[features]
+test-support = []
+
 # #414：接入 workspace 级 lint 清单（src-tauri/Cargo.toml [workspace.lints]）。
 [lints]
 workspace = true

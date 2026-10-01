@@ -1,7 +1,7 @@
 /**
  * 区域层 · 出厂区域预设数据 —— terminal 桶 / global 区域（刀2 / #223）。
  *
- * ★ **本文件是出厂区域预设的落盘数据（刀2 / #223 产出）；生成脚本已于刀3 删除，请勿手改。**
+ * ★ **本文件是出厂区域预设的落盘数据（刀2 / #223 产出）；生成脚本已于刀3 删除——本文件即真值本体，手改即生效（#488 批⑥）。**
  *   它是**唯一真值**：10 套出厂预设的有效值由它算出（`effectivePresetTheme`）——
  *   改这里的任何一个值，等于改掉所有引用它的预设。历史来源见 `.agents/records/issue-223-factory-zone-presets-as-data.md`。
  * 值 = 生成时刻的 `pickZoneFields(GLOBAL_PRESETS[来源].theme, 'global')`，逐字段照抄
@@ -34,7 +34,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#D77757",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -61,7 +60,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#88c0d0",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -88,7 +86,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#bb9af7",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -115,7 +112,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#ffb000",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {
@@ -142,7 +138,6 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#7fff00",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
 ]
