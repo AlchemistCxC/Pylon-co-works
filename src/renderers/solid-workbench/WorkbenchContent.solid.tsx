@@ -66,43 +66,19 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
   const document = () => snapshot().document
   // P52 D5：transient 流字段已死（D3 后无生产写入者）——canonical running 行
   // 是唯一流式显示；此前的 transient 兜底 memo 与 appendTransient 注入随之退役。
-  // #441-A：canonical/legacy 数组引用都未变时直接复用上次结果（tool/usage 等事件的
+  // #441-A：canonical 数组引用未变时直接复用上次结果（tool/usage 等事件的
   // 发布不改 messages 引用，`reduceTool` 只换 activities/timeline）。安全性前提与
   // `prepareMessagesOf` 同：快照冻结数组 + COW 纪律。
-  let lastViewInputs: {
-    readonly canonical: readonly WorkbenchMessage[] | undefined
-    readonly legacy: readonly Message[]
-  } | undefined
+  // #487：legacy 快照 messages 面（含预览宿主 tool 行合并）退役——document.messages
+  // 是唯一消息所有者，与生产/预览/回放同构。
+  let lastViewCanonical: readonly WorkbenchMessage[] | undefined
   let lastView: readonly Message[] = []
   const viewMessages = createMemo<readonly Message[]>(() => {
-    const legacy = snapshot().messages
-    const projected = document()?.messages
-    const inputs = lastViewInputs
-    if (inputs !== undefined && inputs.canonical === projected && inputs.legacy === legacy) return lastView
-    // Canonical document messages are the sole owner whenever available. The
-    // legacy list remains only as a compatibility fallback for preview hosts
-    // that have not mounted a WorkbenchDocument yet (including legacy tool
-    // rows); mixing the two lists would reintroduce duplicate stream owners.
-    const canonical = projected ?? []
-    const base = canonical.length === 0 && legacy.length > 0
-      ? legacy
-      : (() => {
-        const legacyToolIds = new Set(legacy.filter(message => message.role === 'tool').map(message => message.id))
-        const mapped = canonical
-          .filter(message => !(legacyToolIds.has(message.id) && message.role === 'assistant' && message.content.length === 0))
-          .map(toSolidMessage)
-        // Legacy preview hosts still expose tool rows before their activity
-        // projection is available. Preserve those non-text rows without merging
-        // legacy assistant/reasoning rows back into the canonical stream.
-        // (P57 S2-R3：mapped 是本 memo 新建数组，直接追加 legacy tool 行，省一次展开拷贝。)
-        for (const message of legacy) {
-          if (message.role === 'tool') mapped.push(message)
-        }
-        return mapped
-      })()
-    lastViewInputs = { canonical: projected, legacy }
-    lastView = base
-    return base
+    const canonical = document()?.messages ?? []
+    if (lastViewCanonical === canonical) return lastView
+    lastViewCanonical = canonical
+    lastView = canonical.map(toSolidMessage)
+    return lastView
   })
   const renderMessages = createMemo(() => prepareMessagesOf(viewMessages()))
   const searchMatches = createMemo(() => {

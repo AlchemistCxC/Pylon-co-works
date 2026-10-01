@@ -15,28 +15,13 @@ import { registerBuiltinBrowserAgentSessionAccess } from '../core/browser/builti
 
 const SessionsPanel = lazy(() => import('../../components/sidebar/SessionsPanel.tsx'))
 const SearchPanel = lazy(() => import('../../components/sidebar/SearchPanel.tsx'))
-const ScheduledBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.ScheduledBlock })))
-const AutomationBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.AutomationBlock })))
-const TasksBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.TasksBlock })))
-const ExtensionsBlock = lazy(() => import('../../components/sidebar/blocks/mockBlocks.tsx').then(m => ({ default: m.ExtensionsBlock })))
 const AgentContextPanel = lazy(() => import('../../components/right-panel/AgentContextPanel.tsx'))
 const FileContextPanel = lazy(() => import('../../components/right-panel/FileContextPanel.tsx'))
 
 /**
- * 左栏「模块区」的占位区块。**这是 mock**：只验证模块栈模型（次序、折叠、图标、
- * 点击语义、整页、拖拽重排、显隐），不接任何域。
- * - 「定时」声明 `page` 且默认点击语义 → 标题展开 + 头部自动「打开」按钮（用户说的「都要」）
- * - 「自动化」`onTitleClick: 'page'` → 点击直接进入主区整页，折叠改由独立折叠钮负责
- * - 「任务」「扩展」只有折叠，用来对照
- * 真实能力落地时逐个替换 `component` 即可，宿主外壳与这些声明协议都不需要再动。
+ * 左栏「模块区」的真实模块（搜索 + 会话）。搜索是独立面板（可隐藏/拖走），
+ * 会话是常开模块——同一条注册表、同一套折叠/图标/点击语义。
  */
-const MOCK_MODULE_BLOCKS = [
-  { id: 'builtin.sidebar.module.scheduled', label: '定时', icon: 'clock', order: 100, component: ScheduledBlock, page: { title: '定时' } },
-  { id: 'builtin.sidebar.module.automation', label: '自动化', icon: 'waypoints', order: 200, component: AutomationBlock, page: { title: '自动化' }, onTitleClick: 'page' as const },
-  { id: 'builtin.sidebar.module.tasks', label: '任务', icon: 'layout-dashboard', order: 300, component: TasksBlock },
-  { id: 'builtin.sidebar.module.extensions', label: '扩展', icon: 'boxes', order: 400, component: ExtensionsBlock },
-] as const
-
 export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
   return {
     id: BUILTIN_PYLON_WORKSPACE_ID,
@@ -68,18 +53,6 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         renderKind: 'first-party-react',
         component: SessionsPanel,
       })
-      for (const block of MOCK_MODULE_BLOCKS) {
-        context.sidebar.registerAgentSidebarContribution({
-          id: block.id,
-          label: block.label,
-          icon: block.icon,
-          order: block.order,
-          renderKind: 'first-party-react',
-          component: block.component,
-          ...('page' in block ? { page: block.page } : {}),
-          ...('onTitleClick' in block ? { onTitleClick: block.onTitleClick } : {}),
-        })
-      }
       for (const contribution of BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS) context.fileWorkbench.register(contribution)
       for (const command of [...createBuiltinFileCommandDefinitions(), ...createBuiltinWorkspaceCommandDefinitions(), ...createBuiltinBrowserCommandDefinitions()]) {
         context.commands.register(command, { contributionId: `${BUILTIN_PYLON_WORKSPACE_ID}.${command.id}`, layer: 'feature', priority: command.priority })

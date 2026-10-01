@@ -9,11 +9,15 @@
 # 属性能反模式：确需跨 await 传递数据时，先克隆出所需字段或缩短临界区，
 # 而不是让守卫活着穿过 await 点。执行语义是基线棘轮「相对
 # artifacts/clippy-baseline.json 零新增」（AGENTS.md §2.4）。
+# （#488 批②）`allow-invalid = true`：部分 crate（如 pylon-foundations）的依赖图
+# 里没有 tokio，条目类型在该 crate 内不可达——clippy 会为这种情况发「does not
+# refer to a reachable type」元告警。此旗只静默该元告警，lint 本身在类型可达的
+# crate 照常生效。
 await-holding-invalid-types = [
-  { path = "tokio::sync::MutexGuard", reason = "持 tokio Mutex 跨 .await 会串行化其它任务；先克隆数据或缩短临界区" },
-  { path = "tokio::sync::OwnedMutexGuard", reason = "同 MutexGuard：不要跨 .await 持有" },
-  { path = "tokio::sync::RwLockReadGuard", reason = "读锁跨 .await 会饿死写者" },
-  { path = "tokio::sync::RwLockWriteGuard", reason = "写锁跨 .await 会串行化全部任务" },
-  { path = "tokio::sync::OwnedRwLockReadGuard", reason = "同 RwLockReadGuard：读锁不要跨 .await" },
-  { path = "tokio::sync::OwnedRwLockWriteGuard", reason = "同 RwLockWriteGuard：写锁不要跨 .await" },
+  { path = "tokio::sync::MutexGuard", reason = "持 tokio Mutex 跨 .await 会串行化其它任务；先克隆数据或缩短临界区", allow-invalid = true },
+  { path = "tokio::sync::OwnedMutexGuard", reason = "同 MutexGuard：不要跨 .await 持有", allow-invalid = true },
+  { path = "tokio::sync::RwLockReadGuard", reason = "读锁跨 .await 会饿死写者", allow-invalid = true },
+  { path = "tokio::sync::RwLockWriteGuard", reason = "写锁跨 .await 会串行化全部任务", allow-invalid = true },
+  { path = "tokio::sync::OwnedRwLockReadGuard", reason = "同 RwLockReadGuard：读锁不要跨 .await", allow-invalid = true },
+  { path = "tokio::sync::OwnedRwLockWriteGuard", reason = "同 RwLockWriteGuard：写锁不要跨 .await", allow-invalid = true },
 ]

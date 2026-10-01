@@ -91,10 +91,19 @@ describe('issue 5 reasoning segmentation regression', () => {
     services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), { ownerKey: 'owner-preview', generation: 1 })
     const text = '这是一个连续的思考过程，不应该每几个字符换段。'
     // P52 D5：逐字符流由 canonical running reasoning 行承载（transient 字段已删除）。
+    // #487：预览面与生产同构——流式行经 applyDocument 进 canonical document。
     let acc = ''
+    const base = services.runtime.getSnapshot().document!
     for (const char of [...text]) {
       acc += char
-      services.runtime.update({ messages: [{ id: 'm-think', role: 'reasoning', sender: 'peri', content: acc, time: '10:00', running: true }], generating: true })
+      services.runtime.applyDocument({
+        ...base,
+        messages: [{
+          id: 'm-think', segmentId: 'm-think', role: 'reasoning', content: acc, parts: [],
+          identity: {}, source: { provider: 'peri', sourceId: 'peri' }, sequence: 1,
+          running: true, time: '2026-08-26T10:00:00.000Z',
+        }],
+      }, { ownerKey: 'owner-preview', generation: 1 })
     }
     const body = await waitFor(() => {
       const found = host.querySelector('.solid-workbench-chat .term-reasoning-body')

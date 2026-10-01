@@ -4,6 +4,7 @@
 //! ACP-02：options 从 `Vec<String>` 升级为 [`PermissionOption`]（typed wire），
 //! kind/name 宽容保留、optionId 原值不正规化（§5.5）。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
@@ -489,7 +490,6 @@ pub(crate) async fn respond_interaction(
 /// #463 后端 C-1：内存写与落盘全程持 `approval_mode_write_lock`——并发 set
 /// （GUI 与 CLI 桥同进程）串行化，磁盘必为最后一次 set（tokio Mutex 公平取锁，
 /// 临界区内无基于旧值的读改写，故锁序即生效序）。
-#[allow(clippy::await_holding_invalid_type)]
 // approval_mode_write_lock 跨 await：串行「内存写→落盘」全窗口，防写完成序可逆（与 config_write_lock 同型）
 #[tauri::command]
 pub(crate) async fn set_approval_mode(
@@ -501,7 +501,7 @@ pub(crate) async fn set_approval_mode(
             "unknown approval mode: {mode}"
         )));
     }
-    let _write_guard = state.approval_mode_write_lock.lock().await;
+    let _write_guard = HeldAcrossAwait::new(state.approval_mode_write_lock.lock().await);
     *state.approval_mode.lock().map_err(|e| e.to_string())? = mode.clone();
     let service = state
         .user_data_service
@@ -653,6 +653,48 @@ pub(crate) struct PrivateInteractionTimeoutOutcome {
     pub request_id: RequestId,
     pub client_generation: u64,
     pub kind: String,
+}
+
+/// #488 批⑤：`permission.resolved` / `interaction.resolved` 终态事件
+/// （`event_names::INTERACTION` 频道）的**单一构造点**。收敛前是 5 处复制粘贴的
+/// json! 变体（客户端替换 drain ×2 / 超时 sweep ×2 / elicitation 完成 ×1），字段
+/// 集合各自手拼、易漂移；新增终态来源只改这里。字段口径以断线 drain 版为基准：
+/// permission 变体带 `optionId`（无值传空串），interaction 变体带 `kind`；前端按
+/// agentId+requestId+clientGeneration settle，与 session 无关。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolvedInteractionEvent<'a> {
+    Permission { option_id: &'a str },
+    Interaction { kind: &'a str },
+}
+
+pub(crate) fn resolved_interaction_payload(
+    resolved: ResolvedInteractionEvent<'_>,
+    agent_id: &str,
+    session_id: &str,
+    request_id: &str,
+    client_generation: u64,
+    reason: &str,
+) -> serde_json::Value {
+    match resolved {
+        ResolvedInteractionEvent::Permission { option_id } => serde_json::json!({
+            "eventType": "permission.resolved",
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id,
+            "clientGeneration": client_generation,
+            "optionId": option_id,
+            "reason": reason,
+        }),
+        ResolvedInteractionEvent::Interaction { kind } => serde_json::json!({
+            "eventType": "interaction.resolved",
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "requestId": request_id,
+            "clientGeneration": client_generation,
+            "kind": kind,
+            "reason": reason,
+        }),
+    }
 }
 
 /// #356：私有交互超时的默认回包（产品裁决落在这一处）。
@@ -827,7 +869,57 @@ pub(crate) async fn sweep_interaction_timeouts(
 
 #[cfg(test)]
 mod tests {
+    use super::ResolvedInteractionEvent;
     use crate::private_interaction::PendingPrivateInteraction;
+
+    /// #488 批⑤：终态事件单一构造点的形状钉——两个变体的字段集合与既有
+    /// wire 消费面（前端按 agentId+requestId+clientGeneration settle）互钉，
+    /// 防收敛后新增来源时字段漂移。
+    #[test]
+    fn resolved_interaction_payload_pins_both_wire_shapes() {
+        let permission = super::resolved_interaction_payload(
+            ResolvedInteractionEvent::Permission { option_id: "allow" },
+            "peri",
+            "s1",
+            "7",
+            5,
+            "timed_out",
+        );
+        assert_eq!(
+            permission,
+            serde_json::json!({
+                "eventType": "permission.resolved",
+                "agentId": "peri",
+                "sessionId": "s1",
+                "requestId": "7",
+                "clientGeneration": 5,
+                "optionId": "allow",
+                "reason": "timed_out",
+            })
+        );
+        let interaction = super::resolved_interaction_payload(
+            ResolvedInteractionEvent::Interaction {
+                kind: "elicitation",
+            },
+            "peri",
+            "s1",
+            "7",
+            5,
+            "completed",
+        );
+        assert_eq!(
+            interaction,
+            serde_json::json!({
+                "eventType": "interaction.resolved",
+                "agentId": "peri",
+                "sessionId": "s1",
+                "requestId": "7",
+                "clientGeneration": 5,
+                "kind": "elicitation",
+                "reason": "completed",
+            })
+        );
+    }
 
     fn private_elicitation_pending() -> PendingPrivateInteraction {
         PendingPrivateInteraction {

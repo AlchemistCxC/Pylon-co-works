@@ -69,7 +69,7 @@ describe('Workspace Registry（阶段 6 首个切片）', () => {
     expect(resolveSheetSingletonKey({ kind: 'agent', agentId: 'a1' })).toBe('agent:a1')
     expect(resolveSheetSingletonKey({ kind: 'agent', agentId: undefined })).toBeUndefined()
     expect(resolveSheetSingletonKey({ kind: 'file', singletonKey: 'file:src/a.ts' })).toBe('file:src/a.ts')
-    expect(resolveSheetSingletonKey({ kind: 'prism' })).toBe('prism')
+    expect(resolveSheetSingletonKey({ kind: 'runtime' })).toBe('runtime')
   })
 
   it('register/unregister 驱动 revision 并保持快照稳定', () => {

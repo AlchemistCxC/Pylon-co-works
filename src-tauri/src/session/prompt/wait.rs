@@ -3,6 +3,7 @@
 //! W3 重构批次 S1 纯搬移自 session/prompt.rs（行为零变化）。
 
 use super::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 // #425 件6：发起路径两位点（ensure 失败 / 用户消息送出）经感知 sink。
 use crate::dispatcher::reactions::KernelReactionSink;
 
@@ -286,7 +287,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     result
 }
 
-#[allow(clippy::await_holding_invalid_type)] // prompt_lock/prompt_gate 单飞（B3）：同 source/同实例同时刻最多一个 prompt；cancel 闭包同持 acp 锁（方案 5）
+// prompt_lock/prompt_gate 单飞（B3）：同 source/同实例同时刻最多一个 prompt；cancel 闭包同持 acp 锁（方案 5）
 async fn send_prompt_core_impl<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -342,13 +343,14 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         None => state.wire_mcp_servers()?,
     };
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
-    let _prompt_guard = prompt_lock.lock().await;
+    let _prompt_guard = HeldAcrossAwait::new(prompt_lock.lock().await);
     // B3（§4.4）：同一实例同一时刻最多一个 prompt——跨 source 的第二个并发
     // prompt 立即失败（稳定码），不排队：排队会让两条对话在用户看不到的地
     // 方互相阻塞，超限显形比静默串行可诊断。
-    let _instance_prompt_gate = runtime.prompt_gate.clone().try_lock_owned().map_err(|_| {
-        PylonError::Protocol("prompt_in_progress: 该 Agent 实例已有进行中的 prompt".to_string())
-    })?;
+    let _instance_prompt_gate =
+        HeldAcrossAwait::new(runtime.prompt_gate.clone().try_lock_owned().map_err(|_| {
+            PylonError::Protocol("prompt_in_progress: 该 Agent 实例已有进行中的 prompt".to_string())
+        })?);
 
     // G2-08 锁合并：updated_at 刷新移入 ensure_session_mapping 的存在性读取
     // （guard 内一次 sessions.lock() 完成"刷新 + 存在性读取 + is_first"）——
@@ -652,9 +654,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         cancel_requested,
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_recovery 泛型边界）
-            acp_for_cancel
-                .lock()
-                .await
+            HeldAcrossAwait::new(acp_for_cancel.lock().await)
                 .cancel_session(&peri_id_for_cancel)
                 .await
                 .map_err(|e| e.to_string())

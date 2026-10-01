@@ -5,7 +5,6 @@ const styleModules = typeof document === 'undefined'
   : import.meta.glob<string>([
   './styles/SheetVocabulary.css',
   './styles/adaptive.css',
-  './styles/components/PrismSheet.css',
   './styles/components/Sidebar.css',
   './styles/components/right-panel/ContextPanel.css',
   './styles/sheets/OverviewSheetView.css',

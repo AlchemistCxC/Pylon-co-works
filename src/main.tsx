@@ -11,6 +11,10 @@ import './index.css'
 // 只读消费 index.css token；必须在 index.css 之后引入。
 import './styles/tailwind.css'
 import { startupMark } from './app/startupTiming'
+// #488 批⑦：前端诊断日志统一出口——先于各桥安装，桥内诊断即可进 runtime log。
+import { installTauriFrontendLogSink } from './infrastructure/tauri/frontendLogSink'
+
+installTauriFrontendLogSink()
 
 // #269：前端最早可插桩点（模块求值起点）——import 求值成本不计入，
 // 与 performance.timeOrigin 的差值即脚本求值前开销。

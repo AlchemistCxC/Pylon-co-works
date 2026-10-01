@@ -108,7 +108,6 @@ fn validate_delete_owner_none_passthrough_some_validated() {
 fn begin_delete_removes_canonical_events_for_the_same_owner() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch s1");
     let evt = parse_canonical_event(&event_json(["p1", "a1", "s1"], 1)).expect("parse event");
     let other =
         parse_canonical_event(&event_json(["p2", "b2", "s1"], 1)).expect("parse other owner");
@@ -163,7 +162,6 @@ fn begin_delete_removes_canonical_events_for_the_same_owner() {
 fn legacy_delete_without_owner_key_keeps_events() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch s1");
     let evt = parse_canonical_event(&event_json(["p1", "a1", "s1"], 1)).expect("parse event");
     let evt_repo = EventRepo::open(&path).expect("open event repo");
     evt_repo.append_events(&[evt], None).expect("append event");
@@ -191,9 +189,6 @@ fn legacy_delete_without_owner_key_keeps_events() {
 fn purge_tombstoned_events_respects_grace_period_and_keeps_tombstones() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    for session in ["old", "fresh", "deleting"] {
-        repo.touch_session(session).expect("touch");
-    }
     let evt_repo = EventRepo::open(&path).expect("open event repo");
     // append 批次不得跨 owner（repository 契约）——逐 owner 写入。
     for session in ["old", "fresh", "deleting"] {
@@ -268,7 +263,6 @@ fn checkpoint_wal_is_idempotent() {
 fn finalize_transitions_deleting_to_deleted() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open");
-    repo.touch_session("s1").expect("touch");
     repo.begin_delete_session("s1", None).expect("begin");
     assert_eq!(
         repo.tombstone_state("s1").expect("state").as_deref(),
@@ -290,7 +284,6 @@ fn finalize_transitions_deleting_to_deleted() {
 fn deleting_tombstone_still_gates_late_evt_append() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open");
-    repo.touch_session("s1").expect("touch");
     repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("begin delete");
     let late = parse_canonical_event(&event_json(["p1", "a1", "s1"], 2)).expect("parse late");
@@ -314,7 +307,6 @@ fn finalize_is_owner_scoped_and_same_owner_begin_is_idempotent() {
     // 无 tombstone：finalize no-op（不报错）。
     repo.finalize_session_delete("ghost", None)
         .expect("finalize missing is no-op");
-    repo.touch_session("s1").expect("touch");
     repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("begin 1");
     // 相同 owner 重复 begin：INSERT OR IGNORE 幂等。

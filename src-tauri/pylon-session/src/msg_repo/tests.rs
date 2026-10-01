@@ -1,5 +1,18 @@
 use super::*;
 
+/// 测试内 tombstone state 读取（替代已删除的产品方法 `tombstone_state`：生产 gate 只查存在性，
+/// 读 state 是测试断言专用）。None = 无 tombstone。
+fn tombstone_state(repo: &MsgRepo, session_id: &str) -> Option<String> {
+    let conn = repo.conn.lock().unwrap();
+    conn.query_row(
+        "SELECT state FROM deleted_sessions WHERE session_id = ?1",
+        params![session_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .expect("query tombstone state")
+}
+
 fn unique_temp_db_path() -> std::path::PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -350,8 +363,10 @@ fn owner_tombstone_deletes_and_blocks_only_the_matching_snapshot() {
     }
 
     let owner_a_key = owner_a.key().expect("owner key");
-    repo.delete_session("shared", Some(&owner_a_key))
+    repo.begin_delete_session("shared", Some(&owner_a_key))
         .expect("delete owner a");
+    repo.finalize_session_delete("shared", Some(&owner_a_key))
+        .expect("finalize owner a");
 
     assert!(repo
         .get_session_state_for_owner(&owner_a)
@@ -377,67 +392,45 @@ fn owner_tombstone_deletes_and_blocks_only_the_matching_snapshot() {
 }
 
 #[test]
-fn touch_session_rejects_tombstoned_session() {
-    let repo = MsgRepo::open_in_memory().expect("open");
-    repo.touch_session("s1").expect("touch");
-    repo.delete_session("s1", None).expect("delete");
-    assert!(
-        repo.touch_session("s1").is_err(),
-        "已删除会话 touch 必须被 tombstone 拒绝（不复活）"
-    );
-}
-
-#[test]
 fn delete_session_writes_tombstone_and_keeps_canonical_events() {
     let repo = MsgRepo::open_in_memory().expect("open");
-    repo.touch_session("s1").expect("touch");
-    repo.delete_session("s1", Some(r#"["p1","a1","s1"]"#))
+    repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("delete");
-    assert_eq!(
-        repo.tombstone_state("s1").expect("state").as_deref(),
-        Some("deleted")
-    );
-    assert_eq!(repo.tombstone_state("ghost").expect("state"), None);
+    repo.finalize_session_delete("s1", Some(r#"["p1","a1","s1"]"#))
+        .expect("finalize");
+    assert_eq!(tombstone_state(&repo, "s1").as_deref(), Some("deleted"));
+    assert_eq!(tombstone_state(&repo, "ghost"), None);
     let conn = repo.conn.lock().unwrap();
     let events: i64 = conn
         .query_row("SELECT COUNT(*) FROM canonical_events", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
         events, 0,
-        "无事件场景保持 0；delete_session 不清理 canonical_events 行"
+        "无事件场景保持 0；删除不清理 canonical_events 行"
     );
 }
 
 #[test]
 fn begin_delete_and_finalize_transitions_deleting_to_deleted() {
     let repo = MsgRepo::open_in_memory().expect("open");
-    repo.touch_session("s1").expect("touch");
     repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("begin");
-    assert_eq!(
-        repo.tombstone_state("s1").expect("state").as_deref(),
-        Some("deleting")
-    );
-    // deleting 同样 gate 迟到 touch（不复活）
-    assert!(
-        repo.touch_session("s1").is_err(),
-        "deleting 进行中迟到写必须拒绝"
-    );
+    assert_eq!(tombstone_state(&repo, "s1").as_deref(), Some("deleting"));
+    // deleting 同样 gate 迟到状态写（不复活）
+    let owner = crate::owner::DurableSessionOwner::new("p1", "a1", "s1");
+    let late_error = repo
+        .set_session_state_for_owner(&owner, None, &serde_json::json!({"late": true}))
+        .expect_err("deleting 进行中迟到写必须拒绝");
+    assert!(matches!(late_error, MessageError::SessionDeleted(_)));
     repo.finalize_session_delete("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("finalize");
-    assert_eq!(
-        repo.tombstone_state("s1").expect("state").as_deref(),
-        Some("deleted")
-    );
+    assert_eq!(tombstone_state(&repo, "s1").as_deref(), Some("deleted"));
     // 幂等：重复 begin/finalize
     repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("begin idempotent");
     repo.finalize_session_delete("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("finalize idempotent");
-    assert_eq!(
-        repo.tombstone_state("s1").expect("state").as_deref(),
-        Some("deleted")
-    );
+    assert_eq!(tombstone_state(&repo, "s1").as_deref(), Some("deleted"));
 }
 
 // ── ISSUE-20 W4：rusqlite 错误分类（corrupt/constraint/conflict/unavailable）──

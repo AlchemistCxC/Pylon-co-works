@@ -75,7 +75,7 @@ Rust 侧性能反模式按「clippy 能否机械判定」分两半。执行语�
 
 - 配置两处：仓库根 `clippy.toml`（`await-holding-invalid-types` 列 tokio 锁卫全家族：`MutexGuard`/`OwnedMutexGuard`/`RwLock{Read,Write}Guard`/`Owned*`）+ `src-tauri/Cargo.toml` 的 `[workspace.lints.clippy]`（nursery 的 `redundant_clone`）。新增 member crate 必须接 `[lints] workspace = true`，否则清单对该 crate 不生效。
 - 默认 warn、已在棘轮内的（不重复登记）：`await_holding_lock`/`await_holding_refcell_ref`（std 锁与 RefCell 跨 await）、`regex-creation-in-loops`（循环内编译正则）、`unbuffered-bytes` 等 perf 家族。
-- **有意持锁跨 await 的写法**：命名守卫表达串行化意图（`_lifecycle_guard`/`refresh_lock` 单飞等），函数级 `#[allow(clippy::await_holding_invalid_type)]` 附设计依据；意外宽持锁（如 `if let Some(x) = lock().await.remove(..)` 的检视位临时守卫活过分支体、id 分配锁卫跨第二把锁）必须真重构，不许 allow。
+- **有意持锁跨 await 的写法（#488 批② 起收口）**：命名守卫表达串行化意图（`_lifecycle_guard`/`refresh_lock` 单飞等），守卫包进 `pylon_foundations::await_guard::HeldAcrossAwait::new(...)` 显式声明意图，使用点保留锁序注释（持有的锁名 + 为什么串行化是语义）；`#[allow(clippy::await_holding_invalid_type)]` 的裸写法全仓**禁止**（`scripts/check-await-holding.mjs` 规则 1 拦截，随 `check:clippy` 链与 CI 执行），新增/增减 `HeldAcrossAwait` 使用点须同步该脚本的 INVENTORY 对账清单。意外宽持锁（如 `if let Some(x) = lock().await.remove(..)` 的检视位临时守卫活过分支体、id 分配锁卫跨第二把锁）必须真重构，不许收口包过。
 
 **非机械可拦（review checklist + grep 线索）**
 

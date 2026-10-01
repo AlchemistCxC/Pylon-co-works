@@ -6,7 +6,6 @@ const appCss = read('src/plugins/product/packages/builtin.pylon-shell/styles/App
 const sidebarCss = read('src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css')
 const overviewCss = read('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css')
 const fileCss = read('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/file/FileSheet.css')
-const prismCss = read('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css')
 
 /**
  * 取选择器列表中**恰好包含**该选择器的规则体。
@@ -32,7 +31,6 @@ const FIRST_PARTY_CSS = [
   sidebarCss,
   overviewCss,
   fileCss,
-  prismCss,
   read('src/plugins/product/packages/builtin.pylon-workspace/styles/SheetVocabulary.css'),
   read('src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css'),
   read('src/plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css'),
@@ -79,8 +77,8 @@ describe('#154 左列统一模型 CSS 契约', () => {
   })
 
   it('各 Sheet 的左栏 CSS 不再自画竖边框', () => {
-    for (const selector of ['.overview-sidebar', '.file-sidebar', '.ps-nav']) {
-      for (const body of ruleBodies(overviewCss + fileCss + prismCss, selector)) {
+    for (const selector of ['.overview-sidebar', '.file-sidebar']) {
+      for (const body of ruleBodies(overviewCss + fileCss, selector)) {
         expect(body, `${selector} 不得自带竖边框`).not.toMatch(/border-right/)
       }
     }
@@ -91,7 +89,7 @@ describe('#154 左列统一模型 CSS 契约', () => {
     const allCollapsed = collapsedRules.join('\n')
     expect(collapsedRules.length, '缺少折叠态规则').toBeGreaterThan(0)
     expect(allCollapsed).toContain('visibility:hidden')
-    // 各 Sheet 左栏自带内边距（gateway/search/history 的 px-3、ps-nav 的 padding）；
+    // 各 Sheet 左栏自带内边距（gateway/search/history 的 px-3 等）；
     // box-sizing:border-box 下即使 width:0，盒子也不会小于 padding 之和——实测
     // Gateway 折叠后残留 24px。折叠态必须把内边距一并归零，「折叠 = 0 宽」才成立。
     expect(allCollapsed, '折叠态未归零内边距 → 会残留 padding 宽度').toMatch(/padding:\s*0/)
