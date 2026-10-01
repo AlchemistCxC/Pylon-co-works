@@ -1,35 +1,24 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
-import closer from '../assets/tactical/closer.png'
-import falling from '../assets/tactical/falling.png'
-import { useTacticalSceneStore } from './tacticalSceneStore'
+import SolidMount from '../host/SolidMount'
 
-/** A decorative plane only. It cannot intercept clicks or move operational controls. */
+/**
+ * TacticalScene — tactical-blue 的装饰场景平面。
+ *
+ * 本文件是 interfaceModeScenes（React 世界）与 Solid 实体之间的**薄桥 + 加载缝**：
+ * 实体在 `TacticalScene.solid.tsx`（React 类型图不触碰 .solid 文件，P52 D4 同构，
+ * 模块接口在此声明）。
+ * A decorative plane only. It cannot intercept clicks or move operational controls.
+ */
+
+/** Solid 实体的模块接口（React 类型图内的唯一事实）。 */
+interface TacticalSceneSolidModule {
+  mountTacticalScene(container: HTMLElement): () => void
+}
+
+const modules = import.meta.glob<TacticalSceneSolidModule>('./TacticalScene.solid.tsx', { eager: true })
+const solidModule = modules['./TacticalScene.solid.tsx']
+if (!solidModule) throw new Error('TacticalScene Solid 实体未进入 Vite module graph')
+
+// #515：实体在 TacticalScene.solid.tsx，本文件是 React 世界薄桥（批7 拆除）。
 export default function TacticalScene() {
-  const { artwork, opacity, motion } = useTacticalSceneStore()
-  const plane = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const element = plane.current
-    if (!element) return
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    let frame = 0
-    const reset = () => { element.style.setProperty('--scene-x', '0px'); element.style.setProperty('--scene-y', '0px') }
-    const move = (event: PointerEvent) => {
-      if (!motion || media.matches || event.pointerType === 'touch') return
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        element.style.setProperty('--scene-x', `${(event.clientX / window.innerWidth - 0.5) * 14}px`)
-        element.style.setProperty('--scene-y', `${(event.clientY / window.innerHeight - 0.5) * 10}px`)
-      })
-    }
-    const reduce = () => { cancelAnimationFrame(frame); reset() }
-    window.addEventListener('pointermove', move, { passive: true })
-    window.addEventListener('blur', reduce)
-    media.addEventListener('change', reduce)
-    return () => { cancelAnimationFrame(frame); reset(); window.removeEventListener('pointermove', move); window.removeEventListener('blur', reduce); media.removeEventListener('change', reduce) }
-  }, [motion])
-  return <div ref={plane} className="tactical-scene" aria-hidden="true" data-motion={motion ? 'on' : 'off'} style={{ '--scene-opacity': opacity } as CSSProperties}>
-    <img className="tactical-scene-art" src={closer} alt="" data-visible={artwork === 'closer'} draggable={false} />
-    <img className="tactical-scene-art" src={falling} alt="" data-visible={artwork === 'falling'} draggable={false} />
-    <div className="tactical-scene-shade" />
-  </div>
+  return <SolidMount initial={{}} mount={container => solidModule.mountTacticalScene(container)} />
 }

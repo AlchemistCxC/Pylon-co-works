@@ -56,6 +56,8 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   // C 类：Renderer Suite fatal 回退链过程日志（含少量 B 类注册噪音）
   'src/application/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
   'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
+  // #515：上项的 Solid 实体直连测试（同族 feed 注册噪音/错误路径契约）。
+  'src/sheets/__tests__/AgentSheetView.solid.test.tsx',
   // A 类：错误路径契约
   'src/domains/identity/__tests__/identityStore.hydration.test.ts',
   'src/__tests__/replay/canonicalEventFeed.test.ts',
@@ -68,8 +70,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
   // #422：凭证门禁错误路径（config_verification_required / 连接测试失败）刻意触发
   // reportRuntimeError 的 console.error——与上面 AgentRuntimePanel 同族的预期契约。
-  'src/components/settings/__tests__/AgentConfigEditor.test.tsx',
-  'src/components/settings/__tests__/GatewayRiskPanel.test.tsx',
+  // #515：两文件实体已迁 .solid.tsx，测试随之改名（同一错误路径契约，白名单跟随）。
+  'src/components/settings/__tests__/AgentConfigEditor.solid.test.tsx',
+  'src/components/settings/__tests__/GatewayRiskPanel.solid.test.tsx',
   'src/components/settings/__tests__/PluginManager.test.tsx',
   'src/components/__tests__/ErrorCenter.test.tsx',
   'src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx',
@@ -83,7 +86,7 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/sheets/file/__tests__/gitPanelAcceptance.test.tsx',
   'src/sheets/gateway/__tests__/gatewayRouteSave.integration.test.tsx',
   'src/sheets/gateway/__tests__/gatewaySheetView.ui.test.tsx',
-  'src/sheets/__tests__/OverviewSheetView.visual.test.tsx',
+  'src/sheets/__tests__/OverviewSheetView.visual.solid.test.tsx',
   'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.test.tsx',
   'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.test.tsx',
   'src/workspace-sheets/__tests__/sheetTabStripAgentSwitch.test.tsx',
