@@ -1,6 +1,6 @@
 // projector 域基准：生产活实现 `projectWorkbench`（TS，ADR-0018 修订 1 回退后的唯一实现）。
 //
-// 接线点：`src/domains/workbench/workbenchProjector.ts:444`；工作台会话在冷重放/刷新时调它。
+// 接线点：`src/domains/workbench/workbenchProjectorReducer.ts（#486 项2 四分后实体位；原 workbenchProjector.ts:444，经门面再导出）`；工作台会话在冷重放/刷新时调它。
 // 输入面 `../fixtures/envelopes.ts` 从 git 历史恢复（出处见该文件头注）。
 //
 // 为什么这是「已接线」而不是「已回退所以不用量」：回退改的是**实现语言**，不是这条路径的存在。
@@ -82,7 +82,7 @@ export function buildProjectorSuite(): PerfSuite {
       {
         name: 'projectWorkbench(fold)',
         domain: 'projector',
-        wiredAt: 'src/domains/workbench/workbenchProjector.ts:444',
+        wiredAt: 'src/domains/workbench/workbenchProjectorReducer.ts（#486 项2 四分后实体位；原 workbenchProjector.ts:444，经门面再导出）',
         note: '冷重放的一次性折叠成本（事件数 × 单事件归约成本）。这一列不含 DOM 与渲染层消费。',
         cases: [
           foldCase('delta-xs', { scale: 'xs', flow: 'cold' }, deltaJournal(1)),
@@ -102,7 +102,7 @@ export function buildProjectorSuite(): PerfSuite {
       {
         name: 'reduceWorkbenchEvent(live)',
         domain: 'projector',
-        wiredAt: 'src/domains/workbench/workbenchProjector.ts:423（经 agentWorkbenchSession.applyLive 每信封调用）',
+        wiredAt: 'src/domains/workbench/workbenchProjectorReducer.ts（#486 项2 四分后实体位；原 workbenchProjector.ts:423，经门面再导出；经 agentWorkbenchSession.applyLive 每信封调用）',
         note: 'live 单事件归约成本：基文档（s≈1k / m≈10k / l≈40k 行）上的 1+64 连拍（先回 running 再折消息）。只量投影器归约层（timeline 整表拷贝为主项）；runtime freezeDocument 与 publish 不在内，#440-b 不得用此 pair 归因。',
         cases: [
           liveCase('live-s', { scale: 's', flow: 'growing' }, 501),

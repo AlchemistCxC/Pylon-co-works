@@ -3,7 +3,7 @@
  * Document imports are type-only to avoid a runtime cycle back to the reducer.
  */
 import type { InteractionEvent, WorkbenchEventEnvelope } from './events/workbenchEventSchema.ts'
-import type { WorkbenchDocument, WorkbenchInteraction } from './workbenchProjector.ts'
+import type { WorkbenchDocument, WorkbenchInteraction } from './workbenchProjectorTypes.ts'
 
 /** C12：secret-bearing interaction 的脱敏键清单——命中值永不落 journal/document/diagnostic。 */
 const SENSITIVE_REQUEST_KEYS: ReadonlySet<string> = new Set(['password', 'secret', 'value', 'token', 'accesstoken', 'refreshtoken', 'clientsecret', 'apikey', 'authorization', 'credential', 'cookie'])
