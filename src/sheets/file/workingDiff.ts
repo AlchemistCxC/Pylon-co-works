@@ -6,7 +6,7 @@
  * 但 diffPresentation 在 scope 外不可改，故在此以独立纯函数提供。
  */
 import type { DiffLine } from '../../domains/tool/diffPresentation'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage'
+import type { DispatchSelection } from '../../domains/file/dispatchMessage'
 
 /** 基线 vs 当前全文的行级 diff（per-index 比较，与 makeLines/changedLineNumbers 同族）。
  * 空字符串按无行处理，避免空基线产生一条伪 removed ''。 */
