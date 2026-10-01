@@ -553,6 +553,10 @@ pub(crate) struct ApprovalModeSnapshot {
 
 /// CLI 增强（contract.bridge 前置）：读取当前全局审批模式 + 落盘健康位。
 /// 此前只有 set 无 get——外部自动化无法确认模式即盲跑。
+/// 已知窗口（#463 审查 CONCERN，随批承认）：本命令不持写锁，in-flight set 已写
+/// 内存、save 未结算的毫秒级窗口内可读到 `{mode: 新值, persisted: 上次结论}` 的
+/// 瞬时失配（stale-true），save 结算后自愈；权威消费路径（set 自身锁内返回的
+/// 快照）不受影响。查询不值得为毫秒级窗口阻塞在在途 save 上，故不走写锁。
 #[tauri::command]
 pub(crate) async fn get_approval_mode(
     state: tauri::State<'_, AppState>,
