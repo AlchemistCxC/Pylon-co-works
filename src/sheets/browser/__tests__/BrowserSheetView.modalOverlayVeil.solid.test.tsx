@@ -3,11 +3,15 @@
  * #309：模态覆盖层（启动器/权限请求等）打开期间，原生子 WebView 必须让位
  * （browser_set_visible false），关闭后恢复 true——否则覆盖层上的按钮被原生页面
  * 吃掉点击。可见性判定 = isSheetActive && !modalOverlayOpen。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * 覆盖层 store 写入外的 React `act` 包裹移除（Solid 侧信号同步通知，无 act 等价物）。
  */
-import { act, render, waitFor } from '@testing-library/react'
+import { createSignal } from 'solid-js'
+import { render, waitFor } from '@solidjs/testing-library'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import BrowserSheetView from '../BrowserSheetView'
+import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useModalOverlayStore } from '../../../app/modalOverlayStore'
 
@@ -64,24 +68,26 @@ describe('#309 模态覆盖层期间原生子视图让位', () => {
   }
 
   it('覆盖层打开 → setVisible(false)；关闭 → setVisible(true)', async () => {
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true) })
-    render(<BrowserSheetView sheet={sheet} ctx={ctx} />)
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true)
+    const [ctxSignal] = createSignal<SheetContext>(ctx)
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctxSignal()} />)
 
     await waitFor(() => expect(visibleCalls()).not.toHaveLength(0))
     expect(visibleCalls().at(-1)).toBe(false)
 
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false) })
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false)
     await waitFor(() => expect(visibleCalls().at(-1)).toBe(true))
   })
 
   it('非活动 Sheet（isActive=false）依旧隐藏，不受覆盖层影响', async () => {
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false) })
-    const { rerender } = render(<BrowserSheetView sheet={sheet} ctx={{ ...ctx, isActive: false }} />)
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false)
+    const [ctxSignal, setCtx] = createSignal<SheetContext>({ ...ctx, isActive: false })
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctxSignal()} />)
     await waitFor(() => expect(visibleCalls()).not.toHaveLength(0))
     expect(visibleCalls().at(-1)).toBe(false)
 
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true) })
-    rerender(<BrowserSheetView sheet={sheet} ctx={{ ...ctx, isActive: false }} />)
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true)
+    setCtx({ ...ctx, isActive: false })
     await waitFor(() => expect(visibleCalls().at(-1)).toBe(false))
   })
 })

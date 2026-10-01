@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 /**
  * Browser snapshot single-flight regression:
- * opening two tool panels in the same tick (or React StrictMode replaying an
+ * opening two tool panels in the same tick (or a rapid panel change replaying an
  * effect) must share one in-flight browser_snapshot request.  A duplicate
  * cross-process snapshot is both wasteful and produces duplicate console rows.
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减；StrictMode 措辞
+ * 改为「rapid panel change」——Solid 无双挂载，single-flight 契约不变）。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createSignal } from 'solid-js'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import BrowserSheetView from '../BrowserSheetView'
+import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, hasTauriRuntime: () => true }))
@@ -58,7 +62,8 @@ describe('Browser page snapshot single-flight', () => {
       browser_close: () => Promise.resolve({}),
     })
 
-    render(<BrowserSheetView sheet={sheet} ctx={ctx} />)
+    const [ctxSignal] = createSignal<SheetContext>(ctx)
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctxSignal()} />)
     await screen.findByRole('button', { name: '下载' })
 
     fireEvent.click(screen.getByRole('button', { name: '下载' }))
@@ -69,4 +74,3 @@ describe('Browser page snapshot single-flight', () => {
     await waitFor(() => expect(fakeInvoke.calls.filter(call => call.cmd === 'browser_snapshot')).toHaveLength(1))
   })
 })
-

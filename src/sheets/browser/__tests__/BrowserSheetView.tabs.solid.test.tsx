@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * Browser 内部多标签。
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。
+ */
+import { createSignal } from 'solid-js'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import BrowserSheetView from '../BrowserSheetView'
+import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: true, hasTauriRuntime: () => true }))
@@ -80,7 +85,8 @@ describe('Browser 内部多标签', () => {
   })
 
   it('在 Browser 视图内切换、新建和关闭标签；关闭最后标签回空态', async () => {
-    render(<BrowserSheetView sheet={sheet} ctx={ctx} />)
+    const [ctxSignal] = createSignal<SheetContext>(ctx)
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctxSignal()} />)
 
     expect(await screen.findByRole('tab', { name: 'Example Domain' })).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(screen.getByRole('tab', { name: 'IANA Help' }))

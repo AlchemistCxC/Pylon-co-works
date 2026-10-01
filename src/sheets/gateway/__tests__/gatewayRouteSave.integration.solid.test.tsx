@@ -8,16 +8,23 @@
  * 3. I12 W6：新增路由表单必须可选择 instance/profile/session，保存携带全字段（yaml 键写回）；
  * 4. 严格校验：缺 instance/profile/session 时禁止保存并显示错误；
  * 5. 旧 route 迁移：平台唯一 enabled instance 时既有 legacy route 自动补绑定 instanceId。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * 文本输入 fireEvent.change → fireEvent.input（实体 onInput 契约）；select 保持
+ * fireEvent.change（实体原生 change 契约）。
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
-import GatewaySheetView from '../GatewaySheetView'
+import GatewaySheetView from '../GatewaySheetView.solid'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { clearErrors, getErrors } from '../../../app/errorCenter.ts'
 
 const fakeInvoke = new FakeInvoke()
+
+// vitest globals 未开，solid testing-library 不自动 cleanup。
+afterEach(cleanup)
 
 afterEach(() => {
   clearErrors()
@@ -57,17 +64,17 @@ function installHandlers(): void {
 
 function renderGateway(): void {
   const sheet: SheetRecord = { id: 'gw', kind: 'gateway', title: 'Gateway', createdAt: 0, lastFocusedAt: 0 }
-  render(<GatewaySheetView sheet={sheet} ctx={{} as SheetContext} />)
+  render(() => <GatewaySheetView sheet={sheet} ctx={{} as SheetContext} />)
 }
 
 async function fillAndSave(source: string, agentId: string): Promise<void> {
   renderGateway()
   await screen.findByText(/qq:group:1/)
-  fireEvent.change(screen.getByLabelText('路由 source'), { target: { value: source } })
-  fireEvent.change(screen.getByLabelText('路由 agentId'), { target: { value: agentId } })
+  fireEvent.input(screen.getByLabelText('路由 source'), { target: { value: source } })
+  fireEvent.input(screen.getByLabelText('路由 agentId'), { target: { value: agentId } })
   fireEvent.change(screen.getByLabelText('路由 instance'), { target: { value: 'qq-bot-1' } })
   fireEvent.change(screen.getByLabelText('路由 profile'), { target: { value: 'profile-a' } })
-  fireEvent.change(screen.getByLabelText('路由 session'), { target: { value: '战役1' } })
+  fireEvent.input(screen.getByLabelText('路由 session'), { target: { value: '战役1' } })
   fireEvent.click(screen.getByRole('button', { name: '保存' }))
 }
 
@@ -119,8 +126,8 @@ describe('I12 W6 UI consumer（LR2-WI02）', () => {
   it('严格校验：缺 instance 保存 → 显示错误且不调 update_agents_config', async () => {
     renderGateway()
     await screen.findByText(/qq:group:1/)
-    fireEvent.change(screen.getByLabelText('路由 source'), { target: { value: 'qq:group:9' } })
-    fireEvent.change(screen.getByLabelText('路由 agentId'), { target: { value: 'peri' } })
+    fireEvent.input(screen.getByLabelText('路由 source'), { target: { value: 'qq:group:9' } })
+    fireEvent.input(screen.getByLabelText('路由 agentId'), { target: { value: 'peri' } })
     // 不选 instance/profile，不填 session
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {

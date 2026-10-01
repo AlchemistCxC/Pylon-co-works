@@ -5,10 +5,16 @@
  * （titlebar 统一控制 workspaceStore.sidebarCollapsed → SheetLayout 注入 ctx）。
  * 观察点：.browser-sheet 的 browser-sidebar-collapsed 类直连 ctx.sidebarCollapsed，
  * 且不存在独立折叠按钮（browser-sidebar-toggle）。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * - React `rerender` → ctx 信号翻转（类切换仍同步可断言——Solid class 写入同步）；
+ * - 左列工具项是 React 岛（BrowserSidebar，本批施工域外），岛挂载在微任务落地，
+ *   原本 render 后同步可达的内容断言改为 waitFor 轮询（断言集不缩减）。
  */
+import { createSignal } from 'solid-js'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
-import BrowserSheetView from '../BrowserSheetView'
+import { render, waitFor } from '@solidjs/testing-library'
+import BrowserSheetView from '../BrowserSheetView.solid'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
 // jsdom 无原生 ResizeObserver：BrowserSheetView 挂载即建 observer，测试垫片即可
@@ -55,30 +61,34 @@ describe('I09-A-FE-02 Browser 单一折叠状态（ctx.sidebarCollapsed）', () 
   })
 
   it('展开态：.browser-sheet 无 browser-sidebar-collapsed 类', () => {
-    const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    const [ctx] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
     const root = container.querySelector('.browser-sheet')
     expect(root).toBeTruthy()
     expect(root!.classList.contains('browser-sidebar-collapsed')).toBe(false)
   })
 
   it('折叠态：消费 ctx.sidebarCollapsed=true → browser-sidebar-collapsed 类', () => {
-    const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
+    const [ctx] = createSignal<SheetContext>(makeCtx(true))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
     const root = container.querySelector('.browser-sheet')
     expect(root!.classList.contains('browser-sidebar-collapsed')).toBe(true)
   })
 
   it('无独立折叠按钮（titlebar 统一控制，禁止 browser-sidebar-toggle）', () => {
-    const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    const [ctx] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
     expect(container.querySelector('.browser-sidebar-toggle')).toBeNull()
   })
 
   it('响应式：ctx.sidebarCollapsed 变化后类即时翻转（单一状态源）', () => {
-    const { container, rerender } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    const [ctx, setCtx] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
     const root = container.querySelector('.browser-sheet')!
     expect(root.classList.contains('browser-sidebar-collapsed')).toBe(false)
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
+    setCtx(makeCtx(true))
     expect(root.classList.contains('browser-sidebar-collapsed')).toBe(true)
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    setCtx(makeCtx(false))
     expect(root.classList.contains('browser-sidebar-collapsed')).toBe(false)
   })
 })
@@ -88,12 +98,13 @@ describe('Browser 工具栏在展开/折叠态保持可用（Agent/历史/书签
     localStorage.clear()
   })
 
-  it('展开态：label 与标题/note 正常渲染，工具不是 disabled 占位', () => {
-    const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
-    const items = container.querySelectorAll('.browser-tool-item')
-    expect(items.length).toBe(5)
+  it('展开态：label 与标题/note 正常渲染，工具不是 disabled 占位', async () => {
+    const [ctx] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
+    await waitFor(() => expect(container.querySelectorAll('.browser-tool-item')).toHaveLength(5))
     expect(container.querySelector('.browser-sidebar-title')).toBeTruthy()
     expect(container.querySelector('.browser-sidebar-note')).toBeTruthy()
+    const items = container.querySelectorAll('.browser-tool-item')
     items.forEach(item => {
       expect(item.querySelector('span')).toBeTruthy()
       expect(item.querySelector('.browser-tool-unavailable')).toBeNull()
@@ -102,13 +113,17 @@ describe('Browser 工具栏在展开/折叠态保持可用（Agent/历史/书签
     })
   })
 
-  it('折叠态：不渲染 label 文字，只保留图标；aria-label/title 保留', () => {
-    const { container } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
+  it('折叠态：不渲染 label 文字，只保留图标；aria-label/title 保留', async () => {
+    const [ctx] = createSignal<SheetContext>(makeCtx(true))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
+    await waitFor(() => expect(container.querySelectorAll('.browser-tool-item')).toHaveLength(5))
+    await waitFor(() => {
+      expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
+      expect(container.querySelector('.browser-sidebar-title')).toBeNull()
+      expect(container.querySelector('.browser-sidebar-note')).toBeNull()
+    })
     const items = container.querySelectorAll('.browser-tool-item')
     expect(items.length).toBe(5)
-    expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
-    expect(container.querySelector('.browser-sidebar-title')).toBeNull()
-    expect(container.querySelector('.browser-sidebar-note')).toBeNull()
     items.forEach(item => {
       // 仅剩图标：无文字节点（label/unavailable 都不渲染），svg 仍在
       expect(item.querySelector('svg')).toBeTruthy()
@@ -116,23 +131,26 @@ describe('Browser 工具栏在展开/折叠态保持可用（Agent/历史/书签
       expect(item.querySelector('.browser-tool-unavailable')).toBeNull()
     })
     // 工具的可访问名仍由 aria-label/title 承担（首位工具为 issue #82 新增的 Agent）
-    const firstTool = container.querySelectorAll('.browser-tool-item')[0] as HTMLButtonElement
+    const firstTool = items[0] as HTMLButtonElement
     expect(firstTool.disabled).toBe(false)
     expect(firstTool.getAttribute('aria-label')).toBe('Agent')
     expect(firstTool.title).toBe('Agent')
   })
 
-  it('往返：展开→折叠→展开后文字恢复渲染', () => {
-    const { container, rerender } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
-    const first = container.querySelectorAll('.browser-tool-item')[0]
-    expect(first!.querySelector('.browser-tool-unavailable')).toBeNull()
+  it('往返：展开→折叠→展开后文字恢复渲染', async () => {
+    const [ctx, setCtx] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
+    await waitFor(() => expect(container.querySelectorAll('.browser-tool-item')).toHaveLength(5))
+    expect(container.querySelectorAll('.browser-tool-item')[0]!.querySelector('.browser-tool-unavailable')).toBeNull()
 
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
-    expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
-    expect((container.querySelectorAll('.browser-tool-item')[0]).textContent).toBe('')
+    setCtx(makeCtx(true))
+    await waitFor(() => expect(container.querySelector('.browser-tool-unavailable')).toBeNull())
+    await waitFor(() => expect((container.querySelectorAll('.browser-tool-item')[0]).textContent).toBe(''))
 
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
-    expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
-    expect(container.querySelector('.browser-sidebar-title')).toBeTruthy()
+    setCtx(makeCtx(false))
+    await waitFor(() => {
+      expect(container.querySelector('.browser-tool-unavailable')).toBeNull()
+      expect(container.querySelector('.browser-sidebar-title')).toBeTruthy()
+    })
   })
 })

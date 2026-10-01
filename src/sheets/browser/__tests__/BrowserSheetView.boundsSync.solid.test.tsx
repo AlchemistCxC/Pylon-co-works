@@ -2,14 +2,18 @@
 /**
  * I09-A-FE-02（L2：Browser child WebView bounds 与 CSS 一致，6.10 问题 #4）：
  * 折叠状态（ctx.sidebarCollapsed）变化必须即时重同步 WebView bounds——
- * syncBounds 效果以 [syncBounds, sidebarCollapsed] 为依赖，折叠切换触发
- * browser_set_bounds 重新调用，使后端 WebView 边界与折叠后的 CSS 布局一致。
+ * syncBounds 效果以折叠/活动/phase 为依赖，折叠切换触发 browser_set_bounds 重新调用，
+ * 使后端 WebView 边界与折叠后的 CSS 布局一致。
  * 本测试 mock IS_TAURI=true + ready 快照，观察 setBounds 调用次数随折叠变化递增。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * React `rerender` → ctx 信号翻转。
  */
+import { createSignal } from 'solid-js'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import BrowserSheetView from '../BrowserSheetView'
+import BrowserSheetView from '../BrowserSheetView.solid'
 
 // 折叠变化 → bounds 重同步依赖真实 Tauri 运行时路径（IS_TAURI 守卫），故 mock env 为 Tauri
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({
@@ -78,17 +82,18 @@ describe('I09-A-FE-02 Browser WebView bounds 与 CSS 一致（折叠变化重同
   })
 
   it('展开态就绪后同步 bounds；折叠切换再次同步（setBounds 次数递增）', async () => {
-    const { rerender } = render(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    const [ctx, setCtx] = createSignal<SheetContext>(makeCtx(false))
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctx()} />)
     // 等 browser_status → ready → syncBounds 效果触发 setBounds
     await waitFor(() => expect(setBoundsCalls()).toBeGreaterThanOrEqual(1))
     const expanded = setBoundsCalls()
 
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(true)} />)
-    // 折叠变化（dep sidebarCollapsed 翻转）→ 效果重跑 → 重新 setBounds
+    setCtx(makeCtx(true))
+    // 折叠变化（依赖翻转）→ 效果重跑 → 重新 setBounds
     await waitFor(() => expect(setBoundsCalls()).toBeGreaterThan(expanded))
     const collapsed = setBoundsCalls()
 
-    rerender(<BrowserSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    setCtx(makeCtx(false))
     await waitFor(() => expect(setBoundsCalls()).toBeGreaterThan(collapsed))
   })
 })

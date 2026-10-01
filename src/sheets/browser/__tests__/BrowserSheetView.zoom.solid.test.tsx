@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * Browser 页面缩放。
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * range 的 fireEvent.change → fireEvent.input（实体 onInput 契约）。
+ */
+import { createSignal } from 'solid-js'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import BrowserSheetView from '../BrowserSheetView'
+import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 
 vi.mock('../../../infrastructure/tauri/env.ts', () => ({
@@ -64,7 +70,8 @@ describe('Browser 页面缩放', () => {
   })
 
   it('默认 90%，设置范围 50–200%，并把用户值发送到原生 WebView', async () => {
-    render(<BrowserSheetView sheet={sheet} ctx={ctx} />)
+    const [ctxSignal] = createSignal<SheetContext>(ctx)
+    render(() => <BrowserSheetView sheet={sheet} ctx={ctxSignal()} />)
 
     const toggle = await screen.findByRole('button', { name: '页面缩放，当前 90%' })
     fireEvent.click(toggle)
@@ -75,7 +82,7 @@ describe('Browser 页面缩放', () => {
     expect(range.step).toBe('10')
     expect(range.value).toBe('90')
 
-    fireEvent.change(range, { target: { value: '120' } })
+    fireEvent.input(range, { target: { value: '120' } })
     await waitFor(() => {
       expect(fakeInvoke.calls).toContainEqual({ cmd: 'browser_set_zoom', args: { zoomPercent: 120 } })
       expect(screen.getByRole('button', { name: '页面缩放，当前 120%' })).toBeTruthy()

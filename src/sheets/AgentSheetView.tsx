@@ -1,11 +1,20 @@
-import { useEffect } from 'react'
-import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
+import SolidMount from '../host/SolidMount'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { useActiveInterfaceModeContribution } from '../app/useActiveInterfaceModeContribution.ts'
-import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
-import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
-import AgentSheetPageHost, { useOpenSidebarPage } from '../components/sidebar/AgentSheetPageHost.tsx'
-import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
+
+/** 与 Solid 实体（AgentSheetView.solid.tsx）内声明的 AgentSheetViewProps 逐字段一致。 */
+export interface AgentSheetViewProps {
+  sheet: SheetRecord
+  ctx: SheetContext
+}
+
+/** Solid 实体的模块接口（React 类型图内的唯一事实）。 */
+interface AgentSheetViewSolidModule {
+  mountAgentSheetView: (container: HTMLElement, latest: () => AgentSheetViewProps) => () => void
+}
+
+const modules = import.meta.glob<AgentSheetViewSolidModule>('./AgentSheetView.solid.tsx', { eager: true })
+const solidModule = modules['./AgentSheetView.solid.tsx']
+if (!solidModule) throw new Error('AgentSheetView Solid 实体未进入 Vite module graph')
 
 /**
  * AgentSheetView — agent 主工作台（W1-03 侧栏上移后只留主区）。
@@ -17,70 +26,11 @@ import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
  * 经现成 lifecycle 恢复消息，但输入宿主隐藏，改渲染「只读回放 · 点击继续」占位条；
  * 点击 clear 姿态 → ControlCenter 出现 → 首次 send 即 live。姿态是一次性手势：
  * 离开该会话/关闭 sheet 即清除，防 tab 重开误回只读。
+ *
+ * #515：实体在 AgentSheetView.solid.tsx，本文件是 React 世界薄桥（批7 拆除）。
+ * 翻转前 deferral（三分支 React 岛 + rendererMode 门禁冲突）已随工作台实体 Solid 化
+ * 解除：岛链退化为 solid-in-solid，仅整页宿主/隔离表面两分支仍是 React 面。
  */
-export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  const postureSession = useReplayPostureStore(s => s.sessionId)
-  // 左栏模块可以把自己的内容展开成「主区整页」——它**替换**聊天视图，但不开新 Sheet。
-  // 这里只解析，不在 hook 之前早退（早退会让后面的 hook 顺序随页面开关变化）。
-  const openPage = useOpenSidebarPage(sheet.state)
-  // 姿态只对进入时的会话生效（非 null 且匹配 activeSession）
-  const isReplay = ctx.activeSession !== null && postureSession === ctx.activeSession
-  const mode = useActiveInterfaceModeContribution()
-  useEffect(() => {
-    if (postureSession !== null && postureSession !== ctx.activeSession) {
-      useReplayPostureStore.getState().clear()
-    }
-  }, [postureSession, ctx.activeSession])
-  // 页面打开时聊天区整体不挂载（与切会话同一条路径：历史在返回时经 lifecycle 重读）。
-  if (openPage) return <AgentSheetPageHost page={openPage} ctx={ctx} sheet={sheet} />
-  if (mode.workbench.renderKind === 'isolated-surface') {
-    return <IsolatedPluginSurface
-      surfaceId={mode.workbench.surfaceId}
-      className="main interface-mode-workbench-surface"
-      input={{
-        modeId: mode.id,
-        sheet: { id: sheet.id, kind: sheet.kind, title: sheet.title, agentId: sheet.agentId },
-        activeSessionId: ctx.activeSession,
-        sessionSource: ctx.activeSession ? ctx.sessionSource(ctx.activeSession) : undefined,
-        isReplay,
-      }}
-      onEvent={(event, detail) => {
-        if (event === 'workbench:continue-replay') useReplayPostureStore.getState().clear()
-        else if (event === 'workbench:select-session' && typeof detail === 'string') ctx.selectSession(detail)
-        else if (event === 'workbench:open-profile') ctx.openProfileEdit()
-        else if (event === 'workbench:open-session-settings' && typeof detail === 'string') ctx.openSessionSettings(detail)
-        else if ((event === 'workbench:open-resource' || event === 'workbench:reveal-resource') && ctx.activeSession) {
-          openResourceInFileSheet(ctx.activeSession, detail)
-        }
-        else if (event === 'workbench:open-sheet' && detail && typeof detail === 'object') {
-          const input = detail as { kind?: unknown, title?: unknown, agentId?: unknown }
-          if (typeof input.kind === 'string' && typeof input.title === 'string') {
-            ctx.openSheet({
-              kind: input.kind,
-              title: input.title,
-              ...(typeof input.agentId === 'string' ? { agentId: input.agentId } : {}),
-            })
-          }
-        }
-      }}
-    />
-  }
-  if (mode.workbench.renderKind === 'renderer-suite') {
-    return <AgentRendererSuiteWorkbench
-      sheet={sheet}
-      ctx={ctx}
-      modeId={mode.id}
-      defaultSuiteId={mode.workbench.defaultSuiteId}
-      isReplay={isReplay}
-    />
-  }
-  // Chat is Solid-only. Even host-mode contributions fall back to the built-in
-  // Solid suite, so the chat area never mounts the legacy React chat renderer.
-  return <AgentRendererSuiteWorkbench
-    sheet={sheet}
-    ctx={ctx}
-    modeId={mode.id}
-    defaultSuiteId="builtin.solid"
-    isReplay={isReplay}
-  />
+export default function AgentSheetView(props: AgentSheetViewProps) {
+  return <SolidMount initial={props} mount={solidModule.mountAgentSheetView} />
 }

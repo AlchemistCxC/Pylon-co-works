@@ -5,11 +5,16 @@
  *    Sheet 的 I09-A-FE-02 同一约束）；
  * 2. 可见性随 ctx.isActive 与模态覆盖层切换（原生子 WebView 不受 display:none 影响）：
  *    覆盖层打开 → setVisible(false)，关闭 → true；非活动不自动 start。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * - React `rerender` → ctx 信号翻转（Solid 无 rerender，等价的 props 推入路径）；
+ * - 覆盖层 store 写入外的 React `act` 包裹移除（Solid 侧无需 act，信号同步通知）。
  */
-import { act, render, waitFor } from '@testing-library/react'
+import { createSignal } from 'solid-js'
+import { render, waitFor } from '@solidjs/testing-library'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
-import DocsSheetView from '../DocsSheetView'
+import DocsSheetView from '../DocsSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import { useModalOverlayStore } from '../../../app/modalOverlayStore'
 
@@ -34,7 +39,7 @@ class MockResizeObserver {
 vi.stubGlobal('ResizeObserver', MockResizeObserver)
 
 const sheet: SheetRecord = { id: 'docs-1', kind: 'docs', title: '文档', createdAt: 0, lastFocusedAt: 0 }
-const ctx: SheetContext = {
+const baseCtx: SheetContext = {
   openSheet: vi.fn(), focusSheet: vi.fn(), closeSheet: vi.fn(), activeSession: null,
   selectSession: vi.fn(), openProfileEdit: vi.fn(), openSessionSettings: vi.fn(),
   sidebarCollapsed: false, rightInset: 0, ccEditMode: false, isActive: true,
@@ -69,40 +74,43 @@ describe('#371 Docs Sheet WebView 同步（bounds / visible）', () => {
   }
 
   it('活动态自动 start；折叠切换重同步 bounds（次数递增）', async () => {
-    const { rerender } = render(<DocsSheetView sheet={sheet} ctx={ctx} />)
+    const [ctx, setCtx] = createSignal<SheetContext>(baseCtx)
+    render(() => <DocsSheetView sheet={sheet} ctx={ctx()} />)
     await waitFor(() => expect(callsOf('docs_sheet_start').length).toBeGreaterThanOrEqual(1))
     await waitFor(() => expect(callsOf('docs_sheet_set_bounds').length).toBeGreaterThanOrEqual(1))
     const expanded = callsOf('docs_sheet_set_bounds').length
 
-    rerender(<DocsSheetView sheet={sheet} ctx={{ ...ctx, sidebarCollapsed: true }} />)
+    setCtx({ ...baseCtx, sidebarCollapsed: true })
     await waitFor(() => expect(callsOf('docs_sheet_set_bounds').length).toBeGreaterThan(expanded))
     const collapsed = callsOf('docs_sheet_set_bounds').length
 
-    rerender(<DocsSheetView sheet={sheet} ctx={{ ...ctx, sidebarCollapsed: false }} />)
+    setCtx({ ...baseCtx, sidebarCollapsed: false })
     await waitFor(() => expect(callsOf('docs_sheet_set_bounds').length).toBeGreaterThan(collapsed))
   })
 
   it('非活动不自动 start；转活动后 start 并同步可见性', async () => {
-    const { rerender } = render(<DocsSheetView sheet={sheet} ctx={{ ...ctx, isActive: false }} />)
+    const [ctx, setCtx] = createSignal<SheetContext>({ ...baseCtx, isActive: false })
+    render(() => <DocsSheetView sheet={sheet} ctx={ctx()} />)
     // 非活动：不自动 start（文档壳无 status 探测，后端 start 幂等去重）
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(callsOf('docs_sheet_start').length).toBe(0)
 
-    rerender(<DocsSheetView sheet={sheet} ctx={{ ...ctx, isActive: true }} />)
+    setCtx({ ...baseCtx, isActive: true })
     await waitFor(() => expect(callsOf('docs_sheet_start').length).toBeGreaterThanOrEqual(1))
     await waitFor(() => expect(callsOf('docs_sheet_set_visible').length).toBeGreaterThanOrEqual(1))
     expect(callsOf('docs_sheet_set_visible').at(-1)!.args).toMatchObject({ visible: true })
   })
 
   it('覆盖层打开 → setVisible(false)；关闭 → setVisible(true)', async () => {
-    render(<DocsSheetView sheet={sheet} ctx={ctx} />)
+    const [ctx] = createSignal<SheetContext>(baseCtx)
+    render(() => <DocsSheetView sheet={sheet} ctx={ctx()} />)
     await waitFor(() => expect(callsOf('docs_sheet_set_visible').length).toBeGreaterThanOrEqual(1))
     expect(callsOf('docs_sheet_set_visible').at(-1)!.args).toMatchObject({ visible: true })
 
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true) })
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', true)
     await waitFor(() => expect(callsOf('docs_sheet_set_visible').at(-1)!.args).toMatchObject({ visible: false }))
 
-    act(() => { useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false) })
+    useModalOverlayStore.getState().setOverlayOpen('sheet-launcher', false)
     await waitFor(() => expect(callsOf('docs_sheet_set_visible').at(-1)!.args).toMatchObject({ visible: true }))
   })
 })

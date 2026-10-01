@@ -8,11 +8,15 @@
  * 4. 知识注入区只读：注入事实来自 gateway_status 快照，区块内不提供任何可编辑控件
  *    （取代原 legacy 脚本中的文案字面量断言 `/归 Prism 管理，只读/`——那条断言管文案标点，
  *    P82 视觉精修或任何文案调整都会把它撞红，而它对“区块被改成可编辑”反而一声不响）。
+ *
+ * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
+ * - React `act` 刷效 → 微任务 flush（Solid 信号同步通知，无 act 等价物）；
+ * - 文本输入 fireEvent.change → fireEvent.input（实体 onInput 契约）。
  */
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, fireEvent } from '@solidjs/testing-library'
 import { FakeInvoke } from '../../../test/fakeInvoke'
-import GatewaySheetView from '../GatewaySheetView'
+import GatewaySheetView from '../GatewaySheetView.solid'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { clearErrors } from '../../../app/errorCenter.ts'
 
@@ -42,12 +46,17 @@ function installHandlers(instances: Array<Record<string, unknown>>): void {
 
 function renderSheet(): void {
   const sheet: SheetRecord = { id: 'gw', kind: 'gateway', title: 'Gateway', createdAt: 0, lastFocusedAt: 0 }
-  render(<GatewaySheetView sheet={sheet} ctx={{} as SheetContext} />)
+  render(() => <GatewaySheetView sheet={sheet} ctx={{} as SheetContext} />)
 }
 
-function flushEffects(): Promise<unknown> {
-  return act(async () => {})
+/** 刷掉挂载期的 promise 链（原 React act(async () => {}) 的等价）。
+ * 只冲微任务——setTimeout 会被 vi.useFakeTimers 冻结（轮询用例在假定时器下 flush）。 */
+async function flushEffects(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await Promise.resolve()
 }
+
+// vitest globals 未开，solid testing-library 不自动 cleanup。
+afterEach(cleanup)
 
 describe('P79 Gateway 页交互优化', () => {
   beforeEach(() => {
@@ -104,8 +113,8 @@ describe('P79 Gateway 页交互优化', () => {
     // 必填字段未填齐 → 保存凭据禁用
     expect((screen.getByRole('button', { name: '保存凭据' }) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.change(appId, { target: { value: 'app123' } })
-    fireEvent.change(clientSecret, { target: { value: 'secretXYZ' } })
+    fireEvent.input(appId, { target: { value: 'app123' } })
+    fireEvent.input(clientSecret, { target: { value: 'secretXYZ' } })
     fireEvent.click(screen.getByRole('button', { name: '保存凭据' }))
     await flushEffects()
 
@@ -142,9 +151,8 @@ describe('P79 Gateway 页交互优化', () => {
     await flushEffects()
     const instancesCallsBefore = fakeInvoke.calls.filter(entry => entry.cmd === 'gateway_instances').length
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100)
-    })
+    await vi.advanceTimersByTimeAsync(3100)
+    await flushEffects()
     const instancesCallsAfter = fakeInvoke.calls.filter(entry => entry.cmd === 'gateway_instances').length
     expect(instancesCallsAfter).toBeGreaterThan(instancesCallsBefore)
   })
