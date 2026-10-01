@@ -1,7 +1,5 @@
 # L.md · 并行施工协调板
 
-- [kumo] **#463 决策口收口（2026-10-01）**：域＝`src-tauri/src/{permission,lib}.rs`（AppState 增 `approval_mode_persisted` + set/get 返回 `{mode,persisted}` 快照）、`src-tauri/pylon-session/src/user_data.rs`（`UserDataError::ReservedKey`）、`src-tauri/src/session/mod.rs`（`user_data_save` 拒绝 approval-mode key）、`src/cli/{pylonCliPorts,pylonCliDomainPorts,pylonCliService}.ts`、`src/demo/mockTauri.ts`、说明书《Pylon-CLI-命令表》《Pylon-项目架构参考》approval 段。**避让 #515**：CLI 端口/服务层非组件非 store，如需翻转请保留 wire 契约语义；`src-tauri/Cargo.toml`（[Codex] 在途）不碰。#482/#483 补遗条目（lib.rs/说明书域）PR #510 已合并，请及时撤条。
-
 - [Codex] **Agent 探测/导入故障调查（2026-10-01）**：域＝`src/components/settings/{AgentCandidateList,useAgentDetection,useAgentCandidateProvisioning,AgentCreateForm,AgentRuntimePanel}*`、`src/domains/agent/`、`src-tauri/pylon-core/src/agent_detection/` 与相关测试/说明书/记录；先调试 `F:/A-I/Platform/Pylon`。发现共享树 `src-tauri/Cargo.toml` 他人在途，依 §2.1 不 stage/commit；隔离到基于 `github/main` 的 worktree 完成施工与提交。
 
 - [kumo] **#504 flaky test 修复（2026-10-01）**：域＝`src-tauri/pet-core/src/lib.rs`（新增测试用墙钟归零 helper）＋ `src-tauri/src/dispatcher/reactions.rs`（表征测试比较前归一化）＋ `.agents/{spec,records}/504-*`。不碰 `src-tauri/Cargo.toml`、前端、说明书。

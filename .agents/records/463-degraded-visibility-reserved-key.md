@@ -72,6 +72,29 @@ issue 期望行为第三条「degraded 状态外部可查」（审查项 3，wir
 2. 实机验收未走查（webview2-acceptance：CLI set → 落盘失败注入的端到端时序无法在单测面构造，真机亦需故障注入工具；行为由三层单测钉住）。
 3. identity 写放大/写穿协议整体改造仍为后续阶段（#448 原文，与本 issue 无关）。
 
+## 审查轮（两个独立子 agent 对抗式，用户指令派发）
+
+提交 `3d7b5b68` 落地后派发两个只读子 agent：后端（健康位语义/并发/拦截完备性/wire/测试真实性）与前端（消费方完备性/类型链/兼容破坏面/mock/说明书）。裁决：**双双 PASS WITH CONCERNS，零 BLOCKER**。
+
+### 已修（随批 `33b79882`）
+
+1. **后端 CONCERN-1**：`get_approval_mode` 不持写锁，in-flight set「内存已写、save 未结算」的毫秒级窗口内可返回 `{mode: 新值, persisted: 上次结论}` 的瞬时 stale-true（违反快照自述不变量）。裁决取审查者认可的最轻修法：**doc 承认窗口**（权威消费路径＝set 自身锁内返回的快照——不受影响；事后自愈；查询不值得为毫秒级窗口阻塞在在途 save 上，故不走写锁）。
+2. **前端 CONCERN-1**：`typedClients.test.ts:331` 是全仓唯一幸存的旧 wire 形状断言（FakeInvoke 注册裸字符串 `'auto'` + `resolves.toBe`）——透传 client 下测试真实通过、不构成破坏，但会把已不存在的契约固化进测试面。修正：fixture 更新为 `{mode:'auto', persisted:true}` + `toEqual`，顺补 `setApprovalMode` 透传用例（该命令原零测试覆盖）。
+3. **前端 NIT-2**：架构参考补 `user_data_load` 保持允许的理由（读不分叉 + 种子探询依赖）。
+
+### 未修 NIT（审查核实无需动）
+
+- 后端 NIT-1：restore Some(mode) 臂的 `store(true)` 在 approval_mode 锁 if-let 内——锁中毒时健康位停留初值 true；启动窗口内中毒不可达（阶段 8b 单线程、命令面未开），纯理论。
+- 后端 NIT-2：拦截为 IPC 层约定非结构强制——审查者全仓盘点核实「service.save 调用方仅 permission.rs 与本命令」属实，注释已声明，未来新增调用方需人工复查。
+- 后端 NIT-3：Ordering Release/Acquire 对独立 bool 偏强（Relaxed 即足），保守无害。
+- 前端 NIT-1：mockTauri 不校验 mode 枚举/set 无状态——浏览器 mock 模式下 App.tsx 跳过该 effect、无生产调用者，纯 demo 保真度。
+
+### 审查轮复验证据
+
+- vitest（typedClients + src/cli + mockTauri）：**4 文件 56 passed / 0 failed**。
+- `cargo test --lib permission::tests::set_approval_mode`：3 passed；`cargo fmt --all --check` 干净。
+- 审查者独立实测：`bun x tsc -b` 零输出；`src/cli` 4 文件 55 用例全绿（随批修正后 56）。
+
 ## 并行交集
 
 本批共享树提交仅含上表 13 文件。#515 的 27 个 store 在途文件、[Codex] 的 `src-tauri/Cargo.toml` 均未触碰、未暂存。全量 vitest 4 红已定位为 #515 施工中间态（被测文件在其在途清单内），非本批引入——合并前请 #515 完工后复跑全量确认。
