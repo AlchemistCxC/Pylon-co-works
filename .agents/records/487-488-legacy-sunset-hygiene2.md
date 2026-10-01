@@ -81,7 +81,7 @@
 
 ### ⑦ 前端日志统一出口
 
-- 新 `src/domains/diagnostics/frontendLogSink.ts`（端口：installFrontendLogSink /
+- 新 `src/contracts/frontendLogSink.ts`（端口：installFrontendLogSink /（初版落 `src/domains/diagnostics/`，合并轮起上移 contracts，见文末「合并轮」）
   logWarn / logError；缺省 console；出口抛错 try/catch 静默回落 console）+
   `src/infrastructure/tauri/frontendLogSink.ts`（IS_TAURI 守卫；invoke
   push_frontend_log；detail 并入 message，Error 取 message；invoke 失败/限流静默
@@ -183,3 +183,31 @@
 
 审查轮门禁复跑：`bun run check:clippy` exit 0（加固后对账 17 文件/57 处）、
 tsc ×2 0 错、`cargo check -p pylon` 过、check:docs/maintenance 过。
+
+## 合并轮（PR #502 冲突处置，两批 merge）
+
+main 在本分支施工期间连续吸收 #482/#483（便携唯一存储 + 宠物 UI 全链删除）、
+#485、#486 全部七项、#489/#490/#491，PR 两度 CONFLICTING。两批 merge（c4e193bb、
+5dd4ebd6 + 本笔 allowlist/记录修正）：
+
+- **批一（#482/#483）**：paths.rs 以 main 为准——迁移链整链删除使 #488④ 的
+  `migrate_appdata_to_portable` spawn_blocking hunk **随函数消亡**（批④剩两处：
+  MHTML 落盘、list_workspace_entries，验收面不变）；L.md 按声明自带指令撤下
+  已合并的 #482/#483 条目；firstPartyStyleOwnership.test 双删合并（workspace 6
+  = −PrismSheet/#484、renderers 6 = −PetCompanion/#483）。
+- **批二（#486 七项等）**：WorkbenchContent.solid.tsx 保留 #487 纯 document 版
+  viewMessages（项4 拆分基线早于 #487，其旧 legacy 版被 main 带回；`displayDocument`
+  已随项4 拆分退役，改用 `document()`）；维护地图把 #488② 门禁尾与 #489 分层
+  规则段按语义拼接。#486 项3 的超长函数拆分在 lib.rs/dispatcher/session 与本批
+  HeldAcrossAwait 包裹**自动合并成功**（项3 按交接注记基于本批基线合并）。
+- **#489 新分层门禁反噬处置**：新规则「infrastructure → domains 运行时值禁止」
+  命中本批⑦的 3 条 import（hookBridgeDispatcher / skinRuntimeServices /
+  tauri/frontendLogSink → 端口）。**端口自 `src/domains/diagnostics/` 上移
+  `src/contracts/frontendLogSink.ts`**（契约层各层可自由消费，测试随迁，
+  12 处消费点 import 重写），分层门禁 857 文件 11 规则零越界。
+- **check-runtime-boundaries allowlist 补登记**：`infrastructure/tauri/frontendLogSink.ts`
+  的 direct invoke 按 hookBridgeDispatcher 先例登记（CI check:solid 首跑暴露，
+  本地此前只跑了 layer 门禁漏过——教训：合并后应跑完整 `bun run check:solid`）。
+- 合并后全门禁：Rust workspace lib 1664/0（#482/#483 删测试净 −6）、vitest
+  661 文件/5169 过、check:clippy 0（对账 57 处不变）、check:solid 全链 0、
+  fmt/tsc×2/check:docs 0。
