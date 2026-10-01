@@ -855,19 +855,19 @@ pub(crate) fn build_app_state(parts: AppStateParts) -> AppState {
     }
 }
 
-// P3a（#106）：setup 管道提取——DataDirs 解析→portable 迁移→workspace 恢复→storage 诊断
+// P3a（#106）：setup 管道提取——DataDirs 解析→workspace 恢复
 // →浏览器/插件/Pet/MCP/Kernel 三服务→gateway 实例恢复→事件泵与 watcher。
 // run() 的 setup 闭包改为一行调用；测试可用 mock app 驱动同一序列。
-// #331/M2：18 个阶段拆为具名 `setup_*` 函数，失败策略在编排处逐行标注——
+// #331/M2：阶段拆为具名 `setup_*` 函数，失败策略在编排处逐行标注——
 // 〔致命〕Err 上抛中止启动；〔可见〕tracing 报错但不中止；〔静默〕warn 后继续。
 // 阶段顺序即依赖顺序（施工文档 §2.3），不得重排。
+// #482：portable 首启自动迁移（原阶段 3）与 storage 模式诊断（原阶段 5）随
+// AppData 双模式一并退役——便携是唯一存储模式，无回退、无迁移。
 pub(crate) fn run_setup_pipeline(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::startup_timing::mark("setup_enter");
     let window = setup_open_main_window(app)?; // 〔致命〕主窗口缺失
     let dirs = setup_install_data_dirs(app)?; // 〔致命〕数据目录解析/安装失败——消费者禁止各自回退
-    setup_migrate_appdata(app, &dirs)?; // 〔致命〕AppData 路径解析失败；迁移失败〔可见〕不中止（UI 横幅兜底）
     setup_hydrate_workspaces(app)?; // 〔致命〕workspace 注册表恢复失败
-    setup_install_storage_diagnostics(app, &dirs)?; // 〔致命〕诊断锁中毒 / 路径解析失败
     setup_register_browser_host(app, &window, &dirs); // 无失败路径
     setup_register_docs_sheet_host(app, &window); // 无失败路径
     setup_ensure_plugin_dirs(app); // 〔静默〕插件目录树创建失败仅 warn
@@ -902,12 +902,12 @@ fn setup_open_main_window(
 
 /// 阶段 2：解析 DataDirs 并写入 AppState 一次性槽位。
 /// 施工文档 §2.3：任何插件/Pet/MCP/SQLite/Gateway 路径消费者运行前，
-/// 用 app.handle() 解析一次 DataDirs 并写入 AppState 一次性槽位。
+/// 解析一次 DataDirs 并写入 AppState 一次性槽位。
 /// 失败 = 启动中止（blocked），禁止消费者各自回退不同目录。
 fn setup_install_data_dirs(
     app: &tauri::App,
 ) -> Result<crate::paths::DataDirs, Box<dyn std::error::Error>> {
-    let data_dirs = crate::paths::resolve_data_dirs(app.handle())
+    let data_dirs = crate::paths::resolve_data_dirs()
         .map_err(|error| format!("resolve data dirs failed: {error}"))?;
     app.state::<AppState>()
         .data_dirs
@@ -933,77 +933,13 @@ fn setup_install_data_dirs(
     Ok(dirs)
 }
 
-/// 阶段 3：portable 首次启动自动迁移（2026-08-19 修复）：AppData 旧数据 → data/。
-/// 必须在此处（hydrate_workspaces 之前、message_service 初始化之前）——服务打开后
-/// 迁移命令会被拒绝，hydrate 在迁移前会读到空 workspaces 表。路径解析失败上抛
-/// （〔致命〕）；迁移本身失败不中止启动：AppData 数据未动，可后续手动处理（UI 横幅兜底）。
-fn setup_migrate_appdata(
-    app: &tauri::App,
-    dirs: &crate::paths::DataDirs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let app_config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    if crate::paths::migration_available(dirs, &app_data_dir, &app_config_dir) {
-        match crate::paths::migrate_appdata_to_portable_staged(
-            &app_data_dir,
-            &app_config_dir,
-            &dirs.data_root,
-        ) {
-            Ok(()) => {
-                tracing::info!(
-                    "AppData 旧数据已自动迁移至 portable: {}",
-                    dirs.data_root.display()
-                )
-            }
-            Err(error) => {
-                tracing::error!(
-                    "portable 自动迁移失败（AppData 数据未动，可后续手动处理）：{error}"
-                )
-            }
-        }
-    }
-    Ok(())
-}
-
-/// 阶段 4：Workspace 注册表恢复。必须先于前端 hydrate；文件缺失即首次启动，返回空表。
+/// 阶段 3：Workspace 注册表恢复。必须先于前端 hydrate；文件缺失即首次启动，返回空表。
 fn setup_hydrate_workspaces(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     crate::workspaces::hydrate_workspaces(app.state::<AppState>().inner())
         .map_err(|error| format!("load workspaces failed: {error}").into())
 }
 
-/// 阶段 5：storage 诊断与路径同时确定（施工文档 §7.4，只暴露模式/脱敏原因）。
-fn setup_install_storage_diagnostics(
-    app: &tauri::App,
-    dirs: &crate::paths::DataDirs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    let app_config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    let migration_available =
-        crate::paths::migration_available(dirs, &app_data_dir, &app_config_dir);
-    let storage = crate::startup::StorageDiagnostics::from_dirs(dirs)
-        .with_migration_available(migration_available);
-    let app_state = app.state::<AppState>();
-    let mut startup = app_state
-        .startup
-        .write()
-        .map_err(|_| "startup diagnostics lock poisoned".to_string())?;
-    startup.storage = Some(storage);
-    Ok(())
-}
-
-/// 阶段 6：浏览器管理器注入主窗口（Phase 4，子 WebView add_child 需要）+
+/// 阶段 4：浏览器管理器注入主窗口（Phase 4，子 WebView add_child 需要）+
 /// issue #82：Agent 浏览器设置加载 + ref 失效钩子（导航即整表失效）。
 fn setup_register_browser_host(
     app: &tauri::App,
@@ -1027,14 +963,14 @@ fn setup_register_browser_host(
         }));
 }
 
-/// 阶段 6b（#371）：文档 Sheet 管理器注入主窗口（子 WebView add_child 需要）。
+/// 阶段 4b（#371）：文档 Sheet 管理器注入主窗口（子 WebView add_child 需要）。
 fn setup_register_docs_sheet_host(app: &tauri::App, window: &tauri::WebviewWindow) {
     app.state::<AppState>()
         .docs_sheet
         .register_host(window.as_ref().window(), app.handle().clone());
 }
 
-/// 阶段 7：插件基建 v2——启动即创建用户插件目录树（installed/staging），
+/// 阶段 5：插件基建 v2——启动即创建用户插件目录树（installed/staging），
 /// 让用户无需先安装也能在文件管理器里看到插件目录。
 fn setup_ensure_plugin_dirs(app: &tauri::App) {
     if let Err(error) = crate::plugin_cmds::ensure_plugin_dirs(app.handle()) {
@@ -1042,7 +978,7 @@ fn setup_ensure_plugin_dirs(app: &tauri::App) {
     }
 }
 
-/// 阶段 8：宠物状态落盘加载。文件缺失/损坏时保持新宠物（静默降级）。
+/// 阶段 6：宠物状态落盘加载。文件缺失/损坏时保持新宠物（静默降级）。
 fn setup_restore_pet(app: &tauri::App, dirs: &crate::paths::DataDirs) {
     let path = crate::paths::pet_persist_path(dirs);
     if let Some(saved) = pet::load_from_file(&path) {
@@ -1053,7 +989,7 @@ fn setup_restore_pet(app: &tauri::App, dirs: &crate::paths::DataDirs) {
     }
 }
 
-/// 阶段 9：B4.2 MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
+/// 阶段 7：B4.2 MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
 fn setup_restore_mcp_config(app: &tauri::App, dirs: &crate::paths::DataDirs) {
     let path = crate::paths::mcp_persist_path(dirs);
     if let Some(servers) = load_mcp_persisted(&path) {
@@ -1064,7 +1000,7 @@ fn setup_restore_mcp_config(app: &tauri::App, dirs: &crate::paths::DataDirs) {
     }
 }
 
-/// 阶段 10：Kernel persistence readiness barrier——三个 service 共用同一 SQLite 文件，
+/// 阶段 8：Kernel persistence readiness barrier——三个 service 共用同一 SQLite 文件，
 /// 但作为一个启动单元串行 open/migrate 并一次性安装。setup 返回后所有
 /// command/dispatcher 都可依赖 service 已就绪；任一失败则 setup 失败，
 /// 不运行半可用 Kernel，也不回退 localStorage/第二历史权威。
@@ -1093,7 +1029,7 @@ fn setup_install_persistence_services(
     Ok(())
 }
 
-/// 阶段 10b（#448 PR3）：approval-mode 从 user_data 回填内存态（此前该值纯内存，
+/// 阶段 8b（#448 PR3）：approval-mode 从 user_data 回填内存态（此前该值纯内存，
 /// 跨重启持久化只在前端 localStorage——任何不经 webview 的 set（CLI 桥）重启后被
 /// 前端旧值静默覆盖，#321 决议确认的漂移路径；现后端为权威：启动读回 + set 写穿）。
 /// 语义与降级见 `permission::restore_persisted_approval_mode`（回填在 service 装好
@@ -1102,7 +1038,7 @@ fn setup_restore_approval_mode(app: &tauri::App) {
     crate::permission::restore_persisted_approval_mode(app.state::<AppState>().inner());
 }
 
-/// 阶段 11：I12-W4 gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
+/// 阶段 9：I12-W4 gateway 实例启动恢复——解析持久化路径 → 加载配置（spawn_blocking）
 /// → 批量创建（统一 Stopped，旧 Connected 不直接恢复）→ 按 `enabled && autoStart`
 /// 策略显式启动（失败可见，不静默）。损坏/IO 失败保留原文件，仅可见报错
 /// （不阻断启动、不丢配置）。I12-W5：同块打开凭据存储（W3）→ 加载后刷新
@@ -1166,7 +1102,7 @@ fn setup_restore_gateway_instances(app: &tauri::App, dirs: &crate::paths::DataDi
     });
 }
 
-/// 阶段 12：gateway 注册面接线——start 凭据解析器（I12-W5）、共用 HTTP client、
+/// 阶段 10：gateway 注册面接线——start 凭据解析器（I12-W5）、共用 HTTP client、
 /// 平台注册表（P78）、适配器注册表挂钩（P78）与 route guard（W1）。均无失败路径；
 /// HTTP client 构建失败降级默认 client。
 fn setup_wire_gateway_registry(app: &tauri::App) {
@@ -1240,8 +1176,8 @@ fn setup_wire_gateway_registry(app: &tauri::App) {
     }
 }
 
-/// 阶段 13：通知 dispatcher 与 runtime log dispatcher 启动。返回默认 agent 是否
-/// 处于 Connecting（供阶段 14 判断是否后台初始连接）。
+/// 阶段 11：通知 dispatcher 与 runtime log dispatcher 启动。返回默认 agent 是否
+/// 处于 Connecting（供阶段 12 判断是否后台初始连接）。
 fn setup_start_dispatchers(app: &tauri::App, window: &tauri::WebviewWindow) -> bool {
     let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
     // #270：Connecting 状态的默认 agent runtime 由下方后台任务完成初始连接，其
@@ -1268,7 +1204,7 @@ fn setup_start_dispatchers(app: &tauri::App, window: &tauri::WebviewWindow) -> b
     default_runtime_connecting
 }
 
-/// 阶段 14：#270（ADR-0022）默认 agent 初始连接后台化——窗口先见。持 switch_lock →
+/// 阶段 12：#270（ADR-0022）默认 agent 初始连接后台化——窗口先见。持 switch_lock →
 /// agent_lifecycle 双锁（与 switch/reconnect 同序）串行化竞争窗口：后台连接
 /// 期间用户手动 switch/reconnect 会排队至其完成，不会交叉杀进程或以旧代际
 /// 覆盖新客户端（replace_agent_client 的 epoch 校验兜底）。announce=true 使
@@ -1330,7 +1266,7 @@ fn setup_spawn_default_agent_connect(app: &tauri::App, default_runtime_connectin
     });
 }
 
-/// 阶段 15：gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
+/// 阶段 13：gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
 /// 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
 /// （announce=false，不广播 GUI 状态）。
 fn setup_install_gateway_ingest_handler(app: &tauri::App) {
@@ -1466,7 +1402,7 @@ fn setup_install_gateway_ingest_handler(app: &tauri::App) {
         }));
 }
 
-/// 阶段 16：会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
+/// 阶段 14：会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
 /// 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
 fn setup_spawn_session_expiry_watcher(app: &tauri::App) {
     let app_for_watcher = app.handle().clone();
@@ -1479,7 +1415,7 @@ fn setup_spawn_session_expiry_watcher(app: &tauri::App) {
     });
 }
 
-/// 阶段 17：#110 F3 事件库维护 watcher——墓碑事件清扫（兜底历史垃圾）+ WAL checkpoint
+/// 阶段 15：#110 F3 事件库维护 watcher——墓碑事件清扫（兜底历史垃圾）+ WAL checkpoint
 /// （TRUNCATE）。启动即跑一次，此后每 10 分钟一次：流式回合每 chunk 一次事务，
 /// 从不 checkpoint 时 WAL 只增不减（体检实证 WAL 66MB 反超主库 62MB）。
 fn setup_spawn_journal_maintenance_watcher(app: &tauri::App) {
@@ -1515,7 +1451,7 @@ fn setup_spawn_journal_maintenance_watcher(app: &tauri::App) {
     });
 }
 
-/// 阶段 18：权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
+/// 阶段 16：权限超时 watcher（ACP-03 §5.6）：每 5s 结算超时挂起请求并发出
 /// permission.resolved terminal 事件——后端唯一计时/应答来源，前端
 /// 只展示倒计时并提交选择，不自行宣称超时结果（invariant 5）。
 /// #356：同一 watcher 附带私有交互（elicitation/ask-user/exit-plan）对等的
@@ -1929,7 +1865,6 @@ pub fn run() {
                 crate::browser::agent_cmds::browser_agent_download,
                 crate::startup::startup_diagnostics,
                 crate::startup::report_startup_timing,
-                crate::paths::migrate_appdata_to_portable,
             ])
             .setup(|app| run_setup_pipeline(app))
             // 关窗时不在此处 block_on kill——run() 由 rt.block_on 驱动，窗口回调在

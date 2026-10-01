@@ -86,7 +86,7 @@ function sectionForThemeZone(zone: string): SettingsSectionId | undefined {
 function themeRecords(): SettingsContributionRecord[] {
   const records: SettingsContributionRecord[] = []
   for (const [fieldKey, definition] of Object.entries(THEME_FIELD_DEFS)) {
-    if (definition.hidden || definition.meta || fieldKey === 'showPet' || THEME_FIELD_OWNERS[fieldKey as keyof typeof THEME_FIELD_OWNERS].owner !== 'theme') continue
+    if (definition.hidden || definition.meta || THEME_FIELD_OWNERS[fieldKey as keyof typeof THEME_FIELD_OWNERS].owner !== 'theme') continue
     const section = sectionForThemeZone(definition.zone)
     if (!section) continue
     records.push({
@@ -104,14 +104,6 @@ function themeRecords(): SettingsContributionRecord[] {
       diagnostics: [],
     })
   }
-  // showPet is owned by layoutRailsStore (A-V12); retain one canonical page-owned route
-  // so Theme compatibility metadata cannot create a second editable field.
-  records.push({
-    source: 'page-owned', ownerId: 'workspace.showPet', namespace: 'page-owned', fieldKey: 'showPet', label: '桌面宠物',
-    canonicalRoute: { domain: 'workspace', section: 'pet', field: 'showPet' }, placementSource: 'host-policy', active: true,
-    consumerTrace: { ownerDefinition: 'layoutRailsStore.showPet', settingsControl: 'Settings workspace pet toggle', storeOrPreview: 'layoutRailsStore.setShowPet', productionConsumer: 'Workbench appearance', visibleResult: 'Solid pet visibility' },
-    diagnostics: [],
-  })
   return records
 }
 

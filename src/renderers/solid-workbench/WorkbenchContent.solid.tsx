@@ -710,9 +710,6 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
             >▼</button>
           </div>
         </div>
-        <Show when={appearance().showPet}>
-          <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
-        </Show>
       </Show>
       <Show when={!props.context.input().replayReadonly}>
         <SolidControlCenter />

@@ -3,11 +3,12 @@ export const PERSISTENCE_KEY_OWNERS = Object.freeze({
   'pylon-profiles': { owner: 'identity', authority: 'sqlite', fallback: 'localStorage', version: 1 },
   'pylon-sessions': { owner: 'identity', authority: 'sqlite', fallback: 'localStorage', version: 2 },
   'pylon-workspace-sheets': { owner: 'workspace', authority: 'localStorage', fallback: 'defaults', version: 2 },
-  // ADR-0009 键名钉死不变；envelope version 已到 4（v4 = v3 + showPet，A-V12 并入壳层偏好）。
+  // ADR-0009 键名钉死不变；envelope version 4（#483 起 showPet 字段已随宠物链退役，
+  // 版本号不回退——v3 migrate 仍服务布局字段）。
   'pylon-workspace-layout-v3': { owner: 'right-rail', authority: 'localStorage', fallback: 'legacy-layout', version: 4 },
   'pylon-settings-chrome': { owner: 'settings-chrome', authority: 'localStorage', fallback: 'defaults', version: 1 },
   'pylon-right-rail': { owner: 'right-rail', authority: 'legacy', fallback: 'defaults', version: 1 },
-  'pylon-workspace-show-pet': { owner: 'right-rail', authority: 'legacy', fallback: 'defaults', version: 1 },
+  // #483：'pylon-workspace-show-pet' 随宠物链退役——旧 key 成为无害孤儿，不再登记。
   'pylon-settings-density': { owner: 'settings-chrome', authority: 'legacy', fallback: 'defaults', version: 1 },
   'pylon-settings-preview-collapsed': { owner: 'settings-chrome', authority: 'legacy', fallback: 'defaults', version: 1 },
   'pylon-settings-collapse': { owner: 'settings-chrome', authority: 'legacy', fallback: 'defaults', version: 1 },

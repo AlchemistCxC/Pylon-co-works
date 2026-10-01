@@ -30,7 +30,6 @@ export type SettingsSectionId =
   | 'cc'
   | 'right'
   | 'window'
-  | 'pet'
   | 'history'
   | 'backup'
   | 'agent'
@@ -68,7 +67,7 @@ export interface SettingsDomain {
 
 export const SETTINGS_DOMAINS: readonly SettingsDomain[] = [
   { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'] },
-  { id: 'workspace', label: '工作区', sections: ['window', 'pet', 'history', 'backup'] },
+  { id: 'workspace', label: '工作区', sections: ['window', 'history', 'backup'] },
   { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway', 'prediction'] },
   { id: 'plugins', label: '插件', sections: ['pluginManager', 'hookDiagnostics'] },
 ] as const
@@ -105,7 +104,6 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   cc: '中控台',
   right: '右栏',
   window: '窗口',
-  pet: '宠物',
   history: '历史保留',
   backup: '配置备份',
   agent: 'Agent',

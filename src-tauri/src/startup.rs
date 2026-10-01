@@ -73,35 +73,8 @@ pub enum ConfigSourceKind {
     Embedded,
 }
 
-/// 存储诊断（施工文档 §7.4）：只暴露模式与脱敏原因，完整路径只进本地日志。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StorageDiagnostics {
-    pub mode: crate::paths::StorageMode,
-    pub portable_requested: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback_reason: Option<String>,
-    /// AppData → portable 迁移可用性（Phase 5 接线；当前固定 false）。
-    pub migration_available: bool,
-}
-
-impl StorageDiagnostics {
-    pub(crate) fn from_dirs(dirs: &crate::paths::DataDirs) -> Self {
-        Self {
-            mode: dirs.mode,
-            portable_requested: dirs.portable_requested,
-            fallback_reason: dirs.fallback_reason.clone(),
-            migration_available: false,
-        }
-    }
-
-    pub(crate) fn with_migration_available(mut self, available: bool) -> Self {
-        self.migration_available = available;
-        self
-    }
-}
-
-/// 启动诊断快照（只读；AppState.startup 持有，setup 解析 DataDirs 后补写 storage）。
+/// 启动诊断快照（只读；AppState.startup 持有）。
+/// #482：storage 模式诊断随 AppData 双模式退役——便携是唯一存储模式。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupDiagnostics {
@@ -111,9 +84,6 @@ pub struct StartupDiagnostics {
     pub default_agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_source: Option<ConfigSourceView>,
-    /// 存储模式诊断（setup 最前面解析 DataDirs 后写入）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage: Option<StorageDiagnostics>,
 }
 
 /// run() 构建：配置来源 + 分域错误 + prism 构造状态 + 默认 agent。
@@ -157,7 +127,6 @@ pub(crate) fn build_startup_diagnostics(
         },
         default_agent_id,
         config_source: Some(source_view),
-        storage: None,
     }
 }
 
@@ -184,7 +153,6 @@ impl StartupDiagnostics {
                 kind: ConfigSourceKind::Embedded,
                 file_name: Some("agents.yaml".to_string()),
             }),
-            storage: None,
         }
     }
 }
@@ -322,43 +290,18 @@ mod tests {
         assert!(value["configSource"]["fileName"].is_string());
     }
 
+    /// #482 回归钉：storage 模式诊断已随 AppData 双模式退役，
+    /// 序列化契约里不得再出现 storage 字段。
     #[test]
-    fn storage_diagnostics_serializes_portable_mode_without_paths() {
-        let dirs = crate::paths::DataDirs {
-            data_root: std::path::PathBuf::from("D:/secret-portable/data"),
-            config_root: std::path::PathBuf::from("D:/secret-portable/data"),
-            mode: crate::paths::StorageMode::Portable,
-            portable_requested: true,
-            fallback_reason: None,
-        };
-        let storage = StorageDiagnostics::from_dirs(&dirs);
-        let value = serde_json::to_value(&storage).unwrap();
-        assert_eq!(value["mode"], "portable");
-        assert_eq!(value["portableRequested"], true);
-        assert_eq!(value["migrationAvailable"], false);
-        let serialized = serde_json::to_string(&storage).unwrap();
-        assert!(
-            !serialized.contains("secret-portable"),
-            "storage 诊断不得泄露完整路径: {serialized}"
+    fn startup_diagnostics_has_no_storage_section() {
+        let diagnostics = build_startup_diagnostics(
+            crate::agent_config::ConfigSource::Embedded,
+            None,
+            None,
+            true,
+            None,
         );
-    }
-
-    #[test]
-    fn storage_diagnostics_reports_fallback_with_sanitized_reason() {
-        let dirs = crate::paths::DataDirs {
-            data_root: std::path::PathBuf::from("C:/Users/u/AppData/Roaming"),
-            config_root: std::path::PathBuf::from("C:/Users/u/AppData/Roaming"),
-            mode: crate::paths::StorageMode::AppData,
-            portable_requested: true,
-            fallback_reason: Some("portable data root not writable: 权限不足".to_string()),
-        };
-        let storage = StorageDiagnostics::from_dirs(&dirs);
-        let value = serde_json::to_value(&storage).unwrap();
-        assert_eq!(value["mode"], "app_data");
-        assert_eq!(value["portableRequested"], true);
-        assert!(value["fallbackReason"]
-            .as_str()
-            .unwrap()
-            .contains("not writable"));
+        let value = serde_json::to_value(&diagnostics).unwrap();
+        assert!(value.get("storage").is_none(), "storage 诊断应已退役");
     }
 }

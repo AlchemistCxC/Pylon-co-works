@@ -52,7 +52,6 @@ export const FACTORY_GUI_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#268bd2",
       showTabBar: true,
       showSidebar: true,
-      showPet: true,
     },
   },
   {

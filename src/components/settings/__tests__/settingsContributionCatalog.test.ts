@@ -77,8 +77,8 @@ describe('SettingsContributionCatalog', () => {
 
   it('keeps migrated layout and assistant avatar fields to one canonical editable route', () => {
     const catalog = projectSettingsContributionCatalog()
-    expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(1)
-    expect(catalog.records.find(record => record.fieldKey === 'showPet')?.canonicalRoute).toMatchObject({ domain: 'workspace', section: 'pet' })
+    // #483：showPet 随宠物链删除退役，catalog 不得再出现该字段（防死而复生）。
+    expect(catalog.records.filter(record => record.fieldKey === 'showPet')).toHaveLength(0)
     expect(catalog.records.filter(record => record.fieldKey === 'assistantDotImage')).toHaveLength(1)
     expect(catalog.records.find(record => record.fieldKey === 'assistantDotImage')?.canonicalRoute.section).toBe('chat')
   })

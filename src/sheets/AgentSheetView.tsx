@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useActiveInterfaceModeContribution } from '../app/useActiveInterfaceModeContribution.ts'
@@ -20,8 +19,6 @@ import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
  * 离开该会话/关闭 sheet 即清除，防 tab 重开误回只读。
  */
 export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  // W2-11/A-V12：showPet 真值源为 layoutRailsStore（工作台壳层偏好，随 A-V12 并入）
-  const showPet = useRightRailStore(s => s.showPet)
   const postureSession = useReplayPostureStore(s => s.sessionId)
   // 左栏模块可以把自己的内容展开成「主区整页」——它**替换**聊天视图，但不开新 Sheet。
   // 这里只解析，不在 hook 之前早退（早退会让后面的 hook 顺序随页面开关变化）。
@@ -45,7 +42,6 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
         sheet: { id: sheet.id, kind: sheet.kind, title: sheet.title, agentId: sheet.agentId },
         activeSessionId: ctx.activeSession,
         sessionSource: ctx.activeSession ? ctx.sessionSource(ctx.activeSession) : undefined,
-        showPet,
         isReplay,
       }}
       onEvent={(event, detail) => {

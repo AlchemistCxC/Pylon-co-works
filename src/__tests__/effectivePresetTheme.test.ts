@@ -81,10 +81,14 @@ const REPO_ROOT = resolve(__dirname, '..', '..')
  *   空态靠**代码侧硬编码名单**兜着；那份名单搬进预设后，它们也必须各带一份，否则空态会静默变成"什么都不藏"）。
  * ★ 真值由 `.agents/spec/266-probe-preset-counts.mts` 实测（`THEME_SETTING_KEYS=177`、
  *   逐套打印 `Object.keys(effectivePresetTheme(p)).length`），**不是手推**。
+ *
+ * ★ #483（宠物链删除）：`showPet` 从 ThemeSettings/zones 工厂退役 ⇒ 基线第七次按**真值**重算：
+ * - 6 套「完整快照」型（global 区切面含 showPet）：`177 → 176`；
+ * - `glass` / `agent-command` / `agent-map` / `focus-flow` **不动**（切面本就不含 showPet）。
  */
 const BASELINE_FIELD_COUNTS: Record<string, number> = {
-  claude: 177, glass: 64, nord: 177, tokyo: 177, solarized: 177,
-  amber: 177, matrix: 177, 'agent-command': 37, 'agent-map': 37, 'focus-flow': 37,
+  claude: 176, glass: 64, nord: 176, tokyo: 176, solarized: 176,
+  amber: 176, matrix: 176, 'agent-command': 37, 'agent-map': 37, 'focus-flow': 37,
 }
 
 /** 该预设的有效值 —— 用测试侧独立算法（直接并池里的 5 个切面），不复用被测函数。 */
