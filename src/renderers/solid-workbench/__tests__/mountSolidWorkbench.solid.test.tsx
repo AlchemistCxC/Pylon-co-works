@@ -5,7 +5,7 @@ import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSo
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
-import { createSessionResponseEnvelope } from '../../../sheets/agent-workbench/sessionResponseProjection.ts'
+import { createSessionResponseEnvelope } from '../../../application/agent-workbench/sessionResponseProjection.ts'
 import { createWorkbenchHostPort } from '../../../plugin-runtime/renderers/workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../../../plugin-runtime/renderers/workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
@@ -21,7 +21,7 @@ import { resolveCcWidgetGroup, type CcDetachX } from '../../../domains/cc/widget
 import { parseTranslateOffset } from '../input/ccPlacementCollision.ts'
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
-import { createAgentWorkbenchCommandFacade } from '../../../sheets/agent-workbench/agentWorkbenchCommands.ts'
+import { createAgentWorkbenchCommandFacade } from '../../../application/agent-workbench/agentWorkbenchCommands.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const hosts: HTMLElement[] = []

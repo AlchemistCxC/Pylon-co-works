@@ -431,7 +431,7 @@ flowchart TB
 | 七个 Product Plugin（P77 起含 builtin.pylon-gateway） | `src/plugins/product/builtinProductPlugins.ts`、`src/plugins/product/packages/*/pylon-plugin.json`、`src/plugins/product/builtinPylon*.ts` |
 | 当前 Renderer/完整 Workbench 原型 | `src/plugin-runtime/renderers/*`、`interface-mode/*`、`ui/*`、`src/sheets/AgentSheetView.tsx` |
 | 当前 Solid | `src/renderers/solid-workbench/*` |
-| canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/sheets/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts` |
+| canonical 事件入口与 Workbench 会话 | `src/infrastructure/events/canonicalEventFeed.ts`、`canonicalEventCursor.ts`、`src/application/agent-workbench/agentWorkbenchSession.ts`、`agentWorkbenchLifecycle.ts`（#486 项1 自 sheets/ 归位） |
 | 外部包 Web 链 | `packageInstallationService.ts` → `packagePluginRuntime.ts` → `src/infrastructure/plugins/pluginPackageClient.ts` |
 | Rust package/process | `src-tauri/src/plugin_cmds/`、`src-tauri/src/plugin_process/mod.rs` |
 | Rust Kernel / IPC | `src-tauri/src/lib.rs`、`lifecycle/*`、`dispatcher/*`、`session/*`（编排层）；协议引擎核在 `src-tauri/pylon-acp`、存储核在 `src-tauri/pylon-session` |

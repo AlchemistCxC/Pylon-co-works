@@ -18,7 +18,7 @@ import { toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEve
 import type { Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
-import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
 const ownerKey = toCanonicalOwnerKey(owner)

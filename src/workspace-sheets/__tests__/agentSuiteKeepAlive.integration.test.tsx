@@ -8,7 +8,7 @@ import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { getActiveWorkbenchHostPort } from '../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
+import { getActiveWorkbenchHostPort } from '../../application/agent-workbench/activeWorkbenchHostPort.ts'
 
 describe('Agent Renderer Suite tab lifecycle', () => {
   beforeEach(() => {

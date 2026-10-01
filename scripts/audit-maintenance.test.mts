@@ -3,7 +3,9 @@ import { isMaintainedSource, moduleFor } from './audit-maintenance.mts'
 
 describe('maintenance module classification', () => {
   it('uses the specific owner before a wider container', () => {
-    expect(moduleFor('src/sheets/agent-workbench/sessionResponseProjection.ts')).toBe('workbench-host')
+    expect(moduleFor('src/application/agent-workbench/sessionResponseProjection.ts')).toBe('workbench-host')
+    // #486 项1：application 子目录必须被 workbench-host 专属桶认领，而非 application 宽桶。
+    expect(moduleFor('src/application/agent-workbench/agentWorkbenchSession.ts')).toBe('workbench-host')
     expect(moduleFor('src/sheets/file/FileSheet.tsx')).toBe('workspace-ui')
     expect(moduleFor('src-tauri/src/session/prompt.rs')).toBe('rust-session')
     expect(moduleFor('src-tauri/src/terminal.rs')).toBe('rust-host')
@@ -21,7 +23,7 @@ describe('maintenance module classification', () => {
       expect(isMaintainedSource(path)).toBe(false)
     }
     expect(isMaintainedSource('src-tauri/src/session/prompt.rs')).toBe(true)
-    expect(isMaintainedSource('src/sheets/agent-workbench/sessionResponseProjection.ts')).toBe(true)
+    expect(isMaintainedSource('src/application/agent-workbench/sessionResponseProjection.ts')).toBe(true)
     expect(isMaintainedSource('scripts/pack_release.py')).toBe(true)
     expect(isMaintainedSource('scripts/backup-portable-data.sh')).toBe(true)
     expect(isMaintainedSource('src/new-feature/component.jsx')).toBe(true)

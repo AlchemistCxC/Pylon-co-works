@@ -14,7 +14,7 @@
  */
 import { useRuntimeStore, type SessionConfig } from '../../domains/runtime/runtimeStore.ts'
 import { extractModelConfig, type ConfigOption } from '../../infrastructure/acp/chatContracts.ts'
-import type { WorkbenchOptionEntry } from '../../renderers/solid-workbench/input/workbenchOptionCatalog.ts'
+import type { WorkbenchOptionEntry } from '../../plugin-runtime/renderers/workbenchRendererFactory.ts'
 
 function bucketAgentId(key: string): string | undefined {
   try {

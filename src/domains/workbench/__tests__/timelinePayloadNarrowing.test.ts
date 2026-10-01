@@ -187,8 +187,8 @@ describe('#375-d 同内容元数据快照复用', () => {
 
 describe('#380 会话侧不再常驻整会话信封', () => {
   const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
-  const sessionSource = () => read('../../../sheets/agent-workbench/agentWorkbenchSession.ts')
-  const echoSource = () => read('../../../sheets/agent-workbench/agentWorkbenchOptimisticEcho.ts')
+  const sessionSource = () => read('../../../application/agent-workbench/agentWorkbenchSession.ts')
+  const echoSource = () => read('../../../application/agent-workbench/agentWorkbenchOptimisticEcho.ts')
 
   it('会话里没有 fold.log / fold.ids 这类整会话信封持有', () => {
     // 为什么用源码断言：这份日志是运行时内部状态，没有观测面；它的「不存在」同样没有观测面

@@ -12,7 +12,7 @@ export const moduleDefinitions = [
   { id: 'infrastructure', roots: ['src/infrastructure/'], responsibility: 'IPC、持久化、事件传输与系统适配' },
   { id: 'plugin-host', roots: ['src/plugin-runtime/'], responsibility: '扩展注册、激活、隔离、授权和资源 Scope' },
   { id: 'product-plugins', roots: ['src/plugins/'], responsibility: '第一方产品包与贡献实现；plugins/core 仍属产品层' },
-  { id: 'workbench-host', roots: ['src/host/', 'src/sheets/agent-workbench/'], responsibility: 'Renderer Suite 宿主、会话绑定与命令编排；文档状态所有者' },
+  { id: 'workbench-host', roots: ['src/host/', 'src/application/agent-workbench/', 'src/sheets/agent-workbench/'], responsibility: 'Renderer Suite 宿主、会话绑定与命令编排；文档状态所有者（#486 项1：会话运行时归位 application，视图件留守 sheets）' },
   { id: 'renderers', roots: ['src/renderers/'], responsibility: '文档到 UI 的呈现与交互适配；消费 Host Port' },
   { id: 'workspace-ui', roots: ['src/sheets/', 'src/workspace-sheets/', 'src/components/'], responsibility: 'Sheet、设置、工作区与既有组件；chat 目录含待迁移的编排' },
   { id: 'cli', roots: ['src/cli/'], responsibility: 'CLI 语法、执行与领域命令适配' },

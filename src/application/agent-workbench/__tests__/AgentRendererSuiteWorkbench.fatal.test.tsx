@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes.ts'
 import { activateBuiltinPlugin, getPluginRuntime } from '../../../plugin-runtime/pluginCompositionRoot.ts'
 import { resetStores } from '../../../test/resetStores.ts'
-import AgentSheetView from '../../AgentSheetView.tsx'
+import AgentSheetView from '../../../sheets/AgentSheetView.tsx'
 
 vi.mock('../../../renderers/solid-workbench/loadSolidWorkbench.ts', () => ({
   loadSolidWorkbench: vi.fn(async () => { throw new Error('builtin solid prepare failed') }),

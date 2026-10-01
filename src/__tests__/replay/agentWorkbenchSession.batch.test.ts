@@ -14,7 +14,7 @@ import { mergeAdjacentDeltaChunks } from '../../infrastructure/events/canonicalE
 import { createCanonicalEvent, toCanonicalOwnerKey, type CanonicalConversationEvent, type CanonicalEventOwner } from '../../domains/events/eventSchema'
 import type { Session } from '../../domains/identity/identityStore.ts'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
-import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 
 const owner: CanonicalEventOwner = { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }
 const ownerKey = toCanonicalOwnerKey(owner)

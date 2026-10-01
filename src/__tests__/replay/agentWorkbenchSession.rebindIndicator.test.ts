@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createAgentWorkbenchSessionRuntime } from '../../sheets/agent-workbench/agentWorkbenchSession.ts'
+import { createAgentWorkbenchSessionRuntime } from '../../application/agent-workbench/agentWorkbenchSession.ts'
 import type { Session } from '../../domains/identity/identityStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'

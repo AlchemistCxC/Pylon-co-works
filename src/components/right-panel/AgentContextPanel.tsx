@@ -13,7 +13,7 @@ import type { WorkbenchHostPort } from '../../plugin-runtime/renderers/workbench
 import {
   getActiveWorkbenchHostPort,
   subscribeActiveWorkbenchHostPort,
-} from '../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
+} from '../../application/agent-workbench/activeWorkbenchHostPort.ts'
 
 /** 按会话作用域的 UI 状态钩子（自 domains/chat/sessionUiState 内联——唯一 React 消费点）。 */
 function useSessionUiState<T,>(
