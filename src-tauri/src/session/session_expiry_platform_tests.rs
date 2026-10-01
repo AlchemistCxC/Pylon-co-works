@@ -94,20 +94,21 @@ async fn disabled_gui_timeout_reclaims_nothing() {
     );
 }
 
-/// 超时解析是纯函数：缺省 / 0 关闭 / 显式值 / 非法值回退。
+/// 超时解析是纯函数：#490 起缺省 = 关闭；显式 `0` 关闭 / 显式正数生效 / 非法值回退
+/// 默认（即同样落关闭——opt-in 只认合法正数，笔误不会误启回收）。
 #[test]
 fn gui_idle_timeout_parsing() {
-    use crate::session::expiry::{gui_idle_timeout_from, DEFAULT_GUI_IDLE_TIMEOUT_SECS};
+    use crate::session::expiry::gui_idle_timeout_from;
     assert_eq!(
         gui_idle_timeout_from(None),
-        Some(std::time::Duration::from_secs(
-            DEFAULT_GUI_IDLE_TIMEOUT_SECS
-        ))
+        None,
+        "#490：缺省 = 关闭（回收是显式 opt-in，#379 懒重连使其失去必要性）"
     );
     assert_eq!(gui_idle_timeout_from(Some("0")), None, "0 关闭");
     assert_eq!(
         gui_idle_timeout_from(Some("300")),
-        Some(std::time::Duration::from_secs(300))
+        Some(std::time::Duration::from_secs(300)),
+        "显式设值仍生效（opt-in 路径）"
     );
     assert_eq!(
         gui_idle_timeout_from(Some("  60  ")),
@@ -116,10 +117,8 @@ fn gui_idle_timeout_parsing() {
     );
     assert_eq!(
         gui_idle_timeout_from(Some("不是数字")),
-        Some(std::time::Duration::from_secs(
-            DEFAULT_GUI_IDLE_TIMEOUT_SECS
-        )),
-        "非法值回退默认"
+        None,
+        "非法值回退默认 = 0 = 关闭"
     );
 }
 
