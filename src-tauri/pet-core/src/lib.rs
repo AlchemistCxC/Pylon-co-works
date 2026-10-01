@@ -753,6 +753,16 @@ impl PetState {
         saved
     }
 
+    /// #504：跨 crate 表征测试专用——清零 apply 路径写入的真实墙钟衍生字段
+    ///（tick 结算基准 / 活动基准 / 互动基准）。表征断言只锁行为面，两次驱动
+    /// 相隔微秒，墙钟毫秒跳变属非行为差异（dispatcher「sink ≡ 直呼」Debug
+    /// 全等锁即栽在此）。生产路径不得调用——调用即丢失需求结算时间基准。
+    pub fn zero_wall_clock_for_test(&mut self) {
+        self.last_tick_at_ms = 0;
+        self.last_activity_at_ms = 0;
+        self.last_interaction_at_ms = 0;
+    }
+
     /// v2：事件入口——先结算需求衰减（时间戳），再记录窗口事件、应用收益表、
     /// 执行 HSM 转移（设计书 §5 T1-T8）。
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {

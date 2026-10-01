@@ -413,6 +413,11 @@ mod tests {
     /// 状态分别经 [`PetReactionSink`] 与既有 pet 函数族推进，终态 Debug 快照
     /// 必须全等（补缝是纯接缝扩展，行为不变；PetState 无 PartialEq，比较
     /// Debug 字符串）。
+    ///
+    /// #504：apply 内部取真实墙钟写 `last_tick_at_ms` / `last_activity_at_ms`
+    ///（`UserSent` 另写私有的 `last_interaction_at_ms`），sink 路与直呼路两次
+    /// 驱动相隔微秒，毫秒跳变落在其间即拆散全等（非行为差异）——比较前对
+    /// 两侧归零（`zero_wall_clock_for_test`），表征只锁行为面。
     #[test]
     fn prompt_path_sink_methods_match_direct_pet_calls() {
         let drive = |sink_method: fn(&PetReactionSink), pet_fn: fn(&mut PetState)| {
@@ -420,7 +425,9 @@ mod tests {
             sink_method(&PetReactionSink::new(shared.clone()));
             let mut direct = PetState::default();
             pet_fn(&mut direct);
-            let via_sink = shared.lock().expect("pet lock").clone();
+            let mut via_sink = shared.lock().expect("pet lock").clone();
+            via_sink.zero_wall_clock_for_test();
+            direct.zero_wall_clock_for_test();
             assert_eq!(
                 format!("{via_sink:?}"),
                 format!("{direct:?}"),
