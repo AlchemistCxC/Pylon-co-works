@@ -5,6 +5,7 @@
 //! 幂等设计：`auto_reconnect_active` 防重入，双通道（broadcast/watch）都送达时
 //! 最多多发一次同 payload 状态事件。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -46,7 +47,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
 
     /// 崩溃通知入口（broadcast 分支 / watch 订阅即查 / watch changed 三路共用）。
     /// `reason` 为稳定 code（transport.rs CrashReason::as_str）。
-    #[allow(clippy::await_holding_invalid_type)] // R9：自动重连是 LifecycleOp 状态机一环，agent_lifecycle 跨 await 与 switch/reconnect 串行
+    // R9：自动重连是 LifecycleOp 状态机一环，agent_lifecycle 跨 await 与 switch/reconnect 串行
     pub(crate) async fn handle(&self, reason: String) {
         // ISSUE-17 目标行为 2：保留原始 code 生成用户可读文案（不覆盖诊断字段）
         let last_error = format!("ACP 进程崩溃（{reason}）");
@@ -195,7 +196,8 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
                         let Some(agent) = agent else {
                             break;
                         };
-                        let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
+                        let _lifecycle_guard =
+                            HeldAcrossAwait::new(reconnect_runtime.agent_lifecycle.lock().await);
                         // R9：自动重连是 LifecycleOp 状态机的一环——经本 runtime 的
                         // agent_lifecycle 与 switch/reconnect/平台懒启动串行（无 kill，
                         // 不持 switch_lock；状态机定义见 lifecycle.rs 模块文档）。

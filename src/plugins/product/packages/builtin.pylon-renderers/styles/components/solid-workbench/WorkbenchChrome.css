@@ -463,9 +463,6 @@
   }
 }
 
-/* 过渡态：pet 实体未迁移（React PetCompanion 待 P4），文字占位不展示假 UI */
-.solid-workbench-pet-slot[data-fixture='pending'] { display: none; }
-
 /* 回放只读遮罩：覆盖消息流、不挡中控 */
 .solid-workbench-replay-overlay {
   position: absolute;

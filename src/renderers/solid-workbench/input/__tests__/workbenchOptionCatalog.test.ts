@@ -16,7 +16,7 @@ import { normalizeSessionMode } from '../../../../domains/chat/sessionModeState.
 
 function emptySnapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
   return {
-    revision: 0, sessionId: null, status: 'idle', messages: [], generating: false,
+    revision: 0, sessionId: null, status: 'idle', generating: false,
     generationStart: 0, tokenCount: 0, summary: null, tasks: [],
     availableModels: [], activeModel: '', availableModes: [], activeMode: '',
     canAttach: false, promptImage: false, error: null, ...overrides,

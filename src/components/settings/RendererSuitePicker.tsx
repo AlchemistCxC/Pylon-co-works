@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
+import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
-import { getInterfaceModeRegistry, getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import Select from '../ui/Select.tsx'
 
 /** Suite-level choice UI; message renderer ids are intentionally not exposed here. */
@@ -16,8 +16,7 @@ export default function RendererSuitePicker() {
     () => rendererRegistry.snapshot(),
     () => rendererRegistry.snapshot(),
   )
-  const modeRegistry = getInterfaceModeRegistry()
-  const mode = modeRegistry.resolve(modeId)?.value ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === modeId)
+  const mode = findInterfaceModeContribution(modeId)
   if (!mode || mode.workbench.renderKind !== 'renderer-suite') return null
   const choices = resolveInterfaceModeSuite(mode, selectedByMode[modeId], snapshot.rendererSuites.map(entry => entry.value.id))
   const selectedId = choices.activeSuiteId ?? choices.requestedSuiteId ?? mode.workbench.defaultSuiteId

@@ -25,7 +25,6 @@ assert.ok(themeFields.length > 0, 'ThemeSettings 字段集合不得为空')
 const explicitMetaFields = new Set(['appliedPreset', 'custom', 'ccEditMode'])
 const expectedOwnerOverrides: Record<string, string> = {
   sidebarWidth: 'workspace-layout',
-  showPet: 'workspace-layout',
   rightWidth: 'right-rail',
 }
 const allowedZones = new Set(['global', 'layout', 'sidebar', 'chat', 'cc', 'right'])

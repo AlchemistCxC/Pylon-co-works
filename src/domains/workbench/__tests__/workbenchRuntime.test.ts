@@ -1,15 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPreviewWorkbenchRuntime, mergeWorkbenchRuntimeSnapshot, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
-import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench, type WorkbenchDocument, type WorkbenchMessage } from '../workbenchProjector.ts'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
-import type { Message } from '../../chat/messageTypes.ts'
 
-it('reuses message projections across metadata changes and interleaved owners without changing generation fields', () => {
+/** 测试直构 WorkbenchMessage 行（#487 起测试与生产同构喂 document）。 */
+function workbenchMessage(row: {
+  id: string, role: 'user' | 'assistant' | 'reasoning', content: string, time: string,
+  running: boolean, sequence: number, segmentId?: string,
+}): WorkbenchMessage {
+  return {
+    id: row.id, segmentId: row.segmentId ?? row.id, role: row.role, content: row.content, parts: [],
+    identity: { messageId: row.id },
+    source: { provider: 'peri', sourceId: 'source-a' },
+    sequence: row.sequence, running: row.running, time: row.time,
+  }
+}
+
+it('document 派生的活性字段跨 metadata 变化保持判定，running 行落定后活性随之收敛', () => {
   const times = ['2026-09-12T00:00:01Z', '2026-09-12T00:00:02Z', '2026-09-12T00:00:03Z']
-  const source = createPreviewWorkbenchRuntime({ ...initial(), messages: times.map((time, index) => ({
-    id: String(index), role: index === 1 ? 'reasoning' as const : 'assistant' as const,
-    sender: 'agent', content: String(index), time, running: true,
-  })) })
+  const rows = times.map((time, index) => workbenchMessage({
+    id: String(index), role: index === 1 ? 'reasoning' : 'assistant',
+    content: String(index), time, running: true, sequence: index + 1,
+  }))
+  const source = createPreviewWorkbenchRuntime({ ...initial(), document: { ...createWorkbenchDocument('session-a'), messages: rows } })
   const document = source.getSnapshot().document!
   const first = mergeWorkbenchRuntimeSnapshot(source.getSnapshot(), { document })
   for (const model of ['one', 'two', 'three']) {
@@ -17,7 +30,6 @@ it('reuses message projections across metadata changes and interleaved owners wi
     const next = mergeWorkbenchRuntimeSnapshot(first, { document: {
       ...document, session: { ...document.session, model }, activities: [...document.activities], diagnostics: [...document.diagnostics],
     } })
-    expect(next.messages).toBe(first.messages)
     expect(next.activeModel).toBe(model)
     expect(next).toMatchObject({ generating: true, generationPhase: { kind: 'thinking' },
       generationStart: Date.parse(times[0]), lastTokenAt: Date.parse(times[2]), thinkingStart: Date.parse(times[1]),
@@ -26,9 +38,6 @@ it('reuses message projections across metadata changes and interleaved owners wi
   const changed = mergeWorkbenchRuntimeSnapshot(first, { document: { ...document,
     messages: document.messages.map(message => ({ ...message, running: false })),
   } })
-  // #204③：legacy messages 派生改为**按需门控**（宿主 legacy 字段非空才派生）；
-  // 本用例宿主非空 ⇒ 派生行为与此前一致：内容变化产生新数组，running 状态随之落定。
-  expect(changed.messages).not.toBe(first.messages)
   expect(changed.generating).toBe(false)
   source.destroy()
 })
@@ -37,9 +46,6 @@ function initial() {
   return {
     sessionId: 'session-a',
     status: 'ready' as const,
-    messages: [],
-    streamingText: '',
-    streamingThinking: '',
     generating: false,
     generationStart: 0,
     tokenCount: 0,
@@ -52,6 +58,7 @@ function initial() {
     canAttach: false,
     promptImage: false,
     error: null,
+    document: createWorkbenchDocument('session-a'),
   }
 }
 
@@ -158,7 +165,10 @@ describe('createPreviewWorkbenchRuntime', () => {
     runtime.update({ tokenCount: 1 })
     expect(messages).not.toHaveBeenCalled()
     expect(usage).not.toHaveBeenCalled()
-    runtime.update({ messages: [{ id: 'm1', role: 'assistant', sender: 'peri', content: 'hello', time: '10:00' }] })
+    const current = runtime.getSnapshot().document!
+    runtime.applyDocument({ ...current, messages: [workbenchMessage({
+      id: 'm1', role: 'assistant', content: 'hello', time: '2026-08-25T10:00:00.000Z', running: false, sequence: 1,
+    })] })
     expect(messages).toHaveBeenCalledTimes(1)
     expect(usage).not.toHaveBeenCalled()
   })
@@ -176,7 +186,6 @@ describe('createPreviewWorkbenchRuntime', () => {
     runtime.update({ tokenCount: 4, generating: true })
     expect(runtime.getSnapshot()).toMatchObject({ revision: 1, tokenCount: 4, generating: true })
     expect(Object.isFrozen(runtime.getSnapshot())).toBe(true)
-    expect(Object.isFrozen(runtime.getSnapshot().messages)).toBe(true)
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
@@ -228,7 +237,7 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().document!.messages).not.toBe(first)
   })
 
-  it('P57 S2-R1c：usage 类事件间 legacy snapshot.messages 引用保持稳定', () => {
+  it('P57 S2-R1c：usage 类事件间 document.messages 引用保持稳定', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const document = projectWorkbench([createWorkbenchEnvelope({
       sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
@@ -237,15 +246,14 @@ describe('createPreviewWorkbenchRuntime', () => {
       event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'stable' }] },
     })]).document
     runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
-    const legacyMessages = runtime.getSnapshot().messages
     const documentMessages = runtime.getSnapshot().document!.messages
     const frozen = runtime.getSnapshot().document!
 
-    // usage 类事件走活路径（applyDocument）→ messages 引用稳定 → legacy memo 命中
+    // usage 类事件走活路径（applyDocument）→ document.messages 引用稳定（freezeItems
+    // 的 P57 S2-R1b 引用透传），显示链的数组引用 memo 得以命中。
     runtime.applyDocument({ ...frozen, session: { ...frozen.session, usage: { inputTokens: 7 } } }, { ownerKey: 'owner-a', generation: 1 })
 
     expect(runtime.getSnapshot().document!.messages).toBe(documentMessages)
-    expect(runtime.getSnapshot().messages).toBe(legacyMessages)
   })
 
   it('P57 R1d 红线回归：usage slice 在 session.usage 变化时仍收到局部通知', () => {
@@ -275,27 +283,34 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().tokenCount).toBe(0)
   })
 
-  it('Bug4：流式高频更新不再全量序列化整个快照，大历史下 streamingText 更新照常广播', () => {
+  it('Bug4：流式高频更新不再全量序列化整个快照，大历史下 tokenCount 更新照常广播', () => {
     // 旧实现每次 update 都对整包 JSON.stringify（含全部历史消息）判重，消息越多越慢。
-    // 修复后改逐字段引用比较：messages 引用未变时不序列化，streamingText/tokenCount 高频更新
+    // 修复后改逐字段引用比较：document.messages 引用未变时不序列化，tokenCount 高频更新
     // 仍是 O(1)，且语义不变（变化才 bump revision、才通知）。
-    const big: WorkbenchRuntimeSnapshot = {
+    const big = {
       ...initial(),
       revision: 0,
-      messages: Array.from({ length: 1000 }, (_, i): Message => ({
-        id: `m-${i}`, role: (i % 2 ? 'assistant' : 'user') as Message['role'],
-        content: '一段较长的历史回复内容'.repeat(5), running: false, time: '12:00:00', sender: 'peri',
-      })),
+      document: {
+        ...createWorkbenchDocument('session-a'),
+        messages: Array.from({ length: 1000 }, (_, i) => workbenchMessage({
+          id: `m-${i}`, role: i % 2 ? 'assistant' : 'user',
+          content: '一段较长的历史回复内容'.repeat(5), running: false,
+          time: '2026-08-25T12:00:00.000Z', sequence: i + 1,
+        })),
+      },
       tasks: Array.from({ length: 200 }, (_, i) => ({
         id: `t-${i}`, status: 'completed', content: '任务内容'.repeat(10), title: 'tool',
       })),
-    }
+    } satisfies WorkbenchRuntimeSnapshot & { document: WorkbenchDocument }
 
-    // 打桩：记录 JSON.stringify 是否被以"含非空 messages 的整包"调用（即是否又回退全量序列化）。
+    // 打桩：记录 JSON.stringify 是否被以「含非空 messages 的整包（快照或文档）」调用
+    // （即是否又回退全量序列化）。
     const stringifySpy = vi.spyOn(JSON, 'stringify')
     const serializedWholeSnapshot = () => stringifySpy.mock.calls.some(([value]) => {
-      const obj = value as Record<string, unknown> | null
-      return !!obj && Array.isArray(obj.messages) && obj.messages.length > 0
+      const obj = value as { messages?: unknown[]; document?: { messages?: unknown[] } } | null
+      if (!obj || typeof obj !== 'object') return false
+      const messages = obj.messages ?? obj.document?.messages
+      return Array.isArray(messages) && messages.length > 0
     })
 
     const runtime = createPreviewWorkbenchRuntime(big)

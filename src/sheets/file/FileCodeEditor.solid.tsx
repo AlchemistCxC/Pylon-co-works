@@ -1,5 +1,5 @@
 import { onCleanup, onMount, createEffect } from 'solid-js'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
+import type { DispatchSelection } from '../../domains/file/dispatchMessage.ts'
 import { createFileCodeMirrorKernel, type FileCodeEditorApi, type FileCodeMirrorKernel, type KernelSummary } from './fileCodeMirrorKernel.ts'
 
 /**

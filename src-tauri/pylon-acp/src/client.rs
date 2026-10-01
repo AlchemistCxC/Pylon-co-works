@@ -1,4 +1,5 @@
 use super::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -112,15 +113,15 @@ impl NotificationInbox {
     }
 
     /// 普通通知 lane（session/update 等）。
-    #[allow(clippy::await_holding_invalid_type)] // Mutex<Receiver> 的 recv 必须持锁消费（跨消息串行化），锁卫跨 await 是本结构的工作方式
+    // Mutex<Receiver> 的 recv 必须持锁消费（跨消息串行化），锁卫跨 await 是本结构的工作方式
     pub async fn recv(&self) -> Option<ClassifiedMessage> {
-        self.updates.lock().await.recv().await
+        HeldAcrossAwait::new(self.updates.lock().await).recv().await
     }
 
     /// 控制帧 lane（agent JSON-RPC 请求 / 崩溃广播；优先消费）。
-    #[allow(clippy::await_holding_invalid_type)] // 同 recv：Mutex<Receiver> 持锁消费
+    // 同 recv：Mutex<Receiver> 持锁消费
     pub async fn recv_control(&self) -> Option<ClassifiedMessage> {
-        self.control.lock().await.recv().await
+        HeldAcrossAwait::new(self.control.lock().await).recv().await
     }
 }
 /// B1：消息类型化分类（reader 一次分类，dispatcher 枚举匹配——method 拼写错误

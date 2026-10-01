@@ -2,6 +2,7 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSessionLoadResult {
@@ -231,7 +232,7 @@ pub(super) async fn run_load_with_replay_capture(
 }
 
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
+// session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     owner: DurableSessionOwner,
@@ -247,7 +248,7 @@ pub(crate) async fn load_persisted_session(
     // 尚不存在（load 本身建立会话槽位），故不要求会话已存在；不存在 owner runtime →
     // agent_runtime_unavailable，绝不 fallback active runtime。
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
-    let _creation_guard = runtime.session_creation.lock().await;
+    let _creation_guard = HeldAcrossAwait::new(runtime.session_creation.lock().await);
     let generation = state.current_generation(&runtime);
     // CWD-03：Workspace 绑定优先（root_path 单一来源）；未绑定走 cwd 缺省链。
     let (cwd, workspace_id) =

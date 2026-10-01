@@ -30,6 +30,7 @@ import {
 import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
 import type { StreamingDisplaySchedulerOptions } from '../streamingDisplayScheduler.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
+import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 
 // ── WASM 出口（streamingCompute 模块顶层装载，import 即就绪；出口类型随切流收编） ──
 
@@ -158,17 +159,22 @@ describe('切分契约不变量（splitStreamingMarkdownBlocks / splitStreamingM
 /** 一拍：调度间隔 + 1ms 余量（与既有调度器测试同口径）。 */
 const TICK_MS = 1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1
 
-function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
+/** #487：`messages` 覆盖项路由进 canonical document（legacy 快照字段已退役）。 */
+function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> & { messages?: readonly WorkbenchMessage[] } = {}): WorkbenchRuntimeSnapshot {
+  const { messages, ...rest } = overrides
   return {
     revision: 0, sessionId: 'session-a', ownerKey: 'owner-a', generation: 1,
-    status: 'ready', messages: [], generating: false, generationStart: 0, tokenCount: 0, summary: null,
+    status: 'ready', generating: false, generationStart: 0, tokenCount: 0, summary: null,
     tasks: [], availableModels: [], activeModel: '', availableModes: [], activeMode: '',
-    canAttach: false, promptImage: false, error: null, ...overrides,
+    canAttach: false, promptImage: false, error: null,
+    ...(messages !== undefined ? { document: { ...createWorkbenchDocument('session-a'), messages } } : {}),
+    ...rest,
   }
 }
 
-const message = (id: string, content: string) => ({
-  id, role: 'assistant' as const, sender: 'test', content, time: '', running: true,
+const message = (id: string, content: string): WorkbenchMessage => ({
+  id, segmentId: id, role: 'assistant', content, parts: [], identity: {},
+  source: { provider: 'test', sourceId: id }, sequence: 1, running: true, time: '',
 })
 
 type EngineEvent =
@@ -210,7 +216,7 @@ function drive(
         first: publicationCount === 0,
         publication: {
           kind: diagnostics.lastPublicationKind,
-          rows: value.messages.map(row => row.content),
+          rows: value.document?.messages.map(row => row.content) ?? [],
           budget: diagnostics.lastBudget,
           backlog: diagnostics.lastBacklogUnits,
           totalUnits: diagnostics.lastPublicationTotalUnits,

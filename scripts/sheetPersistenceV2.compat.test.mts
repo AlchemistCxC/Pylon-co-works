@@ -14,7 +14,8 @@ import { useLegacyCompatRuntime } from './legacyCompatHarness.mts'
 
 useLegacyCompatRuntime()
 
-// W1-01：schema v2——layout 三字段、v1 清洗旧 kind、只输出 v2、损坏样本、showPet 独立 key roundtrip
+// W1-01：schema v2——layout 三字段、v1 清洗旧 kind、只输出 v2、损坏样本、showPet 反携带钉
+// （showPet 字段本体已随 #483 宠物链退役，见用例 7）
 
 class MemoryStorage {
   private values = new Map<string, string>()
@@ -113,10 +114,9 @@ describe('sheet persistence v2 legacy compat', () => {
     expect(loaded.state).toEqual(state)
   })
 
-  // 7. showPet 已随 A-V12 并入 layoutRailsStore（envelope v4 字段，migrate 从旧独立 key 搬家）——
-  //    迁移行为由 src/domains/workspace/__tests__/layoutRailsStore.showPet.test.ts 覆盖；
-  //    此处保留 envelope 侧断言：v2 envelope 持久化不携带 showPet（它不在 sheet 持久化面）。
-  it('sheet envelope 不携带 showPet（壳层偏好归 layoutRailsStore）', () => {
+  // 7. showPet 曾随 A-V12 并入 layoutRailsStore（envelope v4）；#483 宠物链删除后字段退役，
+  //    此处保留 envelope 侧断言：v2 envelope 持久化不携带 showPet（防死而复生）。
+  it('sheet envelope 不携带 showPet（字段已随宠物链退役）', () => {
     const storage = new MemoryStorage()
     const serialized = serializeSheetStateV2(state, DEFAULT_SHEET_LAYOUT)
     expect(serialized.includes("showPet")).toBe(false)

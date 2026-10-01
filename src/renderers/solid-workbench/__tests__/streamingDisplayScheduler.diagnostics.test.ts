@@ -12,21 +12,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
 import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbenchRuntime.ts'
+import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
 
 /** 一拍：一个调度器定时器间隔（+1ms 余量，保证恰好走一拍）。 */
 const TICK_MS = 1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1
 
-function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
+/** #487：`messages` 覆盖项路由进 canonical document（legacy 快照字段已退役）。 */
+function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> & { messages?: readonly WorkbenchMessage[] } = {}): WorkbenchRuntimeSnapshot {
+  const { messages, ...rest } = overrides
   return {
     revision: 0, sessionId: 'session-a', ownerKey: 'owner-a', generation: 1,
-    status: 'ready', messages: [], generating: false, generationStart: 0, tokenCount: 0, summary: null,
+    status: 'ready', generating: false, generationStart: 0, tokenCount: 0, summary: null,
     tasks: [], availableModels: [], activeModel: '', availableModes: [], activeMode: '',
-    canAttach: false, promptImage: false, error: null, ...overrides,
+    canAttach: false, promptImage: false, error: null,
+    ...(messages !== undefined ? { document: { ...createWorkbenchDocument('session-a'), messages } } : {}),
+    ...rest,
   }
 }
 
-const message = (content: string, running = true) => ({
-  id: 'm1', role: 'assistant' as const, sender: 'test', content, time: '', running,
+const message = (content: string, running = true): WorkbenchMessage => ({
+  id: 'm1', segmentId: 'm1', role: 'assistant', content, parts: [], identity: {},
+  source: { provider: 'test', sourceId: 'm1' }, sequence: 1, running, time: '',
 })
 
 describe('streaming display diagnostics counters (P89/S0)', () => {
@@ -92,7 +98,7 @@ describe('streaming display diagnostics counters (P89/S0)', () => {
       vi.useFakeTimers()
       const revealed: number[] = []
       const scheduler = createStreamingDisplayScheduler(
-        value => revealed.push(value.messages[0]?.content.length ?? 0),
+        value => revealed.push(value.document?.messages[0]?.content.length ?? 0),
         { now: () => Date.now() },
       )
       scheduler.push(snapshot({ generating: true, messages: [message('')] }))

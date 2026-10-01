@@ -7,9 +7,11 @@
 //! correlation，待其摆脱 agent_config 后可随阶段二迁入）。
 
 pub mod atomic_write;
+pub mod await_guard;
 pub mod child_command;
 pub mod event_names;
 pub mod git;
+pub mod job_object;
 pub mod sanitize;
 pub mod time;
 pub mod workspace;

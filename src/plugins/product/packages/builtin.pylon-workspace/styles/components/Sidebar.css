@@ -362,7 +362,7 @@
   gap:8px;
   background:var(--bg-panel);
 }
-.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet) {
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit) {
   display:grid;
   place-items:center;
   flex:0 0 28px;
@@ -375,10 +375,9 @@
   color:var(--text-dim);
   transition:background var(--motion-fast) var(--ease-standard),color var(--motion-fast) var(--ease-standard);
 }
-.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet):hover { background:var(--bg-hover); color:var(--text); }
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit):hover { background:var(--bg-hover); color:var(--text); }
 .app[data-interface-mode="terminal-like"] .agent-sidebar .profile-avatar.active { border-color:var(--accent-edge); background:var(--accent-soft); color:var(--accent); }
-.app[data-interface-mode="terminal-like"] .agent-sidebar .profile-pet[aria-pressed="true"] { color:var(--accent); background:var(--accent-soft); }
-.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit,.profile-pet):focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.app[data-interface-mode="terminal-like"] .agent-sidebar :is(.profile-avatar,.profile-edit):focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 
 /* collapsed —— #154：折叠是**布局层状态**（`.layout[data-sidebar="collapsed"]`），
    不再由各 Sheet 自己加类。宽度已由 --sheet-sidebar-track-width 归零；这里把整列
@@ -406,12 +405,7 @@
    全仓始终没有渲染点（.agents/spec/154 未决问题 3「复活还是删除」）。用户以「模块区放 4 个
    mock」答复了未决问题 1，状态灯不在其中，故按死代码处置。复活时从 git 历史取回即可。 */
 
-/* W2-11：showPet toggle（写 workspaceStore，非主题） */
-.profile-pet {
-  background: none; border: none; color: var(--text-dim);
-  cursor: pointer; font-size: 13px; padding: 4px;
-}
-.profile-pet[aria-pressed="true"] { color: var(--text); }
+/* #483：W2-11 `.profile-pet`（showPet toggle）随宠物链删除退役。 */
 
 .cwd-new { display:flex; flex-direction:column; gap:var(--ui-space-2); margin-bottom:var(--ui-space-3); padding:var(--ui-space-3); border:1px solid var(--border); border-radius:var(--ui-radius-sm); background:color-mix(in srgb,var(--bg-panel) 82%,transparent); }
 .cwd-new-input { width:100%; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border); border-radius:var(--ui-radius-sm); color:var(--text); padding:0 var(--ui-space-3); font-size:13px; }

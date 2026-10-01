@@ -140,7 +140,7 @@ export const useStore = create<ThemeState>()(persist(
       set(structuredClone(DEFAULTS))
       return
     }
-    // 覆盖范围与原来的「整份 DEFAULTS」逐字一致（含非预设域字段 sidebarWidth / rightWidth / showPet），
+    // 覆盖范围与原来的「整份 DEFAULTS」逐字一致（含非预设域字段 sidebarWidth / rightWidth），
     // 只把**预设域字段**换成默认预设的值；ccLayout 归一与 ccHeight 收敛沿用「应用预设」同一套算法。
     // 名字传空串 = 沿用 resetZone 的「无基准」态：默认预设不进列表，若记名，预设行会因认不出它
     // 而亮出兜底 chip「未知预设」——那正是刀6/07a 要避免的悬空。

@@ -117,11 +117,15 @@ pub(crate) async fn list_workspace_entries(
     include_hidden: Option<bool>,
 ) -> Result<Vec<workspace::WorkspaceEntry>, PylonError> {
     let root = workspace_root_for_target(state.inner(), &target).await?;
-    workspace::list_entries(
-        &root,
-        relative_path.as_deref().unwrap_or("."),
-        include_hidden.unwrap_or(false),
-    )
+    let relative_path = relative_path.unwrap_or_else(|| ".".to_string());
+    let include_hidden = include_hidden.unwrap_or(false);
+    // #488 批④：目录枚举是走盘的阻塞 fs，与 workspace_search 同口径经
+    // spawn_blocking 移出 async 运行时。
+    tokio::task::spawn_blocking(move || {
+        workspace::list_entries(&root, &relative_path, include_hidden)
+    })
+    .await
+    .map_err(|error| PylonError::Workspace(error.to_string()))?
     .map_err(|error| PylonError::Workspace(error.to_string()))
 }
 
