@@ -418,6 +418,10 @@ mod tests {
     ///（`UserSent` 另写私有的 `last_interaction_at_ms`），sink 路与直呼路两次
     /// 驱动相隔微秒，毫秒跳变落在其间即拆散全等（非行为差异）——比较前对
     /// 两侧归零（`zero_wall_clock_for_test`），表征只锁行为面。
+    ///
+    /// 防扩展踩坑：`line_idx_by_scene`（HashMap）Debug 迭代序按实例随机——
+    /// 当前每驱动恰好一次 `lines::pick`（单键无序歧义）故安全；扩展为多事件
+    /// 驱动前须先归一化该字段，否则 Debug 全等将引入非毫秒类新竞态。
     #[test]
     fn prompt_path_sink_methods_match_direct_pet_calls() {
         let drive = |sink_method: fn(&PetReactionSink), pet_fn: fn(&mut PetState)| {
