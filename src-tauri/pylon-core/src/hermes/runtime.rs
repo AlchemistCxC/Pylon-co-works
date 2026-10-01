@@ -218,14 +218,14 @@ fn select_and_probe(
     }
 
     // Explicit agent configuration is considered only after the bundled tree.
-    for key in [HERMES_GIT_BASH_PATH_ENV] {
-        if let Some(path) = configured_env
-            .iter()
-            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-            .map(|(_, value)| PathBuf::from(value))
-        {
-            candidates.push((path, false));
-        }
+    // （#519：clippy 1.99 将 single_element_loop 收入默认集——原单元素数组循环
+    // 展开为直取；将来真出现多键需求再以显式键表重建循环。）
+    if let Some(path) = configured_env
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(HERMES_GIT_BASH_PATH_ENV))
+        .map(|(_, value)| PathBuf::from(value))
+    {
+        candidates.push((path, false));
     }
     if let Some(path) = std::env::var_os(HERMES_GIT_BASH_PATH_ENV) {
         candidates.push((PathBuf::from(path), false));
