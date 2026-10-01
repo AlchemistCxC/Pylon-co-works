@@ -14,6 +14,7 @@ use crate::runtime::AgentRuntime;
 use crate::session::model::SessionInfo;
 use crate::session::owner::DurableSessionOwner;
 use crate::session::AppState;
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::sync::Arc;
 
 /// Loaded 臂正身：代际复核 → journal 导入/权威判定 → store 快照应用 → attach →
@@ -277,7 +278,7 @@ fn trace_and_rollback_failed_load(
 
 /// ACP-01/恢复历史会话命令（原 persist/mod.rs :235-532；编排层三终态分派）。
 #[tauri::command]
-#[allow(clippy::await_holding_invalid_type)] // session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
+// session_creation 跨 await：load/恢复与并发建立串行（同 new_session）
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     owner: DurableSessionOwner,
@@ -293,7 +294,7 @@ pub(crate) async fn load_persisted_session(
     // 尚不存在（load 本身建立会话槽位），故不要求会话已存在；不存在 owner runtime →
     // agent_runtime_unavailable，绝不 fallback active runtime。
     let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
-    let _creation_guard = runtime.session_creation.lock().await;
+    let _creation_guard = HeldAcrossAwait::new(runtime.session_creation.lock().await);
     let generation = state.current_generation(&runtime);
     // CWD-03：Workspace 绑定优先（root_path 单一来源）；未绑定走 cwd 缺省链。
     let (cwd, workspace_id) =

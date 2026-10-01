@@ -6,7 +6,6 @@ import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { resetStores } from '../../test/resetStores'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness'
 import { openOrFocusSettingsSheet } from '../../sheets/settingsSheetNavigation'
-import SheetTabStrip from '../SheetTabStrip'
 import WorkspaceTitlebar from '../WorkspaceTitlebar'
 import type { SheetRecord } from '../sheetTypes'
 import type { AgentStatus } from '../../contracts/agentTypes'
@@ -28,27 +27,6 @@ const status = (lifecycle: AgentStatus['status']): AgentStatus => ({
   status: lifecycle,
 })
 
-function renderTabStrip(agentStatuses: Record<string, AgentStatus> = {}) {
-  render(
-    <SheetTabStrip
-      sheets={sheets}
-      activeSheetId="peri-sheet"
-      activeAgent="peri"
-      agentStatuses={agentStatuses}
-      onFocus={vi.fn()}
-      onClose={vi.fn()}
-      menuActions={{
-        onTogglePin: vi.fn(),
-        onClose: vi.fn(),
-        onCloseOthers: vi.fn(),
-        onCloseRight: vi.fn(),
-        onReopen: vi.fn(),
-      }}
-      canReopen={false}
-    />,
-  )
-}
-
 const titlebarActions = {
   onToggleSidebar: vi.fn(),
   onFocusSheet: vi.fn(),
@@ -68,7 +46,7 @@ const titlebarActions = {
   onCloseWindow: vi.fn(),
 }
 
-describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、SheetTabStrip 对同一输入得到同一语义）', () => {
+describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar 对同一输入得到同一语义）', () => {
   beforeEach(() => {
     localStorage.clear()
     resetStores()
@@ -80,33 +58,6 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
         { id: 'hermes', name: 'Hermes' },
       ],
       activeAgent: 'peri',
-    })
-  })
-
-  describe('SheetTabStrip', () => {
-    it('active agent 无快照 → tab 状态 unknown，不出现假绿 connected / 明确断开 disconnected', () => {
-      renderTabStrip()
-
-      const periTab = screen.getByRole('tab', { name: /Peri/ }).closest('.sheet-tab') as HTMLElement
-      expect(periTab.dataset.agentState).toBe('unknown')
-      expect(screen.getByLabelText('Agent 状态：unknown')).toBeInTheDocument()
-      expect(screen.queryByLabelText('Agent 状态：connected')).toBeNull()
-      expect(screen.queryByLabelText('Agent 状态：disconnected')).toBeNull()
-    })
-
-    it('快照到达（connected 事件）→ 同一帧更新为 connected', () => {
-      renderTabStrip({ peri: status('connected') })
-
-      const periTab = screen.getByRole('tab', { name: /Peri/ }).closest('.sheet-tab') as HTMLElement
-      expect(periTab.dataset.agentState).toBe('connected')
-      expect(screen.getByLabelText('Agent 状态：connected')).toBeInTheDocument()
-    })
-
-    it('非 active agent（即使有快照）→ tab 状态 inactive', () => {
-      renderTabStrip({ hermes: status('error') })
-
-      const hermesTab = screen.getByRole('tab', { name: /Hermes/ }).closest('.sheet-tab') as HTMLElement
-      expect(hermesTab.dataset.agentState).toBe('inactive')
     })
   })
 

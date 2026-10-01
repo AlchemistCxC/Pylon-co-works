@@ -403,6 +403,9 @@ jobs:
           for spec in "pylon" "pylon-core" "pylon-acp" "pylon-session" "pylon-foundations" "pet-core"; do
             node scripts/check-clippy-baseline.mjs artifacts/clippy-workspace.json artifacts/clippy-baseline.json --crate="$spec" --crate-dir=src-tauri --package="$spec" || failed=1
           done
+          # #488 批②：await-holding 豁免对账（禁裸 allow + HeldAcrossAwait 清单；
+          # 与本地 bun run check:clippy 链同一脚本）。
+          node scripts/check-await-holding.mjs || failed=1
           exit $failed
 
       - name: clippy 失败证据包

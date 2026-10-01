@@ -1,6 +1,7 @@
 //! 会话域：SessionInfo / AppState helpers / 会话命令 / 过期生命周期。
 //! R1 拆分自 lib.rs（行为零变化）。
 
+use pylon_foundations::await_guard::HeldAcrossAwait;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -479,7 +480,7 @@ impl AppState {
 
     /// 平台 ingest 目标 runtime 就绪检查（B10.3）：未连接时懒启动连接。
     /// announce=false——平台消息路由不切换/不广播 GUI active agent 状态。
-    #[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接
+    // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接
     pub(crate) async fn ensure_runtime_ready(
         &self,
         runtime: &Arc<AgentRuntime>,
@@ -511,7 +512,7 @@ impl AppState {
         } else {
             crate::agent::runtime::SessionContinuity::Invalidated
         };
-        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
         // 双检查：拿到生命周期锁后重查（防并发连接）
         let status = runtime
             .agent_runtime
@@ -556,7 +557,7 @@ impl AppState {
     /// agent_id=None：不接管 active_agent（owner 路由的非 active runtime 不抢位）。
     /// 调用点必须在 prompt 锁 / prompt_gate / session_creation 获取之前
     /// （无锁序反转；LifecycleOp 状态机表见 lifecycle/mod.rs 模块文档）。
-    #[allow(clippy::await_holding_invalid_type)] // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接（同 ensure_runtime_ready）
+    // agent_lifecycle 跨 await：双检查模式，拿锁后重查状态防并发连接（同 ensure_runtime_ready）
     pub(crate) async fn ensure_connected_for_send<R: tauri::Runtime>(
         &self,
         runtime: &Arc<AgentRuntime>,
@@ -580,7 +581,7 @@ impl AppState {
             .get(agent_id)
             .cloned()
             .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
-        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        let _lifecycle_guard = HeldAcrossAwait::new(runtime.agent_lifecycle.lock().await);
         // 双检查：拿到生命周期锁后重查（并发连接/自动重连已推进状态则让路）
         let status = runtime
             .agent_runtime

@@ -3,8 +3,8 @@ import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField, Tex
 import { Decoration, keymap, type DecorationSet } from '@codemirror/view'
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
-import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
+import type { DispatchSelection } from '../../domains/file/dispatchMessage.ts'
+import { changedLineNumbers } from '../../domains/file/fileDiff.ts'
 import { resolveFileLanguageProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
 
 /**

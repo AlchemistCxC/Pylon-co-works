@@ -1399,6 +1399,83 @@ fn search_hits_returns_hit_rows_case_insensitive_and_keeps_row_granularity() {
 }
 
 #[test]
+fn search_hits_escapes_like_wildcards_to_literals() {
+    let repo = repo();
+    // #488 批③：`%`/`_`/`\` 是用户文本的一部分，不是通配符——只匹配字面出现。
+    let percent_row = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        1,
+        "user.message",
+        serde_json::json!({"text": "进度 100% 完成"}),
+    ))
+    .unwrap();
+    let underscore_row = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        2,
+        "user.message",
+        serde_json::json!({"text": "snake_case 命名"}),
+    ))
+    .unwrap();
+    let bridge_row = parse_canonical_event(&event_json(
+        "peri",
+        "s1",
+        3,
+        "user.message",
+        serde_json::json!({"text": "反斜杠 \\ 字面量"}),
+    ))
+    .unwrap();
+    let plain_rows = [
+        parse_canonical_event(&event_json(
+            "peri",
+            "s2",
+            1,
+            "user.message",
+            serde_json::json!({"text": "普通文本没有任何特殊字符"}),
+        ))
+        .unwrap(),
+        parse_canonical_event(&event_json(
+            "peri",
+            "s2",
+            2,
+            "user.message",
+            serde_json::json!({"text": "axb 三个字母没有下划线"}),
+        ))
+        .unwrap(),
+    ];
+    repo.append_events(&[percent_row, underscore_row, bridge_row], None)
+        .expect("append");
+    repo.append_events(&plain_rows, None).expect("append plain");
+
+    // `%` 只命中字面含 `%` 的行（修复前会匹配所有行）。
+    let percent_hits = repo.search_hits("%", 10).unwrap();
+    assert_eq!(percent_hits.len(), 1);
+    assert_eq!(percent_hits[0].sequence, 1);
+
+    // `_` 只命中字面含 `_` 的行（修复前 `a%`/`_` 会把 `axb` 一并拉进来）。
+    let underscore_hits = repo.search_hits("_", 10).unwrap();
+    assert_eq!(
+        underscore_hits
+            .iter()
+            .map(|hit| hit.sequence)
+            .collect::<Vec<_>>(),
+        vec![2],
+        "下划线按字面量匹配，snake_case 命中而 axb 不命中"
+    );
+
+    // 转义符本身也按字面量匹配。
+    let backslash_hits = repo.search_hits("\\", 10).unwrap();
+    assert_eq!(backslash_hits.len(), 1);
+    assert_eq!(backslash_hits[0].sequence, 3);
+
+    // 混合通配符的子串仍然按字面命中。
+    let mixed = repo.search_hits("100% 完", 10).unwrap();
+    assert_eq!(mixed.len(), 1);
+    assert_eq!(mixed[0].sequence, 1);
+}
+
+#[test]
 fn search_hits_matches_chinese_query_and_reports_exact_offsets() {
     let repo = repo();
     // raw_payload 序列化文本 = `{"text":"中文检索词在此"}`，"检索词" 首偏移 = 12

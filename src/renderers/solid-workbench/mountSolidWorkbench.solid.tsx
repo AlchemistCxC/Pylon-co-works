@@ -42,7 +42,7 @@ export function displayGateSignature(snapshot: WorkbenchRuntimeSnapshot): readon
     snapshot.generationPhase, snapshot.generationActivity, snapshot.summary,
     snapshot.tokenCount,
     canonicalTokenCount(document?.session.usage, snapshot.tokenCount),
-    snapshot.tasks, snapshot.messages,
+    snapshot.tasks,
     snapshot.availableModels, snapshot.activeModel, snapshot.availableModes, snapshot.activeMode,
     snapshot.canAttach, snapshot.promptImage, snapshot.terminalFence,
     document?.messages, document?.activities, document?.diagnostics,

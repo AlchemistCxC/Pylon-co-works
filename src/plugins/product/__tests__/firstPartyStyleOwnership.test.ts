@@ -5,9 +5,9 @@ import {
 } from '../firstPartyStyleOwnership.ts'
 
 const expectedCssPaths = [
-  'src/components/kernel/SkinPreviewBar.css',
   'src/index.css',
   // J 施工书 20260914：pluginManagerPanel.css 已绞杀进 utilities 层，不再登记。
+  // #491 绞杀恢复批：SkinPreviewBar.css 同批绞杀，不再登记。
   'src/plugins/product/packages/builtin.pylon-renderers/styles/adaptive.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css',
   'src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css',
@@ -22,7 +22,6 @@ const expectedCssPaths = [
   'src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css',
   // 解耦评估批 2（issue #83）：FileSheet.css 的跨 sheet 共享词汇剥出为独立基座。
   'src/plugins/product/packages/builtin.pylon-workspace/styles/SheetVocabulary.css',
-  'src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css',
   'src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css',
@@ -54,10 +53,10 @@ describe('first-party CSS ownership inventory', () => {
       'src/index.css',
       // TW 施工书 20260914（P85）：Tailwind utilities 基线为 kernel 级静态基线。
       'src/styles/tailwind.css',
-      'src/components/kernel/SkinPreviewBar.css',
+      // -SkinPreviewBar.css（#491 绞杀恢复批：整文件绞杀进 utilities 层）。
     ])
     expect(listFirstPartyStylesByOwner('builtin.pylon-shell')).toHaveLength(4) // -PermissionDialog/-SessionOwnerRecoveryDialog/-ProfileEditor（已绞杀，P93）
-    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(7) // -HistorySheet/-BrowserSheet/-RuntimeSheet（已绞杀，P93 批 2/4）；+SheetVocabulary.css（共享词汇基座，issue #83）
+    expect(listFirstPartyStylesByOwner('builtin.pylon-workspace')).toHaveLength(6) // -HistorySheet/-BrowserSheet/-RuntimeSheet（已绞杀，P93 批 2/4）；-PrismSheet.css（演示出树，#484）；+SheetVocabulary.css（共享词汇基座，issue #83）
     expect(listFirstPartyStylesByOwner('builtin.pylon-renderers')).toHaveLength(6) // -MessageSearchBar（已绞杀，J/绞杀流水线 20260914）；-PetCompanion.css（#483 宠物链删除）；+WorkbenchChrome.css（Solid 壳层过渡态）
     expect(listFirstPartyStylesByOwner('builtin.pylon-gateway')).toHaveLength(1) // P77：gateway 样式随包迁移
   })

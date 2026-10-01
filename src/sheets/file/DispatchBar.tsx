@@ -3,7 +3,7 @@ import { appClients } from '../../app/appClients.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../app/runtimeError'
-import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
+import { buildDispatchMessage, type DispatchSelection } from '../../domains/file/dispatchMessage.ts'
 import type { Session } from '../../domains/identity/identityStore'
 
 export function resolveDispatchOwnerSession(

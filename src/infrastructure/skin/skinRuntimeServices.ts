@@ -5,6 +5,7 @@
  * 禁止各组件自建 Runtime 或直接 useStore.setState 驱动皮肤。
  */
 import { SkinRuntime } from '../../plugin-runtime/skin/skinRuntime.ts'
+import { logWarn } from '../../contracts/frontendLogSink.ts'
 import { DEFAULTS } from '../../domains/theme/themeDefaults.ts'
 import { THEME_SETTING_KEYS } from '../../domains/theme/themeFieldDefs.ts'
 import {
@@ -45,7 +46,7 @@ export function bindSkinPersistence(storage?: SkinStorage): () => void {
     try {
       persistSkinState(target, skinRuntime)
     } catch (error) {
-      console.warn('pylon-skins 持久化失败', error)
+      logWarn('pylon-skins 持久化失败', error)
     }
   }
   return skinRuntime.subscribe(persist)

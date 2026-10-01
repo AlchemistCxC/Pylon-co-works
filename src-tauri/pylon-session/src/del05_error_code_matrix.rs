@@ -126,9 +126,10 @@ fn user_data_error_wire_codes_are_stable_contract() {
 fn delete_then_evt_append_wire_code_is_event_session_deleted() {
     let path = unique_temp_db_path();
     let repo = MsgRepo::open(&path).expect("open file repo");
-    repo.touch_session("s1").expect("touch s1");
-    repo.delete_session("s1", Some(r#"["p1","a1","s1"]"#))
+    repo.begin_delete_session("s1", Some(r#"["p1","a1","s1"]"#))
         .expect("delete s1");
+    repo.finalize_session_delete("s1", Some(r#"["p1","a1","s1"]"#))
+        .expect("finalize s1");
 
     let late = parse_canonical_event(&serde_json::json!({
         "eventId": "[\"p1\",\"a1\",\"s1\"]#1",

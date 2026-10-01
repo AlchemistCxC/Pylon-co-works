@@ -142,7 +142,7 @@ export function classifyPath(
   return { bucket, area, lang }
 }
 
-/** TS/JS 测试文件判据（文件级）。mock/demo 数据（如 mockBlocks.tsx）不是测试，不在此列。 */
+/** TS/JS 测试文件判据（文件级）。mock/demo 数据（如 demoData.ts）不是测试，不在此列。 */
 export function isTestPathTs(path: string): boolean {
   const lang = LANG_BY_EXT[path.slice(path.lastIndexOf('.') + 1)]
   if (!lang || !TS_FAMILY.has(lang)) return false

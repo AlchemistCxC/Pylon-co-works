@@ -18,31 +18,34 @@
 //! 权威）；下次发消息走 `known_peri_id` → `session/load` 自愈。连接回收才真正释放
 //! agent 子进程/文件句柄/内存——这是 issue 点名「一直挂着 agent 子进程」的落点。
 //!
-//! ⚠️ **两条路径的自愈能力不同**：会话回收后下一次发送会自愈（revive），而**连接
-//! 回收不会**——Pylon 的 GUI prompt 路径没有断线自动重连（`session/prompt.rs` 只判
-//! `Crashed`；`AcpClient` 对已停止的连接直接 `ConnectionClosed`），用户需要手动
-//! 重连/切一次 agent 才能继续。这正是连接回收必须保守的原因：只在**零会话**且闲置
-//! 超过 24 小时默认值时才动它，且 `PYLON_SESSION_IDLE_TIMEOUT_SECS=0` 可整体关闭。
-//! 「GUI 断线懒重连」是独立议题，不在本项范围。
+//! #490：**回收默认关闭**（[`DEFAULT_GUI_IDLE_TIMEOUT_SECS`] = `0`），显式 opt-in。
+//! 维持 24 小时默认的核心论据——「GUI prompt 路径没有断线自动重连，回收之后用户要
+//! 手动救」——已被 #379 推翻：会话回收只删映射，下次发送经 `known_peri_id` 自愈
+//! （见上）；连接回收断掉的线，如今也由 `ensure_connected_for_send`（`session/mod.rs`）
+//! 在发送/建会话前懒重建。自动回收由此失去必要性：默认让闲置会话与 agent 子进程
+//! 常驻，「隔天回来继续用」是零成本路径；资源受限部署设 `PYLON_SESSION_IDLE_TIMEOUT_SECS`
+//! 为正秒数即恢复本文件全部链路。零会话口径与 `platform_may_route_to` 保活守卫保留不动。
 
 use super::*;
 
 /// #363-4：GUI 本地（无 gateway binding）会话与连接的回收超时（秒）。
 ///
 /// `0` 关闭本项；非法值回退默认。命名与语义对齐 Codeg `CODEG_ACP_IDLE_TIMEOUT_SECS`
-/// （同样是「秒 + 0 关闭」），但**默认值不同**，理由见 [`DEFAULT_GUI_IDLE_TIMEOUT_SECS`]。
+/// （同样是「秒 + 0 关闭」）；#490 起默认值同为关闭（`0`），理由见
+/// [`DEFAULT_GUI_IDLE_TIMEOUT_SECS`]。
 pub(crate) const GUI_IDLE_TIMEOUT_ENV: &str = "PYLON_SESSION_IDLE_TIMEOUT_SECS";
 
-/// 默认 24 小时。
+/// #490：默认 `0`——**后台回收关闭**，回收是显式 opt-in。
 ///
-/// Codeg 默认 180 秒，前提是它的前端每 30 秒给连接发一次 keepalive、并且断线有自动
-/// 重连。Pylon 两者都没有：GUI 的 prompt 路径只判 `Crashed`（`session/prompt.rs`），
-/// 打到已断开的连接上是硬错误。若照搬 180 秒，用户离开三分钟后回来发消息就会直接
-/// 拿到失败。所以默认取「与无 binding 会话原本就已生效的隐式默认」一致的 1440 分钟
-/// （即原 `idle_minutes` 缺省值），把「更快回收」留给配置。
-pub(crate) const DEFAULT_GUI_IDLE_TIMEOUT_SECS: u64 = 1440 * 60;
+/// 24 小时默认当年取「与无 binding 会话隐式默认（`idle_minutes` 缺省 1440 分钟）
+/// 一致」的保守值，前提是 GUI 发送打到已回收的连接上是硬错误。#379 落地
+/// `ensure_connected_for_send` 后该前提不再成立：连接被回收后首次发送会先懒重连
+/// 再继续，「隔天回来继续用」不依赖后台回收。于是默认翻转——闲置会话与 agent 子进程常驻
+/// （内存/句柄的常驻代价由用户显式承担），资源受限部署设正秒数换回自动释放。
+/// 非法值回退本值同样落在「关闭」：opt-in 只认合法正数，笔误不会误启回收。
+pub(crate) const DEFAULT_GUI_IDLE_TIMEOUT_SECS: u64 = 0;
 
-/// 读 GUI 回收超时：env 覆盖 → 默认；`0` = 关闭（返回 `None`）。
+/// 读 GUI 回收超时：env 覆盖 → 默认（#490 起即关闭）；`0` = 关闭（返回 `None`）。
 fn gui_idle_timeout() -> Option<std::time::Duration> {
     gui_idle_timeout_from(std::env::var(GUI_IDLE_TIMEOUT_ENV).ok().as_deref())
 }
@@ -269,8 +272,9 @@ pub(crate) async fn check_session_expiry_with(
         // 收到会话为止：连接上的子进程（`AgentRuntime.acp` 的 `ManagedChild`）不会因
         // 会话回收而释放，它属于连接。一个没有任何会话的连接，按定义不在给用户看任何
         // 对话，闲置超时后杀掉它的进程树才是 issue 点名的「回收子进程/句柄/内存」。
-        // 保守边界：有会话的连接不走这条路径（那会让 GUI 下一次发消息打到死连接上，
-        // 而 Pylon 的 GUI prompt 路径没有断线自动重连）。
+        // 保守边界：有会话的连接不走这条路径。#379 懒重连后，回收过的连接在下次发送
+        // 时本可自愈，但拆掉仍带会话的连接只会换来无谓的重建延迟与代际失效——
+        // 「零会话才收」的口径不变。
         reclaim_idle_connection(
             &agent_id,
             &runtime,
@@ -286,11 +290,11 @@ pub(crate) async fn check_session_expiry_with(
 
 /// 平台消息**可能**落到该 agent 时不得回收它的连接（#363-4 修正）。
 ///
-/// 连接回收把 runtime 置为 `Disconnected`，而这是**不会自愈**的状态：自动重连只管
-/// `Crashed`/`Error`，平台 ingest 对非 Connected 实例直接拒绝且无 fallback
-/// （`route.rs` 的 `IngestReject::InstanceNotConnected`）。所以只要平台有任何路径能
-/// 路由到该 agent，就必须保留它的连接——否则一个挂机 24 小时、期间没有会话的网关
-/// agent 会被静默杀掉，之后所有入站平台消息被拒到有人手动重连为止。
+/// 连接回收把 runtime 置为 `Disconnected`。#379（GUI 发送懒重连）与 B10.3（平台
+/// ingest 的 `ensure_runtime_ready` 懒启动）落地后，该状态已能自愈，本守卫当年的
+/// 「防静默不可恢复」论据随之弱化；但守卫保留——回收意味着秒级重建延迟与远端会话
+/// 代际失效（`SessionContinuity::Invalidated`），对平台可能路由的 agent 做无谓拆除
+/// 没有收益，保守保活的代价只是「零会话连接多活一阵」。
 ///
 /// 两条路径：
 /// 1. **显式路由绑定**：`gateway.routes()` 里 `agent_id` 命中该 agent。

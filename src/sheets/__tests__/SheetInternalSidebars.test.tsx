@@ -17,7 +17,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import PrismManagerSheetView from '../PrismManagerSheetView.tsx'
 import RuntimeSheetView from '../RuntimeSheetView.tsx'
 import OverviewSheetView from '../OverviewSheetView.tsx'
 import SearchSheetView from '../search/SearchSheetView.tsx'
@@ -50,7 +49,6 @@ const ctx = (sidebarCollapsed: boolean) => ({
 } as unknown as SheetContext)
 
 const cases = [
-  ['prism', PrismManagerSheetView, '.ps-nav'],
   ['runtime', RuntimeSheetView, '.runtime-sidebar'],
   ['overview', OverviewSheetView, '.overview-sidebar'],
   ['search', SearchSheetView, '.search-sidebar'],

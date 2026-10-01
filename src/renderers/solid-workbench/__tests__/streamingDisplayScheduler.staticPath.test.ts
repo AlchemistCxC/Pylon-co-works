@@ -10,6 +10,7 @@
  *  渲染层据此把该行留在增量路径；新出现的行不算「在长」（活性由权威判据负责）。
  *
  * 两侧边界同样被钉住：直播中的新行仍按预算揭示；终态交接仍不整块倒出。
+ * #487：调度器只认 canonical document.messages（legacy 快照字段已退役）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_STREAMING_DISPLAY_OPTIONS, createStreamingDisplayScheduler } from '../streamingDisplayScheduler.ts'
@@ -19,17 +20,22 @@ import { createWorkbenchDocument, type WorkbenchMessage } from '../../../domains
 
 const TICK_MS = 1000 / DEFAULT_STREAMING_DISPLAY_OPTIONS.maxUpdatesPerSecond + 1
 
-function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> = {}): WorkbenchRuntimeSnapshot {
+/** #487：`messages` 覆盖项路由进 canonical document（legacy 快照字段已退役）。 */
+function snapshot(overrides: Partial<WorkbenchRuntimeSnapshot> & { messages?: readonly WorkbenchMessage[] } = {}): WorkbenchRuntimeSnapshot {
+  const { messages, ...rest } = overrides
   return {
     revision: 0, sessionId: 'session-a', ownerKey: 'owner-a', generation: 1,
-    status: 'ready', messages: [], generating: false, generationStart: 0, tokenCount: 0, summary: null,
+    status: 'ready', generating: false, generationStart: 0, tokenCount: 0, summary: null,
     tasks: [], availableModels: [], activeModel: '', availableModes: [], activeMode: '',
-    canAttach: false, promptImage: false, error: null, ...overrides,
+    canAttach: false, promptImage: false, error: null,
+    ...(messages !== undefined ? { document: { ...createWorkbenchDocument('session-a'), messages } } : {}),
+    ...rest,
   }
 }
 
-const message = (id: string, content: string, running = true) => ({
-  id, role: 'assistant' as const, sender: 'test', content, time: '', running,
+const message = (id: string, content: string, running = true): WorkbenchMessage => ({
+  id, segmentId: id, role: 'assistant', content, parts: [], identity: {},
+  source: { provider: 'test', sourceId: id }, sequence: 1, running, time: '',
 })
 
 /** 与 `streamingDisplayScheduler.test.ts` 同一口径：假定时器 + `Date.now()` 时钟。 */
@@ -57,7 +63,7 @@ describe('#212 判据 A · 历史整发', () => {
     scheduler.push(snapshot({ messages: [message('m1', long, false)] }))
 
     expect(published).toHaveLength(before + 1)
-    expect(published.at(-1)!.messages[0]!.content).toBe(long)
+    expect(published.at(-1)!.document!.messages[0]!.content).toBe(long)
     expect(scheduler.diagnostics().lastPublicationKind).toBe('whole')
     expect(scheduler.diagnostics().historyPublications).toBe(1)
   })
@@ -68,11 +74,11 @@ describe('#212 判据 A · 历史整发', () => {
     scheduler.push(snapshot({ messages: [] }))
     scheduler.push(snapshot({
       messages: [
-        { id: 'r1', role: 'reasoning', sender: 'test', content: text(3000), time: '', running: false },
-        { id: 'm1', role: 'assistant', sender: 'test', content: text(5000), time: '', running: false },
-      ] as never,
+        { ...message('r1', text(3000), false), role: 'reasoning' as const },
+        message('m1', text(5000), false),
+      ],
     }))
-    expect(published.at(-1)!.messages.map(item => item.content.length)).toEqual([3000, 5000])
+    expect(published.at(-1)!.document!.messages.map(item => item.content.length)).toEqual([3000, 5000])
     expect(scheduler.diagnostics().historyPublications).toBe(1)
   })
 
@@ -86,7 +92,7 @@ describe('#212 判据 A · 历史整发', () => {
     const before = published.length
     scheduler.resume(snapshot({ generating: false, messages: [message('m1', long, false)] }))
     expect(published).toHaveLength(before + 1)
-    expect(published.at(-1)!.messages[0]!.content).toBe(long)
+    expect(published.at(-1)!.document!.messages[0]!.content).toBe(long)
   })
 
   it('interpolateHistory 开关是回滚路径：置 true 恢复逐拍揭示', async () => {
@@ -104,7 +110,7 @@ describe('#212 判据 A · 历史整发', () => {
     // 非生成态的增长走「终态合并」分支（微任务）⇒ 与既有用例同构，须 await 才落地
     await Promise.resolve()
     const first = published[before]!
-    expect(first.messages[0]!.content.length).toBe(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
+    expect(first.document!.messages[0]!.content.length).toBe(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick)
     expect(scheduler.diagnostics().lastPublicationKind).toBe('budgeted')
     expect(scheduler.diagnostics().historyPublications).toBe(0)
   })
@@ -118,7 +124,7 @@ describe('#212 边界 · 直播侧不变', () => {
     const before = published.length
     scheduler.push(snapshot({ generating: true, messages: [message('m1', long)] }))
     vi.advanceTimersByTime(TICK_MS)
-    expect(published[before]!.messages[0]!.content.length).toBe(
+    expect(published[before]!.document!.messages[0]!.content.length).toBe(
       DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealUnitsPerTick,
     )
     expect(scheduler.diagnostics().historyPublications).toBe(0)
@@ -136,7 +142,7 @@ describe('#212 边界 · 直播侧不变', () => {
     scheduler.push(snapshot({ generating: true, messages: [message('m1', '')] }))
     scheduler.push(snapshot({ generating: true, messages: [message('m1', complete)] }))
     vi.advanceTimersByTime(TICK_MS)
-    const revealed = published.at(-1)!.messages[0]!.content.length
+    const revealed = published.at(-1)!.document!.messages[0]!.content.length
     expect(revealed).toBeGreaterThan(0)
     expect(revealed).toBeLessThan(complete.length)
 
@@ -147,10 +153,10 @@ describe('#212 边界 · 直播侧不变', () => {
     }))
     await Promise.resolve()
     // 终态的结构（summary/running）已落地，文本仍在按预算收敛
-    expect(published.at(-1)!.messages[0]!.content.length).toBeLessThan(complete.length)
+    expect(published.at(-1)!.document!.messages[0]!.content.length).toBeLessThan(complete.length)
     expect(scheduler.diagnostics().flushes).toBe(0)
     vi.advanceTimersByTime(DEFAULT_STREAMING_DISPLAY_OPTIONS.maxRevealLagMs + 400)
-    expect(published.at(-1)!.messages[0]!.content).toBe(complete)
+    expect(published.at(-1)!.document!.messages[0]!.content).toBe(complete)
   })
 })
 
@@ -180,17 +186,10 @@ describe('#212 判据 C · 增长集合', () => {
     expect(scheduler.revealingRows().size).toBe(0)
   })
 
-  it('canonical 与 legacy 双列表同源时只记一次账', () => {
+  it('同一行（document 语义下唯一列表）只记一次账', () => {
     const { scheduler } = setup()
-    const documentOf = (content: string) => ({
-      ...createWorkbenchDocument('session-a'),
-      messages: [{
-        id: 'm1', role: 'assistant' as const, content, time: '', running: true,
-        parts: [], identity: {}, source: { provider: 'acp', sourceId: 's' }, sequence: 2,
-      } as unknown as WorkbenchMessage],
-    })
-    scheduler.push(snapshot({ generating: true, messages: [message('m1', 'a')], document: documentOf('a') }))
-    scheduler.push(snapshot({ generating: true, messages: [message('m1', 'abc')], document: documentOf('abc') }))
+    scheduler.push(snapshot({ generating: true, messages: [message('m1', 'a')] }))
+    scheduler.push(snapshot({ generating: true, messages: [message('m1', 'abc')] }))
     expect(scheduler.revealingRows().size).toBe(1)
     expect(scheduler.diagnostics().growingRows).toBe(1)
   })

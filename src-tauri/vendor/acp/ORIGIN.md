@@ -3,6 +3,7 @@
 > 本目录（`src-tauri/vendor/acp/`）只存放从 codeg 迁入的**源码副本**，用于溯源、许可证履约与逐文件比对。
 > 它**不是编译目标**：Cargo 不编译 `vendor/`，Pylon 的行为改动一律落在 `src-tauri/src/acp/` 的 adapter 中。
 > **[已退役 2026-09-14，P91 测试体系大修 §0 决策 2]** `scripts/check-vendor-provenance.mjs` 经用户裁定为死代码并删除；provenance 机器校验与 consumer 登记要求随之废止。本文件保留的 license/出处登记（§1–§3）是外部代码署名义务，继续有效。
+> **[副本出树 2026-10-01，#484]** 唯一副本 `acp_transcript.rs`（§3 provenance 登记、SHA `49c489ca…`，逐字副本、从未编译接入）经用户裁定为死代码删除；本文件随之不再承载「源码副本比对」职能，仅作为 **codeg 迁入代码的署名义务与出处登记**（含 §6 各追记）继续有效。后续如需对照上游，按 §1 锁定 commit 从 codeg 本地副本重取。
 
 ## 1. 来源锁定
 

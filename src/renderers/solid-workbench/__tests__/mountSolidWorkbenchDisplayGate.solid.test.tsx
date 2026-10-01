@@ -11,7 +11,8 @@ import type { WorkbenchRuntimeSnapshot } from '../../../domains/workbench/workbe
  * P57 S2-R1d（第一步：渲染器侧门控）验收 2：
  * - 连续 100 个 display 无关（usage 数值不变）的更新不触发 Solid 显示链发表；
  * - usage 数值变化必须放行（footer tokenCount 消费点 :544 防过度静默）；
- * - snapshot.messages 数组引用在 usage 类事件间保持不变（R1b/R1c 链）。
+ * - document.messages 数组引用在 usage 类事件间保持不变（R1b/R1c 链，#487 起
+ *   document 是唯一消息所有者）。
  *
  * 「setRuntimeSnapshot spy」的实现方式：mock 调度器工厂，包裹其 publish 回调——
  * publish 正是 mount 内调用 setRuntimeSnapshot 的唯一路径（preview 走 flush 直发）。
@@ -133,7 +134,7 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
     }
   })
 
-  it('usage 类事件间 snapshot.messages 数组引用不变', () => {
+  it('usage 类事件间 document.messages 数组引用不变', () => {
     const services = createPreviewWorkbenchServices()
     const host = document.createElement('div')
     document.body.append(host)
@@ -147,7 +148,6 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
         envelope(1, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '问题' }] }),
       ]).document
       services.runtime.replaceDocument(base, { ownerKey: 'owner-preview', generation: 1 })
-      const messagesRef = services.runtime.getSnapshot().messages
       const documentMessagesRef = services.runtime.getSnapshot().document!.messages
       const frozenBase = services.runtime.getSnapshot().document!
 
@@ -156,7 +156,6 @@ describe('mountSolidWorkbench display gate（P57 S2-R1d 第一步）', () => {
       }
 
       expect(services.runtime.getSnapshot().document!.messages).toBe(documentMessagesRef)
-      expect(services.runtime.getSnapshot().messages).toBe(messagesRef)
     } finally {
       lifecycle.destroy()
       host.remove()

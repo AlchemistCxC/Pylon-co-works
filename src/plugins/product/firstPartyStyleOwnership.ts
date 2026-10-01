@@ -72,7 +72,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
     ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'Tailwind v4 utilities 基线：@theme inline 只读消费 index.css token；无 preflight（TW 施工书 20260914）',
   ),
-  entry('src/components/kernel/SkinPreviewBar.css', 'kernel', 'kernel-static', ['src/components/kernel/SkinPreviewBar.tsx']),
+  // #491 绞杀恢复批：SkinPreviewBar.css 已整文件绞杀进 utilities 层，不再登记。
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionSettings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
@@ -81,7 +81,6 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
 
   entry('src/plugins/product/packages/builtin.pylon-gateway/styles/adaptive.css', 'builtin.pylon-gateway', 'adaptive', [GATEWAY_STYLE_ASSETS], 'gateway 包自适应残量：modern-gui 覆写 + status-pulse 动画（绞杀 P93 批 3）'),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/adaptive.css', 'builtin.pylon-workspace', 'adaptive', [WORKSPACE_STYLE_ASSETS], 'workspace 包自适应残量：history/search/browser/runtime 的 mode 覆写与变量残量（绞杀 P93 批 2/4）'),
-  entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/PrismSheet.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/Sidebar.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/components/right-panel/ContextPanel.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-workspace/styles/sheets/OverviewSheetView.css', 'builtin.pylon-workspace', 'plugin-scope', [WORKSPACE_STYLE_ASSETS]),
