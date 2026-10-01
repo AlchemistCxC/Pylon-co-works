@@ -212,7 +212,8 @@ declare_app_state! {
         /// issue #82：Agent 浏览器能力 hub（设置/claim/ref/CDP 状态）。
         browser_agent: Arc<crate::browser::agent::hub::BrowserAgentHub>,
         prism: PrismClient,
-        /// R5（P1-3）：启动诊断快照（run() 构建主体，setup 解析 DataDirs 后补写 storage）。
+        /// R5（P1-3）：启动诊断快照（run() 构建主体；#482 起 storage 模式诊断已随
+        /// AppData 双模式退役，快照只含配置来源与分域错误）。
         startup: Arc<RwLock<crate::startup::StartupDiagnostics>>,
         /// #463：approval-mode 写序锁（tokio Mutex）——set_approval_mode 的内存写与
         /// user_data 落盘全程持锁，并发 set（GUI 与 CLI 桥同进程）时磁盘必为最后一次
@@ -682,9 +683,10 @@ pub fn init_tracing() -> LogGuard {
 /// （`file_layer.with_subscriber(base)`）。`tracing-subscriber` 给 `fmt::Subscriber`
 /// 实现的 `LookupSpan::register_filter` 是**默认实现、直接 panic**
 /// （`registry/mod.rs`：`"{type} does not currently support filters"`），于是这条分支
-/// 一被走到进程就启动即崩——触发条件只是「日志根可写」，portable 与 AppData 两条路
-/// 都满足，**与 debug/release 无关**，于是从源码构建的发行包 100% 起不来。`Registry`
-/// 支持 per-layer filtering，三个 sink 平铺挂上去即可（各层的级别/目标过滤语义不变）。
+/// 一被走到进程就启动即崩——触发条件只是「日志根可写」（事发时 portable 与 AppData
+/// 两条路都满足，#482 起仅剩 portable 一条），**与 debug/release 无关**，于是从源码
+/// 构建的发行包 100% 起不来。`Registry` 支持 per-layer filtering，三个 sink 平铺挂上去
+/// 即可（各层的级别/目标过滤语义不变）。
 ///
 /// 抽成独立函数是为了能被测试直接驱动：`set_global_default` 每进程只成功一次，而
 /// 「构造这条订阅栈不 panic」正是 #383 的回归点。

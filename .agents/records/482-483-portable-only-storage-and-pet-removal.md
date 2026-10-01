@@ -81,6 +81,21 @@
 2. `effectivePresetTheme` 键数基线与 `firstPartyStyleOwnership` 计数 pin 的随迁（spec「测试处置」未点名）——类型/守卫强制暴露的连带面。
 3. 其余与 spec 一致。
 
+## 审查轮（2026-10-01，双独立子 agent 对抗式，均 APPROVE_WITH_NITS）
+
+按 issue 域分派两个审查 agent（#482 存储域 / #483 前端域）。核心结论：删除彻底零残留、致命失败路径语义正确且回归钉有效、**旧持久化数据（含 showPet 的 `pylon-theme`/layout envelope v4/旧预设 payload）经逐出口白名单（partialize/`filterPresetTheme`/`pickCustomPresetTheme`/外观投影）验证既不会复活也不会破坏加载**、提交零夹带、定向复跑门禁全绿。发现与处置（审查修正提交）：
+
+| 级别 | 发现 | 处置 |
+| --- | --- | --- |
+| P2 | `resources/release/README.txt` 仍指导「删 flag 移走 data\ 回 AppData」（回退已不存在，误导发行包文案） | 改写为「仅便携存储；data 不可写拒启；flag 仅身份标记」 |
+| P2 | `docs/说明书/Pylon-插件系统说明书-用户版.md` 仍描述「非便携模式」config_root | 改写为「仅便携存储，无 AppData/AppConfig 回退」 |
+| P2 | `workbench-skin-baseline.json` 基线未随 showPet 退役重拍（仍记 177 字段 + 15 处 showPet） | `check-workbench-theme-contract.mts --write` 重拍（176 字段，diff 即 showPet 摘除） |
+| P2 | `Pylon-CLI-命令表.md` 仍列已删的 `layout.pet.set` | 摘除并留退役注记 |
+| P3 | lib.rs `AppState.startup` 注提「补写 storage」、error.rs Command 用例清单含「portable 迁移」、lib.rs #383 叙事「两条路」、pack_release.py 两处「触发/请求 portable」措辞、项目架构参考「阶段 10b」悬空 | 全部随手清偿（§6.2） |
+| P3 | layoutRailsStore 接口参数顺手改名（collapsed→leftRailCollapsed），与宠物链无关 | 撤销，恢复原参数名保持最小 diff |
+
+审查后复跑门禁：cargo workspace lib 1662/0、fmt 干净、clippy `added: []`、check:solid exit 0、vitest 661 文件 5179/0、pack_release 测试 45/45 OK。
+
 ## 未解问题
 
 - 无阻塞项。备注：`petClient`/`petContracts`/Rust `src/pet` 命令层在宠物 UI 重建前保持零生产消费者（petContracts.test 仍覆盖），将来重做宠物 UI 时按 ADR-0035「新增 UI 一律 Solid」口径启用。

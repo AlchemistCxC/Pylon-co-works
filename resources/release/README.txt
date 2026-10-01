@@ -42,8 +42,9 @@ Pylon 启动 Hermes 前会自动检查运行时，遇到 Bash/环境卡死时会
 `HERMES_CONCURRENT_TOOL_TIMEOUT_S`；未设置时为 30，且只作用于 Hermes 子进程。
 
 【数据目录】
-本包为便携模式：所有数据（会话、插件、MCP、宠物等）保存在本目录 data\ 下。
-删除 portable.flag 并移走 data\ 目录后启动，将回到系统 AppData 目录。
+本包为便携模式（Pylon 仅支持便携存储）：所有数据（会话、插件、MCP、宠物等）
+保存在本目录 data\ 下。portable.flag 仅是便携身份标记；data\ 目录不可写时
+程序将拒绝启动（不会改用系统 AppData 目录）。
 
 【安装包】
 如果你需要安装版（NSIS/MSI），请使用 `bun run tauri -- build --bundles nsis,msi`，
