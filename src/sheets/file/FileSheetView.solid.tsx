@@ -1,0 +1,491 @@
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { createSolidMount } from '../../host/solidBridge.solid'
+import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { useIdentityStore } from '../../domains/identity/identityStore'
+import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
+import { createFileSheetState, fileSheetReducer, fileTabKey, fileTabViewType, parseFileTabs, serializeFileTabs, type FileTabRecord } from './fileSheetState.ts'
+import FileSheetSidebarSolid from './FileSheetSidebar.solid.tsx'
+import FileTabBarSolid from './FileTabBar.solid.tsx'
+import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
+import { workspaceTargetFromSession, workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
+import { getFileWorkbenchRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { listFileActivities, resolveFileProvider, resolveFileViewRenderer, resolveGitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
+import { IsolatedPluginSurfaceSolid } from './isolatedPluginSurface.solid.tsx'
+import FileViewRenderBoundarySolid from './FileViewRenderBoundary.solid.tsx'
+import FileViewHostSolid from './FileViewHost.solid.tsx'
+import FileTreeSolid from './FileTree.solid.tsx'
+import WorkspaceSearchPanelSolid from './WorkspaceSearchPanel.solid.tsx'
+import GitPanelSolid from './GitPanel.solid.tsx'
+import ViewsPanelSolid from './ViewsPanel.solid.tsx'
+import { registerWorkspaceLiveCloseGuard } from '../../workspace-sheets/workspaceLiveCloseGuards.ts'
+import { FILE_NAVIGATION_METADATA_KEY, parsePendingFileNavigation } from './fileSheetNavigation.ts'
+import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
+import { WorkbenchIcon } from './fileIcons.solid.tsx'
+
+/**
+ * FileSheetViewProps — 与 React 桥（FileSheetView.tsx）内声明的同名接口逐字段一致。
+ */
+export interface FileSheetViewProps {
+  sheet: SheetRecord
+  ctx: SheetContext
+}
+
+/** registry 快照 → Solid 只读信号（快照引用等值，与 WorkspaceTitlebar.solid 同一形态）。 */
+function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
+  // updater 形态：T 可能是任意值（含函数），走 (prev) => next 重载避开 Solid setter
+  // 对「函数值」的排除分支。
+  const [snapshot, setSnapshot] = createSignal<T>(store.getSnapshot())
+  onCleanup(store.subscribe(() => setSnapshot(() => store.getSnapshot())))
+  return snapshot
+}
+
+/**
+ * SessionsActivity 的 Solid 直绘（原 first-party-react 贡献 builtinFileWorkbenchViews.
+ * SessionsActivity 的域内克隆，DOM/类名逐项一致；插件面 Solid 化后由实体注册取代）。
+ */
+function SessionsActivitySolid(props: { targetSessionId: string | null; sessions: readonly WorkspaceSession[]; onSelectTarget: (sessionId: string | null) => void }) {
+  return (
+    <div class="file-section-panel file-session-panel">
+      <div class="file-panel-heading">
+        <span>WORKSPACES</span>
+        <span class="file-panel-count">{props.sessions.length}</span>
+        <Show when={props.targetSessionId}>
+          <button type="button" class="file-source-clear" onClick={() => props.onSelectTarget(null)}>清除选择</button>
+        </Show>
+      </div>
+      <Show when={props.sessions.length > 0} fallback={<p class="file-section-hint">没有可用会话</p>}>
+        <ul class="file-source-list">
+          <For each={props.sessions}>{session => (
+            <li>
+              <button type="button" class={`file-source-item ${props.targetSessionId === session.id ? 'active' : ''}`} onClick={() => props.onSelectTarget(session.id)} title={session.source}>
+                <span class="file-source-icon" aria-hidden="true"><WorkbenchIcon name="MessageSquare" size={15} /></span>
+                <span class="file-source-copy"><strong>{session.name}</strong><small>{session.source}</small></span>
+              </button>
+            </li>
+          )}</For>
+        </ul>
+      </Show>
+    </div>
+  )
+}
+
+/**
+ * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造；ISSUE-08 D-02/D-04；
+ * #515 Solid 实体）。
+ *
+ * singletonKey = file:{初始 source}（同工作区复用）；内部 targetSource 本地态。
+ * metadata 承载 openTabs（版本化 tab 记录 `{version:2,tabs:[{path,mode,staged?}],activeKey}`，
+ * v1 openTabs:string[] 在 parseFileTabs 内迁移为 file-mode tabs、损坏 normalize 为空）
+ * 与 activeFile（右栏 FileContextPanel 反查关联会话）。
+ * 布局（D-08）：左栏=活动栏 + 分区内容（文件树/SCM/搜索/视图，随分区切换）；
+ * 主区=恒定 tab 条 + FileViewHost 统一渲染（文件视图 / SCM diff / 空态）。
+ * SCM 点击变更 → openDiffTab（diff-mode tab，同路径 file/diff 不互相覆盖）。
+ *
+ * #515 过渡期分派语义（插件面 builtinFileWorkbench 仍按 first-party-react 注册 React
+ * 组件）：activity 内容按已登记的 builtin id 直连域内 Solid 实体（与 React 版渲染的
+ * 是同一批实体的直传薄壳），view renderer 的 first-party-react 分支直连 FileViewHost
+ * 实体（当前唯一第一方 renderer）；isolated-surface 走 Solid 版挂载面。未登记的第三方
+ * first-party-react 贡献以空态提示占位（其出现属产品未决项，不猜）。React 版的
+ * Suspense lazy 缝随 lazy 注册退役，不设加载态。
+ */
+export default function FileSheetView(props: FileSheetViewProps) {
+  const sessions = createZustandSignal(useIdentityStore, s => s.sessions)
+  // zustand 动作引用稳定（create 期定义）；测试 resetStores 只回滚 state。
+  const patchSheetMetadata = useWorkspaceStore.getState().patchSheetMetadata
+
+  // ── 持久化 target 解析（metadata 是当前权威；sheet.state 仅 legacy 回退）──
+  const persistedSessionId = createMemo<string | null>(() => {
+    const sheet = props.sheet
+    const metadataHasTarget = Object.prototype.hasOwnProperty.call(sheet.metadata ?? {}, 'targetSessionId')
+    const metadataTarget = metadataHasTarget
+      ? (sheet.metadata?.targetSessionId || null)
+      : undefined
+    const stateHasTarget = typeof sheet.state === 'object' && sheet.state !== null && 'targetSessionId' in sheet.state
+    const legacyStateTarget = stateHasTarget
+      ? (typeof (sheet.state as { targetSessionId?: unknown }).targetSessionId === 'string'
+          ? (sheet.state as { targetSessionId: string }).targetSessionId || null
+          : null)
+      : undefined
+    const singletonSessionId = sheet.singletonKey?.match(/^file:session:(.+)$/)?.[1]
+    const legacySource = sheet.singletonKey?.match(/^file:(?!session:)(.+)$/)?.[1]
+    return metadataHasTarget
+      ? metadataTarget ?? null
+      : stateHasTarget
+        ? legacyStateTarget ?? null
+        : singletonSessionId
+          ?? (legacySource ? props.ctx.sessionBySource(legacySource)?.id : undefined)
+          ?? props.ctx.activeSession
+          ?? null
+  })
+
+  // ── 分区/目标本地态（React useReducer → signal + reducer）──
+  const [sheetState, setSheetState] = createSignal(createFileSheetState(persistedSessionId()))
+  createEffect(() => {
+    if (sheetState().targetSessionId !== persistedSessionId()) {
+      setSheetState(previous => fileSheetReducer(previous, { type: 'set-target-session', sessionId: persistedSessionId() }))
+    }
+  })
+
+  const targetSession = createMemo(() => sessions().find(session => session.id === sheetState().targetSessionId))
+  const target = createMemo(() => workspaceTargetFromSession(targetSession()))
+  const targetSessionIdOfTarget = createMemo(() => target()?.sessionId)
+
+  // ── workbench registry（进程单例；快照引用等值触发）──
+  const workbenchSnapshot = createRegistrySignal(getFileWorkbenchRegistry())
+  const activities = createMemo(() => {
+    workbenchSnapshot()
+    return listFileActivities(target())
+  })
+  const selectedActivity = createMemo(() => activities().find(activity => activity.id === sheetState().activeSection) ?? activities()[0] ?? null)
+  const fileProvider = createMemo(() => {
+    workbenchSnapshot()
+    return resolveFileProvider(target())
+  })
+  const gitProvider = createMemo(() => {
+    workbenchSnapshot()
+    return resolveGitProvider(target())
+  })
+  // I09-A-FE-02（D-01/D-08）：折叠唯一来源 ctx.sidebarCollapsed（titlebar 统一控制）
+  const sidebarCollapsed = () => props.ctx.sidebarCollapsed
+
+  // ── 版本化 tab（metadata 权威；损坏 → 空；v1 → file-mode tabs）──
+  const tabsState = createMemo(() => parseFileTabs(props.sheet.metadata?.openTabs))
+  const activeTabKey = createMemo(() => tabsState().activeKey)
+  const activeTab = createMemo<FileTabRecord | null>(() => {
+    const state = tabsState()
+    if (state.activeKey) {
+      const active = state.tabs.find(tab => fileTabKey(tab) === state.activeKey)
+      if (active) return active
+    }
+    return state.tabs[state.tabs.length - 1] ?? null
+  })
+
+  const [dirtyTabKeys, setDirtyTabKeys] = createSignal<ReadonlySet<string>>(new Set())
+  const [savingTabKeys, setSavingTabKeys] = createSignal<ReadonlySet<string>>(new Set())
+  const onDirtyChange = (key: string, dirty: boolean) => {
+    setDirtyTabKeys(current => {
+      const hasKey = current.has(key)
+      if (hasKey === dirty) return current
+      const next = new Set(current)
+      if (dirty) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
+  const onSavingChange = (key: string, saving: boolean) => {
+    setSavingTabKeys(current => {
+      const hasKey = current.has(key)
+      if (hasKey === saving) return current
+      const next = new Set(current)
+      if (saving) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
+  const discardDirty = (key: string) => setDirtyTabKeys(current => {
+    if (!current.has(key)) return current
+    const next = new Set(current)
+    next.delete(key)
+    return next
+  })
+  const canLeaveActiveTab = (nextKey: string | null) => {
+    const currentKey = activeTab() ? fileTabKey(activeTab()!) : null
+    if (!currentKey || currentKey === nextKey) return true
+    if (savingTabKeys().has(currentKey)) return false
+    if (!dirtyTabKeys().has(currentKey)) return true
+    if (!window.confirm('当前文件有未保存修改。放弃修改并继续吗？')) return false
+    discardDirty(currentKey)
+    return true
+  }
+  createEffect(() => {
+    if (dirtyTabKeys().size === 0 && savingTabKeys().size === 0) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    onCleanup(() => window.removeEventListener('beforeunload', warnBeforeUnload))
+  })
+  createEffect(() => {
+    const unregister = registerWorkspaceLiveCloseGuard(props.sheet.id, () => {
+      if (savingTabKeys().size > 0) return false
+      if (dirtyTabKeys().size === 0) return true
+      return window.confirm('此 File Sheet 有未保存修改。放弃修改并关闭吗？')
+    })
+    onCleanup(unregister)
+  })
+
+  const [failedRendererIds, setFailedRendererIds] = createSignal<ReadonlySet<string>>(new Set())
+  let handledNavigation: string | null = null
+  createEffect(() => {
+    void targetSessionIdOfTarget()
+    void activeTabKey()
+    setFailedRendererIds(new Set<string>())
+  })
+  const viewRenderer = createMemo(() => resolveFileViewRenderer(target(), activeTab(), failedRendererIds()))
+
+  const readCurrentTabs = () => {
+    const currentSheet = useWorkspaceStore.getState().workspaceSheets.sheets.find(item => item.id === props.sheet.id)
+    return parseFileTabs(currentSheet?.metadata?.openTabs)
+  }
+
+  const persistTabs = (tabs: FileTabRecord[], activeKey: string | null, targetSessionId = sheetState().targetSessionId) => {
+    const activeFile = tabs.find(tab => fileTabKey(tab) === activeKey)?.path
+    const fallback = tabs.length > 0 ? tabs[tabs.length - 1].path : ''
+    patchSheetMetadata(props.sheet.id, {
+      openTabs: serializeFileTabs({ version: 3, tabs, activeKey }),
+      activeFile: activeFile ?? fallback,
+      targetSessionId: targetSessionId ?? '',
+    })
+  }
+
+  const openFileTab = (path: string, line?: number) => {
+    const nextKey = fileTabKey({ path, viewType: 'file.text' })
+    if (!canLeaveActiveTab(nextKey)) return
+    const current = readCurrentTabs()
+    const index = current.tabs.findIndex(tab => fileTabViewType(tab) === 'file.text' && tab.path === path)
+    const revealLine = Number.isInteger(line) && (line ?? 0) > 0 ? line : undefined
+    const next = index >= 0
+      ? current.tabs.map((tab, tabIndex) => tabIndex === index && revealLine !== undefined ? { ...tab, line: revealLine } : tab)
+      : [...current.tabs, { path, viewType: 'file.text', ...(revealLine === undefined ? {} : { line: revealLine }) }]
+    persistTabs(next, nextKey)
+  }
+
+  // Cross-Sheet navigation is queued in metadata, but only this mounted FileSheet
+  // may apply it. This preserves the same dirty/saving guard as Explorer/search
+  // navigation and avoids an AgentSheet mutating editor tabs behind the host.
+  createEffect(() => {
+    const sheetId = props.sheet.id
+    const raw = props.sheet.metadata?.[FILE_NAVIGATION_METADATA_KEY]
+    if (!raw) {
+      handledNavigation = null
+      return
+    }
+    const pending = parsePendingFileNavigation(raw)
+    if (!pending) {
+      patchSheetMetadata(sheetId, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+      return
+    }
+    if (handledNavigation === pending.requestId) return
+
+    // A session-scoped FileSheet can be manually retargeted. Returning to its
+    // owning AgentSheet must clear the old workspace tabs before changing target,
+    // otherwise an identical relative path could be read/written in the wrong root.
+    if (pending.sessionId !== sheetState().targetSessionId) {
+      if (savingTabKeys().size > 0) return
+      if (dirtyTabKeys().size > 0 && !window.confirm('当前工作区有未保存修改。放弃修改并打开链接文件吗？')) {
+        handledNavigation = pending.requestId
+        patchSheetMetadata(sheetId, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+        return
+      }
+      setDirtyTabKeys(new Set<string>())
+      patchSheetMetadata(sheetId, {
+        openTabs: serializeFileTabs({ version: 3, tabs: [], activeKey: null }),
+        activeFile: '',
+        targetSessionId: pending.sessionId,
+        // Keep the intent for the next render. The target-sync effect advances
+        // local ownership first; only then may the target file tab mount.
+        [FILE_NAVIGATION_METADATA_KEY]: raw,
+      })
+      return
+    }
+
+    const nextTab: FileTabRecord = {
+      path: pending.path,
+      viewType: 'file.text',
+      ...(pending.line === undefined ? {} : { line: pending.line }),
+    }
+    const nextKey = fileTabKey(nextTab)
+    const currentKey = activeTab() ? fileTabKey(activeTab()!) : null
+    // Saving is transient and cannot be cancelled safely. Keep the intent queued;
+    // this effect retries as soon as the saving key set changes.
+    if (currentKey && currentKey !== nextKey && savingTabKeys().has(currentKey)) return
+    handledNavigation = pending.requestId
+    if (currentKey && currentKey !== nextKey && dirtyTabKeys().has(currentKey)) {
+      if (!window.confirm('当前文件有未保存修改。放弃修改并打开链接文件吗？')) {
+        patchSheetMetadata(sheetId, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+        return
+      }
+      setDirtyTabKeys(current => {
+        const next = new Set(current)
+        next.delete(currentKey)
+        return next
+      })
+    }
+
+    const current = readCurrentTabs()
+    const existingIndex = current.tabs.findIndex(tab => fileTabViewType(tab) === 'file.text' && tab.path === pending.path)
+    const tabs = existingIndex >= 0
+      ? current.tabs.map((tab, index) => index === existingIndex ? { ...tab, ...(pending.line === undefined ? {} : { line: pending.line }) } : tab)
+      : [...current.tabs, nextTab]
+    patchSheetMetadata(sheetId, {
+      openTabs: serializeFileTabs({ version: 3, tabs, activeKey: nextKey }),
+      activeFile: pending.path,
+      targetSessionId: sheetState().targetSessionId ?? '',
+      [FILE_NAVIGATION_METADATA_KEY]: '',
+    })
+  })
+
+  const openDiffTab = (path: string, staged: boolean) => {
+    const nextKey = fileTabKey({ path, viewType: 'git.diff' })
+    if (!canLeaveActiveTab(nextKey)) return
+    const current = readCurrentTabs()
+    const index = current.tabs.findIndex(tab => fileTabViewType(tab) === 'git.diff' && tab.path === path)
+    const next = index >= 0
+      ? current.tabs.map((tab, i) => (i === index ? { ...tab, staged } : tab))
+      : [...current.tabs, { path, viewType: 'git.diff', staged }]
+    persistTabs(next, nextKey)
+  }
+
+  const selectTab = (key: string) => {
+    if (!canLeaveActiveTab(key)) return
+    const current = readCurrentTabs()
+    if (!current.tabs.some(tab => fileTabKey(tab) === key)) return
+    persistTabs(current.tabs, key)
+  }
+
+  const closeTab = (key: string) => {
+    if (savingTabKeys().has(key)) return
+    if (dirtyTabKeys().has(key)) {
+      if (!window.confirm('当前文件有未保存修改。放弃修改并关闭吗？')) return
+      discardDirty(key)
+    }
+    const current = readCurrentTabs()
+    const remaining = current.tabs.filter(tab => fileTabKey(tab) !== key)
+    const activeKey = current.activeKey === key
+      ? (remaining.length > 0 ? fileTabKey(remaining[remaining.length - 1]) : null)
+      : current.activeKey
+    persistTabs(remaining, activeKey)
+  }
+
+  const selectSection = (section: string) => setSheetState(previous => fileSheetReducer(previous, { type: 'set-section', section }))
+  const selectSource = (sessionId: string | null) => {
+    if (sessionId === sheetState().targetSessionId) return
+    if (savingTabKeys().size > 0) return
+    if (dirtyTabKeys().size > 0 && !window.confirm('当前工作区有未保存修改。放弃修改并切换工作区吗？')) return
+    setDirtyTabKeys(new Set<string>())
+    setSheetState(previous => fileSheetReducer(previous, { type: 'set-target-session', sessionId }))
+    // A path is meaningful only inside its owning workspace. Rebinding old tabs to a
+    // new target can read or write an unrelated same-named file, so target switches
+    // atomically clear the old workspace's tab set.
+    persistTabs([], null, sessionId)
+    // 从“会话”分区选择目标的用户意图是浏览该工作区；选择完成后直接进入 Explorer，
+    // 否则 FileTree 不会挂载，也就永远不会发起根目录读取。
+    if (sessionId) setSheetState(previous => fileSheetReducer(previous, { type: 'set-section', section: 'builtin.file.explorer' }))
+  }
+
+  // Context is derived only from the selected persisted Session owner; never from active runtime state.
+  const sheetContext = createMemo(() => target() ? { agentId: target()!.agentId, source: target()!.source } : null)
+
+  const isolatedActivityInput = createMemo(() => ({
+    target: target(),
+    targetSessionId: sheetState().targetSessionId,
+    sessions: sessions(),
+    context: sheetContext(),
+    activeFile: activeTab()?.path ?? null,
+  }))
+
+  const onActivityEvent = (event: string, detail: unknown) => {
+    if (event === 'select-target') selectSource(typeof detail === 'string' ? detail : null)
+    else if (event === 'open-file' && typeof detail === 'string') openFileTab(detail)
+    else if (event === 'open-file' && detail && typeof detail === 'object' && 'path' in detail) {
+      const input = detail as { path: unknown; line?: unknown }
+      if (typeof input.path === 'string') openFileTab(input.path, typeof input.line === 'number' ? input.line : undefined)
+    }
+    else if (event === 'open-diff' && detail && typeof detail === 'object' && 'path' in detail) {
+      const input = detail as { path: unknown; staged?: unknown }
+      if (typeof input.path === 'string') openDiffTab(input.path, input.staged === true)
+    }
+  }
+
+  const ActivityContent = () => (
+    <Show when={selectedActivity()} keyed fallback={
+      <div class="file-section-panel"><p class="file-section-hint">没有可用的 File Workbench activity</p></div>
+    }>
+      {activity => {
+        if (activity.renderKind === 'isolated-surface') {
+          return <IsolatedPluginSurfaceSolid surfaceId={activity.surfaceId} className="file-section-panel" input={isolatedActivityInput()} onEvent={onActivityEvent} />
+        }
+        switch (activity.id) {
+          case 'builtin.file.explorer':
+            return <FileTreeSolid target={target()} provider={fileProvider()} activeFile={activeTab()?.path ?? null} onOpen={openFileTab} />
+          case 'builtin.file.search':
+            return <WorkspaceSearchPanelSolid target={target()} provider={fileProvider()} onOpenResult={openFileTab} />
+          case 'builtin.file.scm':
+            return <GitPanelSolid target={target()} provider={gitProvider()} onOpenDiff={openDiffTab} />
+          case 'builtin.file.views':
+            return <ViewsPanelSolid source={target()?.source ?? null} context={sheetContext()} onOpenFile={openFileTab} />
+          case 'builtin.file.sessions':
+            return <SessionsActivitySolid targetSessionId={sheetState().targetSessionId} sessions={sessions()} onSelectTarget={selectSource} />
+          default:
+            return <div class="file-section-panel"><p class="file-section-hint">没有可用的 File Workbench activity</p></div>
+        }
+      }}
+    </Show>
+  )
+
+  const viewInstanceKey = createMemo(() => `${workspaceTargetKey(target()) ?? 'unbound'}:${activeTab() ? fileTabKey(activeTab()!) : 'empty'}`)
+
+  const ViewContent = () => {
+    return (
+    <Show
+      when={activeTab() && viewRenderer()}
+      fallback={
+        <div class="file-tab-empty"><div class="file-empty-card"><strong>{activeTab() ? '没有可用的文件视图 renderer' : '打开一个文件开始阅读'}</strong></div></div>
+      }
+    >
+      <FileViewRenderBoundarySolid
+        rendererId={viewRenderer()!.id}
+        onError={viewRenderer()!.onError ?? (() => 'fallback')}
+        onFallback={rendererId => setFailedRendererIds(current => new Set([...current, rendererId]))}
+      >
+        <Show when={viewInstanceKey()} keyed>
+          {_key => {
+            const renderer = viewRenderer()!
+            const currentTab = activeTab()!
+            if (renderer.renderKind === 'isolated-surface') {
+              return <IsolatedPluginSurfaceSolid surfaceId={renderer.surfaceId} className="file-view-isolated" input={{ target: target(), context: sheetContext(), tab: currentTab }} onEvent={(event, detail) => {
+                if (event === 'close-tab' && typeof detail === 'string') closeTab(detail)
+                else if (event === 'dirty-state' && typeof detail === 'boolean') onDirtyChange(fileTabKey(currentTab), detail)
+                else if (event === 'saving-state' && typeof detail === 'boolean') onSavingChange(fileTabKey(currentTab), detail)
+              }} />
+            }
+            return (
+              <FileViewHostSolid
+                target={target()}
+                context={sheetContext()}
+                tab={currentTab}
+                fileProvider={fileProvider()}
+                gitProvider={gitProvider()}
+                onCloseTab={closeTab}
+                onDirtyChange={onDirtyChange}
+                onSavingChange={onSavingChange}
+              />
+            )
+          }}
+        </Show>
+      </FileViewRenderBoundarySolid>
+    </Show>
+    )
+  }
+
+  return (
+    <div class="file-sheet">
+      <FileSheetSidebarSolid
+        activeSection={sheetState().activeSection}
+        activities={activities()}
+        collapsed={sidebarCollapsed()}
+        onSelectSection={selectSection}
+      >
+        {ActivityContent()}
+      </FileSheetSidebarSolid>
+      <main class="file-editor">
+        <FileTabBarSolid tabs={tabsState().tabs} activeKey={tabsState().activeKey} dirtyKeys={dirtyTabKeys()} savingKeys={savingTabKeys()} onSelect={selectTab} onClose={closeTab} />
+        {ViewContent()}
+      </main>
+    </div>
+  )
+}
+
+/** React 薄桥（FileSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
+export const mountFileSheetView = createSolidMount(FileSheetView)

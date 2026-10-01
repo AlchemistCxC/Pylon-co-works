@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within, cleanup } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
 import type { GitOperationResult, GitStatusWithBranch } from '../../../infrastructure/tauri/gitContracts.ts'
 import type { GitProvider } from '../../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { WorkspaceTarget } from '../../../domains/workspace/workspaceTarget.ts'
-import GitPanel from '../GitPanel.tsx'
+import GitPanel from '../GitPanel.solid.tsx'
 import { reportRuntimeError } from '../../../app/runtimeError.ts'
+
+afterEach(() => cleanup())
+
+// #515：迁移自 gitPanelMutations.test.tsx（React RTL → Solid 实体直连）。
+// 断言改写点登记：
+// 1. render(<JSX/>) → render(() => JSX)；rerender(nextProps) → 信号驱动
+//    （setTargetSignal 切 workspace，等价 React 父组件重渲染）；
+// 2. fireEvent.change → fireEvent.input（Solid onInput ≡ React onChange 的即时输入流）。
+// 其余断言集与 DOM 契约不变。
 
 vi.mock('../../../app/runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
 
@@ -41,13 +51,19 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+function renderGitPanel(initialTarget: WorkspaceTarget, git: GitProvider) {
+  const [targetSignal, setTargetSignal] = createSignal<WorkspaceTarget>(initialTarget)
+  render(() => <GitPanel target={targetSignal()} provider={git} onOpenDiff={vi.fn()} />)
+  return setTargetSignal
+}
+
 describe('GitPanel 写操作', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('按文件暂存并用操作回执原子刷新分区', async () => {
     const stage = vi.fn().mockResolvedValue(result(status([{ path: 'src/a.ts', status: 'M ', staged: true }]), '已暂存'))
     const git = provider({ stage })
-    render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    render(() => <GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '暂存 src/a.ts' }))
     await waitFor(() => expect(stage).toHaveBeenCalledWith(target, ['src/a.ts']))
@@ -60,11 +76,11 @@ describe('GitPanel 写操作', () => {
     const commit = vi.fn().mockResolvedValue(result(status([]), '提交成功'))
     const history = vi.fn().mockResolvedValue([{ hash: 'abcdef123', author: 'Pylon', date: 1, subject: 'done' }])
     const git = provider({ status: vi.fn().mockResolvedValue(initial), commit, history })
-    render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    render(() => <GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
 
     const submit = await screen.findByRole('button', { name: '提交 1 项变更' })
     expect(submit).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('提交说明'), { target: { value: 'describe change' } })
+    fireEvent.input(screen.getByLabelText('提交说明'), { target: { value: 'describe change' } })
     expect(submit).toBeEnabled()
     fireEvent.click(submit)
     await waitFor(() => expect(commit).toHaveBeenCalledWith(target, 'describe change'))
@@ -75,13 +91,13 @@ describe('GitPanel 写操作', () => {
   it('创建/切换分支与 pull/push 都经 provider 能力调用', async () => {
     const createBranch = vi.fn().mockResolvedValue(result(status([], 'feature/gui'), '已创建分支'))
     const switchBranch = vi.fn().mockResolvedValue(result(status([], 'main'), '已切换分支'))
-    const pull = vi.fn().mockResolvedValue(result(status([]), '已经是最新版本'))
-    const push = vi.fn().mockResolvedValue(result(status([]), '推送完成'))
+    const pull = vi.fn().mockResolvedValue(result(status([], '已经是最新版本'), '已是最新'))
+    const push = vi.fn().mockResolvedValue(result(status([], 'main'), '推送完成'))
     const git = provider({ createBranch, switchBranch, pull, push })
-    render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    render(() => <GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '分支' }))
-    fireEvent.change(screen.getByLabelText('分支名称'), { target: { value: 'feature/gui' } })
+    fireEvent.input(screen.getByLabelText('分支名称'), { target: { value: 'feature/gui' } })
     fireEvent.click(screen.getByRole('button', { name: '创建并切换' }))
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith(target, 'feature/gui'))
     await screen.findByText('feature/gui')
@@ -92,14 +108,14 @@ describe('GitPanel 写操作', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith(target))
 
     fireEvent.click(screen.getByRole('button', { name: '分支' }))
-    fireEvent.change(screen.getByLabelText('分支名称'), { target: { value: 'main' } })
+    fireEvent.input(screen.getByLabelText('分支名称'), { target: { value: 'main' } })
     fireEvent.click(screen.getByRole('button', { name: '切换已有分支' }))
     await waitFor(() => expect(switchBranch).toHaveBeenCalledWith(target, 'main'))
   })
 
   it('只读 provider 不渲染写入口，diff 行为保持可用', async () => {
     const onOpenDiff = vi.fn()
-    render(<GitPanel target={target} provider={provider()} onOpenDiff={onOpenDiff} />)
+    render(() => <GitPanel target={target} provider={provider()} onOpenDiff={onOpenDiff} />)
     fireEvent.click(await screen.findByTitle('src/a.ts'))
     expect(onOpenDiff).toHaveBeenCalledWith('src/a.ts', false)
     expect(screen.queryByLabelText('提交说明')).toBeNull()
@@ -110,11 +126,11 @@ describe('GitPanel 写操作', () => {
     const operation = deferred<GitOperationResult>()
     const stage = vi.fn(() => operation.promise)
     const git = provider({ stage })
-    const { rerender } = render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    const setTarget = renderGitPanel(target, git)
     fireEvent.click(await screen.findByRole('button', { name: '暂存 src/a.ts' }))
 
     const nextTarget = { ...target, sessionId: 'session-b', source: 'source-b', legacyWorkdir: 'C:/repo-b' }
-    rerender(<GitPanel target={nextTarget} provider={git} onOpenDiff={vi.fn()} />)
+    setTarget(nextTarget)
     operation.reject(new Error('stale workspace failure'))
     await waitFor(() => expect(screen.getByText('WORKING TREE')).toBeTruthy())
 
@@ -128,14 +144,14 @@ describe('GitPanel 写操作', () => {
       commit: vi.fn().mockResolvedValue(result(status([]), 'ok')),
       createBranch: vi.fn().mockResolvedValue(result(status([]), 'ok')),
     })
-    const { rerender } = render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    const setTarget = renderGitPanel(target, git)
     await screen.findByRole('button', { name: '提交 1 项变更' })
-    fireEvent.change(screen.getByLabelText('提交说明'), { target: { value: 'workspace a commit' } })
+    fireEvent.input(screen.getByLabelText('提交说明'), { target: { value: 'workspace a commit' } })
     fireEvent.click(screen.getByRole('button', { name: '分支' }))
-    fireEvent.change(screen.getByLabelText('分支名称'), { target: { value: 'workspace-a-branch' } })
+    fireEvent.input(screen.getByLabelText('分支名称'), { target: { value: 'workspace-a-branch' } })
 
     const nextTarget = { ...target, sessionId: 'session-b', source: 'source-b', legacyWorkdir: 'C:/repo-b' }
-    rerender(<GitPanel target={nextTarget} provider={git} onOpenDiff={vi.fn()} />)
+    setTarget(nextTarget)
 
     await waitFor(() => expect(screen.getByLabelText('提交说明')).toHaveValue(''))
     expect(screen.queryByDisplayValue('workspace-a-branch')).toBeNull()

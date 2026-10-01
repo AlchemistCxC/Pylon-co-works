@@ -14,15 +14,22 @@
  * 折叠态的可见性由 `.layout[data-sidebar="collapsed"]` 保证，逐格验证在
  * `src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.test.tsx`
  * 与 `sidebarUnifiedModel.css.test.ts`。
+ *
+ * #515：迁移自 FileSheetView.sidebarSingleState.test.tsx（React RTL → Solid 实体直连）。
+ * 断言改写点登记：rerender(makeCtx(next)) → ctx 信号驱动（setCtxSignal 切换，等价
+ * React 父组件重渲染）；其余断言集与 DOM 契约不变。
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { render, cleanup } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { render } from '@testing-library/react'
-import FileSheetView from '../FileSheetView'
+import FileSheetView from '../FileSheetView.solid.tsx'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import { createSheetState } from '../../../domains/workspace/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
+
+afterEach(() => cleanup())
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -59,7 +66,8 @@ function makeCtx(sidebarCollapsed: boolean): SheetContext {
 
 function renderHarness(sidebarCollapsed: boolean) {
   useWorkspaceStore.setState({ workspaceSheets: createSheetState([sheet], 'file-1') })
-  return render(<FileSheetView sheet={sheet} ctx={makeCtx(sidebarCollapsed)} />)
+  const [ctxSignal] = createSignal<SheetContext>(makeCtx(sidebarCollapsed))
+  return render(() => <FileSheetView sheet={sheet} ctx={ctxSignal()} />)
 }
 
 describe('I09-A-FE-02 / #154 File 左栏单一几何来源', () => {
@@ -94,12 +102,13 @@ describe('I09-A-FE-02 / #154 File 左栏单一几何来源', () => {
 
   it('ctx.sidebarCollapsed 变化不再改变左栏类集合（与折叠解耦，单一几何来源）', () => {
     useWorkspaceStore.setState({ workspaceSheets: createSheetState([sheet], 'file-1') })
-    const { container, rerender } = render(<FileSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    const [ctxSignal, setCtxSignal] = createSignal<SheetContext>(makeCtx(false))
+    const { container } = render(() => <FileSheetView sheet={sheet} ctx={ctxSignal()} />)
     const sidebar = container.querySelector('.file-sidebar') as HTMLElement
     const expandedClasses = sidebar.className
-    rerender(<FileSheetView sheet={sheet} ctx={makeCtx(true)} />)
+    setCtxSignal(makeCtx(true))
     expect(sidebar.className).toBe(expandedClasses)
-    rerender(<FileSheetView sheet={sheet} ctx={makeCtx(false)} />)
+    setCtxSignal(makeCtx(false))
     expect(sidebar.className).toBe(expandedClasses)
   })
 })

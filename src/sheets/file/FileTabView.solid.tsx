@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
-import { render, Show } from 'solid-js/web'
+import { Show } from 'solid-js/web'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import { useWorkspaceStore, touchedFileVersionKey } from '../../domains/workspace/workspaceStore'
@@ -9,6 +9,7 @@ import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspac
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createSolidMount } from '../../host/solidBridge.solid'
 import FileCodeEditor from './FileCodeEditor.solid.tsx'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 
@@ -18,6 +19,9 @@ export interface FileSaveReceipt {
   persistedContent: string
 }
 
+/**
+ * FileTabViewProps — 与 React 桥（FileTabView.tsx）内声明的同名接口逐字段一致。
+ */
 export interface FileTabViewProps {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
@@ -44,7 +48,8 @@ export interface FileTabViewProps {
 }
 
 /**
- * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#279 第 2 梯队架构 + 合并重移植）。
+ * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#515 起收编为直连
+ * props 形态，React 桥经 createSolidMount 响应式通道透传）。
  *
  * 渲染恒为 CodeMirror 常驻单内核（FileCodeEditor.solid → fileCodeMirrorKernel 共享工厂）：
  * 0-A2 默认可写，只读仅物理例外（writable=false）；旧「手工 DOM 投影 +
@@ -54,23 +59,20 @@ export interface FileTabViewProps {
  * decoration）、0-A3 写冲突锁簿记、saveReceipt 锚点推进、truncated 上报。内容全文
  * 不过框架 state——宿主经 apiRef 句柄取全文。
  *
- * 跨桥 props 经 SolidMount 响应式通道进入；`latest()` 的字段先过 memo（引用等值去重
- * ≡ React deps 数组），事件回调在调用点经 latest() 现场取新（untrack）。
+ * props 经桥面 store 进入（引用等值去重 ≡ React deps 数组）；事件回调在调用点经
+ * untrack 现场取新（恒为最新闭包）。
  */
-export default function FileTabView(p: { latest: () => FileTabViewProps }) {
-  const value = p.latest
-  const latest = () => untrack(value)
-
+export default function FileTabView(props: FileTabViewProps) {
   // ── 响应式字段 ──
-  const explicitTarget = createMemo(() => value().target)
-  const source = createMemo(() => value().source)
-  const explicitProvider = createMemo(() => value().provider)
-  const path = createMemo(() => value().path)
-  const revealLine = createMemo(() => value().revealLine)
-  const context = createMemo(() => value().context)
-  const writable = createMemo(() => value().writable !== false)
-  const saveAnchorToken = createMemo(() => value().saveAnchorToken)
-  const saveReceipt = createMemo(() => value().saveReceipt ?? null)
+  const explicitTarget = createMemo(() => props.target)
+  const source = createMemo(() => props.source)
+  const explicitProvider = createMemo(() => props.provider)
+  const path = createMemo(() => props.path)
+  const revealLine = createMemo(() => props.revealLine)
+  const context = createMemo(() => props.context)
+  const writable = createMemo(() => props.writable !== false)
+  const saveAnchorToken = createMemo(() => props.saveAnchorToken)
+  const saveReceipt = createMemo(() => props.saveReceipt ?? null)
 
   const target = createMemo(() => {
     const resolved = explicitTarget()
@@ -136,7 +138,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
         return
       }
       setLoading(false)
-      const currentApi = latest().apiRef?.current
+      const currentApi = untrack(() => props.apiRef)?.current
       if (isFirstLoad || !currentApi) {
         // 首载，或内核不在挂载位（上次 error 卸载后恢复）：回退首载路径让内核以
         // 新磁盘快照重挂——否则 stale initialContent + 新 baseline 会产生伪 dirty，
@@ -146,11 +148,11 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
         if (!isFirstLoad) setRemountNonce(n => n + 1)
       } else {
         currentApi.replaceDoc(loaded.text, { baseline: loaded.text, markChanged: showChanged })
-        if (showChanged) latest().onSelectionInvalidated?.()
+        if (showChanged) untrack(() => props.onSelectionInvalidated)?.()
       }
       diskRef = loaded.text
-      latest().onTruncated(loaded.truncated, { totalBytes: loaded.totalBytes })
-      latest().onContentReady?.(loaded.text)
+      untrack(() => props.onTruncated)(loaded.truncated, { totalBytes: loaded.totalBytes })
+      untrack(() => props.onContentReady)?.(loaded.text)
       resolveRuntimeErrors({ key: errorKey() })
     }).catch(err => {
       if (isCurrentSourceRequest(requestContext, token) && requestPath === path()) {
@@ -172,7 +174,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     const currentProvider = untrack(provider)
     const requestPath = path()
     if (!currentTarget || !currentTargetKey || !currentProvider || !requestPath) return
-    const currentApi = latest().apiRef?.current
+    const currentApi = untrack(() => props.apiRef)?.current
     if (!currentApi) return
     requestContext = { source: currentTargetKey, generation: requestContext.generation + 1 }
     const token = beginSourceRequest(requestContext, currentTargetKey)
@@ -186,11 +188,11 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
         // 无用户编辑：刷新显示到磁盘（不产生冲突）
         currentApi.replaceDoc(loaded.text, { baseline: loaded.text })
         diskRef = loaded.text
-        latest().onTruncated(loaded.truncated, { totalBytes: loaded.totalBytes })
-        latest().onContentReady?.(loaded.text)
+        untrack(() => props.onTruncated)(loaded.truncated, { totalBytes: loaded.totalBytes })
+        untrack(() => props.onContentReady)?.(loaded.text)
       } else {
         // 用户有未保存编辑：不覆盖，上报外部修改冲突
-        latest().onExternalChange?.()
+        untrack(() => props.onExternalChange)?.()
       }
     }).catch(() => {})
   }
@@ -204,13 +206,13 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     touchTimes = touchTimes.filter(t => now - t < WRITE_LOCK_COOLDOWN_MS)
     touchTimes.push(now)
     const locked = touchTimes.length >= 2
-    latest().onWriteLockChange?.(locked)
+    untrack(() => props.onWriteLockChange)?.(locked)
     if (locked) {
       if (unlockTimer !== null) window.clearTimeout(unlockTimer)
       unlockTimer = window.setTimeout(() => {
         unlockTimer = null
         touchTimes = []
-        latest().onWriteLockChange?.(false)
+        untrack(() => props.onWriteLockChange)?.(false)
         probeDisk()
       }, WRITE_LOCK_COOLDOWN_MS)
     }
@@ -219,7 +221,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     })
   })
 
-  // 目标/文件/provider 变化 → 全量重置 + 读取（React 版 [targetKey, path, provider] effect）
+  // 目标/文件变化 → 全量重置 + 读取（React 版 [targetKey, path, provider] effect）
   createEffect(() => {
     const currentTargetKey = targetKey()
     const currentPath = path()
@@ -247,7 +249,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     const currentTouch = touchVersion()
     if (currentTouch === undefined || !untrack(target) || !path()) return
     const timer = window.setTimeout(() => {
-      const currentApi = latest().apiRef?.current
+      const currentApi = untrack(() => props.apiRef)?.current
       if (!currentApi) {
         loadedRef = null
         setLoadedText(null)
@@ -273,7 +275,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
     const receipt = saveReceipt()
     if (!receipt || receipt.version === saveReceiptRef) return
     saveReceiptRef = receipt.version
-    const currentApi = latest().apiRef?.current
+    const currentApi = untrack(() => props.apiRef)?.current
     const hasNewerEdits = (currentApi?.getDoc() ?? '') !== receipt.expectedContent
     diskRef = receipt.persistedContent
     currentApi?.clearChangedMarks()
@@ -302,23 +304,29 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
         if (mode === 'pending') return null
         void mode
         return (
-          <Show when={editorKey()} keyed>
-            {_editorKey => (
-              <div class="file-tab-view file-tab-edit" data-path={path()}>
-                <FileCodeEditor
-                  path={path()}
-                  initialContent={loadedText() ?? ''}
-                  baseline={latest().baseline ?? loadedText() ?? ''}
-                  writable={writable()}
-                  revealLine={revealLine()}
-                  onSummaryChange={summary => latest().onSummaryChange?.(summary)}
-                  onWriteLockChange={locked => latest().onWriteLockChange?.(locked)}
-                  onSave={() => latest().onSave?.()}
-                  apiRef={latest().apiRef}
-                />
-              </div>
-            )}
-          </Show>
+            <Show when={editorKey()} keyed>
+              {_editorKey => {
+                // baseline 取挂载时刻快照（untrack）：内核基线此后只经 replaceDoc
+                // （外部刷新）与 advanceBaseline（保存回执）推进——若保留 loadedText
+                // 响应性，宿主 reset 卸载窗口内会触发 setBaseline→emitSummary 复活
+                // 陈旧 summary（React 版子先父后 effect 序无此窗口）。
+                return (
+                <div class="file-tab-view file-tab-edit" data-path={path()}>
+                  <FileCodeEditor
+                    path={path()}
+                    initialContent={loadedText() ?? ''}
+                    baseline={untrack(() => props.baseline ?? loadedText() ?? '')}
+                    writable={writable()}
+                    revealLine={revealLine()}
+                    onSummaryChange={summary => untrack(() => props.onSummaryChange)?.(summary)}
+                    onWriteLockChange={locked => untrack(() => props.onWriteLockChange)?.(locked)}
+                    onSave={() => untrack(() => props.onSave)?.()}
+                    apiRef={untrack(() => props.apiRef)}
+                  />
+                </div>
+                )
+              }}
+            </Show>
         )
       }}
     </Show>
@@ -326,9 +334,7 @@ export default function FileTabView(p: { latest: () => FileTabViewProps }) {
 }
 
 /** React 薄桥（FileTabView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderFileTabView(container: HTMLElement, latest: () => FileTabViewProps): () => void {
-  return render(() => <FileTabView latest={latest} />, container)
-}
+export const mountFileTabView = createSolidMount(FileTabView)
 
 /** 0-A3 写冲突锁：冷却窗口（ms）内 touchVersion >=2 次递增 = agent 正在写盘。 */
 export const WRITE_LOCK_COOLDOWN_MS = 3000

@@ -1,54 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
-import { reportRuntimeError } from '../../app/runtimeError'
-import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
-import DiffCard from '../../components/file/DiffCard'
-import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
-import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
+import SolidMount from '../../host/SolidMount'
+import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
+
+/** 与 Solid 实体（DiffView.solid.tsx）内声明的 DiffViewProps 逐字段一致。 */
+export interface DiffViewProps {
+  target: WorkspaceTarget | null
+  provider: GitProvider | null
+  path: string
+  staged: boolean
+  onClose: () => void
+}
+
+/** Solid 实体的模块接口（React 类型图内的唯一事实）。 */
+interface DiffViewSolidModule {
+  mountDiffView: (container: HTMLElement, latest: () => DiffViewProps) => () => void
+}
+
+const modules = import.meta.glob<DiffViewSolidModule>('./DiffView.solid.tsx', { eager: true })
+const solidModule = modules['./DiffView.solid.tsx']
+if (!solidModule) throw new Error('DiffView Solid 实体未进入 Vite module graph')
 
 /**
  * DiffView — Git diff 展示（W2-05）。
  *
  * 点击 staged/unstaged 条目 → git_diff(source, path, staged) → 复用 DiffCard
  * （DiffPayload 统一渲染，不新造 diff 渲染器）。只读。
+ * #515：实体在 DiffView.solid.tsx，本文件是 React 世界薄桥（批7 拆除）。
  */
-export default function DiffView({ target, provider, path, staged, onClose }: {
-  target: WorkspaceTarget | null
-  provider: GitProvider | null
-  path: string
-  staged: boolean
-  onClose: () => void
-}) {
-  const [output, setOutput] = useState('')
-  const [error, setError] = useState('')
-  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
-  const targetKey = workspaceTargetKey(target)
-
-  useEffect(() => {
-    requestContext.current = advanceSourceContext(requestContext.current, targetKey)
-    if (!target || !targetKey || !provider) return
-    const token = beginSourceRequest(requestContext.current, targetKey)
-    let disposed = false
-    setOutput('')
-    setError('')
-    provider.diff(target, { path, staged }).then(text => {
-      if (!disposed && isCurrentSourceRequest(requestContext.current, token)) setOutput(typeof text === 'string' ? text : '')
-    }).catch(err => {
-      if (disposed || !isCurrentSourceRequest(requestContext.current, token)) return
-      setError(classifyGitError(err).message)
-      reportRuntimeError('读取 Git diff', err)
-    })
-    return () => { disposed = true }
-  }, [target, targetKey, provider, path, staged])
-
-  return (
-    <div className="git-diff-view">
-      <div className="git-diff-head">
-        <span className="git-diff-path">{path}（{staged ? 'staged' : 'unstaged'}）</span>
-        <button type="button" className="git-diff-close" onClick={onClose} aria-label="关闭 diff">✕</button>
-      </div>
-      {error && <div className="file-tree-error" role="alert">{error}</div>}
-      {!error && <DiffCard output={output} />}
-    </div>
-  )
+export default function DiffView(props: DiffViewProps) {
+  return <SolidMount initial={props} mount={solidModule.mountDiffView} />
 }

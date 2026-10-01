@@ -2,12 +2,12 @@ import SolidMount from '../../host/SolidMount'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
-import type { FileCodeEditorApi, KernelSummary } from './FileCodeEditor.tsx'
+import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 
 /**
- * FileTabView — 文件视图（#279 第 2 梯队 Solid 化 + 0-A1~A3 语义合并重移植）。
+ * FileTabView — 文件视图（0-A1~A3 语义合并重移植；#515 直连 props 形态）。
  *
- * 本文件是宿主（FileViewHost）与 Solid 实体之间的**薄桥 + 加载缝**：实体在
+ * 本文件是宿主（FileViewHost）与 Solid 实体之间的**薄桥**：实体在
  * `FileTabView.solid.tsx`（React 类型图不触碰 .solid 文件，P52 D4 同构，模块接口在此
  * 声明）。props 全量经 SolidMount 响应式通道透传——saveReceipt/saveAnchorToken/
  * writable/baseline 等可变字段的响应性是保存锚点/脏判定的数据完整性契约。
@@ -15,6 +15,7 @@ import type { FileCodeEditorApi, KernelSummary } from './FileCodeEditor.tsx'
  * props 契约 = 0-A1~A3 语义（合并重移植）：默认可写（writable，仅物理例外 false）、
  * KernelSummary/apiRef 内核句柄面、onWriteLockChange 写冲突锁。实体行为规格见
  * FileTabView.solid.tsx 头注与 `.agents/records/280-filesheet-stage0-dev-record.md`。
+ * #515：实体在 FileTabView.solid.tsx，本文件是 React 世界薄桥（批7 拆除）。
  */
 export interface FileSaveReceipt {
   version: number
@@ -47,9 +48,9 @@ export interface FileTabViewProps {
   apiRef?: { current: FileCodeEditorApi | null }
 }
 
-/** Solid 实体的模块接口（React 类型图内的唯一事实，与实体侧逐字段一致）。 */
+/** Solid 实体的模块接口（React 类型图内的唯一事实）。 */
 interface FileTabSolidModule {
-  renderFileTabView(container: HTMLElement, latest: () => FileTabViewProps): () => void
+  mountFileTabView: (container: HTMLElement, latest: () => FileTabViewProps) => () => void
 }
 
 const modules = import.meta.glob<FileTabSolidModule>('./FileTabView.solid.tsx', { eager: true })
@@ -62,7 +63,7 @@ export default function FileTabView(props: FileTabViewProps) {
   return (
     <SolidMount
       initial={props}
-      mount={(container, latest) => solidModule.renderFileTabView(container, latest)}
+      mount={solidModule.mountFileTabView}
     />
   )
 }

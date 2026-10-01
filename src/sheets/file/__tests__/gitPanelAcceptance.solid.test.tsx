@@ -5,22 +5,36 @@
  *   GitPanel 树正确渲染、diff 以原路径请求（不因引号/切分失真）。
  * - 只证明 browser fixture/DOM 行为，不证明 Tauri/ACP/外部服务（ISSUE-15 验收设计）。
  * - branch 显示 / 附件超限错误态依赖冻结中的 WI04，不在此文件覆盖（WI04 解冻后补）。
+ *
+ * #515：迁移自 gitPanelAcceptance.test.tsx（React RTL → Solid 实体直连，经 FileSheetView
+ * 实体全链路）。断言改写点登记：
+ * 1. render(<FileSheetHarness/>)（React zustand hook 订阅）→ render(() => <FileSheetHarness/>)
+ *   （createZustandSignal 订阅——useXxxStore(selector) 是 React shim hook，Solid 组件内
+ *   不可用）；渲染函数传参语义不变；
+ * 2. vi.mock('../../../app/runtimeError')：React 版依赖 vitest.setup.ts 的 console.error
+ *   白名单吸收 not-repo 路径的 reportRuntimeError 噪音；Solid 版文件名不同（.solid），
+ *   白名单不改（setup 文件不在本迁移域），改以 mock 上报通道吸收同族噪音——not-repo
+ *   断言只看 DOM，与上报通道无关。
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { render, screen, fireEvent } from '@testing-library/react'
-import FileSheetView from '../FileSheetView'
+import { fireEvent, render, screen, cleanup } from '@solidjs/testing-library'
+import { createZustandSignal } from '../../../host/solidStoreBridge.ts'
+import FileSheetView from '../FileSheetView.solid.tsx'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 import { createSheetState } from '../../../domains/workspace/sheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 
+afterEach(() => cleanup())
+
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../../test-utils/tauriCoreMock')
   return tauriCoreMock(invoke)
 })
+vi.mock('../../../app/runtimeError', () => ({ reportRuntimeError: vi.fn(), resolveRuntimeErrors: vi.fn() }))
 vi.mock('../../../domains/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
 const ASYNC_PANEL_TIMEOUT = { timeout: 10_000 }
 
@@ -54,13 +68,14 @@ function seedSheet(metadata: Record<string, string>) {
 }
 
 function FileSheetHarness() {
-  const sheet = useWorkspaceStore(s => s.workspaceSheets.sheets.find(item => item.id === 'file-1'))
-  if (!sheet) return null
-  return <FileSheetView sheet={sheet} ctx={ctx} />
+  const sheet = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.sheets.find(item => item.id === 'file-1'))
+  // 不用 keyed Show：sheet 每次写盘都是新对象，keyed 会销毁重建整棵 FileSheetView
+  //（React 版为同实例重渲染，组件状态必须跨 patch 存活）——测试始终先 seed 再渲染。
+  return <FileSheetView sheet={sheet()!} ctx={ctx} />
 }
 
 function renderHarness() {
-  return render(<FileSheetHarness />)
+  return render(() => <FileSheetHarness />)
 }
 
 function openScm() {
@@ -159,9 +174,8 @@ describe('ISSUE-15 前端网页层 fixture（空格/中文/rename 路径）', ()
   })
 })
 
-// ── ISSUE-15 W4 RED fixtures：GitPanel 展示后端真实 branch/detached（修复前必须失败）──
-// 当前 GitPanel 硬编码 <strong>main</strong> 且调用 git_status（非 git_status_with_branch）；
-// 以下用例按目标形态断言（mock git_status_with_branch 返回真实分支）→ 当前实现 RED。
+// ── ISSUE-15 W4 前端 branch consumer fixture ──
+// （原 RED fixtures 已随 WI04 落地转绿；断言不变，只随 #515 迁移渲染面。）
 
 describe('ISSUE-15 W4 前端 branch consumer fixture', () => {
   beforeEach(() => {

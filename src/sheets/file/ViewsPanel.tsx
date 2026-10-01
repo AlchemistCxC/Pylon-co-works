@@ -1,52 +1,27 @@
-import { useMemo } from 'react'
-import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
+import SolidMount from '../../host/SolidMount'
 import type { AgentContext } from '../../domains/agent/agentContext'
-import { toAgentContextKey } from '../../domains/agent/agentContext'
-import FileTypeIcon from './FileTypeIcon'
 
-/** 触碰时间格式化（HH:MM；可测） */
-export function formatTouchTime(at: number): string {
-  return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
-
-/**
- * ViewsPanel — FileSheet 的 Agent 文件活动工作面（ISSUE-08 D-04）。
- * 只消费 workspaceStore.touchedFiles[source]，不维护任何 Git 状态（SCM 独占 Git，见 GitPanel）。
- * 点击触碰文件 → onOpenFile(path) 进入统一文件 tab 的普通视图（不创建 diff 主视图）。
- */
-export default function ViewsPanel({ source, context, onOpenFile }: {
+/** 与 Solid 实体（ViewsPanel.solid.tsx）内声明的 ViewsPanelProps 逐字段一致。 */
+export interface ViewsPanelProps {
   source: string | null
   context?: AgentContext | null
   onOpenFile: (path: string) => void
-}) {
-  const touchedFilesRecord = useWorkspaceStore(s => s.touchedFiles)
-  // I01-W3：touchedFiles 按 AgentContextKey（agentId+source）隔离读取
-  const touchedFiles = useMemo(
-    () => (source && context ? touchedFilesRecord[toAgentContextKey(context)] ?? [] : []),
-    [source, context, touchedFilesRecord],
-  )
+}
 
-  return (
-    <div className="file-section-panel file-views-panel">
-      <section className="file-view-section">
-        <div className="file-panel-heading"><span>AGENT CHANGES</span><span className="file-panel-count">{touchedFiles.length}</span></div>
-        {!source && <p className="file-section-hint">选择会话后查看 Agent 改动</p>}
-        {source && touchedFiles.length === 0 && <p className="file-section-hint file-section-muted">Agent 尚未修改文件</p>}
-        {touchedFiles.length > 0 && (
-          <ul className="file-view-list">
-            {touchedFiles.slice().reverse().map(file => (
-              <li key={`${file.path}:${file.at}`}>
-                <button type="button" className="file-view-row" onClick={() => onOpenFile(file.path)} title={`打开 ${file.path}`}>
-                  <FileTypeIcon path={file.path} size={14} />
-                  <span className="file-view-path">{file.path}</span>
-                  <small>{file.toolKind}</small>
-                  <span className="file-view-time">{formatTouchTime(file.at)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
-  )
+/** Solid 实体的模块接口（React 类型图内的唯一事实）。 */
+interface ViewsPanelSolidModule {
+  mountViewsPanel: (container: HTMLElement, latest: () => ViewsPanelProps) => () => void
+}
+
+const modules = import.meta.glob<ViewsPanelSolidModule>('./ViewsPanel.solid.tsx', { eager: true })
+const solidModule = modules['./ViewsPanel.solid.tsx']
+if (!solidModule) throw new Error('ViewsPanel Solid 实体未进入 Vite module graph')
+
+/**
+ * ViewsPanel — FileSheet 的 Agent 文件活动工作面（ISSUE-08 D-04）。
+ * #515：实体在 ViewsPanel.solid.tsx（`formatTouchTime` 一并随迁），本文件是 React 世界
+ * 薄桥（批7 拆除）。
+ */
+export default function ViewsPanel(props: ViewsPanelProps) {
+  return <SolidMount initial={props} mount={solidModule.mountViewsPanel} />
 }

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import FileSheetView from '../FileSheetView'
+import { fireEvent, render, screen, waitFor, cleanup } from '@solidjs/testing-library'
+import { createZustandSignal } from '../../../host/solidStoreBridge.ts'
+import FileSheetView from '../FileSheetView.solid.tsx'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { resetStores } from '../../../test/resetStores'
@@ -11,9 +12,22 @@ import { createSheetState } from '../../../domains/workspace/sheetState'
 import { fileTabKey, parseFileTabs, serializeFileTabs, type FileTabRecord, type FileTabState } from '../fileSheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
-import { replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
+import { replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.solid.ts'
 import { closeWorkspace } from '../../../workspace-sheets/workspaceController.ts'
 import { FILE_NAVIGATION_METADATA_KEY } from '../fileSheetNavigation.ts'
+
+afterEach(() => cleanup())
+
+// #515：迁移自 FileSheetView.integration.test.tsx（React RTL → Solid 实体直连）。
+// 断言改写点登记：
+// 1. render(<FileSheetHarness/>)（React zustand hook）→ render(() => <FileSheetHarness/>)
+//  （createZustandSignal 订阅——useXxxStore(selector) 是 React shim hook，Solid 组件内
+//  不可用）；
+// 2. act() 包装退役——store 写入经 createZustandSignal 同步传播；
+// 3. fireEvent.change → fireEvent.input（Solid onInput ≡ React onChange 的即时输入流）；
+// 4. replaceFileEditorValue 改用 codeMirrorTestUtils.solid（无 React act 包装）；
+// 5. closeWorkspace 直接 await（React act 拍对齐由微任务天然满足）。
+// 其余断言集与 DOM 契约不变。
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -65,13 +79,14 @@ function seedUnboundSheet() {
 }
 
 function FileSheetHarness() {
-  const sheet = useWorkspaceStore(s => s.workspaceSheets.sheets.find(item => item.id === 'file-1'))
-  if (!sheet) return null
-  return <FileSheetView sheet={sheet} ctx={ctx} />
+  const sheet = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.sheets.find(item => item.id === 'file-1'))
+  // 不用 keyed Show：sheet 每次写盘都是新对象，keyed 会销毁重建整棵 FileSheetView
+  //（React 版为同实例重渲染，组件状态必须跨 patch 存活）——测试始终先 seed 再渲染。
+  return <FileSheetView sheet={sheet()!} ctx={ctx} />
 }
 
 function renderHarness() {
-  return render(<FileSheetHarness />)
+  return render(() => <FileSheetHarness />)
 }
 
 function readTextResult(relativePath: string, content: string) {
@@ -214,10 +229,8 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
 
     const first = await screen.findByTitle('src/a.ts')
     const second = screen.getByTitle('src/b.ts')
-    act(() => {
-      fireEvent.click(first)
-      fireEvent.click(second)
-    })
+    fireEvent.click(first)
+    fireEvent.click(second)
 
     await waitFor(() => {
       expect(screen.getAllByTitle('src/a.ts').length).toBeGreaterThan(0)
@@ -304,16 +317,16 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     await screen.findByText(/未保存/)
 
     vi.mocked(window.confirm).mockReturnValueOnce(false)
-    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+    useWorkspaceStore.getState().patchSheetMetadata('file-1', {
       [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'request-1', sessionId: 'session-a', path: 'src/b.ts', line: 5 }),
-    }))
+    })
     await waitFor(() => expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).toBe(''))
     expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/a.ts')
 
     vi.mocked(window.confirm).mockReturnValueOnce(true)
-    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+    useWorkspaceStore.getState().patchSheetMetadata('file-1', {
       [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'request-2', sessionId: 'session-a', path: 'src/b.ts', line: 5 }),
-    }))
+    })
     await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
     expect(parseFileTabs(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.openTabs).tabs)
       .toContainEqual(expect.objectContaining({ path: 'src/b.ts', line: 5 }))
@@ -338,9 +351,9 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     await screen.findByText('保存中…')
     vi.mocked(window.confirm).mockClear()
 
-    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+    useWorkspaceStore.getState().patchSheetMetadata('file-1', {
       [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'saving-request', sessionId: 'session-a', path: 'src/b.ts' }),
-    }))
+    })
 
     fireEvent.click(screen.getByTitle('src/b.ts'))
     fireEvent.click(screen.getByRole('button', { name: '关闭 src/a.ts' }))
@@ -349,15 +362,12 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     expect(window.confirm).not.toHaveBeenCalled()
     expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).not.toBe('')
 
-    let closed = true
-    await act(async () => { closed = await closeWorkspace('file-1') })
+    const closed = await closeWorkspace('file-1')
     expect(closed).toBe(false)
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.some(sheet => sheet.id === 'file-1')).toBe(true)
 
-    await act(async () => {
-      write.resolve(readTextResult('src/a.ts', 'const x = 2'))
-      await write.promise
-    })
+    write.resolve(readTextResult('src/a.ts', 'const x = 2'))
+    await write.promise
     await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
     expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).toBe('')
   })
@@ -420,7 +430,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     seedSheet({})
     renderHarness()
     fireEvent.click(screen.getByLabelText('搜索：搜索工作区内容'))
-    fireEvent.change(await screen.findByLabelText('工作区搜索'), { target: { value: 'line 42' } })
+    fireEvent.input(await screen.findByLabelText('工作区搜索'), { target: { value: 'line 42' } })
     fireEvent.click(screen.getByLabelText('搜索'))
     fireEvent.click(await screen.findByTitle('src/result.ts:42'))
 

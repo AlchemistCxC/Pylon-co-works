@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import ViewsPanel, { formatTouchTime } from '../ViewsPanel'
+import { render, screen, cleanup } from '@solidjs/testing-library'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import ViewsPanel, { formatTouchTime } from '../ViewsPanel.solid.tsx'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../../domains/agent/agentContext'
 import { resetStores } from '../../../test/resetStores'
+
+afterEach(() => cleanup())
+
+// #515：迁移自 ViewsPanel.test.tsx（React RTL → Solid 实体直连）。
+// 断言改写点登记：render(<JSX/>) → render(() => JSX)；其余断言集与 DOM 契约不变。
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -28,7 +33,7 @@ describe('ViewsPanel 只消费 touchedFiles（去 Git 化）', () => {
         [toAgentContextKey({ agentId: 'agent-test', source: 'ws-a' })]: [touched('src/old.ts', 'Edit', 1000), touched('src/new.ts', 'Write', 2000)],
       },
     })
-    const { container } = render(<ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={vi.fn()} />)
+    const { container } = render(() => <ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={vi.fn()} />)
     expect(screen.getByText('src/new.ts')).toBeTruthy()
     expect(screen.getByText('src/old.ts')).toBeTruthy()
     expect(screen.getByText('Write')).toBeTruthy()
@@ -41,7 +46,7 @@ describe('ViewsPanel 只消费 touchedFiles（去 Git 化）', () => {
       touchedFiles: { [toAgentContextKey({ agentId: 'agent-test', source: 'ws-a' })]: [touched('src/a.ts', 'Edit', 1000)] },
     })
     const onOpenFile = vi.fn()
-    render(<ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={onOpenFile} />)
+    render(() => <ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={onOpenFile} />)
     screen.getByText('src/a.ts').closest('button')!.click()
     expect(onOpenFile).toHaveBeenCalledWith('src/a.ts')
   })
@@ -50,18 +55,18 @@ describe('ViewsPanel 只消费 touchedFiles（去 Git 化）', () => {
     useWorkspaceStore.setState({
       touchedFiles: { [toAgentContextKey({ agentId: 'agent-test', source: 'ws-a' })]: [touched('src/a.ts', 'Edit', 1000)] },
     })
-    render(<ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={vi.fn()} />)
+    render(() => <ViewsPanel source="ws-a" context={{ agentId: 'agent-test', source: 'ws-a' }} onOpenFile={vi.fn()} />)
     expect(invoke).not.toHaveBeenCalled()
     expect(invoke.mock.calls.flat().filter(call => call === 'git_status')).toEqual([])
   })
 
   it('无 source → 显示选择会话引导', () => {
-    render(<ViewsPanel source={null} onOpenFile={vi.fn()} />)
+    render(() => <ViewsPanel source={null} onOpenFile={vi.fn()} />)
     expect(screen.getByText(/选择会话/)).toBeTruthy()
   })
 
   it('有 source 但无触碰文件 → 空提示', () => {
-    render(<ViewsPanel source="ws-b" onOpenFile={vi.fn()} />)
+    render(() => <ViewsPanel source="ws-b" onOpenFile={vi.fn()} />)
     expect(screen.getByText(/尚未修改文件/)).toBeTruthy()
   })
 

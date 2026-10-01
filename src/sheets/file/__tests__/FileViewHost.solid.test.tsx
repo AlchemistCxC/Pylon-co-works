@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import FileViewHost from '../FileViewHost'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, cleanup } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
+import FileViewHost from '../FileViewHost.solid.tsx'
 import { fileTabKey, type FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
-import { fileEditorEditable } from './codeMirrorTestUtils.ts'
+import { fileEditorEditable } from './codeMirrorTestUtils.solid.ts'
+
+afterEach(() => cleanup())
+
+// #515：迁移自 FileViewHost.test.tsx（React RTL → Solid 实体直连）。
+// 断言改写点登记：
+// 1. render(<JSX/>) → render(() => JSX)；
+// 2. rerender(nextProps) → 信号驱动（setTab/setSource 切换，等价 React 父组件重渲染）；
+// 3. act() 包装退役（Solid 信号→effect 同步传播，waitFor 兜底收敛）。
+// 其余断言集与 DOM 契约不变。
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -39,7 +49,7 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
   })
 
   it('file 模式：打开默认可写（ADR-0023）；read 经 typed client 带 source/相对路径', async () => {
-    const { container } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    const { container } = render(() => <FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     // 挂载与首读完成是两拍渲染：只等元素存在会在 data-path 尚未落入 DOM 时断言（P91 C 批退役 retry 后暴露的游走 flake）。
     await waitFor(() => {
       expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
@@ -54,43 +64,46 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
     expect(screen.getAllByText('ws-a').length).toBeGreaterThan(0)
   })
 
+
   it('diff 模式：渲染 DiffView 复用 DiffCard，git_diff 带 source/path/staged', async () => {
-    render(<FileViewHost source="ws-a" tab={diffTab} onCloseTab={vi.fn()} />)
+    render(() => <FileViewHost source="ws-a" tab={diffTab} onCloseTab={vi.fn()} />)
     await screen.findByText('变更预览')
     expect(screen.getByText('src/a.ts（staged）')).toBeTruthy()
     expect(invoke).toHaveBeenCalledWith('git_diff', { source: 'ws-a', path: 'src/a.ts', staged: true })
   })
 
   it('同路径 file↔diff 切换不串 mode（关闭/切换不互相覆盖）', async () => {
-    const { container, rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    const [tabSignal, setTabSignal] = createSignal<FileTabRecord>(fileTab)
+    const { container } = render(() => <FileViewHost source="ws-a" tab={tabSignal()} onCloseTab={vi.fn()} />)
     await waitFor(() => expect(fileViewOf(container)).not.toBeNull())
-    rerender(<FileViewHost source="ws-a" tab={diffTab} onCloseTab={vi.fn()} />)
+    setTabSignal(diffTab)
     await screen.findByText('变更预览')
     expect(fileViewOf(container)).toBeNull()
     expect(screen.queryByText('const x = 1')).toBeNull()
-    rerender(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    setTabSignal(fileTab)
     await waitFor(() => expect(fileViewOf(container)).not.toBeNull())
     expect(screen.queryByText('变更预览')).toBeNull()
   })
 
   it('diff 关闭按钮以 mode-key 回调 onCloseTab', async () => {
     const onCloseTab = vi.fn()
-    render(<FileViewHost source="ws-a" tab={diffTab} onCloseTab={onCloseTab} />)
+    render(() => <FileViewHost source="ws-a" tab={diffTab} onCloseTab={onCloseTab} />)
     await screen.findByText('变更预览')
     fireEvent.click(screen.getByLabelText('关闭 diff'))
     expect(onCloseTab).toHaveBeenCalledWith(fileTabKey(diffTab))
   })
 
   it('无活动 tab → 空态引导卡片', () => {
-    const { container } = render(<FileViewHost source="ws-a" tab={null} onCloseTab={vi.fn()} />)
+    const { container } = render(() => <FileViewHost source="ws-a" tab={null} onCloseTab={vi.fn()} />)
     expect(screen.getByText('打开一个文件开始阅读')).toBeTruthy()
     expect(container.querySelector('.file-empty-card')).not.toBeNull()
   })
 
   it('source 清空 → 重置瞬态编辑器状态（行数归零，视图提示未指向会话）', async () => {
-    const { container, rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    const [sourceSignal, setSourceSignal] = createSignal<string | null>('ws-a')
+    const { container } = render(() => <FileViewHost source={sourceSignal()} tab={fileTab} onCloseTab={vi.fn()} />)
     await screen.findByText('1 行')
-    rerender(<FileViewHost source={null} tab={fileTab} onCloseTab={vi.fn()} />)
+    setSourceSignal(null)
     await waitFor(() => expect(screen.getAllByText('未指向会话').length).toBeGreaterThan(0))
     await waitFor(() => expect(screen.getByText('0 行')).toBeTruthy())
     expect(fileViewOf(container)).not.toBeNull()
