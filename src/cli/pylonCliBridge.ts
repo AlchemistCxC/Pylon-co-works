@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../infrastructure/tauri/env.ts'
-import { logError } from '../domains/diagnostics/frontendLogSink.ts'
+import { logError } from '../contracts/frontendLogSink.ts'
 import { getPylonCliService, getPylonCliTool } from './pylonCliRuntime.ts'
 import { errorMessage } from './pylonCliService.ts'
 

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI } from './env.ts'
-import { installFrontendLogSink } from '../../domains/diagnostics/frontendLogSink.ts'
+import { installFrontendLogSink } from '../../contracts/frontendLogSink.ts'
 
 /**
  * #488 批⑦：把前端诊断日志接进后端 runtime log（`push_frontend_log`，R8 每秒

@@ -1,6 +1,6 @@
 import { loadProfiles, parseProfileEnvelope, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile } from './profilePersistence'
 import { normalizeSessions } from './sessionPersistence'
-import { logError } from '../diagnostics/frontendLogSink.ts'
+import { logError } from '../../contracts/frontendLogSink.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
 import {

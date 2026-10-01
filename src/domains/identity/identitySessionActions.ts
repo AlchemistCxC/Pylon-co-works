@@ -1,7 +1,7 @@
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../contracts/agentCommandSet.ts'
 import { loadSessions, normalizeSessions, SESSION_SCHEMA_VERSION } from './sessionPersistence'
 import { clearSessionUiState } from '../chat/sessionUiState'
-import { logError } from '../diagnostics/frontendLogSink.ts'
+import { logError } from '../../contracts/frontendLogSink.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { resolveUnresolvedSessionTransaction } from '../../app/bootstrap/resolveUnresolvedSessionTransaction'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'

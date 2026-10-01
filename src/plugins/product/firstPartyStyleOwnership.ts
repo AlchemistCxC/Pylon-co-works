@@ -72,7 +72,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
     ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'Tailwind v4 utilities 基线：@theme inline 只读消费 index.css token；无 preflight（TW 施工书 20260914）',
   ),
-  entry('src/components/kernel/SkinPreviewBar.css', 'kernel', 'kernel-static', ['src/components/kernel/SkinPreviewBar.tsx']),
+  // #491 绞杀恢复批：SkinPreviewBar.css 已整文件绞杀进 utilities 层，不再登记。
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/components/SessionSettings.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),
