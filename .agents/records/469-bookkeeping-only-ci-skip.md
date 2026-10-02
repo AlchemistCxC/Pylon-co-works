@@ -64,15 +64,15 @@ AGENTS.md  README.md  .agents/L.md  .agents/BOARD.md
 - **改后**必需检查 1 条：`[{"context":"门禁总闸","integration_id":15368}]`——`context` 逐字等于 job 的 `name`；其余规则与条件原样带回。
 - 改动由本账号（admin）直接执行：改前 GET 存档落报告目录，PUT 后复核只剩一条。
 
-## 验收标准与结果
+## 验收标准与结果（2026-10-02 全部达成）
 
 | 验收项 | 结果 |
 | --- | --- |
-| 本笔 PR 的 7 条检查全部产出且绿（`判定改动面` + 5 重活 + `门禁总闸`） | PR __（待回填：检查名与耗时） |
-| 合入后 main 的 push 运行里 `门禁总闸` 产出且绿 | __（待回填：run 链接与结论） |
-| ruleset 收敛：改前/改后 JSON + 复核只剩一条 | __（待回填） |
-| 端到端样本 PR：`判定改动面` pass / 5 重活 skipped / `门禁总闸` success / `MERGEABLE` 且非 `BLOCKED` | PR __（待回填：四项读数） |
-| 样本 PR 合入后 `.agents/L.md` 的 `#266` 刀5 与 `#469` 两条消失 | __（待回填） |
+| 本笔 PR 的 7 条检查全部产出且绿（`判定改动面` + 5 重活 + `门禁总闸`） | ✅ PR [#522](https://github.com/Teens-in-Times/Pylon-co-works/pull/522)（run 37007083989，墙钟 8m28s）：`判定改动面` 7s、`前端静态门禁（lint + tsc + build）` 3m36s、`前端测试（vitest 分片 1/2）` 4m36s、`（分片 2/2）` 3m39s、`Rust（fmt + 测试 + 构建）` 7m45s、`Rust（clippy 基线门禁）` 4m13s、`Rust（ACP shadow parity）` 4m56s、`门禁总闸` 3s —— 8/8 行 pass（矩阵一 job 两行） |
+| 合入后 main 的 push 运行里 `门禁总闸` 产出且绿 | ✅ run [37008042999](https://github.com/Teens-in-Times/Pylon-co-works/actions/runs/37008042999)（merge commit `11ee32c8`）：八个作业全 success，含 `判定改动面` 与 `门禁总闸`（push 路径首次实测） |
+| ruleset 收敛：改前/改后 JSON + 复核只剩一条 | ✅ id `23202065`：改前 6 条（静态门禁 / 分片 1/2、2/2 / fmt+测试+构建 / clippy / shadow）→ 改后 `["门禁总闸"]`；`bypass_actors: []` 与 deletion / non_fast_forward 原样；PUT 落点 `updated_at 2026-10-02T20:51:22.539+08:00`；前后 JSON 落报告目录 |
+| 端到端样本 PR：`判定改动面` pass / 5 重活 skipped / `门禁总闸` success / `MERGEABLE` 且非 `BLOCKED` | ✅ PR [#523](https://github.com/Teens-in-Times/Pylon-co-works/pull/523)（只改 `.agents/L.md`；run 37009464788，墙钟约 15s）：`判定改动面` pass 7s；五个重活全 skipped（矩阵呈未展开名 `前端测试（vitest 分片 ${{ matrix.shard }}/2）`，收敛后的 ruleset 下无碍）；`门禁总闸` pass 4s；`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`；已合并（merge commit `c8c5e925`） |
+| 样本 PR 合入后 `.agents/L.md` 的 `#266` 刀5 与 `#469` 两条消失 | ✅ main 上 L.md 两子串均 False（文件 23 行），`#266` 刀5 遗留随之清偿 |
 
 > 完整命令与输出落盘：`E:\Acode\FILES\任务\工作台优化\报告等\13-施工单-簿记类文档改动免CI（ci路由+门禁总闸）\`（仓外报告目录）。
 
@@ -88,4 +88,9 @@ AGENTS.md  README.md  .agents/L.md  .agents/BOARD.md
 
 ## 遗留
 
-- （2026-10-02 出单时）运行读数待 CI 出数后回填上表；除此之外无。
+- 无（本单验收 1–5 全部达成；本记录的运行读数由一笔收敛后的纯簿记小 PR 回填——彼时纯簿记 PR 已放行）。
+
+## 环境事实（供追溯）
+
+- 本机 `github.com:443` 不可达（git push / fetch 失败：`Connection was reset` / `Could not connect`），`api.github.com` 正常 ⇒ 本批三笔远端提交（机制 `5af0cf3d`、样本 `794e8ab0`、记录回填）均经 git-data API 等价建立：blob/树 SHA 与本地逐字节一致，仅 commit SHA 不同（机制笔本地 `9f6166ea`）。网络恢复后 `git fetch origin` 即可对齐本地分支。
+- CI 既有告警（非本次引入）：`actions/checkout@v4` 目标 Node 20、被强制跑在 Node 24，所有 job 均有。
