@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, Show } from 'solid-js'
+
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField.solid.tsx'
@@ -9,7 +9,6 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError
 import type { AgentContext } from '../../domains/agent/agentContext'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface ConfigOptionsPanelProps {
   context?: AgentContext
@@ -86,9 +85,4 @@ export default function ConfigOptionsPanel(props: ConfigOptionsPanelProps) {
       </div>
     </Show>
   )
-}
-
-/** React 薄桥（ConfigOptionsPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderConfigOptionsPanel(container: HTMLElement, latest: () => ConfigOptionsPanelProps): () => void {
-  return render(() => createComponent(ConfigOptionsPanel, bridgedProps(latest)), container)
 }

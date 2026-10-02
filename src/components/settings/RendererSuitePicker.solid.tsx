@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, For, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, For, Show } from 'solid-js'
+
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -8,7 +8,6 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import Select from '../ui/Select.solid.tsx'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface RendererSuitePickerProps {}
 
@@ -89,9 +88,4 @@ export default function RendererSuitePicker() {
       </div>
     </Show>
   )
-}
-
-/** React 薄桥（RendererSuitePicker.tsx）经 eager glob 调用的挂载缝。 */
-export function renderRendererSuitePicker(container: HTMLElement, latest: () => RendererSuitePickerProps): () => void {
-  return render(() => createComponent(RendererSuitePicker, bridgedProps(latest)), container)
 }

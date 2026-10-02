@@ -1,13 +1,12 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, For } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, For } from 'solid-js'
+
 import type { IconNode } from 'lucide'
 import { Layers3, PanelsTopLeft, Terminal } from 'lucide'
 import { activateInterfaceMode, interfaceModeIsUsable } from '../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface InterfaceModePickerProps {}
 
@@ -72,9 +71,4 @@ export default function InterfaceModePicker() {
       }}</For>
     </div>
   )
-}
-
-/** React 薄桥（InterfaceModePicker.tsx）经 eager glob 调用的挂载缝。 */
-export function renderInterfaceModePicker(container: HTMLElement, latest: () => InterfaceModePickerProps): () => void {
-  return render(() => createComponent(InterfaceModePicker, bridgedProps(latest)), container)
 }

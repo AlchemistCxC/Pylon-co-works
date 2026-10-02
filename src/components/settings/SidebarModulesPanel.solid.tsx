@@ -1,12 +1,11 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+
 import { getAgentSidebarRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import {
   applyModulePrefs,
   sidebarModulePrefsStore,
 } from '../../domains/appearance/sidebarModulePrefs.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface SidebarModulesPanelProps {}
 
@@ -70,9 +69,4 @@ export default function SidebarModulesPanel() {
       </div>
     </Show>
   )
-}
-
-/** React 薄桥（SidebarModulesPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderSidebarModulesPanel(container: HTMLElement, latest: () => SidebarModulesPanelProps): () => void {
-  return render(() => createComponent(SidebarModulesPanel, bridgedProps(latest)), container)
 }

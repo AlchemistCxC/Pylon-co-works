@@ -14,7 +14,6 @@ import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
 import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.solid.tsx'
 
@@ -445,6 +444,3 @@ export default function PluginManager(props: PluginManagerProps) {
     </div>
   )
 }
-
-/** React 薄桥（PluginManager.tsx）经 eager glob 调用的挂载缝。 */
-export const renderPluginManager = createSolidMount(PluginManager)

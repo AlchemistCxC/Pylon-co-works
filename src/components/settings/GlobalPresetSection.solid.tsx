@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useStore } from '../../domains/theme/themeStore'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
@@ -187,6 +186,3 @@ export default function GlobalPresetSection(props: GlobalPresetSectionProps) {
     </>
   )
 }
-
-/** React 薄桥（GlobalPresetSection.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderGlobalPresetSection = createSolidMount(GlobalPresetSection)

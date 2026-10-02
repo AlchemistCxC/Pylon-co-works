@@ -7,7 +7,6 @@ import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rende
 import { isSettingVisible, settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.solid.tsx'
 import RendererSuitePicker from './RendererSuitePicker.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -372,6 +371,3 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
     </Show>
   </section>
 }
-
-/** React 薄桥（RendererSettingsPanel.tsx）经 eager glob 调用的挂载缝。 */
-export const renderRendererSettingsPanel = createSolidMount(RendererSettingsPanel)

@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import type { SettingsSearchItem } from './settingsDomains.ts'
 
 /**
@@ -131,6 +130,3 @@ export default function SettingsQuickSearch(props: {
     </Show>
   )
 }
-
-/** React 薄桥（SettingsQuickSearch.tsx）经 eager glob 调用的挂载缝。 */
-export const renderSettingsQuickSearch = createSolidMount(SettingsQuickSearch)

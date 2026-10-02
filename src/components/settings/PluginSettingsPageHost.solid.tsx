@@ -7,7 +7,6 @@ import { settingFieldKey, type RendererSettingOption, type SettingsValue } from 
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { RendererSettingsSchemaHost } from './RendererSettingField.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
 
 const EMPTY_VALUES: Readonly<Record<string, SettingsValue>> = Object.freeze({})
@@ -141,6 +140,3 @@ export default function PluginSettingsPageHost(props: { pageId: string }) {
     </Show>
   )
 }
-
-/** React 薄桥（PluginSettingsPageHost.tsx）经 eager glob 调用的挂载缝。 */
-export const renderPluginSettingsPageHost = createSolidMount(PluginSettingsPageHost)

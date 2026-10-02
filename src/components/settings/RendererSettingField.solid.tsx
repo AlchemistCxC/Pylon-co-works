@@ -3,7 +3,6 @@ import type { JSX } from 'solid-js'
 import { For, Match, Show, Switch } from 'solid-js'
 import { isSettingVisible, type RenderChoiceSettingField, type RenderColorSettingField, type RenderMultiChoiceSettingField, type RenderNumberSettingField, type RenderSettingField, type RendererSettingOption, type RendererPresentation, type RendererSettingValue, type RendererSettingsSchema, type RenderBooleanSettingField, type RenderTextSettingField, type SettingsValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import ColorPopover from '../ColorPopover.solid.tsx'
 import Select from '../ui/Select.solid.tsx'
 
@@ -467,9 +466,3 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
     </Switch>
   )
 }
-
-/** React 薄桥（RendererSettingField.tsx）经 eager glob 调用的挂载缝。 */
-export const renderRendererSettingField = createSolidMount(RendererSettingField)
-
-/** React 薄桥（RendererSettingField.tsx 具名导出 RendererSettingsSchemaHost）的挂载缝。 */
-export const renderRendererSettingsSchemaHost = createSolidMount(RendererSettingsSchemaHost)

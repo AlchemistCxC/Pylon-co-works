@@ -1,12 +1,11 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+
 import { PYLON_PLUGIN_CAPABILITIES } from '../../plugin-runtime/packageManifest.ts'
 import {
   getPluginCapabilityGrantStore,
 } from '../../plugin-runtime/management/pluginManagementWiring.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 /**
  * P53 D2 · 宿主授权卡：声明了 capability 但未获用户授权的插件在此批准/拒绝。
@@ -117,9 +116,4 @@ export default function PluginCapabilityConsentCard(props: PluginCapabilityConse
       </div>
     </Show>
   )
-}
-
-/** React 薄桥（PluginCapabilityConsentCard.tsx）经 eager glob 调用的挂载缝。 */
-export function renderPluginCapabilityConsentCard(container: HTMLElement, latest: () => PluginCapabilityConsentCardProps): () => void {
-  return render(() => createComponent(PluginCapabilityConsentCard, bridgedProps(latest)), container)
 }

@@ -6,7 +6,6 @@ import { useStore } from '../../domains/theme/themeStore.ts'
 import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
@@ -260,6 +259,3 @@ export default function RendererSettingsPreview(props: {
     </Show>
   )
 }
-
-/** React 薄桥（RendererSettingsPreview.tsx）经 eager glob 调用的挂载缝。 */
-export const renderRendererSettingsPreview = createSolidMount(RendererSettingsPreview)

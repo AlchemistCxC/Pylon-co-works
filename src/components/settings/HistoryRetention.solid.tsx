@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createSignal, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, onCleanup, Show } from 'solid-js'
+
 import Select from '../ui/Select.solid.tsx'
 import {
   DEFAULT_COUNT_LIMIT,
@@ -26,7 +26,6 @@ import {
   type RetentionPreview,
 } from '../../infrastructure/persistence/retentionPolicyRepository'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface HistoryRetentionProps {}
 
@@ -281,9 +280,4 @@ export default function HistoryRetention() {
       </Show>
     </div>
   )
-}
-
-/** React 薄桥（HistoryRetention.tsx）经 eager glob 调用的挂载缝。 */
-export function renderHistoryRetention(container: HTMLElement, latest: () => HistoryRetentionProps): () => void {
-  return render(() => createComponent(HistoryRetention, bridgedProps(latest)), container)
 }
