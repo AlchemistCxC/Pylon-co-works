@@ -1,5 +1,7 @@
 # L.md · 并行施工协调板
 
+- [kumo] **#520 复查 wave3（2026-10-03）**：S1~S4 只读严查（赶工痕迹/结构性问题/孤儿工厂复活/硬编码契约）不写文件；随后 R1~R4 修复批按域落位（R1 settings+docs 域、R2 renderers/sheets 域、R3 plugin-runtime+host 域、R4 内核语义+一致性），修复域以审查报告圈定为准。R 批不 commit（主会话统一 pathspec）；`src-tauri/**` 不碰。
+
 - [kumo] **#520 终局收尾批 wave1（2026-10-02）**：W1 域＝`src/components/settings/**` agent 面避让域 Solid 化 + `Settings.solid.tsx` 岛改直连 + 该域测试迁移 + `vitest.setup.ts` 白名单跟随；W2 域＝`renderKind: 'first-party-react'`→`'first-party-solid'` 改名（plugin-runtime 契约与全部消费端）+ 死代码二批（plugin-runtime/domains/application 零消费件，不含 components/settings）+ 两可残留处置。A1/A2 只读审查不写文件。W1/W2 均不 commit（主会话统一 pathspec）；`src-tauri/**`、Codex 域外文件不碰。
 
 - [Codex] **Agent 探测/导入故障调查（2026-10-01）**：域＝`src/components/settings/{AgentCandidateList,useAgentDetection,useAgentCandidateProvisioning,AgentCreateForm,AgentRuntimePanel}*`、`src/domains/agent/`、`src-tauri/pylon-core/src/agent_detection/` 与相关测试/说明书/记录；先调试 `F:/A-I/Platform/Pylon`。发现共享树 `src-tauri/Cargo.toml` 他人在途，依 §2.1 不 stage/commit；隔离到基于 `github/main` 的 worktree 完成施工与提交。
