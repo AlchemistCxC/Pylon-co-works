@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  bindingHint,
   bindingStatusText,
   isBindingLocked,
   refineBindingGeneration,
@@ -124,6 +125,43 @@ describe('isBindingLocked / bindingStatusText', () => {
     expect(bindingStatusText({ kind: 'agent_disconnected', agentId: 'peri', status: 'disconnected' })).toContain('未连接')
     expect(bindingStatusText({ kind: 'binding_stale', agentId: 'peri', sessionId: 's1', fromGeneration: 5, toGeneration: 6 }))
       .toContain('已重连')
+  })
+})
+
+describe('bindingHint：输入栏提示判据（CC-30）', () => {
+  it('idle / binding_ready 文案为空 → 不提示', () => {
+    expect(bindingHint({ kind: 'idle' })).toBeUndefined()
+    expect(bindingHint({ kind: 'binding_ready', agentId: 'peri', sessionId: 's1' })).toBeUndefined()
+  })
+
+  it('其余 6 态：text 非空且与 bindingStatusText 一致（8 态全覆盖）', () => {
+    const states: BindingState[] = [
+      { kind: 'restoring', agentId: 'peri' },
+      { kind: 'restore_error', agentId: 'peri', reason: '会话归属不一致' },
+      { kind: 'agent_disconnected', agentId: 'peri', status: 'disconnected' },
+      { kind: 'binding_stale', agentId: 'peri', sessionId: 's1', fromGeneration: 5, toGeneration: 6 },
+      { kind: 'binding_probing', agentId: 'peri', sessionId: 's1', generation: 6 },
+      { kind: 'binding_detached', agentId: 'peri', sessionId: 's1', reason: 'session-probe-timeout', retryable: true },
+    ]
+    for (const state of states) {
+      const hint = bindingHint(state)
+      expect(hint?.text).toBe(bindingStatusText(state))
+      expect(hint?.text).not.toBe('')
+    }
+  })
+
+  it('error 变体仅 restore_error，其余为中性态', () => {
+    const states: BindingState[] = [
+      { kind: 'restoring', agentId: 'peri' },
+      { kind: 'restore_error', agentId: 'peri', reason: 'x' },
+      { kind: 'agent_disconnected', agentId: 'peri', status: 'crashed' },
+      { kind: 'binding_stale', agentId: 'peri', sessionId: 's1', fromGeneration: 1, toGeneration: 2 },
+      { kind: 'binding_probing', agentId: 'peri', sessionId: 's1', generation: 2 },
+      { kind: 'binding_detached', agentId: 'peri', sessionId: 's1', reason: 'r', retryable: false },
+    ]
+    for (const state of states) {
+      expect(bindingHint(state)?.error).toBe(state.kind === 'restore_error')
+    }
   })
 })
 

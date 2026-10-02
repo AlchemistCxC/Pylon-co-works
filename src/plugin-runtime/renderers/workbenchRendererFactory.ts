@@ -54,6 +54,12 @@ export interface WorkbenchMountInput {
    * subtree must not import the runtime store itself.
    */
   readonly agentAdvertisedModels?: readonly WorkbenchOptionEntry[]
+  /**
+   * 会话绑定状态提示（宿主按 `domains/binding/bindingState` 的判据派生，缺省 = 不提示）。
+   * Host-derived plain data: the renderer subtree must not import the runtime
+   * store itself.
+   */
+  readonly bindingHint?: { readonly text: string; readonly error: boolean }
 }
 
 export interface RendererPrepareContext {

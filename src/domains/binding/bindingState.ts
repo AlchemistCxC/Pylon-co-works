@@ -156,3 +156,14 @@ export function bindingStatusText(state: BindingState): string {
     case 'binding_ready': return ''
   }
 }
+
+export interface BindingHint {
+  readonly text: string
+  readonly error: boolean
+}
+
+/** 输入栏悬浮提示的呈现判据（唯一出处）：文案非空即显示；error 变体仅 restore_error。 */
+export function bindingHint(state: BindingState): BindingHint | undefined {
+  const text = bindingStatusText(state)
+  return text ? { text, error: state.kind === 'restore_error' } : undefined
+}
