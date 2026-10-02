@@ -42,7 +42,7 @@ Pylon 是通过 ACP 连接多个本地 Agent runtime 的桌面工作台。它以
 
 ```mermaid
 flowchart TB
-  Entry["src/main.tsx"] --> KR["src/kernel/KernelRoot.tsx<br/>Application mount / Recovery"]
+  Entry["src/main.solid.tsx"] --> KR["src/kernel/KernelRoot.solid.tsx<br/>Application mount / Recovery"]
   KR --> KB["KernelBootstrap<br/>starting / ready / degraded / safe-mode"]
   KB -->|显式 bootstrap/retry| CR["src/plugin-runtime/pluginCompositionRoot.ts"]
   CR --> PR["PluginRuntime + PluginScope + Registries<br/>Kernel 扩展机制"]
@@ -118,7 +118,7 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-  participant Main as main.tsx
+  participant Main as main.solid.tsx
   participant Kernel as KernelRoot
   participant Composition as pluginCompositionRoot
   participant Runtime as PluginRuntime
@@ -491,7 +491,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --workspace --tests --features t
 | Agent 配置 | `AgentRuntimePanel.tsx` → lifecycle config commands → `agent_config/` |
 | 内置插件 | `builtinProductPlugins.ts` → 目标 package activation → 目标 implementation |
 | 外置插件 | packageInstallationService/packagePluginRuntime → PluginRuntime → native plugin commands |
-| Kernel 启动 | `main.tsx` → `KernelRoot.tsx` → `kernelBootstrapServices.ts` → `pluginCompositionRoot.ts` → `App.tsx` |
+| Kernel 启动 | `main.solid.tsx` → `KernelRoot.solid.tsx` → `kernelBootstrapServices.ts` → `pluginCompositionRoot.ts` → `App.solid.tsx` |
 | Product contribution | `productContributionPorts.ts` → `PluginServiceRegistry.resolveRequired` → Agent/Tool sink |
 
 ## 18. 禁止默认全量侦察的工作规则

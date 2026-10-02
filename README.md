@@ -143,7 +143,7 @@ bun run release:portable
 ## 代码地图
 
 ```text
-src/main.tsx                         应用入口与 bootstrap
+src/main.solid.tsx                   应用入口与 bootstrap
 src/kernel/                          Kernel、恢复和 Safe Mode
 src/plugin-runtime/                  插件宿主、Scope 和注册表
 src/domains/                         领域模型与状态同步
