@@ -624,6 +624,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
           communicates the affordance, so keyboard-hint chrome would make the
           centered composer look like a second instruction panel. */}
       <Show when={sendError()}>{error => <div class="input-error" role="alert">{error()}</div>}</Show>
+      <Show when={workbench.input().bindingHint}>{hint => (
+        <div class={`input-binding-status${hint().error ? ' input-binding-status--error' : ''}`} role="status">{hint().text}</div>
+      )}</Show>
       <Show when={!emptyState() && paletteRows().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
           <For each={paletteRows()}>{(row, index) => (
