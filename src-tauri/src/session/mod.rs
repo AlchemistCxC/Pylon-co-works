@@ -675,6 +675,11 @@ pub(crate) async fn user_data_load(
 
 /// 原子保存（expected_revision 不匹配 → conflict；形状非法/超限 → corrupt）。
 /// 返回新 revision（前端后续 expected_revision 基准）。
+/// #463 绕锁面：approval-mode 为保留键——通用盲写不写内存、不持 approval_mode_write_lock，
+/// 可致磁盘/内存静默分叉（重启回退盲写值）。拒绝（`user_data_reserved_key`）强制走
+/// set_approval_mode（锁窗口内内存+落盘同演化）。load 不拦：读不产生分叉，且前端
+/// approvalModeRestore 的持久层探询依赖它。service 层不拦：set_approval_mode 自身经
+/// service.save 写穿；Rust 侧 service.save 调用方仅本命令与 permission.rs（grep 盘点）。
 #[tauri::command]
 pub(crate) async fn user_data_save(
     state: tauri::State<'_, AppState>,
@@ -684,6 +689,12 @@ pub(crate) async fn user_data_save(
 ) -> Result<UserDataSaveResult, PylonError> {
     let key = UserDataKey::parse(&key)
         .ok_or_else(|| UserDataError::Unavailable(format!("unknown user data key: {key}")))?;
+    if matches!(key, UserDataKey::ApprovalMode) {
+        return Err(UserDataError::ReservedKey {
+            key: key.as_str().to_string(),
+        }
+        .into());
+    }
     let revision = require_user_data_service(&state)?
         .save(key, payload, expected_revision)
         .await?;
@@ -2195,5 +2206,62 @@ gateway:
         // 非 JSON 形态一律不提取
         assert_eq!(extract_tool_file_name(r#"{path: x}"#), None);
         assert_eq!(extract_tool_file_name(r#""path":"src/x.rs""#), None);
+    }
+
+    /// #463 绕锁面：user_data_save 对保留键 approval-mode 拒绝（user_data_reserved_key），
+    /// 即使 service 在场也不落盘——磁盘值必须经 set_approval_mode 持锁演化。
+    #[tokio::test]
+    async fn user_data_save_rejects_reserved_approval_mode_key() {
+        use crate::session::user_data::{UserDataError, UserDataKey};
+        let shared = std::sync::Arc::new(
+            crate::session::UserDataService::in_memory().expect("user service"),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(shared.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let error = user_data_save(
+            app.state::<AppState>(),
+            "approval-mode".to_string(),
+            serde_json::json!({ "version": 1, "mode": "bypass" }),
+            None,
+        )
+        .await
+        .expect_err("reserved key must be rejected");
+        match &error {
+            PylonError::UserData(UserDataError::ReservedKey { key }) => {
+                assert_eq!(key, "approval-mode");
+            }
+            other => panic!("expected reserved key error, got {other:?}"),
+        }
+        assert_eq!(error.code(), "user_data_reserved_key");
+        // 拦截在 service 之前：磁盘无行
+        assert!(shared
+            .load_sync(UserDataKey::ApprovalMode)
+            .expect("load")
+            .is_none());
+    }
+
+    /// #463 绕锁面：load 不拦——读不产生分叉，且前端 approvalModeRestore
+    /// 持久层探询（种子判定）依赖它。
+    #[tokio::test]
+    async fn user_data_load_still_allows_approval_mode_key() {
+        let shared = std::sync::Arc::new(
+            crate::session::UserDataService::in_memory().expect("user service"),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_user_data_service(shared)
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let loaded = user_data_load(app.state::<AppState>(), "approval-mode".to_string())
+            .await
+            .expect("load of approval-mode must remain allowed");
+        assert!(loaded.is_none());
     }
 }

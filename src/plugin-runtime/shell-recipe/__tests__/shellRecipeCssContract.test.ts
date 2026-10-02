@@ -4,12 +4,14 @@ import { readFileSync } from 'node:fs'
 const pathname = (relativePath: string) =>
   decodeURIComponent(new URL(relativePath, import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1')
 const appCss = readFileSync(pathname('../../../plugins/product/packages/builtin.pylon-shell/styles/App.css'), 'utf8')
-const appTsx = readFileSync(pathname('../../../App.tsx'), 'utf8')
+// #515：App 实体已 Solid 化（App.tsx 删除，实体在 App.solid.tsx）——源契约改读实体，
+// 正则跟随 memo 取值语法（shellRecipe.sidebarSide → shellRecipe().sidebarSide），断言强度不变。
+const appTsx = readFileSync(pathname('../../../App.solid.tsx'), 'utf8')
 
 describe('Shell Recipe 样式契约（ADR-0003）', () => {
   it('App 根节点写入解析值数据属性，默认态即 DOM 顺序', () => {
-    expect(appTsx).toMatch(/data-shell-sidebar-side=\{shellRecipe\.sidebarSide\}/)
-    expect(appTsx).toMatch(/data-shell-context-side=\{shellRecipe\.contextPanelSide\}/)
+    expect(appTsx).toMatch(/data-shell-sidebar-side=\{shellRecipe\(\)\.sidebarSide\}/)
+    expect(appTsx).toMatch(/data-shell-context-side=\{shellRecipe\(\)\.contextPanelSide\}/)
   })
 
   it('重排规则只以 side="right" 为键，不枚举插件 recipe id', () => {

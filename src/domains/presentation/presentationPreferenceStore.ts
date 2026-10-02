@@ -1,5 +1,5 @@
-import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 export const DEFAULT_PRESENTATION_PROFILE_ID = 'builtin.presentation.terminal-classic'
 
@@ -50,32 +50,34 @@ export function migratePresentationPreferences(
   }
 }
 
-export const usePresentationPreferenceStore = create<PresentationPreferenceState>()(persist(
-  set => ({
-    activeProfileId: DEFAULT_PRESENTATION_PROFILE_ID,
-    rendererSuiteIdByMode: {},
-    setActiveProfileId: id => set({ activeProfileId: id || DEFAULT_PRESENTATION_PROFILE_ID }),
-    setRendererSuiteId: (mode, suiteId) => {
-      if (!mode.trim() || !suiteId.trim()) return
-      set(state => ({ rendererSuiteIdByMode: { ...state.rendererSuiteIdByMode, [mode]: suiteId } }))
-    },
-  }),
-  {
-    name: 'pylon-presentation-preferences',
-    version: 3,
-    storage: createJSONStorage(() => localStorage),
-    migrate: (persisted, version) => {
-      const state = migratePresentationPreferences(persisted, version) as Partial<PresentationPreferenceState>
-      const aliases: Record<string, string> = {
-        'builtin.presentation.terminal-focus': 'builtin.presentation.terminal-modern',
-        'builtin.presentation.terminal-transcript': 'builtin.presentation.paper-low-contrast',
-        'builtin.presentation.hybrid-workbench': 'builtin.presentation.console-glass',
-      }
-      return { ...state, activeProfileId: aliases[state.activeProfileId ?? ''] ?? state.activeProfileId ?? DEFAULT_PRESENTATION_PROFILE_ID }
-    },
-    partialize: state => ({
-      activeProfileId: state.activeProfileId,
-      rendererSuiteIdByMode: state.rendererSuiteIdByMode,
-    }),
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const presentationKernel = createSolidStoreKernel<PresentationPreferenceState>({
+  activeProfileId: DEFAULT_PRESENTATION_PROFILE_ID,
+  rendererSuiteIdByMode: {},
+  setActiveProfileId: id => presentationKernel.setState({ activeProfileId: id || DEFAULT_PRESENTATION_PROFILE_ID }),
+  setRendererSuiteId: (mode, suiteId) => {
+    if (!mode.trim() || !suiteId.trim()) return
+    presentationKernel.setState(state => ({ rendererSuiteIdByMode: { ...state.rendererSuiteIdByMode, [mode]: suiteId } }))
   },
-))
+})
+
+attachSolidPersist(presentationKernel, {
+  name: 'pylon-presentation-preferences',
+  version: 3,
+  storage: resolveLocalStorage(),
+  migrate: (persisted, version) => {
+    const state = migratePresentationPreferences(persisted, version ?? 0) as Partial<PresentationPreferenceState>
+    const aliases: Record<string, string> = {
+      'builtin.presentation.terminal-focus': 'builtin.presentation.terminal-modern',
+      'builtin.presentation.terminal-transcript': 'builtin.presentation.paper-low-contrast',
+      'builtin.presentation.hybrid-workbench': 'builtin.presentation.console-glass',
+    }
+    return { ...state, activeProfileId: aliases[state.activeProfileId ?? ''] ?? state.activeProfileId ?? DEFAULT_PRESENTATION_PROFILE_ID }
+  },
+  partialize: state => ({
+    activeProfileId: state.activeProfileId,
+    rendererSuiteIdByMode: state.rendererSuiteIdByMode,
+  }),
+})
+
+export const usePresentationPreferenceStore: ZustandHook<PresentationPreferenceState> = createReactStoreHook(presentationKernel)

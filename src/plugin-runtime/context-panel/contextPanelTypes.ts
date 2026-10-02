@@ -1,4 +1,4 @@
-import type { ComponentType, LazyExoticComponent } from 'react'
+import type { Component } from 'solid-js'
 import type { RegistryEntry } from '../registry/types.ts'
 import type { SheetContext, SheetRecord } from '../../contracts/sheets.ts'
 import type { SettingsSchema, SettingsValueAdapter } from '../renderers/rendererSettingsTypes.ts'
@@ -48,8 +48,14 @@ interface ContextPanelContributionBase {
 }
 
 export interface FirstPartyContextPanelContribution extends ContextPanelContributionBase {
+  /**
+   * #515 契约翻转：第一方贡献组件是 **Solid 组件**（宿主右栏 Solid 实体直连渲染，
+   * React 岛已退役）。历史字面量 `first-party-react` 保留——判别器的消费面语义是
+   * 「非 isolated-surface 即第一方同运行时组件」，改名只生产 churn（sidebar/file-workbench
+   * 契约与既有测试同用此字面量），框架语义由 component 值本身承载。
+   */
   readonly renderKind: 'first-party-react'
-  readonly component: ComponentType<ContextPanelContributionProps> | LazyExoticComponent<ComponentType<ContextPanelContributionProps>>
+  readonly component: Component<ContextPanelContributionProps>
 }
 
 export interface IsolatedContextPanelContribution extends ContextPanelContributionBase {

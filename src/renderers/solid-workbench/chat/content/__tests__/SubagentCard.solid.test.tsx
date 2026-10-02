@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidSubagentCard } from '../SubagentCard.solid.tsx'
 import type { WorkbenchActivityNode } from '../../../../../domains/workbench/workbenchProjector.ts'
 
@@ -18,6 +18,8 @@ const richNode = {
   goal: 'find call sites', progress: { completed: 3, total: 5 },
   usage: { inputTokens: 1200, outputTokens: 340 }, files: ['src/a.ts'],
 } as unknown as WorkbenchActivityNode
+
+afterEach(() => cleanup())
 
 describe('C09 SolidSubagentCard', () => {
   it('renders adjacent streamed text output as one semantic paragraph', () => {

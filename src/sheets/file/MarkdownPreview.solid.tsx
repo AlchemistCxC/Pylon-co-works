@@ -1,3 +1,13 @@
+/**
+ * ⚠️ 零生产消费死件（#515 二轮死代码审查裁定）。
+ *
+ * - 消费者：全仓四路扫描（静态 import / glob 字符串 / 动态 import / basename）零边；
+ *   `FileTabView.solid.tsx:57` 的提及只是历史注释，无接线。
+ * - 测试债：原 React 版 `MarkdownPreview.test.tsx`（6 it / 25 expect：GFM 表格 align、
+ *   任务列表 defaultChecked、脚注 aria 连字符化、代码块语言类、链接/图片属性透传）
+ *   已随 #515 测试迁移蒸发，本组件的投影契约**当前无门禁**。
+ * - 处置：复活（#515 1-A1 产品裁决）必须连同测试一起恢复；确认退役则随 #520 卫生批删除。
+ */
 import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import {

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createMemo, createSignal, type JSX } from 'solid-js'
 import type { PlanContentPayload, PlanEntryV2 } from '../../../../domains/workbench/plan/goalModel.ts'
 import { selectPlanProgress } from '../../../../domains/workbench/plan/goalModel.ts'

@@ -1,11 +1,11 @@
-import { lazy } from 'react'
+import { lazy } from 'solid-js'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import { BUILTIN_PYLON_SHELL_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonShellStyles } from './packages/builtin.pylon-shell/styleAssets.ts'
 import { createBuiltinShellCommandDefinitions } from '../core/shell/builtinShellCommands.ts'
 
-const PylonApplication = lazy(() => import('../../App.tsx'))
+const PylonApplication = lazy(() => import('../../App.solid.tsx'))
 
 export function createBuiltinPylonShellPlugin(): BuiltinPluginDefinition {
   return {

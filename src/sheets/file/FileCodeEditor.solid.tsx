@@ -1,17 +1,15 @@
+/** @jsxImportSource solid-js */
 import { onCleanup, onMount, createEffect } from 'solid-js'
 import type { DispatchSelection } from '../../domains/file/dispatchMessage.ts'
+import { createSolidMount } from '../../host/solidBridge.solid'
 import { createFileCodeMirrorKernel, type FileCodeEditorApi, type FileCodeMirrorKernel, type KernelSummary } from './fileCodeMirrorKernel.ts'
 
 /**
- * FileCodeEditor — Solid 适配器（薄壳，#279 第 2 梯队 + 0-A1 内核合一合并后）。
- *
- * 内核实体在 fileCodeMirrorKernel.ts（框架无关工厂，与 React 适配器
- * FileCodeEditor.tsx 共享同一行为事实——双渲染器同构纪律 + 0-A1 单内核：
- * editable compartment 两档、changedLines decoration、doc.eq 脏检查、KernelSummary）。
- * 本壳只做 Solid 生命周期桥接：onMount 创建内核，props 后续变化经内核可变方法下传。
- * 宿主以「每文档一实例」挂载（FileTabView 的 keyed Show 按 targetKey:path 重建）。
+ * FileCodeEditorProps — 与 React 桥（FileCodeEditor.tsx）内声明的同名接口逐字段一致。
+ * 命名差异是刻意的历史契约：React 壳面叫 `editable`（桥内映射为 `writable`），
+ * Solid 面（FileTabView.solid 消费）自 #279 起叫 `writable`。
  */
-export default function FileCodeEditor(props: {
+export interface FileCodeEditorProps {
   path: string
   initialContent: string
   baseline: string
@@ -21,7 +19,19 @@ export default function FileCodeEditor(props: {
   onWriteLockChange?: (locked: boolean) => void
   onSave?: () => void
   apiRef?: { current: FileCodeEditorApi | null }
-}) {
+}
+
+/**
+ * FileCodeEditor — Solid 适配器（薄壳，#279 第 2 梯队 + 0-A1 内核合一合并后；#515 起兼作
+ * React 桥的实体）。
+ *
+ * 内核实体在 fileCodeMirrorKernel.ts（框架无关工厂，与 React 桥共享同一行为事实——
+ * 双渲染器同构纪律 + 0-A1 单内核：editable compartment 两档、changedLines decoration、
+ * doc.eq 脏检查、KernelSummary）。本壳只做 Solid 生命周期桥接：onMount 创建内核，
+ * props 后续变化经内核可变方法下传。宿主以「每文档一实例」挂载（FileTabView 的
+ * keyed Show 按 targetKey:path 重建）。
+ */
+export default function FileCodeEditor(props: FileCodeEditorProps) {
   let hostElement: HTMLDivElement | undefined
   let kernel: FileCodeMirrorKernel | null = null
 
@@ -88,3 +98,6 @@ export default function FileCodeEditor(props: {
 }
 
 export type { FileCodeEditorApi, KernelSummary, DispatchSelection }
+
+/** React 薄桥（FileCodeEditor.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
+export const mountFileCodeEditor = createSolidMount(FileCodeEditor)

@@ -6,14 +6,8 @@
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },
   "include": [
-    "src/renderers/solid-workbench/**/*.solid.tsx",
-    "src/renderers/solid-workbench/**/*.solid.test.tsx",
-    "src/sheets/**/*.solid.tsx",
-    "src/sheets/**/*.solid.test.tsx",
-    "src/workspace-sheets/**/*.solid.tsx",
-    "src/workspace-sheets/**/*.solid.test.tsx",
-    "src/components/**/*.solid.tsx",
-    "src/components/**/*.solid.test.tsx"
+    "src/**/*.solid.tsx",
+    "src/**/*.solid.test.tsx"
   ],
   "exclude": []
 }

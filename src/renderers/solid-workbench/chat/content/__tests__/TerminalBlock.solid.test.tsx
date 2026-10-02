@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from '../TerminalBlock.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import { createUnknownContentPart, type ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
@@ -27,6 +27,8 @@ const terminalPart = {
   exitCode: 0,
   status: 'completed',
 } as unknown as ContentPart
+
+afterEach(() => cleanup())
 
 describe('C07 SolidTerminalBlock', () => {
   it('renders separated stdout/stderr lines with stream tags', () => {

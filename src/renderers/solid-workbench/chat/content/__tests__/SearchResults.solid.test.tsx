@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidSearchOrLink } from '../SearchResults.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
@@ -31,6 +31,8 @@ const samplePart = {
     { source: '/src/d.ts', rank: 5, snippet: 'fifth' },
   ],
 } as unknown as ContentPart
+
+afterEach(() => cleanup())
 
 describe('C05 SolidSearchResultsBlock', () => {
   it('renders entries with rank/source/line/score', () => {

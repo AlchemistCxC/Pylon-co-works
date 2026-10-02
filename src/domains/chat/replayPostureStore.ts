@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 /**
  * replayPostureStore — 历史回放只读姿态（W4-02，姿态二拍板：点击行直接进 agent sheet 只读）。
@@ -14,8 +15,11 @@ export interface ReplayPostureState {
   clear: () => void
 }
 
-export const useReplayPostureStore = create<ReplayPostureState>()(set => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const kernel = createSolidStoreKernel<ReplayPostureState>({
   sessionId: null,
-  enter: sessionId => set({ sessionId }),
-  clear: () => set({ sessionId: null }),
-}))
+  enter: sessionId => kernel.setState({ sessionId }),
+  clear: () => kernel.setState({ sessionId: null }),
+})
+
+export const useReplayPostureStore: ZustandHook<ReplayPostureState> = createReactStoreHook(kernel)

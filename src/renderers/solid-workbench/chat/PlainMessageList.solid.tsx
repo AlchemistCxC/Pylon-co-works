@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js'
 import { createVirtualizer } from '@tanstack/solid-virtual'
 import type {

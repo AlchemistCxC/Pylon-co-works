@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createEffect, createResource, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { findOversizeFoldPoint } from '../../../domains/rendererContent/textContentContracts.ts'
 import { highlightCode } from '../../../domains/chat/codeHighlight.ts'

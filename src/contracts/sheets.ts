@@ -54,7 +54,6 @@ export interface SheetContext {
   // 布局态（布局层所有，sheet 只读）
   sidebarCollapsed: boolean
   rightInset: number
-  ccEditMode: boolean
   /**
    * 当前 Sheet 是否位于活动主区。原生子 WebView 不受父 DOM 的 display:none
    * 影响，因此 Browser Sheet 用这个只读标记同步 show/hide；旧调用方省略时

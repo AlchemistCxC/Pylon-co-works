@@ -131,9 +131,16 @@ export interface SessionControlPort {
   messages(sessionId: string, options: { afterSeq?: number; limit?: number; signal?: AbortSignal }): Promise<unknown>
 }
 
+/** #463 审查项 3：approval-mode wire 快照。`persisted` = 内存当前值是否已被
+ *  SQLite 持有（或从未偏离持久层）——false 即 degraded（重启回退），外部可查。 */
+export interface ApprovalModeSnapshot {
+  mode: string
+  persisted: boolean
+}
+
 export interface ApprovalControlPort {
-  get(): Promise<string>
-  set(mode: string): Promise<void>
+  get(): Promise<ApprovalModeSnapshot>
+  set(mode: string): Promise<ApprovalModeSnapshot>
 }
 
 /** interaction list 条目（respond 所需完整 identity + 展示字段）。

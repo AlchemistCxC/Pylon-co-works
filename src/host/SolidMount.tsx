@@ -40,5 +40,8 @@ export default function SolidMount<P>({ initial, mount }: {
     // 挂载一次；props 更新走 setterRef 通道（见上方 layout effect）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  return <div ref={containerRef} style={{ display: 'contents' }} />
+  // #515：ref 用回调形态——本文件会被 .solid.tsx 依赖拉进 solid 类型图（tsconfig.solid），
+  // 对象 ref 的 React RefObject 形参与 solid 的 JSX ref 类型不相容；回调 ref 两侧类型都收，
+  // 提交时机（commit 期赋值、先于 effects）不变。
+  return <div ref={el => { containerRef.current = el }} style={{ display: 'contents' }} />
 }

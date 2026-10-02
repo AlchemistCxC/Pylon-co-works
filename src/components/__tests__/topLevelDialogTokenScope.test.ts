@@ -32,8 +32,12 @@ function bareConsumedTokens(source: string): string[] {
 }
 
 const TOP_LEVEL_DIALOGS = [
-  '../PermissionDialog.tsx',
-  '../SessionOwnerRecoveryDialog.tsx',
+  // #515：PermissionDialog 实体已迁 .solid.tsx（原 .tsx 随根翻转删除），判据跟随实体文件，
+  // 契约不变（与 SessionOwnerRecoveryDialog 条目同一先例）。
+  '../PermissionDialog.solid.tsx',
+  // #515：SessionOwnerRecoveryDialog 实体已迁 .solid.tsx（原 .tsx 是薄桥，不含 token
+  // 消费点），判据跟随实体文件，契约不变。
+  '../SessionOwnerRecoveryDialog.solid.tsx',
 ] as const
 
 describe('#306 顶层弹窗的 CSS token 作用域', () => {

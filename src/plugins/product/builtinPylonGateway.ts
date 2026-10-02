@@ -1,30 +1,22 @@
-import { createElement, lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react'
+import { lazy, type Component } from 'solid-js'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import type { WorkspaceTypeDefinition, WorkspaceViewProps } from '../../plugin-runtime/workspaces/workspaceTypes.ts'
 import { BUILTIN_PYLON_GATEWAY_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonGatewayStyles } from './packages/builtin.pylon-gateway/styleAssets.ts'
 
-const GatewaySheetView = lazy(() => import('../../sheets/gateway/GatewaySheetView.tsx'))
+// #515 贡献面翻转：workspace 渲染面是 Solid 实体（此前注册 React 薄桥）。本文件留在
+// React 类型图（.ts），不得静态 import .solid 文件——按 P52 D4 经 glob 缝（运行期模块
+// 解析，零类型图边）加载，solid `lazy` 保留代码分割；Suspense 由宿主侧（SheetHost）承担。
+interface GatewaySheetViewSolidModule { default: Component<WorkspaceViewProps> }
 
-const loadingFallback = createElement(
-  'div',
-  { className: 'sheet-empty-host' },
-  createElement('div', { className: 'sheet-empty-kicker' }, 'LOADING'),
-  createElement('p', null, '加载模块…'),
-)
+const solidLoaders = import.meta.glob<GatewaySheetViewSolidModule>('../../sheets/gateway/GatewaySheetView.solid.tsx')
 
-function lazyWorkspace(
-  Component: LazyExoticComponent<ComponentType<{ sheet: WorkspaceViewProps['sheet']; ctx: WorkspaceViewProps['ctx'] }>>,
-): ComponentType<WorkspaceViewProps> {
-  return function WorkspaceComponent({ sheet, ctx }) {
-    return createElement(
-      Suspense,
-      { fallback: loadingFallback },
-      createElement(Component, { sheet, ctx }),
-    )
-  }
-}
+const GatewaySheetView = lazy(() => {
+  const load = solidLoaders['../../sheets/gateway/GatewaySheetView.solid.tsx']
+  if (!load) return Promise.reject(new Error('GatewaySheetView Solid 实体未进入 Vite module graph'))
+  return load()
+})
 
 const emptyState = () => undefined
 const serializeEmptyState = () => undefined
@@ -41,7 +33,7 @@ const GATEWAY_WORKSPACE_TYPE: WorkspaceTypeDefinition<unknown> = Object.freeze({
   singleton: true,
   getSingletonKey: singleton('gateway'),
   sidebarMode: 'sheet',
-  component: lazyWorkspace(GatewaySheetView),
+  component: GatewaySheetView,
   launch: { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', launchable: true, icon: 'waypoints', category: 'system', categoryLabel: '系统与管理', categoryOrder: 30, order: 20, keywords: ['route', 'adapter', '网关', '路由', '适配器'] },
   createInitialState: emptyState,
   serialize: serializeEmptyState,

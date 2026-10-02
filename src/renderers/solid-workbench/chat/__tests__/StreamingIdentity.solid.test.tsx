@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createSignal } from 'solid-js'
-import { render, waitFor } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
 
 /**
@@ -17,6 +17,8 @@ import { MarkdownContent } from '../MarkdownContent.solid.tsx'
  * maxWorkers=50% 已消除 paging 冻结根因），原 5s 是 P91 retry 退役期的粗放放宽。
  */
 const FLUSH_BUDGET = { timeout: 2_000 }
+afterEach(() => cleanup())
+
 describe('C00 streaming root identity (1000 chunks)', () => {
   it('places one zero-text cursor at the live plain-text tip and clears it after the last reveal', () => {
     vi.useFakeTimers()

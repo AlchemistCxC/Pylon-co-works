@@ -1,5 +1,5 @@
 import type { SheetRecord } from './sheetTypes.ts'
-import { resolveSheetRender } from './sheetRegistry.tsx'
+import { resolveSheetRender } from './sheetRegistry.ts'
 
 export const SHEET_SIDEBAR_COLLAPSED_KEY = 'pylon.sidebarCollapsed'
 

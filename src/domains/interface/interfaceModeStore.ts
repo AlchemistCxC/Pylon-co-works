@@ -1,5 +1,5 @@
-import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 export type InterfaceMode = string
 
@@ -23,40 +23,42 @@ function validMode(value: unknown): value is InterfaceMode {
   return typeof value === 'string' && /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(value)
 }
 
-export const useInterfaceModeStore = create<InterfaceModeState>()(persist(
-  set => ({
-    interfaceMode: DEFAULT_INTERFACE_MODE,
-    profileByMode: { ...DEFAULT_INTERFACE_PROFILES },
-    setInterfaceMode: mode => set({ interfaceMode: validMode(mode) ? mode : DEFAULT_INTERFACE_MODE }),
-    rememberProfile: (mode, profileId) => set(state => ({
-      profileByMode: {
-        ...state.profileByMode,
-        [mode]: profileId || state.profileByMode[mode] || DEFAULT_INTERFACE_PROFILES[mode] || '',
-      },
-    })),
-    forgetModeProfile: mode => set(state => {
-      if (!(mode in state.profileByMode)) return state
-      const next = { ...state.profileByMode }
-      delete next[mode]
-      return { profileByMode: next }
-    }),
-  }),
-  {
-    name: 'pylon-interface-mode',
-    version: 2,
-    storage: createJSONStorage(() => localStorage),
-    migrate: persisted => {
-      const state = persisted as Partial<InterfaceModeState>
-      const interfaceMode = validMode(state.interfaceMode) ? state.interfaceMode : DEFAULT_INTERFACE_MODE
-      return {
-        ...state,
-        interfaceMode,
-        profileByMode: Object.fromEntries(Object.entries({
-          ...DEFAULT_INTERFACE_PROFILES,
-          ...(state.profileByMode ?? {}),
-        }).filter(([mode, profileId]) => validMode(mode) && typeof profileId === 'string')),
-      }
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const kernel = createSolidStoreKernel<InterfaceModeState>({
+  interfaceMode: DEFAULT_INTERFACE_MODE,
+  profileByMode: { ...DEFAULT_INTERFACE_PROFILES },
+  setInterfaceMode: mode => kernel.setState({ interfaceMode: validMode(mode) ? mode : DEFAULT_INTERFACE_MODE }),
+  rememberProfile: (mode, profileId) => kernel.setState(state => ({
+    profileByMode: {
+      ...state.profileByMode,
+      [mode]: profileId || state.profileByMode[mode] || DEFAULT_INTERFACE_PROFILES[mode] || '',
     },
-    partialize: state => ({ interfaceMode: state.interfaceMode, profileByMode: state.profileByMode }),
+  })),
+  forgetModeProfile: mode => kernel.setState(state => {
+    if (!(mode in state.profileByMode)) return state
+    const next = { ...state.profileByMode }
+    delete next[mode]
+    return { profileByMode: next }
+  }),
+})
+
+attachSolidPersist(kernel, {
+  name: 'pylon-interface-mode',
+  version: 2,
+  storage: resolveLocalStorage(),
+  migrate: persisted => {
+    const state = persisted as Partial<InterfaceModeState>
+    const interfaceMode = validMode(state.interfaceMode) ? state.interfaceMode : DEFAULT_INTERFACE_MODE
+    return {
+      ...state,
+      interfaceMode,
+      profileByMode: Object.fromEntries(Object.entries({
+        ...DEFAULT_INTERFACE_PROFILES,
+        ...(state.profileByMode ?? {}),
+      }).filter(([mode, profileId]) => validMode(mode) && typeof profileId === 'string')),
+    }
   },
-))
+  partialize: state => ({ interfaceMode: state.interfaceMode, profileByMode: state.profileByMode }),
+})
+
+export const useInterfaceModeStore: ZustandHook<InterfaceModeState> = createReactStoreHook(kernel)

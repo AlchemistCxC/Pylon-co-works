@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand, isRenderSemanticCommand } from '../../../host/renderer-suite/rendererSemanticCommand.ts'

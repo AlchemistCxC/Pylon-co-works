@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Dynamic } from 'solid-js/web'
 import { For, Index, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js'
 import { highlightCode } from '../../../domains/chat/codeHighlight.ts'

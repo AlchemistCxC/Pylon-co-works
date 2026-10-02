@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import type { SolidWorkbenchSmokeInput, SolidWorkbenchSmokeLifecycle } from './solidWorkbenchSmokeContracts.ts'

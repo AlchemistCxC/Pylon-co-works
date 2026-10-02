@@ -67,7 +67,7 @@ export function findCoreImports(source: string): CoreImportHit[] {
  * 测试文件（__tests__/、*.test.*）不在扫描范围——测试本就直连被测实现。
  */
 export const CORE_INTERNAL_API_ALLOWLIST: Record<string, Record<string, string>> = {
-  'src/sheets/interfaceModeScenes.tsx': {
+  'src/sheets/interfaceModeScenes.solid.tsx': {
     // A-V9 宿主场景注册表：core 贡献声明（sceneSurface.surfaceId）与本表登记必须同源，防漂移；无注册表等价物。
     BUILTIN_TACTICAL_SCENE_SURFACE_ID: '[kumo/#485] 宿主场景挂点契约常量',
   },
@@ -154,7 +154,7 @@ function allowSymbolsFor(file: string): Set<string> {
 }
 
 const violations = [
-  join(repoRoot, 'src', 'App.tsx'),
+  join(repoRoot, 'src', 'App.solid.tsx'),
   ...sourceFiles(join(repoRoot, 'src', 'components')),
   ...sourceFiles(join(repoRoot, 'src', 'sheets')),
 ].flatMap(file => {

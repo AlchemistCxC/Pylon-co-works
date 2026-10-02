@@ -47,7 +47,9 @@ export interface MarkdownCompute {
 // Rust `pylon_markdown::model::RenderNode` 的 serde JSON 投影（字段逐一同名，
 // hast 同构：`type`/`tagName`/`properties`/`children`/`value`；`tagName` camelCase）。
 // Solid 侧消费在 `src/renderers/solid-workbench/chat/markdownRenderModel.ts`
-// （含 LRU/graft，暂保留其自有同名类型），React 侧消费在 `sheets/file/MarkdownPreview.tsx`。
+// （含 LRU/graft，暂保留其自有同名类型）与 `src/sheets/file/MarkdownPreview.solid.tsx`
+// （文件页预览实体；FileTabView 只读分支已退役，渲染态切换归阶段一 1-A1）。
+// #515：原 React 薄桥 MarkdownPreview.tsx 随桥清理删除。
 // 形状由 parity 快照（`src-tauri/pylon-markdown/parity/`）逐字段钉死。
 
 export interface MarkdownModelText {

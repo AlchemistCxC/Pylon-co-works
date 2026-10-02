@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
 import type { SessionUiKey, SessionUiStore } from '../../../domains/workbench/sessionUiStore.ts'
 

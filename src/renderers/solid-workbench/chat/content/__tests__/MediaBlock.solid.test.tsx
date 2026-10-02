@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSignal } from 'solid-js'
 import { SolidMediaBlock } from '../MediaBlock.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
@@ -19,6 +19,8 @@ import type { ContentPart } from '../../../../../domains/workbench/content/conte
 function media(part: ContentPart, props?: Partial<Parameters<typeof SolidMediaBlock>[0]>) {
   return render(() => <SolidMediaBlock part={part} {...props} />)
 }
+
+afterEach(() => cleanup())
 
 describe('C03 SolidMediaBlock', () => {
   it('renders remote image with lazy loading and alt text', () => {

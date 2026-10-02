@@ -328,9 +328,22 @@ describe('typed status payload：lifecycle 与 capabilities 分字段 normalize�
 
 describe('runtimeClient', () => {
   it('reads the global approval mode through the typed command', async () => {
-    const invoke = new FakeInvoke().register('get_approval_mode', () => 'auto')
+    // #463 审查项 3：wire 契约 = {mode, persisted} 快照（原为裸字符串）
+    const invoke = new FakeInvoke().register('get_approval_mode', () => ({
+      mode: 'auto',
+      persisted: true,
+    }))
     const client = createRuntimeClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
-    await expect(client.getApprovalMode()).resolves.toBe('auto')
+    await expect(client.getApprovalMode()).resolves.toEqual({ mode: 'auto', persisted: true })
+  })
+
+  it('setApprovalMode 透传后端快照（#463 审查项 3：含 persisted 健康位）', async () => {
+    const invoke = new FakeInvoke().register('set_approval_mode', (args) => ({
+      mode: args.mode,
+      persisted: true,
+    }))
+    const client = createRuntimeClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+    await expect(client.setApprovalMode('edit')).resolves.toEqual({ mode: 'edit', persisted: true })
   })
 
   it('listRuntimeLogs normalize 后出边界', async () => {

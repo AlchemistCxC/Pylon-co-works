@@ -5,7 +5,8 @@
  * localStorage 镜像（pylon-workspaces envelope）。hydrate 在启动 bootstrap 调用，
  * 与 identityStore.hydrateSessions 同序（workspace 先于会话绑定解析）。
  */
-import { create } from 'zustand'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI, isBrowserMockRuntime } from '../tauri/env'
 
@@ -47,14 +48,15 @@ interface WorkspaceEntityStore {
   deleteWorkspace: (id: string) => Promise<void>
 }
 
-export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const workspaceEntityKernel: SolidStoreKernel<WorkspaceEntityStore> = createSolidStoreKernel<WorkspaceEntityStore>({
   workspaces: [],
   hydrated: false,
 
-  byId: id => get().workspaces.find(workspace => workspace.id === id),
+  byId: id => workspaceEntityKernel.getState().workspaces.find(workspace => workspace.id === id),
 
   hydrate: async () => {
-    if (get().hydrated) return
+    if (workspaceEntityKernel.getState().hydrated) return
     if (hasBackend()) {
       try {
         let raw = await invoke('workspace_list')
@@ -73,13 +75,13 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
           }
         }
         writeMirror(workspaces)
-        set({ workspaces, hydrated: true })
+        workspaceEntityKernel.setState({ workspaces, hydrated: true })
         return
       } catch {
         // 后端不可用：回退镜像
       }
     }
-    set({ workspaces: readMirror(), hydrated: true })
+    workspaceEntityKernel.setState({ workspaces: readMirror(), hydrated: true })
   },
 
   createWorkspace: async (name, rootPath) => {
@@ -98,7 +100,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
       created = normalized
     } else {
       created = {
-        id: newLocalWorkspaceId(get().workspaces),
+        id: newLocalWorkspaceId(workspaceEntityKernel.getState().workspaces),
         agentId: '',
         name,
         rootPath,
@@ -109,9 +111,9 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
         hookPluginIds: [],
       }
     }
-    const workspaces = [...get().workspaces, created]
+    const workspaces = [...workspaceEntityKernel.getState().workspaces, created]
     writeMirror(workspaces)
-    set({ workspaces })
+    workspaceEntityKernel.setState({ workspaces })
     return created
   },
 
@@ -126,7 +128,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
       if (!normalized) throw new Error('workspace_update 返回无效形状')
       updated = normalized
     } else {
-      const current = get().byId(id)
+      const current = workspaceEntityKernel.getState().byId(id)
       if (!current) throw new Error(`workspace not found: ${id}`)
       updated = {
         ...current,
@@ -138,9 +140,9 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
         lastActiveAt: Date.now(),
       }
     }
-    const workspaces = get().workspaces.map(w => w.id === id ? updated : w)
+    const workspaces = workspaceEntityKernel.getState().workspaces.map(w => w.id === id ? updated : w)
     writeMirror(workspaces)
-    set({ workspaces })
+    workspaceEntityKernel.setState({ workspaces })
     return updated
   },
 
@@ -148,8 +150,10 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
     if (hasBackend()) {
       await invoke('workspace_delete', { workspaceId: id })
     }
-    const workspaces = get().workspaces.filter(w => w.id !== id)
+    const workspaces = workspaceEntityKernel.getState().workspaces.filter(w => w.id !== id)
     writeMirror(workspaces)
-    set({ workspaces })
+    workspaceEntityKernel.setState({ workspaces })
   },
-}))
+})
+
+export const useWorkspaceEntityStore: ZustandHook<WorkspaceEntityStore> = createReactStoreHook(workspaceEntityKernel)

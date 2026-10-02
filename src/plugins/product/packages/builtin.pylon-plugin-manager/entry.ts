@@ -1,4 +1,4 @@
-import { lazy } from 'react'
+import { lazy, type Component } from 'solid-js'
 import manifestSource from './pylon-plugin.json' with { type: 'json' }
 import type { BuiltinPluginDefinition } from '../../../../plugin-runtime/pluginRuntime.ts'
 import type { BuiltinPluginActivationContext } from '../../../../plugin-runtime/pluginActivationContext.ts'
@@ -8,7 +8,13 @@ import { mountFirstPartyStyleAssets } from '../../firstPartyStyleRuntime.ts'
 import { loadBuiltinPluginManagerStyles } from './styleAssets.ts'
 import { pluginManagerRuntimeBridge } from './runtimeBridge.ts'
 
-const ManagerSettingsPage = lazy(() => import('./ManagerSettingsPage.tsx'))
+// #515 贡献面翻转：设置页组件是 Solid 实体。本文件留在 React 类型图（.ts），不得静态
+// import .solid 文件——按 P52 D4 经 glob 缝（运行期模块解析，零类型图边）加载。
+const ManagerSettingsPage = lazy(() => {
+  const load = import.meta.glob<{ default: Component }>('./ManagerSettingsPage.solid.tsx')['./ManagerSettingsPage.solid.tsx']
+  if (!load) return Promise.reject(new Error('ManagerSettingsPage Solid 实体未进入 Vite module graph'))
+  return load()
+})
 
 export function createBuiltinPluginManagerPlugin(): BuiltinPluginDefinition {
   return {

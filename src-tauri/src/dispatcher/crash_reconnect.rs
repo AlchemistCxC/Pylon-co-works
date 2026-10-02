@@ -96,6 +96,7 @@ impl<R: tauri::Runtime> CrashReconnectHandler<R> {
             runtime_logs: self.handles.runtime_logs.clone(),
             gateway: self.handles.gateway.clone(),
             approval_mode: self.handles.approval_mode.clone(),
+            approval_mode_persisted: self.handles.approval_mode_persisted.clone(),
             event_service: self.handles.event_service.clone(),
             message_service: self.handles.message_service.clone(),
             hook_bridge: self.handles.hook_bridge.clone(),

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, waitFor } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { RenderMessage } from '../../../../domains/chat/messageTypes.ts'
 import type { Message } from '../../../../domains/chat/messageTypes.ts'
 import { BuiltinSolidContentSlot } from '../BuiltinSolidContentSlot.solid.tsx'
@@ -24,6 +24,8 @@ function row(message: Partial<Message>): ReturnType<typeof render> {
     />
   ))
 }
+
+afterEach(() => cleanup())
 
 describe('C01 ReasoningBlock states', () => {
   it('running state shows thinking label with reduced-motion safe indicator', () => {

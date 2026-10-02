@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import '../../../index.css'
 // Tailwind v4 utilities 基线（TW 施工书 20260914 / P85）：无 preflight；
 // token canary 在下方，端到端验证类扫描与 @theme inline 映射。

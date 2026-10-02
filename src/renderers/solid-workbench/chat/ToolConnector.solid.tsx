@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../../../domains/tool/toolPresentation.ts'
 import { toolConnectorMotionClass } from '../../../domains/chat/toolIndicatorMotion.ts'
@@ -131,7 +132,11 @@ export function SolidToolConnectorLayer(props: SolidToolConnectorLayerProps) {
   /** #409：锚点注册表版本（register/unregister 时经 onMembershipChange 递增）。 */
   const [membership, setMembership] = createSignal(0)
 
-  onMount(() => props.layoutPort.onMembershipChange(() => setMembership(value => value + 1)))
+  onMount(() => {
+    // 契约返回退订函数（toolConnectorLayoutPort.ts）——丢弃会滞留已卸载实例的监听。
+    const offMembershipChange = props.layoutPort.onMembershipChange(() => setMembership(value => value + 1))
+    onCleanup(offMembershipChange)
+  })
 
   createEffect(() => {
     // #409：边活性 = 两端锚点都在 port 注册中。锚点随行/槽位挂载而注册、卸载而注销，

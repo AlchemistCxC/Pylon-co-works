@@ -86,7 +86,7 @@ const PRUNED_CSS_VARIABLES = ['--cli-line-padding', '--cli-content-offset-y', '-
  *
  * 被排除的只有 **JSX DOM 属性**形式：裸标识符紧跟 `=`（`inputMode={…}` 与 `inputMode="url"`）。
  * 为什么必须排除：`src/components/ElicitationRequestCard.tsx`（`inputMode={…}`）与
- * `src/sheets/browser/BrowserToolPanel.tsx`（`inputMode="url"`）用的是与主题字段**同名**的
+ * `src/sheets/browser/BrowserToolPanel.solid.tsx`（`inputMode="url"`）用的是与主题字段**同名**的
  * HTML 输入模式属性，跟本守卫无关。
  *
  * ★ 转义必须写成 `\\b` / `\\s` / `\\.`（模板串里 `\b` 会变成退格符 U+0008、`\s` 会退化成字面 `s`）
