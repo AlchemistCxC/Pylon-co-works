@@ -1,6 +1,14 @@
 # L.md · 并行施工协调板
 
-- [Codex] **#514 探测/导入修复**：独立 worktree `agent-import` / 分支 `codex/agent-import`，基于 `github/main` f34ca356；域＝`src/components/settings/AgentCandidateList.tsx`、`useAgent{Detection,CandidateProvisioning}.ts`、相关测试、`src/domains/agent/agentDetector.ts`、`src-tauri/{src/lifecycle/config_cmds.rs,pylon-core/src/agent_detection/**}`、说明书/记录。不碰共享树 `src-tauri/Cargo.toml`。
+- [kumo] **#463 决策口收口（2026-10-01）**：域＝`src-tauri/src/{permission,lib}.rs`（AppState 增 `approval_mode_persisted` + set/get 返回 `{mode,persisted}` 快照）、`src-tauri/pylon-session/src/user_data.rs`（`UserDataError::ReservedKey`）、`src-tauri/src/session/mod.rs`（`user_data_save` 拒绝 approval-mode key）、`src/cli/{pylonCliPorts,pylonCliDomainPorts,pylonCliService}.ts`、`src/demo/mockTauri.ts`、说明书《Pylon-CLI-命令表》《Pylon-项目架构参考》approval 段。**避让 #515**：CLI 端口/服务层非组件非 store，如需翻转请保留 wire 契约语义；`src-tauri/Cargo.toml`（[Codex] 在途）不碰。#482/#483 补遗条目（lib.rs/说明书域）PR #510 已合并，请及时撤条。
+
+- [Codex] **Agent 探测/导入故障调查（2026-10-01）**：域＝`src/components/settings/{AgentCandidateList,useAgentDetection,useAgentCandidateProvisioning,AgentCreateForm,AgentRuntimePanel}*`、`src/domains/agent/`、`src-tauri/pylon-core/src/agent_detection/` 与相关测试/说明书/记录；先调试 `F:/A-I/Platform/Pylon`。发现共享树 `src-tauri/Cargo.toml` 他人在途，依 §2.1 不 stage/commit；隔离到基于 `github/main` 的 worktree 完成施工与提交。
+
+- [kumo] **#504 flaky test 修复（2026-10-01）**：域＝`src-tauri/pet-core/src/lib.rs`（新增测试用墙钟归零 helper）＋ `src-tauri/src/dispatcher/reactions.rs`（表征测试比较前归一化）＋ `.agents/{spec,records}/504-*`。不碰 `src-tauri/Cargo.toml`、前端、说明书。
+
+- [kumo] **#498 SheetTabStrip.solid 行为测试补齐（2026-10-01）**：域＝`src/workspace-sheets/__tests__/{sheetTabOverflow,sheetTabStripAgentSwitch,sheetTabStripStatusMatrix}.solid.test.tsx`（三个新文件，不碰生产行为）＋ `vitest.setup.ts` console.error 白名单**换一行**（旧 React 条目→新 solid 条目）。窄域，与 #515 无文件交叠（vitest.setup.ts 一行改动请 #515 注意）；不碰 `src-tauri/`。
+
+- [kumo] **#515 前端全量 Solid 化（ADR-0035 执行，2026-10-01）**：域＝`src/` 全前端生产树与测试——zustand 14 store→Solid 原生、全部 React 组件→`.solid.tsx`、`main.tsx`/`App`/`kernel`/`host` 翻转、插件契约类型、`package.json` React/zustand/radix 依赖退役、vite/vitest/tsconfig/eslint/边界门禁脚本、`docs/说明书/` 前端表述。**避让 [Codex] 域**：`src/components/settings/{AgentCreateForm,AgentRuntimePanel,useAgentDetection,useAgentCandidateProvisioning}*` 及其测试、`src/domains/agent/` 不动。spec：`.agents/spec/515-frontend-solid-endgame-execution.md`。不碰 `src-tauri/`。
 
 > 规则（AGENTS.md §2.3-4）：并行多 agent 施工时，在此声明施工范围以应对冲突（文件互相改写、连带提交等），**写入后立刻提交本文件**使其他 agent 可见。只追写，不覆写，留言简洁。
 
