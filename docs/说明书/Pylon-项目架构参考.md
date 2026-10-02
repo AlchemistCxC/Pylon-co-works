@@ -36,7 +36,7 @@ Pylon 是通过 ACP 连接多个本地 Agent runtime 的桌面工作台。它以
 - `src/plugins/product` 是七个第一方 Product Plugin 的激活和依赖定义。
 - `src/plugins/core` 是第一方 Product Plugin 使用的 implementation；虽然叫 `core`，但它不是 Kernel。
 - Session、ACP、持久化与恢复的概念 Kernel implementation 目前跨越 React/TypeScript 和 Rust/Tauri 多个目录。
-- `App.tsx` 仍承担大量 bootstrap、hydration、listener 和关闭收敛职责，因此当前 Product Shell 与概念 Kernel 之间并未完全分离。
+- `App.solid.tsx` 仍承担大量 bootstrap、hydration、listener 和关闭收敛职责，因此当前 Product Shell 与概念 Kernel 之间并未完全分离。
 
 ## 4. 当前总体拓扑
 
@@ -58,7 +58,7 @@ flowchart TB
   Agents --> AgentImpl["domains/agent + session creation/state"]
   Renderers --> RendererImpl["React/Solid/isolated renderers"]
   Workspace --> WorkspaceImpl["Sheets + Sidebar + Context Panel"]
-  Shell --> App["src/App.tsx"]
+  Shell --> App["src/App.solid.tsx"]
   Gateway --> GatewayImpl["GatewaySheet + 插件包自有样式"]
 
   App --> Identity["identityStore / userDataRepository"]
@@ -123,7 +123,7 @@ sequenceDiagram
   participant Composition as pluginCompositionRoot
   participant Runtime as PluginRuntime
   participant Shell as builtin shell
-  participant App as App.tsx
+  participant App as App.solid.tsx
   participant Tauri as Rust/Tauri
 
   Main->>Main: 恢复 Skin / 启动 CLI bridge
@@ -366,7 +366,7 @@ stateDiagram-v2
 | canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 经 canonicalEventFeed 只读消费 committed row（cursor/gap；#439 起自写轨已退役） | Kernel durable journal |
 | Session metadata persistence | identityStore + UserDataService | Kernel persistence module |
 | PluginRuntime/Scope/registries | `src/plugin-runtime` | Kernel extension mechanism |
-| Product Shell/UI | `App.tsx`、components | First-party Product Plugin |
+| Product Shell/UI | `App.solid.tsx`、components | First-party Product Plugin |
 | Workspace/Renderer/Tools | product/core plugins | First-party Product Plugin |
 | SQLite、Tauri IPC、ACP subprocess | Rust/TS infrastructure | Kernel adapters |
 | Pet/Prism/Gateway 产品反应 | KernelReactionSink 订阅 adapter（`dispatcher/reactions.rs`）+ PromptTurnHooks（`session/prompt/hooks.rs`） | 已收敛为 Kernel events 订阅 adapter（#416） |

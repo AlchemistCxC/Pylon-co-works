@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
-import type { RefObject } from 'react'
 import { createSolidMount } from '../../host/solidBridge.solid'
 import type { BrowserSnapshot } from './browserSheetTypes.ts'
 
@@ -10,7 +9,7 @@ function browserPreviewUrl(url: string): string {
 
 /** 与 React 桥（BrowserViewport.tsx）内声明的同名接口逐字段一致。 */
 export interface BrowserViewportProps {
-  viewportRef: RefObject<HTMLDivElement | null>
+  viewportRef: { current: HTMLDivElement | null }
   browserPreview: boolean
   snapshot: BrowserSnapshot
   previewRevision: number

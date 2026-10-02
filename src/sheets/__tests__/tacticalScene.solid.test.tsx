@@ -4,7 +4,7 @@
  * #515：React 测试 → solid 直连 TacticalCommandDeck 实体。断言逐字保留；
  * `fireEvent.change`（slider）→ `fireEvent.input`（Solid 受控 input 语义）。
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import TacticalCommandDeck from '../TacticalCommandDeck.solid.tsx'
 import { useTacticalSceneStore } from '../tacticalSceneStore'

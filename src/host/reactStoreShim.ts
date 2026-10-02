@@ -55,7 +55,6 @@ export function createReactStoreHook<T extends object>(kernel: SolidStoreKernel<
       }
       versionRef.current = { version, value }
       return value
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [kernel, selector, eq])
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   }

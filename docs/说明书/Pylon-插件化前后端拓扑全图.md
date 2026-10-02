@@ -86,10 +86,10 @@ flowchart TB
     end
 
     subgraph CONSUMERS[Product Shell、UI Host 与 Registry 消费点]
-      APP[src/App.tsx<br/>Product Shell composition]
+      APP[src/App.solid.tsx<br/>Product Shell composition]
       TITLE[WorkspaceTitlebar]
       SHEETLAYOUT[SheetLayout / Sheet registry host]
-      SETTINGS[src/components/Settings.tsx<br/>settings sheet 主区视图]
+      SETTINGS[src/components/Settings.solid.tsx<br/>settings sheet 主区视图]
       PLUGINMGR[PluginManager]
       AGENTSHEET[AgentSheetView]
       SUITEWB[AgentRendererSuiteWorkbench<br/>Renderer Suite 宿主接线]

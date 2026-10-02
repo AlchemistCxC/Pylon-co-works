@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
-import type { RefObject } from 'react'
 import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Minus, Plus, RefreshCw, RotateCcw, Search, type IconNode } from 'lucide'
 import { browserReducer, createBrowserState, type BrowserAction } from '../../domains/browser/browserState.ts'
 import {
@@ -141,7 +140,7 @@ export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: Sheet
   // 跨域 iframe 的页面自身导航无法被父文档读取；命令导航/刷新时递增 key，
   // 让预览重新回到 Browser 状态机记录的 URL，避免地址栏与画面脱节。
   const [previewRevision, setPreviewRevision] = createSignal(0)
-  const viewportRef: RefObject<HTMLDivElement | null> = { current: null }
+  const viewportRef: { current: HTMLDivElement | null } = { current: null }
 
   // ── Agent 面板（issue #82）：档位/黑名单/claim/审计/页面变化提示/问AI ──
   const [agentSettings, setAgentSettings] = createSignal<BrowserAgentSettingsView | null>(null)

@@ -4,6 +4,9 @@
 // - RTL 导入改 @solidjs/testing-library；显式 afterEach(cleanup)。
 // - 左栏折叠展开是 solid 信号驱动（微任务异步）：expandSectionAndReadSubItems 改 async，
 //   点击后等二级容器落地再读（无二级项的 section 维持「返回 []」语义）；断言集不缩减。
+// - 「点二级项能滚到锚点」的锚点/滚动两处 waitFor 预算 1s→10s（#515 全量收尾）：滚动挂
+//   rAF（定时器型），全量并行满载（fork 级 CPU/分页压力）下会晚于 1s 才响——单 worker
+//   全量与本文件隔离跑均秒过，属负载时序非接线缺陷；断言本体不变。
 import { cleanup, fireEvent, waitFor, within } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CC_WIDGET_GROUPS } from '../domains/cc/widgetDefinitions.ts'
@@ -127,16 +130,19 @@ describe('#266 CC-09 · 左栏「中控台」二级项 = 元件层', () => {
     for (const label of items) {
       // 主区：元件标题（h3）必须带同名锚点 —— 这正是本刀在 themeFieldRenderer 上补的那一处
       // （主区在 ZonePresetSection React 岛内，岛首渲异步——先等锚点落地）
+      // ★ 预算放宽（#515 全量收尾实测）：全量并行满载时 fork 级 CPU/分页压力会把
+      //   rAF（定时器型）推迟到默认 1s waitFor 之外——单 worker 全量与本文件隔离跑
+      //   均稳定秒过（661 文件全绿实测），属负载时序而非接线缺陷；断言本体不变。
       await waitFor(() => {
         expect(document.querySelector(`[data-group-anchor="${label}"]`)).not.toBeNull()
-      })
+      }, { timeout: 10_000 })
       const anchor = document.querySelector(`[data-group-anchor="${label}"]`)
       expect(anchor?.tagName).toBe('H3')
       // 导航侧：点一下确实触发了锚点滚动（滚动挂在 rAF 里 ⇒ 等一帧再断言）
       const scrollIntoView = Element.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>
       scrollIntoView.mockClear()
       fireEvent.click(subgroups.getByRole('button', { name: label }))
-      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled(), { timeout: 10_000 })
     }
   })
 

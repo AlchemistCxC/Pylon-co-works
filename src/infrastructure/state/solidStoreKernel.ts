@@ -1,5 +1,5 @@
 import { unwrap } from 'solid-js/store'
-import { createStore, produce, reconcile } from 'solid-js/store'
+import { createStore, produce } from 'solid-js/store'
 
 /**
  * Solid store 内核（#515 前端全量 Solid 化批0）：zustand 运行时的就地置换件。
@@ -13,7 +13,8 @@ import { createStore, produce, reconcile } from 'solid-js/store'
  * - `setState(partial)` 浅合并；函数形态的 updater **返回当前 state 同一引用时整体跳过**
  *   （不合并、不通知）；合并后必产新通知（无值级判等——与 zustand 一致，判等在消费侧）。
  * - `setState(next, true)` 整体替换（resetStores 的 `setState(getInitialState(), true)` 依赖）。
- * - `subscribe(listener)` 收 `(state, prevState)`，返回退订函数。
+ * - `subscribe(listener)` 收 `(state, prevState)`；⚠️ prevState 与 state 同一引用且为**写后值**
+ *   （produce/reconcile 就地改写裸对象，无写前快照）——不要拿它做 diff，zustand 语义在此不成立。
  * - `getInitialState()` 返回**创建时的初始对象**（浅捕获；嵌套对象与 zustand 一样
  *   不做深拷贝——写入方各自负责 clone，见 themeStore resetTheme 的 structuredClone）。
  * - 状态本体是 Solid store 代理：引用跨写入稳定，读取方拿到的代理可当不可变快照用
@@ -54,12 +55,26 @@ export function createSolidStoreKernel<T extends object>(initial: T): SolidStore
     getState: () => current,
     setState: (partial, replace) => {
       const next = typeof partial === 'function' ? partial(current) : partial
-      if (replace) {
-        // reconcile 替换语义：根属性整体换成 next 的（引用级），代理身份不变。
-        setState(reconcile(next as T))
-      } else {
-        setState(produce(s => { Object.assign(s, next) }))
-      }
+      // ★ replace 不得用 `reconcile`：reconcile 为了细粒度更新会**就地合并旧树的嵌套
+      //   数据**（数组走 `setProperty(previous, 'length', …)` 逐位覆写）——旧状态里的
+      //   嵌套对象/数组可能藏着**调用方自有引用**（zustand 时代一直如此共享：出厂区域
+      //   预设池的 `values` 数组经 `effectivePresetTheme`/`filterPresetTheme` 浅拷贝进
+      //   state；hydration merge 的 `...current` 还会把 `DEFAULTS` 的数组铺进初始树）。
+      //   就地改写等于把这些外部数据打穿（#515 定位：defaultPresets「铁律1」在批0 后
+      //   必红的根因——resetStores 一跑，出厂池的 ccHidden 数组被清空）。zustand v5 的
+      //   replace 从不改写旧状态 ⇒ 这里用 produce 逐键**整键换入**（数组/对象按引用整
+      //   替，solid 对非 merge 赋值不做就地合并），并删除 next 缺席的键（replace=整体
+      //   置换语义），旧树除根属性引用外零触碰；代理身份照旧稳定。
+      setState(produce(s => {
+        const target = s as Record<string, unknown>
+        const patch = next as Record<string, unknown>
+        if (replace) {
+          for (const key of Object.keys(target)) {
+            if (!(key in patch)) delete target[key]
+          }
+        }
+        Object.assign(target, patch)
+      }))
       notify(current)
     },
     subscribe: listener => {
@@ -122,7 +137,7 @@ export interface SolidPersistOptions<T extends object> {
  * - hydrate 落盘走 merge 后的整份状态但**不触发写盘**（先 hydrate 后挂写回订阅）；
  * - 写回在每次 set 通知后同步执行（zustand 同款：resetStores 依赖同步落盘），
  *   载荷经 `partialize` 白名单（缺省整份状态，函数成员被 JSON.stringify 自然丢弃）。
- * - 解析失败：console.error 后放弃 hydration（zustand 同款），内存初始态兜底。
+ * - 解析失败：**静默**放弃 hydration（zustand 同款，错误经 onRehydrateStorage 的 error 位可见），内存初始态兜底。
  */
 export function attachSolidPersist<T extends object>(kernel: SolidStoreKernel<T>, options: SolidPersistOptions<T>): void {
   // 存储不可用（node 测试环境）⇒ 整体 no-op，内存态兜底（zustand createJSONStorage 同款）。

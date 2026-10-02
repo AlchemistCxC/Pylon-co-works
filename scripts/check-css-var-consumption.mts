@@ -35,7 +35,7 @@ const tsxAll = tsxFiles.map(read).join('\n')
 const injected = new Set<string>(Object.keys(THEME_CSS_VAR_MAP))
 const injectedFields = new Set<string>(Object.values(THEME_CSS_VAR_MAP))
 // S5：显式派生 var 从 themeCssSnapshot 注入（App 不再手写 cssVars 对象键）
-const app = read(join(ROOT, 'App.tsx'))
+const app = read(join(ROOT, 'App.solid.tsx'))
 const snapshot = read(join(ROOT, 'domains/theme/themeCssSnapshot.ts'))
 for (const m of snapshot.matchAll(/'((?:--[a-z0-9-]+))':/g)) injected.add(m[1])
 

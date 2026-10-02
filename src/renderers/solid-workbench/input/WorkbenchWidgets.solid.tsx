@@ -1,5 +1,5 @@
 /** @jsxImportSource solid-js */
-﻿import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
+ import { For, Show, createEffect, createSignal, createUniqueId, onCleanup, onMount } from 'solid-js'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
 import { resolveCcWidgetGroup } from '../../../domains/cc/widgetDefinitions.ts'
 import {

@@ -7,15 +7,17 @@
  * 与 App.solid createVeil / PermissionDialog.solid 的生产内联形态同构）。断言集逐字保留。
  */
 import { render } from '@solidjs/testing-library'
-import { createEffect, on, onCleanup } from 'solid-js'
+import { createEffect, onCleanup } from 'solid-js'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useModalOverlayStore } from '../modalOverlayStore'
 
 function Probe(props: { id: string; open: boolean }) {
-  createEffect(on(() => props.open, isOpen => {
+  // React 版 `useEffect(fn, [open])` mount 即跑——这里不用 defer，保持同语义。
+  createEffect(() => {
+    const isOpen = props.open
     useModalOverlayStore.getState().setOverlayOpen(props.id, isOpen)
     onCleanup(() => useModalOverlayStore.getState().setOverlayOpen(props.id, false))
-  }, { defer: true }))
+  })
   return null
 }
 
