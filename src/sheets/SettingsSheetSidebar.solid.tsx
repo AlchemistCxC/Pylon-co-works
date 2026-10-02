@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import { normalizeSettingsSheetState, type SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import {
@@ -205,6 +204,3 @@ export default function SettingsSheetSidebar(props: WorkspaceViewProps<SettingsS
     </aside>
   )
 }
-
-/** React 薄桥（SettingsSheetSidebar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountSettingsSheetSidebar = createSolidMount(SettingsSheetSidebar)

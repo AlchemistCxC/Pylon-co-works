@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createSignal, For, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { collectElicitationValues, parseElicitationFields, type ElicitationValues } from './elicitationSchema.ts'
 
 // #515：解析/收集纯函数住 elicitationSchema.ts（React/Solid 共用）；实体侧按原文件
@@ -148,6 +147,3 @@ export default function ElicitationRequestCard(props: {
     </div>
   )
 }
-
-/** React 薄桥（ElicitationRequestCard.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderElicitationRequestCard = createSolidMount(ElicitationRequestCard)

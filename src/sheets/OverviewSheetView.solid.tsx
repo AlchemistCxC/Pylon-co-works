@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles, type IconNode } from 'lucide'
 import { appClients } from '../app/appClients.ts'
 import { IS_TAURI } from '../infrastructure/tauri/env'
@@ -498,6 +497,3 @@ export default function OverviewSheetView(props: OverviewSheetViewProps) {
     </div>
   )
 }
-
-/** React 薄桥（OverviewSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountOverviewSheetView = createSolidMount(OverviewSheetView)

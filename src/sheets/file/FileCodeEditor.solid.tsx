@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { onCleanup, onMount, createEffect } from 'solid-js'
 import type { DispatchSelection } from '../../domains/file/dispatchMessage.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createFileCodeMirrorKernel, type FileCodeEditorApi, type FileCodeMirrorKernel, type KernelSummary } from './fileCodeMirrorKernel.ts'
 
 /**
@@ -98,6 +97,3 @@ export default function FileCodeEditor(props: FileCodeEditorProps) {
 }
 
 export type { FileCodeEditorApi, KernelSummary, DispatchSelection }
-
-/** React 薄桥（FileCodeEditor.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileCodeEditor = createSolidMount(FileCodeEditor)

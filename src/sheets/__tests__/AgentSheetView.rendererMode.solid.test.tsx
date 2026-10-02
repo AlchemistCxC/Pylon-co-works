@@ -650,7 +650,10 @@ describe('AgentSheetView renderer mode context', () => {
     try {
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-old')
       const view = renderAgentSheetViewReactive(ctx)
-      await screen.findByText('namespace-old')
+      // RendererSuiteHost 先把候选挂进 display:none 的 staging，提交（phase=active）才搬进容器。
+      // findByText 对隐藏 staging 照样命中，若在此放行，下一段切候选会把旧激活打成
+      // StaleSuiteRequest 连提交机会都没有——必须等旧实例真正可见（已提交）。
+      await waitFor(() => expect(screen.getByText('namespace-old')).toBeVisible())
 
       usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-candidate')
       await waitFor(() => expect(view.container.querySelector('[data-renderer-suite-staging="test.namespace-candidate"]')).not.toBeNull())
@@ -697,7 +700,9 @@ describe('AgentSheetView renderer mode context', () => {
       const { container } = render(() => <AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
-      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid')
+      // staging 里的回退工作台照样能被 findByLabelText 命中；data-suite-id 要等
+      // phase=active 的监听才翻转——等它到位再断言，避免与提交竞速。
+      await waitFor(() => expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid'))
       expect(prepareCount).toBe(3)
     } finally {
       await registration.dispose()
@@ -1161,7 +1166,9 @@ describe('AgentSheetView renderer mode context', () => {
       await registration.dispose()
 
       await waitFor(() => expect(screen.queryByText('plan slot: task-1 / dependency / Production goal / 12')).toBeNull())
-      screen.getByRole('button', { name: /1 任务.*1 阻塞/ }).click()
+      // slot 卸载到 fallback（content.plan 的 SolidPlanGoalContent）挂载之间隔着一次
+      // Solid 微任务，文本消失即可观察时按钮可能尚未进场——用 findBy 等它。
+      ;(await screen.findByRole('button', { name: /1 任务.*1 阻塞/ })).click()
       expect(await screen.findByRole('treeitem', { name: /Wire plan.*已阻塞/ })).toBeInTheDocument()
       expect(screen.getByRole('status', { name: /目标：Production goal.*进行中/ })).toBeInTheDocument()
       expect(destroyed).toHaveBeenCalled()
@@ -1555,7 +1562,9 @@ describe('AgentSheetView renderer mode context', () => {
 
       expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
       expect(prepareCount).toBe(3)
-      expect(screen.queryByText('runtime-recovery-source')).toBeNull()
+      // findByLabelText 命中的是 staging 里的回退工作台；旧 source 实例要等回退提交
+      // 时才被销毁、文本才离场——等真条件而不是立刻断言。
+      await waitFor(() => expect(screen.queryByText('runtime-recovery-source')).toBeNull())
     } finally {
       await registration.dispose()
     }
@@ -1594,7 +1603,8 @@ describe('AgentSheetView renderer mode context', () => {
       const { container } = render(() => <AgentSheetView sheet={sheet({})} ctx={ctx} />)
 
       await screen.findByText('explicit-fallback-suite', {}, { timeout: 5_000 })
-      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'test.explicit-fallback')
+      // staging 命中 ≠ 已提交；data-suite-id 在 phase=active 才翻转，等它。
+      await waitFor(() => expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'test.explicit-fallback'))
     } finally {
       await failingRegistration.dispose()
       await fallbackRegistration.dispose()

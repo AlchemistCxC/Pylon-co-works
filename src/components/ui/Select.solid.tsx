@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 
 export interface SelectOption {
@@ -186,6 +185,3 @@ export default function Select(props: SelectProps) {
     </Show>
   </span>
 }
-
-/** React 薄桥（ui/Select.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSelect = createSolidMount(Select)

@@ -10,7 +10,9 @@ preloadComputeWasm()
 
 // 组件测试（jsdom）所需的最小浏览器 API 垫片
 import { afterAll, afterEach, vi } from 'vitest'
-import { cleanup } from '@testing-library/react'
+// cleanup 的真身在框架 wrapper（@testing-library/react 已随 #520 W4 退役）——
+// Solid 面取 @solidjs/testing-library 的同名导出（对 node 分组是零挂载 no-op）。
+import { cleanup } from '@solidjs/testing-library'
 
 afterEach(() => {
   cleanup()

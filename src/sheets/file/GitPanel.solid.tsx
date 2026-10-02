@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createGitStatus } from './useGitStatus.solid.ts'
 import { advanceSourceContext, type SourceRequestContext } from './sourceRequestGuard'
@@ -313,6 +312,3 @@ export default function GitPanel(props: GitPanelProps) {
     </Show>
   )
 }
-
-/** React 薄桥（GitPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountGitPanel = createSolidMount(GitPanel)

@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { useStore } from '../domains/theme/themeStore'
 import { resolveSpinnerFrames, resolveSpinnerMarker } from '../domains/chat/spinnerFrames'
@@ -366,6 +365,3 @@ function PvTool(props: { name: string; input: string; status: ToolConnectorStatu
   const glowCss = () => safeGlow() > 0 ? { 'text-shadow': `0 0 ${safeGlow()}px ${safeGlowColor() || statusColor() || 'currentColor'}` } : undefined
   return <div class="term-tool" data-status={props.status}><div class="term-tool-head"><span class={`term-tool-indicator ${props.status}`} aria-label={indicatorAsset().ariaLabel[props.status === 'ok' ? 'completed' : props.status === 'err' ? 'failed' : 'running']} role="img" style={glowCss()}>{indicatorAsset().glyph}</span><span class="term-tool-name">{props.name}</span><span class="term-tool-summary term-tool-summary-code"> ({props.input})</span><Show when={props.status === 'ok'}><span class="term-tool-suffix"> — 12 lines</span></Show></div></div>
 }
-
-/** React 薄桥（SettingsPreview.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSettingsPreview = createSolidMount(SettingsPreview)

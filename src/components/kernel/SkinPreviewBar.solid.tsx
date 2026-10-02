@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { Show, createSignal, onCleanup } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { getSkinRuntime } from '../../infrastructure/skin/skinRuntimeServices'
 import { skinTargetKey, type SkinRuntime } from '../../plugin-runtime/skin/skinRuntime'
 import type { SkinPatch, SkinTarget } from '../../plugin-runtime/skin/skinTypes'
@@ -109,6 +108,3 @@ export default function SkinPreviewBar(props: SkinPreviewBarProps) {
     </Show>
   )
 }
-
-/** React 薄桥（SkinPreviewBar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountSkinPreviewBar = createSolidMount(SkinPreviewBar)

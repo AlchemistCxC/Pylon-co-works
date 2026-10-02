@@ -2,7 +2,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 import MessageSearchBar from './MessageSearchBar.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
@@ -214,6 +213,3 @@ export default function AgentContextPanel(props: AgentContextPanelProps) {
     </div>
   )
 }
-
-/** React 薄桥（AgentContextPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderAgentContextPanel = createSolidMount(AgentContextPanel)

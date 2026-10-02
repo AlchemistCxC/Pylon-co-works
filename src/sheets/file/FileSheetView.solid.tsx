@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
@@ -487,6 +486,3 @@ export default function FileSheetView(props: FileSheetViewProps) {
     </div>
   )
 }
-
-/** React 薄桥（FileSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileSheetView = createSolidMount(FileSheetView)

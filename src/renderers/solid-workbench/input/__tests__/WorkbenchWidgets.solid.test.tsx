@@ -57,6 +57,9 @@ describe('Solid Workbench widgets', () => {
     services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'cycle' })
     fireEvent.click(screen.getByRole('button', { name: 'deepseek-v4-flash' }))
     await waitFor(() => expect(services.commands.calls).toHaveLength(1))
+    // calls 记录先于 setModel 续体收敛；pending 未落时触发钮显示 '......'，
+    // 先等它回到模型名（fake setModel 不改 activeModel，收敛后仍是 flash）。
+    await waitFor(() => expect(screen.getByRole('button', { name: 'deepseek-v4-flash' })).toBeTruthy())
     services.appearance.setTheme({ ...structuredClone(DEFAULTS), modelSwitchMode: 'menu' })
     const trigger = screen.getByRole('button', { name: /deepseek-v4-flash/ })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -84,7 +87,8 @@ describe('Solid Workbench widgets', () => {
     await waitFor(() => expect(services.commands.calls[0]?.args).toEqual([
       'preview-session', 'reasoning_effort', 'high', { expectedValue: 'low', expectedVersion: 7 },
     ]))
-    expect(screen.getByRole('button', { name: 'high' })).toBeTruthy()
+    // 同上：calls 记录 ≠ setConfigOption 续体已跑完；等 pending 落下、触发钮显示 'high'。
+    await waitFor(() => expect(screen.getByRole('button', { name: 'high' })).toBeTruthy())
     services.commands.setHandler('setConfigOption', async () => ({ ok: false, error: 'reasoning denied' }))
     fireEvent.click(screen.getByRole('button', { name: 'high' }))
     fireEvent.click(screen.getByRole('option', { name: 'low' }))

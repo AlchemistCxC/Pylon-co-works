@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import AgentSheetPageHost from '../components/sidebar/AgentSheetPageHost.solid.tsx'
 import { IsolatedPluginSurface as IsolatedPluginSurfaceSolid } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
@@ -122,6 +121,3 @@ export default function AgentSheetView(props: AgentSheetViewProps) {
     </Show>
   )
 }
-
-/** React 薄桥（AgentSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountAgentSheetView = createSolidMount(AgentSheetView)

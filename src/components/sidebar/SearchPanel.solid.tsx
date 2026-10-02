@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { formatTime } from '../../utils/relativeTime'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
@@ -105,6 +104,3 @@ export default function SearchPanel(props: AgentSidebarContributionProps) {
     </>
   )
 }
-
-/** React 薄桥（SearchPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSearchPanel = createSolidMount(SearchPanel)

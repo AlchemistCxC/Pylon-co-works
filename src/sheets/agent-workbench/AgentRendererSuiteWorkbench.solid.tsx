@@ -1,5 +1,4 @@
 /** @jsxImportSource solid-js */
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { appClients } from '../../app/appClients.ts'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -641,6 +640,3 @@ function ActiveAgentSessionLifecycle(props: {
   // ErrorCenter is the single ordinary-error presentation.
   return null
 }
-
-/** React 薄桥（AgentRendererSuiteWorkbench.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountAgentRendererSuiteWorkbench = createSolidMount(AgentRendererSuiteWorkbench)

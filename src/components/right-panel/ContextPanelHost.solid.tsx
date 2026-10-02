@@ -7,7 +7,6 @@ import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/plugi
 import { settingFieldKey, type SettingsValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore } from '../../domains/workspace/layoutRailsStore.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
@@ -196,6 +195,3 @@ export default function ContextPanelHost(props: ContextPanelHostProps) {
     )}</Show>
   )
 }
-
-/** React 薄桥（ContextPanelHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderContextPanelHost = createSolidMount(ContextPanelHost)

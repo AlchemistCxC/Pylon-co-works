@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
 import type { SheetRecord } from './sheetTypes'
 
 export interface WorkspaceMenuActions {
@@ -58,9 +57,4 @@ export default function WorkspaceMenu(props: WorkspaceMenuProps) {
       </div>
     </Show>
   )
-}
-
-/** 消费方（Titlebar/TabStrip）经具名导入使用；无 React 桥——消费方全部在本梯队 Solid 化。 */
-export function renderWorkspaceMenu(container: HTMLElement, props: WorkspaceMenuProps): () => void {
-  return render(() => <WorkspaceMenu {...props} />, container)
 }

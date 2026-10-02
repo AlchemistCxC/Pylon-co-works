@@ -1,11 +1,10 @@
 import { defineConfig, type Plugin } from 'vite'
-import react from '@vitejs/plugin-react'
 import solid from 'vite-plugin-solid'
 // @tailwindcss/vite 4.x 只有 default 导出（无命名导出 tailwindcss）。
 import tailwindcss from '@tailwindcss/vite'
 
-// #279 逐梯队 Solid 化 → #515 全量终态：凡 `.solid.tsx` 后缀即 solid 编译，
-// React 侧文件（薄桥，#515 批7 收口后归零）不出现 Solid JSX，两侧编译管线互不沾染。
+// #279 逐梯队 Solid 化 → #515/#520 全量终态：凡 `.solid.tsx` 后缀即 solid 编译；
+// React 面已整体退役（#520 W4），全仓只剩 solid 编译管线。
 const SOLID_WORKBENCH_FILES = /src\/.*\.solid(?:\.test)?\.tsx$/
 
 /**
@@ -122,7 +121,6 @@ export default defineConfig({
     tailwindcss(),
     browserPreviewProxy(),
     solid({ include: SOLID_WORKBENCH_FILES }),
-    react({ exclude: SOLID_WORKBENCH_FILES }),
   ],
   server: {
     port: 5173,
@@ -150,7 +148,6 @@ export default defineConfig({
           // can hand Rollup Windows-style ids; testing the raw `id` made the
           // vendor split platform-dependent and silently inflated the app
           // chunk on Windows builds.
-          if (/node_modules\/(react|react-dom|scheduler)\//.test(normalizedId)) return 'vendor-react'
           if (/node_modules\/(motion|motion-dom|framer-motion)\//.test(normalizedId)) return 'vendor-motion'
         },
       },

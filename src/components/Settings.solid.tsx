@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onMount, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
-import { shallowEqual } from '../infrastructure/state/reactStoreShim'
+import { shallowEqual } from '../infrastructure/state/solidStoreKernel'
 import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
 import { useStore } from '../domains/theme/themeStore'
 import { useCustomPresetStore } from '../domains/theme/customPresetStore'
@@ -132,7 +131,7 @@ export default function Settings(props: SettingsProps) {
   // pickCustomPresetTheme 白名单覆盖 Settings 全部 t.xxx 访问（已核对），ccEditMode 单独补。
   // 批0 后 kernel getState() 引用跨写入恒定（produce 就地改写同一裸树），identity selector
   // 的信号按 === 判等永不传播。故 selector 逐通知产浅快照（恢复 zustand 时代「每次写入
-  // 都换根引用」的观察语义，同 reactStoreShim 无 selector 分支），外层 equals memo 以
+  // 都换根引用」的观察语义），外层 equals memo 以
   // shallowEqual 滤掉无值变化的写入（App.solid.tsx themeBaseline 同款），预设应用 /
   // 重置 / 切 profile / ccEditMode 写入即时反映到 t 的受控值。
   const rawTheme = createZustandSignal(useStore, s => ({ ...s }))
@@ -458,6 +457,3 @@ export default function Settings(props: SettingsProps) {
     </div>
   )
 }
-
-/** React 薄桥（Settings.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSettings = createSolidMount(Settings)

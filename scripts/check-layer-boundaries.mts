@@ -47,6 +47,8 @@ function gitTrackedSrcFiles(): string[] {
       .filter(p => /\.(?:ts|tsx|mts)$/.test(p))
       .filter(p => !p.includes('__tests__/') && !p.endsWith('.test.ts') && !p.endsWith('.test.tsx'))
       .map(p => resolve(projectRoot, p))
+      // ls-files 按 index 列文件：工作树已删（未提交的删除）会 ENOENT，跳过。
+      .filter(p => { try { return statSync(p).isFile() } catch { return false } })
   } catch {
     // 非 git 环境退回全量扫描
     const files: string[] = []

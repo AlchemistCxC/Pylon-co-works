@@ -74,7 +74,10 @@ describe('plugin manager page navigation (#274)', () => {
     const grants = await bootWithManagerGranted()
     const ui = mountSettingsSheet({ domain: 'plugins' })
     await screen.findByRole('heading', { name: '插件管理器', level: 3 })
-    expect(document.querySelector('[data-plugin-manager-page]')).toBeTruthy()
+    // 页根（data-plugin-manager-page）比标题晚一拍挂载（与上一用例同口径，等真条件）。
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-plugin-manager-page]')).toBeTruthy()
+    })
 
     const hookEntry = [...sidebar().querySelectorAll('.set-nav-btn')].find(btn => btn.textContent?.includes('Hook 诊断'))
     expect(hookEntry).toBeTruthy()

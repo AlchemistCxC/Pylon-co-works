@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { WorkbenchIcon, FileTypeIconSolid } from './fileIcons.solid.tsx'
 import { reportRuntimeError } from '../../app/runtimeError'
 import { classifyWorkspaceSearchError, normalizeWorkspaceSearchResults, type WorkspaceSearchResult, type WorkspaceSearchSaveStatus } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
@@ -128,6 +127,3 @@ export default function WorkspaceSearchPanel(props: WorkspaceSearchPanelProps) {
     </div>
   )
 }
-
-/** React 薄桥（WorkspaceSearchPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountWorkspaceSearchPanel = createSolidMount(WorkspaceSearchPanel)

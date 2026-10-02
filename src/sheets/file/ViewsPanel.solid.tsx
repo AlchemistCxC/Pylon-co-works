@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, For, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import type { AgentContext } from '../../domains/agent/agentContext'
@@ -62,6 +61,3 @@ export default function ViewsPanel(props: ViewsPanelProps) {
     </div>
   )
 }
-
-/** React 薄桥（ViewsPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountViewsPanel = createSolidMount(ViewsPanel)

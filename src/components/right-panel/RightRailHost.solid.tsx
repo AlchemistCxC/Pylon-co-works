@@ -6,7 +6,6 @@ import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAI
 import ContextPanelHost from './ContextPanelHost.solid.tsx'
 import { useStore } from '../../domains/theme/themeStore.ts'
 import { createBackgroundPresentation } from '../../infrastructure/skin/backgroundImage.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import type { ShellContext } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
@@ -126,6 +125,3 @@ export default function RightRailHost(props: RightRailHostProps) {
     </Show>
   )
 }
-
-/** React 薄桥（RightRailHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderRightRailHost = createSolidMount(RightRailHost)

@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { appClients } from '../app/appClients.ts'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
@@ -313,6 +312,3 @@ function DiagnosticChip(props: { label: string; entry: { status: string; message
     </Show>
   )
 }
-
-/** React 薄桥（RuntimeSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountRuntimeSheetView = createSolidMount(RuntimeSheetView)

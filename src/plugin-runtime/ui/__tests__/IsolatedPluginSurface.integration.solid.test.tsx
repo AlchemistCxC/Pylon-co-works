@@ -36,9 +36,12 @@ const instances: PluginInstance[] = []
 let alphaPlugin: BundledReactPlugin
 let betaPlugin: BundledReactPlugin
 
-// #484：react18 别名已删，双版本共存面收窄为「两个自包含 bundle（各自内联一份 React
+// #484：react18 别名已删，双版本共存面收窄为「两个自包含 bundle（各自内联一份运行时
 // 实例）」——隔离语义（独立 root、独立事件监听、卸载其一不影响另一）仍由本测试覆盖。
-const REACT_VERSION = (JSON.parse(readFileSync(resolve('node_modules/react/package.json'), 'utf8') as string) as { version: string }).version
+// #520 W4：宿主 react 系依赖退役，夹具不再内联真实 React（第三方 React 插件自带
+// runtime 打包，宿主面不变）——改用自包含 DOM 运行时夹具，隔离语义与 DOM 契约
+// （data-plugin-react-version 经 reactVersion deprecated 适配器）断言逐项保留。
+const PLUGIN_FIXTURE_VERSION = '18.0.0-pylon-fixture'
 
 // P91 §12 bundle 缓存：esbuild 产物按 (source + args) 内容寻址落 tmp，前后用例/运行间复用，
 // 命中即跳过 spawn；加载仍走 data URL，与既有机制一致。
@@ -46,32 +49,29 @@ const BUNDLE_CACHE_DIR = join(tmpdir(), 'pylon-isolated-plugin-surface-bundles')
 
 function cachedBundlePath(source: string, args: readonly string[]): string {
   const key = createHash('sha256').update(source).update(args.join('\u0000')).digest('hex').slice(0, 24)
-  return join(BUNDLE_CACHE_DIR, `react-plugin-${key}.js`)
+  return join(BUNDLE_CACHE_DIR, `plugin-fixture-${key}.js`)
 }
 
 async function buildReactPlugin(label: string): Promise<BundledReactPlugin> {
   const source = `
-        import React from 'react'
-        import { createRoot } from 'react-dom/client'
-
-        export const version = React.version
+        // 自包含夹具：零外部 import（宿主 node_modules 已无 react）——每次 data URL
+        // 导入都是独立模块实例，闭包状态互不共享，与「各自内联一份 runtime」同语义。
+        export const version = '${PLUGIN_FIXTURE_VERSION}'
         export function mount(container) {
-          const root = createRoot(container)
-          function PluginView() {
-            const [events, setEvents] = React.useState(0)
-            React.useEffect(() => {
-              const onProbe = () => setEvents(value => value + 1)
-              window.addEventListener('pylon:test-plugin-ui', onProbe)
-              return () => window.removeEventListener('pylon:test-plugin-ui', onProbe)
-            }, [])
-            return React.createElement(
-              'button',
-              { 'data-events': String(events) },
-              'isolated ${label} ' + React.version,
-            )
+          const button = document.createElement('button')
+          let events = 0
+          button.dataset.events = '0'
+          const onProbe = () => {
+            events += 1
+            button.dataset.events = String(events)
           }
-          root.render(React.createElement(PluginView))
-          return () => root.unmount()
+          window.addEventListener('pylon:test-plugin-ui', onProbe)
+          button.textContent = 'isolated ${label} ' + version
+          container.replaceChildren(button)
+          return () => {
+            window.removeEventListener('pylon:test-plugin-ui', onProbe)
+            container.replaceChildren()
+          }
         }
       `
   const args = [
@@ -120,9 +120,9 @@ async function installSurface(id: string, plugin: BundledReactPlugin): Promise<P
 }
 
 describe('isolated plugin UI roots', () => {
-  it('runs two self-contained React bundles together and fully unmounts one owner', async () => {
-    expect(alphaPlugin.version).toBe(REACT_VERSION)
-    expect(betaPlugin.version).toBe(REACT_VERSION)
+  it('runs two self-contained plugin bundles together and fully unmounts one owner', async () => {
+    expect(alphaPlugin.version).toBe(PLUGIN_FIXTURE_VERSION)
+    expect(betaPlugin.version).toBe(PLUGIN_FIXTURE_VERSION)
     const alpha = await installSurface('test.alpha', alphaPlugin)
     await installSurface('test.beta', betaPlugin)
     const view = render(() => <>
@@ -130,18 +130,18 @@ describe('isolated plugin UI roots', () => {
       <IsolatedPluginSurface surfaceId="test.beta.surface" />
     </>)
 
-    expect(await view.findByText(`isolated alpha ${REACT_VERSION}`)).toBeInTheDocument()
-    expect(await view.findByText(`isolated beta ${REACT_VERSION}`)).toBeInTheDocument()
-    expect(view.container.querySelectorAll(`[data-plugin-react-version="${REACT_VERSION}"]`)).toHaveLength(2)
+    expect(await view.findByText(`isolated alpha ${PLUGIN_FIXTURE_VERSION}`)).toBeInTheDocument()
+    expect(await view.findByText(`isolated beta ${PLUGIN_FIXTURE_VERSION}`)).toBeInTheDocument()
+    expect(view.container.querySelectorAll(`[data-plugin-react-version="${PLUGIN_FIXTURE_VERSION}"]`)).toHaveLength(2)
 
     window.dispatchEvent(new Event('pylon:test-plugin-ui'))
-    await waitFor(() => expect(view.getByText(`isolated alpha ${REACT_VERSION}`)).toHaveAttribute('data-events', '1'))
-    await waitFor(() => expect(view.getByText(`isolated beta ${REACT_VERSION}`)).toHaveAttribute('data-events', '1'))
+    await waitFor(() => expect(view.getByText(`isolated alpha ${PLUGIN_FIXTURE_VERSION}`)).toHaveAttribute('data-events', '1'))
+    await waitFor(() => expect(view.getByText(`isolated beta ${PLUGIN_FIXTURE_VERSION}`)).toHaveAttribute('data-events', '1'))
 
     await deactivatePluginInstance(alpha)
     instances.splice(instances.indexOf(alpha), 1)
-    await waitFor(() => expect(view.queryByText(`isolated alpha ${REACT_VERSION}`)).toBeNull())
+    await waitFor(() => expect(view.queryByText(`isolated alpha ${PLUGIN_FIXTURE_VERSION}`)).toBeNull())
     window.dispatchEvent(new Event('pylon:test-plugin-ui'))
-    await waitFor(() => expect(view.getByText(`isolated beta ${REACT_VERSION}`)).toHaveAttribute('data-events', '2'))
+    await waitFor(() => expect(view.getByText(`isolated beta ${PLUGIN_FIXTURE_VERSION}`)).toHaveAttribute('data-events', '2'))
   })
 })

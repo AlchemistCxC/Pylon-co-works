@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { appClients } from '../app/appClients.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
@@ -201,6 +200,3 @@ export default function SessionSettings(props: SessionSettingsProps) {
     </Show>
   )
 }
-
-/** React 薄桥（SessionSettings.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionSettings = createSolidMount(SessionSettings)

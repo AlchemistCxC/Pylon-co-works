@@ -3,7 +3,6 @@ import { createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
 import { getPluginUiRegistry } from '../runtimeServices.ts'
 import type { PluginUiEventBridge, PluginUiUnmount } from './pluginUiTypes.ts'
 import { resolvePluginUiRuntime } from './pluginUiTypes.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 
 /** registry 快照 → Solid 只读信号（快照引用等值，与 WorkspaceTitlebar.solid 同一形态）。 */
 function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
@@ -106,6 +105,3 @@ export function IsolatedPluginSurface(props: IsolatedPluginSurfaceProps) {
     />
   )
 }
-
-/** React 薄桥（IsolatedPluginSurface.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountIsolatedPluginSurface = createSolidMount(IsolatedPluginSurface)

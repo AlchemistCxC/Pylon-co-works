@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { onMount, Show } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import type { MessageSearchBarProps } from './rightPanelTypes.ts'
 
 export type { MessageSearchBarProps }
@@ -60,6 +59,3 @@ export default function MessageSearchBar(props: MessageSearchBarProps) {
     </div>
   )
 }
-
-/** React 薄桥（MessageSearchBar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderMessageSearchBar = createSolidMount(MessageSearchBar)

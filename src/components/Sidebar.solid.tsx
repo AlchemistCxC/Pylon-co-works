@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, Show, Suspense, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { refreshSessionsBackend, useIdentityStore } from '../domains/identity/identityStore'
@@ -610,6 +609,3 @@ export default function Sidebar(props: SidebarProps) {
     </aside>
   )
 }
-
-/** React 薄桥（Sidebar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSidebar = createSolidMount(Sidebar)

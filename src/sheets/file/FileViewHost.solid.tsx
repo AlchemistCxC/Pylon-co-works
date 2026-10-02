@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { fileTabKey, fileTabViewType, resetFileSheetTransientState, type FileTabRecord } from './fileSheetState.ts'
 import FileTabView, { type FileSaveReceipt } from './FileTabView.solid.tsx'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
@@ -353,6 +352,3 @@ export default function FileViewHost(props: FileViewHostProps) {
     </Show>
   )
 }
-
-/** React 薄桥（FileViewHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileViewHost = createSolidMount(FileViewHost)

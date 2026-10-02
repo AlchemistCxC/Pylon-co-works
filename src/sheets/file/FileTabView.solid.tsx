@@ -10,7 +10,6 @@ import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspac
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import FileCodeEditor from './FileCodeEditor.solid.tsx'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 
@@ -49,8 +48,8 @@ export interface FileTabViewProps {
 }
 
 /**
- * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#515 起收编为直连
- * props 形态，React 桥经 createSolidMount 响应式通道透传）。
+ * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#515 起收编为
+ * Solid 实体直连 props，React 桥面已随 React 面退役删除）。
  *
  * 渲染恒为 CodeMirror 常驻单内核（FileCodeEditor.solid → fileCodeMirrorKernel 共享工厂）：
  * 0-A2 默认可写，只读仅物理例外（writable=false）；旧「手工 DOM 投影 +
@@ -338,9 +337,6 @@ export default function FileTabView(props: FileTabViewProps) {
     </Show>
   )
 }
-
-/** React 薄桥（FileTabView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileTabView = createSolidMount(FileTabView)
 
 /** 0-A3 写冲突锁：冷却窗口（ms）内 touchVersion >=2 次递增 = agent 正在写盘。 */
 export const WRITE_LOCK_COOLDOWN_MS = 3000

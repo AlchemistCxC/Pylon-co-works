@@ -228,7 +228,9 @@ describe('SolidInputBar', () => {
     expect(services.commands.calls[0]).toEqual({
       command: 'send', args: ['session-a', { text: '第一条待发', attachments: [] }],
     })
-    expect(screen.queryByText('第一条待发')).toBeNull()
+    // send 调用先于 sendQueued 的出队写（await sendText 之后才 filter）——
+    // 队列 chip 的收敛晚于 calls 增长一个微任务，等它落地再断言。
+    await waitFor(() => expect(screen.queryByText('第一条待发')).toBeNull())
     expect(screen.getByText('第二条待发')).toBeTruthy()
 
     services.runtime.update({ generating: true })
@@ -468,6 +470,9 @@ describe('SolidInputBar', () => {
     fireEvent.input(textarea, { target: { value: '第一条' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     await waitFor(() => expect(textarea.value).toBe(''))
+    // 草稿清空发生在 send 之前，历史落库在 send 完成之后（recordHistory 在
+    // await commands.send 的续体里）——等历史真正入库再按方向键。
+    await waitFor(() => expect(services.sessionUi.get('session-a', 'input-history', [])).toEqual(['第一条']))
     fireEvent.input(textarea, { target: { value: '当前草稿' } })
     fireEvent.keyDown(textarea, { key: 'ArrowUp' })
 

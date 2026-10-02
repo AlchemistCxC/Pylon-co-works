@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
@@ -131,6 +130,3 @@ export default function ProfileEditor(props: ProfileEditorProps) {
     </div>
   )
 }
-
-/** React 薄桥（ProfileEditor.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderProfileEditor = createSolidMount(ProfileEditor)

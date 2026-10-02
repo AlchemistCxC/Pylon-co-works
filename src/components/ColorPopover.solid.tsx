@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, on, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 
 const COLOR_CHIPS = ['#a855f7', '#3b82f6', '#34d399', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#ffffff', '#000000']
 const RECENT_LIMIT = 6
@@ -188,6 +187,3 @@ function ColorChoiceRow(props: {
     </div>
   </div>
 }
-
-/** React 薄桥（ColorPopover.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderColorPopover = createSolidMount(ColorPopover)

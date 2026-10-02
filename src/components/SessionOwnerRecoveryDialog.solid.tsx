@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useModalOverlayStore } from '../app/modalOverlayStore'
@@ -124,6 +123,3 @@ export default function SessionOwnerRecoveryDialog() {
     </Show>
   )
 }
-
-/** React 薄桥（SessionOwnerRecoveryDialog.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionOwnerRecoveryDialog = createSolidMount(SessionOwnerRecoveryDialog)

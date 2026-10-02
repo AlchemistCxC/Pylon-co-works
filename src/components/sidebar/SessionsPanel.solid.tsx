@@ -3,7 +3,6 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { Portal } from 'solid-js/web'
 import { open } from '@tauri-apps/plugin-dialog'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { formatTime } from '../../utils/relativeTime'
 import { isAbsolutePath, type Workspace } from '../../domains/workspace/workspaceEntities'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
@@ -357,6 +356,3 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
     </>
   )
 }
-
-/** React 薄桥（SessionsPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionsPanel = createSolidMount(SessionsPanel)

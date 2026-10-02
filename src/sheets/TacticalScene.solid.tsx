@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, onCleanup } from 'solid-js'
-import { render } from 'solid-js/web'
 import closer from '../assets/tactical/closer.png'
 import falling from '../assets/tactical/falling.png'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
@@ -46,9 +45,4 @@ export default function TacticalScene() {
     <img class="tactical-scene-art" src={falling} alt="" data-visible={artwork() === 'falling'} draggable={false} />
     <div class="tactical-scene-shade" />
   </div>
-}
-
-/** React 薄桥（TacticalScene.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function mountTacticalScene(container: HTMLElement): () => void {
-  return render(() => <TacticalScene />, container)
 }

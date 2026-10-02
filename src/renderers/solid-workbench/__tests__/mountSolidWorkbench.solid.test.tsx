@@ -1396,6 +1396,10 @@ describe('mountSolidWorkbench', () => {
         { id: 'workspace-unknown-b', label: '未知 B', path: 'G:/unknown-b' },
       ],
     })
+    // 第一段 createSession 的调用记录先于其完成（invoke 入口同步 push，await handler
+    // 还在微任务队列里）。此处必须等 submitting 收敛（textarea 重新可用）再喂第二段，
+    // 否则 keydown 落在禁用的 textarea 上被浏览器语义吞掉——这正是本用例曾踩的竞态。
+    await waitFor(() => expect((prompt as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.input(prompt, { target: { value: '未知工作区不预选' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
     await waitFor(() => {
@@ -1696,7 +1700,9 @@ describe('mountSolidWorkbench', () => {
     expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()
     expect(prompt).toHaveValue('保留这份任务描述')
     expect(prompt).toBeEnabled()
-    expect(prompt).toHaveFocus()
+    // 焦点交还挂在 sendText 失败续体的 queueMicrotask 上，晚于 submitError 落 DOM——
+    // findByRole('alert') 解析时它可能尚未执行，必须等它到位再断言。
+    await waitFor(() => expect(prompt).toHaveFocus())
   })
 
   it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {
