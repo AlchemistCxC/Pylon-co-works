@@ -22,8 +22,11 @@ interface Props {
 /** Navigation only: all operational actions are supplied by the existing host. */
 // #515：React → Solid 实体（OverviewSheetView.solid 直连）；DOM 结构逐字节保持。
 export default function TacticalCommandDeck(props: Props) {
-  const scene = createZustandSignal(useTacticalSceneStore, state => state)
-  const artwork = () => scene().artwork
+  // selector ⚠️ 约定：逐字段选取。identity selector 在 solidStoreKernel 恒定根引用下
+  // 永不传播（历史 P0 同族：Settings.solid，#520 A2 轮复现于本文件）。
+  const artwork = createZustandSignal(useTacticalSceneStore, state => state.artwork)
+  const opacity = createZustandSignal(useTacticalSceneStore, state => state.opacity)
+  const motion = createZustandSignal(useTacticalSceneStore, state => state.motion)
   return <section class="tactical-deck" aria-label="战术指挥台">
     <div class="tactical-identity">
       <div class="tactical-channel"><span /> PYLON / FIELD TERMINAL</div>
@@ -66,8 +69,8 @@ export default function TacticalCommandDeck(props: Props) {
           <button type="button" aria-pressed={artwork() === 'closer'} onClick={() => useTacticalSceneStore.getState().setArtwork('closer')}>凝视 / CLOSER</button>
           <button type="button" aria-pressed={artwork() === 'falling'} onClick={() => useTacticalSceneStore.getState().setArtwork('falling')}>坠落 / FALLING</button>
         </div>
-        <label>背景强度 <output>{Math.round(scene().opacity * 100)}%</output><input aria-label="背景强度" type="range" min="15" max="70" value={Math.round(scene().opacity * 100)} onInput={event => useTacticalSceneStore.getState().setOpacity(Number(event.currentTarget.value) / 100)} /></label>
-        <label class="tactical-motion-control"><input type="checkbox" checked={scene().motion} onInput={event => useTacticalSceneStore.getState().setMotion(event.currentTarget.checked)} />背景视差与缓动</label>
+        <label>背景强度 <output>{Math.round(opacity() * 100)}%</output><input aria-label="背景强度" type="range" min="15" max="70" value={Math.round(opacity() * 100)} onInput={event => useTacticalSceneStore.getState().setOpacity(Number(event.currentTarget.value) / 100)} /></label>
+        <label class="tactical-motion-control"><input type="checkbox" checked={motion()} onInput={event => useTacticalSceneStore.getState().setMotion(event.currentTarget.checked)} />背景视差与缓动</label>
         <small>仅用于蓝调战术；尊重系统减少动态效果设置。</small>
       </div></details>
     </footer>
