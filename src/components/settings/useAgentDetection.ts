@@ -7,9 +7,8 @@ import { selectAcpRuntimeDetectorIds, type AgentDetectionDiagnostic, type AgentR
 import { builtinAgentCatalog } from '../../domains/agent/agentCatalog.ts'
 
 /**
- * useAgentDetection — 探测流状态机（A-V4 拆分自 AgentRuntimePanel，逻辑逐字随迁；
- * 报告原建议 reducer 化——探测是「跑一轮→全量替换结果」的单一事务，八个散落
- * useState 在此收拢为一个内聚单元，语义等同）。挂载即扫描一次，后续由
+ * useAgentDetection — 设置页探测流程；
+ * 单飞与 generation 隔离取消/卸载后的迟到结果。挂载即扫描一次，后续由
  * 「重新探测」显式触发（force 绕过后端 TTL 缓存，#325）。
  */
 export function useAgentDetection(options: {
@@ -27,23 +26,34 @@ export function useAgentDetection(options: {
   const [detectionCompleted, setDetectionCompleted] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const mountedRef = useRef(true)
+  const generationRef = useRef(0)
+  const inFlightRef = useRef(false)
+  const cancellationRef = useRef<Promise<unknown> | null>(null)
 
   /** `force` = 绕过后端三态 TTL 缓存重跑探测（用户点「重新探测」时必须为真，否则可能只是
    *  读缓存——上一版就是这样点了没反应的，#325）。 */
   const detectRuntimes = async (force = false) => {
-    if (detecting) return
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    const generation = ++generationRef.current
+    const isCurrent = () => mountedRef.current && generationRef.current === generation
     setDetecting(true)
     setDetectionCompleted(false)
     try {
+      // Finish cancelling the previous backend scan before starting another one.
+      // Otherwise a late cancel IPC can cancel the newly requested scan.
+      await cancellationRef.current
+      if (!isCurrent()) return
       const agentClient = appClients.agent()
       const registered = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
       const detectors = registered.length > 0 ? registered : builtinAgentCatalog.detectors()
       const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors), force)
-      if (!mountedRef.current) return
+      if (!isCurrent()) return
       setCandidates(report.candidates)
       setSelectedCandidateId(current => report.candidates.some(candidate => candidate.candidateId === current)
         ? current
-        : report.candidates.find(candidate => !candidate.alreadyImportedAgentId)?.candidateId ?? report.candidates[0]?.candidateId ?? null)
+        : report.candidates.find(candidate => !candidate.alreadyImportedAgentId && candidate.startability === 'verified')?.candidateId
+          ?? report.candidates.find(candidate => !candidate.alreadyImportedAgentId)?.candidateId ?? report.candidates[0]?.candidateId ?? null)
       setDetectionDiagnostics(report.diagnostics)
       // #116 子项 10：诊断原文（内部码 + 系统级错误串）不再进 UI，改报进运行日志
       // / Runtime sheet，保持可检索。先结清上一轮的诊断条目（本轮可能已消失），
@@ -62,17 +72,26 @@ export function useAgentDetection(options: {
       setDetectionCompleted(true)
       resolvePanelError('探测本机 Agent')
     } catch (error) {
-      if (!mountedRef.current) return
+      if (!isCurrent()) return
       reportPanelError('探测本机 Agent', error)
       setFeedback('探测失败，详情见右下角错误中心')
-    } finally { if (mountedRef.current) setDetecting(false) }
+    } finally { if (isCurrent()) { inFlightRef.current = false; setDetecting(false) } }
+  }
+
+  const cancelDetection = () => {
+    if (!inFlightRef.current) return
+    generationRef.current++
+    inFlightRef.current = false
+    setDetecting(false)
+    setFeedback('探测已取消。可以重新探测或手动添加。')
+    cancellationRef.current = appClients.agent().cancelDetectionRefresh().catch(error => reportPanelError('取消 Agent 探测', error))
   }
 
   useEffect(() => {
     mountedRef.current = true
     void detectRuntimes()
     // 首次进入 Agent 配置即扫描一次；后续扫描仍由“重新探测”显式触发。
-    return () => { mountedRef.current = false }
+    return () => { mountedRef.current = false; generationRef.current++; inFlightRef.current = false }
   }, [])
 
   /**
@@ -86,7 +105,8 @@ export function useAgentDetection(options: {
     for (const diagnostic of detectionDiagnostics) {
       // 预算耗尽是对**全局预算**的陈述，不是这个可执行文件的事实——把它画到卡片上会让一个
       // 可能完全正常的 Agent 显示「探测失败」。它仍留在「发现的运行时」块里（#325 审查）。
-      if (diagnostic.code === 'detection_budget_exhausted') continue
+      // A version timeout/unsupported flag is not an ACP launch failure.
+      if (diagnostic.code !== 'version_probe_spawn_failed') continue
       if (diagnostic.candidateId) byCandidateId.set(diagnostic.candidateId, diagnostic)
       if (diagnostic.executable) byExecutable.set(diagnostic.executable.toLowerCase(), diagnostic)
     }
@@ -106,6 +126,6 @@ export function useAgentDetection(options: {
   return {
     candidates, selectedCandidateId, setSelectedCandidateId,
     detectionDiagnostics, detectionElapsedMs, detectionPreflight, detectionTruncated, detectionCompleted,
-    detecting, detectRuntimes, probeFailureByAgentId,
+    detecting, detectRuntimes, cancelDetection, probeFailureByAgentId,
   }
 }

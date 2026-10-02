@@ -84,6 +84,7 @@ pub(crate) fn assemble_candidates(
             name: rule.display_name.clone(),
             executable: path.to_string_lossy().to_string(),
             args: candidate_args,
+            alternatives: Vec::new(),
             evidence,
             identity_confidence,
             startability,
