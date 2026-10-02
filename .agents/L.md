@@ -1,5 +1,7 @@
 # L.md · 并行施工协调板
 
+- [Codex] **#514 探测/导入修复（PR #521）**：独立 worktree `agent-import` / `codex/agent-import`；域＝Agent 设置候选/探测/导入、`src/domains/agent/agentDetector.ts`、`src-tauri/{src/lifecycle/config_cmds.rs,pylon-core/src/agent_detection/**}`、相关测试/说明书/记录。已同步 `github/main` 76fdaac6，正在复验合并后的门禁；不碰共享树 `src-tauri/Cargo.toml`。合入后撤本条。
+
 - [kumo] **#463 决策口收口（2026-10-01）**：域＝`src-tauri/src/{permission,lib}.rs`（AppState 增 `approval_mode_persisted` + set/get 返回 `{mode,persisted}` 快照）、`src-tauri/pylon-session/src/user_data.rs`（`UserDataError::ReservedKey`）、`src-tauri/src/session/mod.rs`（`user_data_save` 拒绝 approval-mode key）、`src/cli/{pylonCliPorts,pylonCliDomainPorts,pylonCliService}.ts`、`src/demo/mockTauri.ts`、说明书《Pylon-CLI-命令表》《Pylon-项目架构参考》approval 段。**避让 #515**：CLI 端口/服务层非组件非 store，如需翻转请保留 wire 契约语义；`src-tauri/Cargo.toml`（[Codex] 在途）不碰。#482/#483 补遗条目（lib.rs/说明书域）PR #510 已合并，请及时撤条。
 
 - [Codex] **Agent 探测/导入故障调查（2026-10-01）**：域＝`src/components/settings/{AgentCandidateList,useAgentDetection,useAgentCandidateProvisioning,AgentCreateForm,AgentRuntimePanel}*`、`src/domains/agent/`、`src-tauri/pylon-core/src/agent_detection/` 与相关测试/说明书/记录；先调试 `F:/A-I/Platform/Pylon`。发现共享树 `src-tauri/Cargo.toml` 他人在途，依 §2.1 不 stage/commit；隔离到基于 `github/main` 的 worktree 完成施工与提交。
