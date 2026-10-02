@@ -23,6 +23,14 @@ describe('agent detector DTO', () => {
     expect(normalizeAgentRuntimeCandidates([{ candidateId: 'broken', detectorId: 'x', provider: 'x', executable: 'x', evidence: [], warnings: [], identityConfidence: 'high', protocolAvailability: 'not_tested' }])).toEqual([])
   })
 
+  it('keeps structured alternate launch forms and drops malformed alternatives', () => {
+    const candidates = normalizeAgentRuntimeCandidates([{
+      candidateId: 'hermes:one', detectorId: 'hermes', provider: 'hermes', suggestedAgentId: 'hermes', name: 'Hermes', executable: 'hermes.exe', args: ['acp'], evidence: [], identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
+      alternatives: [null, { candidateId: 'hermes:two', executable: 'hermes-acp.exe', args: [], startability: 'not_tested' }, { candidateId: 'broken', executable: 42, args: [] }],
+    }])
+    expect(candidates[0].alternatives).toEqual([{ candidateId: 'hermes:two', executable: 'hermes-acp.exe', args: [], startability: 'not_tested' }])
+  })
+
   it('passes only ordered ACP contributions to native discovery', () => {
     expect(selectAcpRuntimeDetectorIds([
       { id: 'later', provider: 'future', protocol: 'acp', priority: 10 },

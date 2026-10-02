@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../../test/fakeInvoke'
 import AgentRuntimePanel from '../AgentRuntimePanel'
@@ -366,6 +366,49 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     }))
   })
 
+  it('权威配置列表删除 Agent 后，旧发现报告不阻止重新导入', async () => {
+    const candidate = {
+      candidateId: 'detected:hermes', detectorId: 'builtin.detector.hermes', provider: 'hermes',
+      suggestedAgentId: 'hermes', name: 'Hermes', executable: 'hermes.exe', args: ['acp'],
+      alreadyImportedAgentId: 'hermes', identityConfidence: 'high', protocolAvailability: 'not_tested', evidence: [], warnings: [],
+    }
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 10, truncated: false }),
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'hermes', durationMs: 12 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+    })
+    render(<AgentRuntimePanel />)
+    expect(await screen.findByRole('button', { name: '使用此 Agent' })).toBeInTheDocument()
+    act(() => useIdentityStore.getState().setAgents([]))
+    fireEvent.click(await screen.findByRole('button', { name: '验证并导入' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', expect.objectContaining({ scope: 'agent_create', agentId: 'hermes' })))
+  })
+
+  it('选择折叠的备用入口后，验证和保存使用同一可执行文件与参数', async () => {
+    const candidate = {
+      candidateId: 'detected:alt', detectorId: 'detector.test', provider: 'custom',
+      suggestedAgentId: 'custom', name: 'Alternative', executable: 'agent.exe', args: ['acp'],
+      identityConfidence: 'high', protocolAvailability: 'not_tested', evidence: [], warnings: [],
+      alternatives: [{ candidateId: 'detected:acp', executable: 'agent-acp.exe', args: [], startability: 'not_tested' }],
+    }
+    fakeInvoke.registerMany({
+      detect_agent_runtimes: () => Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 10, truncated: false }),
+      test_agent_candidate: () => Promise.resolve({ ok: true, agentId: 'custom', durationMs: 12 }),
+      agent_config_snapshot: () => Promise.resolve({ revision: 'rev-1', agents: [] }),
+      update_agents_config: () => Promise.resolve({ applied: true, revision: 'rev-2' }),
+    })
+    render(<AgentRuntimePanel />)
+    fireEvent.change(await screen.findByLabelText('Alternative 启动入口'), { target: { value: 'detected:acp' } })
+    fireEvent.click(screen.getByRole('button', { name: '验证并导入' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', expect.objectContaining({
+      agent: expect.objectContaining({ exe: 'agent-acp.exe', args: [] }),
+    })))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', expect.objectContaining({
+      config: expect.objectContaining({ exe: 'agent-acp.exe', args: [] }),
+    })))
+  })
+
   /**
    * A5① Claude 侧候选渲染：wrapper provider 的候选必须展示自己的 ACP 入口与身份，
    * 且不得把 vendor CLI 当成可导入的候选执行文件。
@@ -504,7 +547,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     }))
   })
 
-  it('导入成功后切换到新 Agent、对账状态并打开 Agent Sheet', async () => {
+  it('导入留在配置页，显式使用才切换并打开 Agent Sheet', async () => {
     const openSheet = vi.fn(() => 'agent-ready')
     useWorkspaceStore.setState({ openSheet })
     const candidate = {
@@ -527,6 +570,12 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     const candidateCard = (await screen.findByLabelText('Ready Agent executable')).closest('.agent-runtime-card') as HTMLElement
     fireEvent.click(within(candidateCard).getByRole('button', { name: '验证并导入' }))
 
+    const useAgent = await within(candidateCard).findByRole('button', { name: '使用此 Agent' })
+    await waitFor(() => expect(useAgent).toBeEnabled())
+    expect(invoke.mock.calls.filter(([command]) => command === 'detect_agent_runtimes')).toHaveLength(1)
+    expect(invoke).not.toHaveBeenCalledWith('switch_agent', { name: 'ready-agent' })
+    expect(openSheet).not.toHaveBeenCalled()
+    fireEvent.click(useAgent)
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('switch_agent', { name: 'ready-agent' }))
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('agent_status', undefined)

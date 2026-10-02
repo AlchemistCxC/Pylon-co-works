@@ -322,6 +322,7 @@ export function createAgentClient(transport: ClientTransport) {
      *  「重新探测」必须真的重跑探测，否则用户点了没反应（#325）。 */
     detectAgentRuntimes: (detectorIds: readonly string[], force = false): Promise<AgentDetectionReport> =>
       transport.invoke('detect_agent_runtimes', { detectorIds, force }).then(normalizeAgentDetectionReport),
+    cancelDetectionRefresh: (): Promise<unknown> => transport.invoke('cancel_detection_refresh'),
     /** 施工文档 §4.5：隔离连接测试（不改 active/runtime）。
      *  `agentYaml`（#422）：scope=agent 的 YAML 整块入口——后端按整块替换语义解析
      *  测试并签发保存凭证；省略与 JSON def 二选一（同时传以 YAML 为准）。 */

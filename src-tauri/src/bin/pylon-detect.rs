@@ -388,6 +388,7 @@ mod tests {
             name: "Fixture".into(),
             executable: "fixture.exe".into(),
             args: vec!["acp".into()],
+            alternatives: Vec::new(),
             evidence: vec![pylon_core::agent_detection::AgentDetectionEvidence {
                 kind: "config-fields".into(),
                 detail: "config.yaml [provider, model]".into(),

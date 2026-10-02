@@ -20,6 +20,7 @@ use std::time::Duration;
 /// nothing meant re-spawning it every time. A cached failure keeps its
 /// diagnostic, so the second refresh reports the same reason as the first
 /// rather than a bare failure.
+/// Retryable timeouts and wait failures are not cached.
 ///
 /// Keyed by mtime so upgrading a CLI is a miss rather than a stale hit, which
 /// also means each upgrade leaves its predecessor behind. Bounded and dropped
@@ -64,7 +65,11 @@ pub(crate) async fn version_probe(
         };
     }
     let outcome = probe_version_uncached(detector_id, &executable, version_args, budget).await;
-    if let Some(key) = &cache_key {
+    // Timeouts describe this attempt, not a permanent fact about an unchanged binary.
+    if let Some(key) = cache_key
+        .as_ref()
+        .filter(|_| !outcome.diagnostic.as_ref().is_some_and(|d| d.retryable))
+    {
         if let Ok(mut cache) = cache.lock() {
             if cache.len() >= MAX_VERSION_PROBE_CACHE_ENTRIES {
                 cache.clear();
@@ -131,7 +136,7 @@ pub(crate) async fn probe_version_uncached(
             child.kill_and_wait().await;
             return VersionProbeOutcome {
                 version: None,
-                startability: Startability::Failed,
+                startability: Startability::NotTested,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     Some(executable),
@@ -147,7 +152,7 @@ pub(crate) async fn probe_version_uncached(
         Err(error) => {
             return VersionProbeOutcome {
                 version: None,
-                startability: Startability::Failed,
+                startability: Startability::NotTested,
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     Some(executable),
@@ -164,7 +169,7 @@ pub(crate) async fn probe_version_uncached(
     if !status.success() {
         return VersionProbeOutcome {
             version: None,
-            startability: Startability::Failed,
+            startability: Startability::NotTested,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 Some(executable),
@@ -182,7 +187,7 @@ pub(crate) async fn probe_version_uncached(
     if version.is_none() {
         VersionProbeOutcome {
             version: None,
-            startability: Startability::Failed,
+            startability: Startability::NotTested,
             diagnostic: Some(probe_diagnostic(
                 detector_id,
                 Some(executable),

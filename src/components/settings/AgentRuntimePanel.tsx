@@ -79,10 +79,16 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
   const { detecting, detectRuntimes, probeFailureByAgentId, ...detection } = useAgentDetection({
     reportPanelError, resolvePanelError, setFeedback,
   })
+  // A discovery snapshot can outlive a delete or manual import in this panel.
+  // The current registry owns whether a provider is already configured.
+  const currentCandidates = detection.candidates.map(candidate => ({
+    ...candidate,
+    alreadyImportedAgentId: agents.find(agent => agent.id === candidate.alreadyImportedAgentId || agent.provider === candidate.provider)?.id,
+  }))
 
   const provisioning = useAgentCandidateProvisioning({
-    agents, reportPanelError, resolvePanelError, reportConfigMutationError,
-    setFeedback, setConfigConflict, notify, detectRuntimes,
+    agentClient, agents, reportPanelError, resolvePanelError, reportConfigMutationError,
+    setFeedback, setConfigConflict, notify,
   })
 
   const reloadConfigSnapshot = async () => {
@@ -409,7 +415,7 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
       })}
 
       <AgentCandidateList
-        candidates={detection.candidates}
+        candidates={currentCandidates}
         selectedCandidateId={detection.selectedCandidateId}
         onSelectCandidate={detection.setSelectedCandidateId}
         detectionDiagnostics={detection.detectionDiagnostics}
@@ -419,10 +425,15 @@ export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?:
         detectionCompleted={detection.detectionCompleted}
         detecting={detecting}
         onRedetect={() => { void detectRuntimes(true) }}
+        onCancelDetection={detection.cancelDetection}
         onManualCreate={() => setShowCreate(true)}
         candidateDrafts={provisioning.candidateDrafts}
         candidateValidation={provisioning.candidateValidation}
+        importedCandidateIds={provisioning.importedCandidateIds}
+        candidateErrors={provisioning.candidateErrors}
         provisioningCandidateId={provisioning.provisioningCandidateId}
+        provisioningPhase={provisioning.provisioningPhase}
+        onCancelValidation={provisioning.cancelCandidateValidation}
         onValidateAndImport={candidate => { void provisioning.validateAndImportCandidate(candidate) }}
         onImportUnverified={candidate => { void provisioning.importUnverifiedCandidate(candidate) }}
         onActivateImported={candidate => { void provisioning.activateImportedCandidate(candidate) }}

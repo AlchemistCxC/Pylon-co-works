@@ -724,6 +724,7 @@ fn synthetic_candidate(
             name: provider.into(),
             executable: executable.into(),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            alternatives: Vec::new(),
             evidence,
             identity_confidence: IdentityConfidence::Medium,
             startability: Startability::NotTested,
@@ -766,6 +767,9 @@ fn merge_prefers_the_imported_variant_and_warns_on_version_conflict() {
     ]);
     assert_eq!(merged.len(), 1, "同一 detector 必须合并");
     let candidate = &merged[0];
+    assert_eq!(candidate.0.alternatives.len(), 1);
+    assert_eq!(candidate.0.alternatives[0].executable, "C:/a/hermes");
+    assert_eq!(candidate.0.alternatives[0].args, vec!["acp"]);
     assert_eq!(
         candidate.0.already_imported_agent_id.as_deref(),
         Some("hermes-existing")
@@ -921,9 +925,36 @@ async fn version_probe_uses_catalog_arguments_and_standard_default() {
             Duration::from_secs(2),
         )
         .await;
-        assert_eq!(invalid.startability, Startability::Failed);
+        assert_eq!(invalid.startability, Startability::NotTested);
         assert_eq!(invalid.diagnostic.unwrap().code, "version_probe_non_zero");
     }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_discovery_does_not_select_a_unix_launcher_over_a_batch_entry() {
+    let root = FixtureRoot::new("windows-launcher");
+    plant_version_tool(&root, "ccb", None);
+    std::fs::write(root.join("ccb"), "#!/bin/sh\nexec node cli.js \"$@\"\n").unwrap();
+    let report = detect_agent_runtime_candidates(AgentDetectionOptions {
+        detector_ids: Some(vec!["builtin.detector.claude-code".into()]),
+        search_roots: Some(vec![root.to_path_buf()]),
+        home_dir: Some(root.to_path_buf()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.candidates.len(), 1);
+    assert_eq!(
+        Path::new(&report.candidates[0].executable)
+            .extension()
+            .unwrap(),
+        "cmd"
+    );
+    assert!(!report
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "version_probe_spawn_failed"));
 }
 
 /// C1：失败也必须进缓存，而且缓存是**按 key** 而不是全局「记住最后一次」。
@@ -946,7 +977,7 @@ async fn a_failed_version_probe_is_cached_like_a_successful_one() {
 
     // 第一次：真的跑了，失败带诊断。
     let first = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
-    assert_eq!(first.startability, Startability::Failed);
+    assert_eq!(first.startability, Startability::NotTested);
     assert_eq!(
         first.diagnostic.as_ref().map(|d| d.code.as_str()),
         Some("version_probe_non_zero")
@@ -955,7 +986,7 @@ async fn a_failed_version_probe_is_cached_like_a_successful_one() {
     // 第二次：命中缓存——不但结果相同，而且**诊断还在**（缓存的失败必须保留
     // 理由，否则第二次刷新只会看到一个没有原因的失败）。
     let second = version_probe("fixture", failing.clone(), &[], Duration::from_secs(5)).await;
-    assert_eq!(second.startability, Startability::Failed);
+    assert_eq!(second.startability, Startability::NotTested);
     assert_eq!(
         second.diagnostic.as_ref().map(|d| d.code.as_str()),
         Some("version_probe_non_zero"),
@@ -986,6 +1017,38 @@ async fn a_failed_version_probe_is_cached_like_a_successful_one() {
         2,
         "缓存必须按 (路径, 参数, mtime) 分键，不得互相驱逐"
     );
+}
+
+#[tokio::test]
+async fn a_timed_out_version_probe_can_recover_without_changing_the_binary() {
+    use super::probe_cache::version_probe;
+    let root = FixtureRoot::new("version-timeout-retry");
+    std::fs::create_dir_all(&root).unwrap();
+    let executable = plant_counting_probe(&root.0, "probe", Some("9.9.9"));
+    let body = if cfg!(windows) {
+        "@echo off\r\nping 127.0.0.1 -n 2 >nul\r\necho 9.9.9\r\n"
+    } else {
+        "#!/bin/sh\nsleep 1\necho 9.9.9\n"
+    };
+    std::fs::write(&executable, body).unwrap();
+    let first = version_probe(
+        "fixture",
+        executable.clone(),
+        &[],
+        Duration::from_millis(50),
+    )
+    .await;
+    assert_eq!(first.startability, Startability::NotTested);
+    assert_eq!(
+        first
+            .diagnostic
+            .as_ref()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("version_probe_timeout")
+    );
+    let second = version_probe("fixture", executable, &[], Duration::from_secs(5)).await;
+    assert_eq!(second.startability, Startability::Verified);
+    assert_eq!(second.version.as_deref(), Some("9.9.9"));
 }
 
 /// 安置一个每次运行都向自身目录的 `count.txt` 追加一行的探针夹具。
@@ -1125,9 +1188,8 @@ async fn version_probe_timeout_is_bounded_and_visible() {
         .iter()
         .find(|diagnostic| diagnostic.code == "version_probe_timeout")
         .expect("必须报告探针超时");
-    assert_eq!(report.candidates[0].startability, Startability::Failed);
-    // #325：探测失败必须**结构化**归因到候选与可执行文件——前端据此把失败原因挂到
-    // 对应 Agent 卡，而不必再从 message 里正则抠路径（旧前端就是这么做的）。
+    assert_eq!(report.candidates[0].startability, Startability::NotTested);
+    // A version timeout remains attributable to the entry, without claiming ACP failed.
     assert!(
         timeout
             .executable
@@ -1183,6 +1245,7 @@ const PROBE_EXIT_WAIT: Duration = Duration::from_secs(10);
 #[cfg(windows)]
 #[tokio::test]
 async fn managed_probe_cleanup_kills_descendant_processes() {
+    use pylon_foundations::child_command::HideConsoleWindow;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -1193,7 +1256,7 @@ async fn managed_probe_cleanup_kills_descendant_processes() {
     let pid_file = root.join("child.pid");
     let escaped_pid_file = pid_file.to_string_lossy().replace("'", "''");
     let script = format!(
-            "$child = Start-Process ping.exe -ArgumentList '-t','127.0.0.1' -PassThru; Set-Content -LiteralPath '{escaped_pid_file}' -Value $child.Id; Wait-Process -Id $child.Id"
+            "$child = Start-Process ping.exe -ArgumentList '-t','127.0.0.1' -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '{escaped_pid_file}' -Value $child.Id; Wait-Process -Id $child.Id"
         );
     let mut command = tokio::process::Command::new("powershell.exe");
     command
@@ -1202,16 +1265,21 @@ async fn managed_probe_cleanup_kills_descendant_processes() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    command.hide_console_window();
     let mut child = ManagedProbeChild::new(command.spawn().unwrap());
     let deadline = Instant::now() + PROBE_READY_WAIT;
-    while !pid_file.is_file() && Instant::now() < deadline {
+    // Set-Content creates the file before releasing its exclusive write handle.
+    // Readiness means a complete readable PID, rather than file existence.
+    let pid = loop {
+        if let Some(pid) = std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "descendant pid file not ready");
         tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let pid = std::fs::read_to_string(&pid_file)
-        .expect("descendant pid file")
-        .trim()
-        .parse::<u32>()
-        .unwrap();
+    };
 
     child.kill_and_wait().await;
     let deadline = Instant::now() + PROBE_EXIT_WAIT;

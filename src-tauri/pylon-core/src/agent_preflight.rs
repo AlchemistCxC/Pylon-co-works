@@ -818,6 +818,7 @@ mod tests {
             name: "Claude Code".into(),
             executable: "ccb".into(),
             args: vec!["--acp".into()],
+            alternatives: Vec::new(),
             evidence: version
                 .map(|version| {
                     vec![AgentDetectionEvidence {

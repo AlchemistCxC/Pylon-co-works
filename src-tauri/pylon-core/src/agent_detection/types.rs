@@ -73,6 +73,15 @@ pub enum Startability {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeAlternative {
+    pub candidate_id: String,
+    pub executable: String,
+    pub args: Vec<String>,
+    pub startability: Startability,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeCandidate {
     pub candidate_id: String,
     pub detector_id: String,
@@ -81,6 +90,8 @@ pub struct AgentRuntimeCandidate {
     pub name: String,
     pub executable: String,
     pub args: Vec<String>,
+    /// Other discovered launch forms for the same provider; no configuration is written.
+    pub alternatives: Vec<AgentRuntimeAlternative>,
     pub evidence: Vec<AgentDetectionEvidence>,
     pub identity_confidence: IdentityConfidence,
     pub startability: Startability,

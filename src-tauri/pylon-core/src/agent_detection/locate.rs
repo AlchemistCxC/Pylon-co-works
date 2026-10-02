@@ -42,7 +42,6 @@ pub(crate) fn executable_names(command: &str) -> Vec<String> {
             format!("{command}.exe"),
             format!("{command}.cmd"),
             format!("{command}.bat"),
-            command.into(),
         ]
     } else {
         vec![command.into()]

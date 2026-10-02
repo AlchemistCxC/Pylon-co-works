@@ -11,6 +11,13 @@ export type AgentIdentityConfidence = 'high' | 'medium'
 export type AgentStartability = 'not_tested' | 'verified' | 'failed'
 export type AgentProtocolAvailability = 'not_tested' | 'verified' | 'failed'
 
+export interface AgentRuntimeAlternative {
+  candidateId: string
+  executable: string
+  args: string[]
+  startability: AgentStartability
+}
+
 export interface AgentDetectionDiagnostic {
   code: string
   stage: string
@@ -35,6 +42,7 @@ export interface AgentRuntimeCandidate {
   name: string
   executable: string
   args: string[]
+  alternatives?: AgentRuntimeAlternative[]
   evidence: AgentDetectionEvidence[]
   identityConfidence: AgentIdentityConfidence
   /** Backend emits this for every candidate; optional keeps older persisted/mock payloads readable. */
@@ -196,7 +204,20 @@ export function normalizeAgentRuntimeCandidates(raw: unknown): AgentRuntimeCandi
   }).map(candidate => ({
     ...candidate,
     startability: candidate.startability ?? 'not_tested',
+    alternatives: normalizeRuntimeAlternatives(candidate.alternatives),
   }))
+}
+
+function normalizeRuntimeAlternatives(raw: unknown): AgentRuntimeAlternative[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap(item => {
+    if (!item || typeof item !== 'object') return []
+    const value = item as Partial<AgentRuntimeAlternative>
+    if (typeof value.candidateId !== 'string' || typeof value.executable !== 'string'
+      || !Array.isArray(value.args) || !value.args.every(arg => typeof arg === 'string')
+      || !['not_tested', 'verified', 'failed'].includes(value.startability ?? '')) return []
+    return [{ candidateId: value.candidateId, executable: value.executable, args: [...value.args], startability: value.startability as AgentStartability }]
+  })
 }
 
 function normalizeDiagnostics(raw: unknown): AgentDetectionDiagnostic[] {

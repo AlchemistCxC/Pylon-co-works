@@ -6,8 +6,8 @@ use super::locate::{
 };
 use super::probe_cache::version_probe;
 use super::types::{
-    AgentDetectionEvidence, AgentEvidenceHit, AgentProviderEvidence, AgentRuntimeCandidate,
-    IdentityConfidence, ProtocolAvailability, Startability,
+    AgentDetectionEvidence, AgentEvidenceHit, AgentProviderEvidence, AgentRuntimeAlternative,
+    AgentRuntimeCandidate, IdentityConfidence, ProtocolAvailability, Startability,
 };
 use crate::agent_catalog::{AgentDetectionProfile, CatalogConfigEvidence, CatalogConfigFormat};
 use crate::agent_preflight::ToolVersion;
@@ -159,7 +159,7 @@ pub(crate) fn candidate_version(candidate: &AgentRuntimeCandidate) -> Option<Str
 /// vendor CLI 与 ACP 适配器是同一 agent 的两个证据面（`acp_adapter_relation`），不是两个实例。
 ///
 /// 合并取最强证据作代表，但被折叠的形式**不静默丢弃**：写入 `evidence`
-/// （kind=`folded-runtime`）与 `warnings`，并在版本不一致时显式告警；已导入的变体优先
+/// （kind=`folded-runtime`）、`alternatives` 与 `warnings`，并在版本不一致时显式告警；已导入的变体优先
 /// 当代表，否则"已导入"会在合并后丢失并诱导重复导入。
 pub(crate) fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<RankedCandidate> {
     let mut groups: Vec<(String, Vec<RankedCandidate>)> = Vec::new();
@@ -186,6 +186,12 @@ pub(crate) fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<
         let mut winner = bucket.remove(winner_index);
         let winner_version = candidate_version(&winner.0);
         for variant in bucket {
+            winner.0.alternatives.push(AgentRuntimeAlternative {
+                candidate_id: variant.0.candidate_id.clone(),
+                executable: variant.0.executable.clone(),
+                args: variant.0.args.clone(),
+                startability: variant.0.startability,
+            });
             let variant_version = candidate_version(&variant.0);
             if let (Some(winner_version), Some(variant_version)) =
                 (&winner_version, &variant_version)
@@ -197,7 +203,7 @@ pub(crate) fn merge_candidates_by_identity(ranked: Vec<RankedCandidate>) -> Vec<
                 }
             }
             winner.0.warnings.push(format!(
-                "同一 Agent 另有可执行形式：{} {}（未采用为导入目标）",
+                "同一 Agent 另有可执行形式：{} {}（可选择为启动入口）",
                 variant.0.executable,
                 variant.0.args.join(" ")
             ));

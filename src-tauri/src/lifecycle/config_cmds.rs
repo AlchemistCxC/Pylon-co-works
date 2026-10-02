@@ -35,7 +35,7 @@ pub(crate) async fn reload_agents(
             .map_err(|error| error.to_string())?
             .clone();
         let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
-        if !new_agents.contains_key(&active_agent) {
+        if !active_agent.is_empty() && !new_agents.contains_key(&active_agent) {
             return Err(PylonError::Protocol(format!(
                 "agent config cannot remove active agent: {active_agent}"
             )));
@@ -487,7 +487,8 @@ fn removed_agents_guard(
     active: &str,
 ) -> Result<Vec<String>, crate::agent_config::ConfigError> {
     use crate::agent_config::ConfigError;
-    if !candidate.contains_key(active) {
+    // Zero-agent startup uses the empty string as the absence of an active agent.
+    if !active.is_empty() && !candidate.contains_key(active) {
         return Err(ConfigError::ActiveAgentProtected(format!(
             "候选配置删除了当前 active agent: {active}"
         )));
@@ -509,6 +510,24 @@ mod tests {
 
     fn parsed(content: &str) -> std::collections::HashMap<String, crate::agent_config::AgentDef> {
         crate::agent_config::validate_candidate(content, None).expect("fixture 必须合法")
+    }
+
+    #[test]
+    fn first_agent_import_does_not_treat_empty_active_as_an_agent_to_delete() {
+        let candidate = build_scope_candidate(
+            "agents: {}\n",
+            "agent_create",
+            Some("hermes"),
+            &serde_json::json!({"name":"Hermes", "transport":"subprocess", "exe":"hermes", "args":["acp"], "default":true}),
+        )
+        .unwrap();
+        let new_agents = parsed(&candidate);
+        assert!(
+            removed_agents_guard(&std::collections::HashMap::new(), &new_agents, "")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(removed_agents_guard(&new_agents, &new_agents, "missing-active").is_err());
     }
 
     fn delete_candidate(agent_id: &str) -> String {

@@ -5,7 +5,7 @@ import { createSignal } from 'solid-js'
 import FileViewHost from '../FileViewHost.solid.tsx'
 import { fileTabKey, type FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
-import { fileEditorEditable } from './codeMirrorTestUtils.solid.ts'
+import { fileEditorEditable, waitForFileEditor } from './codeMirrorTestUtils.solid.ts'
 
 afterEach(() => cleanup())
 
@@ -55,7 +55,10 @@ describe('FileViewHost 统一 file/diff 宿主（D-03/D-04）', () => {
       expect(fileViewOf(container)?.getAttribute('data-path')).toBe('src/a.ts')
       expect(invoke).toHaveBeenCalledWith('read_workspace_text', { source: 'ws-a', relativePath: 'src/a.ts' })
     })
-    await waitFor(() => expect(screen.getByText('const x = 1')).toBeTruthy())
+    const editor = await waitForFileEditor('const x = 1')
+    // Syntax highlighting can split a line across spans; assert the visible editor text.
+    // （#521 冲突解：移植 Codex 侧对脆性断言的修复——高亮拆 span 后 getByText 匹配不到）
+    expect(editor.contentDOM).toHaveTextContent('const x = 1')
     expect(fileEditorEditable()).toBe(true)
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
     expect(screen.queryByText('编辑中')).toBeNull()
