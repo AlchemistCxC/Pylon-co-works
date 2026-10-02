@@ -44,7 +44,7 @@ function register(contribution: Partial<AgentSidebarContribution> & { id: string
   identitySeq += 1
   disposals.push(registry.register(createPluginIdentity('test.sidebar-blocks', `run-${identitySeq}`), {
     label: contribution.id,
-    renderKind: 'first-party-react',
+    renderKind: 'first-party-solid',
     component: () => null,
     ...contribution,
   } as AgentSidebarContribution))

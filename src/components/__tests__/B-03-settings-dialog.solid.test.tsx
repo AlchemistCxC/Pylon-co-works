@@ -2,18 +2,17 @@
 /** @jsxImportSource solid-js */
 // #515 改写点登记（迁移自 B-03-settings-dialog.test.tsx，React RTL → Solid）：
 // - RTL 导入改 @solidjs/testing-library；显式 afterEach(cleanup)。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素）。
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid JSX（#515 W1 起实体直连，mock 须产 Solid 元素）。
 // - 「正文跟随」的 DOM 断言包 vi.waitFor：solid 的 DOM 更新是微任务异步（原 React act
 //   同步提交）；sheet 状态断言（store 同步写）保持同步。断言语义不变、集合不缩减。
 import { cleanup, fireEvent, screen, within } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
-  default: () => createElement('div', { 'data-testid': 'agent-runtime-panel' }, 'runtime onboarding'),
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({
+  default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
 
 const { invokeRef } = vi.hoisted(() => ({

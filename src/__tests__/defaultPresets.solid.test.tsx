@@ -34,7 +34,7 @@ import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { mountSettingsSheet } from '../test/settingsSheetHarness.solid'
 import { resetStores } from '../test/resetStores.ts'
 
-vi.mock('../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => null }))
+vi.mock('../components/settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const GLASS = GLOBAL_PRESETS.find(preset => preset.name === 'glass')!

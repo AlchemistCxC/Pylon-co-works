@@ -1,22 +1,18 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
-import { render } from 'solid-js/web'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
+import { createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { zonePresetsFor, isCustomZonePresetEntry, type ZonePresetEntry } from '../../domains/theme/zones/index.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 /**
  * settingsSectionShared.solid — Settings 共享呈现原语的 Solid 实体（#515）。
  *
- * #515 第二批收尾：`Group`（折叠组）、error key 口径（report/resolveSettingsError）
- * 在本实体落地面——此前 GlobalPresetSection.solid.tsx 因本文件在途而按同源口径本地
- * 声明过副本（其漂移由 Settings.customPreset 契约测试钉住；收拢副本由该文件归属批处理）。
- * React 世界（AgentSettingsSection / ZonePresetSection / settingsAgentActions 等
- * React 消费者）继续从 settingsSectionShared.tsx 消费——React 面文件不得静态回向引用
- * .solid 实体，因此该 .tsx 保留 React 实现与 ZonePresetRow 薄桥。
+ * #515 W1 收口：`Group`（折叠组）与 error key 口径在本实体落地面；error key 纯函数
+ * 拆至 `settingsErrorReports.ts`（`.ts` 面不得静态引用 .solid.tsx，实体侧转发保持
+ * 既有消费接口）。React 面 settingsSectionShared.tsx 已随该域 Solid 化删除——本文件
+ * 是唯一事实。
  */
+export { reportSettingsError, resolveSettingsError } from './settingsErrorReports.ts'
 
 export function Group(props: { title: string; children: JSX.Element; defaultOpen?: boolean }) {
   const [open, setOpen] = createSignal(props.defaultOpen ?? true)
@@ -29,22 +25,6 @@ export function Group(props: { title: string; children: JSX.Element; defaultOpen
       <Show when={open()}>{props.children}</Show>
     </div>
   )
-}
-
-/** Settings 域内错误上报的统一 key 口径（agentActions 与预设事务共用；与
- * settingsSectionShared.tsx 的纯函数逐字一致）。 */
-export function reportSettingsError(action: string, error: unknown, agentId?: string): ReturnType<typeof reportRuntimeError> {
-  return reportRuntimeError(action, error, agentId, {
-    key: `settings:${action}:${agentId ?? 'app'}`,
-    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
-    source: 'settings',
-  })
-}
-
-export function resolveSettingsError(action: string, agentId?: string): void {
-  resolveRuntimeErrors({
-    key: `settings:${action}:${agentId ?? 'app'}`,
-  })
 }
 
 export interface ZonePresetRowProps {
@@ -119,9 +99,4 @@ export function ZonePresetRow(props: ZonePresetRowProps) {
       </Group>
     </Show>
   )
-}
-
-/** React 薄桥（settingsSectionShared.tsx）经 eager glob 调用的挂载缝。 */
-export function renderZonePresetRow(container: HTMLElement, latest: () => ZonePresetRowProps): () => void {
-  return render(() => createComponent(ZonePresetRow, bridgedProps(latest)), container)
 }

@@ -5,17 +5,16 @@
 // tactical-blue（不在归属表内）⇒ 预设组不出现。
 // #515 改写点登记（迁移自 Settings.globalPresetMenu.test.tsx，React RTL → Solid）：
 // - RTL 导入改 @solidjs/testing-library；补显式 afterEach(cleanup)。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素）。
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid 空组件（#515 W1 起实体直连，mock 不产 React 元素）。
 // - React 的 act 包装改直调 setState + vi.waitFor：solid 的 DOM 更新是微任务异步，
 //   换桶断言等待 DOM 到位后再跑；断言语义不变、集合不缩减。
 import { cleanup, screen, within } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
 import { resetStores } from '../../test/resetStores.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({ default: () => createElement('div') }))
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const GUI_LABELS = ['Glass Light', 'Solarized Light', 'Agent 指挥台', 'Agent 关系图', '专注流程']

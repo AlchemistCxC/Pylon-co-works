@@ -5,21 +5,19 @@
 //   提交），同步断言改 await findBy（findByTestId 先等岛落地，其余断言原样保留；
 //   断言集不缩减）——上一批登记，本轮保留。
 // - RTL 导入改 @solidjs/testing-library；显式 afterEach(cleanup)。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素，
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid JSX（#515 W1 起实体直连，mock 须产 Solid 元素），
 //   本文件 JSX 经 solid 编译，不能进岛）；DOM 契约逐字段不变。
 import { cleanup, screen } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
 import { resetStores } from '../../test/resetStores.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
-  default: (props: { initialAgentId?: string }) => createElement('div', {
-    'data-testid': 'agent-runtime-panel',
-    'data-agent-id': props.initialAgentId,
-  }, 'runtime onboarding'),
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({
+  default: (props: { initialAgentId?: string }) => (
+    <div data-testid="agent-runtime-panel" data-agent-id={props.initialAgentId}>runtime onboarding</div>
+  ),
 }))
 
 const { invokeRef } = vi.hoisted(() => ({

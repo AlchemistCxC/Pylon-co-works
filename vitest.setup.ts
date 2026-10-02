@@ -64,12 +64,12 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/domains/identity/__tests__/identityStore.hydration.test.ts',
   'src/__tests__/replay/canonicalEventFeed.test.ts',
   'src/application/transactions/__tests__/applyWorkspaceLayoutChange.test.ts',
-  'src/application/transactions/__tests__/applyWorkspaceRootChange.test.ts',
   // #445：搜索错误路径（searchHits/单行拉取拒绝）刻意触发 reportRuntimeError 的
   // console.error——A 类错误路径契约。
   'src/domains/search/__tests__/searchService.test.ts',
   // #515 二轮：messageRenderBoundary.test.tsx 已随 #279 chat 死代码清理退役，条目删除。
-  'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
+  // #515 W1：AgentRuntimePanel 实体已迁 .solid.tsx，测试随之改名（同一错误路径契约，白名单跟随）。
+  'src/components/settings/__tests__/AgentRuntimePanel.default.solid.test.tsx',
   // #422：凭证门禁错误路径（config_verification_required / 连接测试失败）刻意触发
   // reportRuntimeError 的 console.error——与上面 AgentRuntimePanel 同族的预期契约。
   // #515：两文件实体已迁 .solid.tsx，测试随之改名（同一错误路径契约，白名单跟随）。

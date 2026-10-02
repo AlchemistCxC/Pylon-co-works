@@ -1,11 +1,9 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onMount, Show } from 'solid-js'
-import { createElement, type ComponentType, type ReactElement, type ReactNode } from 'react'
-import SolidMount from '../host/SolidMount'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { shallowEqual } from '../infrastructure/state/reactStoreShim'
-import { createRegistrySignal, ReactIslandHost } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
 import { useStore } from '../domains/theme/themeStore'
 import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import type { ThemeSettings } from '../domains/theme/themeStore'
@@ -36,10 +34,14 @@ import { HOSTED_PLUGIN_MANAGER_PAGE_ID, SETTINGS_SECTION_LABELS, sectionZone, SE
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
-// Solid 域内直连实体（settings/* 已实体化）
-import { type RenderCtx, renderZoneGroupFields } from './settings/themeFieldRenderer.solid.tsx'
-import { renderSidebarModulesPanel } from './settings/SidebarModulesPanel.solid.tsx'
-import { renderPresentationProfilePicker } from './settings/PresentationProfilePicker.solid.tsx'
+// ---- Solid 域内直连（#515 W1 终局批：settings agent 避让域 Solid 化收口，
+// 以下 ReactIslandHost/glob 岛全部退役，宿主与组件同为 Solid ⇒ solid-in-solid 直连）。 ----
+import { type RenderCtx, ZoneGroupFields } from './settings/themeFieldRenderer.solid.tsx'
+import SidebarModulesPanel from './settings/SidebarModulesPanel.solid.tsx'
+import PresentationProfilePicker from './settings/PresentationProfilePicker.solid.tsx'
+import SettingsSectionHeaderSolid from './settings/SettingsSectionHeader.solid.tsx'
+import ZonePresetSectionSolid from './settings/ZonePresetSection.solid.tsx'
+import AgentSettingsSectionSolid from './settings/AgentSettingsSection.solid.tsx'
 import SettingsPreviewSolid from './SettingsPreview.solid.tsx'
 import TemplateLibrarySolid from './settings/TemplateLibrary.solid.tsx'
 import WindowPanelSolid from './settings/WindowPanel.solid.tsx'
@@ -48,7 +50,6 @@ import HistoryRetentionSolid from './settings/HistoryRetention.solid.tsx'
 import GatewayRiskPanelSolid from './settings/GatewayRiskPanel.solid.tsx'
 import InputPredictionSettingsPanelSolid from './settings/InputPredictionSettingsPanel.solid.tsx'
 import HookDiagnosticsPanelSolid from './settings/HookDiagnosticsPanel.solid.tsx'
-// ---- Solid 域内直连（#515 第二批收尾：以下组件实体已迁 .solid.tsx，岛退役） ----
 import PluginManagerSolid from './settings/PluginManager.solid.tsx'
 import PluginSettingsPageHostSolid from './settings/PluginSettingsPageHost.solid.tsx'
 import RendererSettingsPanelSolid from './settings/RendererSettingsPanel.solid.tsx'
@@ -56,89 +57,6 @@ import RendererSettingsPreviewSolid from './settings/RendererSettingsPreview.sol
 import SettingsQuickSearchSolid from './settings/SettingsQuickSearch.solid.tsx'
 import GlobalPresetSectionSolid from './settings/GlobalPresetSection.solid.tsx'
 import { Group } from './settings/settingsSectionShared.solid.tsx'
-// ---- React 岛（#515 迁移期：这些 settings 子组件仍是 React 面，批7 后随 React 面退役；
-// 类型图不触碰 React 组件文件，模块接口就地声明，与实体侧逐字段一致）。 ----
-
-interface SettingsSectionHeaderProps {
-  section: SettingsSectionId
-  density: 'basic' | 'standard' | 'all'
-  onDensity: (density: 'basic' | 'standard' | 'all') => void
-}
-
-interface SettingsSectionHeaderModule {
-  default: (props: SettingsSectionHeaderProps) => ReactElement
-}
-
-const sectionHeaderModules = import.meta.glob<SettingsSectionHeaderModule>('./settings/SettingsSectionHeader.tsx', { eager: true })
-const SettingsSectionHeader = sectionHeaderModules['./settings/SettingsSectionHeader.tsx']?.default
-if (!SettingsSectionHeader) throw new Error('SettingsSectionHeader React 面未进入 Vite module graph')
-
-interface ZonePresetSectionProps {
-  zone: 'sidebar' | 'chat' | 'cc' | 'right'
-  label?: string
-  isSearching: boolean
-  interfaceMode: string
-  fields: ReactElement
-  header?: ReactElement
-  footer?: ReactElement
-  onApplyZonePreset: (zone: ZonePresetEntry['zone'], entry: ZonePresetEntry) => void
-  onSaveZonePresetEntry: (zone: ZonePresetEntry['zone'], name: string) => void
-  onRemoveZonePresetEntry: (id: string) => void
-}
-
-interface ZonePresetSectionModule {
-  default: (props: ZonePresetSectionProps) => ReactElement
-}
-
-const zonePresetModules = import.meta.glob<ZonePresetSectionModule>('./settings/ZonePresetSection.tsx', { eager: true })
-const ZonePresetSection = zonePresetModules['./settings/ZonePresetSection.tsx']?.default
-if (!ZonePresetSection) throw new Error('ZonePresetSection React 面未进入 Vite module graph')
-
-interface ReactGroupProps {
-  title: string
-  children: ReactNode
-  defaultOpen?: boolean
-}
-
-interface SettingsSectionSharedModule {
-  Group: (props: ReactGroupProps) => ReactElement
-}
-
-const sectionSharedModules = import.meta.glob<SettingsSectionSharedModule>('./settings/settingsSectionShared.tsx', { eager: true })
-const ReactGroup = sectionSharedModules['./settings/settingsSectionShared.tsx']?.Group
-if (!ReactGroup) throw new Error('settingsSectionShared React 面未进入 Vite module graph')
-
-// #515 连带修复：themeFieldRenderer / SidebarModulesPanel / PresentationProfilePicker 的
-// React 薄桥已随实体化拆除，但下方 ZonePresetSection React 岛的 fields/header 仍是
-// React 元素位——就地复刻同构薄桥（SolidMount + 实体 renderXxx 工厂，与拆除前的桥
-// 文件等价），DOM 契约不变。批7（ZonePresetSection Solid 化）后随岛一并退役。
-// （SolidMount 在 solid 类型图里 JSX.Element 解析为 Solid Element，与 createElement 的
-// ReactElement 形参不相容——按 React 组件视角断言，运行时是同一个函数。）
-function reactIslandBridge<P extends object>(
-  mount: (container: HTMLElement, latest: () => P) => () => void,
-): (props: P) => ReactElement {
-  return (props: P) => createElement(
-    SolidMount as unknown as ComponentType<{ initial: P; mount: typeof mount }>,
-    { initial: props, mount },
-  )
-}
-
-const ZoneGroupFieldsBridge = reactIslandBridge(renderZoneGroupFields)
-const SidebarModulesPanelBridge = reactIslandBridge(renderSidebarModulesPanel)
-const PresentationProfilePickerBridge = reactIslandBridge(renderPresentationProfilePicker)
-
-interface AgentSettingsSectionProps {
-  initialAgentId?: string
-  activeSessionContext?: { agentId: string; source: string }
-}
-
-interface AgentSettingsSectionModule {
-  default: (props: AgentSettingsSectionProps) => ReactElement
-}
-
-const agentSectionModules = import.meta.glob<AgentSettingsSectionModule>('./settings/AgentSettingsSection.tsx', { eager: true })
-const AgentSettingsSection = agentSectionModules['./settings/AgentSettingsSection.tsx']?.default
-if (!AgentSettingsSection) throw new Error('AgentSettingsSection React 面未进入 Vite module graph')
 
 /**
  * 设置贡献目录的共享投影（`useSettingsContributionCatalog` 的 Solid 形态，#515 内联；
@@ -191,9 +109,9 @@ export interface SettingsProps extends WorkspaceViewProps<SettingsSheetState> {}
  * settings/AgentSettingsSection；全局预设事务在 settings/GlobalPresetSection；
  * 区域分区骨架在 settings/ZonePresetSection；速搜定位在 useSettingsSearchNavigation。
  *
- * #515：Solid 实体——settings/* 已实体化的子组件直连 .solid；仍为 React 面的子组件
- * （AgentSettingsSection / ZonePresetSection / SettingsSectionHeader）经 ReactIslandHost
- * 岛挂载（批7 后随 React 面退役）；原 useSettingsSearchNavigation hook 的定位态内联。
+ * #515 W1（终局批）：Solid 实体——settings/* 子组件全部 .solid 直连；settings agent
+ * 避让域（AgentSettingsSection 及其子树）Solid 化后，ReactIslandHost/glob React 岛
+ * 已全部退役；原 useSettingsSearchNavigation hook 的定位态内联。
  */
 export default function Settings(props: SettingsProps) {
   // #154 阶段 4：设置由固定覆盖层迁入 sheet 体系。导航真值（domain/section/pluginPageId/
@@ -362,30 +280,30 @@ export default function Settings(props: SettingsProps) {
         )
       case 'sidebar':
         return (
-          <ReactIslandHost element={() => createElement(ZonePresetSection, {
-            zone: 'sidebar',
-            label: SETTINGS_SECTION_LABELS.sidebar,
-            isSearching: isSearching(),
-            interfaceMode: currentInterfaceMode(),
-            header: !isSearching() ? createElement(ReactGroup, { title: '模块', children: createElement(SidebarModulesPanelBridge) }) : undefined,
-            fields: createElement(ZoneGroupFieldsBridge, { zone: 'sidebar', ctx: renderCtx(), density: density() }),
-            onApplyZonePreset: applyLocalPreset,
-            onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
-            onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
-          })} />
+          <ZonePresetSectionSolid
+            zone="sidebar"
+            label={SETTINGS_SECTION_LABELS.sidebar}
+            isSearching={isSearching()}
+            interfaceMode={currentInterfaceMode()}
+            header={!isSearching() ? <Group title="模块"><SidebarModulesPanel /></Group> : undefined}
+            fields={<ZoneGroupFields zone="sidebar" ctx={renderCtx()} density={density()} />}
+            onApplyZonePreset={applyLocalPreset}
+            onSaveZonePresetEntry={saveZonePresetEntryFromSettings}
+            onRemoveZonePresetEntry={id => useCustomPresetStore.getState().removeZonePresetEntry(id)}
+          />
         )
       case 'chat':
         return (
-          <ReactIslandHost element={() => createElement(ZonePresetSection, {
-            zone: 'chat',
-            isSearching: isSearching(),
-            interfaceMode: currentInterfaceMode(),
-            header: !isSearching() ? createElement(ReactGroup, { title: '渲染风格', children: createElement(PresentationProfilePickerBridge) }) : undefined,
-            fields: createElement(ZoneGroupFieldsBridge, { zone: 'chat', ctx: renderCtx(), density: density() }),
-            onApplyZonePreset: applyLocalPreset,
-            onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
-            onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
-          })} />
+          <ZonePresetSectionSolid
+            zone="chat"
+            isSearching={isSearching()}
+            interfaceMode={currentInterfaceMode()}
+            header={!isSearching() ? <Group title="渲染风格"><PresentationProfilePicker /></Group> : undefined}
+            fields={<ZoneGroupFields zone="chat" ctx={renderCtx()} density={density()} />}
+            onApplyZonePreset={applyLocalPreset}
+            onSaveZonePresetEntry={saveZonePresetEntryFromSettings}
+            onRemoveZonePresetEntry={id => useCustomPresetStore.getState().removeZonePresetEntry(id)}
+          />
         )
       case 'renderers':
         return (
@@ -400,56 +318,46 @@ export default function Settings(props: SettingsProps) {
         )
       case 'cc':
         return (
-          <ReactIslandHost element={() => createElement(ZonePresetSection, {
-            zone: 'cc',
-            label: SETTINGS_SECTION_LABELS.cc,
-            isSearching: isSearching(),
-            interfaceMode: currentInterfaceMode(),
-            fields: createElement(ZoneGroupFieldsBridge, { zone: 'cc', ctx: renderCtx(), density: density() }),
-            footer: !isSearching() ? createElement(ReactGroup, {
-              title: '布局编辑',
-              children: [
-                createElement('button', {
-                  key: 'cc-edit-toggle',
-                  type: 'button',
-                  className: 'ps-btn primary',
-                  onClick: () => {
-                    const cur = useStore.getState().ccEditMode
-                    useStore.getState().setCcEditMode(!cur)
-                    if (!cur) props.ctx.closeSheet(props.sheet.id)
-                  },
-                }, t().ccEditMode ? '退出布局编辑器' : '进入布局编辑器'),
-                createElement('div', { key: 'cc-edit-hint', className: 'set-hint' }, '位置 / 大小 / 显隐 在编辑器中拖拽调整'),
-              ],
-            }) : undefined,
-            onApplyZonePreset: applyLocalPreset,
-            onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
-            onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
-          })} />
+          <ZonePresetSectionSolid
+            zone="cc"
+            label={SETTINGS_SECTION_LABELS.cc}
+            isSearching={isSearching()}
+            interfaceMode={currentInterfaceMode()}
+            fields={<ZoneGroupFields zone="cc" ctx={renderCtx()} density={density()} />}
+            footer={!isSearching() ? <Group title="布局编辑">
+              <button type="button" class="ps-btn primary"
+                onClick={() => {
+                  const cur = useStore.getState().ccEditMode
+                  useStore.getState().setCcEditMode(!cur)
+                  if (!cur) props.ctx.closeSheet(props.sheet.id)
+                }}>{t().ccEditMode ? '退出布局编辑器' : '进入布局编辑器'}</button>
+              <div class="set-hint">位置 / 大小 / 显隐 在编辑器中拖拽调整</div>
+            </Group> : undefined}
+            onApplyZonePreset={applyLocalPreset}
+            onSaveZonePresetEntry={saveZonePresetEntryFromSettings}
+            onRemoveZonePresetEntry={id => useCustomPresetStore.getState().removeZonePresetEntry(id)}
+          />
         )
       case 'right':
         return (
-          <ReactIslandHost element={() => createElement(ZonePresetSection, {
-            zone: 'right',
-            label: SETTINGS_SECTION_LABELS.right,
-            isSearching: isSearching(),
-            interfaceMode: currentInterfaceMode(),
-            fields: createElement(ZoneGroupFieldsBridge, { zone: 'right', ctx: renderCtx(), density: density() }),
-            onApplyZonePreset: applyLocalPreset,
-            onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
-            onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
-          })} />
+          <ZonePresetSectionSolid
+            zone="right"
+            label={SETTINGS_SECTION_LABELS.right}
+            isSearching={isSearching()}
+            interfaceMode={currentInterfaceMode()}
+            fields={<ZoneGroupFields zone="right" ctx={renderCtx()} density={density()} />}
+            onApplyZonePreset={applyLocalPreset}
+            onSaveZonePresetEntry={saveZonePresetEntryFromSettings}
+            onRemoveZonePresetEntry={id => useCustomPresetStore.getState().removeZonePresetEntry(id)}
+          />
         )
       case 'agent':
+        // 活动会话变化经 props getter 直达（原 React 岛「父渲染透传」语义）。
         return (
-          <ReactIslandHost element={() => {
-            // 岛重渲触发：活动会话变化要透传（原 React 父渲染语义）。
-            void activeSessionContext()
-            return createElement(AgentSettingsSection, {
-              initialAgentId: props.state.agentId,
-              activeSessionContext: activeSessionContext(),
-            })
-          }} />
+          <AgentSettingsSectionSolid
+            initialAgentId={props.state.agentId}
+            activeSessionContext={activeSessionContext()}
+          />
         )
       case 'session':
         return (
@@ -484,11 +392,11 @@ export default function Settings(props: SettingsProps) {
       <div class="settings-tabs-root">
         <div class="settings-body" data-settings-domain={activeDomain()} data-settings-section={activeSection()}>
           <Show when={!activePluginPageId()}>
-            <ReactIslandHost element={() => createElement(SettingsSectionHeader, {
-              section: activeSection(),
-              density: density(),
-              onDensity: value => useSettingsChromeStore.getState().setDensity(value),
-            })} />
+            <SettingsSectionHeaderSolid
+              section={activeSection()}
+              density={density()}
+              onDensity={value => useSettingsChromeStore.getState().setDensity(value)}
+            />
           </Show>
           <Show when={!activePluginPageId() && (previewZone() || activeSection() === 'renderers')}>
             <div class="set-toolbar">

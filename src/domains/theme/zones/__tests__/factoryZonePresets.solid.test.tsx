@@ -45,7 +45,7 @@ import {
   type ZonePresetEntry,
 } from '../index.ts'
 
-vi.mock('../../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => null }))
+vi.mock('../../components/settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const BUCKETS = ['gui', 'terminal'] as const

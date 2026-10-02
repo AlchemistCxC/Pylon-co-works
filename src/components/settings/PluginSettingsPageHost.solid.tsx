@@ -118,7 +118,7 @@ export default function PluginSettingsPageHost(props: { pageId: string }) {
                     </>
                   )
                 }
-                const Contribution = current.value.renderKind === 'first-party-react' ? current.value.component : null
+                const Contribution = current.value.renderKind === 'first-party-solid' ? current.value.component : null
                 return (
                   <>
                     {schemaHost}

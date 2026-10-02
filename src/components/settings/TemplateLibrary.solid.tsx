@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, Show } from 'solid-js'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { GLOBAL_PRESETS } from '../../domains/theme/presets/index.ts'
 import { effectivePresetTheme } from '../../domains/theme/zones/index.ts'
@@ -10,7 +9,7 @@ import { themeToCssVars } from './templateThemeVars.ts'
 import { createPresetBundle, presetCoverage, type PresetApplyResult } from '../../domains/theme/presetBundle.ts'
 import { normalizeCustomPresetId } from '../../domains/theme/customPresets.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
+import SettingsPreviewSolid from '../SettingsPreview.solid.tsx'
 
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。
@@ -18,9 +17,10 @@ import { bridgedProps } from '../../host/solidBridge.solid'
  * #515：Solid 实体（原 TemplateLibrary.tsx 为 React 薄桥）。
  *
  * 官方预设 + 用户自定义两分区；预览 = 对 delta 计算 { ...THEME_DEFAULTS, ...delta }
- * 的内存态 cssVars 注入预览容器局部 style（预览本体是 SettingsPreview React 岛，
- * 经 eager glob 缝挂载——不触全局 store）；点击才应用（setGlobalPreset /
- * applyCustomPreset）；「恢复此模板默认」重应用当前模板 delta（清手调字段）。
+ * 的内存态 cssVars 注入预览容器局部 style（预览本体是 SettingsPreview，#515 W1 起
+ * solid-in-solid 直连实体——原 React 预览岛 TemplateLibraryPreviewIsland 退役，不触
+ * 全局 store）；点击才应用（setGlobalPreset / applyCustomPreset）；「恢复此模板默认」
+ * 重应用当前模板 delta（清手调字段）。
  */
 
 export interface TemplateLibraryProps {
@@ -28,15 +28,6 @@ export interface TemplateLibraryProps {
   onRestore: (presetName: string) => void | Promise<void>
   onCustomApply?: (presetId: string) => Promise<PresetApplyResult>
 }
-
-/** SettingsPreview React 岛的模块接口（Solid 类型图内的唯一事实，与岛侧逐字段一致）。 */
-interface TemplatePreviewIslandModule {
-  mountTemplatePreviewIsland(container: HTMLElement, get: () => { zone: string }): { rerender(): void; dispose(): void }
-}
-
-const islandModules = import.meta.glob<TemplatePreviewIslandModule>('./TemplateLibraryPreviewIsland.tsx', { eager: true })
-const islandModule = islandModules['./TemplateLibraryPreviewIsland.tsx']
-if (!islandModule) throw new Error('模板预览 React 岛未进入 Vite module graph')
 
 interface TemplateView {
   id: string
@@ -114,11 +105,9 @@ export default function TemplateLibrary(props: TemplateLibraryProps) {
   const renderCard = (template: TemplateView) => (
     <div class="template-card">
       <div class="template-preview" style={themeToCssVars(template.theme)}>
-        <div ref={host => {
-          if (!host) return
-          const mount = untrack(() => islandModule.mountTemplatePreviewIsland(host, () => ({ zone: 'global' })))
-          onCleanup(() => mount.dispose())
-        }} />
+        {/* #515 W1：预览岛（TemplateLibraryPreviewIsland + SettingsPreview React 桥）
+            退役，实体直连——zone 固定 global，挂载后无 props 流。 */}
+        <SettingsPreviewSolid zone="global" />
       </div>
       <div class="template-actions">
         <button type="button" class="template-apply" disabled={applyingId() !== null} aria-busy={applyingId() === template.id || undefined} onClick={() => { void applyTemplate(template) }}>
@@ -170,7 +159,3 @@ export default function TemplateLibrary(props: TemplateLibraryProps) {
   )
 }
 
-/** React 薄桥（TemplateLibrary.tsx）经 eager glob 调用的挂载缝。 */
-export function renderTemplateLibrary(container: HTMLElement, latest: () => TemplateLibraryProps): () => void {
-  return render(() => createComponent(TemplateLibrary, bridgedProps(latest)), container)
-}
