@@ -2,7 +2,7 @@
 import { createMemo, onCleanup, onMount, Show, Suspense } from 'solid-js'
 import { save } from '@tauri-apps/plugin-dialog'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { appClients } from '../../app/appClients.ts'
 import { refreshSessionsBackend, useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'

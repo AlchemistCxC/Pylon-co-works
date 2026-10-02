@@ -1,10 +1,10 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, onCleanup } from 'solid-js'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
-import { DEFAULT_INTERFACE_MODE, useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
-import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { findInterfaceModeContribution } from '../app/interfaceModeLookup.ts'
-import type { InterfaceModeContribution } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import { createZustandSignal } from './solidStoreBridge.ts'
+import { DEFAULT_INTERFACE_MODE, useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
+import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
+import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 
 /**
  * #515 sheet 视图 Solid 化的共享支撑件（仅 Solid 实体消费；React 类型图不触碰本文件）。

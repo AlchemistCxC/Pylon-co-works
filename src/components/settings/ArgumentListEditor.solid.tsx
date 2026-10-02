@@ -16,9 +16,10 @@ export interface ArgumentListEditorProps {
 
 /**
  * ArgumentListEditor — 启动参数列表编辑器（实参增删改/上下移）。
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/aria 契约逐字保持）。
- * 行键 = 原版 React `key={index}` ⇒ 用 `<Index>`（按位复用行，输入不丢焦点；
- * `<For>` 按引用判等，逐键重挂会让输入框失焦）。
+ * #515 W1：Solid 实体。DOM/aria 契约：div.agent-argument-list[role=group]
+ * [aria-label="{label} 启动参数"] > .set-preset-row 行（input.set-input
+ * [aria-label="{label} 参数 N"] + 上移/下移/删除钮）+「添加参数」。
+ * 行用 `<Index>` 按位复用（行号即键）：逐键编辑不重挂行、输入框不丢焦点。
  */
 export default function ArgumentListEditor(props: ArgumentListEditorProps) {
   const disabled = () => props.disabled ?? false

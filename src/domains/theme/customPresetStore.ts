@@ -21,7 +21,7 @@
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import type { CustomPreset } from './customPresets.ts'
 import type { ThemeState } from './themeStore.ts'
-import { useStore } from './themeStore.ts'
+import { useThemeStore } from './themeStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import {
   cleanupZonePresetEntries,
@@ -102,7 +102,7 @@ function readLegacyPresetsStorageValue(key: string): string | null {
   return migrated
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useCustomPresetStore 即内核本体（直连，无 shim）。
 const customPresetKernel = createSolidStoreKernel<CustomPresetState>({
     customPresets: [],
     zonePresetEntries: [],
@@ -116,14 +116,14 @@ const customPresetKernel = createSolidStoreKernel<CustomPresetState>({
     removeCustomPreset: (id) => {
       // reducer 同时产出主题侧回写（appliedPreset/custom 标记）与预设列表删除
       const patch = removeCustomPresetReducer(presetCombinedApi().get(), id)
-      useStore.setState({ appliedPreset: patch.appliedPreset, custom: patch.custom })
+      useThemeStore.setState({ appliedPreset: patch.appliedPreset, custom: patch.custom })
       customPresetKernel.setState({ customPresets: patch.customPresets })
     },
 
     saveZonePresetEntry: (mode, zone, label) => {
       const cleanLabel = label.trim()
       if (!cleanLabel) return null
-      const theme = useStore.getState()
+      const theme = useThemeStore.getState()
       const existing = normalizeZonePresetEntries(customPresetKernel.getState().zonePresetEntries)
       const id = createZonePresetEntryId(mode, zone, Date.now(), existing.map(entry => entry.id))
       const entry: ZonePresetEntry = {
@@ -144,15 +144,15 @@ const customPresetKernel = createSolidStoreKernel<CustomPresetState>({
       const current = Array.isArray(customPresetKernel.getState().zonePresetEntries) ? customPresetKernel.getState().zonePresetEntries : []
       const patch = removeZonePresetEntryReducer({
         zonePresetEntries: current,
-        appliedPreset: useStore.getState().appliedPreset,
-        custom: useStore.getState().custom,
+        appliedPreset: useThemeStore.getState().appliedPreset,
+        custom: useThemeStore.getState().custom,
       }, id)
       if (patch.zonePresetEntries === current) return
       // 出厂条目不可删的闸门在 reducer；命中删除时才回写主题侧标记（可选字段）
       const themePatch: Partial<Pick<ThemeState, 'appliedPreset' | 'custom'>> = {}
       if (patch.appliedPreset !== undefined) themePatch.appliedPreset = patch.appliedPreset
       if (patch.custom !== undefined) themePatch.custom = patch.custom
-      if (Object.keys(themePatch).length > 0) useStore.setState(themePatch)
+      if (Object.keys(themePatch).length > 0) useThemeStore.setState(themePatch)
       customPresetKernel.setState({ zonePresetEntries: patch.zonePresetEntries })
     },
 })
@@ -209,7 +209,7 @@ export const useCustomPresetStore: SolidStoreKernel<CustomPresetState> = customP
 /** 合成 store api：get = 两 store 合并视图；set 按字段路由（预设切片 ⇄ 主题字段）。 */
 function presetCombinedApi() {
   return {
-    get: (): ThemeState & CustomPresetState => ({ ...useStore.getState(), ...useCustomPresetStore.getState() }),
+    get: (): ThemeState & CustomPresetState => ({ ...useThemeStore.getState(), ...useCustomPresetStore.getState() }),
     set: (partial: Partial<ThemeState & CustomPresetState> | ((state: ThemeState & CustomPresetState) => Partial<ThemeState & CustomPresetState>)): void => {
       const patch = typeof partial === 'function' ? partial(presetCombinedApi().get()) : partial
       const { customPresets, zonePresetEntries, ...themePatch } = patch as Partial<ThemeState & CustomPresetState>
@@ -219,7 +219,7 @@ function presetCombinedApi() {
           ...(zonePresetEntries !== undefined ? { zonePresetEntries } : {}),
         })
       }
-      if (Object.keys(themePatch).length > 0) useStore.setState(themePatch)
+      if (Object.keys(themePatch).length > 0) useThemeStore.setState(themePatch)
     },
   }
 }

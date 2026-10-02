@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { useTacticalSceneStore } from './tacticalSceneStore'
 
 export type TacticalPanel = 'home' | 'agents' | 'recent' | 'workspaces'

@@ -3,7 +3,7 @@ import type { SessionConfig } from '../runtime/runtimeStore.ts'
 import type { AvailableCommand } from '../../infrastructure/acp/chatContracts'
 import type { AgentContext, AgentContextKey } from '../agent/agentContext.ts'
 import { toAgentContextKey } from '../agent/agentContext.ts'
-import { assembleSessionPrompt } from '../../host/commandSetResolver.ts'
+import { assembleSessionPrompt } from '../../application/commandSetResolver.ts'
 import { collectFirstMessagePromptPrelude } from '../../plugins/core/sessionCreation/builtinSessionCreation.ts'
 
 export interface SessionLiveStats {

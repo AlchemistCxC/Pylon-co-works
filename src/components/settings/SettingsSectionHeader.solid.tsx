@@ -30,8 +30,10 @@ export interface SettingsSectionHeaderProps {
  * 页面自有/未登记 section 显示「设置页」徽标（PAGE_OWNED_SECTIONS + isPageOwnedSection 派生）。
  * 密度档三选（拍板 D3-A 全局一档）：basic 只显 tier:'basic'；standard 非 advanced；all 全量。
  *
- * #515 W1：Solid 实体（原 React 面同批退役）；K-3 的 ui/Select 直连 Solid 实体
- * （原 React 桥 ui/Select.tsx 随零消费者删除）。DOM/aria 契约逐字保持。
+ * #515 W1：Solid 实体；下拉经 ui/Select 的 Solid 实体直连。DOM/aria 契约：
+ * div.settings-section-header > .settings-owner-badge[data-owner]（aria-hidden 菱形 +
+ * .settings-owner-id 名牌，页面自有/未登记 section 按「设置页」徽标处理）+
+ * 密度档 .settings-density-select（Select）。
  */
 export default function SettingsSectionHeader(props: SettingsSectionHeaderProps) {
   // ⚠️ Solid 组件体只跑一次：owner/pageOwned 是 props 派生值，必须收成 accessor——

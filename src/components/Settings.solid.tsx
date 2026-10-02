@@ -1,9 +1,9 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onMount, Show } from 'solid-js'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { shallowEqual } from '../infrastructure/state/solidStoreKernel'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
-import { useStore } from '../domains/theme/themeStore'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import type { ThemeSettings } from '../domains/theme/themeStore'
 import { normalizeCustomPresetId, pickCustomPresetTheme } from '../domains/theme/customPresets'
@@ -134,7 +134,7 @@ export default function Settings(props: SettingsProps) {
   // 都换根引用」的观察语义），外层 equals memo 以
   // shallowEqual 滤掉无值变化的写入（App.solid.tsx themeBaseline 同款），预设应用 /
   // 重置 / 切 profile / ccEditMode 写入即时反映到 t 的受控值。
-  const rawTheme = createZustandSignal(useStore, s => ({ ...s }))
+  const rawTheme = createZustandSignal(useThemeStore, s => ({ ...s }))
   const themeState = createMemo(() => rawTheme(), undefined, { equals: shallowEqual })
   const t = createMemo(() => ({ ...pickCustomPresetTheme(themeState()), ccEditMode: themeState().ccEditMode } as ThemeSettings & { ccEditMode: boolean }))
 
@@ -167,7 +167,7 @@ export default function Settings(props: SettingsProps) {
   // 改单个字段 — 标记当前 section 对应的 zone 为 custom（非主题 section 回退 global）
   const onSettingChange = (partial: Partial<ThemeSettings>) => {
     const zone = sectionZone(activeSection()) || 'global'
-    useStore.getState().setZoneField(zone, partial)
+    useThemeStore.getState().setZoneField(zone, partial)
   }
   // 声明式字段渲染上下文（骨架 3）：纯字段组由 themeFieldRenderer 自动渲染
   const renderCtx = createMemo<RenderCtx>(() => ({ t: t(), onChange: onSettingChange, search: searchQuery() }))
@@ -179,7 +179,7 @@ export default function Settings(props: SettingsProps) {
   const applyLocalPreset = (zone: ZonePresetEntry['zone'], entry: ZonePresetEntry) => {
     const theme = resolveZonePresetEntryTheme(entry)
     if (!theme) return
-    useStore.getState().applyZonePreset(zone, entry.id, theme)
+    useThemeStore.getState().applyZonePreset(zone, entry.id, theme)
   }
 
   // 「存当前为自定义」：存 = pickZoneFields(当前主题, zone)，随后立刻应用同一条目，
@@ -191,7 +191,7 @@ export default function Settings(props: SettingsProps) {
     if (!id) return
     const entry = useCustomPresetStore.getState().zonePresetEntries.find(item => item.id === id)
     const theme = entry ? resolveZonePresetEntryTheme(entry) : null
-    if (theme) useStore.getState().applyZonePreset(zone, id, theme)
+    if (theme) useThemeStore.getState().applyZonePreset(zone, id, theme)
   }
 
   // 应用全局预设（templates 区与 GlobalPresetSection 各自经事务薄壳调用）
@@ -326,8 +326,8 @@ export default function Settings(props: SettingsProps) {
             footer={!isSearching() ? <Group title="布局编辑">
               <button type="button" class="ps-btn primary"
                 onClick={() => {
-                  const cur = useStore.getState().ccEditMode
-                  useStore.getState().setCcEditMode(!cur)
+                  const cur = useThemeStore.getState().ccEditMode
+                  useThemeStore.getState().setCcEditMode(!cur)
                   if (!cur) props.ctx.closeSheet(props.sheet.id)
                 }}>{t().ccEditMode ? '退出布局编辑器' : '进入布局编辑器'}</button>
               <div class="set-hint">位置 / 大小 / 显隐 在编辑器中拖拽调整</div>
@@ -408,7 +408,7 @@ export default function Settings(props: SettingsProps) {
               </div>
               <Show when={previewZone()}>
                 <button type="button" class="ps-btn sm set-zone-reset"
-                  onClick={() => useStore.getState().resetZone(sectionZone(activeSection()) || 'global')}
+                  onClick={() => useThemeStore.getState().resetZone(sectionZone(activeSection()) || 'global')}
                   title="将该区全部字段恢复默认">重置本区</button>
               </Show>
             </div>

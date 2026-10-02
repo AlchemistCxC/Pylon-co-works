@@ -35,12 +35,14 @@ export interface AgentCreateFormProps {
 }
 
 /**
- * AgentCreateForm — 新建 Agent 表单（A-V4 拆分自 AgentRuntimePanel，JSX 逐字随迁）。
- * 草稿自持，随表单卸载重置（创建成功后收起=清空，与旧一致；用户手动「收起新建」
- * 也会重置——与旧实现「收起保留草稿」不等价，见 #454 PR 披露）；提交经 onCreate 走面板侧事务
+ * AgentCreateForm — 新建 Agent 表单（A-V4 自 AgentRuntimePanel 拆出）。
+ * 草稿自持，随表单卸载重置（创建成功后收起=清空；用户手动「收起新建」
+ * 也会重置——非「收起保留草稿」，见 #454 PR 披露）；提交经 onCreate 走面板侧事务
  * （校验/CAS/嵌入式降级在面板，成功后面板收起表单即重置草稿）。
  *
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/aria 契约逐字保持）。
+ * #515 W1：Solid 实体。DOM/aria 契约：div.agent-runtime-create
+ * [aria-label="新建 Agent 配置"] > input.set-input ×4（aria-label 新建 Agent
+ * id/name/exe/provider）+「选择可执行文件」「创建」钮（.ps-btn.sm）。
  */
 export default function AgentCreateForm(props: AgentCreateFormProps) {
   const [createDraft, setCreateDraft] = createSignal<AgentCreateDraftInput>(EMPTY_CREATE_DRAFT)

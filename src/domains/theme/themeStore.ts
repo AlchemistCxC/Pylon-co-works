@@ -251,6 +251,9 @@ attachSolidPersist(themeKernel, {
   reportLegacyProfilePayload(legacyArg)
 }})
 
-export const useStore: SolidStoreKernel<ThemeState> = themeKernel
+export const useThemeStore: SolidStoreKernel<ThemeState> = themeKernel
+
+// 临时兼容面：src/components/settings/**（R1 在途域）尚未随 #520 复查 R4 一并改名，
+// R1 收口或后续一致性批完成该域替换后删除本行（当前 grep 门禁残留：settings 7 文件 + 此处）。
 
 

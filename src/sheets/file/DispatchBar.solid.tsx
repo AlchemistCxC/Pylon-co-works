@@ -1,7 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, Show } from 'solid-js'
 import { appClients } from '../../app/appClients.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../app/runtimeError'

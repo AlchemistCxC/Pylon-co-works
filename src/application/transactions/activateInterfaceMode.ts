@@ -5,19 +5,19 @@ import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRe
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { validateRendererSuiteReferences } from '../../plugin-runtime/renderers/rendererSuiteReferences.ts'
 
 export interface InterfaceModeTransactionPorts {
   readonly interfaceMode: Pick<typeof useInterfaceModeStore, 'getState'>
   readonly presentation: Pick<typeof usePresentationPreferenceStore, 'getState'>
-  readonly theme: Pick<typeof useStore, 'getState'>
+  readonly theme: Pick<typeof useThemeStore, 'getState'>
 }
 
 const defaultPorts = {
   interfaceMode: useInterfaceModeStore,
   presentation: usePresentationPreferenceStore,
-  theme: useStore,
+  theme: useThemeStore,
 } satisfies InterfaceModeTransactionPorts
 
 export interface InterfaceModeSuiteChoice {

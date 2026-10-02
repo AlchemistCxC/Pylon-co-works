@@ -4,7 +4,7 @@ import { clearErrors, dismissError, subscribeErrorCenter, getErrors, type ErrorE
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 import { explainErrorCode } from '../app/errorCodeExplanations.ts'
 import { safeJson } from '../utils/safeJson.ts'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 
 function recoveryLabel(kind: NonNullable<ErrorEntry['recovery']>['kind']): string {
   return {

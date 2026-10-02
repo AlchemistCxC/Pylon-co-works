@@ -3,7 +3,7 @@ import { createMemo, For, Show } from 'solid-js'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { selectAgentStatus, statusLabel } from '../../contracts/agentTypes'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import AgentRuntimePanel from './AgentRuntimePanel.solid.tsx'
 import AgentConfigEditor from './AgentConfigEditor.solid.tsx'
 import ConfigOptionsPanel from './ConfigOptionsPanel.solid.tsx'
@@ -16,13 +16,13 @@ export interface AgentSettingsSectionProps {
 }
 
 /**
- * AgentSettingsSection — 设置页 agent 分区（A-V3 拆分自 Settings.tsx，JSX 逐字随迁）：
+ * AgentSettingsSection — 设置页 agent 分区（A-V3 自 Settings 拆出）：
  * 当前 Agent 概况卡（重连/重载/事实行/权威状态提示）+ 切换 Agent 列表 +
  * 发现与管理（AgentRuntimePanel）+ 高级 YAML/动态配置。事务等待态经
  * createSettingsAgentActions 自持，Settings 主组件不再持有 agent 运维状态。
  *
- * #515 W1：Solid 实体——Settings.solid 的 React 岛随本实体直连退役；子组件
- * （AgentConfigEditor/ConfigOptionsPanel）直连 .solid 实体（React 薄桥随零消费者删除）。
+ * #515 W1：Solid 实体（Settings.solid 直连）；子组件
+ * AgentConfigEditor/ConfigOptionsPanel 直连 .solid 实体。
  */
 export default function AgentSettingsSection(props: AgentSettingsSectionProps) {
   const agents = createZustandSignal(useIdentityStore, s => s.agents)

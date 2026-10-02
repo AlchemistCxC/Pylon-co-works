@@ -15,8 +15,8 @@ import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../contracts/agentEntry.ts'
 import { INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
-import { createActiveInterfaceModeContribution } from './solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createActiveInterfaceModeContribution } from '../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 function relativeTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)

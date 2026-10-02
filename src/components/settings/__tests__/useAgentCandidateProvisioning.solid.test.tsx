@@ -13,6 +13,7 @@ import { createSignal } from 'solid-js'
 import { createAgentCandidateProvisioning } from '../useAgentCandidateProvisioning.solid.ts'
 import { reportRuntimeError } from '../../../app/runtimeError.ts'
 import { resetStores } from '../../../test/resetStores.ts'
+import { flushTask } from '../../../test/solidTestHelpers.ts'
 import type { AgentRuntimeCandidate } from '../../../domains/agent/agentDetector.ts'
 import { appClients } from '../../../app/appClients.ts'
 import type { AgentEntry } from '../../../domains/identity/identityStore.ts'
@@ -56,8 +57,6 @@ function mount(agents: AgentEntry[] = []) {
     unmount: ui.unmount,
   }
 }
-
-const flushTask = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 
 describe('候选验证与导入生命周期', () => {
   beforeEach(() => {

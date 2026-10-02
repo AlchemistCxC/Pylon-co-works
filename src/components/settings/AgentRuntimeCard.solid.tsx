@@ -47,12 +47,12 @@ export interface AgentRuntimeCardProps {
 }
 
 /**
- * AgentRuntimeCard — 单张 Agent 运行时卡（A-V4 拆分自 AgentRuntimePanel，JSX 逐字
- * 随迁）：身份行/状态行/探测失败归因（#325）/运行期错误/编辑表单（草稿 + 启动计划）/
+ * AgentRuntimeCard — 单张 Agent 运行时卡（A-V4 自 AgentRuntimePanel 拆出）：
+ * 身份行/状态行/探测失败归因（#325）/运行期错误/编辑表单（草稿 + 启动计划）/
  * 动作排（保存/先测试连接/取消验证/取消/编辑/设默认/测试连接/重启/删除）。
- * 状态与事务仍在面板（编辑流跨卡单飞），本组件纯呈现 + 回调。
+ * 状态与事务仍在面板（编辑流跨卡单飞），本组件纯呈现 + 回调；根节点 div.agent-runtime-card。
  *
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/class/aria 契约逐字保持）。
+ * #515 W1：Solid 实体。
  */
 export default function AgentRuntimeCard(props: AgentRuntimeCardProps) {
   return (

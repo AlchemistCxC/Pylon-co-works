@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { createRoot } from 'solid-js'
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type PersistStringStorage } from '../solidStoreKernel'
-import { createZustandSignal } from '../../../host/solidStoreBridge'
+import { createZustandSignal } from '../solidStoreBridge.ts'
 import { useReplayPostureStore } from '../../../domains/chat/replayPostureStore'
 
 describe('solidStoreKernel（#515 批0 门面语义）', () => {

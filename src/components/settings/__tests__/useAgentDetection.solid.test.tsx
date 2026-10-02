@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import { createAgentDetection } from '../useAgentDetection.solid.ts'
+import { flushTask } from '../../../test/solidTestHelpers.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', async () => {
@@ -34,8 +35,6 @@ function mount() {
     unmount: ui.unmount,
   }
 }
-
-const flushTask = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 
 describe('Agent 探测生命周期', () => {
   beforeEach(() => { invoke.mockReset() })

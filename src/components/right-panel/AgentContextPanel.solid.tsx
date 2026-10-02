@@ -2,7 +2,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 import MessageSearchBar from './MessageSearchBar.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
@@ -17,15 +17,15 @@ import {
 } from '../../application/agent-workbench/activeWorkbenchHostPort.ts'
 import type { AgentContextPanelProps } from './rightPanelTypes.ts'
 
-/** 按会话作用域的 UI 状态（原 React 版 useSessionUiState 内联钩子的 Solid 形态）。 */
+/** 按会话作用域的 UI 状态：值以 (sessionId, key) 存取 sessionUiState，signal 为本地
+ * 读视图，set 在 updater 求值后同步双写回 store。 */
 function createSessionUiState<T>(
   sessionId: () => string | null,
   key: string,
   initial: T,
 ): [Accessor<T>, (action: T | ((previous: T) => T)) => void] {
   const [state, setState] = createSignal<T>(sessionUiStateGet<T>(sessionId() ?? '', key) ?? initial)
-  // 会话切换：恢复该会话存档（React 版用 useLayoutEffect 避免 B 先闪现 A 的一帧；
-  // Solid 的 createEffect 在同一次渲染提交内读值，没有闪现窗口）。
+  // 会话切换：恢复该会话存档（createEffect 在同一次渲染提交内读值，切换无闪现窗口）。
   createEffect(() => {
     const id = sessionId() ?? ''
     // updater 形态：泛型 T 可能是函数值，走 (prev) => next 重载避开 Solid setter 的排除分支。
@@ -107,7 +107,6 @@ export default function AgentContextPanel(props: AgentContextPanelProps) {
 
   // Host 出现时把 legacy 会话状态桥接进 Host Port namespace。仅「同一会话上出现
   // （首个/更换的）Host」才桥；会话切换必须从新 owner namespace 起步。
-  // （React 版用 ref 对比 first/hostChanged/sessionChanged，这里语义逐条对应。）
   let initializedHostBinding = false
   let previousHostPort: WorkbenchHostPort | undefined
   let previousSessionId: string | null = sessionId()

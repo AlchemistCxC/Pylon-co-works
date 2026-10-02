@@ -9,7 +9,7 @@ import { createMemo } from 'solid-js'
 import { afterEach, expect, it } from 'vitest'
 import { useRuntimeStore } from '../../../domains/runtime/runtimeStore.ts'
 import { agentAdvertisedModelEntries } from '../agentAdvertisedModels.ts'
-import { createZustandSignal } from '../../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../../infrastructure/state/solidStoreBridge.ts'
 
 afterEach(() => { useRuntimeStore.setState({ sessionConfig: {} }) })
 

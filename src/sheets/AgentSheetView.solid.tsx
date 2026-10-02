@@ -4,11 +4,11 @@ import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import AgentSheetPageHost from '../components/sidebar/AgentSheetPageHost.solid.tsx'
 import { IsolatedPluginSurface as IsolatedPluginSurfaceSolid } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { normalizePageState, resolveOpenPage } from '../plugin-runtime/sidebar/sidebarBlockState.ts'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
-import { createActiveInterfaceModeContribution, createRegistrySignal } from './solidSheetSupport.solid.tsx'
+import { createActiveInterfaceModeContribution, createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.solid.tsx'
 
 // ---- #515 批7：整页宿主与隔离表面均已 Solid 实体化（批1-C/批3-E），React 岛退役，

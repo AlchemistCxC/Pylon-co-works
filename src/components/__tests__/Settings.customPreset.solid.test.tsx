@@ -9,7 +9,7 @@ import { cleanup, fireEvent, screen, within } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
@@ -66,7 +66,7 @@ describe('Settings custom preset controls', () => {
     fireEvent.click(within(row).getByRole('button', { name: '我的预设' }))
 
     await expect(screen.findByRole('status')).resolves.toHaveTextContent('自定义预设已应用')
-    expect(useStore.getState().chatFontSize).toBe(13)
+    expect(useThemeStore.getState().chatFontSize).toBe(13)
   })
 
   it('shows the failed provider when a custom preset transaction rolls back', async () => {

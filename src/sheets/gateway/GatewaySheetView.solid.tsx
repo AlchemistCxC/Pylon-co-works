@@ -6,7 +6,7 @@ import type { AdapterCatalogItem, AdapterInstance, GatewayInstanceInput } from '
 import { migrateLegacyRouteBindings, saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
 import { GATEWAY_ROUTE_RESETS, type GatewayRouteReset, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**

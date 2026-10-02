@@ -47,7 +47,7 @@ export default function SettingsQuickSearch(props: {
     })
   })
 
-  // 全局键：'/' 呼出（输入态除外）、Esc 关闭（与原 window keydown 契约逐字一致）
+  // 全局键（window 级 keydown）：'/' 呼出（输入态除外）、Esc 关闭
   createEffect(() => {
     const isOpen = props.open
     const onKey = (event: KeyboardEvent) => {

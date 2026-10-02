@@ -3,7 +3,7 @@ import manifestSource from './pylon-plugin.json' with { type: 'json' }
 import type { BuiltinPluginDefinition } from '../../../../plugin-runtime/pluginRuntime.ts'
 import type { BuiltinPluginActivationContext } from '../../../../plugin-runtime/pluginActivationContext.ts'
 import { defineFirstPartyProductPackage } from '../../firstPartyProductPackage.ts'
-import { BUILTIN_PYLON_PLUGIN_MANAGER_ID } from '../../productPluginIds.ts'
+import { BUILTIN_PLUGIN_MANAGER_PAGE_ID, BUILTIN_PYLON_PLUGIN_MANAGER_ID } from '../../productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from '../../firstPartyStyleRuntime.ts'
 import { loadBuiltinPluginManagerStyles } from './styleAssets.ts'
 import { pluginManagerRuntimeBridge } from './runtimeBridge.ts'
@@ -38,7 +38,7 @@ export function createBuiltinPluginManagerPlugin(): BuiltinPluginDefinition {
         resourceId: `${BUILTIN_PYLON_PLUGIN_MANAGER_ID}:bridge-owner`,
       })
       settings.registerPage({
-        id: 'pylon-plugin-manager',
+        id: BUILTIN_PLUGIN_MANAGER_PAGE_ID,
         label: '插件管理器',
         description: '安装/启停/重载/卸载、内置组件、启动故障、契约诊断与贡献面透视。',
         renderKind: 'first-party-solid',

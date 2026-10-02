@@ -4,7 +4,7 @@ import { BookOpen, ChevronLeft, ChevronRight, House, RotateCw, type IconNode } f
 import { appClients } from '../../app/appClients.ts'
 import type { DocsSheetSnapshot } from '../../infrastructure/tauri/docsClient'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { reportRuntimeError } from '../../app/runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 

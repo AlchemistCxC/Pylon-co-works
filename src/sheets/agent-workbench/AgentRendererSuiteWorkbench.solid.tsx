@@ -33,8 +33,8 @@ import { publishActiveWorkbenchHostPort } from '../../application/agent-workbenc
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from '../../application/agent-workbench/agentWorkbenchSessionCreation.ts'
 import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { createRegistrySignal } from '../solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 
 /**
  * AgentRendererSuiteWorkbench — Renderer Suite 工作台宿主（#53/#358/#442 演进）。
@@ -117,7 +117,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       },
     },
   })
-  // store 切片（原 hook 消费 → createZustandSignal；selector 语义与 useStore 一致）。
+  // store 切片（原 hook 消费 → createZustandSignal；selector 语义与 useThemeStore 一致）。
   const sessions = createZustandSignal(useIdentityStore, state => state.sessions)
   const activeAgentId = createZustandSignal(useIdentityStore, state => state.activeAgent)
   const workspaces = createZustandSignal(useWorkspaceEntityStore, state => state.workspaces)

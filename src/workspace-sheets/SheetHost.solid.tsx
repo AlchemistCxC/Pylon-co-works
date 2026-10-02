@@ -4,7 +4,7 @@ import { Dynamic } from 'solid-js/web'
 import { resolveSheetRender } from './sheetRegistry.ts'
 import SheetErrorBoundary from './SheetErrorBoundary.solid.tsx'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 
 /**

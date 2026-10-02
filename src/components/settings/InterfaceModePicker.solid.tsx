@@ -6,7 +6,7 @@ import { Layers3, PanelsTopLeft, Terminal } from 'lucide'
 import { activateInterfaceMode, interfaceModeIsUsable } from '../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 export interface InterfaceModePickerProps {}
 

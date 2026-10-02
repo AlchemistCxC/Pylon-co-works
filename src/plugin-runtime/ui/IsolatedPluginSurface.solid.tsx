@@ -1,17 +1,9 @@
 /** @jsxImportSource solid-js */
-import { createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
+import { createEffect, createMemo, on, onCleanup } from 'solid-js'
 import { getPluginUiRegistry } from '../runtimeServices.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 import type { PluginUiEventBridge, PluginUiUnmount } from './pluginUiTypes.ts'
 import { resolvePluginUiRuntime } from './pluginUiTypes.ts'
-
-/** registry 快照 → Solid 只读信号（快照引用等值，与 WorkspaceTitlebar.solid 同一形态）。 */
-function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
-  // updater 形态：T 可能是任意值（含函数），走 (prev) => next 重载避开 Solid setter
-  // 对「函数值」的排除分支。
-  const [snapshot, setSnapshot] = createSignal<T>(store.getSnapshot())
-  onCleanup(store.subscribe(() => setSnapshot(() => store.getSnapshot())))
-  return snapshot
-}
 
 function createBridge(onEvent?: (event: string, detail: unknown) => void): PluginUiEventBridge & { clear(): void } {
   const listeners = new Map<string, Set<(detail: unknown) => void>>()
@@ -57,7 +49,8 @@ export interface IsolatedPluginSurfaceProps {
  * shell surface）仍经同名薄桥挂载本实体，批7 拆桥后直连。
  */
 export function IsolatedPluginSurface(props: IsolatedPluginSurfaceProps) {
-  const snapshot = createRegistrySignal(getPluginUiRegistry())
+  const pluginUiRegistry = getPluginUiRegistry()
+  const snapshot = createRegistrySignal(pluginUiRegistry, () => pluginUiRegistry.getSnapshot())
   const entry = createMemo(() => snapshot().entries.find(candidate => candidate.value.id === props.surfaceId))
   const runtime = createMemo(() => entry() ? resolvePluginUiRuntime(entry()!.value).runtime : undefined)
 

@@ -2,7 +2,7 @@
 import { createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { zonePresetsFor, isCustomZonePresetEntry, type ZonePresetEntry } from '../../domains/theme/zones/index.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * settingsSectionShared.solid — Settings 共享呈现原语的 Solid 实体（#515）。
@@ -67,9 +67,9 @@ export function ZonePresetRow(props: ZonePresetRowProps) {
                     ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
                     : undefined}
                   onClick={() => props.onApply(props.zone, entry)}>{entry.label}</button>
-                {/* 刀7 前置（#211）：删除钮只在 deletable 条目上出现（React 原版
-                    `{deletable && (pending ? confirm : 删除)}` 的逐字对应——批1-A 曾把
-                    删除钮误放进外层 fallback，导致出厂/未选中条目也被渲染删除钮）。 */}
+                {/* 刀7 前置（#211）：删除钮只渲染在 deletable 条目上，确认态
+                    （pending ? confirm : 删除）在条目内联表达——不得放进外层
+                    fallback，否则出厂/未选中条目也会出现删除钮。 */}
                 <Show when={deletable()}>
                   <Show when={pendingDeleteEntryId() === entry.id} fallback={
                     <button type="button" class="ps-btn sm danger"

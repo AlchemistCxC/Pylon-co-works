@@ -56,7 +56,7 @@ import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts
 import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
-import { createActiveInterfaceModeContribution } from './sheets/solidSheetSupport.solid.tsx'
+import { createActiveInterfaceModeContribution } from './infrastructure/state/solidSheetSupport.solid.tsx'
 import { InterfaceModeSceneHost } from './sheets/interfaceModeScenes.solid.tsx'
 import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
 import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
@@ -65,10 +65,10 @@ import { restoreApprovalModeFromBackendAuthority } from './domains/permission/ap
 import { hydrateInputPredictionSettingsFromBackend } from './infrastructure/persistence/inputPredictionSettingsRepository.ts'
 import { hydrateCustomPresetsFromBackend } from './infrastructure/persistence/customPresetRepository.ts'
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
-import { useStore } from './domains/theme/themeStore'
-import { createZustandSignal } from './host/solidStoreBridge.ts'
+import { useThemeStore } from './domains/theme/themeStore'
+import { createZustandSignal } from './infrastructure/state/solidStoreBridge.ts'
 import { shallowEqual } from './infrastructure/state/solidStoreKernel.ts'
-import { createRegistrySignal } from './sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from './infrastructure/state/solidSheetSupport.solid.tsx'
 import type { InterfaceModeContribution } from './plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import type { SettingsDomainId } from './components/settings/settingsDomains.ts'
 
@@ -147,7 +147,7 @@ export default function App() {
   // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
   const activeSheet = createMemo(() => workspaceSheets().sheets.find(sheet => sheet.id === workspaceSheets().activeSheetId))
   const sidebarCollapsed = createZustandSignal(useRightRailStore, s => s.leftRailCollapsed)
-  const showSidebar = createZustandSignal(useStore, s => s.showSidebar !== false)
+  const showSidebar = createZustandSignal(useThemeStore, s => s.showSidebar !== false)
   // #154：左列是否存在以「注册表真的提供 sidebar 组件」为准，而不是只看 sidebarMode。
   // 后者会让「声明 'sheet' 但把左栏画在自己内容区里」的 Sheet 也空占一条标题栏轨道，
   // 那条轨道自画的边框由此与左列自己的边框错开（浏览器 Sheet 实测错开 84px）。
@@ -413,7 +413,7 @@ export default function App() {
   // 基线为派生对象：浅等去重（React 期 useShallow 同源语义），避免主题 store 任意
   // 通知都重投影 Skin 基线。createZustandSignal 无 equality 形态，以 equals memo 包一层。
   const rawThemeBaseline = createZustandSignal(
-    useStore,
+    useThemeStore,
     s => pickThemeBaseline(s as unknown as Record<string, unknown>),
   )
   const themeBaseline = createMemo(() => rawThemeBaseline(), undefined, { equals: shallowEqual })

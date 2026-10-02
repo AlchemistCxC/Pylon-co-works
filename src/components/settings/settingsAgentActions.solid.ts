@@ -12,15 +12,15 @@ import { runReconnectCommand } from './reconnectCommand'
 import { reportSettingsError, resolveSettingsError } from './settingsErrorReports.ts'
 
 /**
- * createSettingsAgentActions（原 useSettingsAgentActions）— Agent 运维事务薄壳
- * （A-V3 拆分自 Settings.tsx，逻辑逐字随迁）：switchAgent / reconnectAgent（含
+ * createSettingsAgentActions — Agent 运维事务薄壳（A-V3 自 Settings 拆出）：
+ * switchAgent / reconnectAgent（含
  * 「对账成功则降级为诊断」分支）/ reloadAgents（含工具字典装载反馈）。事务本体已在
  * application/transactions；本模块只持有 UI 等待态与错误可见性，供
  * AgentSettingsSection.solid 消费。
  *
- * #515 W1：React hook → Solid 形态（`activeAgent` 改 accessor——switchAgent/reconnect
- * 在调用时刻读最新值，语义与 React 重渲捕获一致）。error key 口径改从纯 TS 模块
- * settingsErrorReports.ts 引（.ts 面不得静态引用 .solid.tsx）。
+ * #515 W1：Solid 形态契约：`activeAgent` 为 accessor——switchAgent/reconnect
+ * 在调用时刻读最新值。error key 口径引纯 TS 模块
+ * settingsErrorReports.ts（.ts 面不得静态引用 .solid.tsx）。
  */
 export function createSettingsAgentActions(activeAgent: () => string) {
   const [switchingAgentId, setSwitchingAgentId] = createSignal<string | null>(null)

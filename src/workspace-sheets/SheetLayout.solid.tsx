@@ -2,7 +2,7 @@
 import { createEffect, createMemo, For, on, Show, untrack, type Component } from 'solid-js'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
-import { useStore } from '../domains/theme/themeStore'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
 import { resolveSessionSource } from '../domains/chat/sessionCommandState'
 import { belongsToProfile } from '../domains/chat/sessionProfile'
@@ -18,8 +18,8 @@ import { closeWorkspace } from './workspaceController'
 import { sheetHasLeftColumn } from './sheetSidebarState.ts'
 import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
@@ -154,8 +154,8 @@ export default function SheetLayout(props: SheetLayoutProps) {
       },
     }
   }
-  const ccEditMode = createZustandSignal(useStore, s => s.ccEditMode)
-  const showSidebar = createZustandSignal(useStore, s => s.showSidebar !== false)
+  const ccEditMode = createZustandSignal(useThemeStore, s => s.ccEditMode)
+  const showSidebar = createZustandSignal(useThemeStore, s => s.showSidebar !== false)
   // #154：左列的可见性是布局层的状态——宽度、竖直分割线与 a11y 可见性都据它决定，
   // 各 Sheet 不再自行判断折叠。判定与 App 的 sidebarEnabled 同源（sheetHasLeftColumn），
   // 避免标题栏与左列对「本 Sheet 有没有左栏」得出两个结论。

@@ -23,6 +23,7 @@ import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../application/agent-workbench/agentWorkbenchCommands.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
+import { FLUSH_BUDGET } from '../../../test/solidTestHelpers.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -1232,7 +1233,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-renderer="solid"]')?.getAttribute('data-preview')).toBe('true')
     // 预算依据：等待对象是 fixture shell 动态 import + 首帧渲染（ms 级）；2s 覆盖
     // 满载并发抖动，原 5s 是 P91 期粗放放宽（#175 已消除满载 paging 根因）。
-    expect(await screen.findByRole('heading', { name: '迁移结果' }, { timeout: 2_000 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '迁移结果' }, FLUSH_BUDGET)).toBeInTheDocument()
     expect(screen.getByText('Read')).toBeInTheDocument()
     expect(host.querySelector('.task-tree')).toBeInTheDocument()
     expect(host.querySelector('.term-spinner')).toBeInTheDocument()
@@ -3173,7 +3174,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
       const current = updates
       if (lastSeen >= 0) expect(current).toBe(lastSeen)
       lastSeen = current
-    }, { timeout: 2_000 })
+    }, FLUSH_BUDGET)
     expect(mounts).toBe(2)
     expect(host.querySelectorAll('.group-member-probe')).toHaveLength(2)
   })

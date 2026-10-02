@@ -28,9 +28,9 @@ function normalizedDraft(draft: CandidateDraft): CandidateDraft {
  * Editing/cancelling/unmounting fences late validation before persistence.
  * Import stores configuration; activation is an explicit action.
  *
- * #515 W1：React hook → Solid 形态（消费者 AgentRuntimePanel.solid 直连；须在响应式
- * owner 内调用）。改写点：`agents` prop 改 accessor（`agents()`），卸载/列表跟随的
- * 两个 useEffect 分别由 onCleanup / createEffect 承担；其余逐字对应。
+ * #515 W1：Solid 形态（消费者 AgentRuntimePanel.solid 直连；须在响应式
+ * owner 内调用）。契约：`agents` 为 accessor（`agents()` 每次读最新列表）；卸载
+ * 收尾经 onCleanup、列表跟随经 createEffect 承担。
  */
 export function createAgentCandidateProvisioning(options: {
   agentClient: AgentClient

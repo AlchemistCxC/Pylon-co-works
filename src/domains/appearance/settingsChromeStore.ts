@@ -132,7 +132,7 @@ function migrateLegacySettingsChrome(storage: Storage): LegacyChromeSeed {
 const legacySeed = migrateLegacySettingsChrome(safeLocalStorage())
 const hasLegacySeed = Object.keys(legacySeed).length > 0
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useSettingsChromeStore 即内核本体（直连，无 shim）。
 const settingsChromeKernel = createSolidStoreKernel<SettingsChromeState>({
   density: 'standard',
   previewCollapsed: false,

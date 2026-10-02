@@ -23,7 +23,10 @@ interface HitGroup { readonly id: string; readonly label: string; readonly hits:
 const LOOSE_GROUP_ID = '__loose__'
 const LOOSE_GROUP_LABEL = '无工作区'
 
-/** SearchPanel — 搜索模块（#515 Solid 实体；DOM/aria 契约与 React 版逐字同构）。 */
+/** SearchPanel — 搜索模块（#515 Solid 实体）。DOM/aria 契约：.search-field >
+ * .search-field-input[aria-label="搜索会话"]（+ .search-field-clear），结果区
+ * .search-results[role=tree] > .search-group[role=group] > .search-hit[role=treeitem]，
+ * 计数 .search-count[role=status]。 */
 export default function SearchPanel(props: AgentSidebarContributionProps) {
   // 查询是**这个模块自己的状态**：它不影响其它模块，也不需要上提到宿主。
   const [query, setQuery] = createSignal('')

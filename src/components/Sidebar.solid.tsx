@@ -1,11 +1,11 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, Show, Suspense, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { refreshSessionsBackend, useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 
@@ -226,8 +226,11 @@ export interface SidebarProps {
  * 任意 Sheet 里收起/展开某模块，切到别的 Sheet、乃至重启应用都不改变（issue #202）。
  * 整页（`activePageId`）则相反——它是「这张 Sheet 的主区此刻显示什么」，留在 Sheet 级。
  *
- * #515：Solid 实体——偏好 store 经注册表信号订阅（原 sidebarPrefsHooks 内联），
- * 贡献体经 React 岛宿主挂载；DOM/aria/data-* 契约与 React 版逐字同构。
+ * #515：Solid 实体——偏好 store 经注册表信号订阅；first-party 贡献体为 Solid 组件
+ * 经 <Dynamic> 直挂（isolated 贡献走 IsolatedPluginSurface）。DOM/aria/data-* 契约：
+ * aside.sidebar.agent-sidebar > div.sidebar-modules[role=list] > section.sidebar-block
+ * [data-module-id][data-collapsed]，模块外壳（.sidebar-block-head 等）归宿主渲染，
+ * 贡献只画 .sidebar-block-body-inner。
  */
 export default function Sidebar(props: SidebarProps) {
   const pageState = createMemo(() => normalizePageState(props.state))

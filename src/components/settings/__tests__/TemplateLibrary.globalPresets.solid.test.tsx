@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, within } from '@solidjs/testing-lib
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetStores } from '../../../test/resetStores.ts'
 import TemplateLibrary from '../TemplateLibrary.solid.tsx'
-import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../../domains/theme/themeStore.ts'
 import { useCustomPresetStore } from '../../../domains/theme/customPresetStore.ts'
 
 vi.mock('../../SettingsPreview.solid.tsx', () => ({
@@ -26,8 +26,8 @@ describe('TemplateLibrary global presets', () => {
     const card = screen.getByText('我的同名模板').closest('.template-card') as HTMLElement
     fireEvent.click(within(card).getByRole('button', { name: '应用' }))
     await expect(screen.findByRole('status')).resolves.toHaveTextContent('自定义预设已应用')
-    expect(useStore.getState().chatFontSize).toBe(19)
-    expect(useStore.getState().appliedPreset.global).toBe('custom-42')
+    expect(useThemeStore.getState().chatFontSize).toBe(19)
+    expect(useThemeStore.getState().appliedPreset.global).toBe('custom-42')
   })
 
   it('把旧版 bare id 归一化后再交给应用 transaction', async () => {

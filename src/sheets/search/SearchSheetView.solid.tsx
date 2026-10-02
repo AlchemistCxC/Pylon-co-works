@@ -1,7 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, Show } from 'solid-js'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'

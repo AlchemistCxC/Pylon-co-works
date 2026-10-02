@@ -31,7 +31,7 @@ function describeTarget(target: SkinTarget): string {
  * 根上的 `skin-preview-bar` 类名保留为纯锚点——零 CSS 规则，仅供测试与调试定位。
  */
 export default function SkinPreviewBar(props: SkinPreviewBarProps) {
-  // React 版默认参数的等价：未注入 runtime 时取全局单例（组件体只跑一次，仅取一次）。
+  // 注入契约：未注入 runtime 时回落全局单例（Solid 组件体只跑一次，仅取一次）。
   const runtime = () => props.runtime ?? getSkinRuntime()
   const [snapshot, setSnapshot] = createSignal(runtime().getSnapshot())
   onCleanup(runtime().subscribe(() => setSnapshot(() => runtime().getSnapshot())))

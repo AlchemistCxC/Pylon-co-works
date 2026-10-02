@@ -1,6 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { createFileSheetState, fileSheetReducer, fileTabKey, fileTabViewType, parseFileTabs, serializeFileTabs, type FileTabRecord } from './fileSheetState.ts'
@@ -28,15 +29,6 @@ import { WorkbenchIcon } from './fileIcons.solid.tsx'
 export interface FileSheetViewProps {
   sheet: SheetRecord
   ctx: SheetContext
-}
-
-/** registry 快照 → Solid 只读信号（快照引用等值，与 WorkspaceTitlebar.solid 同一形态）。 */
-function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
-  // updater 形态：T 可能是任意值（含函数），走 (prev) => next 重载避开 Solid setter
-  // 对「函数值」的排除分支。
-  const [snapshot, setSnapshot] = createSignal<T>(store.getSnapshot())
-  onCleanup(store.subscribe(() => setSnapshot(() => store.getSnapshot())))
-  return snapshot
 }
 
 /**
@@ -131,7 +123,8 @@ export default function FileSheetView(props: FileSheetViewProps) {
   const targetSessionIdOfTarget = createMemo(() => target()?.sessionId)
 
   // ── workbench registry（进程单例；快照引用等值触发）──
-  const workbenchSnapshot = createRegistrySignal(getFileWorkbenchRegistry())
+  const fileWorkbenchRegistry = getFileWorkbenchRegistry()
+  const workbenchSnapshot = createRegistrySignal(fileWorkbenchRegistry, () => fileWorkbenchRegistry.getSnapshot())
   const activities = createMemo(() => {
     workbenchSnapshot()
     return listFileActivities(target())

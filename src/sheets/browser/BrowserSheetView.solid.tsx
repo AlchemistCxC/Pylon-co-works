@@ -25,7 +25,7 @@ import {
 import { getPylonCliService } from '../../cli/pylonCliRuntime.ts'
 import { hasTauriRuntime, isBrowserMockRuntime, IS_TAURI, type TauriWindow } from '../../infrastructure/tauri/env.ts'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { reportRuntimeError } from '../../app/runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import { BROWSER_PHASE_LABELS, type BrowserPageSnapshot, type BrowserSnapshot, type BrowserToolId } from './browserSheetTypes.ts'

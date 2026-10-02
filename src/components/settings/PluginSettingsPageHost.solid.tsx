@@ -7,7 +7,7 @@ import { settingFieldKey, type RendererSettingOption, type SettingsValue } from 
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { RendererSettingsSchemaHost } from './RendererSettingField.solid.tsx'
-import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 
 const EMPTY_VALUES: Readonly<Record<string, SettingsValue>> = Object.freeze({})
 const EMPTY_ADAPTER_SNAPSHOT = Object.freeze({ values: EMPTY_VALUES, unavailable: Object.freeze({}), revision: 0 })

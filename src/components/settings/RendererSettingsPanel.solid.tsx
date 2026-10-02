@@ -7,15 +7,15 @@ import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rende
 import { isSettingVisible, settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.solid.tsx'
 import RendererSuitePicker from './RendererSuitePicker.solid.tsx'
-import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { findInterfaceModeContribution } from '../../app/interfaceModeLookup.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 import type { SettingsDensity } from '../../domains/appearance/settingsChromeStore.ts'
 import { selectWorkbenchAppearance } from '../../domains/appearance/appearance.ts'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { resolveFieldOptions, resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
 import { stringifySettingsTarget } from '../../plugin-runtime/settings/settingsTargetGrammar.ts'
@@ -274,10 +274,10 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const activeObjectKey = () => selected() ? rendererSettingsEntryKey(selected()!) : ''
   const selectedResolution = createMemo(() => {
     if (!selected()) return { values: {}, sources: {} }
-    if (props.schemas) return fixtureValues(selected()!, storeSnapshot(), selectWorkbenchAppearance(useStore.getState(), 0) as unknown as Readonly<Record<string, RendererSettingValue>>, optionSnapshot().entries)
+    if (props.schemas) return fixtureValues(selected()!, storeSnapshot(), selectWorkbenchAppearance(useThemeStore.getState(), 0) as unknown as Readonly<Record<string, RendererSettingValue>>, optionSnapshot().entries)
     const profile = presentationProfiles().entries.find(entry => entry.contributionId === activeProfileId())?.value
     return resolveProductionRendererSettingsScope({
-      hostAppearance: selectWorkbenchAppearance(useStore.getState(), 0),
+      hostAppearance: selectWorkbenchAppearance(useThemeStore.getState(), 0),
       catalog: registrySnapshot(),
       settings: storeSnapshot(),
       namespace: selected()!.namespace,

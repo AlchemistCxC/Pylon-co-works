@@ -32,8 +32,8 @@ async function bootWithPersisted(persisted: { state: Record<string, unknown>; ve
     raw = JSON.stringify(persisted)
     localStorage.setItem(STORAGE_KEY, raw)
   }
-  const { useStore } = await import('../themeStore.ts')
-  const state = useStore.getState() as unknown as Record<string, unknown>
+  const { useThemeStore } = await import('../themeStore.ts')
+  const state = useThemeStore.getState() as unknown as Record<string, unknown>
   return { state, layout: state.ccLayout as Booted['layout'], raw }
 }
 

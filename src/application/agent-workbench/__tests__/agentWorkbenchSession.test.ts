@@ -5,7 +5,7 @@ import type { Session } from '../../../domains/identity/identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import { getCanonicalEventFeed } from '../../../infrastructure/events/canonicalEventFeed.ts'
 import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
-import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../../domains/theme/themeStore.ts'
 
 function session(id = 'session-a', source = 'local:a'): Session {
   return {
@@ -519,12 +519,12 @@ describe('Agent Workbench canonical session runtime', () => {
       service.appearance.dispatch({ type: 'set-cc-property', key: 'modelSwitchMode', value: 'cycle' })
       service.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 18 } })
 
-      expect(useStore.getState().modelSwitchMode).toBe('cycle')
-      expect(useStore.getState().ccLayout.placements.model.offsetX).toBe(18)
+      expect(useThemeStore.getState().modelSwitchMode).toBe('cycle')
+      expect(useThemeStore.getState().ccLayout.placements.model.offsetX).toBe(18)
       expect(service.appearance.getSnapshot()).toMatchObject({ modelSwitchMode: 'cycle' })
     } finally {
       service.destroy()
-      useStore.setState(useStore.getInitialState(), true)
+      useThemeStore.setState(useThemeStore.getInitialState(), true)
     }
   })
 

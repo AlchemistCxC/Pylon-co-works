@@ -1,20 +1,19 @@
 import { createSignal, onCleanup } from 'solid-js'
+import type { ZustandStoreLike } from './solidStoreKernel.ts'
 
-/** 通知式 store 的最小结构面（SolidStoreKernel 对象天然满足；类型侧不引 react）。 */
-interface ZustandStoreLike<T> {
-  getState: () => T
-  subscribe: (listener: (state: T) => void) => () => void
-}
+export type { ZustandStoreLike }
 
 /**
- * 通知式 store → Solid 只读信号（#279 引入的组件侧响应式读取原语）。
+ * 通知式 store → Solid 只读信号（组件侧响应式读取原语，在役）。
  *
  * 订阅随 Solid owner（组件/effect 根）自动回收；selector 语义与旧 React 侧
  * `useXxxStore(selector)` 一致。信号默认按引用判等——内核状态切片在未变时
  * 引用稳定，不会产生多余的通知。
- * #515 W3 终态：zustand 与 React shim 已退役，`useXxxStore` 即 SolidStoreKernel
- * 对象，其 getState/subscribe 门面天然满足本接口——组件读 store 切片统一走本桥，
- * 不再有「迁移完成后删除此桥」的后续步骤（名字里的 zustand 仅为历史沿革）。
+ * 终态：zustand 库与 React shim 均已退役（#515 W3），`useXxxStore` 即
+ * SolidStoreKernel 对象，其 getState/subscribe 门面天然满足 `ZustandStoreLike`
+ * （单源于 solidStoreKernel，本文件 re-export）——组件读 store 切片统一走本函数，
+ * 没有删除后续步骤（名字里的 zustand 仅为历史沿革；#520 R3 自 host 迁居
+ * infrastructure/state）。
  *
  * ⚠️ selector 只在 store 通知时重跑（审查 #312 P3）：不得依赖 store 外的响应式
  * 状态——那类依赖变化不会触发 selector 重算，信号会持旧值（例：selector 里读

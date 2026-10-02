@@ -81,7 +81,7 @@ interface RuntimeStoreState {
   resetAll: () => void
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useRuntimeStore 即内核本体（直连，无 shim）。
 const runtimeKernel = createSolidStoreKernel<RuntimeStoreState>({
   liveGenerating: null,
   liveGeneratingSources: [],

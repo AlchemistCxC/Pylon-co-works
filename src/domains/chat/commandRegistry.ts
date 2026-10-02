@@ -3,7 +3,7 @@ import type { CommandTier } from '../../contracts/agentCommandSet.ts'
 import {
   resolveCommandSetDescriptors,
   resolveCommandSetSuggestions,
-} from '../../host/commandSetResolver.ts'
+} from '../../application/commandSetResolver.ts'
 
 export interface CommandSuggestion {
   cmd: string

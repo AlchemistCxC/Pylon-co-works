@@ -36,7 +36,7 @@ export { flushIdentityBackend, refreshSessionsBackend } from '../../infrastructu
  * agent 变化同步 workspace 与 runtime）在动作内经 identityCrossDomain 调用其他域。
  */
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useIdentityStore 即内核本体（直连，无 shim）。
 // 装配先建同步器与 accessor（都经 useIdentityStore 延迟解析，无初始化环），再建内核。
 const syncIdentityToBackend = createIdentityBackendSync({
   getState: () => useIdentityStore.getState(),

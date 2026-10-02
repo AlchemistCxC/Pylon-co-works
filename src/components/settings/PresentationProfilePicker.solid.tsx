@@ -4,10 +4,10 @@ import { createMemo, createSignal, For, Show } from 'solid-js'
 import { applyPresentationProfile } from '../../application/transactions/applyPresentationProfile.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { presentationProfileInterfaceMode } from '../../application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 export interface PresentationProfilePickerProps {}
 
@@ -32,7 +32,7 @@ export default function PresentationProfilePicker() {
       return
     }
     const result = applyPresentationProfile(profile, {
-      setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
+      setZoneField: (zone, patch, source) => useThemeStore.getState().setZoneField(zone, patch, source),
       setActiveProfileId: next => {
         usePresentationPreferenceStore.getState().setActiveProfileId(next)
         useInterfaceModeStore.getState().rememberProfile(interfaceMode(), next)

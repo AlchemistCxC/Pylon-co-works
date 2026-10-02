@@ -10,7 +10,8 @@ export interface InvocationPreviewProps {
 
 /**
  * 草稿启动命令预览（实际启动串 + 校验 issue 行；编辑/候选/新建三处共用）。
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/role 契约逐字保持）。
+ * #515 W1：Solid 实体。DOM/role 契约：div.agent-invocation-preview > .set-hint
+ * 「实际启动：<code>」行，issue 行按严重度 role=alert|note。
  */
 export default function InvocationPreview(props: InvocationPreviewProps) {
   const invocation = createMemo(() => describeInvocation(

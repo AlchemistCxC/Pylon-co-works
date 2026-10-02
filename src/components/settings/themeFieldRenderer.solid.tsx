@@ -15,7 +15,7 @@ import type { PluginSettingOption, PluginSettingOptionsContribution } from '../.
 import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from '../../domains/chat/toolIndicatorAssets.ts'
 import { lastSettingWriter, SETTING_WRITE_SOURCE_LABELS } from '../../domains/theme/settingProvenance.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）的 Solid 实体

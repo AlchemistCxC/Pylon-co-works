@@ -2,12 +2,12 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { createPreviewWorkbenchServices } from '../../renderers/solid-workbench/__fixtures__/previewWorkbenchServices.ts'
 import { THEME_DEFAULTS, THEME_SETTING_KEYS } from '../../domains/theme/themeFieldDefs.ts'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
-import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
 import type { RendererRegistrySnapshot } from '../../plugin-runtime/renderers/rendererRegistry.ts'
 import type { RendererSettingsCatalogEntry } from './rendererSettingsCatalog.ts'
@@ -163,7 +163,7 @@ export default function RendererSettingsPreview(props: {
     const profile = getPresentationProfileRegistry().resolve(profileId())?.value
     setError(null)
     const services = createPreviewWorkbenchServices()
-    const themeSnapshot = () => Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]]))
+    const themeSnapshot = () => Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useThemeStore.getState()[key]]))
     const applyHostTheme = () => {
       services.appearance.setTheme({ ...THEME_DEFAULTS, ...themeSnapshot() } as unknown as Parameters<typeof services.appearance.setTheme>[0])
     }

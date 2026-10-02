@@ -1,7 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
-import { useStore } from '../domains/theme/themeStore'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { resolveSpinnerFrames, resolveSpinnerMarker } from '../domains/chat/spinnerFrames'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../domains/tool/toolPresentation'
 import { resolveToolIndicatorAssetForTone } from '../domains/chat/toolIndicatorAssets'
@@ -95,7 +95,7 @@ function PvSolidControlCenter() {
     // 模板卡片局部变量优先于全局 store（保留 A 系列"模板预览读取局部中控变量"能力）
     const themeSnapshot = () => ({
       ...THEME_DEFAULTS,
-      ...Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useStore.getState()[key]])),
+      ...Object.fromEntries(THEME_SETTING_KEYS.map(key => [key, useThemeStore.getState()[key]])),
       ...localTemplateCcTheme(host),
     }) as Parameters<NonNullable<typeof handle>['setTheme']>[0]
     void loadSettingsPreviewControlCenter()
@@ -103,7 +103,7 @@ function PvSolidControlCenter() {
         if (disposed) return
         handle = mountSettingsPreviewControlCenter(host)
         handle.setTheme(themeSnapshot())
-        unsubscribeTheme = useStore.subscribe(() => {
+        unsubscribeTheme = useThemeStore.subscribe(() => {
           handle?.setTheme(themeSnapshot())
         })
       })
@@ -129,7 +129,10 @@ function PvSolidControlCenter() {
   )
 }
 
-/** SettingsPreview — 设置页实时预览画布（#515 Solid 实体；DOM/class 契约与 React 版逐字同构）。 */
+/** SettingsPreview — 设置页实时预览画布（#515 Solid 实体）。DOM/class 契约：
+ * div.set-preview-wrap > div.set-preview-frame（padding-bottom 定比撑高）>
+ * div.set-preview-clip > div.set-preview-scaled（按容器宽/设计宽 scale）+
+ * .set-preview-caption 示意标注。 */
 export default function SettingsPreview(props: SettingsPreviewProps) {
   // React useState 惰性初始化 → Solid 信号直接求值（组件体只跑一次，无惰性必要）。
   const [dims, setDims] = createSignal({
@@ -175,20 +178,20 @@ export default function SettingsPreview(props: SettingsPreviewProps) {
 }
 
 function PreviewApp(props: { zone: string }) {
-  // 原 useShallow 整片订阅 → 逐字段信号（Solid 细粒度，无 re-render 语义差异）。
-  const rightBg = createZustandSignal(useStore, s => s.rightBg)
-  const rightBgImage = createZustandSignal(useStore, s => s.rightBgImage)
-  const rightWidth = createZustandSignal(useStore, s => s.rightWidth)
-  const rightTransparency = createZustandSignal(useStore, s => s.rightTransparency)
-  const rightBlur = createZustandSignal(useStore, s => s.rightBlur)
-  const rawConnectorMode = createZustandSignal(useStore, s => s.toolConnectorMode)
-  const rawConnectorColor = createZustandSignal(useStore, s => s.toolConnectorColor)
-  const connectorStyle = createZustandSignal(useStore, s => s.toolConnectorStyle)
-  const connectorWidth = createZustandSignal(useStore, s => s.toolConnectorWidth)
-  const connectorOpacity = createZustandSignal(useStore, s => s.toolConnectorOpacity)
-  const toolOk = createZustandSignal(useStore, s => s.toolOk)
-  const toolRun = createZustandSignal(useStore, s => s.toolRun)
-  const toolErr = createZustandSignal(useStore, s => s.toolErr)
+  // 订阅粒度：按字段独立 createZustandSignal（细粒度追踪，字段间互不牵连）。
+  const rightBg = createZustandSignal(useThemeStore, s => s.rightBg)
+  const rightBgImage = createZustandSignal(useThemeStore, s => s.rightBgImage)
+  const rightWidth = createZustandSignal(useThemeStore, s => s.rightWidth)
+  const rightTransparency = createZustandSignal(useThemeStore, s => s.rightTransparency)
+  const rightBlur = createZustandSignal(useThemeStore, s => s.rightBlur)
+  const rawConnectorMode = createZustandSignal(useThemeStore, s => s.toolConnectorMode)
+  const rawConnectorColor = createZustandSignal(useThemeStore, s => s.toolConnectorColor)
+  const connectorStyle = createZustandSignal(useThemeStore, s => s.toolConnectorStyle)
+  const connectorWidth = createZustandSignal(useThemeStore, s => s.toolConnectorWidth)
+  const connectorOpacity = createZustandSignal(useThemeStore, s => s.toolConnectorOpacity)
+  const toolOk = createZustandSignal(useThemeStore, s => s.toolOk)
+  const toolRun = createZustandSignal(useThemeStore, s => s.toolRun)
+  const toolErr = createZustandSignal(useThemeStore, s => s.toolErr)
 
   const connectorMode = () => rawConnectorMode() || 'none'
   const connectorColor = () => rawConnectorColor() || 'rgba(0,0,0,0.12)'
@@ -298,9 +301,9 @@ function PreviewApp(props: { zone: string }) {
 }
 
 function PvUser() {
-  const rawUserName = createZustandSignal(useStore, s => s.userName)
-  const rawPrefix = createZustandSignal(useStore, s => s.userPrefix)
-  const userColor = createZustandSignal(useStore, s => s.userColor)
+  const rawUserName = createZustandSignal(useThemeStore, s => s.userName)
+  const rawPrefix = createZustandSignal(useThemeStore, s => s.userPrefix)
+  const userColor = createZustandSignal(useThemeStore, s => s.userColor)
   const userName = () => rawUserName() || 'user'
   const prefix = () => rawPrefix() || '❯'
   const cs = () => userColor() ? { color: userColor()! } : undefined
@@ -308,15 +311,15 @@ function PvUser() {
 }
 
 function PvSpinner() {
-  const preset = createZustandSignal(useStore, s => s.spinnerFramePreset)
-  const customFrames = createZustandSignal(useStore, s => s.spinnerCustomFrames)
-  const doneMarker = createZustandSignal(useStore, s => s.spinnerDoneMarker)
-  const cancelledMarker = createZustandSignal(useStore, s => s.spinnerCancelledMarker)
-  const errorMarker = createZustandSignal(useStore, s => s.spinnerErrorMarker)
-  const doneMode = createZustandSignal(useStore, s => s.spinnerDoneMarkerMode)
-  const cancelledMode = createZustandSignal(useStore, s => s.spinnerCancelledMarkerMode)
-  const errorMode = createZustandSignal(useStore, s => s.spinnerErrorMarkerMode)
-  const spinnerSize = createZustandSignal(useStore, s => s.spinnerSize)
+  const preset = createZustandSignal(useThemeStore, s => s.spinnerFramePreset)
+  const customFrames = createZustandSignal(useThemeStore, s => s.spinnerCustomFrames)
+  const doneMarker = createZustandSignal(useThemeStore, s => s.spinnerDoneMarker)
+  const cancelledMarker = createZustandSignal(useThemeStore, s => s.spinnerCancelledMarker)
+  const errorMarker = createZustandSignal(useThemeStore, s => s.spinnerErrorMarker)
+  const doneMode = createZustandSignal(useThemeStore, s => s.spinnerDoneMarkerMode)
+  const cancelledMode = createZustandSignal(useThemeStore, s => s.spinnerCancelledMarkerMode)
+  const errorMode = createZustandSignal(useThemeStore, s => s.spinnerErrorMarkerMode)
+  const spinnerSize = createZustandSignal(useThemeStore, s => s.spinnerSize)
   const frames = createMemo(() => resolveSpinnerFrames(preset(), customFrames()))
   // P52 D4：React GenerationFooter 已退役——预览用同一 resolveSpinnerMarker
   // 呈现三终态标记（终态文案契约由 Solid footer 测试锁定，此处仅视觉预览）。
@@ -347,15 +350,15 @@ function PvSpinner() {
 }
 
 function PvTool(props: { name: string; input: string; status: ToolConnectorStatus }) {
-  const toolOk = createZustandSignal(useStore, s => s.toolOk)
-  const toolRun = createZustandSignal(useStore, s => s.toolRun)
-  const toolErr = createZustandSignal(useStore, s => s.toolErr)
-  const toolIndicator = createZustandSignal(useStore, s => s.toolIndicator)
-  const toolIndicatorRun = createZustandSignal(useStore, s => s.toolIndicatorRun)
-  const toolIndicatorOk = createZustandSignal(useStore, s => s.toolIndicatorOk)
-  const toolIndicatorErr = createZustandSignal(useStore, s => s.toolIndicatorErr)
-  const glow = createZustandSignal(useStore, s => s.toolIndicatorGlow)
-  const glowColor = createZustandSignal(useStore, s => s.toolIndicatorGlowColor)
+  const toolOk = createZustandSignal(useThemeStore, s => s.toolOk)
+  const toolRun = createZustandSignal(useThemeStore, s => s.toolRun)
+  const toolErr = createZustandSignal(useThemeStore, s => s.toolErr)
+  const toolIndicator = createZustandSignal(useThemeStore, s => s.toolIndicator)
+  const toolIndicatorRun = createZustandSignal(useThemeStore, s => s.toolIndicatorRun)
+  const toolIndicatorOk = createZustandSignal(useThemeStore, s => s.toolIndicatorOk)
+  const toolIndicatorErr = createZustandSignal(useThemeStore, s => s.toolIndicatorErr)
+  const glow = createZustandSignal(useThemeStore, s => s.toolIndicatorGlow)
+  const glowColor = createZustandSignal(useThemeStore, s => s.toolIndicatorGlowColor)
   const indicatorAsset = createMemo(() => resolveToolIndicatorAssetForTone(props.status, {
     toolIndicator: toolIndicator(), toolIndicatorRun: toolIndicatorRun(), toolIndicatorOk: toolIndicatorOk(), toolIndicatorErr: toolIndicatorErr(),
   }))

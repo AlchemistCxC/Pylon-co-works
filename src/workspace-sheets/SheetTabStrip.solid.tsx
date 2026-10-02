@@ -6,7 +6,7 @@ import { useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import { activateAgentSheet } from './activateAgentSheet'
 import { selectAgentStatus, type AgentStatus } from '../contracts/agentTypes'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 import type { SheetRecord } from './sheetTypes'
 import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu.solid.tsx'

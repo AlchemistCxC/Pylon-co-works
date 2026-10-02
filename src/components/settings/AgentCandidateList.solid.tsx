@@ -111,9 +111,10 @@ export interface AgentCandidateListProps {
  * 设置页发现入口：优先展示候选与导入动作，报告、草稿和诊断按需展开。
  * 状态与副作用由宿主提供，此组件只呈现状态并转发操作。
  *
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/class/aria 契约逐字保持）。
- * 候选卡内的派生值（草稿/验证/导入态）全部收进 per-candidate accessor——原 React
- * 「每次渲染重算」的语义在 Solid 下以细粒度函数读取对应。
+ * #515 W1：Solid 实体。DOM/class/aria 契约：section.agent-runtime-discovery
+ * [aria-label="发现的运行时"] > .set-preset-row 动作行 + details 探测报告 +
+ * .agent-candidate-row[aria-expanded] 候选卡；候选卡内的派生值（草稿/验证/导入态）
+ * 全部收进 per-candidate accessor，读取时求值。
  */
 export default function AgentCandidateList(props: AgentCandidateListProps) {
   return (
@@ -154,7 +155,7 @@ export default function AgentCandidateList(props: AgentCandidateListProps) {
         const importMode = () => candidateImportMode(candidate, validation())
         const validationDetails = () => validation() ? candidateValidationDetails(validation()!) : null
         const selected = () => candidate.candidateId === props.selectedCandidateId
-        // 导入态：本面板的导入凭据优先，其次注册表现状解析（原宿主 map 语义逐字随迁）。
+        // 导入态：本面板的导入凭据优先，其次注册表现状解析。
         const importedId = () => props.importedCandidateIds[candidate.candidateId] ?? props.resolveImportedAgentId(candidate)
         const busy = () => props.provisioningCandidateId === candidate.candidateId
         const alternatives = () => [{ candidateId: candidate.candidateId, executable: candidate.executable, args: candidate.args, startability: candidate.startability }, ...(candidate.alternatives ?? [])]

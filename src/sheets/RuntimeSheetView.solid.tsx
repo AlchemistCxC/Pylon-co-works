@@ -8,8 +8,8 @@ import { getDiagnosticErrors, getErrorHistory, subscribeErrorCenter, type ErrorE
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, RUNTIME_LOG_RENDER_WINDOW, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { createRegistrySignal } from './solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 export interface RuntimeSheetViewProps {
   sheet: SheetRecord

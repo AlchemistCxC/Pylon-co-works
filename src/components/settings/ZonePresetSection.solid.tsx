@@ -1,10 +1,10 @@
 /** @jsxImportSource solid-js */
 import { createMemo, Show, type JSX } from 'solid-js'
-import { useStore } from '../../domains/theme/themeStore'
+import { useThemeStore } from '../../domains/theme/themeStore'
 import { deriveZoneStatus } from '../../domains/theme/presetReducer'
 import { ZonePresetRow } from './settingsSectionShared.solid.tsx'
 import type { ZonePresetEntry } from '../../domains/theme/zones/index.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 export interface ZonePresetSectionProps {
   /** 区域分区骨架只服务具名 section 区（global 的组合不同，走 GlobalPresetSection）。 */
@@ -31,8 +31,8 @@ export interface ZonePresetSectionProps {
  * 注入）。
  */
 export default function ZonePresetSection(props: ZonePresetSectionProps) {
-  const appliedPreset = createZustandSignal(useStore, s => s.appliedPreset)
-  const custom = createZustandSignal(useStore, s => s.custom)
+  const appliedPreset = createZustandSignal(useThemeStore, s => s.appliedPreset)
+  const custom = createZustandSignal(useThemeStore, s => s.custom)
 
   const status = createMemo(() => deriveZoneStatus({ appliedPreset: appliedPreset(), custom: custom() }, props.zone))
   return (

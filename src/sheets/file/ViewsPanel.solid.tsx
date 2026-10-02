@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createMemo, For, Show } from 'solid-js'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import { toAgentContextKey } from '../../domains/agent/agentContext'

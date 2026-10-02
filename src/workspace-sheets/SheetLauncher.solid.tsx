@@ -1,12 +1,11 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
-import { render } from 'solid-js/web'
 import { resolveLaunchIconName } from './launchIcons.solid.tsx'
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { activateAgentSheet } from './activateAgentSheet'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import type { SheetRecord, SheetKind } from './sheetTypes'
 import type { WorkspaceLaunchOption } from '../plugin-runtime/workspaces/workspaceTypes'
 
@@ -351,9 +350,4 @@ export default function SheetLauncher(p: { latest: () => SheetLauncherProps }) {
       </div>
     </Show>
   )
-}
-
-/** React 薄桥（SheetLauncher.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderSheetLauncher(container: HTMLElement, latest: () => SheetLauncherProps): () => void {
-  return render(() => <SheetLauncher latest={latest} />, container)
 }

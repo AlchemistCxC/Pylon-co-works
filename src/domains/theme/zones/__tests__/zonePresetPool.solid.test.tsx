@@ -20,7 +20,7 @@ import { GLOBAL_PRESETS, INTERFACE_MODE_PRESET_BUCKET } from '../../presets/inde
 import { PRESET_ZONES } from '../../presetReducer.ts'
 import { ZONE_FIELDS } from '../../themeFieldDefs.ts'
 import type { ThemeSettings } from '../../themeStore.ts'
-import { useStore } from '../../themeStore.ts'
+import { useThemeStore } from '../../themeStore.ts'
 import { useCustomPresetStore } from '../../customPresetStore.ts'
 import { useInterfaceModeStore } from '../../../interface/interfaceModeStore.ts'
 import { mountSettingsSheet } from '../../../../test/settingsSheetHarness.solid'
@@ -92,7 +92,7 @@ describe('zonePresetPool · 派生（刀6 #206）', () => {
         expect(entries.map(entry => entry.id).sort(), `${at} 覆盖该桶全部预设`).toEqual([...names].sort())
       }
     }
-    console.log('[刀6] 每格条数', JSON.stringify(cells))
+    console.debug('[刀6] 每格条数', JSON.stringify(cells))
   })
 
   it('不折叠（刀2 / #223 裁决 A）：同形切面各留一条，各自 id 与 label 取自己的来源；sources 已退场', () => {
@@ -161,7 +161,7 @@ describe('zonePresetPool · 自定义条目（刀6 #206）', () => {
   })
 
   it('存当前 → 入池（键含模式 + 区域）→ 应用恢复值；写盘可见且可按读入路径还原', () => {
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456', sidebarNameSize: 17 })
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#123456', sidebarNameSize: 17 })
     const id = useCustomPresetStore.getState().saveZonePresetEntry('gui', 'sidebar', '我的侧栏')
     expect(id, '存当前必须返回条目 id').toBeTruthy()
     // 「键含模式 + 区域」
@@ -183,15 +183,15 @@ describe('zonePresetPool · 自定义条目（刀6 #206）', () => {
     expect(custom!.label).toBe('我的侧栏')
 
     // 应用：改走再恢复
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#000000' })
-    expect(useStore.getState().sidebarBg).toBe('#000000')
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#000000' })
+    expect(useThemeStore.getState().sidebarBg).toBe('#000000')
     const theme = resolveZonePresetEntryTheme(custom!)
     expect(theme?.sidebarBg).toBe('#123456')
-    useStore.getState().applyZonePreset('sidebar', custom!.id, theme!)
-    expect(useStore.getState().sidebarBg).toBe('#123456')
-    expect(useStore.getState().sidebarNameSize).toBe(17)
-    expect(useStore.getState().appliedPreset.sidebar).toBe(id)
-    expect(useStore.getState().custom.sidebar).toBe(false)
+    useThemeStore.getState().applyZonePreset('sidebar', custom!.id, theme!)
+    expect(useThemeStore.getState().sidebarBg).toBe('#123456')
+    expect(useThemeStore.getState().sidebarNameSize).toBe(17)
+    expect(useThemeStore.getState().appliedPreset.sidebar).toBe(id)
+    expect(useThemeStore.getState().custom.sidebar).toBe(false)
 
     // 持久化：#448 PR5 起写独立键 pylon-custom-presets（拆出自 pylon-theme），读入路径可原样还原
     const raw = localStorage.getItem('pylon-custom-presets')
@@ -315,10 +315,10 @@ describe('zonePresetPool · 自定义条目删除（刀7 前置 #211）', () => 
 
   /** 播一条自定义条目并让它成为 sidebar 的当前基准（= 被选中态）。 */
   function seedSelectedCustomEntry(label = '我的侧栏'): string {
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
     const id = useCustomPresetStore.getState().saveZonePresetEntry('gui', 'sidebar', label)!
     const entry = useCustomPresetStore.getState().zonePresetEntries.find(item => item.id === id)!
-    useStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
+    useThemeStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
     return id
   }
 
@@ -340,25 +340,25 @@ describe('zonePresetPool · 自定义条目删除（刀7 前置 #211）', () => 
 
   it('删除被引用的条目：该区失去基准但保留现值（与全局删除链同语义）', () => {
     const id = seedSelectedCustomEntry()
-    expect(useStore.getState().appliedPreset.sidebar).toBe(id)
-    expect(useStore.getState().sidebarBg).toBe('#123456')
+    expect(useThemeStore.getState().appliedPreset.sidebar).toBe(id)
+    expect(useThemeStore.getState().sidebarBg).toBe('#123456')
 
     useCustomPresetStore.getState().removeZonePresetEntry(id)
 
-    expect(useStore.getState().appliedPreset.sidebar).toBe('')
-    expect(useStore.getState().custom.sidebar).toBe(true)
-    expect(useStore.getState().sidebarBg).toBe('#123456')
+    expect(useThemeStore.getState().appliedPreset.sidebar).toBe('')
+    expect(useThemeStore.getState().custom.sidebar).toBe(true)
+    expect(useThemeStore.getState().sidebarBg).toBe('#123456')
   })
 
   it('出厂条目不可删：把出厂预设名当 id 传进去是 no-op（不动条目、不写状态）', () => {
     const id = seedSelectedCustomEntry()
     const entriesBefore = useCustomPresetStore.getState().zonePresetEntries
-    const appliedBefore = useStore.getState().appliedPreset
+    const appliedBefore = useThemeStore.getState().appliedPreset
 
     useCustomPresetStore.getState().removeZonePresetEntry('glass')
 
     expect(useCustomPresetStore.getState().zonePresetEntries).toBe(entriesBefore)
-    expect(useStore.getState().appliedPreset).toBe(appliedBefore)
+    expect(useThemeStore.getState().appliedPreset).toBe(appliedBefore)
     expect(useCustomPresetStore.getState().zonePresetEntries.map(entry => entry.id)).toEqual([id])
     expect(isCustomZonePresetEntry(ZONE_PRESET_POOL.gui.sidebar[0])).toBe(false)
   })
@@ -420,7 +420,7 @@ describe('zonePresetPool · 自定义条目删除（刀7 前置 #211）', () => 
 
     // ③ 选中该自定义条目 ⇒ 恰好 1 个
     const entry = useCustomPresetStore.getState().zonePresetEntries.find(item => item.id === id)!
-    useStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
+    useThemeStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
     await vi.waitFor(() => {
       expect(deletes()).toHaveLength(1)
     })

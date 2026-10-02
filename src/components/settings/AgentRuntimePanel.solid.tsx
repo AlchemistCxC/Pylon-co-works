@@ -19,7 +19,7 @@ import {
   assertCustomProfileFieldsAllowed,
   validateCustomProfile,
 } from '../../domains/agent/customProfileRules.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { createAgentDetection } from './useAgentDetection.solid.ts'
 import { createAgentPanelFeedback } from './useAgentPanelFeedback.solid.ts'
 import { createAgentCandidateProvisioning } from './useAgentCandidateProvisioning.solid.ts'
@@ -48,9 +48,9 @@ export interface AgentRuntimePanelProps {
  * createAgentPanelFeedback；呈现分别在 AgentRuntimeCard / AgentCandidateList /
  * AgentCreateForm。
  *
- * #515 W1：Solid 实体（原 React 面同批退役；DOM/class/aria 契约逐字保持）。
- * store 消费经 createZustandSignal（selector 只读 store）；useEffect/useRef 按
- * 迁移指南语义表映射（onCleanup/createEffect/普通可变变量）。
+ * #515 W1：Solid 实体。
+ * store 消费经 createZustandSignal（selector 只读 store）；副作用用
+ * createEffect/onCleanup 承担，跨渲染可变量用组件体局部 let。
  */
 export default function AgentRuntimePanel(props: AgentRuntimePanelProps) {
   const agentClient = appClients.agent()
@@ -282,7 +282,6 @@ export default function AgentRuntimePanel(props: AgentRuntimePanelProps) {
     const testedFingerprint = agentDraftFingerprint({ name: current.name, provider: current.provider, exe: current.exe, args: current.args })
     setDraftMachine(machine => agentDraftReducer(machine, { type: 'testBegin' }))
     // Solid setter 同步生效：此处读到的已是 testBegin 后的机器（testRequestId 已 +1）。
-    // React 版读的是旧渲染快照再 +1——两者得到同一序号。
     const requestId = draftMachine().testRequestId
     setTestingId(agentId)
     try {

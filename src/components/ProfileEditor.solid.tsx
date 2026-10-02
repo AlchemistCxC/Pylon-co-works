@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, Show } from 'solid-js'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
@@ -20,7 +20,10 @@ export interface ProfileEditorProps {
   onClose: () => void
 }
 
-/** ProfileEditor — 身份 Profile 编辑弹窗（#515 Solid 实体；DOM/aria 契约与 React 版逐字同构）。 */
+/** ProfileEditor — 身份 Profile 编辑弹窗（#515 Solid 实体）。DOM/aria 契约：遮罩点击
+ * 关闭；div[role=dialog][aria-modal][aria-labelledby=profile-editor-title]，标题
+ * h3#profile-editor-title，字段 label[for] ↔ input/textarea#profile-*，关闭钮
+ * aria-label="关闭 Profile 设置"。 */
 export default function ProfileEditor(props: ProfileEditorProps) {
   const profiles = createZustandSignal(useIdentityStore, s => s.profiles)
   const activeProfileId = createZustandSignal(useIdentityStore, s => s.activeProfileId)

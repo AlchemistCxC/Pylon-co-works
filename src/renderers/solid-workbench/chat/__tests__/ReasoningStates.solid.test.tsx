@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { RenderMessage } from '../../../../domains/chat/messageTypes.ts'
 import type { Message } from '../../../../domains/chat/messageTypes.ts'
 import { BuiltinSolidContentSlot } from '../BuiltinSolidContentSlot.solid.tsx'
+import { FLUSH_BUDGET } from '../../../../test/solidTestHelpers.ts'
 import { SolidMessageRow } from '../MessageRow.solid.tsx'
 
 /**
@@ -71,11 +72,11 @@ describe('C01 ReasoningBlock states', () => {
     const button = result.getByRole('button')
     await fireEvent.click(button)
     // MarkdownContent 异步解析，等待 h1 出现（复用 C00 语义标签，非纯文本行）。
-    // 预算依据：等待对象是 createResource 解析 + Solid 刷帧（微任务级，常态 <50ms，
-    // 本文件其余 waitFor 用默认 1s 均稳定通过）；2s 覆盖满载并发抖动，原 5s 是 P91 期粗放放宽。
+    // 等待对象是 createResource 解析 + Solid 刷帧（微任务级）；统一冲刷预算见
+    // solidTestHelpers 的 FLUSH_BUDGET。
     await waitFor(() => {
       if (!result.container.querySelector('.term-h1')) throw new Error('markdown not parsed yet')
-    }, { timeout: 2_000 })
+    }, FLUSH_BUDGET)
     expect(result.container.querySelectorAll('.term-reasoning-line')).toHaveLength(0)
   })
 

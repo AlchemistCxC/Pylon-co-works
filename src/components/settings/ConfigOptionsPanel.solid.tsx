@@ -8,16 +8,15 @@ import { appClients } from '../../app/appClients.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import type { AgentContext } from '../../domains/agent/agentContext'
 import { toAgentContextKey } from '../../domains/agent/agentContext'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 export interface ConfigOptionsPanelProps {
   context?: AgentContext
 }
 
-/** #515：ConfigOptionsPanel 的 Solid 实体（原 ConfigOptionsPanel.tsx 为 React 薄桥）。 */
+/** #515：ConfigOptionsPanel 的 Solid 实体（按 AgentContext 切片渲染/编辑会话配置 options）。 */
 export default function ConfigOptionsPanel(props: ConfigOptionsPanelProps) {
-  // 会话配置切片 + props.context 双响应轴：切片引用变化或 context 变化任一发生都重派生
-  // （React 版由每次渲染重跑 selector 达成同一语义）。
+  // 会话配置切片 + props.context 双响应轴：切片引用变化或 context 变化任一发生都重派生。
   const sessionConfig = createZustandSignal(useRuntimeStore, s => s.sessionConfig)
   const config = createMemo(() => {
     const context = props.context

@@ -8,7 +8,7 @@ import {
   selectUserTier,
   type CommandSuggestion,
 } from '../../../domains/chat/commandRegistry.ts'
-import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
+import { subscribePluginCommands } from '../../../application/commandSetResolver.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'

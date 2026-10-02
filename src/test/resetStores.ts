@@ -5,7 +5,7 @@
  * sessionUiState 注册表。测试 beforeEach/afterEach 调用。
  */
 
-import { useStore } from '../domains/theme/themeStore'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { useCustomPresetStore } from '../domains/theme/customPresetStore'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
@@ -39,7 +39,7 @@ export function resetStores(): void {
   }
   useIdentityStore.setState(useIdentityStore.getInitialState(), true)
   useRuntimeStore.setState(useRuntimeStore.getInitialState(), true)
-  useStore.setState(useStore.getInitialState(), true)
+  useThemeStore.setState(useThemeStore.getInitialState(), true)
   // #448 PR5：customPresets/zonePresetEntries 拆出的独立持久化域一并重置
   useCustomPresetStore.setState(useCustomPresetStore.getInitialState(), true)
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)

@@ -5,7 +5,6 @@ import type { Message } from '../../../../domains/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/appearance/appearance.ts'
 import { SolidDiffCard } from '../DiffCard.solid.tsx'
 import { SolidToolCard } from '../ToolCard.solid.tsx'
-// （SolidTaskTree describe 随 chat/TaskTree.solid.tsx 退役删除——#520 死代码二批，零生产消费。）
 
 const TOOL_APPEARANCE: Pick<WorkbenchAppearanceSnapshot,
   'toolIndicator' | 'toolIndicatorGlow' | 'toolIndicatorGlowColor'> = {

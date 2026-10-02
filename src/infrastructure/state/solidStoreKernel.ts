@@ -34,7 +34,7 @@ export interface SolidStoreKernel<T extends object> {
   getInitialState: () => T
   /** 通知计数（每次 set 单调 +1）——外部快照缓存以它判「快照是否过期」。 */
   getVersion: () => number
-  /** Solid store 代理本体（终态直连用；过渡期与 getState() 同一对象）。 */
+  /** Solid store 代理本体（终态直连用；state 即终态读取面）。 */
   readonly state: T
 }
 

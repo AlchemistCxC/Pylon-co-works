@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
 import { markdownParseCounters, resetMarkdownParseCounters } from '../markdownParseCounters.ts'
+import { nextFrame } from '../../../../test/solidTestHelpers.ts'
 
 beforeEach(() => {
   clearMarkdownRenderModelCache()
@@ -24,8 +25,6 @@ beforeEach(() => {
 })
 
 afterEach(cleanup)
-
-const nextFrame = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
 /** 块签名：标签 + class + 文本（与 #55 用例同口径）。 */
 function blockSignature(container: HTMLElement): string[] {

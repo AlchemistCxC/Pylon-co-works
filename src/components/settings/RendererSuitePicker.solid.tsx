@@ -7,7 +7,7 @@ import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStor
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import Select from '../ui/Select.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 export interface RendererSuitePickerProps {}
 

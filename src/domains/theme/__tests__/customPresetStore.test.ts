@@ -17,11 +17,11 @@ async function freshStores() {
   // 求值在同一条同步链上完成——快照先于 themeStore hydrate 的微任务写回（生产
   // import 图同序）。若先单独 await themeStore，await 的微任务空隙会让其 hydrate
   // 把旧 pylon-theme 修剪掉，搬家读到空。
-  const { useStore } = await import('../customPresetStore.ts').then(() => import('../themeStore.ts'))
+  const { useThemeStore } = await import('../customPresetStore.ts').then(() => import('../themeStore.ts'))
   const { useCustomPresetStore, CUSTOM_PRESET_STORAGE_KEY } = await import('../customPresetStore.ts')
   // zustand persist 的 hydrate 经微任务链调度——等它落定后再断言
   await new Promise(resolve => globalThis.setTimeout(resolve, 0))
-  return { useStore, useCustomPresetStore, CUSTOM_PRESET_STORAGE_KEY }
+  return { useThemeStore, useCustomPresetStore, CUSTOM_PRESET_STORAGE_KEY }
 }
 
 beforeEach(() => {
@@ -81,7 +81,7 @@ describe('旧 pylon-theme 一次性搬家', () => {
     const persisted = localStorage.getItem('pylon-custom-presets')
     expect(persisted, '搬家值必须当场落盘').toBeTruthy()
     // 模拟会话 1 内发生一次 theme 写盘（partialize 白名单修剪旧键内嵌字段）
-    first.useStore.getState().setZoneField('chat', { chatFontSize: 20 })
+    first.useThemeStore.getState().setZoneField('chat', { chatFontSize: 20 })
     // 会话 2（重启）：own 优先命中新键，与旧键是否被修剪无关
     const second = await freshStores()
     expect(second.useCustomPresetStore.getState().customPresets.map(p => p.id)).toEqual(['custom-v11'])
@@ -112,22 +112,22 @@ describe('旧 pylon-theme 一次性搬家', () => {
 
 describe('跨 store 事务路由', () => {
   it('saveCustomPreset 快照读 themeStore 当前值，条目落新 store', async () => {
-    const { useStore, useCustomPresetStore } = await freshStores()
-    useStore.getState().setZoneField('chat', { chatFontSize: 19 })
+    const { useThemeStore, useCustomPresetStore } = await freshStores()
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 19 })
     const id = useCustomPresetStore.getState().saveCustomPreset('我的预设')
     const saved = useCustomPresetStore.getState().customPresets
     expect(saved).toHaveLength(1)
     expect(saved[0].id).toBe(id)
     expect(saved[0].theme.chatFontSize).toBe(19)
     // themeStore 不再持有预设切片
-    expect('customPresets' in useStore.getState()).toBe(false)
+    expect('customPresets' in useThemeStore.getState()).toBe(false)
   })
 
   it('写盘隔离：预设落新键，themeStore 的 pylon-theme 写盘值不再含预设字段', async () => {
-    const { useStore, useCustomPresetStore } = await freshStores()
-    useStore.getState().setZoneField('chat', { chatFontSize: 19 })
+    const { useThemeStore, useCustomPresetStore } = await freshStores()
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 19 })
     useCustomPresetStore.getState().saveCustomPreset('写盘隔离')
-    useStore.getState().setZoneField('chat', { chatFontSize: 20 })
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 20 })
     const themeRaw = localStorage.getItem('pylon-theme')
     expect(themeRaw, '主题域必须已写盘').toBeTruthy()
     const themeState = (JSON.parse(themeRaw!) as { state: Record<string, unknown> }).state
@@ -139,23 +139,23 @@ describe('跨 store 事务路由', () => {
   })
 
   it('removeCustomPreset：条目删于新 store；被引用 zone 的 appliedPreset/custom 回写 themeStore', async () => {
-    const { useStore, useCustomPresetStore } = await freshStores()
-    useStore.getState().setZoneField('chat', { chatFontSize: 19 })
+    const { useThemeStore, useCustomPresetStore } = await freshStores()
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 19 })
     const id = useCustomPresetStore.getState().saveCustomPreset('被引用预设')
     await useCustomPresetStore.getState().applyCustomPreset(id)
-    expect(useStore.getState().appliedPreset.chat).toBe(id)
+    expect(useThemeStore.getState().appliedPreset.chat).toBe(id)
 
     useCustomPresetStore.getState().removeCustomPreset(id)
     expect(useCustomPresetStore.getState().customPresets).toHaveLength(0)
     // 引用该 id 的 zone 失去基准（appliedPreset=''）且 custom=true——字段保留现值
-    expect(useStore.getState().appliedPreset.chat).toBe('')
-    expect(useStore.getState().custom.chat).toBe(true)
-    expect(useStore.getState().chatFontSize).toBe(19)
+    expect(useThemeStore.getState().appliedPreset.chat).toBe('')
+    expect(useThemeStore.getState().custom.chat).toBe(true)
+    expect(useThemeStore.getState().chatFontSize).toBe(19)
   })
 
   it('saveZonePresetEntry 快照读 themeStore；removeZonePresetEntry 回写主题侧标记', async () => {
-    const { useStore, useCustomPresetStore } = await freshStores()
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
+    const { useThemeStore, useCustomPresetStore } = await freshStores()
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
     const id = useCustomPresetStore.getState().saveZonePresetEntry('gui', 'sidebar', '我的侧栏')!
     expect(id.startsWith('zone-gui-sidebar-')).toBe(true)
     expect(useCustomPresetStore.getState().zonePresetEntries[0].values?.sidebarBg).toBe('#123456')
@@ -163,11 +163,11 @@ describe('跨 store 事务路由', () => {
     // 引用它后删除：失去基准 + 保留现值
     const entry = useCustomPresetStore.getState().zonePresetEntries[0]
     const { resolveZonePresetEntryTheme } = await import('../zones/index.ts')
-    useStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
+    useThemeStore.getState().applyZonePreset('sidebar', id, resolveZonePresetEntryTheme(entry)!)
     useCustomPresetStore.getState().removeZonePresetEntry(id)
     expect(useCustomPresetStore.getState().zonePresetEntries).toHaveLength(0)
-    expect(useStore.getState().appliedPreset.sidebar).toBe('')
-    expect(useStore.getState().custom.sidebar).toBe(true)
-    expect(useStore.getState().sidebarBg).toBe('#123456')
+    expect(useThemeStore.getState().appliedPreset.sidebar).toBe('')
+    expect(useThemeStore.getState().custom.sidebar).toBe(true)
+    expect(useThemeStore.getState().sidebarBg).toBe('#123456')
   })
 })

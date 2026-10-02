@@ -6,7 +6,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import SettingsPreview from '../SettingsPreview.solid.tsx'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
 beforeEach(() => resetStores())
@@ -29,7 +29,7 @@ describe('SettingsPreview Solid 中控迁移', () => {
     const ccWrapper = controlCenter.parentElement?.parentElement as HTMLElement | null
     expect(ccWrapper?.style.outline).toContain('solid')
 
-    useStore.setState({ ccBg: '#102030', ccBgImage: 'data:image/png;base64,fixture' })
+    useThemeStore.setState({ ccBg: '#102030', ccBgImage: 'data:image/png;base64,fixture' })
     await waitFor(() => {
       expect(controlCenter.style.getPropertyValue('--cc-surface')).toBe('#102030')
       expect(controlCenter.style.getPropertyValue('--cc-surface-image')).toContain('url(')

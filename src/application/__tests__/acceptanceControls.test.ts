@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { KERNEL_ACCEPTANCE_STORAGE_KEY, shouldExposeKernelAcceptanceControls } from '../kernelAcceptanceControls'
+import { KERNEL_ACCEPTANCE_STORAGE_KEY, shouldExposeKernelAcceptanceControls } from '../acceptanceControls.ts'
 
 describe('Kernel acceptance controls gate', () => {
   it('Vite dev 模式直接开放', () => {

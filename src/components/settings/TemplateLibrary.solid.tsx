@@ -8,7 +8,7 @@ import type { ThemeSettings } from '../../domains/theme/themeStore'
 import { themeToCssVars } from './templateThemeVars.ts'
 import { createPresetBundle, presetCoverage, type PresetApplyResult } from '../../domains/theme/presetBundle.ts'
 import { normalizeCustomPresetId } from '../../domains/theme/customPresets.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import SettingsPreviewSolid from '../SettingsPreview.solid.tsx'
 
 /**

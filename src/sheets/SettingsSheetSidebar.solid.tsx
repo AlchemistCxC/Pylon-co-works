@@ -13,15 +13,15 @@ import {
   type SettingsSectionId,
 } from '../components/settings/settingsDomains.ts'
 import { GROUP_ORDER } from '../domains/theme/themeFieldDefs'
-import { useStore } from '../domains/theme/themeStore'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore.ts'
 import { useSettingsChromeStore } from '../domains/appearance/settingsChromeStore.ts'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/pluginSettingsStore.ts'
 import { getPluginSettingsPageRegistry, getPluginSettingsStore } from '../plugin-runtime/runtimeServices.ts'
 import { pulseSettingsAnchor } from '../utils/anchorPulse.ts'
-import { createRegistrySignal } from './solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * Settings Sheet 左栏导航（#154 阶段 4：一二级同栏分层）。
@@ -58,7 +58,7 @@ export default function SettingsSheetSidebar(props: WorkspaceViewProps<SettingsS
   const [confirmResetTheme, setConfirmResetTheme] = createSignal(false)
   const reset = () => { resetThemeForActiveInterfaceMode() }
   // 该区有自定义改动（dirty）时导航按钮带小圆点（store 真值，与字段编辑同步）
-  const custom = createZustandSignal(useStore, s => s.custom)
+  const custom = createZustandSignal(useThemeStore, s => s.custom)
 
   const navigate = (partial: { domain?: SettingsDomainId; section?: SettingsSectionId; pluginPageId?: string | null; rendererCategoryId?: string | null }) => {
     useWorkspaceStore.getState().patchSheetState(props.sheet.id, normalizeSettingsSheetState({ ...props.state, ...partial }) as unknown as Record<string, unknown>)

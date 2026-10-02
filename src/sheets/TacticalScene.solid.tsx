@@ -2,7 +2,7 @@
 import { createEffect, onCleanup } from 'solid-js'
 import closer from '../assets/tactical/closer.png'
 import falling from '../assets/tactical/falling.png'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { useTacticalSceneStore } from './tacticalSceneStore'
 
 /**

@@ -6,7 +6,7 @@ import {
   type ZoneRefMap,
 } from '../../domains/theme/presetReducer.ts'
 import { ZONE_PRESET_POOL, effectivePresetTheme, resolveZonePresetEntryTheme } from '../../domains/theme/zones/index.ts'
-import { useStore, type ThemeSettings } from '../../domains/theme/themeStore.ts'
+import { useThemeStore, type ThemeSettings } from '../../domains/theme/themeStore.ts'
 import { getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileRegistry } from '../../plugin-runtime/presentation/presentationProfileRegistry.ts'
 import { activatePresentationProfile } from './activateInterfaceMode.ts'
@@ -117,7 +117,7 @@ export function applyGlobalPreset(name: PresetName | string, ports?: GlobalPrese
   const plan = planGlobalPreset(name, id => registry.resolve(id)?.value)
   if (plan.kind === 'skip') return false
   if (plan.activateProfileId !== undefined && !activatePresentationProfile(plan.activateProfileId, ports)) return false
-  const themeStore = (ports?.theme ?? useStore).getState()
+  const themeStore = (ports?.theme ?? useThemeStore).getState()
   if (plan.zoneRefs) {
     themeStore.assembleGlobalPreset(
       expandGlobalPresetZoneRefs(plan.interfaceMode, plan.zoneRefs),

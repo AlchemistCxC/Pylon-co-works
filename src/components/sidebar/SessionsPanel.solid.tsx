@@ -325,8 +325,8 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
           </div>
         </Show>
       </div>
-      {/* 手写 Dialog 最小等价（radix @radix-ui/react-dialog 退役，#515 §3）：Portal 到 body、
-          遮罩/Esc 关闭、role=dialog + aria-describedby，DOM 类名与 React 版逐字同构。 */}
+      {/* 手写 Dialog 最小等价（#515 §3）：Portal 到 body、遮罩点击/Esc 关闭，
+          role=dialog + aria-modal + aria-describedby（aria-label="工作区设置"）。 */}
       <Show when={editingWorkspace()}>{workspace => (
         <Portal>
           <div class="dialog-overlay" onClick={() => setEditingCwdId(null)} />
