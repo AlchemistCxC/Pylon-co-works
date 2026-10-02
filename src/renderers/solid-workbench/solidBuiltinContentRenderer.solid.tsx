@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For } from 'solid-js'
 import { coalesceAdjacentDisplayTextParts, isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'

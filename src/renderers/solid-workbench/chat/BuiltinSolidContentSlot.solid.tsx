@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Match, Show, Switch } from 'solid-js'
 import type {
   RenderAppearanceSnapshot,

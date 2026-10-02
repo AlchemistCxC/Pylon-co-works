@@ -1,6 +1,9 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
+/** @jsxImportSource solid-js */
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, Suspense, untrack } from 'solid-js'
 import { render } from 'solid-js/web'
 import SheetTabStrip from './SheetTabStrip.solid.tsx'
+import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
+import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
 import { useStore } from '../domains/theme/themeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
@@ -18,20 +21,6 @@ import type { TitlebarContext, TitlebarRegistryEntry } from '../plugin-runtime/t
 import { resolveLaunchIcon } from './launchIcons.solid.tsx'
 import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../components/settings/settingsDomains.ts'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
-
-// 插件贡献 React 岛：island 文件是 React 面（内含 ErrorBoundary/Suspense/插件 React
-// 组件），React 类型图不得被 solid 程序拉入——按 P52 D4 用 eager glob 缝加载，
-// 挂载函数接口在此声明（本文件类型图内的唯一事实）。
-interface WorkspaceTitlebarPluginIslandModule {
-  mountTitlebarPluginIsland(container: HTMLElement, get: () => {
-    entries: TitlebarRegistryEntry[]
-    context: TitlebarContext
-  }): { rerender(): void; dispose(): void }
-}
-
-const islandModules = import.meta.glob<WorkspaceTitlebarPluginIslandModule>('./WorkspaceTitlebarPluginIsland.tsx', { eager: true })
-const islandModule = islandModules['./WorkspaceTitlebarPluginIsland.tsx']
-if (!islandModule) throw new Error('标题栏插件 React 岛未进入 Vite module graph')
 
 export interface WorkspaceMenuActions {
   onTogglePin: (id: string) => void
@@ -218,25 +207,7 @@ export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarPr
     })
   })
 
-  // 插件贡献 React 岛：app-actions 贡献簇（component renderKind 走 React 组件树，
-  // ErrorBoundary/Suspense 在岛内）。依赖（贡献快照/标题栏上下文）变化 → rerender。
-  let islandElement: HTMLDivElement | undefined
-  let island: { rerender(): void; dispose(): void } | null = null
-  createEffect(() => {
-    const entries = contributedActions()
-    const context = titlebarContext()
-    untrack(() => {
-      if (!islandElement) return
-      island ??= islandModule.mountTitlebarPluginIsland(islandElement, () => ({
-        entries: untrack(contributedActions),
-        context: untrack(titlebarContext),
-      }))
-      island.rerender()
-    })
-    void entries
-    void context
-  })
-  onCleanup(() => island?.dispose())
+  // #515 岛退役：app-actions 插件贡献簇直连渲染（见 JSX 尾部 TitlebarPluginActions）。
 
   // #154：左格只在左列真的可见时占轨道——折叠后轨道宽度由
   // --sheet-sidebar-track-width 归零，整格不参与布局，于是既没有空列也没有悬空分割线。
@@ -378,7 +349,7 @@ export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarPr
               </div>
             </Show>
           </div>
-          <div ref={element => { islandElement = element }} style={{ display: 'contents' }} />
+          <TitlebarPluginActions entries={contributedActions()} context={titlebarContext()} />
         </div>
         <span class="workspace-window-controls-divider" aria-hidden="true" />
         <div class="workspace-window-native-controls" aria-label="窗口控制">
@@ -388,6 +359,41 @@ export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarPr
         </div>
       </div>
     </header>
+  )
+}
+
+/**
+ * TitlebarPluginActions — app-actions 插件贡献簇（#515 岛退役：原 React 岛
+ * WorkspaceTitlebarPluginIsland 直连化；DOM 契约逐项保留——command 菜单项不进标题栏、
+ * isolated-surface 挂 workspace-titlebar-plugin-action、first-party 组件包
+ * PluginContributionBoundary + Suspense）。
+ */
+function TitlebarPluginActions(props: { entries: TitlebarRegistryEntry[]; context: TitlebarContext }) {
+  return (
+    <For each={props.entries}>{entry => {
+      const contribution = entry.value
+      // 菜单项不进标题栏按钮簇：它是数据化贡献，渲染在齿轮菜单里。
+      if (contribution.renderKind === 'command') return null
+      if (contribution.renderKind === 'isolated-surface') {
+        if (!contribution.surfaceId) return null
+        return (
+          <IsolatedPluginSurface
+            surfaceId={contribution.surfaceId}
+            className="workspace-titlebar-plugin-action"
+            input={{ titlebarContext: props.context }}
+          />
+        )
+      }
+      const Action = contribution.component
+      if (!Action) return null
+      return (
+        <PluginContributionBoundary contributionId={entry.contributionId}>
+          <Suspense fallback={null}>
+            <Action context={props.context} />
+          </Suspense>
+        </PluginContributionBoundary>
+      )
+    }}</For>
   )
 }
 

@@ -1,10 +1,10 @@
 # L.md · 并行施工协调板
 
-- [kumo] **#463 决策口收口（2026-10-01）**：域＝`src-tauri/src/{permission,lib}.rs`（AppState 增 `approval_mode_persisted` + set/get 返回 `{mode,persisted}` 快照）、`src-tauri/pylon-session/src/user_data.rs`（`UserDataError::ReservedKey`）、`src-tauri/src/session/mod.rs`（`user_data_save` 拒绝 approval-mode key）、`src/cli/{pylonCliPorts,pylonCliDomainPorts,pylonCliService}.ts`、`src/demo/mockTauri.ts`、说明书《Pylon-CLI-命令表》《Pylon-项目架构参考》approval 段。**避让 #515**：CLI 端口/服务层非组件非 store，如需翻转请保留 wire 契约语义；`src-tauri/Cargo.toml`（[Codex] 在途）不碰。#482/#483 补遗条目（lib.rs/说明书域）PR #510 已合并，请及时撤条。
-
 - [Codex] **Agent 探测/导入故障调查（2026-10-01）**：域＝`src/components/settings/{AgentCandidateList,useAgentDetection,useAgentCandidateProvisioning,AgentCreateForm,AgentRuntimePanel}*`、`src/domains/agent/`、`src-tauri/pylon-core/src/agent_detection/` 与相关测试/说明书/记录；先调试 `F:/A-I/Platform/Pylon`。发现共享树 `src-tauri/Cargo.toml` 他人在途，依 §2.1 不 stage/commit；隔离到基于 `github/main` 的 worktree 完成施工与提交。
 
 - [kumo] **#504 flaky test 修复（2026-10-01）**：域＝`src-tauri/pet-core/src/lib.rs`（新增测试用墙钟归零 helper）＋ `src-tauri/src/dispatcher/reactions.rs`（表征测试比较前归一化）＋ `.agents/{spec,records}/504-*`。不碰 `src-tauri/Cargo.toml`、前端、说明书。
+
+- [kumo] **#519 clippy 1.99 门禁修复（2026-10-02）**：域＝`src-tauri/pylon-core/src/hermes/runtime.rs`（single_element_loop 展开一处）＋ `.agents/records/519-*`。同一修复需同步到 `kumo/321-persistence-adr`（#516）、`kumo/498-sheet-tab-solid-tests`（#518）两分支——以 `git worktree` 隔离操作，**不切共享树工作区**。不碰其它文件。
 
 - [kumo] **#498 SheetTabStrip.solid 行为测试补齐（2026-10-01）**：域＝`src/workspace-sheets/__tests__/{sheetTabOverflow,sheetTabStripAgentSwitch,sheetTabStripStatusMatrix}.solid.test.tsx`（三个新文件，不碰生产行为）＋ `vitest.setup.ts` console.error 白名单**换一行**（旧 React 条目→新 solid 条目）。窄域，与 #515 无文件交叠（vitest.setup.ts 一行改动请 #515 注意）；不碰 `src-tauri/`。
 
@@ -21,3 +21,5 @@
 - [worker] **#266 刀5 编辑清单改左侧一列 + 拖动阈值**（施工单 `待办/12-施工单-编辑清单改左侧一列与拖动阈值（刀5）.md`）：域＝`src/renderers/solid-workbench/input/ControlCenter.solid.tsx`（`beginDrag` 加 3px 阈值；底部横栏 + 独立属性面板两族换成左列；**组件根改 fragment**）、`src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css`（删 `.cc-edit-toolbar*` / `.cc-prop-panel,-header,-body,-footer`，新增 `.cc-edit-column*` / `.cc-edit-row*`，`.cc-edit-warning` 改列内）、同目录 `solid-workbench/WorkbenchChrome.css`（空态隐藏列表删 `.cc-edit-toolbar` / `.cc-prop-panel` 两条）、上述各自的 `__tests__/**`、`.agents/records/266-cc-edit-column-and-drag-threshold.md`。分支 `feat/cc-visibility-two-layer.5`（基于 `origin/main @ 10834c75`）。**不碰**：`src-tauri/**`、`src/workspace-sheets/**`、`src/domains/**`、位置模型（`layout`/`detachX`/槽位）、尺寸算式、出厂数据**值**、`THEME_SCHEMA_VERSION`、空态下 `.cc-edit-hdr` 的可见性。⚠️ **方案偏离（已在记录「遗留」节留痕，待翻译裁断）**：左列渲染在**中控槽位之外**（即组件根 fragment）——空态那条 `transform: translateY(-50%)` 会给 `position:fixed` 的后代**建立包含块**，列若留在槽位内会被压成 64px 高并跟着 -50% 位移；在不改空态几何（单子 §十.1）的前提下这是唯一可行结构。施工期不 commit（铁律 5）⇒ 本条不入库，收口由翻译做。
 
 - [kumo] **#463 写穿链遗留（前端 C-1 跨会话回滚 + 后端 C-1 并发乱序）**：改动域＝`src/infrastructure/persistence/{customPresetRepository,inputPredictionSettingsRepository}.ts` 及两测试文件、`src-tauri/src/permission.rs`（set_approval_mode 串行锁）、`src-tauri/src/lib.rs`（AppState 增 `approval_mode_write_lock` 一字段）。**不碰**：`pylon-session/src/user_data.rs`、`session/mod.rs`、其余 repository。规格 `.agents/spec/463-write-through-reconcile-ordering.md`。项 3（degraded 外部可查）留决策口不施工。
+
+- [kumo] **#515 迁移批（sidebar/right-panel 域，2026-10-01）**：域＝`src/components/sidebar/*`（AgentSheetPageHost/FirstPartyContribution/SearchPanel/SessionsPanel/三个 hooks 文件）与 `src/components/right-panel/*`（AgentContextPanel/ContextPanelHost/MessageSearchBar/RightRailHost）→ `.solid.tsx` 实体 + React 薄桥 + 同目录新增 React 岛文件；对应测试改写 `.solid.test.tsx`。hooks 原 .ts 不动（Sidebar.tsx 等域外 React 消费者仍在）。不 commit，收口由主会话 pathspec 提交。

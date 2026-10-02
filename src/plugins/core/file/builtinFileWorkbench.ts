@@ -1,20 +1,45 @@
-import { lazy } from 'react'
+import { lazy, type Component } from 'solid-js'
 import { tauriInvokeTransport } from '../../../infrastructure/acp/tauriTransport.ts'
 import { createWorkspaceClient } from '../../../infrastructure/tauri/workspaceClient.ts'
 import { normalizeWorkspaceText } from '../../../infrastructure/tauri/workspaceContracts.ts'
 import { normalizeWorkspaceSearchResults } from '../../../infrastructure/tauri/workspaceSearchContracts.ts'
 import { normalizeGitHistory, normalizeGitOperationResult, normalizeGitStatusWithBranch } from '../../../infrastructure/tauri/gitContracts.ts'
-import type { FileWorkbenchContribution } from '../../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
+import type { FileWorkbenchContribution, FileActivityProps } from '../../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { WorkspaceEntry } from '../../../components/right-panel/rightPanelTypes.ts'
 import { fileTabViewType } from '../../../sheets/file/fileSheetState.ts'
 
-const views = () => import('./builtinFileWorkbenchViews.tsx')
-const SessionsActivity = lazy(() => views().then(module => ({ default: module.SessionsActivity })))
-const ExplorerActivity = lazy(() => views().then(module => ({ default: module.ExplorerActivity })))
-const SearchActivity = lazy(() => views().then(module => ({ default: module.SearchActivity })))
-const ScmActivity = lazy(() => views().then(module => ({ default: module.ScmActivity })))
-const ViewsActivity = lazy(() => views().then(module => ({ default: module.ViewsActivity })))
-const FileViewHost = lazy(() => import('../../../sheets/file/FileViewHost.tsx'))
+// #515 贡献面翻转：第一方贡献组件是 **Solid 实体**。本文件留在 React 类型图（.ts），
+// 不得静态 import .solid 文件（会把 Solid JSX 拉进 React tsconfig 程序）——按 P52 D4
+// 经 glob 缝（运行期模块解析，零类型图边）加载，solid `lazy` 保留代码分割。
+interface BuiltinFileWorkbenchViewsSolidModule {
+  SessionsActivity: Component<FileActivityProps>
+  ExplorerActivity: Component<FileActivityProps>
+  SearchActivity: Component<FileActivityProps>
+  ScmActivity: Component<FileActivityProps>
+  ViewsActivity: Component<FileActivityProps>
+}
+
+const viewLoaders = import.meta.glob<BuiltinFileWorkbenchViewsSolidModule>('./builtinFileWorkbenchViews.solid.tsx')
+const hostLoaders = import.meta.glob<{ default: Component }>('../../../sheets/file/FileViewHost.solid.tsx')
+
+function viewsModule(): Promise<BuiltinFileWorkbenchViewsSolidModule> {
+  const load = viewLoaders['./builtinFileWorkbenchViews.solid.tsx']
+  if (!load) return Promise.reject(new Error('builtinFileWorkbenchViews Solid 实体未进入 Vite module graph'))
+  return load()
+}
+
+const SessionsActivity = lazy(async () => ({ default: (await viewsModule()).SessionsActivity }))
+const ExplorerActivity = lazy(async () => ({ default: (await viewsModule()).ExplorerActivity }))
+const SearchActivity = lazy(async () => ({ default: (await viewsModule()).SearchActivity }))
+const ScmActivity = lazy(async () => ({ default: (await viewsModule()).ScmActivity }))
+const ViewsActivity = lazy(async () => ({ default: (await viewsModule()).ViewsActivity }))
+
+const FileViewHost = lazy(() => {
+  const load = hostLoaders['../../../sheets/file/FileViewHost.solid.tsx']
+  if (!load) return Promise.reject(new Error('FileViewHost Solid 实体未进入 Vite module graph'))
+  return load()
+})
+
 const client = createWorkspaceClient({ invoke: tauriInvokeTransport })
 
 /** 0-A4：FileSheet 可读/可编辑上限——与后端 MAX_PREVIEW_BYTES（1MB）对齐。 */

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 interface PylonMarkProps {
   size?: number
   className?: string

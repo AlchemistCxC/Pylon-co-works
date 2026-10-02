@@ -216,11 +216,14 @@ describe('B4 「终端补全」机制确实没了（源码级扫描）', () => {
 })
 
 describe('B5 模板库两处同源（显示用的 theme 与落盘包的主题）', () => {
+  // #515 连带修复：契约改指 Solid 实体源码（TemplateLibrary.tsx React 薄桥已随实体化
+  // 拆除）。实体里官方段是普通 map（非 useMemo），自定义段是 createMemo——仅段位标记
+  // 改写，逐条断言语义原样保留。
   it('组件源码里：有效值只算一次、两处共用；官方段不再直接读 preset.theme', () => {
-    const source = readFileSync(join(REPO_ROOT, 'src', 'components', 'settings', 'TemplateLibrary.tsx'), 'utf8')
+    const source = readFileSync(join(REPO_ROOT, 'src', 'components', 'settings', 'TemplateLibrary.solid.tsx'), 'utf8')
     // 只看**官方预设**那一段（自定义段读的是 `CustomPreset.theme`，与刀3 无关）
-    const start = source.indexOf('const official = useMemo(')
-    const end = source.indexOf('const custom = useMemo(')
+    const start = source.indexOf('const official: TemplateView[] = GLOBAL_PRESETS.map(')
+    const end = source.indexOf('const custom = createMemo<')
     expect(start, '官方段必须存在').toBeGreaterThan(-1)
     expect(end, '自定义段必须存在').toBeGreaterThan(start)
     const official = source.slice(start, end)

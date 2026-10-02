@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../domains/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'

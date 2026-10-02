@@ -1,10 +1,11 @@
 /**
  * diffCardPresentation — DiffCard 的 utility 常量单源（结构审查 A-V7）。
  *
- * 原 React `components/file/DiffCard.tsx` 与 Solid `renderers/solid-workbench/chat/DiffCard.solid.tsx`
- * 各持一份逐字相同的常量组（P92 样式绞杀的机械翻译产物），「不得漂移」仅靠注释维持；
- * 框架无关的纯字符串常量收拢本模块，两侧 import 同一份。调色板变量（--diff-*，主题可供给）
- * 连同 hex 兜底原样平移；字面量 rgba 为存量值保留。
+ * 历史上 React `components/file/DiffCard.tsx` 与 Solid `renderers/solid-workbench/chat/DiffCard.solid.tsx`
+ * 各持一份逐字相同的常量组（P92 样式绞杀的机械翻译产物），故把框架无关的纯字符串常量
+ * 收拢本模块；#515 起 React 原件已退役，DiffCard 唯一实体是 `DiffCard.solid.tsx`，
+ * 本模块即其常量面。调色板变量（--diff-*，主题可供给）连同 hex 兜底原样平移；
+ * 字面量 rgba 为存量值保留。
  */
 
 export const DIFF_CARD = 'mt-1 mb-1.5 rounded-none overflow-hidden border border-border bg-[var(--chat-code-bg,rgba(0,0,0,0.02))]'

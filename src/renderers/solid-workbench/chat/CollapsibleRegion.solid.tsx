@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import type { JSX } from 'solid-js'
 
 /** Solid renderer counterpart of the host collapse seam. */

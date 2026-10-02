@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createMemo, type JSX } from 'solid-js'
 import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import {

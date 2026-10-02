@@ -10,8 +10,8 @@
  * #483 宠物链整体删除后该字段退役。envelope version 维持 4（v3 migrate 仍服务
  * 布局字段）；旧 `pylon-workspace-show-pet` key 成为无害孤儿，不再主动清理。
  */
-import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 export const RIGHT_RAIL_MIN_WIDTH = 220
@@ -60,53 +60,51 @@ export function clampLeftRailWidth(width: number): number {
 }
 
 /** Application-level right rail state. It intentionally lives outside Sheet state. */
-export const useRightRailStore = create<RightRailState>()(persist(
-  (set) => ({
-    // Preserve the v2 layout default so existing workspaces keep the rail open
-    // after the v3 migration.
-    collapsed: legacyLayout.rightCollapsed ?? false,
-    leftRailWidth: legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH,
-    leftRailCollapsed: legacyLayout.leftCollapsed ?? false,
-    width: legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH,
-    activePanelId: null,
-    background: null,
-    setCollapsed: collapsed => set({ collapsed }),
-    setLeftRailWidth: width => set({ leftRailWidth: clampLeftRailWidth(width) }),
-    setLeftRailCollapsed: leftRailCollapsed => set({ leftRailCollapsed }),
-    setWidth: width => set({ width: clampRightRailWidth(width) }),
-    setActivePanel: activePanelId => set({ activePanelId }),
-    setBackground: background => set({ background }),
-  }),
-  {
-    name: 'pylon-workspace-layout-v3',
-    version: 4,
-    storage: createJSONStorage(() => ({
-      getItem: key => localStorage.getItem(key),
-      setItem: (key, value) => localStorage.setItem(key, value),
-      removeItem: key => localStorage.removeItem(key),
-    })),
-    migrate: (persisted: unknown) => {
-      const state = (persisted && typeof persisted === 'object' && 'state' in persisted)
-        ? (persisted as { state?: Record<string, unknown> }).state
-        : undefined
-      // #483：v4 曾含 showPet（A-V12）；宠物链删除后 migrate 不再产出该字段，
-      // 旧 envelope 里的残留值被静默丢弃。
-      return {
-        collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : legacyLayout.rightCollapsed ?? false,
-        leftRailWidth: clampLeftRailWidth(typeof state?.leftRailWidth === 'number' ? state.leftRailWidth : legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH),
-        leftRailCollapsed: typeof state?.leftRailCollapsed === 'boolean' ? state.leftRailCollapsed : legacyLayout.leftCollapsed ?? false,
-        width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH),
-        activePanelId: typeof state?.activePanelId === 'string' ? state.activePanelId : null,
-        background: state?.background && typeof state.background === 'object' ? state.background as RightRailBackgroundPresentation : null,
-      }
-    },
-    partialize: state => ({
-      collapsed: state.collapsed,
-      leftRailWidth: state.leftRailWidth,
-      leftRailCollapsed: state.leftRailCollapsed,
-      width: state.width,
-      activePanelId: state.activePanelId,
-      background: state.background,
-    }),
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const rightRailKernel = createSolidStoreKernel<RightRailState>({
+  // Preserve the v2 layout default so existing workspaces keep the rail open
+  // after the v3 migration.
+  collapsed: legacyLayout.rightCollapsed ?? false,
+  leftRailWidth: legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH,
+  leftRailCollapsed: legacyLayout.leftCollapsed ?? false,
+  width: legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH,
+  activePanelId: null,
+  background: null,
+  setCollapsed: collapsed => rightRailKernel.setState({ collapsed }),
+  setLeftRailWidth: width => rightRailKernel.setState({ leftRailWidth: clampLeftRailWidth(width) }),
+  setLeftRailCollapsed: leftRailCollapsed => rightRailKernel.setState({ leftRailCollapsed }),
+  setWidth: width => rightRailKernel.setState({ width: clampRightRailWidth(width) }),
+  setActivePanel: activePanelId => rightRailKernel.setState({ activePanelId }),
+  setBackground: background => rightRailKernel.setState({ background }),
+})
+
+attachSolidPersist(rightRailKernel, {
+  name: 'pylon-workspace-layout-v3',
+  version: 4,
+  storage: resolveLocalStorage(),
+  migrate: (persisted: unknown) => {
+    const state = (persisted && typeof persisted === 'object' && 'state' in persisted)
+      ? (persisted as { state?: Record<string, unknown> }).state
+      : undefined
+    // #483：v4 曾含 showPet（A-V12）；宠物链删除后 migrate 不再产出该字段，
+    // 旧 envelope 里的残留值被静默丢弃。
+    return {
+      collapsed: typeof state?.collapsed === 'boolean' ? state.collapsed : legacyLayout.rightCollapsed ?? false,
+      leftRailWidth: clampLeftRailWidth(typeof state?.leftRailWidth === 'number' ? state.leftRailWidth : legacyLayout.leftWidth ?? LEFT_RAIL_DEFAULT_WIDTH),
+      leftRailCollapsed: typeof state?.leftRailCollapsed === 'boolean' ? state.leftRailCollapsed : legacyLayout.leftCollapsed ?? false,
+      width: clampRightRailWidth(typeof state?.width === 'number' ? state.width : legacyLayout.rightWidth ?? RIGHT_RAIL_DEFAULT_WIDTH),
+      activePanelId: typeof state?.activePanelId === 'string' ? state.activePanelId : null,
+      background: state?.background && typeof state.background === 'object' ? state.background as RightRailBackgroundPresentation : null,
+    }
   },
-))
+  partialize: state => ({
+    collapsed: state.collapsed,
+    leftRailWidth: state.leftRailWidth,
+    leftRailCollapsed: state.leftRailCollapsed,
+    width: state.width,
+    activePanelId: state.activePanelId,
+    background: state.background,
+  }),
+})
+
+export const useRightRailStore: ZustandHook<RightRailState> = createReactStoreHook(rightRailKernel)

@@ -70,7 +70,11 @@ function harness(overrides: Partial<PylonCliServicePorts> = {}) {
     cancel: vi.fn(async () => true),
     messages: vi.fn(async (sessionId: string) => ({ sessionId, events: [], lastSequence: 0 })),
   }
-  const approval = { get: vi.fn(async () => 'default'), set: vi.fn(async () => {}) }
+  // #463 审查项 3：approval wire = {mode, persisted} 快照
+  const approval = {
+    get: vi.fn(async () => ({ mode: 'default', persisted: true })),
+    set: vi.fn(async (mode: string) => ({ mode, persisted: true })),
+  }
   const interactions = {
     list: vi.fn(async () => ({ items: [] as InteractionItem[] })),
     respond: vi.fn(async (_identity: unknown, _kind: string, _answer: unknown) => {}),
@@ -262,9 +266,12 @@ describe('PylonCliService typed command surface', () => {
       .resolves.toMatchObject({ sessionId: 's-1' })
     await expect(service.execute({ command: 'session messages', args: { sessionId: 's-1', afterSeq: 3 } }))
       .resolves.toMatchObject({ operationId: 'op-1', result: { sessionId: 's-1', lastSequence: 0 } })
-    // approval get/set
-    await expect(service.execute({ command: 'approval get' })).resolves.toEqual({ mode: 'default' })
-    await expect(service.execute({ command: 'approval set', args: { mode: 'auto' } })).resolves.toEqual({ mode: 'auto' })
+    // approval get/set：#463 审查项 3——透传后端快照（含 persisted 健康位），
+    // set 不再回显入参（mode 由后端返回确认）
+    await expect(service.execute({ command: 'approval get' }))
+      .resolves.toEqual({ mode: 'default', persisted: true })
+    await expect(service.execute({ command: 'approval set', args: { mode: 'auto' } }))
+      .resolves.toEqual({ mode: 'auto', persisted: true })
     expect(approval.set).toHaveBeenCalledWith('auto')
     // interaction respond：requestId 解析 + optionId 校验 + identity/kind 透传
     interactions.list.mockResolvedValueOnce({

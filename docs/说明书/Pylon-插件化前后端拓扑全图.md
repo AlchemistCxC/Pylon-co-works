@@ -23,7 +23,7 @@ flowchart TB
     direction TB
 
     subgraph BOOT[Kernel 壳与启动组合]
-      MAIN[src/main.tsx]
+      MAIN[src/main.solid.tsx]
       KROOT[src/kernel/KernelRoot.tsx]
       KBOOT[KernelBootstrap<br/>normal / degraded / safe-mode]
       APPHOSTRT[ApplicationRuntime<br/>mount / unmount / soft-remount]
@@ -86,10 +86,10 @@ flowchart TB
     end
 
     subgraph CONSUMERS[Product Shell、UI Host 与 Registry 消费点]
-      APP[src/App.tsx<br/>Product Shell composition]
+      APP[src/App.solid.tsx<br/>Product Shell composition]
       TITLE[WorkspaceTitlebar]
       SHEETLAYOUT[SheetLayout / Sheet registry host]
-      SETTINGS[src/components/Settings.tsx<br/>settings sheet 主区视图]
+      SETTINGS[src/components/Settings.solid.tsx<br/>settings sheet 主区视图]
       PLUGINMGR[PluginManager]
       AGENTSHEET[AgentSheetView]
       SUITEWB[AgentRendererSuiteWorkbench<br/>Renderer Suite 宿主接线]
@@ -424,7 +424,7 @@ flowchart TB
 
 | 区域 | 入口 |
 |---|---|
-| Kernel 启动 | `src/main.tsx` → `src/kernel/KernelRoot.tsx` → `kernelBootstrapServices.ts` |
+| Kernel 启动 | `src/main.solid.tsx` → `src/kernel/KernelRoot.solid.tsx` → `kernelBootstrapServices.ts`（#515 前端全量 Solid 化：React 挂载点退役） |
 | 唯一 Plugin Runtime | `src/plugin-runtime/pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginActivationContext.ts` |
 | 原子 contribution 更新 | `src/plugin-runtime/shadowUpdate.ts`、`registry/reactiveRegistry.ts`、`registry/registryBatch.ts` |
 | Registries | `src/plugin-runtime/runtimeServices.ts`、`pluginHostServices.ts` |

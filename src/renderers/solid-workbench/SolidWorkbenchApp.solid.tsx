@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 /** Workbench composition owner: reactive rows, viewport and mount lifetimes.
  * Value projections live in adjacent modules; they must not create a second runtime store.
  * #228 批次 D：组合实现拆分至 WorkbenchContent / WorkbenchDocumentSurface /

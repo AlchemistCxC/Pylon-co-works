@@ -110,7 +110,7 @@ interface AgentSidebarContributionBase {
 
 export interface FirstPartyAgentSidebarContribution extends AgentSidebarContributionBase {
   readonly renderKind: 'first-party-react'
-  /** Opaque at the runtime boundary; the React host narrows it before rendering. */
+  /** Opaque at the runtime boundary; the Solid host (src/components/Sidebar.solid.tsx) narrows it before rendering. */
   readonly component: unknown
 }
 

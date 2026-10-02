@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidInteractionCard } from '../InteractionCard.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { WorkbenchInteraction } from '../../../../../domains/workbench/workbenchProjector.ts'
@@ -22,6 +22,8 @@ const permissionPending = {
     ],
   },
 } as unknown as WorkbenchInteraction
+
+afterEach(() => cleanup())
 
 describe('C11 SolidInteractionCard', () => {
   it('renders structured request fields with danger demotion and capability-gated actions', async () => {

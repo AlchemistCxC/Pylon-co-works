@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'

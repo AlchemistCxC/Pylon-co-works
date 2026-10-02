@@ -1,5 +1,43 @@
 export type RightPanelTab = 'workspace' | 'logs' | 'activity' | 'changes'
 
+import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+
+// ── #515 Solid 迁移桥面类型（React 薄桥与 Solid 实体共用的中立类型落点；
+//    放这里是因为两侧文件互相 import 会把对方的 JSX 拉进自己的 tsconfig 程序）──
+
+/** MessageSearchBar 的 props（原 MessageSearchBar.tsx 内联接口，实体化后中立化）。 */
+export interface MessageSearchBarProps {
+  query: string
+  matchIndex: number
+  matchCount: number
+  onQueryChange: (query: string) => void
+  onPrevious: () => void
+  onNext: () => void
+  onClose: () => void
+}
+
+/** AgentContextPanel 的 props（原内联形状，实体化后中立化）。 */
+export interface AgentContextPanelProps {
+  sheet: SheetRecord
+  ctx: SheetContext
+}
+
+/** ContextPanelHost 的 props（原内联形状，实体化后中立化）。 */
+export interface ContextPanelHostProps {
+  sheet: SheetRecord
+  ctx: SheetContext
+  activePanelId?: string | null
+}
+
+/**
+ * RightRailHost 的 props（原内联形状，实体化后中立化）。
+ */
+export interface RightRailHostProps {
+  sheet: SheetRecord | null
+  ctx: SheetContext
+  activeAgent?: string
+}
+
 export interface RightPanelTabDefinition {
   id: RightPanelTab
   label: string

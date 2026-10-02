@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createContext, useContext, type Accessor } from 'solid-js'
 import type { WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/appearance/appearance.ts'
 import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'

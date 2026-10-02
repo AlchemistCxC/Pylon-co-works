@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
 import { render } from 'solid-js/web'
 import { resolveLaunchIconName } from './launchIcons.solid.tsx'

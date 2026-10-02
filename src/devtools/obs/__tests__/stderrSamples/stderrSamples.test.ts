@@ -247,10 +247,14 @@ describe('buildP5Checks', () => {
     expect(checks.samplesAvailable).toBe(true)
     expect(checks.totalStderrLines).toBe(1)
     expect(checks.correlationDroppedFrontend).toBe(false) // LOG-03：normalize 保留 correlation
-    // 文件锚而非行号锚：证据指向 sheetRegistry（行号易漂移，文件锚即可定位登记点）
+    // 符号锚而非行号锚（行号易漂移）：注册真值 = builtinWorkspacePlugins 的
+    // BUILTIN_WORKSPACE_TYPES（kind 'runtime'），渲染实体 = RuntimeSheetView.solid.tsx。
     expect(checks.windowIdentified.evidence.length).toBeGreaterThanOrEqual(2)
     for (const entry of checks.windowIdentified.evidence) {
-      expect(entry).toContain('sheetRegistry')
+      expect(
+        entry.includes('builtinWorkspacePlugins') || entry.includes('RuntimeSheetView'),
+        `证据锚须指向真实事实源（builtinWorkspacePlugins / RuntimeSheetView），实际：${entry}`,
+      ).toBe(true)
     }
   })
 

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createMemo } from 'solid-js'
 import {
   normalizeDiffPayload,

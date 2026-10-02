@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'

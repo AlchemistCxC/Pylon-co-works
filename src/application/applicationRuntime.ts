@@ -1,11 +1,12 @@
-import type { ComponentType } from 'react'
+import type { Component } from 'solid-js'
 import type { PluginIdentity } from '../plugin-runtime/pluginIdentity.ts'
 import type { AsyncDisposable } from '../plugin-runtime/registry/types.ts'
 import { notifyRegistryListener } from './registryBatch.ts'
 import { createDeferrableDisposable } from '../utils/deferrableDisposable.ts'
 
 export interface Disposable { dispose: () => void }
-export interface ApplicationContribution { id: string; component: ComponentType }
+/** #515：application 贡献组件为 Solid `Component`（插件契约随前端终态翻转）。 */
+export interface ApplicationContribution { id: string; component: Component }
 export interface ApplicationRuntimeSnapshot {
   activeApplicationId: string | null
   registeredApplicationIds: readonly string[]

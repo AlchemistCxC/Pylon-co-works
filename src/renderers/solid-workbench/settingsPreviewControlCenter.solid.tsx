@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 /**
  * settingsPreviewControlCenter — 设置页中控预览的 Solid 挂载点（P52 D4）。
  *

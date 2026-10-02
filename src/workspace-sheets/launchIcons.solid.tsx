@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { LucideIcon } from '../components/LucideIcon.solid.tsx'
 import { type LaunchIconKey } from './launchIconKeys.ts'
 

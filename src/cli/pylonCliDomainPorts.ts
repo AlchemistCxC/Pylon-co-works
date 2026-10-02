@@ -19,7 +19,7 @@ import { getHookRuntime, getPluginServiceRegistry } from '../plugin-runtime/runt
 import { enabledHookIds, runSessionNotificationHook, runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
 import { buildSendMessagePayload } from '../domains/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
-import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WireInteractionEntry, WorkspaceRegistryControlPort } from './pylonCliService.ts'
+import type { AgentControlPort, ApprovalControlPort, ApprovalModeSnapshot, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WireInteractionEntry, WorkspaceRegistryControlPort } from './pylonCliService.ts'
 import { normalizeWireInteractionEntry } from './pylonCliService.ts'
 import { requestNewSession } from '../application/transactions/requestNewSession.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
@@ -292,14 +292,16 @@ export function createCliSessionControlPort(): SessionControlPort {
   }
 }
 
-/** CLI 增强：全局审批模式 port（get 此前缺失，外部自动化无法确认模式）。 */
+/** CLI 增强：全局审批模式 port（get 此前缺失，外部自动化无法确认模式）。
+ *  #463 审查项 3：get/set 均透传后端快照 {mode, persisted}——persisted=false
+ *  即落盘降级（重启回退），外部可查。 */
 export function createCliApprovalControlPort(): ApprovalControlPort {
   return {
     async get() {
-      return await invoke<string>('get_approval_mode')
+      return await invoke<ApprovalModeSnapshot>('get_approval_mode')
     },
     async set(mode) {
-      await invoke('set_approval_mode', { mode })
+      return await invoke<ApprovalModeSnapshot>('set_approval_mode', { mode })
     },
   }
 }

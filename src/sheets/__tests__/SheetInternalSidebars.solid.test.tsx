@@ -1,0 +1,103 @@
+// @vitest-environment jsdom
+/** @jsxImportSource solid-js */
+/**
+ * #154 左列统一模型契约（改写自 I09-A-FE-01/02 的「Sheet 自持左栏」契约）。
+ *
+ * 旧契约断言「折叠时 Sheet 自己把侧栏从 DOM 摘掉，侧栏状态由 Sheet 持有」。
+ * 那正是分割线对不齐的成因：每个 Sheet 各自决定宽度与边框，标题栏又按自己的
+ * token 另画一条。新契约把几何收归布局层，因此这里断言三件事：
+ *
+ * 1. 每个 Sheet 的左栏挂共享几何类 `.sidebar`（宽度唯一来自
+ *    `--sheet-sidebar-track-width`，由 .sidebar 消费）；
+ * 2. 左栏不再自带宽度 / flex 基准 / 竖边框（几何不许回到 Sheet 手里）；
+ * 3. 折叠时左栏**仍在 DOM**——可见性归布局层的 `.layout[data-sidebar="collapsed"]`，
+ *    Sheet 不再自己摘节点（否则折叠动画与 a11y 可见性会各说各话）。
+ *
+ * 断言强度不降：旧断言的「折叠后用户看不到左栏」在新模型里由布局层状态保证，
+ * 已在 `sidebarUnifiedModel.css.test.ts` 里以 CSS 契约静态钉住。
+ *
+ * #515：迁移自 SheetInternalSidebars.test.tsx（React RTL → @solidjs/testing-library，
+ * 实体直连五个 Sheet 视图的 .solid.tsx——原文件引用的 RuntimeSheetView.tsx/
+ * GatewaySheetView.tsx 薄桥已被桥清理批删除，Search/History 薄桥随本批删除）。
+ * 改写点登记：
+ * - `render(<Component/>)` → `render(() => <Component/>)`；
+ * - `rerender(<Component ctx={collapsed}/>)` 用例改为 createSignal 驱动 ctx 隧道
+ *   （Solid 无 rerender；契约等价：ctx 折叠位变化后侧栏节点仍在 DOM）；
+ * - 补显式 `afterEach(cleanup)`（vitest globals 未开）；
+ * - 几何断言逐字保留（.sidebar 共享类、SHEET_OWNED_GEOMETRY 退休 token 反断言、
+ *   折叠后节点仍在）。
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@solidjs/testing-library'
+import { createSignal, type Component } from 'solid-js'
+import RuntimeSheetView from '../RuntimeSheetView.solid.tsx'
+import OverviewSheetView from '../OverviewSheetView.solid.tsx'
+import SearchSheetView from '../search/SearchSheetView.solid.tsx'
+import HistorySheetView from '../history/HistorySheetView.solid.tsx'
+import GatewaySheetView from '../gateway/GatewaySheetView.solid.tsx'
+import type { SheetContext, SheetKind, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+
+afterEach(cleanup)
+
+vi.mock('@tauri-apps/api/core', async () => {
+  const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
+  return tauriCoreMock((command: string) => {
+    if (command === 'list_runtime_logs' || command === 'gateway_sessions' || command === 'gateway_catalog' || command === 'gateway_instances' || command === 'list_persisted_sessions') return Promise.resolve([])
+    if (command === 'gateway_status') return Promise.resolve({ adapters: [], routes: [], qq: null, inject: null })
+    if (command === 'startup_diagnostics') return Promise.resolve({})
+    return Promise.resolve(null)
+  })
+})
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn(() => Promise.resolve(null)) }))
+vi.mock('../../infrastructure/tauri/env.ts', () => ({ IS_TAURI: false, hasTauriRuntime: () => false }))
+
+const sheet = (kind: SheetKind): SheetRecord => ({ id: kind, kind, title: kind, createdAt: 0, lastFocusedAt: 0 })
+const ctx = (sidebarCollapsed: boolean) => ({
+  sidebarCollapsed,
+  openSheet: vi.fn(),
+  focusSheet: vi.fn(),
+  closeSheet: vi.fn(),
+  selectSession: vi.fn(),
+} as unknown as SheetContext)
+
+type SheetViewComponent = Component<{ sheet: SheetRecord; ctx: SheetContext }>
+
+const cases: readonly [SheetKind, SheetViewComponent, `.${string}`][] = [
+  ['runtime', RuntimeSheetView, '.runtime-sidebar'],
+  ['overview', OverviewSheetView, '.overview-sidebar'],
+  ['search', SearchSheetView, '.search-sidebar'],
+  ['history', HistorySheetView, '.history-sidebar'],
+  ['gateway', GatewaySheetView, '.gateway-sidebar'],
+]
+
+/** 退休的宽度 token 与几何工具类：任何一个回到 Sheet 手里都意味着又出现第二条宽度来源。 */
+const SHEET_OWNED_GEOMETRY = /sheet-sidebar-width|workspace-sidebar-track-width|workspace-sidebar-collapsed-width|titlebar-sidebar-width|\bw-\[|\bbasis-\[|\bborder-r\b/
+
+describe('#154 Sheet 左栏只出内容，几何归布局层', () => {
+  for (const [kind, Component, selector] of cases) {
+    it(`${kind}：左栏挂共享几何类 .sidebar`, () => {
+      const { container } = render(() => <Component sheet={sheet(kind)} ctx={ctx(false)} />)
+      const sidebar = container.querySelector(selector) as HTMLElement
+      expect(sidebar).not.toBeNull()
+      expect(sidebar).toHaveClass('sidebar')
+    })
+
+    it(`${kind}：左栏不再自带宽度 / flex 基准 / 竖边框`, () => {
+      const { container } = render(() => <Component sheet={sheet(kind)} ctx={ctx(false)} />)
+      const sidebar = container.querySelector(selector) as HTMLElement
+      expect(sidebar.className).not.toMatch(SHEET_OWNED_GEOMETRY)
+    })
+
+    it(`${kind}：折叠时左栏仍在 DOM，可见性交给布局层状态`, () => {
+      // Solid 无 rerender：ctx 经 signal 隧道更新（契约等价：折叠位变化后侧栏不摘节点）。
+      const [context, setContext] = createSignal(ctx(false))
+      const { container } = render(() => <Component sheet={sheet(kind)} ctx={context()} />)
+      expect(container.querySelector(selector)).not.toBeNull()
+      setContext(ctx(true))
+      // 布局层用 .layout[data-sidebar="collapsed"] .sidebar { visibility:hidden } 负责不可见，
+      // 因此这里必须仍然存在——Sheet 再自行摘节点就会与布局状态脱钩。
+      expect(container.querySelector(selector)).not.toBeNull()
+    })
+  }
+})

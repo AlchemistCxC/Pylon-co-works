@@ -62,14 +62,14 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
     'src/index.css',
     'kernel',
     'kernel-static',
-    ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
+    ['src/main.solid.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'React Root、基础 token、跨 Application scheme、Recovery 与 Rich QA 基线',
   ),
   entry(
     'src/styles/tailwind.css',
     'kernel',
     'kernel-static',
-    ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
+    ['src/main.solid.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
     'Tailwind v4 utilities 基线：@theme inline 只读消费 index.css token；无 preflight（TW 施工书 20260914）',
   ),
   // #491 绞杀恢复批：SkinPreviewBar.css 已整文件绞杀进 utilities 层，不再登记。

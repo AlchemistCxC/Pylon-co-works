@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createMemo, onCleanup } from 'solid-js'
 import type { WorkbenchTaskEntry } from '../../../domains/workbench/workbenchRuntime.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'

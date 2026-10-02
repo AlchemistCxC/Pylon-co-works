@@ -618,7 +618,6 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     }
     case 'reconnect_agent':
     case 'reload_agents':
-    case 'set_approval_mode':
     case 'set_mode':
     case 'set_config_option':
     case 'close_session':
@@ -627,6 +626,14 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'export_session':
     case 'clear_runtime_logs':
       return null
+    // #463 审查项 3：approval wire 契约 = {mode, persisted} 快照（demo 恒健康）
+    case 'set_approval_mode':
+      return {
+        mode: typeof args.mode === 'string' ? args.mode : 'default',
+        persisted: true,
+      }
+    case 'get_approval_mode':
+      return { mode: 'default', persisted: true }
     case 'plugin:event|listen': return 1
     case 'plugin:event|unlisten': return null
     case 'plugin:dialog|save':

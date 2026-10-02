@@ -6,17 +6,36 @@ import { BUILTIN_CANONICAL_MESSAGE_PROJECTOR } from '../core/projector/builtinPr
 import { BUILTIN_PYLON_WORKSPACE_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonWorkspaceStyles } from './packages/builtin.pylon-workspace/styleAssets.ts'
-import { lazy } from 'react'
+import { lazy, type Component } from 'solid-js'
 import { BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS } from '../core/file/builtinFileWorkbench.ts'
 import { createBuiltinFileCommandDefinitions } from '../core/file/builtinFileCommands.ts'
 import { createBuiltinWorkspaceCommandDefinitions } from '../core/sheet/builtinWorkspaceCommands.ts'
 import { createBuiltinBrowserCommandDefinitions } from '../core/browser/builtinBrowserCommands.ts'
 import { registerBuiltinBrowserAgentSessionAccess } from '../core/browser/builtinBrowserAgentSessionAccess.ts'
 
-const SessionsPanel = lazy(() => import('../../components/sidebar/SessionsPanel.tsx'))
-const SearchPanel = lazy(() => import('../../components/sidebar/SearchPanel.tsx'))
-const AgentContextPanel = lazy(() => import('../../components/right-panel/AgentContextPanel.tsx'))
-const FileContextPanel = lazy(() => import('../../components/right-panel/FileContextPanel.tsx'))
+// #515 贡献面翻转：sidebar / context-panel 第一方贡献组件是 **Solid 实体**（此前注册
+// React 薄桥）。本文件留在 React 类型图（.ts），不得静态 import .solid 文件——按 P52 D4
+// 经 glob 缝（运行期模块解析，零类型图边）加载，solid `lazy` 保留代码分割。
+const SessionsPanel = lazy(() => {
+  const load = import.meta.glob<{ default: Component }>('../../components/sidebar/SessionsPanel.solid.tsx')['../../components/sidebar/SessionsPanel.solid.tsx']
+  if (!load) return Promise.reject(new Error('SessionsPanel Solid 实体未进入 Vite module graph'))
+  return load()
+})
+const SearchPanel = lazy(() => {
+  const load = import.meta.glob<{ default: Component }>('../../components/sidebar/SearchPanel.solid.tsx')['../../components/sidebar/SearchPanel.solid.tsx']
+  if (!load) return Promise.reject(new Error('SearchPanel Solid 实体未进入 Vite module graph'))
+  return load()
+})
+const AgentContextPanel = lazy(() => {
+  const load = import.meta.glob<{ default: Component }>('../../components/right-panel/AgentContextPanel.solid.tsx')['../../components/right-panel/AgentContextPanel.solid.tsx']
+  if (!load) return Promise.reject(new Error('AgentContextPanel Solid 实体未进入 Vite module graph'))
+  return load()
+})
+const FileContextPanel = lazy(() => {
+  const load = import.meta.glob<{ default: Component }>('../../components/right-panel/FileContextPanel.solid.tsx')['../../components/right-panel/FileContextPanel.solid.tsx']
+  if (!load) return Promise.reject(new Error('FileContextPanel Solid 实体未进入 Vite module graph'))
+  return load()
+})
 
 /**
  * 左栏「模块区」的真实模块（搜索 + 会话）。搜索是独立面板（可隐藏/拖走），

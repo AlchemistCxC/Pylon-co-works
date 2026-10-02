@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { mountSolidWorkbenchSmoke } from './mountSolidWorkbenchSmoke.solid.tsx'
 import './solidWorkbenchSmoke.css'
 

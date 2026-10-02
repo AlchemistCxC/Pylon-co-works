@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show } from 'solid-js'
 import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderSemanticCommand } from '../../../../contracts/messageRenderer.ts'

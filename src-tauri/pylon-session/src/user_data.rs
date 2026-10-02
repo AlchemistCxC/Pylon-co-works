@@ -114,6 +114,11 @@ pub enum UserDataError {
     /// 三元素 JSON 数组）——删除前校验失败，拒绝污染 tombstone owner。
     #[error("owner_key 校验失败：{0}")]
     InvalidOwnerKey(String),
+    /// #463 绕锁面：保留键禁止经通用 envelope 命令盲写。approval-mode 的磁盘值必须与
+    /// 内存值同窗口演化（set_approval_mode 持 approval_mode_write_lock 写内存+落盘），
+    /// 通用盲写不写内存也不持锁，可致磁盘/内存静默分叉（重启回退到盲写值）。
+    #[error("保留键 {key} 禁止经 user_data_save 写入：请使用专用命令（set_approval_mode）")]
+    ReservedKey { key: String },
 }
 
 impl UserDataError {
@@ -125,6 +130,7 @@ impl UserDataError {
             Self::Corrupt(_) => "user_data_corrupt",
             Self::NotFound(_) => "user_data_not_found",
             Self::InvalidOwnerKey(_) => "invalid_owner_key",
+            Self::ReservedKey { .. } => "user_data_reserved_key",
         }
     }
 }
@@ -1635,5 +1641,19 @@ mod tests {
             .load(UserDataKey::CustomPresets)
             .expect("load")
             .is_none());
+    }
+
+    /// #463 绕锁面：ReservedKey 变体的机器码钉住（wire {code,message} 契约，前端按 code 分支）。
+    /// 拦截点在 IPC 命令层（session/mod.rs user_data_save），service.save 不拦——
+    /// set_approval_mode 自身经 service 写穿（同锁窗口内存+落盘）。
+    #[test]
+    fn reserved_key_error_carries_stable_code() {
+        let error = UserDataError::ReservedKey {
+            key: "approval-mode".into(),
+        };
+        assert_eq!(error.code(), "user_data_reserved_key");
+        let message = error.to_string();
+        assert!(message.contains("approval-mode"), "{message}");
+        assert!(message.contains("set_approval_mode"), "{message}");
     }
 }

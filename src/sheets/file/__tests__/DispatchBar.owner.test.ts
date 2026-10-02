@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveDispatchOwnerSession } from '../DispatchBar.tsx'
+import { resolveDispatchOwnerSession } from '../dispatchOwnerSession.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
 
 const session = (id: string, agentId: string): Session => ({

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type JSX } from 'solid-js'
 import {
   resolveFallbackCommands,

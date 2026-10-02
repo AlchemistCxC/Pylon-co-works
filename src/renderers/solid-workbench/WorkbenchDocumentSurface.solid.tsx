@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show } from 'solid-js'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'

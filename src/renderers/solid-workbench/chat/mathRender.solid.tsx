@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createMemo } from 'solid-js'
 import { renderMathMarkup } from './mathMarkup.ts'
 

@@ -51,11 +51,15 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/application/agent-workbench/__tests__/agentWorkbenchSession.test.ts',
   'src/application/agent-workbench/__tests__/agentWorkbenchSession.terminalDelivery.test.ts',
   'src/application/agent-workbench/__tests__/agentWorkbenchSession.emptyStateFirstPrompt.test.ts',
-  'src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.test.tsx',
-  'src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.test.tsx',
+  // #515：两文件随实体迁移改名 .solid.test.tsx（同族 feed 注册噪音，白名单跟随）。
+  'src/workspace-sheets/__tests__/agentSuiteKeepAlive.integration.solid.test.tsx',
+  'src/workspace-sheets/__tests__/sheetLayoutSidebarCollapsedReactive.solid.test.tsx',
   // C 类：Renderer Suite fatal 回退链过程日志（含少量 B 类注册噪音）
-  'src/application/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.test.tsx',
-  'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx',
+  // #515：两文件随实体直连改名 .solid.test.tsx（同一错误路径契约，白名单跟随）。
+  'src/application/agent-workbench/__tests__/AgentRendererSuiteWorkbench.fatal.solid.test.tsx',
+  'src/sheets/__tests__/AgentSheetView.rendererMode.solid.test.tsx',
+  // #515：上项的 Solid 实体直连测试（同族 feed 注册噪音/错误路径契约）。
+  'src/sheets/__tests__/AgentSheetView.solid.test.tsx',
   // A 类：错误路径契约
   'src/domains/identity/__tests__/identityStore.hydration.test.ts',
   'src/__tests__/replay/canonicalEventFeed.test.ts',
@@ -64,28 +68,39 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   // #445：搜索错误路径（searchHits/单行拉取拒绝）刻意触发 reportRuntimeError 的
   // console.error——A 类错误路径契约。
   'src/domains/search/__tests__/searchService.test.ts',
-  'src/components/chat/__tests__/messageRenderBoundary.test.tsx',
+  // #515 二轮：messageRenderBoundary.test.tsx 已随 #279 chat 死代码清理退役，条目删除。
   'src/components/settings/__tests__/AgentRuntimePanel.default.test.tsx',
   // #422：凭证门禁错误路径（config_verification_required / 连接测试失败）刻意触发
   // reportRuntimeError 的 console.error——与上面 AgentRuntimePanel 同族的预期契约。
-  'src/components/settings/__tests__/AgentConfigEditor.test.tsx',
-  'src/components/settings/__tests__/GatewayRiskPanel.test.tsx',
-  'src/components/settings/__tests__/PluginManager.test.tsx',
-  'src/components/__tests__/ErrorCenter.test.tsx',
-  'src/components/__tests__/Settings.pluginManagerDefaultPage.test.tsx',
-  'src/components/__tests__/SheetErrorBoundary.test.tsx',
+  // #515：两文件实体已迁 .solid.tsx，测试随之改名（同一错误路径契约，白名单跟随）。
+  'src/components/settings/__tests__/AgentConfigEditor.solid.test.tsx',
+  'src/components/settings/__tests__/GatewayRiskPanel.solid.test.tsx',
+  // #515：实体已迁 PluginManager.solid.tsx，测试随之改名（同一错误路径契约，白名单跟随）。
+  'src/components/settings/__tests__/PluginManager.solid.test.tsx',
+  // #515：实体已迁 ErrorCenter.solid.tsx，测试随之改名（错误路径契约，白名单跟随）。
+  'src/components/__tests__/ErrorCenter.solid.test.tsx',
+  // #515：settings sheet harness 收尾——消费测试随实体迁移改名 .solid.test.tsx，
+  // 插件启动失败/授权等待的错误路径契约不变（白名单跟随改名）。
+  'src/components/__tests__/Settings.pluginManagerDefaultPage.solid.test.tsx',
+  // #515：实体已迁 SheetErrorBoundary.solid.tsx，测试随之改名（错误路径契约，白名单跟随）。
+  'src/components/__tests__/SheetErrorBoundary.solid.test.tsx',
   'src/domains/theme/__tests__/customPresetApply.test.ts',
   'src/infrastructure/acp/__tests__/interactionRejectionController.test.ts',
   'src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx',
   'src/plugin-runtime/renderers/__tests__/workbenchHostPort.errorCenter.test.ts',
   'src/plugin-runtime/renderers/__tests__/workbenchHostPort.test.ts',
-  'src/sheets/file/__tests__/FileTabView.readonly.test.tsx',
-  'src/sheets/file/__tests__/gitPanelAcceptance.test.tsx',
-  'src/sheets/gateway/__tests__/gatewayRouteSave.integration.test.tsx',
-  'src/sheets/gateway/__tests__/gatewaySheetView.ui.test.tsx',
-  'src/sheets/__tests__/OverviewSheetView.visual.test.tsx',
-  'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.test.tsx',
-  'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.test.tsx',
+  // #515：两文件随实体迁移改名 .solid.test.tsx（批 1-D2a 漏跟，同一错误路径契约，白名单跟随）。
+  'src/sheets/file/__tests__/FileTabView.readonly.solid.test.tsx',
+  'src/sheets/file/__tests__/gitPanelAcceptance.solid.test.tsx',
+  // #515：gateway 两测试随实体迁移改名 .solid.test.tsx（同一错误路径契约，白名单跟随）。
+  'src/sheets/gateway/__tests__/gatewayRouteSave.integration.solid.test.tsx',
+  'src/sheets/gateway/__tests__/gatewaySheetView.ui.solid.test.tsx',
+  'src/sheets/__tests__/OverviewSheetView.visual.solid.test.tsx',
+  // #515：titlebar React 薄桥退役，矩阵测试随实体迁移改名 .solid.test.tsx——
+  // 避让域 AgentRuntimePanel 的探测失败（"探测本机 Agent失败"）是预期错误路径契约，白名单跟随。
+  'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.solid.test.tsx',
+  // #515：实体已迁 SheetLauncher.solid.tsx，测试随之改名（Agent 激活事务契约，白名单跟随）。
+  'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.solid.test.tsx',
   // #498：原 React 桥的 sheetTabStripAgentSwitch.test.tsx 随 #484 删除；Solid 实体测试承接
   // 同族 A 类错误路径契约（switch 失败 / 对账失败经 reportRuntimeError 的 console.error）。
   'src/workspace-sheets/__tests__/sheetTabStripAgentSwitch.solid.test.tsx',

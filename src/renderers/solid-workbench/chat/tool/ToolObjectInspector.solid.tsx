@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createSignal } from 'solid-js'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import { classifyResourceTarget, isUriLike } from './resourceTarget.ts'

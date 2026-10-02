@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidWorkflowActivityCard } from '../WorkflowCard.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { WorkbenchActivityNode } from '../../../../../domains/workbench/workbenchProjector.ts'
@@ -9,6 +9,8 @@ import type { WorkbenchActivityNode } from '../../../../../domains/workbench/wor
  * C10：后台任务/工作流 Solid 渲染——phase/agent relation、progress、合成 provenance。
  * SubagentCard 是数据驱动的活动卡：semanticKind 只决定 catalog 路由，卡面按节点列渲染。
  */
+
+afterEach(() => cleanup())
 
 describe('C10 workflow activity rendering', () => {
   it('renders adjacent streamed text output as one semantic paragraph', () => {

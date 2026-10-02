@@ -265,10 +265,9 @@ describe('FileSheet code geometry contract (issue38 · issue #69)', () => {
 // ── token 卫生（issue #281）──────────────────────────────────────────────────
 describe('FileSheet token hygiene (issue #281)', () => {
   const INDEX_CSS_PATH = 'src/index.css'
-  // 编辑态有两个同构实现（React 版与 #279 第 2 梯队的 Solid 版），产物渲染的是 Solid 版；
-  // 只查 React 版会给出假绿（PR #312 合入 main 时实测：main 的 #281 兜底修正曾只落在 React 版）。
+  // 编辑态的 React 版已随 #515 全量 Solid 化退役，产物渲染的 Solid 版是唯一实现；
+  // 保留「实现与 CSS 投影逐字对齐」的契约（旧 React 版路径退出前曾是假绿来源：PR #312）。
   const EDITOR_TS_PATHS = [
-    'src/sheets/file/FileCodeEditor.tsx',
     'src/sheets/file/FileCodeEditor.solid.tsx',
   ]
   const indexCss = readFileSync(INDEX_CSS_PATH, 'utf8')

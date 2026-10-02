@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { resolveActivityLine } from '../../../domains/activity/activityLine.ts'
 import {

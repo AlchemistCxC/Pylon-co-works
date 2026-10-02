@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { chatRowDescriptorsOf } from '../../domains/chat/chatRowPipeline.ts'
 import { messageLookupsOf } from '../../domains/chat/messageLookups.ts'

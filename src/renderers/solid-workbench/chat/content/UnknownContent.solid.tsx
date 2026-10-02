@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'

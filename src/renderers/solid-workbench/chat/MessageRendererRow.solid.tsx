@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, onCleanup } from 'solid-js'
 import type { RenderMessage } from '../../../domains/chat/messageTypes.ts'
 import type { ToolVisualState } from '../../../domains/tool/status.ts'

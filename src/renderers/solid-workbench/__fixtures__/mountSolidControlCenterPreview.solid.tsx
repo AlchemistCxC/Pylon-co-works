@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../SolidWorkbenchContext.solid.tsx'

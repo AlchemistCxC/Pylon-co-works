@@ -23,7 +23,7 @@
  * 刻意不管清单（本脚本明示不设防的方向，出现漂移先在此表态再考虑立规）：
  * - src/plugins/、src/sdk/、src/utils/、src/devtools/、src/demo/、src/test-utils/ 与 src/test/、
  *   src/wasm/、src/assets|styles|css01 作为「源侧」不受管辖（插件/演示/测试/产物层）。
- * - 根入口 src/main.tsx、src/App.tsx 是组合根，不设独立规则。
+ * - 根入口 src/main.solid.tsx、src/App.solid.tsx 是组合根，不设独立规则（#515 批7 改名）。
  * - 视图层 → src/app/**（视图消费 app 客户端/错误中心，现存约 77 边）、视图层 → src/host/**
  *   （SolidMount/solidStoreBridge 挂载桥正用面）、host → domains（桥读域 store）、
  *   infrastructure/plugin-runtime → src/app/runtimeError（错误上报口）。
@@ -161,9 +161,9 @@ const RULES: LayerRule[] = [
     forbiddenPathIncludes: ['src/kernel/'],
     allowlist: {},
     allowEdges: {
-      'src/components/settings/PluginCapabilityConsentCard.tsx -> src/kernel/kernelBootstrap.ts': '设置页读 kernelBootstrap 类型做能力同意展示（既定消费面）',
-      'src/components/settings/PluginManager.tsx -> src/kernel/kernelBootstrapServices.ts': '插件管理面板读 kernel 装配服务（重启/管理入口）',
-      'src/components/settings/PluginManager.tsx -> src/kernel/kernelBootstrap.ts': '插件管理面板读 kernelBootstrap 类型',
+      'src/components/settings/PluginManager.solid.tsx -> src/kernel/kernelBootstrapServices.ts': '插件管理面板读 kernel 装配服务（重启/管理入口）',
+      'src/components/settings/PluginManager.solid.tsx -> src/kernel/kernelBootstrap.ts': '插件管理面板读 kernelBootstrap 类型',
+      'src/components/settings/PluginCapabilityConsentCard.solid.tsx -> src/kernel/kernelBootstrap.ts': '插件能力同意卡读 kernelBootstrap 类型（批3 契约翻转随迁）',
     },
   },
   {
@@ -176,19 +176,19 @@ const RULES: LayerRule[] = [
       // bootstrap 装配语义（引导期错误口与启动打点）
       'src/kernel/kernelBootstrap.ts -> src/app/runtimeError.ts': 'bootstrap 装配语义（引导期错误口）',
       'src/kernel/kernelBootstrap.ts -> src/app/startupTiming.ts': 'bootstrap 装配语义（启动相位打点）',
-      'src/kernel/KernelRoot.tsx -> src/app/startupTiming.ts': 'bootstrap 装配语义（启动相位打点）',
+      'src/kernel/KernelRoot.solid.tsx -> src/app/startupTiming.ts': 'bootstrap 装配语义（启动相位打点）',
       // bootstrap 装配语义（挂载 application 运行时/事务端口/验收控制）
-      'src/kernel/ApplicationMount.tsx -> src/application/applicationRuntime.ts': 'bootstrap 装配语义（挂载 application 运行时）',
+      'src/kernel/ApplicationMount.solid.tsx -> src/application/applicationRuntime.ts': 'bootstrap 装配语义（挂载 application 运行时）',
       'src/kernel/kernelAcceptanceControls.ts -> src/application/acceptanceControls.ts': 'bootstrap 装配语义（验收控制装配）',
       'src/kernel/kernelBootstrap.ts -> src/application/applicationMountPort.ts': 'bootstrap 装配语义（application 挂载端口类型）',
       'src/kernel/kernelBootstrapServices.ts -> src/application/applicationRuntimeServices.ts': 'bootstrap 装配语义（application 服务组装）',
       'src/kernel/kernelBootstrapServices.ts -> src/application/applicationMountPort.ts': 'bootstrap 装配语义（application 挂载端口类型）',
-      'src/kernel/KernelRoot.tsx -> src/application/applicationRuntimeServices.ts': 'bootstrap 装配语义（application 服务组装）',
-      'src/kernel/KernelRoot.tsx -> src/application/applicationRuntime.ts': 'bootstrap 装配语义（application 运行时类型）',
+      'src/kernel/KernelRoot.solid.tsx -> src/application/applicationRuntimeServices.ts': 'bootstrap 装配语义（application 服务组装）',
+      'src/kernel/KernelRoot.solid.tsx -> src/application/applicationRuntime.ts': 'bootstrap 装配语义（application 运行时类型）',
       // bootstrap 装配语义（插件宿主组装与渲染诊断注册）
       'src/kernel/kernelBootstrapServices.ts -> src/plugin-runtime/pluginCompositionRoot.ts': 'bootstrap 装配语义（插件宿主组装）',
       'src/kernel/kernelBootstrapServices.ts -> src/plugin-runtime/management/pluginManagementWiring.ts': 'bootstrap 装配语义（插件管理接线）',
-      'src/kernel/KernelRoot.tsx -> src/plugin-runtime/renderers/rendererDiagnosticsRegistry.ts': 'bootstrap 装配语义（渲染诊断注册）',
+      'src/kernel/KernelRoot.solid.tsx -> src/plugin-runtime/renderers/rendererDiagnosticsRegistry.ts': 'bootstrap 装配语义（渲染诊断注册）',
       // bootstrap 装配语义（环境探测）
       'src/kernel/kernelBootstrapServices.ts -> src/infrastructure/tauri/env.ts': 'bootstrap 装配语义（环境探测）',
     },

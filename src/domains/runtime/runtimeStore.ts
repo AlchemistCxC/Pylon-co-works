@@ -1,4 +1,5 @@
-import { create } from 'zustand'
+import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import type { ConfigOption, ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from '../chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from '../../contracts/agentTypes.ts'
@@ -82,7 +83,8 @@ interface RuntimeStoreState {
   resetAll: () => void
 }
 
-export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+const runtimeKernel = createSolidStoreKernel<RuntimeStoreState>({
   liveGenerating: null,
   liveGeneratingSources: [],
   sessionLiveStats: {},
@@ -95,15 +97,15 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   permission: EMPTY_PERMISSION_STATE,
   approvalMode: 'default',
 
-  setPermission: (action) => set(state => ({ permission: permissionReducer(state.permission, action) })),
-  setApprovalMode: (mode) => set(state => ({
+  setPermission: (action) => runtimeKernel.setState(state => ({ permission: permissionReducer(state.permission, action) })),
+  setApprovalMode: (mode) => runtimeKernel.setState(state => ({
     approvalMode: normalizeApprovalMode(mode) || state.approvalMode,
   })),
-  setLiveStats: (stats) => set(stats as Partial<RuntimeStoreState>),
-  setSessionLiveStats: (context, stats) => set(state => ({
+  setLiveStats: (stats) => runtimeKernel.setState(stats as Partial<RuntimeStoreState>),
+  setSessionLiveStats: (context, stats) => runtimeKernel.setState(state => ({
     sessionLiveStats: updateSessionLiveStats(state.sessionLiveStats, context, stats),
   })),
-  clearSessionRuntime: (context) => set(state => {
+  clearSessionRuntime: (context) => runtimeKernel.setState(state => {
     const cleared = clearSessionSourceState({
       context,
       sessionLiveStats: state.sessionLiveStats,
@@ -130,18 +132,18 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
       sessionReloadTokens,
     }
   }),
-  setSessionMode: (context, mode) => set(state => {
+  setSessionMode: (context, mode) => runtimeKernel.setState(state => {
     const sessionModes = { ...state.sessionModes }
     const key = toAgentContextKey(context)
     if (mode) sessionModes[key] = mode
     else delete sessionModes[key]
     return { sessionModes }
   }),
-  setSessionConfig: (context, cfg) => set(s => {
+  setSessionConfig: (context, cfg) => runtimeKernel.setState(s => {
     const key = toAgentContextKey(context)
     return { sessionConfig: { ...s.sessionConfig, [key]: { ...s.sessionConfig[key], ...cfg } } }
   }),
-  setAgentStatus: (id, status) => set(state => {
+  setAgentStatus: (id, status) => runtimeKernel.setState(state => {
     if (!shouldAcceptAgentStatus(state.agentStatuses[id], status)) return state
     if (status.sessionBindings === undefined) {
       return { agentStatuses: { ...state.agentStatuses, [id]: status } }
@@ -163,7 +165,7 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
       bindingGenerations,
     }
   }),
-  setBindingGeneration: (context, generation) => set(state => {
+  setBindingGeneration: (context, generation) => runtimeKernel.setState(state => {
     const key = toAgentContextKey(context)
     const bindingGenerations = { ...state.bindingGenerations }
     const sessionBindingHealth = { ...state.sessionBindingHealth }
@@ -182,12 +184,12 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     }
     return { bindingGenerations, sessionBindingHealth }
   }),
-  bumpSessionReload: (context) => set(state => {
+  bumpSessionReload: (context) => runtimeKernel.setState(state => {
     const key = toAgentContextKey(context)
     return { sessionReloadTokens: { ...state.sessionReloadTokens, [key]: (state.sessionReloadTokens[key] ?? 0) + 1 } }
   }),
-  clearSessionSource: (context) => get().clearSessionRuntime(context),
-  resetSessionRuntime: () => set({
+  clearSessionSource: (context) => runtimeKernel.getState().clearSessionRuntime(context),
+  resetSessionRuntime: () => runtimeKernel.setState({
     sessionConfig: {},
     sessionModes: {},
     sessionLiveStats: {},
@@ -201,5 +203,7 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     // reducer receive 失效，超时/应答由 controller 与后端保护。
     approvalMode: 'default',
   }),
-  resetAll: () => get().resetSessionRuntime(),
-}))
+  resetAll: () => runtimeKernel.getState().resetSessionRuntime(),
+})
+
+export const useRuntimeStore: ZustandHook<RuntimeStoreState> = createReactStoreHook(runtimeKernel)

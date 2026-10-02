@@ -9,7 +9,7 @@
 | 公开契约 | `src/contracts/`、`src/sdk/` | 定义插件可消费的类型、语义和版本边界；不拥有运行时状态 | SDK / manifest / contribution 测试；`check:immer` |
 | 领域 | `src/domains/`；[workbenchProjector](../../src/domains/workbench/workbenchProjector.ts)（#486 项2 起四分：types/reducer/selectors/diagnostics 四件，本链接为公开面门面）| normalized envelope → 可丢弃文档；projector 保持唯一，选择器不改 journal；`timeline.data` 是**标量身份面**（tool/activity 两族按长度收窄：≤512 短标量 + 一层内嵌短标量，省略键名记入 `payloadKeys`），载荷的唯一承载面是 `document.activities[]`，契约见渲染引擎唯一入口台账 **K20**，逃生口 `data-timeline-payload="full"`（运维开关，插件不得依赖） | `vitest run src/domains` |
 | 应用装配 | `src/app/`、`src/application/`、`src/kernel/`；[applicationRuntime](../../src/application/applicationRuntime.ts) | application 层拥有应用注册和事务；kernel 负责根挂载、恢复与启动接线；`app/startupTiming.ts` 是启动相位打点（#269，release 可用旁路，ready 时一次性上报，权威出口在后端 runtime log） | `vitest run src/kernel src/application` |
-| 基础设施 | `src/infrastructure/`；[runtimeClient](../../src/infrastructure/tauri/runtimeClient.ts) | UI / domain 边界到 IPC、存储、传输；处理错误和取消，不决定产品布局。#488 批⑦：前端诊断日志统一出口 `tauri/frontendLogSink.ts`（实现）+ `src/contracts/frontendLogSink.ts`（端口，#489 分层门禁起自 domains 上移 contracts）——接后端 `push_frontend_log`，失败静默降级回 console，main.tsx 顶部接线 | `vitest run src/infrastructure`；`check:boundaries` |
+| 基础设施 | `src/infrastructure/`；[runtimeClient](../../src/infrastructure/tauri/runtimeClient.ts) | UI / domain 边界到 IPC、存储、传输；处理错误和取消，不决定产品布局。#488 批⑦：前端诊断日志统一出口 `tauri/frontendLogSink.ts`（实现）+ `src/contracts/frontendLogSink.ts`（端口，#489 分层门禁起自 domains 上移 contracts）——接后端 `push_frontend_log`，失败静默降级回 console，main.solid.tsx 顶部接线（#515 入口改名） | `vitest run src/infrastructure`；`check:boundaries` |
 | 插件宿主 | `src/plugin-runtime/`；[pluginCompositionRoot](../../src/plugin-runtime/pluginCompositionRoot.ts) | 拥有 registry、activation、权限与资源 Scope；产品通过贡献接入 | `vitest run src/plugin-runtime` |
 | 第一方产品 | `src/plugins/`；[builtinProductPlugins](../../src/plugins/product/builtinProductPlugins.ts) | 产品定义激活依赖，`plugins/core` 提供产品实现；不因 core 名称变成 Kernel。#485 划线（方案 C）：core 定性为**经插件机制交付的首方实现**——插件贡献面（贡献声明数据/注册入口，如 `BUILTIN_INTERFACE_MODES`）视图层必须走注册表消费，builtin 引用只允许住 `src/app/` 连接件（如 `interfaceModeLookup.ts`，registry 真值优先 + builtin 回退）；内部 API 面（契约常量与贡献产物读取端，如 `BUILTIN_TACTICAL_SCENE_SURFACE_ID`、`collectProfilePersona`、`FILE_SHEET_MAX_READ_BYTES`）按符号级白名单直连，清单唯一真源在 `scripts/check-product-contribution-boundary.mts` 的 `CORE_INTERNAL_API_ALLOWLIST`（who/why 逐条登记，新增豁免=显式评审动作；guard 管辖 App/components/sheets） | `vitest run src/plugins`；产品贡献/样式门禁（含 core 划线） |
 | 工作台宿主 | `src/host/`、`src/application/agent-workbench/`（#486 项1 自 sheets/ 归位；原址仅留视图件）；[agentWorkbenchSession](../../src/application/agent-workbench/agentWorkbenchSession.ts)、[agentWorkbenchTurnClock](../../src/application/agent-workbench/agentWorkbenchTurnClock.ts) | 拥有会话绑定、generation、订阅和文档更新；renderer 经 Host Port 发命令。**活性权威单源**（ADR-0029 收口）：`kernel > clock > document`，一个 source 的全部回合事实（时钟 / 账本终态 / 内核在途标记与回合身份戳 / 仅时钟起点）集中在 `agentWorkbenchTurnClock` 的一条 per-source 记录里，所有写入者共用同一组守卫（内核让位 + 读新鲜度）；「**本回合**是否已收敛」只能用回合作用域的 `latestTurnBoundary`（`canonicalTurnDuration.ts`）判定——回合无关的 `hasCanonicalTurnTerminal`（「历史上出现过终态」）不得用于封存时钟/补终态摘要，否则切页或重读会把在途回合压成上一轮的 `displayOnly` 摘要（#390） | `vitest run src/host src/application/agent-workbench` |
@@ -65,10 +65,10 @@ flowchart LR
 
 四个名字都带「呈现」味的域，边界按「管什么状态」切分：
 
-- **presentation**——用户对**呈现档案**的偏好（选哪套 presentation profile，zustand persist 单 store）。消费者是设置页、agent-workbench 宿主与 core/renderer 的偏好读取。
+- **presentation**——用户对**呈现档案**的偏好（选哪套 presentation profile，单一持久化 store；#515 批0 起 zustand 已退役、内核为 solid-js/store）。消费者是设置页、agent-workbench 宿主与 core/renderer 的偏好读取。
 - **appearance**——**外观运行时**的组合与派生（cc 布局、spinner 资产/动词、由 ThemeSettings 派生的外观状态、侧栏模块偏好与 settings chrome store）。它不存「偏好选了什么」之外的语义，视觉结果的组装在这里。
 - **rendererContent**——**内容 → 渲染语义**的归一契约层：各内容族 render kind catalog（text/tool/session/execution/interaction，kind 是内容契约、不等同 renderer 实现，A07）+ 内容呈现纯函数（file/reasoning 呈现、媒体源解析）+ 对统一 Renderer Registry 的产品查询门面。它不做 UI，也不持有偏好。
-- **interface**——**界面布局模式**的偏好与状态（interface mode，zustand persist 单 store），跨 workspace-sheets / settings / shell 消费。
+- **interface**——**界面布局模式**的偏好与状态（interface mode，单一持久化 store；#515 批0 起 zustand 已退役、内核为 solid-js/store），跨 workspace-sheets / settings / shell 消费。
 
 一句话：presentation 管偏好档案、appearance 管外观组合、rendererContent 管内容语义归一、interface 管布局模式；四域均不直连 IPC（传输面在 infrastructure），偏好持久化的 wire 形状变更视为公开契约变更。
 

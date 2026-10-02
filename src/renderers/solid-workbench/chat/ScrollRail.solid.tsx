@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 /**
  * 聊天滚动导航轨（#486 项4 自 WorkbenchContent.solid.tsx 拆出的子组件；行为不变）。
  * 回顶/回底按钮 + 轨道寻道/键盘寻道 + 拖拽拇指；几何与交互判定全部来自

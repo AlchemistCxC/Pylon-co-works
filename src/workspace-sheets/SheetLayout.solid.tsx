@@ -1,0 +1,296 @@
+/** @jsxImportSource solid-js */
+import { createEffect, createMemo, For, on, Show, untrack, type Component } from 'solid-js'
+import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
+import { useIdentityStore } from '../domains/identity/identityStore'
+import { useStore } from '../domains/theme/themeStore'
+import { useHydrationStore } from '../app/bootstrap/hydrationState'
+import { resolveSessionSource } from '../domains/chat/sessionCommandState'
+import { belongsToProfile } from '../domains/chat/sessionProfile'
+import { resolveSheetRender } from './sheetRegistry.ts'
+import { activateAgentSheet } from './activateAgentSheet'
+import SheetHost from './SheetHost.solid.tsx'
+import SheetSidebarSlot from './SheetSidebarSlot.solid.tsx'
+import LeftRailResizeHandle from './LeftRailResizeHandle.solid.tsx'
+import RightRailHost from '../components/right-panel/RightRailHost.solid.tsx'
+import type { SheetContext, SheetRecord } from './sheetTypes'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
+import { closeWorkspace } from './workspaceController'
+import { sheetHasLeftColumn } from './sheetSidebarState.ts'
+import { useRightRailStore } from '../domains/workspace/layoutRailsStore.ts'
+import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
+import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+
+/**
+ * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
+ *
+ * 接盘 App 布局段：解析 activeSheet、构建 SheetContext、按 registry 声明渲染
+ * [侧栏壳 | 主区 | 右栏壳]。profile 投影与会话记忆 effects 从 App 原样搬运（行为不变）。
+ * 无 sheet → 空态。Settings/对话框保持 App 单例挂载，不进本层。
+ *
+ * #515：Solid 实体。keep-alive 槽位**保实例语义**与 React keyed-by-id 对齐：
+ * 外层 `<For>` 以 sheet.id 串为键（同 id 串引用稳定 ⇒ 行不重建），内层以访问器
+ * 响应式更新 sheet/ctx —— sheet 对象被 patch 换引用（如 patchSheetMetadata）时
+ * 只换 props 不换实例，组件内状态与 keep-alive display:contents 活性保持。
+ */
+
+interface SheetLayoutProps {
+  activeSession: string | null
+  onSelectSession: (id: string | null) => void
+  onProfileEdit: () => void
+  onSessionSettings: (id: string) => void
+}
+
+function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): SheetContext {
+  const { openSheet, focusSheet } = useWorkspaceStore.getState()
+  return {
+    openSheet,
+    focusSheet,
+    closeSheet: id => { void closeWorkspace(id) },
+    activeSession: props.activeSession,
+    selectSession: props.onSelectSession,
+    openProfileEdit: props.onProfileEdit,
+    openSessionSettings: props.onSessionSettings,
+    // I09-A-FE-01（L1）：ctx 经 createMemo 随折叠状态重建（见组件体内），消费方经
+    // 响应式 props 拿到的恒为新值——原 React 版靠重渲染刷新该字段，语义对齐。
+    sidebarCollapsed,
+    // 右栏由应用级 RightRailHost 作为 .layout 的 flex sibling 占位，主区宽度已天然扣除；
+    // renderer 再消费 rightInset 会二次挤压内容，并在折叠切换时产生异常跳宽。
+    rightInset: 0,
+    // active 主区的 context；非 active 的 keep-alive Sheet 会在下方显式覆盖为 false。
+    isActive: true,
+    sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
+    sessionBySource: source => useIdentityStore.getState().sessions.find(session => session.source === source),
+  }
+}
+
+export default function SheetLayout(props: SheetLayoutProps) {
+  // registry 订阅不设在本层：SheetHost/SheetSidebarSlot/EmptyLayout 各自自持
+  // createRegistrySignal 订阅，顶层订阅是 React 期驱动重渲染的遗留，已删。
+  const sheets = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.sheets)
+  const activeSheetId = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.activeSheetId)
+  const activeSheet = createMemo(() => sheets().find(sheet => sheet.id === activeSheetId()))
+  // 左栏是统一应用布局；切换任何 Sheet 都保持同一折叠状态。
+  const sidebarCollapsed = createZustandSignal(useRightRailStore, s => s.leftRailCollapsed)
+
+  const identityActiveAgent = createZustandSignal(useIdentityStore, s => s.activeAgent)
+  const sheetOwnerAgentId = createMemo(() => {
+    const sheet = activeSheet()
+    return sheet?.kind === 'agent' ? sheet.agentId : undefined
+  })
+  // 冷启动：激活 agent sheet 时，activeAgent 以恢复出的 sheet owner 为准。空串 = 没有 Agent
+  //（#326 零 Agent 首跑），不得回落硬编码 'peri' 造出一个不存在的 Agent。
+  const activeAgent = createMemo(() => sheetOwnerAgentId() ?? identityActiveAgent())
+  const activeProfileId = createZustandSignal(useIdentityStore, s => s.activeProfileId)
+  const sessions = createZustandSignal(useIdentityStore, s => s.sessions)
+  const sheetAgentStates = createZustandSignal(useWorkspaceStore, s => s.sheetAgentStates)
+  // 报告 2.3：ready 前禁止 Workspace 写操作——避免启动期用未 hydrate 状态覆盖持久化
+  const hydrationReady = createZustandSignal(useHydrationStore, s => s.status === 'ready')
+  let didColdStartActivate = false
+
+  // A（冷启动自动恢复）：hydrate 就绪后，若恢复出的激活 sheet owner ≠ 当前 activeAgent，
+  // 自动切到该 owner（连接对应 Agent），避免默认连 peri 导致 Hermes sheet 报错。
+  createEffect(() => {
+    if (!hydrationReady() || didColdStartActivate) return
+    const owner = sheetOwnerAgentId()
+    if (!owner) return
+    const current = untrack(() => useIdentityStore.getState().activeAgent)
+    if (current === owner) return
+    didColdStartActivate = true
+    const agentName = useIdentityStore.getState().agents.find(agent => agent.id === owner)?.name ?? owner
+    void activateAgentSheet(owner, agentName, () => {}, { silent: true })
+  })
+
+  // W1-03 原样搬运：启动时从权威记忆（sheetAgentStates）恢复当前 agent 的 profile 投影与会话，
+  // 不写回——写回只发生在用户显式 setActiveProfile / 选会话（下方 effect）。
+  // 修复：hydrate 就绪后才恢复（子 effect 先于 bootstrap hydrate 执行会读到空记忆）
+  createEffect(on(() => hydrationReady(), ready => {
+    if (!ready) return
+    // #326：空串 = 没有 Agent（零 Agent 首跑）。它不是实体：读写 sheetAgentStates[''] 会
+    // 把「没有 Agent」写进持久化记忆（重启后仍在），并喂给会话归属推断。
+    const agent = activeAgent()
+    if (!agent) return
+    const memory = useWorkspaceStore.getState().sheetAgentStates[agent]
+    const currentProfileId = untrack(activeProfileId)
+    if (memory?.activeProfileId && memory.activeProfileId !== currentProfileId) {
+      useIdentityStore.getState().setActiveProfile(memory.activeProfileId)
+    }
+    const currentSession: string | null = untrack(() => props.activeSession)
+    if (memory?.activeSessionId && memory.activeSessionId !== currentSession) {
+      props.onSelectSession(memory.activeSessionId)
+    }
+  }))
+
+  // W1-03 原样搬运：会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步）。
+  // 修复：hydrate 就绪前跳过——否则用初始空 sheets 覆盖持久化（刷新丢 sheets → 启动页）
+  createEffect(() => {
+    const agent = activeAgent()
+    if (!hydrationReady() || !agent) return
+    useWorkspaceStore.getState().setSheetAgentState(agent, { activeSessionId: props.activeSession || undefined })
+  })
+
+  // W1-03 原样搬运：profile 越界清理（切 profile 后 activeSession 不属于新 profile → 清空）
+  createEffect(() => {
+    const profileId = activeProfileId()
+    const session = props.activeSession
+    const currentSessions = sessions()
+    if (!belongsToProfile(session, profileId, currentSessions)) props.onSelectSession(null)
+  })
+
+  // ctx 与 React 版同语义：每次「渲染」重建（此处 = 任一依赖变化后经 memo 产出新对象，
+  // 消费方经响应式 props 读取到新引用）
+  const ctx = createMemo(() => buildSheetContext(props, sidebarCollapsed()))
+  const activeSessionOwner = createMemo(() => sessions().find(session => session.id === props.activeSession)?.agentId)
+  const contextForAgentSheet = (sheet: SheetRecord): SheetContext => {
+    const rememberedSession = sheet.agentId ? sheetAgentStates()[sheet.agentId]?.activeSessionId ?? null : null
+    const sessionId = activeSessionOwner() === sheet.agentId ? props.activeSession : rememberedSession
+    const active = sheet.id === activeSheetId()
+    return {
+      ...ctx(),
+      activeSession: sessionId,
+      selectSession: id => {
+        if (sheet.agentId) useWorkspaceStore.getState().setSheetAgentState(sheet.agentId, { activeSessionId: id ?? undefined })
+        if (active) props.onSelectSession(id)
+      },
+    }
+  }
+  const ccEditMode = createZustandSignal(useStore, s => s.ccEditMode)
+  const showSidebar = createZustandSignal(useStore, s => s.showSidebar !== false)
+  // #154：左列的可见性是布局层的状态——宽度、竖直分割线与 a11y 可见性都据它决定，
+  // 各 Sheet 不再自行判断折叠。判定与 App 的 sidebarEnabled 同源（sheetHasLeftColumn），
+  // 避免标题栏与左列对「本 Sheet 有没有左栏」得出两个结论。
+  const leftColumnVisible = createMemo(() => {
+    const sheet = activeSheet()
+    return !!sheet && sheetHasLeftColumn(sheet) && showSidebar() !== false && !sidebarCollapsed()
+  })
+  // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
+  const workspacePersistError = createZustandSignal(useWorkspaceStore, s => s.lastPersistError)
+  const identityPersistError = createZustandSignal(useIdentityStore, s => s.lastPersistError)
+  createEffect(() => {
+    const message = workspacePersistError() ?? identityPersistError()
+    const matcher = { action: '保存本地配置', scope: { kind: 'app' as const, id: 'persistence' } }
+    if (!message) {
+      resolveRuntimeErrors(matcher)
+      return
+    }
+    reportRuntimeError('保存本地配置', new Error(message), undefined, {
+      scope: matcher.scope,
+      key: 'app:persistence',
+      source: 'persistence',
+    })
+  })
+
+  // keep-alive 槽位：以 id 串为键保实例（见文件头注）。收集 = 各槽位 kind 过滤后扁平。
+  const keepAliveSheets = createMemo(() => {
+    const all = sheets()
+    return KEEP_ALIVE_SHEET_SLOT.flatMap(slot =>
+      all.filter(sheet => sheet.kind === slot.kind).map(sheet => ({ slot, sheet })))
+  })
+
+  return (
+    <>
+    <Show when={!activeSheet()} keyed>
+      {_empty => (
+        <EmptyLayout ctx={ctx()} activeAgent={activeAgent()} ccEditMode={ccEditMode()} />
+      )}
+    </Show>
+    <Show when={activeSheet()} fallback={null}>
+      {sheet => (
+        <div class={`layout ${ccEditMode() ? 'cc-editing-app' : ''}`} data-sidebar={leftColumnVisible() ? 'expanded' : 'collapsed'} data-pylon-surface="workspace" data-agent-id={activeAgent()}>
+          <SheetSidebarSlot sheet={sheet()} ctx={ctx()} />
+          <Show when={leftColumnVisible()}>
+            <LeftRailResizeHandle />
+          </Show>
+          <Show when={sheet().kind !== 'agent' && sheet().kind !== 'file' && sheet().kind !== 'browser'}>
+            <SheetHost sheet={sheet()} ctx={ctx()} />
+          </Show>
+          {/* keep-alive 槽位统一数据驱动（结构审查 A-V10）：哪些 kind 保活只有 KEEP_ALIVE_SHEET_SLOT
+              一处真相；槽位各自的 class/data 属性是存量 DOM 契约（样式与测试按它定位），逐 kind 保留。
+              browser 块改经 SheetHost 渲染——错误边界覆盖与其他保活 kind 对齐。
+              G5（FE-AUD-006）：browser 保活语义不变——非活动态只隐藏 DOM，真正 close 才卸载。 */}
+          <For each={keepAliveSheets().map(entry => entry.sheet.id)}>
+            {id => {
+              const entry = createMemo(() => keepAliveSheets().find(item => item.sheet.id === id)!)
+              const active = createMemo(() => entry().sheet.id === activeSheetId())
+              return (
+                <div
+                  class={entry().slot.className}
+                  {...(entry().slot.kind === 'file' ? { 'data-file-sheet-id': id } : { 'data-sheet-id': id })}
+                  aria-hidden={active() ? undefined : true}
+                  style={{ display: active() ? 'contents' : 'none' }}
+                >
+                  <SheetHost
+                    sheet={entry().sheet}
+                    ctx={entry().slot.kind === 'agent'
+                      ? contextForAgentSheet(entry().sheet)
+                      : entry().slot.passIsActive ? { ...ctx(), isActive: active() } : ctx()}
+                  />
+                </div>
+              )
+            }}
+          </For>
+          <RightRailHost sheet={sheet()} ctx={ctx()} activeAgent={activeAgent()} />
+        </div>
+      )}
+    </Show>
+    </>
+  )
+}
+/**
+ * 空态分支独立于 Show fallback（solid 1.9 的 fallback 不支持函数形态、JSX 元素形态会
+ * 在组件体急切求值——OverviewSheetView 的挂载 effect 不能在未插入时就跑）。以 keyed
+ * Show 的子回调实现惰性创建：仅在无 active sheet 时才实例化空态子树。
+ */
+function EmptyLayout(props: { ctx: SheetContext; activeAgent: string; ccEditMode: boolean }) {
+  // W1-05：无 active sheet → 虚拟 overview 接管空态（不写入持久 sheet 数组）
+  const registry = createRegistrySignal({ subscribe: subscribeWorkspaceRegistry }, getWorkspaceRegistrySnapshot)
+  const overviewEntry = createMemo(() => {
+    registry()
+    return resolveSheetRender('overview')
+  })
+  return (
+    <div class={`layout ${props.ccEditMode ? 'cc-editing-app' : ''}`} data-sidebar="collapsed" data-pylon-surface="workspace" data-agent-id={props.activeAgent}>
+      <Show when={overviewEntry()} fallback={<EmptySheetHost />}>
+        {entry => {
+          const Overview = entry().component as Component<{ sheet: SheetRecord; ctx: SheetContext; state: unknown }>
+          return <Overview sheet={VIRTUAL_OVERVIEW_SHEET} ctx={props.ctx} state={entry().deserialize(undefined)} />
+        }}
+      </Show>
+      <RightRailHost sheet={null} ctx={props.ctx} activeAgent={props.activeAgent} />
+    </div>
+  )
+}
+
+/**
+ * keep-alive 槽位表（结构审查 A-V10）——「哪些 sheet kind 保活」的唯一真相。
+ * 旧实现是三段手写近似 JSX + 一条反向否定链；class/data 属性是存量 DOM 契约逐 kind 保留
+ * （browser historic 名不带 -sheet、file 用 data-file-sheet-id）。passIsActive 仅 browser
+ * 声明（原块语义）；file 维持原样不注入 isActive，agent 走 contextForAgentSheet 特化。
+ */
+const KEEP_ALIVE_SHEET_SLOT: readonly { kind: string; className: string; passIsActive?: boolean }[] = [
+  { kind: 'agent', className: 'agent-sheet-keep-alive' },
+  { kind: 'file', className: 'file-sheet-keep-alive' },
+  { kind: 'browser', className: 'browser-keep-alive', passIsActive: true },
+]
+
+/** 虚拟 overview sheet（空态专用，不持久化） */
+const VIRTUAL_OVERVIEW_SHEET: SheetRecord = {
+  id: 'overview-virtual',
+  kind: 'overview',
+  title: 'Overview',
+  createdAt: 0,
+  lastFocusedAt: 0,
+}
+
+function EmptySheetHost() {
+  return (
+    <div class="sheet-empty-host">
+      <div class="sheet-empty-kicker">WORKSPACE</div>
+      <h2>没有打开的 Sheet</h2>
+      <p>打开一个 Agent 工作现场，或从工具入口选择 Sheet。</p>
+      <button type="button" onClick={() => useWorkspaceStore.getState().openSheet({ kind: 'overview', title: 'Overview' })}>
+        打开 Overview
+      </button>
+    </div>
+  )
+}

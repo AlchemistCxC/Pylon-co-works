@@ -90,7 +90,7 @@ for (const command of [
   assert.doesNotMatch(nativeStore, new RegExp(`fn\\s+${command}\\b`), `旧命令实现仍存在：${command}`)
 }
 
-const pluginManager = readFileSync(join(root, 'src/components/settings/PluginManager.tsx'), 'utf8')
+const pluginManager = readFileSync(join(root, 'src/components/settings/PluginManager.solid.tsx'), 'utf8')
 assert.doesNotMatch(pluginManager, /PluginRegistry|PluginHost|api=0\.1|devMode|paste/i)
 assert.match(pluginManager, /Pylon Plugin API \{PYLON_PLUGIN_API_VERSION\}/)
 
