@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type PersistStringStorage } from '../solidStoreKernel'
 
 describe('solidStoreKernel（#515 批0 门面语义）', () => {
@@ -64,15 +64,93 @@ describe('solidStoreKernel（#515 批0 门面语义）', () => {
     })
   })
 
-  describe('attachSolidPersist（zustand persist 子集）', () => {
-    class MemoryStorage implements PersistStringStorage {
-      private map = new Map<string, string>()
-      getItem(key: string) { return this.map.get(key) ?? null }
-      setItem(key: string, value: string) { this.map.set(key, value) }
-      removeItem(key: string) { this.map.delete(key) }
-      dump() { return Object.fromEntries(this.map) }
-    }
+  class MemoryStorage implements PersistStringStorage {
+    private map = new Map<string, string>()
+    getItem(key: string) { return this.map.get(key) ?? null }
+    setItem(key: string, value: string) { this.map.set(key, value) }
+    removeItem(key: string) { this.map.delete(key) }
+    dump() { return Object.fromEntries(this.map) }
+  }
 
+  describe('二轮审查走样修复（zustand 对齐）', () => {
+    it('对象形态同引用 setState 整体跳过（zustand 守卫两形态一致）', () => {
+      const kernel = createSolidStoreKernel<{ v: number }>({ v: 1 })
+      let calls = 0
+      kernel.subscribe(() => { calls += 1 })
+      kernel.setState(kernel.getState())          // 对象形态同引用 → 跳过
+      kernel.setState(kernel.getState(), true)    // replace 形态同引用 → 跳过
+      kernel.setState(s => s)                     // 函数形态同引用 → 跳过（既有守卫）
+      expect(calls).toBe(0)
+      expect(kernel.getVersion()).toBe(0)
+    })
+
+    it('writeBack 抛错不阻断 notify 循环：后续 listener 照常收到、状态已在内存生效', () => {
+      const throwingStorage: PersistStringStorage = {
+        getItem: () => null,
+        setItem: () => { throw new Error('quota exceeded') },
+        removeItem: () => {},
+      }
+      const kernel = createSolidStoreKernel<{ v: number }>({ v: 0 })
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        attachSolidPersist(kernel, { name: 'probe-wb', version: 1, storage: throwingStorage })
+        const seen: number[] = []
+        kernel.subscribe(s => seen.push(s.v))
+        kernel.setState({ v: 7 })
+        // 状态传播不受写盘失败影响；写回 listener 自身的异常被就地吞掉
+        expect(kernel.getState().v).toBe(7)
+        expect(seen).toEqual([7])
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('probe-wb'), expect.any(Error))
+      } finally {
+        consoleSpy.mockRestore()
+      }
+    })
+
+    it('migrate 返回 Promise（异步不受支持）→ 丢弃 persisted、磁盘信封保留原样、不回写', () => {
+      const storage = new MemoryStorage()
+      const original = JSON.stringify({ state: { v: 1, legacy: 'keep' }, version: 1 })
+      storage.setItem('probe-async', original)
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const kernel = createSolidStoreKernel<{ v: number }>({ v: 99 })
+        attachSolidPersist(kernel, {
+          name: 'probe-async', version: 2, storage,
+          // 模拟将来有人写 async migrate 压过类型
+          migrate: (() => Promise.resolve({ v: 1 })) as never,
+        })
+        // 内存保持初始态（persisted 被丢弃，未把 Promise spread 进 merge）
+        expect(kernel.getState().v).toBe(99)
+        // 磁盘信封保留原样——绝不能用内存初始态覆盖用户数据
+        expect(storage.getItem('probe-async')).toBe(original)
+      } finally {
+        consoleSpy.mockRestore()
+      }
+    })
+
+    it('版本错位且无 migrate → 丢弃 persisted 保持初始态（zustand「丢弃 + 告警」对齐）', () => {
+      const storage = new MemoryStorage()
+      storage.setItem('probe-nomig', JSON.stringify({ state: { v: 1, alienShape: true }, version: 1 }))
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const kernel = createSolidStoreKernel<{ v: number }>({ v: 42 })
+        let hydrated: unknown = 'unset'
+        let reportedError: unknown
+        attachSolidPersist(kernel, {
+          name: 'probe-nomig', version: 2, storage,
+          onRehydrateStorage: () => (state, error) => { hydrated = state; reportedError = error },
+        })
+        // 旧形状不混入内存
+        expect(kernel.getState().v).toBe(42)
+        expect(hydrated).toBeUndefined()
+        expect(reportedError).toBeInstanceOf(Error)
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('版本错位'))
+      } finally {
+        consoleSpy.mockRestore()
+      }
+    })
+  })
+
+  describe('attachSolidPersist（zustand persist 子集）', () => {
     beforeEach(() => { localStorage.clear() })
 
     it('磁盘信封为 {state, version}（zustand createJSONStorage 逐字节兼容）', () => {

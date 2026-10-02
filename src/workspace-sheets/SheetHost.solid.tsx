@@ -1,5 +1,5 @@
 /** @jsxImportSource solid-js */
-import { createMemo, Show, type Component } from 'solid-js'
+import { createMemo, Show, Suspense, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import { resolveSheetRender } from './sheetRegistry.ts'
 import SheetErrorBoundary from './SheetErrorBoundary.solid.tsx'
@@ -31,12 +31,14 @@ export default function SheetHost(props: { sheet: SheetRecord; ctx: SheetContext
     <Show when={rendered()} fallback={<UnavailableSheet kind={props.sheet.kind} />}>
       {payload => (
         <SheetErrorBoundary sheetId={props.sheet.id}>
-          <Dynamic
-            component={payload().entry.component as Component<{ sheet: SheetRecord; ctx: SheetContext; state: unknown }>}
-            sheet={props.sheet}
-            ctx={props.ctx}
-            state={payload().state}
-          />
+          <Suspense fallback={null}>
+            <Dynamic
+              component={payload().entry.component as Component<{ sheet: SheetRecord; ctx: SheetContext; state: unknown }>}
+              sheet={props.sheet}
+              ctx={props.ctx}
+              state={payload().state}
+            />
+          </Suspense>
         </SheetErrorBoundary>
       )}
     </Show>

@@ -39,7 +39,9 @@ export interface ContentPartProvider {
   readonly label: string
 }
 
-/** renderer.plan：任务树/计划 provider（第一版仅注册元数据，主链路仍用内置 TaskTree）。 */
+/** renderer.plan：任务树/计划 provider（第一版仅注册元数据；主链路 fallback 是
+ *  WorkbenchContent.solid.tsx 的 SolidPlanGoalContent——a212ce84 有意升级所致；
+ *  chat/TaskTree.solid.tsx 已零消费，为 #520 清理残留）。 */
 export interface PlanProvider {
   readonly providerId: string
   readonly planKind: string

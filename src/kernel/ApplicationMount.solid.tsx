@@ -1,5 +1,5 @@
 /** @jsxImportSource solid-js */
-import { createSignal, onCleanup, Show, type JSX } from 'solid-js'
+import { createSignal, onCleanup, Show, Suspense, type JSX } from 'solid-js'
 import type { ApplicationRuntime } from '../application/applicationRuntime.ts'
 
 interface ApplicationMountProps {
@@ -19,7 +19,9 @@ export default function ApplicationMount(props: ApplicationMountProps): JSX.Elem
     >
       {contribution => {
         const Application = contribution().component
-        return <Application />
+        // solid lazy 资源在无 SuspenseContext 时读到 undefined → Dynamic 渲空；与其他
+        // 宿主（Boundary+Suspense）一致，补加载期 fallback（App.solid 装配期自持恢复层）。
+        return <Suspense fallback={null}><Application /></Suspense>
       }}
     </Show>
   )

@@ -9,8 +9,8 @@
  * 改为「rapid panel change」——Solid 无双挂载，single-flight 契约不变）。
  */
 import { createSignal } from 'solid-js'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
@@ -40,6 +40,8 @@ const ctx: SheetContext = {
   sidebarCollapsed: false, rightInset: 0,
   sessionSource: () => null, sessionBySource: () => undefined,
 }
+
+afterEach(() => cleanup())
 
 describe('Browser page snapshot single-flight', () => {
   let fakeInvoke: FakeInvoke

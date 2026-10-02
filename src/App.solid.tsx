@@ -67,6 +67,7 @@ import { hydrateCustomPresetsFromBackend } from './infrastructure/persistence/cu
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 import { useStore } from './domains/theme/themeStore'
 import { createZustandSignal } from './host/solidStoreBridge.ts'
+import { shallowEqual } from './infrastructure/state/reactStoreShim.ts'
 import { createRegistrySignal } from './sheets/solidSheetSupport.solid.tsx'
 import type { InterfaceModeContribution } from './plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import type { SettingsDomainId } from './components/settings/settingsDomains.ts'
@@ -583,11 +584,3 @@ export default function App() {
   )
 }
 
-function shallowEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true
-  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false
-  const ka = Object.keys(a as Record<string, unknown>)
-  const kb = Object.keys(b as Record<string, unknown>)
-  if (ka.length !== kb.length) return false
-  return ka.every(key => Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]))
-}

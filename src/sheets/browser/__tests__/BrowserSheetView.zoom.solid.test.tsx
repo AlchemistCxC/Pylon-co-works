@@ -5,8 +5,8 @@
  * range 的 fireEvent.change → fireEvent.input（实体 onInput 契约）。
  */
 import { createSignal } from 'solid-js'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
@@ -55,6 +55,8 @@ const ctx: SheetContext = {
 }
 
 let fakeInvoke: FakeInvoke
+
+afterEach(() => cleanup())
 
 describe('Browser 页面缩放', () => {
   beforeEach(() => {

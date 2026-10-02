@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@solidjs/testing-library'
-import { describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it } from 'vitest'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
+
+afterEach(() => cleanup())
 
 describe('C08 content.plan Solid base Slot', () => {
   it('renders canonical five-state plan fields and goal accounting', () => {

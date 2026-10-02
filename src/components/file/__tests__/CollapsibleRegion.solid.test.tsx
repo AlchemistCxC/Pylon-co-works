@@ -2,9 +2,9 @@
 // #515：React 原件（components/file/CollapsibleRegion.tsx）判重退役——唯一实体是
 // renderers/solid-workbench/chat/CollapsibleRegion.solid.tsx，本测试随迁到该实体，
 // 断言集与 React 版逐一对应（未缩减；Fixture 的 useState 改 createSignal）。
-import { fireEvent, render, screen } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { SolidCollapsibleRegion } from '../../../renderers/solid-workbench/chat/CollapsibleRegion.solid.tsx'
 
 function Fixture() {
@@ -16,6 +16,8 @@ function Fixture() {
     </>
   )
 }
+
+afterEach(() => cleanup())
 
 describe('CollapsibleRegion', () => {
   it('折叠时保留正文以支持退场动画，同时从可访问树隐藏', () => {

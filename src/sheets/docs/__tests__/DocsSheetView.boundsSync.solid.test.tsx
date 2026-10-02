@@ -11,8 +11,8 @@
  * - 覆盖层 store 写入外的 React `act` 包裹移除（Solid 侧无需 act，信号同步通知）。
  */
 import { createSignal } from 'solid-js'
-import { render, waitFor } from '@solidjs/testing-library'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import DocsSheetView from '../DocsSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
@@ -49,6 +49,8 @@ const baseCtx: SheetContext = {
 function readySnapshot(): unknown {
   return { phase: 'ready', error: null, visible: true }
 }
+
+afterEach(() => cleanup())
 
 describe('#371 Docs Sheet WebView 同步（bounds / visible）', () => {
   let fakeInvoke: FakeInvoke

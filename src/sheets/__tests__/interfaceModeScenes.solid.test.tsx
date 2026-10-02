@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 // #515：自 interfaceModeScenes.test.tsx 迁移（断言集原样保留，渲染改走 Solid 实体）。
-import { describe, expect, it } from 'vitest'
-import { render, waitFor } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import {
   BUILTIN_INTERFACE_MODES,
   BUILTIN_TACTICAL_SCENE_SURFACE_ID,
 } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { InterfaceModeSceneHost, resolveInterfaceModeScene } from '../interfaceModeScenes.solid.tsx'
+
+afterEach(() => cleanup())
 
 describe('InterfaceModeScenes（A-V9 声明位 ↔ 宿主场景注册表）', () => {
   it('tactical-blue 声明的 sceneSurface surfaceId 在宿主注册表中登记', () => {

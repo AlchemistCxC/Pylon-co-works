@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import HistorySheetView from '../HistorySheetView.solid.tsx'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
@@ -29,6 +29,8 @@ const sheet: SheetRecord = { id: 'history', kind: 'history', title: '存档', cr
 function makeCtx(): SheetContext {
   return { selectSession: vi.fn(), openSheet: vi.fn() } as unknown as SheetContext
 }
+
+afterEach(() => cleanup())
 
 describe('HistorySheetView.solid', () => {
   it('渲染存档骨架（标题/条目/回放导出按钮）', async () => {

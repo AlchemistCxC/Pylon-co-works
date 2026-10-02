@@ -10,8 +10,9 @@ import { createStore, produce } from 'solid-js/store'
  * 在组件迁移批内零改动，终态 React 面退役后 shim 与本门面一并收敛为直连。
  *
  * 语义对齐点（zustand v5 vanilla）：
- * - `setState(partial)` 浅合并；函数形态的 updater **返回当前 state 同一引用时整体跳过**
- *   （不合并、不通知）；合并后必产新通知（无值级判等——与 zustand 一致，判等在消费侧）。
+ * - `setState(partial)` 浅合并；partial / updater **求值结果与当前 state 同一引用时整体跳过**
+ *   （两形态一致，不合并、不通知——zustand 的 `Object.is` 守卫在 setState 入口统一生效）；
+ *   合并后必产新通知（无值级判等——与 zustand 一致，判等在消费侧）。
  * - `setState(next, true)` 整体替换（resetStores 的 `setState(getInitialState(), true)` 依赖）。
  * - `subscribe(listener)` 收 `(state, prevState)`；⚠️ prevState 与 state 同一引用且为**写后值**
  *   （produce/reconcile 就地改写裸对象，无写前快照）——不要拿它做 diff，zustand 语义在此不成立。
@@ -55,8 +56,11 @@ export function createSolidStoreKernel<T extends object>(initial: T): SolidStore
     getState: () => current,
     setState: (partial, replace) => {
       const next = typeof partial === 'function' ? partial(current) : partial
-      // zustand 同款：函数 updater 返回当前 state 同一引用 ⇒ 整体跳过（不写、不通知）。
-      if (Object.is(next, current) && typeof partial === 'function') return
+      // zustand 同款：next 与当前 state 同一引用 ⇒ 整体跳过（不写、不通知），两形态
+      // 一致——zustand 的守卫对 partial / updater 结果统一 `Object.is` 判断，不分函数
+      // 与对象形态。replace 调用点审计：persist hydration 传**新建** merged、resetStores
+      // 传 getInitialState() **新拷贝**，均恒 ≠ current，不受本守卫影响。
+      if (Object.is(next, current)) return
       // ★ replace 不得用 `reconcile`：reconcile 为了细粒度更新会**就地合并旧树的嵌套
       //   数据**（数组走 `setProperty(previous, 'length', …)` 逐位覆写）——旧状态里的
       //   嵌套对象/数组可能藏着**调用方自有引用**（zustand 时代一直如此共享：出厂区域
@@ -125,7 +129,11 @@ export interface SolidPersistOptions<T extends object> {
   partialize?: (state: T) => Partial<T>
   /** 缺省 `{ ...current, ...persisted }`（zustand 默认 merge）。 */
   merge?: (persisted: unknown, current: T) => T
-  /** 版本不一致时的一次性语义迁移；跑过必回写一次（zustand 同款行为）。 */
+  /**
+   * 版本不一致时的一次性语义迁移；跑过必回写一次（zustand 同款行为）。
+   * **必须同步返回**——返回 Promise/thenable 会被拒收（console.error + 丢弃 persisted，
+   * 保持初始态不回写），同步内核无法等待。
+   */
   migrate?: (persisted: unknown, version: number | undefined) => T | Partial<T>
   onRehydrateStorage?: () => (state?: T, error?: unknown) => void
 }
@@ -136,21 +144,34 @@ export interface SolidPersistOptions<T extends object> {
  * 只实现本仓实际用到的语义，磁盘信封**逐字节兼容** zustand createJSONStorage 的
  * `{"state":…,"version":N}`——存量 localStorage 条目原地可读，无一次性搬家：
  * - 读到合法信封 → 版本不一致走 `migrate` 并**回写一次**；一致则只落 `merge`；
+ *   版本错位且**无 migrate**、或 migrate 返回 **Promise**（异步不受支持）→ zustand
+ *   同款「丢弃 + 告警」：console.error 后丢弃 persisted，保持内存初始态，**不回写**；
  * - hydrate 落盘走 merge 后的整份状态但**不触发写盘**（先 hydrate 后挂写回订阅）；
  * - 写回在每次 set 通知后同步执行（zustand 同款：resetStores 依赖同步落盘），
- *   载荷经 `partialize` 白名单（缺省整份状态，函数成员被 JSON.stringify 自然丢弃）。
- * - 解析失败：**静默**放弃 hydration（zustand 同款，错误经 onRehydrateStorage 的 error 位可见），内存初始态兜底。
+ *   载荷经 `partialize` 白名单（缺省整份状态，函数成员被 JSON.stringify 自然丢弃）；
+ *   写回异常（配额满 / 隐私模式）就地吞掉并 console.error——writeBack 是订阅
+ *   listener，异常越出会中止 notify 循环，zustand 的写回在 notify 后执行无此问题；
+ * - 解析失败 / 上述丢弃路径：放弃该 persisted（zustand 同款，错误经
+ *   onRehydrateStorage 的 error 位可见），内存初始态兜底。
  */
 export function attachSolidPersist<T extends object>(kernel: SolidStoreKernel<T>, options: SolidPersistOptions<T>): void {
   // 存储不可用（node 测试环境）⇒ 整体 no-op，内存态兜底（zustand createJSONStorage 同款）。
   const storage = options.storage
   if (!storage) return
   const version = options.version ?? 0
-  // 写回**同步且不吞异常**（zustand 同款：setItem 异常从 setState 调用栈原样抛出，
-  // resetStores 等调用方自行 try/catch；自管可见化的存储在 setItem 内已报错）。
+  // 写回**同步**执行（zustand 同款：resetStores 依赖同步落盘）。★ 异常就地吞掉并
+  // console.error：writeBack 挂在 subscribe 上，`storage.setItem` / `JSON.stringify`
+  // （含 partialize）抛错若越出会**中止 notify 循环**——其后的 listener（全部 React
+  // 订阅者）收不到通知 → UI stale。zustand 的写回在 setState 包装内、notify **之后**
+  // 执行，异常本就不截断订阅者；这里对齐「写回失败不阻断状态传播」（配额满 / 隐私
+  // 模式抛错时状态照常更新，仅落盘失败，persist 名即 store 标识随日志可见）。
   const writeBack = (state: T) => {
-    const payload = options.partialize ? options.partialize(state) : state
-    storage.setItem(options.name, JSON.stringify({ state: payload, version }))
+    try {
+      const payload = options.partialize ? options.partialize(state) : state
+      storage.setItem(options.name, JSON.stringify({ state: payload, version }))
+    } catch (error) {
+      console.error(`[solidStoreKernel] persist「${options.name}」写回失败：状态已在内存生效，仅落盘未成`, error)
+    }
   }
 
   // —— hydration（同步存储 ⇒ 全程同步，与 zustand toThenable 的同步路径一致）——
@@ -166,19 +187,39 @@ export function attachSolidPersist<T extends object>(kernel: SolidStoreKernel<T>
       const storedVersion = parsed && typeof parsed === 'object' ? (parsed as { version?: number }).version : undefined
       let migrated: unknown = persisted
       let didMigrate = false
-      if (storedVersion !== version && options.migrate) {
+      // 「丢弃 persisted」路径（zustand 同款「丢弃 + 告警」）：保持内存初始态、
+      // 跳过 merge、不回写；错误经 onRehydrateStorage 的 error 位可见。
+      let discardPersisted = false
+      if (storedVersion !== version && !options.migrate) {
+        // 版本错位且无 migrate：旧形状若静默混入（partialize 白名单外的字段、
+        // 已改语义的值），比整份丢弃更危险——console.error 后按初始态兜底。
+        console.error(`[solidStoreKernel] persist「${options.name}」版本错位（磁盘 ${String(storedVersion)} ≠ 代码 ${version}）且未提供 migrate：丢弃 persisted，保持初始态`)
+        hydrateError = new Error(`persist「${options.name}」版本错位（磁盘 ${String(storedVersion)} ≠ 代码 ${version}）且未提供 migrate，已丢弃 persisted`)
+        discardPersisted = true
+      } else if (storedVersion !== version && options.migrate) {
         migrated = options.migrate(persisted, storedVersion)
-        didMigrate = true
+        if (typeof (migrated as { then?: unknown } | null | undefined)?.then === 'function') {
+          // thenable（如 async migrate）：本内核同步 hydrate，无法等待。若照旧 spread，
+          // merged 会是空壳且 didMigrate=true ⇒ **立即用内存初始态回写磁盘**——持久化
+          // 数据不可逆丢失。对齐 zustand「丢弃 + 告警」：放弃该 persisted，不落 merge。
+          console.error(`[solidStoreKernel] persist「${options.name}」migrate 返回了 Promise（异步 migrate 不受支持）：丢弃 persisted，保持初始态`)
+          hydrateError = new Error(`persist「${options.name}」migrate 返回 Promise（异步 migrate 不受支持），已丢弃 persisted`)
+          discardPersisted = true
+        } else {
+          didMigrate = true
+        }
       }
-      const current = kernel.getState()
-      const merged = options.merge
-        ? options.merge(migrated, current)
-        : { ...current, ...(migrated as Partial<T>) }
-      kernel.setState(merged, true)
-      hydrated = true
-      if (didMigrate) {
-        // zustand 同款：migrate 后的回写走**正常写回路径**（经 partialize 白名单）。
-        writeBack(kernel.getState())
+      if (!discardPersisted) {
+        const current = kernel.getState()
+        const merged = options.merge
+          ? options.merge(migrated, current)
+          : { ...current, ...(migrated as Partial<T>) }
+        kernel.setState(merged, true)
+        hydrated = true
+        if (didMigrate) {
+          // zustand 同款：migrate 后的回写走**正常写回路径**（经 partialize 白名单）。
+          writeBack(kernel.getState())
+        }
       }
     }
   } catch (error) {

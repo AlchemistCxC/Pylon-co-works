@@ -4,8 +4,8 @@
  * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。
  */
 import { createSignal } from 'solid-js'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
@@ -56,6 +56,8 @@ const snapshot = (activeTabId: number | null, tabs: TestBrowserTab[] = [firstTab
 let serverTabs: TestBrowserTab[] = [firstTab, secondTab]
 let serverActiveTabId: number | null = 1
 let fakeInvoke: FakeInvoke
+
+afterEach(() => cleanup())
 
 describe('Browser 内部多标签', () => {
   beforeEach(() => {

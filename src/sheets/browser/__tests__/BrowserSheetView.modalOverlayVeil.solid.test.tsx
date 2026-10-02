@@ -8,8 +8,8 @@
  * 覆盖层 store 写入外的 React `act` 包裹移除（Solid 侧信号同步通知，无 act 等价物）。
  */
 import { createSignal } from 'solid-js'
-import { render, waitFor } from '@solidjs/testing-library'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import BrowserSheetView from '../BrowserSheetView.solid'
 import { FakeInvoke } from '../../../test/fakeInvoke'
@@ -47,6 +47,8 @@ function readyStatus(): unknown {
     activeTabId: 1, tabs: [{ id: 1, url: 'https://example.com', title: 'Example' }],
   }
 }
+
+afterEach(() => cleanup())
 
 describe('#309 模态覆盖层期间原生子视图让位', () => {
   let fakeInvoke: FakeInvoke

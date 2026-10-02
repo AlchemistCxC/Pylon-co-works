@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import SearchSheetView from '../SearchSheetView.solid.tsx'
 import { useIdentityStore } from '../../../domains/identity/identityStore'
 import { resetStores } from '../../../test/resetStores'
@@ -29,6 +29,8 @@ function setupCtx(): SheetContext {
 }
 
 const sheet: SheetRecord = { id: 'search', kind: 'search', title: '搜索', createdAt: 0, lastFocusedAt: 0 }
+
+afterEach(() => cleanup())
 
 describe('SearchSheetView.solid', () => {
   beforeEach(() => {

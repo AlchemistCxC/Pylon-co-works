@@ -12,8 +12,8 @@
  *   实体直连（同步渲染），waitFor 断言保留不改（语义等价、断言集不缩减）。
  */
 import { createSignal } from 'solid-js'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, waitFor } from '@solidjs/testing-library'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import BrowserSheetView from '../BrowserSheetView.solid'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 
@@ -53,6 +53,8 @@ function makeCtx(sidebarCollapsed: boolean): SheetContext {
     sessionBySource: () => undefined,
   }
 }
+
+afterEach(() => cleanup())
 
 describe('I09-A-FE-02 Browser 单一折叠状态（ctx.sidebarCollapsed）', () => {
   beforeEach(() => {

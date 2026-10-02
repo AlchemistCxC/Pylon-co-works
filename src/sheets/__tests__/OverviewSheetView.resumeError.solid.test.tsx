@@ -5,8 +5,8 @@
  * 修复前 RED：点击后无 alert；修复后 GREEN。
  * #515：自 OverviewSheetView.resumeError.test.tsx 迁移（断言集原样保留，渲染改走 Solid 实体）。
  */
-import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import OverviewSheetView from '../OverviewSheetView.solid.tsx'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import { FakeInvoke } from '../../test/fakeInvoke'
@@ -54,6 +54,8 @@ const sheet: SheetRecord = { id: 'overview', kind: 'overview', title: '概览', 
 function makeCtx(): SheetContext {
   return { selectSession: vi.fn(), openSheet: vi.fn() } as unknown as SheetContext
 }
+
+afterEach(() => cleanup())
 
 describe('CR-002 Overview 恢复会话失败呈现', () => {
   it('事务冲突 → error 槽显示 message，不导航', async () => {

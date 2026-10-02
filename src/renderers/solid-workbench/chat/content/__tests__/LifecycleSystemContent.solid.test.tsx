@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
+
+afterEach(() => cleanup())
 
 describe('C13 lifecycle/system Solid base Slot', () => {
   it('renders structured retry details and gates retry through the semantic command port', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render } from '@solidjs/testing-library'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidFileReferenceCard } from '../FileReference.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
@@ -15,6 +15,8 @@ import type { ContentPart } from '../../../../../domains/workbench/content/conte
 function card(part: ContentPart, actions?: Parameters<typeof SolidFileReferenceCard>[0]['actions']) {
   return render(() => <SolidFileReferenceCard part={part} actions={actions} />)
 }
+
+afterEach(() => cleanup())
 
 describe('C02 SolidFileReferenceCard', () => {
   it('shows file name and raw path without URI rewriting', () => {
