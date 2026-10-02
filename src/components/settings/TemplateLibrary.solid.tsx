@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
 import { render } from 'solid-js/web'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Suspense, lazy, createMemo, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import { Show } from 'solid-js'

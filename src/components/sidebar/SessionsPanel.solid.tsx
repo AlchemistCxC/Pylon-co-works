@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -9,15 +10,9 @@ import { useModalOverlayStore } from '../../app/modalOverlayStore'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 import { resolveSessionDisplayName } from '../../domains/identity/identityStore.ts'
-import type { CwdSettingsIslandInput } from './sidebarBridgeTypes.ts'
 
-// CwdSettingsPanel 是 React 面（settings/** 后续批次迁移）：按 P52 D4 经 eager glob 缝加载。
-interface CwdSettingsIslandModule {
-  mountCwdSettingsIsland(container: HTMLElement, get: () => CwdSettingsIslandInput): { rerender(): void; dispose(): void }
-}
-const islandModules = import.meta.glob<CwdSettingsIslandModule>('./CwdSettingsIsland.tsx', { eager: true })
-const islandModule = islandModules['./CwdSettingsIsland.tsx']
-if (!islandModule) throw new Error('CwdSettings React 岛未进入 Vite module graph')
+// #515 批7：CwdSettingsPanel 已是 Solid 实体（settings 批）——React 岛退役，直连实体。
+import CwdSettingsPanel from '../settings/CwdSettingsPanel.solid.tsx'
 
 function workspaceNameFromPath(rootPath: string): string {
   const withoutTrailingSeparators = rootPath.replace(/[\\/]+$/, '')
@@ -40,15 +35,9 @@ function loadCollapsedWorkspaces(): Set<string> {
   }
 }
 
-/** 工作区设置弹窗体：面板本体在 React 岛里，本组件只负责岛生命周期（挂载期建、卸载期拆）。 */
+/** 工作区设置弹窗体：#515 批7 起 CwdSettingsPanel 为 Solid 实体，直连渲染。 */
 function CwdSettingsDialogBody(props: { workspace: Workspace; onClose: () => void }) {
-  let host: HTMLDivElement | undefined
-  onMount(() => {
-    if (!host) return
-    const mount = islandModule.mountCwdSettingsIsland(host, () => ({ workspace: props.workspace, onClose: props.onClose }))
-    onCleanup(() => mount.dispose())
-  })
-  return <div ref={element => { host = element }} />
+  return <CwdSettingsPanel workspace={props.workspace} onClose={props.onClose} showHeader={false} />
 }
 
 /**

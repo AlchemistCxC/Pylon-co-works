@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'

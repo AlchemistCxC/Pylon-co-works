@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, ErrorBoundary, on } from 'solid-js'
 import type { JSX } from 'solid-js'
 

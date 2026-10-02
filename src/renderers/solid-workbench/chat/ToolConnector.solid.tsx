@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, createEffect, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../../../domains/tool/toolPresentation.ts'
 import { toolConnectorMotionClass } from '../../../domains/chat/toolIndicatorMotion.ts'

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { AssistSnapshot, BudgetSnapshot, SessionCommand, SessionConfigOption, UsageSnapshot } from '../../../../domains/workbench/session/sessionSurface.ts'

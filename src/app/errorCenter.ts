@@ -1,11 +1,14 @@
 /**
- * errorCenter — 运行错误聚合存储（模块级 + useSyncExternalStore）。
+ * errorCenter — 运行错误聚合存储（模块级单例 + 订阅缝）。
  *
  * reportRuntimeError 产生的错误统一收口为可回溯列表（带时间戳、可单个关闭/全部清除），
  * 替代"只显示最新一条"的单 banner。容量上限 50，超出丢弃最旧。
+ *
+ * #515：React hook 面（useErrors/useDiagnosticErrors/useErrorHistory）已随消费方
+ * Solid 化删除——ErrorCenter.solid 与 RuntimeSheetView.solid 经 {@link subscribeErrorCenter}
+ * 非 React 缝消费；本文件不再依赖 React。
  */
 
-import { useSyncExternalStore } from 'react'
 import type {
   RuntimeErrorDetail,
   RuntimeErrorScope,
@@ -187,17 +190,4 @@ export function getDiagnosticErrors(): readonly ErrorEntry[] {
 
 export function getErrorHistory(): readonly ErrorEntry[] {
   return errorHistorySnapshot
-}
-
-export function useErrors(): readonly ErrorEntry[] {
-  return useSyncExternalStore(subscribe, getErrors)
-}
-
-export function useDiagnosticErrors(): readonly ErrorEntry[] {
-  return useSyncExternalStore(subscribe, getDiagnosticErrors)
-}
-
-/** Runtime Sheet seam: inspect resolved/dismissed facts without reviving them. */
-export function useErrorHistory(): readonly ErrorEntry[] {
-  return useSyncExternalStore(subscribe, getErrorHistory)
 }

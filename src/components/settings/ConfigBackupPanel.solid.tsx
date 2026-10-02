@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createSignal, Show, type JSX } from 'solid-js'
 import { render } from 'solid-js/web'
 import { IS_TAURI } from '../../infrastructure/tauri/env'

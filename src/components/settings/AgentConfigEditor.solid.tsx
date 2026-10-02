@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createSignal, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { appClients } from '../../app/appClients.ts'

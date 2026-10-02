@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
 import type { RefObject } from 'react'
 import { createSolidMount } from '../../host/solidBridge.solid'

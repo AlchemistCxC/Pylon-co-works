@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { PYLON_PLUGIN_CAPABILITIES } from '../../plugin-runtime/packageManifest.ts'

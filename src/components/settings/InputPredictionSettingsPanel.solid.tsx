@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, Show, type JSX } from 'solid-js'
 import { render } from 'solid-js/web'
 import { DEFAULT_INPUT_PREDICTION_SETTINGS, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import { createSolidMount } from '../../host/solidBridge.solid'

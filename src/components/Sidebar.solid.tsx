@@ -1,11 +1,14 @@
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
-import { createElement, Suspense, type ReactElement } from 'react'
+/** @jsxImportSource solid-js */
+import { createEffect, createMemo, createSignal, For, Show, Suspense, type Component } from 'solid-js'
+import { Dynamic } from 'solid-js/web'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { refreshSessionsBackend, useIdentityStore } from '../domains/identity/identityStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
-import { createRegistrySignal, ReactIslandHost } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
+import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -42,49 +45,7 @@ import { validateExportPath } from '../domains/overview/persistedHistory.ts'
 import type { LaunchIconKey } from '../workspace-sheets/launchIconKeys.ts'
 import type { AgentSidebarSharedProps } from './sidebar/useSidebarContributionProps.ts'
 
-// ---- React 岛（#515 迁移期：贡献体是 React 面——first-party 组件 / IsolatedPluginSurface
-// + 边界 + Suspense，按 P52 D4 经 eager glob 缝加载；批7 后随 React 面退役）。 ----
-
-interface IsolatedPluginSurfaceProps {
-  surfaceId: string
-  className?: string
-  input?: unknown
-  onEvent?: (event: string, detail: unknown) => void
-}
-
-interface IsolatedPluginSurfaceModule {
-  IsolatedPluginSurface: (props: IsolatedPluginSurfaceProps) => ReactElement
-}
-
-const isolatedSurfaceModules = import.meta.glob<IsolatedPluginSurfaceModule>('../plugin-runtime/ui/IsolatedPluginSurface.tsx', { eager: true })
-const IsolatedPluginSurface = isolatedSurfaceModules['../plugin-runtime/ui/IsolatedPluginSurface.tsx']?.IsolatedPluginSurface
-if (!IsolatedPluginSurface) throw new Error('IsolatedPluginSurface React 面未进入 Vite module graph')
-
-interface PluginContributionBoundaryProps {
-  contributionId: string
-  children: ReactElement
-}
-
-interface PluginContributionBoundaryModule {
-  PluginContributionBoundary: (props: PluginContributionBoundaryProps) => ReactElement
-}
-
-const boundaryModules = import.meta.glob<PluginContributionBoundaryModule>('../plugin-runtime/ui/PluginContributionBoundary.tsx', { eager: true })
-const PluginContributionBoundary = boundaryModules['../plugin-runtime/ui/PluginContributionBoundary.tsx']?.PluginContributionBoundary
-if (!PluginContributionBoundary) throw new Error('PluginContributionBoundary React 面未进入 Vite module graph')
-
-interface FirstPartyContributionProps {
-  component: unknown
-  props: AgentSidebarContributionProps
-}
-
-interface FirstPartyContributionModule {
-  FirstPartyContribution: (props: FirstPartyContributionProps) => ReactElement
-}
-
-const firstPartyModules = import.meta.glob<FirstPartyContributionModule>('./sidebar/FirstPartyContribution.tsx', { eager: true })
-const FirstPartyContribution = firstPartyModules['./sidebar/FirstPartyContribution.tsx']?.FirstPartyContribution
-if (!FirstPartyContribution) throw new Error('FirstPartyContribution React 面未进入 Vite module graph')
+// ---- 插件贡献体（#515 岛退役）：贡献组件是 **Solid 组件**，宿主直连渲染。 ----
 
 /**
  * 稳定图标键 → LucideIcon 具名的映射（launchIcons.tsx 的 LAUNCH_ICONS 同键表，
@@ -470,44 +431,46 @@ export default function Sidebar(props: SidebarProps) {
       }
     }
 
-    // 贡献体 React 岛：共享 props / 折叠态 / wire 输入变化 → rerender（React 自 diff）。
+    // 贡献体直连渲染（#515 岛退役）：共享 props / 折叠态 / wire 输入经细粒度响应直通
+    // 贡献组件；错误边界 + Suspense 语义与原 React 岛一致。
+    const contributionProps = () => ({
+      ...sharedProps(),
+      presentation: 'block' as const,
+      collapsed: collapsed(),
+      onBlockAction: () => {},
+      registerBlockActionHandler: (handler: ((actionId: string) => void) | null) => {
+        if (handler) actionHandlers.set(contributionId, handler)
+        else actionHandlers.delete(contributionId)
+      },
+    })
+    const onSurfaceEvent = (event: string, detail: unknown) => {
+      const shared = sharedProps()
+      if (event === 'host:select-session' && typeof detail === 'string') shared.onSelectSession(detail)
+      if (event === 'host:create-loose-session') shared.onCreateLooseSession()
+      if (event === 'host:create-workspace-session' && typeof detail === 'string') shared.onCreateWorkspaceSession(detail)
+      if (event === 'host:open-session-settings' && typeof detail === 'string') shared.onOpenSessionSettings(detail)
+    }
     const body = () => (
-      <ReactIslandHost element={() => {
-        const shared = sharedProps()
-        const islandProps: AgentSidebarContributionProps = {
-          ...shared,
-          presentation: 'block',
-          collapsed: collapsed(),
-          onBlockAction: () => {},
-          registerBlockActionHandler: handler => {
-            if (handler) actionHandlers.set(contributionId, handler)
-            else actionHandlers.delete(contributionId)
-          },
-        }
-        if (isolated) {
-          return createElement(PluginContributionBoundary, {
-            contributionId,
-            children: createElement(IsolatedPluginSurface, {
-              surfaceId: contribution.surfaceId,
-              className: 'sidebar-block-body-surface',
-              input: surfaceInput(),
-              onEvent: (event, detail) => {
-                if (event === 'host:select-session' && typeof detail === 'string') shared.onSelectSession(detail)
-                if (event === 'host:create-loose-session') shared.onCreateLooseSession()
-                if (event === 'host:create-workspace-session' && typeof detail === 'string') shared.onCreateWorkspaceSession(detail)
-                if (event === 'host:open-session-settings' && typeof detail === 'string') shared.onOpenSessionSettings(detail)
-              },
-            }),
-          })
-        }
-        return createElement(PluginContributionBoundary, {
-          contributionId,
-          children: createElement(Suspense, {
-            fallback: null,
-            children: createElement(FirstPartyContribution, { component: contribution.component, props: islandProps }),
-          }),
-        })
-      }} />
+      <PluginContributionBoundary contributionId={contributionId}>
+        {isolated ? (
+          <IsolatedPluginSurface
+            surfaceId={(contribution as { surfaceId: string }).surfaceId}
+            className="sidebar-block-body-surface"
+            input={surfaceInput()}
+            onEvent={onSurfaceEvent}
+          />
+        ) : (
+          <Suspense fallback={null}>
+            {/* 运行时边界收窄：first-party 贡献组件是 Solid 组件（宿主内置注册）；
+                联合类型在 isolated 分支外不含 component，此处与原 FirstPartyContribution
+                的边界纪律一致按 Solid 组件收窄。 */}
+            <Dynamic
+              component={(contribution as { component?: unknown }).component as Component<AgentSidebarContributionProps>}
+              {...contributionProps()}
+            />
+          </Suspense>
+        )}
+      </PluginContributionBoundary>
     )
 
     const iconName = launchIconName(contribution.icon)

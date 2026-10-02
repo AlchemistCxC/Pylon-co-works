@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'

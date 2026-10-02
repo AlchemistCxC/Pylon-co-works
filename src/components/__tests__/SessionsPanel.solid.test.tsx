@@ -6,7 +6,7 @@
 //   RTL 的 fireEvent 自带 act 包装，岛内状态更新不会落成 console.error 噪音；
 // - 受控输入断言不变（fireEvent.change 对 Solid 实体的输入走原生 change 事件无法触达
 //   onInput 的场景，本文件输入均经 React 岛或 waitFor 异步链，无需改写）。
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
@@ -78,7 +78,7 @@ function createProps(overrides: Partial<AgentSidebarContributionProps> = {}): Ag
 function captureBlockAction(overrides: Partial<AgentSidebarContributionProps> = {}) {
   let handler: ((actionId: string) => void) | null = null
   const props = createProps({ registerBlockActionHandler: next => { handler = next }, ...overrides })
-  return { props, fire: (actionId: string) => { if (!handler) throw new Error('贡献未注册区块头处理器'); act(() => handler!(actionId)) } }
+  return { props, fire: (actionId: string) => { if (!handler) throw new Error('贡献未注册区块头处理器'); handler!(actionId) } }
 }
 
 describe('SessionsPanel', () => {

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, on, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
 

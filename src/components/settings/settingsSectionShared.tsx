@@ -8,10 +8,11 @@ import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError
  * （A-V3 拆分自 Settings.tsx，代码逐字随迁）：折叠 Group、区域预设行、
  * 错误上报/解除的 key 口径。
  *
- * #515：`ZonePresetRow` 实体已迁 `settingsSectionShared.solid.tsx`，此处留 React 薄桥
- * （批7 拆除）。`Group` 的 children 由域外 React 消费者（Settings/AgentSettingsSection/
- * GlobalPresetSection）注入 React 子树、无法跨桥，按迁移模板保留原实现；error key
- * 口径（report/resolveSettingsError）为纯函数，同此保留。
+ * #515 第二批收尾：Solid 面（Group/report/resolveSettingsError/ZonePresetRow 实体）
+ * 已齐备于 `settingsSectionShared.solid.tsx`。本文件保留的理由只剩「React 世界仍有无
+ * 法跨桥的消费者」：`Group` 的 children 由域外 React 消费者（AgentSettingsSection——
+ * 在途避让域；ZonePresetSection）注入 React 子树，error key 口径被 settingsAgentActions
+ * （避让域）消费——这些消费者 Solid 化后本文件随批7 拆除；实体侧不做静态回向引用。
  */
 
 export function Group({ title, children, defaultOpen }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {

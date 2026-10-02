@@ -8,8 +8,8 @@
  *
  * #515：自 React 测试逐用例移植为 Solid 实体原生测试（断言集不缩减）。改写点：
  * - React `rerender` → ctx 信号翻转（类切换仍同步可断言——Solid class 写入同步）；
- * - 左列工具项是 React 岛（BrowserSidebar，本批施工域外），岛挂载在微任务落地，
- *   原本 render 后同步可达的内容断言改为 waitFor 轮询（断言集不缩减）。
+ * - 左列工具项原为 React 岛（岛挂载在微任务落地），批7 起 BrowserSidebar 已是 Solid
+ *   实体直连（同步渲染），waitFor 断言保留不改（语义等价、断言集不缩减）。
  */
 import { createSignal } from 'solid-js'
 import { describe, expect, it, vi, beforeEach } from 'vitest'

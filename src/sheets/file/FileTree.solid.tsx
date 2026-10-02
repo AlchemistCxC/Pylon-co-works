@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'

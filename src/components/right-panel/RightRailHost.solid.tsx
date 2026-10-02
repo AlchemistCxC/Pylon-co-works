@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'

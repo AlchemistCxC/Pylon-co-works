@@ -1,5 +1,6 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
-import { createElement, type ReactElement, type RefObject } from 'react'
+import type { RefObject } from 'react'
 import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Minus, Plus, RefreshCw, RotateCcw, Search, type IconNode } from 'lucide'
 import { browserReducer, createBrowserState, type BrowserAction } from '../../domains/browser/browserState.ts'
 import {
@@ -31,7 +32,9 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { BROWSER_PHASE_LABELS, type BrowserPageSnapshot, type BrowserSnapshot, type BrowserToolId } from './browserSheetTypes.ts'
 import { BrowserViewport } from './BrowserViewport.solid.tsx'
-import { mountReactIsland, type ReactIslandHandle } from '../solidSheetSupport.solid.tsx'
+import { BrowserSidebar } from './BrowserSidebar.solid.tsx'
+import { BrowserTabStrip } from './BrowserTabStrip.solid.tsx'
+import { BrowserToolPanel } from './BrowserToolPanel.solid.tsx'
 
 /**
  * BrowserSheetView — browser 壳（W4-03）。
@@ -46,10 +49,9 @@ import { mountReactIsland, type ReactIslandHandle } from '../solidSheetSupport.s
  *
  * #515：Solid 实体，与 React 版逐行同构。IPC 调用与生命周期（挂载/清理对称）逐条保真：
  * useReducer → 信号 + 纯 reducer；effect deps 语义逐条对照（见各 createEffect 注释）；
- * 原生可见性判定消费 modalOverlayStore（createZustandSignal，不改 store）。BrowserViewport
- * 已是 Solid 实体（直连）；BrowserSidebar / BrowserTabStrip / BrowserToolPanel 仍是 React
- * 面（本批施工域外），经 React 岛挂载——岛 dispose 推迟微任务（薄桥提交期内同步卸载会
- * 撞 React「render 期间卸载」告警，同 AgentSheetView.solid 的 AgentSheetIslandHost 取舍）。
+ * 原生可见性判定消费 modalOverlayStore（createZustandSignal，不改 store）。
+ * BrowserViewport / BrowserSidebar / BrowserTabStrip / BrowserToolPanel 四个子组件均为
+ * Solid 实体（props 信号直读、响应式更新）——批7 起 React 岛与 DeferredIslandHost 已退役。
  */
 
 const DEFAULT_ZOOM_PERCENT = 90
@@ -103,112 +105,6 @@ function BrowserIcon(props: { name: string; size?: number }) {
       aria-hidden="true"
     />
   )
-}
-
-// ---- React 岛（#515 迁移期：三子组件仍在 React 面，类型接口就地声明，与实体侧逐字段一致）。 ----
-
-interface BrowserSidebarProps {
-  sidebarCollapsed: boolean
-  activeTool: BrowserToolId | null
-  onSelectTool: (tool: BrowserToolId) => void
-  phase: BrowserSnapshot['phase']
-}
-
-interface BrowserSidebarModule {
-  BrowserSidebar: (props: BrowserSidebarProps) => ReactElement
-}
-
-const sidebarModules = import.meta.glob<BrowserSidebarModule>('./BrowserSidebar.tsx', { eager: true })
-const BrowserSidebar = sidebarModules['./BrowserSidebar.tsx']?.BrowserSidebar
-if (!BrowserSidebar) throw new Error('BrowserSidebar React 面未进入 Vite module graph')
-
-interface BrowserTabStripProps {
-  tabs: BrowserSnapshot['tabs']
-  activeTabId: number | null
-  onTabCommand: (command: 'new' | 'select' | 'close' | 'open', tabId?: number, url?: string) => void
-}
-
-interface BrowserTabStripModule {
-  BrowserTabStrip: (props: BrowserTabStripProps) => ReactElement
-}
-
-const tabStripModules = import.meta.glob<BrowserTabStripModule>('./BrowserTabStrip.tsx', { eager: true })
-const BrowserTabStrip = tabStripModules['./BrowserTabStrip.tsx']?.BrowserTabStrip
-if (!BrowserTabStrip) throw new Error('BrowserTabStrip React 面未进入 Vite module graph')
-
-interface BrowserToolPanelProps {
-  activeTool: BrowserToolId
-  library: BrowserLibrary
-  pageSnapshot: BrowserPageSnapshot | null
-  consoleFilter: 'all' | ConsoleEntry['level']
-  onConsoleFilterChange: (value: 'all' | ConsoleEntry['level']) => void
-  onClose: () => void
-  onClear: (collection: 'history' | 'bookmarks' | 'downloads' | 'console') => void
-  onNavigate: (url: string) => void
-  onDownload: (url: string, filename?: string) => void
-  onInspect: () => void
-  downloadUrlInput: string
-  onDownloadUrlInputChange: (value: string) => void
-  browserPreview: boolean
-  agentSettings: BrowserAgentSettingsView | null
-  agentClaim: { mode?: string; holder?: string | null } | null
-  agentOps: BrowserAgentOp[]
-  agentBlocklistDraft: string
-  onAgentBlocklistDraftChange: (value: string) => void
-  agentBusy: boolean
-  agentError: string | null
-  pageChangedAt: number | null
-  askAiDraft: string
-  onAskAiDraftChange: (value: string) => void
-  canSendAskAi: boolean
-  onRefreshAgent: () => void
-  onAgentModeChange: (mode: 'off' | 'readonly' | 'full') => void
-  onAgentAdFilterChange: (enabled: boolean) => void
-  onAgentBlocklistSave: () => void
-  onBuildAskAi: () => void
-  onSendAskAi: () => void
-}
-
-interface BrowserToolPanelModule {
-  BrowserToolPanel: (props: BrowserToolPanelProps) => ReactElement
-}
-
-const toolPanelModules = import.meta.glob<BrowserToolPanelModule>('./BrowserToolPanel.tsx', { eager: true })
-const BrowserToolPanel = toolPanelModules['./BrowserToolPanel.tsx']?.BrowserToolPanel
-if (!BrowserToolPanel) throw new Error('BrowserToolPanel React 面未进入 Vite module graph')
-
-/** React 岛宿主（AgentSheetView.solid 的 AgentSheetIslandHost 同款）：仅 dispose 时机
- * 不同——推迟微任务，避开薄桥提交期内的同步 root.unmount() 告警。批7 随 React 面拆除。 */
-function DeferredIslandHost(props: { element: () => ReactElement }) {
-  let hostEl!: HTMLDivElement
-  let island: ReactIslandHandle | null = null
-  // 同一微任务批内的多次依赖触发合并为一次 root.render（同 ReactIslandHost 的取舍）。
-  let scheduled = false
-  let pending: ReactElement | null = null
-  let disposed = false
-  createEffect(() => {
-    const element = props.element()
-    untrack(() => {
-      if (!hostEl || disposed) return
-      island ??= mountReactIsland(hostEl)
-      pending = element
-      if (scheduled) return
-      scheduled = true
-      queueMicrotask(() => {
-        scheduled = false
-        const current = pending
-        pending = null
-        if (!disposed && current) island!.render(current)
-      })
-    })
-  })
-  onCleanup(() => {
-    disposed = true
-    pending = null
-    const currentIsland = island
-    queueMicrotask(() => currentIsland?.dispose())
-  })
-  return <div ref={el => { hostEl = el }} style={{ display: 'contents' }} />
 }
 
 export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: SheetContext }) {
@@ -710,14 +606,12 @@ export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: Sheet
 
   return (
     <div class={`browser-sheet ${sidebarCollapsed() ? 'browser-sidebar-collapsed' : ''} flex flex-1 min-w-0 min-h-0 overflow-hidden text-text font-[family-name:var(--font)] bg-[var(--global-bg-color,var(--bg))]`} data-browser-mode={browserPreview ? 'preview' : 'runtime'}>
-      {/* 岛重渲触发：element() 工厂内直读信号（追踪）——原 React 树父渲染即重渲子树的
-          等价粒度。ctx 是同一代理引用，需逐字段读取才会通知。 */}
-      <DeferredIslandHost element={() => createElement(BrowserSidebar, {
-        sidebarCollapsed: sidebarCollapsed(),
-        activeTool: activeTool(),
-        onSelectTool: chooseTool,
-        phase: snapshot().phase,
-      })} />
+      <BrowserSidebar
+        sidebarCollapsed={sidebarCollapsed()}
+        activeTool={activeTool()}
+        onSelectTool={chooseTool}
+        phase={snapshot().phase}
+      />
       <main class="browser-main flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden">
         {/* 保留语义节点供旧主题/可访问性选择器兼容；视觉上 Browser Sheet 不再重复显示
             BROWSER + Browser 两层标题，浏览器 chrome 直接成为主区入口。 */}
@@ -729,11 +623,11 @@ export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: Sheet
           <span class="browser-status" data-phase={snapshot().phase}>{snapshot().phase}</span>
         </div>
         <Show when={snapshot().tabs.length > 0}>
-          <DeferredIslandHost element={() => createElement(BrowserTabStrip, {
-            tabs: snapshot().tabs,
-            activeTabId: snapshot().activeTabId,
-            onTabCommand: (command, tabId, url) => void tabCommand(command, tabId, url),
-          })} />
+          <BrowserTabStrip
+            tabs={snapshot().tabs}
+            activeTabId={snapshot().activeTabId}
+            onTabCommand={(command, tabId, url) => void tabCommand(command, tabId, url)}
+          />
         </Show>
         <div class="browser-toolbar flex shrink-0 min-w-0 min-h-[44px] items-center gap-1 m-0 py-1.5 px-2 border-0 border-b border-border rounded-none bg-bg-panel max-[720px]:px-[5px]" aria-label="浏览器导航栏">
           <button type="button" class={toolbarButtonClass} onClick={() => void browserCommand('browser_back')} disabled={snapshot().phase !== 'ready'} aria-label="后退"><BrowserIcon name="ChevronLeft" size={18} /></button>
@@ -784,42 +678,40 @@ export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: Sheet
           </div>
         </Show>
         <Show when={activeTool()}>
-          <DeferredIslandHost element={() => {
-            const tool = activeTool()
-            if (!tool) return createElement('span')
-            return createElement(BrowserToolPanel, {
-              activeTool: tool,
-              library: library(),
-              pageSnapshot: pageSnapshot(),
-              consoleFilter: consoleFilter(),
-              onConsoleFilterChange: setConsoleFilter,
-              onClose: () => setActiveTool(null),
-              onClear: collection => updateLibrary(current => clearBrowserCollection(current, collection)),
-              onNavigate: url => void navigateTo(url),
-              onDownload: (url, filename) => void downloadUrl(url, filename),
-              onInspect: () => void inspectPage(),
-              downloadUrlInput: downloadUrlInput(),
-              onDownloadUrlInputChange: setDownloadUrlInput,
-              browserPreview,
-              agentSettings: agentSettings(),
-              agentClaim: agentClaim(),
-              agentOps: agentOps(),
-              agentBlocklistDraft: agentBlocklistDraft(),
-              onAgentBlocklistDraftChange: setAgentBlocklistDraft,
-              agentBusy: agentBusy(),
-              agentError: agentError(),
-              pageChangedAt: pageChangedAt(),
-              askAiDraft: askAiDraft(),
-              onAskAiDraftChange: setAskAiDraft,
-              canSendAskAi: Boolean(props.ctx.activeSession),
-              onRefreshAgent: () => void refreshAgentPanel(),
-              onAgentModeChange: mode => void saveAgentSettings({ defaultMode: mode }),
-              onAgentAdFilterChange: enabled => void saveAgentSettings({ adFilterEnabled: enabled }),
-              onAgentBlocklistSave: saveAgentBlocklist,
-              onBuildAskAi: buildAskAi,
-              onSendAskAi: () => void sendAskAi(),
-            })
-          }} />
+          {tool => (
+            <BrowserToolPanel
+              activeTool={tool()}
+              library={library()}
+              pageSnapshot={pageSnapshot()}
+              consoleFilter={consoleFilter()}
+              onConsoleFilterChange={setConsoleFilter}
+              onClose={() => setActiveTool(null)}
+              onClear={collection => updateLibrary(current => clearBrowserCollection(current, collection))}
+              onNavigate={url => void navigateTo(url)}
+              onDownload={(url, filename) => void downloadUrl(url, filename)}
+              onInspect={() => void inspectPage()}
+              downloadUrlInput={downloadUrlInput()}
+              onDownloadUrlInputChange={setDownloadUrlInput}
+              browserPreview={browserPreview}
+              agentSettings={agentSettings()}
+              agentClaim={agentClaim()}
+              agentOps={agentOps()}
+              agentBlocklistDraft={agentBlocklistDraft()}
+              onAgentBlocklistDraftChange={setAgentBlocklistDraft}
+              agentBusy={agentBusy()}
+              agentError={agentError()}
+              pageChangedAt={pageChangedAt()}
+              askAiDraft={askAiDraft()}
+              onAskAiDraftChange={setAskAiDraft}
+              canSendAskAi={Boolean(props.ctx.activeSession)}
+              onRefreshAgent={() => void refreshAgentPanel()}
+              onAgentModeChange={mode => void saveAgentSettings({ defaultMode: mode })}
+              onAgentAdFilterChange={enabled => void saveAgentSettings({ adFilterEnabled: enabled })}
+              onAgentBlocklistSave={saveAgentBlocklist}
+              onBuildAskAi={buildAskAi}
+              onSendAskAi={() => void sendAskAi()}
+            />
+          )}
         </Show>
         <BrowserViewport
           viewportRef={viewportRef}

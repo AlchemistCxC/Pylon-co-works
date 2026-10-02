@@ -5,9 +5,9 @@
 // act 包装移除；④ RTL 无 rerender，「跨 Sheet 同态」用例改为卸载重挂（读同一份全局
 // 偏好，语义等价）。断言集与 DOM 契约不缩减。
 import { fireEvent, render, screen, waitFor, within } from '@solidjs/testing-library'
-// 贡献体探针住 Sidebar.blocks.harness.tsx（React 编译面）：本文件的 JSX 是 Solid 组件，
-// 不能当 first-party-react 贡献体喂给 React 岛。
-import { ActionProbe, makeBody, resetReceivedAction, takeReceivedAction } from "./Sidebar.blocks.harness.tsx"
+// #515 岛退役：贡献体探针住 Sidebar.blocks.harness.solid.tsx（Solid 编译面）——
+// 注册表贡献组件是 Solid 组件，宿主直连渲染。
+import { ActionProbe, makeBody, resetReceivedAction, takeReceivedAction } from "./Sidebar.blocks.harness.solid.tsx"
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Sidebar from '../Sidebar.solid.tsx'
 import { resetStores } from '../../test/resetStores'

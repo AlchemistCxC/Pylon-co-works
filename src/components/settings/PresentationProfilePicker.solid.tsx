@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { applyPresentationProfile } from '../../application/transactions/applyPresentationProfile.ts'

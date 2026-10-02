@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 /**
  * 聊天滚动跟随控制器（#486 项4 自 WorkbenchContent.solid.tsx 拆出的状态机模块；
  * 行为不变——P57 S1.x / #212 S4 的锁、写迹、smooth 守卫与轨道交互逐段原样搬移）。

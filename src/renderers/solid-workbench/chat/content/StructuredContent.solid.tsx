@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, Switch, Match, createMemo, type JSX } from 'solid-js'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import { parseContentPart, type ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'

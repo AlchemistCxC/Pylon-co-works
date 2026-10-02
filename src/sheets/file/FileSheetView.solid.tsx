@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
@@ -10,7 +11,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
 import { workspaceTargetFromSession, workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
 import { getFileWorkbenchRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { listFileActivities, resolveFileProvider, resolveFileViewRenderer, resolveGitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchResolver.ts'
-import { IsolatedPluginSurfaceSolid } from './isolatedPluginSurface.solid.tsx'
+import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import FileViewRenderBoundarySolid from './FileViewRenderBoundary.solid.tsx'
 import FileViewHostSolid from './FileViewHost.solid.tsx'
 import FileTreeSolid from './FileTree.solid.tsx'
@@ -404,7 +405,7 @@ export default function FileSheetView(props: FileSheetViewProps) {
     }>
       {activity => {
         if (activity.renderKind === 'isolated-surface') {
-          return <IsolatedPluginSurfaceSolid surfaceId={activity.surfaceId} className="file-section-panel" input={isolatedActivityInput()} onEvent={onActivityEvent} />
+          return <IsolatedPluginSurface surfaceId={activity.surfaceId} className="file-section-panel" input={isolatedActivityInput()} onEvent={onActivityEvent} />
         }
         switch (activity.id) {
           case 'builtin.file.explorer':
@@ -444,7 +445,7 @@ export default function FileSheetView(props: FileSheetViewProps) {
             const renderer = viewRenderer()!
             const currentTab = activeTab()!
             if (renderer.renderKind === 'isolated-surface') {
-              return <IsolatedPluginSurfaceSolid surfaceId={renderer.surfaceId} className="file-view-isolated" input={{ target: target(), context: sheetContext(), tab: currentTab }} onEvent={(event, detail) => {
+              return <IsolatedPluginSurface surfaceId={renderer.surfaceId} className="file-view-isolated" input={{ target: target(), context: sheetContext(), tab: currentTab }} onEvent={(event, detail) => {
                 if (event === 'close-tab' && typeof detail === 'string') closeTab(detail)
                 else if (event === 'dirty-state' && typeof detail === 'boolean') onDirtyChange(fileTabKey(currentTab), detail)
                 else if (event === 'saving-state' && typeof detail === 'boolean') onSavingChange(fileTabKey(currentTab), detail)

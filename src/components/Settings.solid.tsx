@@ -1,5 +1,7 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onMount, Show } from 'solid-js'
-import { createElement, type ReactElement, type ReactNode } from 'react'
+import { createElement, type ComponentType, type ReactElement, type ReactNode } from 'react'
+import SolidMount from '../host/SolidMount'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { createRegistrySignal, ReactIslandHost } from '../sheets/solidSheetSupport.solid.tsx'
@@ -27,15 +29,16 @@ import { createPluginSettingsValueAdapter } from '../plugin-runtime/settings/plu
 import { findInterfaceModeContribution } from '../app/interfaceModeLookup.ts'
 import { resolveInterfaceModeSuite } from '../application/transactions/activateInterfaceMode.ts'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
-import { projectSettingsContributionCatalog, type SettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
-import type { RendererRegistrySnapshot } from '../plugin-runtime/renderers/rendererRegistry.ts'
+import { projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_SECTION_LABELS, sectionZone, SETTINGS_DOMAINS, type SettingsDomainId, type SettingsSectionId, type SettingsSearchItem } from './settings/settingsDomains'
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
 // Solid 域内直连实体（settings/* 已实体化）
-import { type RenderCtx } from './settings/themeFieldRenderer.solid.tsx'
+import { type RenderCtx, renderZoneGroupFields } from './settings/themeFieldRenderer.solid.tsx'
+import { renderSidebarModulesPanel } from './settings/SidebarModulesPanel.solid.tsx'
+import { renderPresentationProfilePicker } from './settings/PresentationProfilePicker.solid.tsx'
 import SettingsPreviewSolid from './SettingsPreview.solid.tsx'
 import TemplateLibrarySolid from './settings/TemplateLibrary.solid.tsx'
 import WindowPanelSolid from './settings/WindowPanel.solid.tsx'
@@ -44,7 +47,14 @@ import HistoryRetentionSolid from './settings/HistoryRetention.solid.tsx'
 import GatewayRiskPanelSolid from './settings/GatewayRiskPanel.solid.tsx'
 import InputPredictionSettingsPanelSolid from './settings/InputPredictionSettingsPanel.solid.tsx'
 import HookDiagnosticsPanelSolid from './settings/HookDiagnosticsPanel.solid.tsx'
-import GlobalPresetSectionSolid, { Group } from './settings/GlobalPresetSection.solid.tsx'
+// ---- Solid 域内直连（#515 第二批收尾：以下组件实体已迁 .solid.tsx，岛退役） ----
+import PluginManagerSolid from './settings/PluginManager.solid.tsx'
+import PluginSettingsPageHostSolid from './settings/PluginSettingsPageHost.solid.tsx'
+import RendererSettingsPanelSolid from './settings/RendererSettingsPanel.solid.tsx'
+import RendererSettingsPreviewSolid from './settings/RendererSettingsPreview.solid.tsx'
+import SettingsQuickSearchSolid from './settings/SettingsQuickSearch.solid.tsx'
+import GlobalPresetSectionSolid from './settings/GlobalPresetSection.solid.tsx'
+import { Group } from './settings/settingsSectionShared.solid.tsx'
 // ---- React 岛（#515 迁移期：这些 settings 子组件仍是 React 面，批7 后随 React 面退役；
 // 类型图不触碰 React 组件文件，模块接口就地声明，与实体侧逐字段一致）。 ----
 
@@ -97,47 +107,24 @@ const sectionSharedModules = import.meta.glob<SettingsSectionSharedModule>('./se
 const ReactGroup = sectionSharedModules['./settings/settingsSectionShared.tsx']?.Group
 if (!ReactGroup) throw new Error('settingsSectionShared React 面未进入 Vite module graph')
 
-interface ReactZoneGroupFieldsProps {
-  zone: ZonePresetEntry['zone']
-  ctx: RenderCtx
-  density?: 'basic' | 'standard' | 'all'
+// #515 连带修复：themeFieldRenderer / SidebarModulesPanel / PresentationProfilePicker 的
+// React 薄桥已随实体化拆除，但下方 ZonePresetSection React 岛的 fields/header 仍是
+// React 元素位——就地复刻同构薄桥（SolidMount + 实体 renderXxx 工厂，与拆除前的桥
+// 文件等价），DOM 契约不变。批7（ZonePresetSection Solid 化）后随岛一并退役。
+// （SolidMount 在 solid 类型图里 JSX.Element 解析为 Solid Element，与 createElement 的
+// ReactElement 形参不相容——按 React 组件视角断言，运行时是同一个函数。）
+function reactIslandBridge<P extends object>(
+  mount: (container: HTMLElement, latest: () => P) => () => void,
+): (props: P) => ReactElement {
+  return (props: P) => createElement(
+    SolidMount as unknown as ComponentType<{ initial: P; mount: typeof mount }>,
+    { initial: props, mount },
+  )
 }
 
-interface ThemeFieldRendererModule {
-  ZoneGroupFields: (props: ReactZoneGroupFieldsProps) => ReactElement
-}
-
-const themeFieldModules = import.meta.glob<ThemeFieldRendererModule>('./settings/themeFieldRenderer.tsx', { eager: true })
-const ZoneGroupFieldsReact = themeFieldModules['./settings/themeFieldRenderer.tsx']?.ZoneGroupFields
-if (!ZoneGroupFieldsReact) throw new Error('themeFieldRenderer React 面未进入 Vite module graph')
-
-interface NoPropsModule {
-  default: (props: Record<string, never>) => ReactElement
-}
-
-const sidebarModulesModules = import.meta.glob<NoPropsModule>('./settings/SidebarModulesPanel.tsx', { eager: true })
-const SidebarModulesPanelBridge = sidebarModulesModules['./settings/SidebarModulesPanel.tsx']?.default
-if (!SidebarModulesPanelBridge) throw new Error('SidebarModulesPanel React 面未进入 Vite module graph')
-
-const presentationModules = import.meta.glob<NoPropsModule>('./settings/PresentationProfilePicker.tsx', { eager: true })
-const PresentationProfilePickerBridge = presentationModules['./settings/PresentationProfilePicker.tsx']?.default
-if (!PresentationProfilePickerBridge) throw new Error('PresentationProfilePicker React 面未进入 Vite module graph')
-
-const pluginManagerModules = import.meta.glob<NoPropsModule>('./settings/PluginManager.tsx', { eager: true })
-const PluginManager = pluginManagerModules['./settings/PluginManager.tsx']?.default
-if (!PluginManager) throw new Error('PluginManager React 面未进入 Vite module graph')
-
-interface PluginSettingsPageHostProps {
-  pageId: string
-}
-
-interface PluginSettingsPageHostModule {
-  default: (props: PluginSettingsPageHostProps) => ReactElement
-}
-
-const pluginPageHostModules = import.meta.glob<PluginSettingsPageHostModule>('./settings/PluginSettingsPageHost.tsx', { eager: true })
-const PluginSettingsPageHost = pluginPageHostModules['./settings/PluginSettingsPageHost.tsx']?.default
-if (!PluginSettingsPageHost) throw new Error('PluginSettingsPageHost React 面未进入 Vite module graph')
+const ZoneGroupFieldsBridge = reactIslandBridge(renderZoneGroupFields)
+const SidebarModulesPanelBridge = reactIslandBridge(renderSidebarModulesPanel)
+const PresentationProfilePickerBridge = reactIslandBridge(renderPresentationProfilePicker)
 
 interface AgentSettingsSectionProps {
   initialAgentId?: string
@@ -151,53 +138,6 @@ interface AgentSettingsSectionModule {
 const agentSectionModules = import.meta.glob<AgentSettingsSectionModule>('./settings/AgentSettingsSection.tsx', { eager: true })
 const AgentSettingsSection = agentSectionModules['./settings/AgentSettingsSection.tsx']?.default
 if (!AgentSettingsSection) throw new Error('AgentSettingsSection React 面未进入 Vite module graph')
-
-interface RendererSettingsPanelProps {
-  search?: string
-  categoryId?: string
-  objectKey?: string
-  density?: 'basic' | 'standard' | 'all'
-  settingsCatalog: SettingsContributionCatalog
-  onSelectionChange: (entry: RendererSettingsCatalogEntry | undefined) => void
-}
-
-interface RendererSettingsPanelModule {
-  default: (props: RendererSettingsPanelProps) => ReactElement
-}
-
-const rendererPanelModules = import.meta.glob<RendererSettingsPanelModule>('./settings/RendererSettingsPanel.tsx', { eager: true })
-const RendererSettingsPanel = rendererPanelModules['./settings/RendererSettingsPanel.tsx']?.default
-if (!RendererSettingsPanel) throw new Error('RendererSettingsPanel React 面未进入 Vite module graph')
-
-interface RendererSettingsPreviewProps {
-  entry?: RendererSettingsCatalogEntry
-  catalog: RendererRegistrySnapshot
-  activeSuiteId?: string
-  settingsCatalog?: SettingsContributionCatalog
-}
-
-interface RendererSettingsPreviewModule {
-  default: (props: RendererSettingsPreviewProps) => ReactElement
-}
-
-const rendererPreviewModules = import.meta.glob<RendererSettingsPreviewModule>('./settings/RendererSettingsPreview.tsx', { eager: true })
-const RendererSettingsPreview = rendererPreviewModules['./settings/RendererSettingsPreview.tsx']?.default
-if (!RendererSettingsPreview) throw new Error('RendererSettingsPreview React 面未进入 Vite module graph')
-
-interface SettingsQuickSearchProps {
-  open: boolean
-  items: readonly SettingsSearchItem[]
-  onNavigate: (item: SettingsSearchItem) => void
-  onOpenChange: (open: boolean) => void
-}
-
-interface SettingsQuickSearchModule {
-  default: (props: SettingsQuickSearchProps) => ReactElement
-}
-
-const quickSearchModules = import.meta.glob<SettingsQuickSearchModule>('./settings/SettingsQuickSearch.tsx', { eager: true })
-const SettingsQuickSearch = quickSearchModules['./settings/SettingsQuickSearch.tsx']?.default
-if (!SettingsQuickSearch) throw new Error('SettingsQuickSearch React 面未进入 Vite module graph')
 
 /**
  * 设置贡献目录的共享投影（`useSettingsContributionCatalog` 的 Solid 形态，#515 内联；
@@ -251,8 +191,7 @@ export interface SettingsProps extends WorkspaceViewProps<SettingsSheetState> {}
  * 区域分区骨架在 settings/ZonePresetSection；速搜定位在 useSettingsSearchNavigation。
  *
  * #515：Solid 实体——settings/* 已实体化的子组件直连 .solid；仍为 React 面的子组件
- * （AgentSettingsSection / ZonePresetSection / PluginManager / RendererSettings* /
- * PluginSettingsPageHost / SettingsSectionHeader / SettingsQuickSearch）经 ReactIslandHost
+ * （AgentSettingsSection / ZonePresetSection / SettingsSectionHeader）经 ReactIslandHost
  * 岛挂载（批7 后随 React 面退役）；原 useSettingsSearchNavigation hook 的定位态内联。
  */
 export default function Settings(props: SettingsProps) {
@@ -422,7 +361,7 @@ export default function Settings(props: SettingsProps) {
             isSearching: isSearching(),
             interfaceMode: currentInterfaceMode(),
             header: !isSearching() ? createElement(ReactGroup, { title: '模块', children: createElement(SidebarModulesPanelBridge) }) : undefined,
-            fields: createElement(ZoneGroupFieldsReact, { zone: 'sidebar', ctx: renderCtx(), density: density() }),
+            fields: createElement(ZoneGroupFieldsBridge, { zone: 'sidebar', ctx: renderCtx(), density: density() }),
             onApplyZonePreset: applyLocalPreset,
             onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
             onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
@@ -435,7 +374,7 @@ export default function Settings(props: SettingsProps) {
             isSearching: isSearching(),
             interfaceMode: currentInterfaceMode(),
             header: !isSearching() ? createElement(ReactGroup, { title: '渲染风格', children: createElement(PresentationProfilePickerBridge) }) : undefined,
-            fields: createElement(ZoneGroupFieldsReact, { zone: 'chat', ctx: renderCtx(), density: density() }),
+            fields: createElement(ZoneGroupFieldsBridge, { zone: 'chat', ctx: renderCtx(), density: density() }),
             onApplyZonePreset: applyLocalPreset,
             onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
             onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
@@ -443,14 +382,14 @@ export default function Settings(props: SettingsProps) {
         )
       case 'renderers':
         return (
-          <ReactIslandHost element={() => createElement(RendererSettingsPanel, {
-            search: searchQuery(),
-            categoryId: rendererCategoryId(),
-            objectKey: rendererObjectKey(),
-            density: density(),
-            settingsCatalog: settingsContributionCatalog(),
-            onSelectionChange: setRendererPreviewEntry,
-          })} />
+          <RendererSettingsPanelSolid
+            search={searchQuery()}
+            categoryId={rendererCategoryId()}
+            objectKey={rendererObjectKey()}
+            density={density()}
+            settingsCatalog={settingsContributionCatalog()}
+            onSelectionChange={setRendererPreviewEntry}
+          />
         )
       case 'cc':
         return (
@@ -459,11 +398,12 @@ export default function Settings(props: SettingsProps) {
             label: SETTINGS_SECTION_LABELS.cc,
             isSearching: isSearching(),
             interfaceMode: currentInterfaceMode(),
-            fields: createElement(ZoneGroupFieldsReact, { zone: 'cc', ctx: renderCtx(), density: density() }),
+            fields: createElement(ZoneGroupFieldsBridge, { zone: 'cc', ctx: renderCtx(), density: density() }),
             footer: !isSearching() ? createElement(ReactGroup, {
               title: '布局编辑',
               children: [
                 createElement('button', {
+                  key: 'cc-edit-toggle',
                   type: 'button',
                   className: 'ps-btn primary',
                   onClick: () => {
@@ -472,7 +412,7 @@ export default function Settings(props: SettingsProps) {
                     if (!cur) props.ctx.closeSheet(props.sheet.id)
                   },
                 }, t().ccEditMode ? '退出布局编辑器' : '进入布局编辑器'),
-                createElement('div', { className: 'set-hint' }, '位置 / 大小 / 显隐 在编辑器中拖拽调整'),
+                createElement('div', { key: 'cc-edit-hint', className: 'set-hint' }, '位置 / 大小 / 显隐 在编辑器中拖拽调整'),
               ],
             }) : undefined,
             onApplyZonePreset: applyLocalPreset,
@@ -487,7 +427,7 @@ export default function Settings(props: SettingsProps) {
             label: SETTINGS_SECTION_LABELS.right,
             isSearching: isSearching(),
             interfaceMode: currentInterfaceMode(),
-            fields: createElement(ZoneGroupFieldsReact, { zone: 'right', ctx: renderCtx(), density: density() }),
+            fields: createElement(ZoneGroupFieldsBridge, { zone: 'right', ctx: renderCtx(), density: density() }),
             onApplyZonePreset: applyLocalPreset,
             onSaveZonePresetEntry: saveZonePresetEntryFromSettings,
             onRemoveZonePresetEntry: id => useCustomPresetStore.getState().removeZonePresetEntry(id),
@@ -522,8 +462,8 @@ export default function Settings(props: SettingsProps) {
         // 包未激活/未授权时贡献不存在，回落宿主基础页（承载能力授权卡）。
         const managerPage = pluginSettingsPages().find(entry => entry.contributionId === 'pylon-plugin-manager')
         return managerPage
-          ? <ReactIslandHost element={() => createElement(PluginSettingsPageHost, { pageId: managerPage.contributionId })} />
-          : <ReactIslandHost element={() => createElement(PluginManager)} />
+          ? <PluginSettingsPageHostSolid pageId={managerPage.contributionId} />
+          : <PluginManagerSolid />
       }
       case 'hookDiagnostics':
         return <HookDiagnosticsPanelSolid />
@@ -560,16 +500,16 @@ export default function Settings(props: SettingsProps) {
             </div>
           </Show>
           <Show when={activePluginPageId()} fallback={renderSection(activeSection())}>
-            <ReactIslandHost element={() => createElement(PluginSettingsPageHost, { pageId: activePluginPageId()! })} />
+            <PluginSettingsPageHostSolid pageId={activePluginPageId()!} />
           </Show>
         </div>
 
-        <ReactIslandHost element={() => createElement(SettingsQuickSearch, {
-          open: quickSearchOpen(),
-          items: quickSearchItems(),
-          onNavigate: navigateToField,
-          onOpenChange: setQuickSearchOpen,
-        })} />
+        <SettingsQuickSearchSolid
+          open={quickSearchOpen()}
+          items={quickSearchItems()}
+          onNavigate={navigateToField}
+          onOpenChange={setQuickSearchOpen}
+        />
         <Show when={!activePluginPageId() && (previewZone() || activeSection() === 'renderers')}>
           <div class={`settings-preview-pane${previewCollapsed() ? ' collapsed' : ''}`}>
             <div class="settings-preview-pane-head">
@@ -588,12 +528,12 @@ export default function Settings(props: SettingsProps) {
             <Show when={!previewCollapsed()}>
               <div id="settings-preview-body" class="settings-preview-body">
                 <Show when={activeSection() === 'renderers'} fallback={<SettingsPreviewSolid zone={previewZone()!} />}>
-                  <ReactIslandHost element={() => createElement(RendererSettingsPreview, {
-                    entry: rendererPreviewEntry(),
-                    catalog: rendererRegistrySnapshot(),
-                    activeSuiteId: activeRendererSuiteId(),
-                    settingsCatalog: settingsContributionCatalog(),
-                  })} />
+                  <RendererSettingsPreviewSolid
+                    entry={rendererPreviewEntry()}
+                    catalog={rendererRegistrySnapshot()}
+                    activeSuiteId={activeRendererSuiteId()}
+                    settingsCatalog={settingsContributionCatalog()}
+                  />
                 </Show>
               </div>
             </Show>

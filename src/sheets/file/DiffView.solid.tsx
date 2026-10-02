@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { reportRuntimeError } from '../../app/runtimeError'
@@ -22,9 +23,9 @@ export interface DiffViewProps {
  * DiffView — Git diff 展示（W2-05；#515 Solid 实体）。
  *
  * 点击 staged/unstaged 条目 → git_diff(source, path, staged) → 复用 DiffCard
- * （DiffPayload 统一渲染，不新造 diff 渲染器）。只读。#515 期 DiffCard 的 Solid 实体
- * 复用 solid-workbench 的 `SolidDiffCard`（同一 diffCardPresentation 常量面，DOM 契约
- * 一致）；React 桥（DiffView.tsx）仍走 components/file/DiffCard。
+ * （DiffPayload 统一渲染，不新造 diff 渲染器）。只读。DiffCard 唯一实体是
+ * solid-workbench 的 `SolidDiffCard`（原 React components/file/DiffCard.tsx 已随
+ * #515 判重退役）。
  */
 export default function DiffView(props: DiffViewProps) {
   const [output, setOutput] = createSignal('')

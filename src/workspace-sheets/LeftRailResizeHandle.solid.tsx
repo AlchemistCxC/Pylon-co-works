@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { onCleanup, createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import {

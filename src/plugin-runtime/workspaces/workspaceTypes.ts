@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import type { Component } from 'solid-js'
 import type { SheetContext, SheetInput, SheetRecord, SidebarMode } from '../../contracts/sheets.ts'
 
 export interface WorkspaceLaunchOption {
@@ -31,9 +31,13 @@ export interface WorkspaceTypeDefinition<TState = unknown> {
   getSingletonKey: (input: Pick<SheetInput, 'agentId' | 'singletonKey' | 'metadata'>) => string | undefined
   sidebarMode: SidebarMode
   launch?: WorkspaceLaunchOption
-  component: ComponentType<WorkspaceViewProps<TState>>
-  sidebar?: ComponentType<WorkspaceViewProps<TState>>
-  contextPanel?: 'none' | ComponentType<WorkspaceViewProps<TState>>
+  /**
+   * #515 契约翻转：渲染面是 **Solid 组件**（实体直连；lazy 即 solid `lazy`）。
+   * 历史上的 React 面由各 sheet 的薄桥承载到批7 为止，注册表内不再有 React 值。
+   */
+  component: Component<WorkspaceViewProps<TState>>
+  sidebar?: Component<WorkspaceViewProps<TState>>
+  contextPanel?: 'none' | Component<WorkspaceViewProps<TState>>
   createInitialState(input?: unknown): TState
   serialize(state: TState): unknown
   deserialize(raw: unknown): TState

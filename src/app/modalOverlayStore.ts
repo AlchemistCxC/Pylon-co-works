@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { createSolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
 import { createReactStoreHook, type ZustandHook } from '../host/reactStoreShim'
 
@@ -9,7 +8,7 @@ import { createReactStoreHook, type ZustandHook } from '../host/reactStoreShim'
  * 盖不住它（#309）：启动器/权限请求等覆盖层打开时，覆盖层上的按钮会被原生页面吃掉
  * 点击。因此覆盖层打开期间原生子视图必须暂时让位（隐藏、页面继续运行），关闭后恢复。
  *
- * 覆盖层用 {@link useModalOverlayVeil} 自我声明（key 任取、互不冲突），store 只聚合
+ * 覆盖层用 veil effect 自我声明（key 任取、互不冲突），store 只聚合
  * 「任一打开」这一布尔；消费方（BrowserSheetView 的原生子视图可见性判定）订阅。
  * **不持久化**——这是瞬时 UI 事实，刷新即复位。
  */
@@ -31,20 +30,7 @@ const kernel = createSolidStoreKernel<ModalOverlayState>({
 
 export const useModalOverlayStore: ZustandHook<ModalOverlayState> = createReactStoreHook(kernel)
 
-/** 任一已声明的模态覆盖层处于打开状态。 */
-export function useModalOverlayOpen(): boolean {
-  return useModalOverlayStore(state => state.openKeys.size > 0)
-}
-
-/**
- * 覆盖层自我声明：`open` 期间占有 `key` 槽位，卸载/关闭即释放。
- * 必须在覆盖层组件顶层无条件调用（hooks 规则）——组件常以 `open` 条件渲染自身内容，
- * 但组件本身要一直挂载才能在关闭瞬间释放槽位。
- */
-export function useModalOverlayVeil(key: string, open: boolean): void {
-  const setOverlayOpen = useModalOverlayStore(state => state.setOverlayOpen)
-  useEffect(() => {
-    setOverlayOpen(key, open)
-    return () => setOverlayOpen(key, false)
-  }, [key, open, setOverlayOpen])
-}
+// #515 批7：React hook 面（useModalOverlayOpen/useModalOverlayVeil）已随 React 面退役。
+// veil 语义在 Solid 侧内联：`createEffect(on(open, v => { setOverlayOpen(key, v);
+// onCleanup(() => setOverlayOpen(key, false)) }, { defer: true }))`
+// （先例：App.solid 的 createVeil / PermissionDialog.solid）。

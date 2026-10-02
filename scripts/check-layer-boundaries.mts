@@ -23,7 +23,7 @@
  * 刻意不管清单（本脚本明示不设防的方向，出现漂移先在此表态再考虑立规）：
  * - src/plugins/、src/sdk/、src/utils/、src/devtools/、src/demo/、src/test-utils/ 与 src/test/、
  *   src/wasm/、src/assets|styles|css01 作为「源侧」不受管辖（插件/演示/测试/产物层）。
- * - 根入口 src/main.tsx、src/App.tsx 是组合根，不设独立规则。
+ * - 根入口 src/main.solid.tsx、src/App.solid.tsx 是组合根，不设独立规则（#515 批7 改名）。
  * - 视图层 → src/app/**（视图消费 app 客户端/错误中心，现存约 77 边）、视图层 → src/host/**
  *   （SolidMount/solidStoreBridge 挂载桥正用面）、host → domains（桥读域 store）、
  *   infrastructure/plugin-runtime → src/app/runtimeError（错误上报口）。

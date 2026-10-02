@@ -27,7 +27,6 @@ function testGroup(file: string): 'node' | 'node-shared' | 'react-dom' | 'react-
   }
   // These React hosts mount Solid roots and share Solid's runtime lifetime.
   const solidHost = file === 'src/components/__tests__/SettingsPreview.solidMigration.test.tsx'
-    || file === 'src/sheets/__tests__/AgentSheetView.rendererMode.test.tsx'
   if (file.endsWith('.solid.test.tsx') || solidHost) return 'solid-dom'
   return /\bvi\.(?:mock|doMock|unmock|doUnmock)\s*\(/.test(source) ? 'react-dom' : 'react-shared'
 }

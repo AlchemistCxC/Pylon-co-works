@@ -1,0 +1,593 @@
+/** @jsxImportSource solid-js */
+import { createEffect, createMemo, createSignal, lazy, on, onCleanup, onMount, Show, Suspense } from 'solid-js'
+import SheetLayout from './workspace-sheets/SheetLayout.solid.tsx'
+import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar.solid.tsx'
+import { flushIdentityBackend, useIdentityStore } from './domains/identity/identityStore'
+import { logWarn, logError } from './contracts/frontendLogSink'
+import { useRuntimeStore } from './domains/runtime/runtimeStore'
+import { useWorkspaceStore } from './domains/workspace/workspaceStore'
+import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
+
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PhysicalSize } from '@tauri-apps/api/dpi'
+import { tauriInvokeTransport } from './infrastructure/acp/tauriTransport.ts'
+import { appClients } from './app/appClients.ts'
+import { loadWindowSize, persistWindowSize } from './infrastructure/persistence/windowSizePersistence'
+import { reportRuntimeError, resolveRuntimeErrors } from './app/runtimeError'
+import { sheetHasLeftColumn } from './workspace-sheets/sheetSidebarState.ts'
+import {
+  closeOtherWorkspaces,
+  closeRightWorkspaces,
+  closeWorkspace,
+} from './workspace-sheets/workspaceController.ts'
+import { createSkinSurface } from './infrastructure/skin/useSkinSurface.solid.ts'
+import { projectSkinDocumentRoot } from './infrastructure/skin/skinProjection'
+import { getSkinRuntime, pickThemeBaseline } from './infrastructure/skin/skinRuntimeServices'
+import { listen } from '@tauri-apps/api/event'
+import { normalizeAgentStatus, type AgentStatusPayload } from './contracts/agentTypes'
+import { runRollupTrimBeforeClose } from './infrastructure/events/rollupTrim.ts'
+import { createPermissionController, getPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
+import { createInteractionRejectionController } from './infrastructure/acp/interactionRejectionController.ts'
+import './app/bootstrap/identityCrossDomainWiring'
+import './app/bootstrap/workspaceControllerWiring'
+import { startApplicationBootstrap } from './app/bootstrap/applicationBootstrapRun'
+import { hydrateIdentityAndWorkspace, consumeLegacyProfilePayload } from './app/bootstrap/hydrateIdentityAndWorkspace'
+import { useHydrationStore } from './app/bootstrap/hydrationState'
+import { useModalOverlayStore } from './app/modalOverlayStore'
+import { startupMark, reportStartupTiming } from './app/startupTiming'
+import PermissionDialog from './components/PermissionDialog.solid.tsx'
+import ErrorCenter from './components/ErrorCenter.solid.tsx'
+import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog.solid.tsx'
+import {
+  applyAgentInstancesThroughPort,
+  applyToolDictionaryThroughPort,
+} from './app/ports/productContributionPorts.ts'
+import {
+  getContextPanelRegistry,
+  getFontContributionRegistry,
+  getInterfaceModeRegistry,
+  getPluginServiceRegistry,
+  getShellRecipeRegistry,
+} from './plugin-runtime/runtimeServices.ts'
+import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
+import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './plugin-runtime/workspaces/workspaceRegistry.ts'
+import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget, resolveShellRecipe } from './application/transactions/activateInterfaceMode.ts'
+import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
+import { selectContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
+import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
+import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
+import { createActiveInterfaceModeContribution } from './sheets/solidSheetSupport.solid.tsx'
+import { InterfaceModeSceneHost } from './sheets/interfaceModeScenes.solid.tsx'
+import { drainPersistentStateBeforeClose } from './app/lifecycle/drainPersistentStateBeforeClose.ts'
+import { useRightRailStore } from './domains/workspace/layoutRailsStore.ts'
+import { persistApprovalMode, readPersistedApprovalMode } from './domains/permission/approvalMode.ts'
+import { restoreApprovalModeFromBackendAuthority } from './domains/permission/approvalModeRestore.ts'
+import { hydrateInputPredictionSettingsFromBackend } from './infrastructure/persistence/inputPredictionSettingsRepository.ts'
+import { hydrateCustomPresetsFromBackend } from './infrastructure/persistence/customPresetRepository.ts'
+import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
+import { useStore } from './domains/theme/themeStore'
+import { createZustandSignal } from './host/solidStoreBridge.ts'
+import { createRegistrySignal } from './sheets/solidSheetSupport.solid.tsx'
+import type { InterfaceModeContribution } from './plugin-runtime/interface-mode/interfaceModeTypes.ts'
+import type { SettingsDomainId } from './components/settings/settingsDomains.ts'
+
+// 非首屏 Dialog/Sheet 懒加载：ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
+// #154 阶段 4：Settings 不再是覆盖层 Dialog——迁入 sheet 体系（settingsSheetNavigation）。
+const ProfileEditor = lazy(() => import('./components/ProfileEditor.solid.tsx'))
+const SessionSettings = lazy(() => import('./components/SessionSettings.solid.tsx'))
+const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher.solid.tsx'))
+
+// Runtime registries are process singletons.  信号化订阅在组件体一次性建立，
+// owner 卸载自动回收（原 React 稳定适配器语义的 Solid 对应形态）。
+const contextPanelRegistry = getContextPanelRegistry()
+const fontContributionRegistry = getFontContributionRegistry()
+const interfaceModeRegistry = getInterfaceModeRegistry()
+const shellRecipeRegistry = getShellRecipeRegistry()
+
+// Bootstrap notification identity is application-scoped and intentionally
+// stable across retries/remounts. Keeping it outside the effect avoids
+// allocating a new matcher while a run is in flight.
+const bootstrapScope = { kind: 'app' as const, id: 'bootstrap' }
+const bootstrapKey = (action: string) => `bootstrap:${action}`
+const approvalModeScope = { kind: 'app' as const, id: 'approval-mode' }
+const approvalModeKey = (action: string) => `app:approval-mode:${action}`
+
+function LazyDialogFallback() {
+  return (
+    <div class="sheet-empty-host">
+      <div class="sheet-empty-kicker">LOADING</div>
+      <p>加载模块…</p>
+    </div>
+  )
+}
+
+// FE-AUD-008 / A-V2：组装期统一 client 集（app/appClients），视图层不再自造 client。
+const agentClient = appClients.agent()
+const runtimeClient = appClients.runtime
+// 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
+const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
+
+// 非 Tauri（浏览器预览）时 @tauri-apps/api 的 listen/invoke 会 reject，统一守卫
+
+export default function App() {
+  const interfaceMode = createZustandSignal(useInterfaceModeStore, state => state.interfaceMode)
+  const hydrationStatus = createZustandSignal(useHydrationStore, state => state.status)
+  const presentationProfileId = createZustandSignal(usePresentationPreferenceStore, state => state.activeProfileId)
+  // registry 快照信号（值只作失效信号与 entries 读取，原 useSyncExternalStore 同源语义）
+  const workspaceRegistryTick = createRegistrySignal({ subscribe: subscribeWorkspaceRegistry }, getWorkspaceRegistrySnapshot)
+  const contextPanelSnapshot = createRegistrySignal(contextPanelRegistry, () => contextPanelRegistry.getSnapshot())
+  const fontSnapshot = createRegistrySignal(fontContributionRegistry, () => fontContributionRegistry.getSnapshot())
+  createEffect(() => { projectFontContributions(document.documentElement, fontSnapshot().entries) })
+  const interfaceModeSnapshot = createRegistrySignal(interfaceModeRegistry, () => interfaceModeRegistry.getSnapshot())
+  const interfaceModeContribution = createActiveInterfaceModeContribution() as () => InterfaceModeContribution
+  const quickInterfaceMode = createMemo(() => interfaceModeQuickTarget(interfaceMode()))
+  // Shell Recipe（ADR-0003）：激活期已硬校验引用；此处订阅仅保证插件热换后
+  // 数据属性跟随 registry 快照更新。解析兜底 classic，瞬态不崩壳。
+  const shellRecipeTick = createRegistrySignal(shellRecipeRegistry, () => shellRecipeRegistry.getSnapshot())
+  const shellRecipe = createMemo(() => { workspaceRegistryTick(); shellRecipeTick(); return resolveShellRecipe(interfaceModeContribution()) })
+  createEffect(() => {
+    const mode = interfaceMode()
+    document.documentElement.dataset.interfaceMode = mode
+    document.body.dataset.interfaceMode = mode
+    onCleanup(() => {
+      delete document.documentElement.dataset.interfaceMode
+      delete document.body.dataset.interfaceMode
+    })
+  })
+  createEffect(() => { void interfaceMode(); void interfaceModeSnapshot(); ensureInterfaceModeProfile() })
+  const [activeSession, setActiveSession] = createSignal<string | null>(null)
+  // W2-12：右栏折叠随 sheet 声明挂载（layoutRailsStore.rightCollapsed），旧 RightPanel 退役
+  const [showProfileEdit, setShowProfileEdit] = createSignal(false)
+  const [sessionSettingsId, setSessionSettingsId] = createSignal<string | null>(null)
+  const [showSheetLauncher, setShowSheetLauncher] = createSignal(false)
+  // W1-03（F2-B）：左栏折叠/宽度真值源是 domains/workspace/layoutRailsStore（预设不覆盖布局），App 只读
+  const sidebarWidth = createZustandSignal(useRightRailStore, s => s.leftRailWidth)
+  const workspaceSheets = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets)
+  // active Sheet 的左栏模式同时决定折叠按钮能力与 TitleBar 左侧轨道宽度。
+  const activeSheet = createMemo(() => workspaceSheets().sheets.find(sheet => sheet.id === workspaceSheets().activeSheetId))
+  const sidebarCollapsed = createZustandSignal(useRightRailStore, s => s.leftRailCollapsed)
+  const showSidebar = createZustandSignal(useStore, s => s.showSidebar !== false)
+  // #154：左列是否存在以「注册表真的提供 sidebar 组件」为准，而不是只看 sidebarMode。
+  // 后者会让「声明 'sheet' 但把左栏画在自己内容区里」的 Sheet 也空占一条标题栏轨道，
+  // 那条轨道自画的边框由此与左列自己的边框错开（浏览器 Sheet 实测错开 84px）。
+  // 主题级 showSidebar 一并计入，否则标题栏会为被主题隐藏的左栏保留轨道。
+  const sidebarEnabled = createMemo(() => !!sheetHasLeftColumn(activeSheet()) && showSidebar() !== false)
+  const rightPanelEnabled = createMemo(() => {
+    const sheet = activeSheet()
+    if (!sheet) return false
+    return selectContextPanels(contextPanelSnapshot().entries, {
+      workspaceKind: sheet.kind,
+      sheetId: sheet.id,
+      activeSessionId: activeSession(),
+    }).length > 0
+  })
+  const agents = createZustandSignal(useIdentityStore, s => s.agents)
+  // #326：空串 = 没有 Agent（零 Agent 首跑）。不再回落硬编码 'peri'——那会凭空造出一个
+  // 不存在的 Agent（sheet 聚焦、权限切片、会话归属都按它算）。
+  const activeAgent = createZustandSignal(useIdentityStore, s => s.activeAgent)
+  let prevActiveAgent = activeAgent()
+
+  onMount(() => {
+    const clearActiveSession = () => setActiveSession(null)
+    window.addEventListener('pylon:agent-switched', clearActiveSession)
+    onCleanup(() => window.removeEventListener('pylon:agent-switched', clearActiveSession))
+  })
+
+  // 施工文档 §5.3：ErrorCenter/Overview 的恢复按钮经窗口事件打开现有 Settings /
+  // Runtime Sheet，不新建导航 store。
+  // #154 阶段 4：open-settings 落点从覆盖层改为设置 sheet（幂等：已开则 patch 导航态并聚焦）。
+  onMount(() => {
+    const openSettings = (event: Event) => {
+      const detail = (event as CustomEvent<{ domain?: string; section?: string; agentId?: string }>).detail ?? {}
+      openOrFocusSettingsSheet(detail)
+    }
+    const openRuntime = () => useWorkspaceStore.getState().openSheet({ kind: 'runtime', title: 'Runtime' })
+    window.addEventListener('pylon:open-settings', openSettings)
+    window.addEventListener('pylon:open-runtime-sheet', openRuntime)
+    onCleanup(() => {
+      window.removeEventListener('pylon:open-settings', openSettings)
+      window.removeEventListener('pylon:open-runtime-sheet', openRuntime)
+    })
+  })
+
+  // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener
+  const [bootstrapRetry, setBootstrapRetry] = createSignal(0)
+  createEffect(() => {
+    // 追踪重试信号（React 期 deps [bootstrapRetry] 同口径）：恢复按钮 +1 重跑整个事务。
+    bootstrapRetry()
+    // #269：App chunk 已加载并进入 bootstrap 事务（打点在前一帧的 shell_mounted
+    // 与本点之间即 chunk 拉取耗时）。
+    startupMark('app_bootstrap_start')
+    const bootstrapRun = startApplicationBootstrap({
+      isTauri: IS_TAURI && !isBrowserMockRuntime(),
+      // I14-W6：bootstrap 等待 identity hydration（Tauri 后端读回 / browser 本地）
+      // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
+      hydrateDomains: async () => {
+        // #448 PR2/PR5：预测设置与自定义预设的同步缓存/独立 store 以后端为权威
+        // hydrate（内部吞错不降级启动；失败时回落 localStorage，等价旧行为）。
+        // 与 identity 无依赖关系——并行执行，避免 identity 失败（degraded 路径直接
+        // return）连带跳过两者，把 degraded 会话的无缓存窗口拉长（审查 C-3）。
+        await Promise.all([
+          hydrateIdentityAndWorkspace(consumeLegacyProfilePayload()),
+          hydrateInputPredictionSettingsFromBackend(),
+          hydrateCustomPresetsFromBackend(),
+        ])
+        startupMark('hydrated')
+      },
+      fetchAgents: () => agentClient.listAgents(),
+      applyAgents: list => {
+        applyAgentInstancesThroughPort(getPluginServiceRegistry(), list)
+        useIdentityStore.getState().setAgents(list)
+      },
+      fetchToolDictionary: () => agentClient.listToolDictionary(),
+      applyToolDictionary: payload => applyToolDictionaryThroughPort(getPluginServiceRegistry(), payload),
+      // 冷启动 Agent 状态快照（方案 A）：listener 注册前先查询一次初始状态，
+      // 避免 titlebar 状态灯/发送能力 gate 因初始状态缺失而全灰/禁用。
+      fetchAgentStatus: () => agentClient.agentStatus(),
+      applyAgentStatus: payload => {
+        const agent = useIdentityStore.getState().activeAgent
+        const status = normalizeAgentStatus(payload as AgentStatusPayload, agent)
+        useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || agent, status)
+        // #98：冷挂载——agent_status 快照恢复 pending permission 卡（幂等去重）。
+        getPermissionController()?.seedFromSnapshot(payload)
+      },
+      registerListeners: async () => {
+        const unlisten = await listen<AgentStatusPayload>('pylon:agent-status', event => {
+          const agent = useIdentityStore.getState().activeAgent
+          const status = normalizeAgentStatus(event.payload, agent)
+          useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || agent, status)
+          getPermissionController()?.seedFromSnapshot(event.payload)
+        })
+        // P51：后端 session/load 复活失败而新建会话时广播（Pylon 重启后首次发送）。
+        // 回写新 periId，使下一次发送/重启能继续复活这条新会话而不是再新建。
+        const unlistenRecreated = await listen<{ source: string; periId: string }>('pylon:session-recreated', event => {
+          const { source, periId } = event.payload
+          const session = useIdentityStore.getState().sessions.find(item => item.source === source)
+          if (session && session.periId !== periId) {
+            useIdentityStore.getState().setSessionPeriId(session.id, periId)
+          }
+        })
+        return () => { unlisten(); unlistenRecreated() }
+      },
+      reportError: (action, error) => reportRuntimeError(action, error, undefined, {
+        key: bootstrapKey(action),
+        scope: bootstrapScope,
+        source: 'application.bootstrap',
+        recoveryAction: {
+          label: '重试启动',
+          run: () => { setBootstrapRetry(value => value + 1) },
+        },
+      }),
+      resolveError: action => resolveRuntimeErrors({ key: bootstrapKey(action), scope: bootstrapScope }),
+      // #269：ready 即启动事务终点——打点并一次性上报前后端启动时间线。
+      setStatus: (status, error) => {
+        if (status === 'ready') {
+          startupMark('ready')
+          reportStartupTiming()
+        }
+        useHydrationStore.getState().setStatus(status, error)
+      },
+    })
+    onCleanup(() => { bootstrapRun.dispose() })
+  })
+
+  // 全局审批模式：后端为持久化权威（#448 PR3/PR4——#321 决议「收敛到后端权威」）。
+  // 决策逻辑在 domains/permission/approvalModeRestore（可测事务）：后端持久层在场
+  // → 应用权威值；后端从未存过 → localStorage 首次种子（set 自带写穿）；后端不可用
+  // → 降级显示本地值。旧「本地有值即推送」分支移除——CLI 桥等不经 webview 的 set
+  // 重启后被前端旧值静默覆盖的漂移路径由此消除。本地 key 降级为缓存（种子读一次 +
+  // 成功路径镜像维护），不再参与决策。
+  onMount(() => {
+    if (!IS_TAURI || isBrowserMockRuntime()) return
+    let disposed = false
+    void restoreApprovalModeFromBackendAuthority({
+      loadPersisted: () => runtimeClient.loadApprovalModePersisted(),
+      seedToBackend: mode => runtimeClient.setApprovalMode(mode),
+      readLocal: () => readPersistedApprovalMode(),
+      apply: mode => {
+        if (disposed) return
+        useRuntimeStore.getState().setApprovalMode(mode)
+        persistApprovalMode(mode)
+        resolveRuntimeErrors({ key: approvalModeKey('恢复权限模式'), scope: approvalModeScope })
+      },
+      applyLocalFallback: mode => {
+        if (!disposed) useRuntimeStore.getState().setApprovalMode(mode)
+      },
+      reportError: (action, error) => {
+        if (!disposed) reportRuntimeError(action, error, undefined, {
+          key: approvalModeKey(action),
+          scope: approvalModeScope,
+          source: 'permission.approval-mode',
+        })
+      },
+    })
+    onCleanup(() => { disposed = true })
+  })
+
+  // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
+  // 点击其他 tab）不受影响。用前后值对比避免 workspaceSheets 每次新引用触发重复聚焦。
+  createEffect(() => {
+    const agent = activeAgent()
+    void workspaceSheets()
+    if (prevActiveAgent === agent) return
+    prevActiveAgent = agent
+    const agentSheet = useWorkspaceStore.getState().workspaceSheets.sheets.find(sheet => sheet.kind === 'agent' && sheet.agentId === agent)
+    if (agentSheet) useWorkspaceStore.getState().focusSheet(agentSheet.id)
+  })
+
+  // 权限请求 controller：只挂生命周期（listen → store 纯 reducer；approve invoke），不内嵌业务分支
+  onMount(() => {
+    if (!IS_TAURI) return
+    const controller = createPermissionController({
+      dispatch: action => useRuntimeStore.getState().setPermission(action),
+      getState: () => useRuntimeStore.getState().permission,
+      // P1-1：controller 只作用在当前 agent 的权限切片
+      getCurrentAgentId: () => useIdentityStore.getState().activeAgent,
+      listen: (event, handler) => listen(event, handler),
+      invoke: tauriInvokeTransport,
+    })
+    registerPermissionController(controller)
+    onCleanup(() => {
+      registerPermissionController(null)
+      void controller.dispose()
+    })
+  })
+
+  // Unsupported/malformed ACP interactions have their own transport and notice;
+  // they must not be inserted into the permission reducer as actionable requests.
+  onMount(() => {
+    if (!IS_TAURI) return
+    const controller = createInteractionRejectionController({
+      listen: (event, handler) => listen(event, handler),
+    })
+    onCleanup(() => { void controller.dispose() })
+  })
+
+  // 窗口尺寸记忆：启动恢复上次尺寸，resize 防抖持久化（纯前端，不依赖后端）
+  onMount(() => {
+    if (!IS_TAURI) return
+    const win = getCurrentWindow()
+    const saved = loadWindowSize(localStorage)
+    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(error => logWarn('恢复上次窗口尺寸失败', error))
+    let timer: number | null = null
+    let disposed = false
+    const unlisten = win.onResized(({ payload }) => {
+      if (disposed) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        persistWindowSize(localStorage, { width: payload.width, height: payload.height })
+      }, 400)
+    })
+    onCleanup(() => {
+      disposed = true
+      if (timer !== null) window.clearTimeout(timer)
+      unlisten.then(stop => stop())
+    })
+  })
+
+  onMount(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        setShowSheetLauncher(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    onCleanup(() => window.removeEventListener('keydown', onKeyDown))
+  })
+
+  // 浏览器模式静态演示全景（用户直派，非施工项）：每次启动补 agents/状态灯（非持久化），
+  // 仅首次种会话/sheets。声明在所有现有 effect 之后（SheetLayout 子 effect 先跑）；
+  // 幂等=seedDemo 内部（sessions 空才种会话）+ seeded 标记（对应 React 期 StrictMode 双跑）。
+  let demoSeeded = false
+  createEffect(() => {
+    const status = hydrationStatus()
+    // Keep the browser/demo adapter out of production bundles.  Tauri
+    // production must not merely skip the seed at runtime; the dynamic
+    // import itself is development/mock-only.
+    if (!import.meta.env.DEV) return
+    if (IS_TAURI && !isBrowserMockRuntime()) return
+    if (status !== 'ready') return
+    if (demoSeeded) return
+    const demoParams = new URLSearchParams(window.location.search)
+    void import('./app/bootstrap/browserDemoBootstrap.ts').then(({ runBrowserDemoSeed }) => {
+      if (demoSeeded) return
+      runBrowserDemoSeed(setActiveSession, {
+        withPermission: demoParams.get('demo-permission') === '1',
+        scenario: demoParams.get('demo-scenario') === 'standard' ? 'standard' : 'visual',
+        reset: demoParams.get('demo-reset') === '1',
+      })
+      demoSeeded = true
+      resolveRuntimeErrors({ key: 'app:browser-demo-bootstrap' })
+    }).catch(error => {
+      if (!demoSeeded) reportRuntimeError('加载浏览器演示数据', error, undefined, {
+        key: 'app:browser-demo-bootstrap',
+        scope: { kind: 'app', id: 'browser-demo' },
+        source: 'app.browser-demo',
+      })
+    })
+  })
+
+  // 基线为派生对象：浅等去重（React 期 useShallow 同源语义），避免主题 store 任意
+  // 通知都重投影 Skin 基线。createZustandSignal 无 equality 形态，以 equals memo 包一层。
+  const rawThemeBaseline = createZustandSignal(
+    useStore,
+    s => pickThemeBaseline(s as unknown as Record<string, unknown>),
+  )
+  const themeBaseline = createMemo(() => rawThemeBaseline(), undefined, { equals: shallowEqual })
+  const skinRuntime = getSkinRuntime()
+
+  // Skin Runtime 全局基线 = 当前 Theme Store；启用 Runtime 后现有主题外观不变。
+  createEffect(() => { skinRuntime.setGlobalBaseline(themeBaseline()) })
+
+  // 根 surface 投影：CSS variables / data-skin-* / scoped css 统一由 resolved skin 派生。
+  const appSkin = createSkinSurface<HTMLDivElement>('app', { scope: 'global' }, {}, () => ({
+    layout: { sidebarCollapsed: sidebarCollapsed(), sidebarWidth: sidebarWidth(), sidebarEnabled: sidebarEnabled() },
+  }))
+
+  // Portal 与 body::before 都在 `.app` 外：完整投影全局 Skin，避免二级菜单、
+  // 新建 Sheet 与设置 Dialog 退回默认主题。
+  createEffect(on(appSkin.resolved, resolved => {
+    onCleanup(projectSkinDocumentRoot(document.documentElement, document.body, resolved))
+  }))
+
+  const appWindow = appWindowSingleton
+  const drainBeforeClose = async () => {
+    // #439：canonical 自写轨退役（kernel 严格单写者，前端 pending 恒空），
+    // 关窗 drain 只剩 identity 写穿一条链。
+    await drainPersistentStateBeforeClose({ flushIdentity: flushIdentityBackend })
+    // #81 L3：前端 pending 已清空（kernel 单写者）→ 安全窗口内运行裁剪迁移
+    // （可暂停/续跑；超时不阻塞关窗；trim_rolledup 策略关闭时后端只报告）。
+    await runRollupTrimBeforeClose()
+  }
+  const closeWindowWithFlush = async () => {
+    try {
+      await drainBeforeClose()
+    } catch (error) {
+      reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
+        key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
+      })
+      return
+    }
+    await appWindow.destroy()
+  }
+  onMount(() => {
+    if (!IS_TAURI) return
+    const win = getCurrentWindow()
+    let unlisten: (() => void) | undefined
+    void win.onCloseRequested(async event => {
+      event.preventDefault()
+      try {
+        await drainBeforeClose()
+      } catch (error) {
+        reportRuntimeError('关闭前持久化失败，窗口已保持打开', error, undefined, {
+          key: 'app:close-persistence', scope: { kind: 'app', id: 'lifecycle' }, source: 'app.lifecycle',
+        })
+        return
+      }
+      await win.destroy()
+    }).then(fn => { unlisten = fn }).catch(error => logError('注册窗口关闭 flush 失败', error))
+    onCleanup(() => { unlisten?.() })
+  })
+  const profilesOpen = createMemo(() => showProfileEdit())
+  // #309：原生子视图（浏览器 WebView2 子窗口）在原生层位于 DOM 之上，覆盖层盖不住它。
+  // 模态覆盖层打开期间让原生子视图暂时隐藏（页面继续运行），否则覆盖层上的按钮被
+  // 原生页面吃掉点击；关闭后由消费方恢复可见。（原 useModalOverlayVeil 的 Solid 内联形态）
+  createVeil('sheet-launcher', showSheetLauncher)
+  createVeil('profile-editor', profilesOpen)
+  createVeil('session-settings', () => sessionSettingsId() !== null)
+
+  function createVeil(key: string, open: () => boolean) {
+    createEffect(on(open, isOpen => {
+      useModalOverlayStore.getState().setOverlayOpen(key, isOpen)
+      onCleanup(() => useModalOverlayStore.getState().setOverlayOpen(key, false))
+    }, { defer: true }))
+  }
+
+  return (
+    <div class="app" ref={appSkin.ref} {...appSkin.resolved().dataAttributes} data-interface-mode={interfaceMode()} data-presentation-profile={presentationProfileId()} data-shell-sidebar-side={shellRecipe().sidebarSide} data-shell-context-side={shellRecipe().contextPanelSide}>
+      {/* 装饰场景按 InterfaceModeContribution.sceneSurface 声明位挂载（A-V9 完全体）：
+          宿主场景注册表解析 surfaceId，插件贡献的模式声明同一 id 即获得等价装饰层。 */}
+      <Show when={interfaceModeContribution().sceneSurface}>
+        {scene => <InterfaceModeSceneHost surfaceId={scene().surfaceId} />}
+      </Show>
+      <WorkspaceTitlebar latest={() => ({
+        sheets: workspaceSheets().sheets,
+        activeSheetId: workspaceSheets().activeSheetId,
+        activeAgent: activeAgent(),
+        activeSheetKind: activeSheet()?.kind,
+        activeSessionId: activeSession(),
+        sidebarCollapsed: sidebarCollapsed(),
+        sidebarEnabled: sidebarEnabled(),
+        rightPanelEnabled: rightPanelEnabled(),
+        onToggleSidebar: () => useRightRailStore.getState().setLeftRailCollapsed(!sidebarCollapsed()),
+        onFocusSheet: (id: string) => useWorkspaceStore.getState().focusSheet(id),
+        onCloseSheet: (id: string) => { void closeWorkspace(id) },
+        menuActions: {
+          onTogglePin: (id: string) => useWorkspaceStore.getState().toggleSheetPin(id),
+          onClose: (id: string) => { void closeWorkspace(id) },
+          onCloseOthers: (id: string) => { void closeOtherWorkspaces(id) },
+          onCloseRight: (id: string) => { void closeRightWorkspaces(id) },
+          onReopen: () => useWorkspaceStore.getState().reopenSheet(),
+        },
+        onOpenSheet: () => setShowSheetLauncher(true),
+        onToggleRightPanel: () => useRightRailStore.getState().setCollapsed(!useRightRailStore.getState().collapsed),
+        // 齿轮菜单的设置域项是唯一设置入口：幂等开/聚焦（ADR-0013）；关闭走页签（#195）。
+        onOpenSettingsDomain: (domain: SettingsDomainId) => { openOrFocusSettingsSheet({ domain }) },
+        interfaceMode: interfaceMode(),
+        chromeStyle: interfaceModeContribution().chromeStyle,
+        quickSwitchLabel: quickInterfaceMode()?.label,
+        onToggleInterfaceMode: quickInterfaceMode() ? () => activateInterfaceMode(quickInterfaceMode()!.id) : undefined,
+        onMinimize: () => appWindow.minimize(),
+        onToggleFullscreen: () => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => logError('全屏切换失败', error)),
+        onCloseWindow: () => void closeWindowWithFlush(),
+      })} />
+      <Show when={interfaceModeContribution().shellSurface?.placement === 'before-workspace' ? interfaceModeContribution().shellSurface : undefined}>
+        {surface => (
+          <IsolatedPluginSurface
+            surfaceId={surface().surfaceId}
+            className="interface-mode-shell-surface interface-mode-shell-before-workspace"
+            input={{ modeId: interfaceModeContribution().id, activeSheetId: workspaceSheets().activeSheetId, activeAgent: activeAgent() }}
+          />
+        )}
+      </Show>
+      <Suspense fallback={null}>
+        <Show when={showSheetLauncher()}>
+          <SheetLauncher latest={() => ({
+            open: showSheetLauncher(),
+            agents: agents(),
+            sheets: workspaceSheets().sheets,
+            onOpenChange: (open: boolean) => setShowSheetLauncher(open),
+            onFocusSheet: (id: string) => useWorkspaceStore.getState().focusSheet(id),
+            onOpenSheet: (kind: string, title: string, agentId?: string) => useWorkspaceStore.getState().openSheet({ kind, title, agentId }),
+            onOpenSettings: () => openOrFocusSettingsSheet(),
+            onOpenProfiles: () => setShowProfileEdit(true),
+          })} />
+        </Show>
+      </Suspense>
+
+      <ErrorCenter />
+      <SessionOwnerRecoveryDialog />
+
+      {/* W1-03：布局段下移 SheetLayout（侧栏壳/主区/右栏壳 + profile 投影 effects） */}
+      <SheetLayout
+        activeSession={activeSession()}
+        onSelectSession={setActiveSession}
+        onProfileEdit={() => setShowProfileEdit(true)}
+        onSessionSettings={setSessionSettingsId}
+      />
+      <Show when={interfaceModeContribution().shellSurface?.placement === 'overlay' ? interfaceModeContribution().shellSurface : undefined}>
+        {surface => (
+          <IsolatedPluginSurface
+            surfaceId={surface().surfaceId}
+            className="interface-mode-shell-surface interface-mode-shell-overlay"
+            input={{ modeId: interfaceModeContribution().id, activeSheetId: workspaceSheets().activeSheetId, activeAgent: activeAgent() }}
+          />
+        )}
+      </Show>
+      <Suspense fallback={<LazyDialogFallback />}>
+        {/* #154 阶段 4：设置覆盖层挂载点退役——设置以 settings sheet 常驻 sheet 体系。 */}
+        <Show when={profilesOpen()}>
+          <ProfileEditor onClose={() => setShowProfileEdit(false)} />
+        </Show>
+        <Show when={sessionSettingsId()}>
+          {id => (
+            <SessionSettings sessionId={id()} open={!!id()} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />
+          )}
+        </Show>
+      </Suspense>
+      {/* 权限请求弹窗：store 驱动（无 active 请求返回 null），App 单例挂载不随 sheet 卸载 */}
+      <PermissionDialog />
+    </div>
+  )
+}
+
+function shallowEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false
+  const ka = Object.keys(a as Record<string, unknown>)
+  const kb = Object.keys(b as Record<string, unknown>)
+  if (ka.length !== kb.length) return false
+  return ka.every(key => Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]))
+}

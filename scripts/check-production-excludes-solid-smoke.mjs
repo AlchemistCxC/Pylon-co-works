@@ -19,7 +19,7 @@ if (files.some(name => /^solid-(?:smoke|chunk)-/.test(name))) errors.push('生�
 if (files.some(name => /^browserDemoBootstrap-/.test(name)) || combined.includes('runBrowserDemoSeed')) {
   errors.push('生产产物包含 browser demo seed adapter')
 }
-// mockTauri（src/demo/）是开发脚手架：main.tsx 以 DEV 门 + 动态 import 挂载，生产图里
+// mockTauri（src/demo/）是开发脚手架：main.solid.tsx 以 DEV 门 + 动态 import 挂载（#515 批7 入口改名），生产图里
 // 不应出现该模块或其 chunk。探针用 mockTauri 独有字面量（minify 后字符串保留）——
 // 注意不能用 __PYLON_BROWSER_MOCK__（生产 env.ts 的 isBrowserMockRuntime 会读同名
 // 属性）或 iframe-preview（BrowserSheetView 也在用）。

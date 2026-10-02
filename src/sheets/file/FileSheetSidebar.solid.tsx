@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, type JSX } from 'solid-js'
 import type { FileActivityContribution } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { WorkbenchIcon } from './fileIcons.solid.tsx'

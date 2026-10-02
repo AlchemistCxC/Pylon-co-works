@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import { render } from 'solid-js/web'
 import type { ThemeSettings } from '../../domains/theme/themeStore'

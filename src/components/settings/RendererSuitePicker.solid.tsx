@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, For, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'

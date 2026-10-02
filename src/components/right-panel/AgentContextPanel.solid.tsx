@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 import MessageSearchBar from './MessageSearchBar.solid.tsx'

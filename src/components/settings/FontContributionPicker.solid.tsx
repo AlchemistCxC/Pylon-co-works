@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createMemo, Show } from 'solid-js'
 import { fontContributionCssVariable } from '../../plugin-runtime/fonts/fontContributionRegistry.ts'
 import type { FontRole } from '../../contracts/fonts.ts'

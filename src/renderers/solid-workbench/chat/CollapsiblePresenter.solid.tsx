@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, createUniqueId, type Accessor, type Setter } from 'solid-js'
 
 export interface CollapsiblePresenterOptions {

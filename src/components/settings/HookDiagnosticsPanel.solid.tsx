@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import { Show } from 'solid-js/web'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'

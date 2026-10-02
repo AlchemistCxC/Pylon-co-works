@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For } from 'solid-js'
 import { agentLightDisplay } from '../domains/agent/statusLight'
 

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
 import type { ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'

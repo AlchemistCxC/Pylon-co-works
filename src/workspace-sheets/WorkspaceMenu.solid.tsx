@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, onCleanup, Show } from 'solid-js'
 import { render } from 'solid-js/web'
 import type { SheetRecord } from './sheetTypes'

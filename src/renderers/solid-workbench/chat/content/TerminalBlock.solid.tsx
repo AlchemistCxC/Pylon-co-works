@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createMemo } from 'solid-js'
 import { stripAnsiControlSequences } from '../../../../domains/rendererContent/textContentContracts.ts'
 import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'

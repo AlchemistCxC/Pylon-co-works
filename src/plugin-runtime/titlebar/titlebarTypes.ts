@@ -1,4 +1,4 @@
-import type { ComponentType, LazyExoticComponent } from 'react'
+import type { Component } from 'solid-js'
 import type { RegistryEntry } from '../registry/types.ts'
 
 /** Slots owned by the application shell. Plugins may contribute to these slots,
@@ -26,8 +26,12 @@ interface TitlebarContributionBase {
 }
 
 export interface FirstPartyTitlebarContribution extends TitlebarContributionBase {
+  /**
+   * #515 契约翻转：第一方贡献组件是 **Solid 组件**（标题栏 Solid 实体直连渲染；
+   * 字面量语义见 contextPanelTypes 同名判别器的注释）。
+   */
   readonly renderKind: 'first-party-react'
-  readonly component: ComponentType<{ context: TitlebarContext }> | LazyExoticComponent<ComponentType<{ context: TitlebarContext }>>
+  readonly component: Component<{ context: TitlebarContext }>
 }
 
 export interface IsolatedTitlebarContribution extends TitlebarContributionBase {

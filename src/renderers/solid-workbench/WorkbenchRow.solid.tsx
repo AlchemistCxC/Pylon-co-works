@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Index, Match, Show, Switch, createMemo, createSignal } from 'solid-js'
 import { normalizeToolVisualState } from './toolConnectorProjection.ts'
 import type { Message, RenderMessage } from '../../domains/chat/messageTypes.ts'

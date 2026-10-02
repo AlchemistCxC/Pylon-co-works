@@ -1,16 +1,14 @@
 // @vitest-environment jsdom
 // #515：AgentSheetPageHost 测试的 Solid 版（断言集与 React 版逐一对应，未缩减）。
 // 改写点登记：
-// - 组件 render 用 `@solidjs/testing-library`（传函数）；`useOpenSidebarPage` 仍是 React
-//   hook（消费方 AgentSheetView.tsx 未迁），其两条例证用 `@testing-library/react` 渲染
-//   React 探针组件（无 JSX，经 createElement 构造，避免 Solid 文件里出现 React JSX）；
-// - 注册表贡献组件（React 面）以 createElement 构造，岛内由 React 渲染。
-import { fireEvent, render as renderReact, screen } from '@testing-library/react'
-import { createElement } from 'react'
+// - 组件 render 用 `@solidjs/testing-library`（传函数）；「已展开成整页」解出接缝的
+//   两条例证原用 React hook `useOpenSidebarPage` 渲染 React 探针——该 hook 已随消费者
+//   Solid 化删除，现改用其 Solid 形态 `createOpenSidebarPage` 渲染 Solid 探针；
+// - 注册表贡献组件为 Solid 面（#515 岛退役）：PresentationProbe 用 Solid JSX 构造。
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@solidjs/testing-library'
 import AgentSheetPageHost from '../sidebar/AgentSheetPageHost.solid.tsx'
-import { useOpenSidebarPage } from '../sidebar/useOpenSidebarPage.ts'
+import { createOpenSidebarPage } from '../sidebar/useOpenSidebarPage.solid.ts'
 import { resetStores } from '../../test/resetStores'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
@@ -52,7 +50,7 @@ function register(contribution: Partial<AgentSidebarContribution> & { id: string
 
 /** 观察贡献拿到的 presentation——「区块小样 / 主区整页」是同一组件两种体量。 */
 function PresentationProbe(props: Partial<AgentSidebarContributionProps>) {
-  return createElement('div', { 'data-testid': 'probe' }, props.presentation)
+  return <div data-testid="probe">{props.presentation}</div>
 }
 
 beforeEach(() => {
@@ -106,20 +104,20 @@ describe('AgentSheet 主区整页宿主', () => {
     const state = { activePageId: 'tasks' }
 
     function Probe() {
-      const page = useOpenSidebarPage(state)
-      return createElement('div', { 'data-testid': 'resolved' }, page ? page.id : 'none')
+      const page = createOpenSidebarPage(() => state)
+      return <div data-testid="resolved">{page()?.id ?? 'none'}</div>
     }
-    renderReact(createElement(Probe))
+    render(() => <Probe />)
     expect(screen.getByTestId('resolved')).toHaveTextContent('none')
   })
 
   it('activePageId 指向已卸载的贡献时回落 null（插件停用不锁死主区）', () => {
     const state = { activePageId: 'gone' }
     function Probe() {
-      const page = useOpenSidebarPage(state)
-      return createElement('div', { 'data-testid': 'resolved' }, page ? page.id : 'none')
+      const page = createOpenSidebarPage(() => state)
+      return <div data-testid="resolved">{page()?.id ?? 'none'}</div>
     }
-    renderReact(createElement(Probe))
+    render(() => <Probe />)
     expect(screen.getByTestId('resolved')).toHaveTextContent('none')
   })
 })

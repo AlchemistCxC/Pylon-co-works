@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createMemo, createSignal, type JSX } from 'solid-js'
 import type {
   ContentPart,

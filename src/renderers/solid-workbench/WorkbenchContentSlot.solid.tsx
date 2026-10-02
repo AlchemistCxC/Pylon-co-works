@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
 import type { SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'

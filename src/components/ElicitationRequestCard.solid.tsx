@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createSignal, For, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { collectElicitationValues, parseElicitationFields, type ElicitationValues } from './elicitationSchema.ts'

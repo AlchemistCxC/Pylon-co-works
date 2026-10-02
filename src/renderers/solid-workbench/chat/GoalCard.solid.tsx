@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
 import type { GoalSnapshot } from '../../../domains/workbench/plan/goalModel.ts'
 import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'

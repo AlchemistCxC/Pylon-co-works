@@ -1,6 +1,6 @@
+/** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
-import { createElement, type ReactElement } from 'react'
 import { Activity, ArrowUpRight, Bot, Folder, LayoutDashboard, MessageSquare, Settings2, Sparkles, type IconNode } from 'lucide'
 import { appClients } from '../app/appClients.ts'
 import { IS_TAURI } from '../infrastructure/tauri/env'
@@ -16,7 +16,7 @@ import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../infrastructure/persistence/workspaceEntityStore.ts'
 import { isAgentInvocationConfigured } from '../contracts/agentEntry.ts'
 import { INTERFACE_MODE_CAPABILITY_OVERVIEW_DECK } from '../plugin-runtime/interface-mode/interfaceModeTypes.ts'
-import { createActiveInterfaceModeContribution, ReactIslandHost } from './solidSheetSupport.solid.tsx'
+import { createActiveInterfaceModeContribution } from './solidSheetSupport.solid.tsx'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 
 function relativeTime(timestamp: number): string {
@@ -30,8 +30,9 @@ function relativeTime(timestamp: number): string {
   return `${days} 天前`
 }
 
-// ---- React 岛（#515 迁移期：TacticalCommandDeck 与 AgentConfigEditor 仍是 React 面，
-// 批7 前经岛渲染；类型图不触碰 React 组件文件，模块接口就地声明）。 ----
+// ---- #515 批7：TacticalCommandDeck 与 AgentConfigEditor 已 Solid 实体化，岛退役直连。 ----
+import TacticalCommandDeck from './TacticalCommandDeck.solid.tsx'
+import AgentConfigEditor from '../components/settings/AgentConfigEditor.solid.tsx'
 type TacticalPanel = 'home' | 'agents' | 'recent' | 'workspaces'
 
 interface TacticalCommandDeckProps {
@@ -48,21 +49,9 @@ interface TacticalCommandDeckProps {
   onDiagnostics(): void
 }
 
-interface TacticalCommandDeckModule {
-  default: (props: TacticalCommandDeckProps) => ReactElement
-}
 
-const deckModules = import.meta.glob<TacticalCommandDeckModule>('./TacticalCommandDeck.tsx', { eager: true })
-const TacticalCommandDeck = deckModules['./TacticalCommandDeck.tsx']?.default
-if (!TacticalCommandDeck) throw new Error('TacticalCommandDeck React 面未进入 Vite module graph')
 
-interface AgentConfigEditorModule {
-  default: (props: { agentId: string }) => ReactElement
-}
 
-const configEditorModules = import.meta.glob<AgentConfigEditorModule>('../components/settings/AgentConfigEditor.tsx', { eager: true })
-const AgentConfigEditor = configEditorModules['../components/settings/AgentConfigEditor.tsx']?.default
-if (!AgentConfigEditor) throw new Error('AgentConfigEditor React 面未进入 Vite module graph')
 
 // ---- 内联图标（lucide 核心 IconNode 自绘，类名契约与 lucide-react/LucideIcon.solid
 // 逐类一致）。不直接复用 components/LucideIcon.solid：其映射表归他人施工域，本文件
@@ -317,13 +306,13 @@ export default function OverviewSheetView(props: OverviewSheetViewProps) {
                 <button onClick={openAgentSettings}>配置 Agent <OverviewIcon name="ArrowUpRight" size={14} /></button>
               </nav>
             }>
-              <ReactIslandHost element={() => createElement(TacticalCommandDeck, deckProps())} />
+              <TacticalCommandDeck {...deckProps()} />
             </Show>
           </Show>
           <section class="overview-hero" id="overview-home" aria-labelledby="overview-title">
             <div class="overview-hero-brand">
               <div class="overview-mark-stage">
-                <PylonMark size={58} class="overview-brand-mark" title="Pylon" />
+                <PylonMark size={58} className="overview-brand-mark" title="Pylon" />
               </div>
               <div class="overview-hero-copy">
                 <div class="overview-kicker"><OverviewIcon name="Sparkles" size={12} /> PYLON WORKSPACE</div>
@@ -493,7 +482,7 @@ export default function OverviewSheetView(props: OverviewSheetViewProps) {
             </button>
           </section>
           <Show when={showConfigEditor()}>
-            <div class="overview-config-editor"><ReactIslandHost element={() => createElement(AgentConfigEditor, { agentId: activeAgent() })} /></div>
+            <div class="overview-config-editor"><AgentConfigEditor agentId={activeAgent()} /></div>
           </Show>
           <Show when={error()}>
             <Show when={errorIsValidation()} fallback={

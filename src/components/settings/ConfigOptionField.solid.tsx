@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, createUniqueId, Match, Switch } from 'solid-js'
 import type { NormalizedConfigOption } from './configOptionState'
 import { parseConfigNumberInput } from './configOptionState'

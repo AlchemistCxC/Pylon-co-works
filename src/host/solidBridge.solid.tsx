@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { render } from 'solid-js/web'
 import { createComponent, createEffect, on, untrack, type Component } from 'solid-js'
 import { createStore, reconcile } from 'solid-js/store'

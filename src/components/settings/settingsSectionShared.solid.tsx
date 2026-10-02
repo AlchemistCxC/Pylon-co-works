@@ -1,5 +1,7 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
 import { render } from 'solid-js/web'
+import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { zonePresetsFor, isCustomZonePresetEntry, type ZonePresetEntry } from '../../domains/theme/zones/index.ts'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
@@ -8,13 +10,15 @@ import { bridgedProps } from '../../host/solidBridge.solid'
 /**
  * settingsSectionShared.solid — Settings 共享呈现原语的 Solid 实体（#515）。
  *
- * 本实体目前承载 ZonePresetRow（刀6 #206 区域预设行）；`Group` 的 React 实现保留在
- * settingsSectionShared.tsx（其 children 由域外 React 消费者注入，无法跨桥），
- * error key 口径（report/resolveSettingsError）为纯函数、留原文件。Solid 域内
- * 直连本实体，不经过桥。
+ * #515 第二批收尾：`Group`（折叠组）、error key 口径（report/resolveSettingsError）
+ * 在本实体落地面——此前 GlobalPresetSection.solid.tsx 因本文件在途而按同源口径本地
+ * 声明过副本（其漂移由 Settings.customPreset 契约测试钉住；收拢副本由该文件归属批处理）。
+ * React 世界（AgentSettingsSection / ZonePresetSection / settingsAgentActions 等
+ * React 消费者）继续从 settingsSectionShared.tsx 消费——React 面文件不得静态回向引用
+ * .solid 实体，因此该 .tsx 保留 React 实现与 ZonePresetRow 薄桥。
  */
 
-function Group(props: { title: string; children: JSX.Element; defaultOpen?: boolean }) {
+export function Group(props: { title: string; children: JSX.Element; defaultOpen?: boolean }) {
   const [open, setOpen] = createSignal(props.defaultOpen ?? true)
   return (
     <div class="set-group">
@@ -25,6 +29,22 @@ function Group(props: { title: string; children: JSX.Element; defaultOpen?: bool
       <Show when={open()}>{props.children}</Show>
     </div>
   )
+}
+
+/** Settings 域内错误上报的统一 key 口径（agentActions 与预设事务共用；与
+ * settingsSectionShared.tsx 的纯函数逐字一致）。 */
+export function reportSettingsError(action: string, error: unknown, agentId?: string): ReturnType<typeof reportRuntimeError> {
+  return reportRuntimeError(action, error, agentId, {
+    key: `settings:${action}:${agentId ?? 'app'}`,
+    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
+    source: 'settings',
+  })
+}
+
+export function resolveSettingsError(action: string, agentId?: string): void {
+  resolveRuntimeErrors({
+    key: `settings:${action}:${agentId ?? 'app'}`,
+  })
 }
 
 export interface ZonePresetRowProps {
@@ -67,10 +87,10 @@ export function ZonePresetRow(props: ZonePresetRowProps) {
                     ? '该条目引用的字段已被删除，值已自动清理，不能再应用'
                     : undefined}
                   onClick={() => props.onApply(props.zone, entry)}>{entry.label}</button>
-                <Show when={deletable()} fallback={
-                  <button type="button" class="ps-btn sm danger"
-                    onClick={() => setPendingDeleteEntryId(entry.id)}>删除</button>
-                }>
+                {/* 刀7 前置（#211）：删除钮只在 deletable 条目上出现（React 原版
+                    `{deletable && (pending ? confirm : 删除)}` 的逐字对应——批1-A 曾把
+                    删除钮误放进外层 fallback，导致出厂/未选中条目也被渲染删除钮）。 */}
+                <Show when={deletable()}>
                   <Show when={pendingDeleteEntryId() === entry.id} fallback={
                     <button type="button" class="ps-btn sm danger"
                       onClick={() => setPendingDeleteEntryId(entry.id)}>删除</button>

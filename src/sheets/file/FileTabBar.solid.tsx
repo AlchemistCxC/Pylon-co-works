@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show } from 'solid-js'
 import { fileTabKey, fileTabViewType, type FileTabRecord } from './fileSheetState.ts'
 

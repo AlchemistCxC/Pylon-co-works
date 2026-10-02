@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { appClients } from '../app/appClients.ts'
@@ -259,7 +260,7 @@ function RuntimeErrorFacts(props: { diagnostics: readonly ErrorEntry[]; history:
               <div class="runtime-error-fact-detail grid gap-[var(--ui-space-1)] mt-[var(--ui-space-1)] text-text-dim [overflow-wrap:anywhere]">
                 <Show when={entry.code}><div><code>code</code> = {entry.code}</div></Show>
                 <Show when={entry.source}><div><code>source</code> = {entry.source}</div></Show>
-                <Show when={entry.scope}><div><code>scope</code> = {entry.scope.kind}:{entry.scope.id}</div></Show>
+                <Show when={entry.scope} keyed>{scope => <div><code>scope</code> = {scope.kind}:{scope.id}</div>}</Show>
                 <Show when={entry.technicalMessage}><pre class="max-h-[120px] overflow-auto m-0 p-[var(--ui-space-1)] whitespace-pre-wrap bg-bg-input font-[family-name:var(--mono)] text-[11px] leading-[1.4]">{entry.technicalMessage}</pre></Show>
                 <Show when={entry.metadata}><pre class="max-h-[120px] overflow-auto m-0 p-[var(--ui-space-1)] whitespace-pre-wrap bg-bg-input font-[family-name:var(--mono)] text-[11px] leading-[1.4]">{safeErrorJson(entry.metadata)}</pre></Show>
               </div>

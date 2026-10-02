@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { BookOpen, ChevronLeft, ChevronRight, House, RotateCw, type IconNode } from 'lucide'
 import { createSolidMount } from '../../host/solidBridge.solid'

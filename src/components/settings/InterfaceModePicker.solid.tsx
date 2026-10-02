@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createComponent, createMemo, For } from 'solid-js'
 import { render } from 'solid-js/web'
 import type { IconNode } from 'lucide'

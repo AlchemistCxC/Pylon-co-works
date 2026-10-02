@@ -25,14 +25,9 @@
   },
   "include": ["src"],
   "exclude": [
-    "src/renderers/solid-workbench/**/*.solid.tsx",
-    "src/renderers/solid-workbench/**/*.solid.test.tsx",
-    "src/sheets/**/*.solid.tsx",
-    "src/sheets/**/*.solid.test.tsx",
-    "src/workspace-sheets/**/*.solid.tsx",
-    "src/workspace-sheets/**/*.solid.test.tsx",
-    "src/components/**/*.solid.tsx",
-    "src/components/**/*.solid.test.tsx",
+    "#515 批7：React 类型图排除全部 .solid 文件（编译面由 tsconfig.solid.json 按 src/** 收纳）",
+    "src/**/*.solid.tsx",
+    "src/**/*.solid.test.tsx",
     "src/wasm"
   ]
 }

@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { appClients } from '../../app/appClients.ts'

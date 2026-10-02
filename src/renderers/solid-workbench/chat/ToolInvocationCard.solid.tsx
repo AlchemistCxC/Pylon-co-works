@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createMemo } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../contracts/messageRenderer.ts'
 import { coalesceAdjacentDisplayTextParts, createUnknownContentPart, isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'

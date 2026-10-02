@@ -2,13 +2,12 @@
 // #515：ContextPanelHost / AgentContextPanel 测试的 Solid 版（断言集与 React 版逐一对应，未缩减）。
 // 改写点登记：
 // - 实体直连（ContextPanelHost.solid / AgentContextPanel.solid），render 用
-//   `@solidjs/testing-library`；**fireEvent 保留 RTL-react 版**（自带 act 包装，React 岛内
-//   的贡献组件状态更新不会落成 console.error 噪音）；
-// - 岛内贡献体经 React 并发调度落地：同步 getBy 断言改 findBy/waitFor（语义等价）；
-// - 受控输入的 `fireEvent.change` → `fireEvent.input`（Solid 的受控 input 走 onInput）；
-// - React 版 `view.rerender(...)` → Solid 信号重推 ctx props（Solid 无 rerender API）。
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { createElement } from 'react'
+//   `@solidjs/testing-library`；
+// - #515 岛退役：注册表贡献组件是 **Solid 组件**，宿主直连渲染——原「岛内 React 并发
+//   调度」的 findBy/waitFor 保留（Solid 同步渲染下语义不变，find* 立即兑现）；
+// - fireEvent 保留 RTL-react 版（纯 DOM 事件派发，对 Solid 树同样有效）；
+// - 贡献桩组件改 Solid JSX（原 createElement 桩随 React 岛退役）。
+import { fireEvent, screen, waitFor, within } from '@testing-library/dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
@@ -56,7 +55,8 @@ afterEach(async () => {
 })
 
 /** React 贡献组件桩（无 JSX：本文件是 Solid 编译面，React 面在岛内渲染）。 */
-const panelStub = (text: string) => () => createElement('div', null, text)
+/** Solid 贡献桩（#515 岛退役：注册表组件是 Solid 组件）。 */
+const panelStub = (text: string) => () => <div>{text}</div>
 
 describe('ContextPanelHost', () => {
   it('同 ID 插件热替换后重置旧错误边界并渲染健康实现', async () => {
@@ -65,7 +65,7 @@ describe('ContextPanelHost', () => {
     const oldIdentity = createPluginIdentity('test.context.hot', 'old')
     const nextIdentity = createPluginIdentity('test.context.hot', 'next')
     const BrokenPanel = () => { throw new Error('old broken panel') }
-    const HealthyPanel = () => createElement('div', null, '热替换后的健康面板')
+    const HealthyPanel = () => <div>热替换后的健康面板</div>
     registrations.push(registry.register(oldIdentity, {
       id: 'hot-panel', workspaceKind: sheet.kind, label: '热替换', order: 100,
       renderKind: 'first-party-react', component: BrokenPanel,
@@ -78,7 +78,7 @@ describe('ContextPanelHost', () => {
       id: 'hot-panel', workspaceKind: sheet.kind, label: '热替换', order: 100,
       renderKind: 'first-party-react', component: HealthyPanel,
     }, { contributionId: 'hot-panel', priority: 100 })
-    act(() => { registrations.push(...transaction.commit()) })
+    registrations.push(...transaction.commit())
 
     await screen.findByText('热替换后的健康面板')
   })
@@ -154,7 +154,7 @@ describe('ContextPanelHost', () => {
     const registry = getContextPanelRegistry()
     const identity = createPluginIdentity('test.context.host', 'run-1')
     const BrokenPanel = () => { throw new Error('broken contribution') }
-    const HealthyPanel = () => createElement('div', null, '健康面板内容')
+    const HealthyPanel = () => <div>健康面板内容</div>
 
     registrations.push(registry.register(identity, {
       id: 'broken',

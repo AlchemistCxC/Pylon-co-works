@@ -1,4 +1,5 @@
-import { createEffect, createMemo, onCleanup, onMount, Show, untrack } from 'solid-js'
+/** @jsxImportSource solid-js */
+import { createMemo, onCleanup, onMount, Show, Suspense } from 'solid-js'
 import { save } from '@tauri-apps/plugin-dialog'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 import { createSolidMount } from '../../host/solidBridge.solid'
@@ -14,19 +15,13 @@ import { runSessionNotificationHook } from '../../application/transactions/sessi
 import { getCanonicalEventFeed } from '../../infrastructure/events/canonicalEventFeed.ts'
 import { clearMessageStorage } from '../../domains/chat/messagePersistence'
 import { validateExportPath } from '../../domains/overview/persistedHistory.ts'
+import type { Component } from 'solid-js'
+import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
+import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import type { AgentSidebarSurfaceInput } from '../../plugin-runtime/sidebar/sidebarSurfaceProtocol.ts'
-import type { AgentSheetPageHostProps, AgentSheetPagePluginIslandInput } from './sidebarBridgeTypes.ts'
+import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
+import type { AgentSheetPageHostProps } from './sidebarBridgeTypes.ts'
 import type { AgentSidebarSharedProps } from './useSidebarContributionProps.ts'
-
-// 贡献体是 React 面（first-party 组件 / IsolatedPluginSurface + 边界 + Suspense）：
-// 按 P52 D4 经 eager glob 缝加载 React 岛。
-interface AgentSheetPageIslandModule {
-  mountAgentSheetPageIsland(container: HTMLElement, get: () => AgentSheetPagePluginIslandInput): { rerender(): void; dispose(): void }
-}
-
-const islandModules = import.meta.glob<AgentSheetPageIslandModule>('./AgentSheetPagePluginIsland.tsx', { eager: true })
-const islandModule = islandModules['./AgentSheetPagePluginIsland.tsx']
-if (!islandModule) throw new Error('AgentSheetPage React 岛未进入 Vite module graph')
 
 const NO_GENERATING_SOURCES: readonly string[] = []
 
@@ -183,37 +178,14 @@ export default function AgentSheetPageHost(props: AgentSheetPageHostProps) {
     if (event === 'host:open-session-settings' && typeof detail === 'string') shared.onOpenSessionSettings(detail)
   }
 
-  // 插件贡献 React 岛：依赖（贡献投影/共享 props/wire 输入）变化 → rerender（React 自 diff）。
-  let islandElement: HTMLDivElement | undefined
-  let island: { rerender(): void; dispose(): void } | null = null
-  createEffect(() => {
-    const decl = pageDecl()
-    // 追踪依赖：贡献标识 + 数据快照 + wire 投影（岛内 get() 的读取在 untrack 下进行）。
-    const deps = [props.page.id, props.page.renderKind, sharedSnapshot(), surfaceInput()]
-    untrack(() => {
-      if (!islandElement || !decl) return
-      island ??= islandModule.mountAgentSheetPageIsland(islandElement, () => ({
-        contributionId: props.page.id,
-        renderKind: props.page.renderKind,
-        surfaceId: props.page.renderKind === 'isolated-surface' ? props.page.surfaceId : undefined,
-        component: props.page.renderKind === 'first-party-react' ? props.page.component : undefined,
-        contributionProps: props.page.renderKind === 'first-party-react'
-          ? {
-              ...untrack(sharedSnapshot),
-              presentation: 'page',
-              collapsed: false,
-              onBlockAction: () => {},
-              registerBlockActionHandler: () => {},
-            }
-          : undefined,
-        surfaceInput: props.page.renderKind === 'isolated-surface' ? untrack(surfaceInput) : undefined,
-        onSurfaceEvent,
-      }))
-      island.rerender()
-    })
-    void deps
-  })
-  onCleanup(() => island?.dispose())
+  /** page 体量的贡献 props（体量覆盖 + 空动作注册；memo 供 JSX 展开保持细粒度响应）。 */
+  const contributionProps = createMemo(() => ({
+    ...sharedSnapshot(),
+    presentation: 'page' as const,
+    collapsed: false,
+    onBlockAction: () => {},
+    registerBlockActionHandler: () => {},
+  }))
 
   return (
     <Show when={pageDecl()}>{decl => (
@@ -226,7 +198,38 @@ export default function AgentSheetPageHost(props: AgentSheetPageHostProps) {
           <h2 class="agent-sheet-page-title">{decl().title}</h2>
         </div>
         <div class="agent-sheet-page-body">
-          <div ref={element => { islandElement = element }} style={{ display: 'contents' }} />
+          {/* #515 岛退役：贡献体直连渲染——两类贡献统一 PluginContributionBoundary
+              （错误占位 + Runtime diagnostics 上报，与原 React 岛同语义）。keyed on 贡献
+              对象：热替换/换贡献时边界（含错误态）整体重置。 */}
+          <Show when={props.page} keyed>
+            {page => (
+              <PluginContributionBoundary contributionId={page.id}>
+                {page.renderKind === 'isolated-surface'
+                  ? (
+                      page.surfaceId
+                        ? (
+                            <IsolatedPluginSurface
+                              surfaceId={page.surfaceId}
+                              className="agent-sheet-page-surface"
+                              input={surfaceInput()}
+                              onEvent={onSurfaceEvent}
+                            />
+                          )
+                        : null)
+                  : (() => {
+                      // 运行时边界收窄：first-party 只由宿主内置注册（渲染面是 Solid 组件），
+                      // 这层 `as` 与原 FirstPartyContribution 的边界纪律一致。
+                      const Contribution = page.component as Component<AgentSidebarContributionProps> | undefined
+                      if (!Contribution) return null
+                      return (
+                        <Suspense fallback={null}>
+                          <Contribution {...contributionProps()} />
+                        </Suspense>
+                      )
+                    })()}
+              </PluginContributionBoundary>
+            )}
+          </Show>
         </div>
       </div>
     )}</Show>

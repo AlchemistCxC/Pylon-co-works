@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { onCleanup, onMount, createEffect } from 'solid-js'
 import type { DispatchSelection } from '../../domains/file/dispatchMessage.ts'
 import { createSolidMount } from '../../host/solidBridge.solid'

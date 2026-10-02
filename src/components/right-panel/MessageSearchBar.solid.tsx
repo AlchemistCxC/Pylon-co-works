@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { onMount, Show } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
 import { createSolidMount } from '../../host/solidBridge.solid'

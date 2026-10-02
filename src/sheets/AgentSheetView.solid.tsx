@@ -1,62 +1,20 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createMemo, Show } from 'solid-js'
 import { createSolidMount } from '../host/solidBridge.solid'
-import { createElement, type ReactElement } from 'react'
 import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
+import AgentSheetPageHost from '../components/sidebar/AgentSheetPageHost.solid.tsx'
+import { IsolatedPluginSurface as IsolatedPluginSurfaceSolid } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { normalizePageState, resolveOpenPage } from '../plugin-runtime/sidebar/sidebarBlockState.ts'
-import type { AgentSidebarContribution } from '../plugin-runtime/sidebar/sidebarTypes.ts'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
-import { createActiveInterfaceModeContribution, createRegistrySignal, ReactIslandHost } from './solidSheetSupport.solid.tsx'
+import { createActiveInterfaceModeContribution, createRegistrySignal } from './solidSheetSupport.solid.tsx'
+import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.solid.tsx'
 
-// ---- React 岛（#515 迁移期：整页宿主/隔离表面/Renderer Suite 工作台仍是 React 面，
-// 批7 前经岛渲染；类型图不触碰 React 组件文件，模块接口就地声明，与实体侧逐字段一致）。 ----
-
-interface AgentSheetPageHostProps {
-  page: AgentSidebarContribution
-  ctx: SheetContext
-  sheet: { id: string }
-}
-
-interface AgentSheetPageHostModule {
-  default: (props: AgentSheetPageHostProps) => ReactElement
-}
-
-const pageHostModules = import.meta.glob<AgentSheetPageHostModule>('../components/sidebar/AgentSheetPageHost.tsx', { eager: true })
-const AgentSheetPageHost = pageHostModules['../components/sidebar/AgentSheetPageHost.tsx']?.default
-if (!AgentSheetPageHost) throw new Error('AgentSheetPageHost React 面未进入 Vite module graph')
-
-interface IsolatedPluginSurfaceProps {
-  surfaceId: string
-  className?: string
-  input?: unknown
-  onEvent?: (event: string, detail: unknown) => void
-}
-
-interface IsolatedPluginSurfaceModule {
-  IsolatedPluginSurface: (props: IsolatedPluginSurfaceProps) => ReactElement
-}
-
-const isolatedSurfaceModules = import.meta.glob<IsolatedPluginSurfaceModule>('../plugin-runtime/ui/IsolatedPluginSurface.tsx', { eager: true })
-const IsolatedPluginSurface = isolatedSurfaceModules['../plugin-runtime/ui/IsolatedPluginSurface.tsx']?.IsolatedPluginSurface
-if (!IsolatedPluginSurface) throw new Error('IsolatedPluginSurface React 面未进入 Vite module graph')
-
-interface AgentRendererSuiteWorkbenchProps {
-  sheet: SheetRecord
-  ctx: SheetContext
-  modeId: string
-  defaultSuiteId: string
-  isReplay: boolean
-}
-
-interface AgentRendererSuiteWorkbenchModule {
-  default: (props: AgentRendererSuiteWorkbenchProps) => ReactElement
-}
-
-const workbenchModules = import.meta.glob<AgentRendererSuiteWorkbenchModule>('./agent-workbench/AgentRendererSuiteWorkbench.tsx', { eager: true })
-const AgentRendererSuiteWorkbench = workbenchModules['./agent-workbench/AgentRendererSuiteWorkbench.tsx']?.default
-if (!AgentRendererSuiteWorkbench) throw new Error('AgentRendererSuiteWorkbench React 面未进入 Vite module graph')
+// ---- #515 批7：整页宿主与隔离表面均已 Solid 实体化（批1-C/批3-E），React 岛退役，
+// solid-in-solid 直连。IsolatedPluginSurface 的 props 面与原 React 版逐字段一致
+// （className→class 由实体内部映射）。 ----
 
 export interface AgentSheetViewProps {
   sheet: SheetRecord
@@ -69,8 +27,8 @@ export interface AgentSheetViewProps {
  * 侧栏已上移 SheetLayout（entry.sidebar → SheetSidebarSlot）；本组件只渲染主区
  * （Solid Renderer Suite + 右栏宿主），props 收敛为 { sheet, ctx }。
  * #515：实体自 React 版逐行为同构迁移——姿态 store 经 createZustandSignal，整页解析
- * 与界面模式投影经注册表信号；三分支（整页宿主/隔离表面/Renderer Suite）的实体
- * 仍是 React 面，经 ReactIslandHost 岛挂载（批7 后随 React 面退役）。
+ * 与界面模式投影经注册表信号；三分支（整页宿主/隔离表面/Renderer Suite）均 solid
+ * 实体直连（批7：React 岛退役）。
  *
  * W4-02（姿态二拍板）：历史回放以「只读姿态」直接进入本 sheet——Solid Workbench
  * 经现成 lifecycle 恢复消息，但输入宿主隐藏，改渲染「只读回放 · 点击继续」占位条；
@@ -114,35 +72,28 @@ export default function AgentSheetView(props: AgentSheetViewProps) {
     // 页面打开时聊天区整体不挂载（与切会话同一条路径：历史在返回时经 lifecycle 重读）。
     <Show when={openPage()} fallback={
       <Show when={isolatedWorkbench()} fallback={
-        <ReactIslandHost element={() => {
-          // 岛重渲触发：原 React 树父渲染即带新 ctx 重渲子树，等价粒度＝追踪 ctx 的
-          // 可变字段（会话/右栏内缩）。ctx 是同一代理引用，结果稳定的 memo（如
-          // isReplay）不会通知，必须直读字段。
-          const activeSession = props.ctx.activeSession
-          const rightInset = props.ctx.rightInset
-          void activeSession
-          void rightInset
-          return createElement(AgentRendererSuiteWorkbench, {
-            sheet: props.sheet,
-            ctx: props.ctx,
-            modeId: contribution().id,
-            defaultSuiteId: suiteRequest(),
-            isReplay: isReplay(),
-          })
-        }} />
+        // 工作台分支：Solid 实体直连（实体内 ctx/sheet props 响应式透传，原岛重渲
+        // 触发注释随 ReactIslandHost 一并退役——不再需要手写字段追踪）。
+        <AgentRendererSuiteWorkbench
+          sheet={props.sheet}
+          ctx={props.ctx}
+          modeId={contribution().id}
+          defaultSuiteId={suiteRequest()}
+          isReplay={isReplay()}
+        />
       }>
         {workbench => (
-          <ReactIslandHost element={() => createElement(IsolatedPluginSurface, {
-            surfaceId: workbench().surfaceId,
-            className: 'main interface-mode-workbench-surface',
-            input: {
+          <IsolatedPluginSurfaceSolid
+            surfaceId={workbench().surfaceId}
+            className="main interface-mode-workbench-surface"
+            input={{
               modeId: contribution().id,
               sheet: { id: props.sheet.id, kind: props.sheet.kind, title: props.sheet.title, agentId: props.sheet.agentId },
               activeSessionId: props.ctx.activeSession,
               sessionSource: props.ctx.activeSession ? props.ctx.sessionSource(props.ctx.activeSession) : undefined,
               isReplay: isReplay(),
-            },
-            onEvent: (event, detail) => {
+            }}
+            onEvent={(event: string, detail: unknown) => {
               if (event === 'workbench:continue-replay') useReplayPostureStore.getState().clear()
               else if (event === 'workbench:select-session' && typeof detail === 'string') props.ctx.selectSession(detail)
               else if (event === 'workbench:open-profile') props.ctx.openProfileEdit()
@@ -160,17 +111,13 @@ export default function AgentSheetView(props: AgentSheetViewProps) {
                   })
                 }
               }
-            },
-          })} />
+            }}
+          />
         )}
       </Show>
     }>
       {page => (
-        <ReactIslandHost element={() => {
-          // 岛重渲触发：会话切换要透传给整页宿主（原 React 父渲染语义）。
-          void props.ctx.activeSession
-          return createElement(AgentSheetPageHost, { page: page(), ctx: props.ctx, sheet: { id: props.sheet.id } })
-        }} />
+        <AgentSheetPageHost page={page()} ctx={props.ctx} sheet={{ id: props.sheet.id }} />
       )}
     </Show>
   )

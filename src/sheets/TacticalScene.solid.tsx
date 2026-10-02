@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { createEffect, onCleanup } from 'solid-js'
 import { render } from 'solid-js/web'
 import closer from '../assets/tactical/closer.png'

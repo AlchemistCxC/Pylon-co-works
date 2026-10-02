@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { Show, createMemo, onCleanup, onMount } from 'solid-js'
 import { resolveToolIndicatorAssetForTone } from '../../../domains/chat/toolIndicatorAssets.ts'
 import { toolIndicatorMotionClass } from '../../../domains/chat/toolIndicatorMotion.ts'
