@@ -4,7 +4,7 @@
 
 - issue：https://github.com/Teens-in-Times/Pylon-co-works/issues/514
 - 分支：`codex/agent-import`
-- 基线：`github/main` / `f34ca356`
+- 基线：`github/main` / `f34ca356`；提交 PR 后正常合并最新 main `76fdaac6`（merge `449b6200`）。
 - 日期：2026-10-01—2026-10-02
 - 稳定署名：Codex
 - 施工目录：独立 worktree，避免原共享树的在途改动。
@@ -78,7 +78,14 @@
 - 最后状态修正后的 Agent 专项：4 文件 / 54 用例通过，exit 0，7.12 秒。
 - 最终完整前端：`vitest run --pool=threads --maxWorkers=2`，exit 0；664 文件中 663 通过、1 跳过，5184 用例通过、1 跳过、1 todo，193.77 秒。最后状态修正后重新执行 `check:frontend:static` 和 `check:solid`，均 exit 0。Rust 源码此后未变，前述 Rust 与 Clippy 证据仍对应最终源码。
 
-### 最终实机证据
+### 合并 main 后的收口（2026-10-02）
+
+- PR #521 原先仅在 `.agents/L.md` 存在冲突；正常合并 main，保留双方协调记录，未改写历史。远端已显示 `MERGEABLE`。
+- 合并后完整前端复跑：667 文件中 666 通过、1 跳过；5197 用例通过、1 跳过、1 todo，237.74 秒，exit 0。`check:frontend:static` 与 `check:solid` 也重新通过，exit 0。
+- 用户明确要求「不用验证了，提了 pr 就行了」。据此停止尚在运行的本地 Rust 门禁，不再追加 Clippy 或实机复验。合并前的 Rust、Clippy、实机证据对应实现提交 `0104b6b5`；不将其写成合并后完整门禁已完成。中止 Rust 属用户收口指令，不记为测试失败。
+- PR 已开、说明书及开发记录已入库；远端 CI 异步执行，不等待其完成。用户安装实例未覆盖。
+
+### 合并 main 前的最终实机证据
 
 - 前端静态门禁重新构建 `dist/` → `CARGO_BUILD_JOBS=1 cargo build --manifest-path src-tauri/Cargo.toml --bin pylon`，exit 0，30.71 秒 → 独立便携目录启动。最终二进制 SHA-256：`cecb93cacd6290ac59bb1ad3415f61c6cd77f60f5f4e8419a5bfd2fd49dc2979`；PID 18308，调试端口 9223，WebView2 154；配置和数据均与用户安装隔离。
 - MCP 自检：1 个可连接 page；`1+1=2`，Tauri invoke 类型为 function；初始宿主命令错误数 0；初始 `list_agents=[]`。`webview_snapshot` 定位操作，实际导入/取消/使用点击命中自身，`hitIsSelfOrDescendant=true`。
