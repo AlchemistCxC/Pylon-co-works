@@ -11,7 +11,7 @@
  * 布局字段）；旧 `pylon-workspace-show-pet` key 成为无害孤儿，不再主动清理。
  */
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 export const RIGHT_RAIL_MIN_WIDTH = 220

@@ -1,5 +1,5 @@
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'

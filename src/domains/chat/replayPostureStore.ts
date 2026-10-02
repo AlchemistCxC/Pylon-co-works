@@ -1,5 +1,5 @@
 import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 /**
  * replayPostureStore — 历史回放只读姿态（W4-02，姿态二拍板：点击行直接进 agent sheet 只读）。

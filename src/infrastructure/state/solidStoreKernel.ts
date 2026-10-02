@@ -6,7 +6,7 @@ import { createStore, produce } from 'solid-js/store'
  *
  * 各域 store 的状态本体从 zustand `create` 换成 `solid-js/store` 细粒度 store，
  * 但对外**保 zustand 门面签名**（getState / setState(partial, replace?) / subscribe /
- * getInitialState + hook 形态经 host/reactStoreShim 暂供 React 面使用）——消费者
+ * getInitialState + hook 形态经同目录 reactStoreShim 暂供 React 面使用）——消费者
  * 在组件迁移批内零改动，终态 React 面退役后 shim 与本门面一并收敛为直连。
  *
  * 语义对齐点（zustand v5 vanilla）：
@@ -55,6 +55,8 @@ export function createSolidStoreKernel<T extends object>(initial: T): SolidStore
     getState: () => current,
     setState: (partial, replace) => {
       const next = typeof partial === 'function' ? partial(current) : partial
+      // zustand 同款：函数 updater 返回当前 state 同一引用 ⇒ 整体跳过（不写、不通知）。
+      if (Object.is(next, current) && typeof partial === 'function') return
       // ★ replace 不得用 `reconcile`：reconcile 为了细粒度更新会**就地合并旧树的嵌套
       //   数据**（数组走 `setProperty(previous, 'length', …)` 逐位覆写）——旧状态里的
       //   嵌套对象/数组可能藏着**调用方自有引用**（zustand 时代一直如此共享：出厂区域

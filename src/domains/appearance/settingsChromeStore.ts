@@ -11,7 +11,7 @@
  * → pylon-settings-chrome（envelope v1），搬完即删旧 key。
  */
 import { attachSolidPersist, createSolidStoreKernel, type PersistStringStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 export type SettingsDensity = 'basic' | 'standard' | 'all'
 const DENSITIES: readonly SettingsDensity[] = ['basic', 'standard', 'all']

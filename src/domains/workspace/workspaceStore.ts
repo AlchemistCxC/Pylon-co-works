@@ -1,5 +1,5 @@
 import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { createSheetState, sheetReducer } from './sheetState.ts'
 import {
   DEFAULT_SHEET_LAYOUT,

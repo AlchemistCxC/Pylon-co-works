@@ -1,5 +1,5 @@
 import { createSolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../infrastructure/state/reactStoreShim'
 
 /**
  * modalOverlayStore —— 「有遮挡主区的模态覆盖层打开」这一事实。

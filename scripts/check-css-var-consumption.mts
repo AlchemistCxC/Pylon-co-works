@@ -43,7 +43,7 @@ for (const m of snapshot.matchAll(/'((?:--[a-z0-9-]+))':/g)) injected.add(m[1])
 //    主题值落 fallback；基线必须覆盖全部注入字段）──
 const skinServices = read(join(ROOT, 'infrastructure/skin/skinRuntimeServices.ts'))
 assert.equal(app.includes('pickThemeBaseline'), true, 'App 必须经 pickThemeBaseline 读 Theme Store')
-assert.equal(app.includes('useSkinSurface<HTMLDivElement>('), true, 'App 必须经 useSkinSurface 投影 CSS 变量')
+assert.equal(app.includes('createSkinSurface<HTMLDivElement>('), true, 'App 必须经 createSkinSurface 投影 CSS 变量（#515：useSkinSurface.solid 实体形态）')
 assert.equal(skinServices.includes('for (const key of THEME_SETTING_KEYS)'), true, 'Skin 基线必须遍历 THEME_SETTING_KEYS')
 const subscribed = new Set<string>(THEME_SETTING_KEYS)
 const missingSub = [...injectedFields].filter(f => !subscribed.has(f)).sort()

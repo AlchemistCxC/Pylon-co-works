@@ -1,5 +1,5 @@
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../infrastructure/state/reactStoreShim'
 
 type TacticalArtwork = 'closer' | 'falling'
 interface TacticalSceneState {

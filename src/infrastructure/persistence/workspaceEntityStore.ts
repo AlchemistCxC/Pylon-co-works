@@ -6,7 +6,7 @@
  * 与 identityStore.hydrateSessions 同序（workspace 先于会话绑定解析）。
  */
 import { createSolidStoreKernel, type SolidStoreKernel } from '../state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI, isBrowserMockRuntime } from '../tauri/env'
 

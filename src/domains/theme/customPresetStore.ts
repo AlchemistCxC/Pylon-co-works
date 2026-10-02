@@ -19,7 +19,7 @@
  * presetActions/presetReducer 既有纯函数，事务骨架零改动。
  */
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import type { CustomPreset } from './customPresets.ts'
 import type { ThemeState } from './themeStore.ts'
 import { useStore } from './themeStore.ts'

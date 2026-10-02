@@ -1,5 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import type { SolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
+import type { SolidStoreKernel } from './solidStoreKernel'
 
 /** zustand hook 的完整形状（调用签名 + 静态方法面），消费者类型零改动。 */
 export interface ZustandHook<T extends object> {

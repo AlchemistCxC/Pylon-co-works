@@ -1,5 +1,5 @@
 import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import type { ConfigOption, ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from '../chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from '../../contracts/agentTypes.ts'

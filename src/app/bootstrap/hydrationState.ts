@@ -9,7 +9,7 @@
  * - fatal：不可恢复（保留位；当前无触发路径）
  */
 import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 
 export type HydrationStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'fatal'
 

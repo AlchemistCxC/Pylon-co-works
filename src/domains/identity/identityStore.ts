@@ -1,5 +1,5 @@
 import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../host/reactStoreShim'
+import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
 import { createIdentityBackendSync } from '../../infrastructure/persistence/identityBackendSync.ts'
 import { DEFAULT_PROFILES } from './identityTypes.ts'
