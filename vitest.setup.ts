@@ -100,7 +100,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/workspace-sheets/__tests__/agentStatusConsumerMatrix.solid.test.tsx',
   // #515：实体已迁 SheetLauncher.solid.tsx，测试随之改名（Agent 激活事务契约，白名单跟随）。
   'src/workspace-sheets/__tests__/sheetLauncherAgentSwitch.solid.test.tsx',
-  'src/workspace-sheets/__tests__/sheetTabStripAgentSwitch.test.tsx',
+  // #498：原 React 桥的 sheetTabStripAgentSwitch.test.tsx 随 #484 删除；Solid 实体测试承接
+  // 同族 A 类错误路径契约（switch 失败 / 对账失败经 reportRuntimeError 的 console.error）。
+  'src/workspace-sheets/__tests__/sheetTabStripAgentSwitch.solid.test.tsx',
   'src/workspace-sheets/__tests__/workspaceStore.integration.test.ts',
 ]
 
