@@ -1,5 +1,4 @@
-import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import type { ConfigOption, ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from '../chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from '../../contracts/agentTypes.ts'
@@ -205,4 +204,4 @@ const runtimeKernel = createSolidStoreKernel<RuntimeStoreState>({
   resetAll: () => runtimeKernel.getState().resetSessionRuntime(),
 })
 
-export const useRuntimeStore: ZustandHook<RuntimeStoreState> = createReactStoreHook(runtimeKernel)
+export const useRuntimeStore: SolidStoreKernel<RuntimeStoreState> = runtimeKernel

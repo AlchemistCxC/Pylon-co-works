@@ -67,7 +67,7 @@ import { hydrateCustomPresetsFromBackend } from './infrastructure/persistence/cu
 import { openOrFocusSettingsSheet } from './sheets/settingsSheetNavigation.ts'
 import { useStore } from './domains/theme/themeStore'
 import { createZustandSignal } from './host/solidStoreBridge.ts'
-import { shallowEqual } from './infrastructure/state/reactStoreShim.ts'
+import { shallowEqual } from './infrastructure/state/solidStoreKernel.ts'
 import { createRegistrySignal } from './sheets/solidSheetSupport.solid.tsx'
 import type { InterfaceModeContribution } from './plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import type { SettingsDomainId } from './components/settings/settingsDomains.ts'

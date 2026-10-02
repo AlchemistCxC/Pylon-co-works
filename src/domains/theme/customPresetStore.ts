@@ -18,8 +18,7 @@
  * custom 标记——经 `presetCombinedApi`（合成 get + 按字段路由 set）注入
  * presetActions/presetReducer 既有纯函数，事务骨架零改动。
  */
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import type { CustomPreset } from './customPresets.ts'
 import type { ThemeState } from './themeStore.ts'
 import { useStore } from './themeStore.ts'
@@ -205,7 +204,7 @@ attachSolidPersist(customPresetKernel, {
     }),
 })
 
-export const useCustomPresetStore: ZustandHook<CustomPresetState> = createReactStoreHook(customPresetKernel)
+export const useCustomPresetStore: SolidStoreKernel<CustomPresetState> = customPresetKernel
 
 /** 合成 store api：get = 两 store 合并视图；set 按字段路由（预设切片 ⇄ 主题字段）。 */
 function presetCombinedApi() {

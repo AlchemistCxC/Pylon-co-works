@@ -1,5 +1,4 @@
-import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import { identityCrossDomain } from '../../app/ports/identityCrossDomainPort'
 import { createIdentityBackendSync } from '../../infrastructure/persistence/identityBackendSync.ts'
 import { DEFAULT_PROFILES } from './identityTypes.ts'
@@ -102,7 +101,7 @@ const identityKernel = createSolidStoreKernel<IdentityStoreState>({
   }),
 })
 
-export const useIdentityStore: ZustandHook<IdentityStoreState> = createReactStoreHook(identityKernel)
+export const useIdentityStore: SolidStoreKernel<IdentityStoreState> = identityKernel
 
 installIdentityPluginDataPort({
   get: () => useIdentityStore.getState(),

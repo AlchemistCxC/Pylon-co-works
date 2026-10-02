@@ -1,5 +1,4 @@
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 
 export const DEFAULT_PRESENTATION_PROFILE_ID = 'builtin.presentation.terminal-classic'
 
@@ -80,4 +79,4 @@ attachSolidPersist(presentationKernel, {
   }),
 })
 
-export const usePresentationPreferenceStore: ZustandHook<PresentationPreferenceState> = createReactStoreHook(presentationKernel)
+export const usePresentationPreferenceStore: SolidStoreKernel<PresentationPreferenceState> = presentationKernel

@@ -10,8 +10,7 @@
  * #483 宠物链整体删除后该字段退役。envelope version 维持 4（v3 migrate 仍服务
  * 布局字段）；旧 `pylon-workspace-show-pet` key 成为无害孤儿，不再主动清理。
  */
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import { readLegacyLayoutSnapshot } from '../../infrastructure/persistence/legacyKeyMigration.ts'
 
 export const RIGHT_RAIL_MIN_WIDTH = 220
@@ -60,7 +59,7 @@ export function clampLeftRailWidth(width: number): number {
 }
 
 /** Application-level right rail state. It intentionally lives outside Sheet state. */
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useRightRailStore 即内核本体（直连，无 shim）。
 const rightRailKernel = createSolidStoreKernel<RightRailState>({
   // Preserve the v2 layout default so existing workspaces keep the rail open
   // after the v3 migration.
@@ -107,4 +106,4 @@ attachSolidPersist(rightRailKernel, {
   }),
 })
 
-export const useRightRailStore: ZustandHook<RightRailState> = createReactStoreHook(rightRailKernel)
+export const useRightRailStore: SolidStoreKernel<RightRailState> = rightRailKernel

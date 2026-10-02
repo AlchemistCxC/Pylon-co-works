@@ -1,5 +1,4 @@
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
 
 type TacticalArtwork = 'closer' | 'falling'
 interface TacticalSceneState {
@@ -12,7 +11,7 @@ interface TacticalSceneState {
 }
 
 /** Preferences belong only to this optional interface; never write global theme settings. */
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useTacticalSceneStore 即内核本体（直连，无 shim）。
 const kernel = createSolidStoreKernel<TacticalSceneState>({
   artwork: 'closer', opacity: 0.42, motion: true,
   setArtwork: artwork => kernel.setState({ artwork }),
@@ -34,4 +33,4 @@ attachSolidPersist(kernel, {
   },
 })
 
-export const useTacticalSceneStore: ZustandHook<TacticalSceneState> = createReactStoreHook(kernel)
+export const useTacticalSceneStore: SolidStoreKernel<TacticalSceneState> = kernel

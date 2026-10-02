@@ -10,8 +10,7 @@
  * 旧 key 一次性搬家（首读时）：pylon-settings-{density,preview-collapsed,collapse,pinned}
  * → pylon-settings-chrome（envelope v1），搬完即删旧 key。
  */
-import { attachSolidPersist, createSolidStoreKernel, type PersistStringStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, type PersistStringStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 
 export type SettingsDensity = 'basic' | 'standard' | 'all'
 const DENSITIES: readonly SettingsDensity[] = ['basic', 'standard', 'all']
@@ -187,7 +186,7 @@ attachSolidPersist(settingsChromeKernel, {
   }),
 })
 
-export const useSettingsChromeStore: ZustandHook<SettingsChromeState> = createReactStoreHook(settingsChromeKernel)
+export const useSettingsChromeStore: SolidStoreKernel<SettingsChromeState> = settingsChromeKernel
 
 // 首跑搬家：legacy 值存在 ⇒ 写穿新 envelope（persist 同步落盘），旧 key 已在上文删除。
 if (hasLegacySeed) {

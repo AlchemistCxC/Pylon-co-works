@@ -1,5 +1,4 @@
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, updateCcPlacementState } from '../cc/ccLayoutState.ts'
 import type { CcVisibilityTarget } from '../cc/ccLayoutState.ts'
@@ -252,6 +251,6 @@ attachSolidPersist(themeKernel, {
   reportLegacyProfilePayload(legacyArg)
 }})
 
-export const useStore: ZustandHook<ThemeState> = createReactStoreHook(themeKernel)
+export const useStore: SolidStoreKernel<ThemeState> = themeKernel
 
 

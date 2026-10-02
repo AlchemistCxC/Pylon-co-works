@@ -1,5 +1,4 @@
-import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import { createSheetState, sheetReducer } from './sheetState.ts'
 import {
   DEFAULT_SHEET_LAYOUT,
@@ -236,4 +235,4 @@ const workspaceKernel = createSolidStoreKernel<WorkspaceStoreState>({
   },
 })
 
-export const useWorkspaceStore: ZustandHook<WorkspaceStoreState> = createReactStoreHook(workspaceKernel)
+export const useWorkspaceStore: SolidStoreKernel<WorkspaceStoreState> = workspaceKernel
