@@ -1,0 +1,84 @@
+# Dev Record — #515 前端全量 Solid 化终局执行（ADR-0035）
+
+> 本记录承接一次性规格文档 `.agents/spec/515-frontend-solid-endgame-execution.md` 与迁移施工指南 `515-migration-guide.md`（均不入库），其目标、范围、方案与验收结论在此承接。
+
+## 元信息
+
+- issue：#515（`gh issue view 515`，ADR-0035 执行）
+- 分支：`kumo/prometheus`
+- 提交范围：`fc875a23..87e48eaf`（批0/0.5/1×4/2×2/3×3/7/7b/8×2/10；不含并行的 #463/#504/#519 各自 issue 提交）
+- 日期：2026-10-01 ～ 2026-10-02
+
+## 目标与范围
+
+ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆除、react 生态依赖退役；测试随组件迁移（断言不降级）；每批落地门禁保持绿。
+
+**不做什么**（执行中固化为避让域/过渡态）：`src/components/settings/{AgentCreateForm,AgentRuntimePanel,AgentCandidateList,AgentRuntimeCard,AgentSettingsSection,ZonePresetSection,ArgumentListEditor,InvocationPreview,SettingsSectionHeader,settingsSectionShared,settingsAgentActions,useAgentDetection,useAgentCandidateProvisioning,useAgentPanelFeedback}*`（[Codex] 在途，L.md 2026-10-01）及其 React 岛载具；Rust/wasm 出口；sheet 注册表 wire 契约；持久化格式。
+
+## 改动清单（区段粒度；合计 464 files，+20963/−16714）
+
+| 区段 | 大致范围 | 性质 |
+| --- | --- | --- |
+| store 内核（批0） | `src/infrastructure/state/solidStoreKernel.ts`（新增）、`src/host/reactStoreShim.ts`（新增，批8 迁至 infrastructure/state/）、16 个 zustand store 置换内核（对外签名不变） | 修改/新增 |
+| 组件面（批1~2，六批并行） | `components/{settings 叶子,sidebar,right-panel,根,ui,file,kernel}`、`sheets/{根,file,browser,docs,gateway,agent-workbench}` 全部 React 组件 → `.solid.tsx` 实体 + React 薄桥 | 修改/新增 |
+| 根翻转（批7） | `main.tsx`→`main.solid.tsx`、`App`/`KernelRoot`/`ApplicationMount`/`KernelRecoveryLayer`/`SheetLayout`/`SheetHost`/`SheetSidebarSlot`/`SheetErrorBoundary`/`PermissionDialog` → `.solid.tsx`（原件删除） | 修改/新增/删除 |
+| 插件契约（批3） | contextPanel/settings/titlebar/workspace/pluginApplication 五契约 `ComponentType` → solid `Component`（`renderKind` 字面量保留，语义登记于类型 JSDoc）；`IsolatedPluginSurface` 晋升 solid 实体 | 修改 |
+| 岛退役（批3/7） | ContextPanelPluginIsland/AgentSheetPagePluginIsland/WorkspaceTitlebarPluginIsland/FirstPartyContribution/CwdSettingsIsland/TemplateLibraryPreviewIsland(部分保留) 等岛与宿主直连改造 | 删除/修改 |
+| 桥清退（批7） | 72 个零消费者 React 薄桥/死代码级联删除（grep 全仓 + glob 断链扫描双重校验） | 删除 |
+| 依赖退役（批7b） | `package.json`：zustand、@radix-ui/*（10）、cmdk、motion 移除（零 import 核实）；react/react-dom/@testing-library/react 保留（避让域+岛载具） | 修改 |
+| 编译配置（批0.5/7） | vite/vitest `SOLID_WORKBENCH_FILES` 预扩全 src；tsconfig.json exclude 收敛 `src/**/*.solid.*`；全部 `.solid.tsx` 加 `@jsxImportSource solid-js` pragma；index.html 入口改名 | 修改 |
+| 门禁脚本（批7b/8） | check-context-panel-wiring 重写为 solid 实体接线守卫；product-contribution/css-var/layer/plugin-manifests/first-party-styles/solid-workbench-boundaries 六脚本被检对象与白名单随改名更新 | 修改 |
+| 测试迁移 | 108 个 React 测试 → `.solid.test.tsx`（harness solid 化 + 断言零缩减）；新增 `solidStoreKernel` 单测 11 用例 | 修改/新增/删除 |
+| 说明书（批10） | 架构参考/拓扑全图/模块维护地图/README：入口链、内核启动链、store 机制表述 | 修改 |
+
+## 方案要点
+
+1. **store 保签名置换**：`createSolidStoreKernel` 以 solid-js/store 为本体复刻 zustand vanilla 门面（getState/setState 浅合并/函数 updater 同引用跳过/replace 整体置换/subscribe/getInitialState/version 计数）；`attachSolidPersist` 复刻 persist 子集（`{state,version}` 信封逐字节兼容、同步 hydrate、migrate 后经 partialize 回写、corrupt 静默、写盘异常原样传播）；React 面 hook 形态经 `reactStoreShim`（useSyncExternalStore + 无 selector 版本浅拷贝）。消费者在批0 零改动。
+2. **组件迁移统一形态**：`.solid.tsx` 实体（照常 `props.x`）+ `createSolidMount`/`bridgedProps` 通用桥面工厂 + React 薄桥（`import.meta.glob` eager 缝——直连 import 会把 Solid JSX 拉进 React 类型图，不可编译）；岛承载不可直连的 React 子树（最终只剩避让域）。
+3. **keep-alive 保实例**：SheetLayout 槽位以 sheet.id 串为 `<For>` 键 + 内层访问器更新（React keyed-by-id 语义对齐，metadata patch 不重建）；replace 路径禁用 `reconcile`（就地合并会写穿共享引用——批8 定位的批0 产品回归，见「测试处置」）。
+4. **编译自描述**：全部 `.solid.tsx` 头部 `@jsxImportSource solid-js`，使 Solid 文件被 React 类型图静态引用时仍按 solid JSX 编译。
+5. **react 依赖残留的合法形态**：避让域 React 组件经 Settings.solid 内 React 岛（SolidMount）承载；`react`/`react-dom`/`@testing-library/react` 等 React 生态依赖因此保留（ADR 终态的最后一个收敛批待避让域合入）。
+
+## 验收标准与结果（issue #515 判据逐条）
+
+| 验收项 | 结果 |
+| --- | --- |
+| `src` 生产代码 react/zustand import 清零（避让域除外） | ✅ zustand 0；react 仅剩避让域 14 文件 + 岛载具 4 文件（SolidMount/reactStoreShim/Settings.solid/solidSheetSupport），逐项见 issue 评论 |
+| `solidStoreBridge.ts` 与 `SolidMount.tsx` 删除 | ⚠️ 未达成（过渡态）：`createZustandSignal` 为 48 个 solid 实体的在役 store 消费范式，「直连收敛 + 拆桥」登记为后续批（follow-up issue）；SolidMount 仍承载避让域岛 |
+| package.json 依赖退役 | ✅ zustand/radix/cmdk/motion 已移除；react 系保留理由=避让域 |
+| 门禁全绿（check:frontend + check:solid + lint） | ✅ `check:frontend:static` exit 0、`check:solid` 全链 exit 0、lint 0 诊断、全量 vitest 5168+ 通过 0 失败（两轮） |
+| 几何契约与 keep-alive 测试迁移后仍绿 | ✅ sidebarUnifiedModel/workspaceTitlebar css 契约零改动绿；keep-alive 三件断言逐一持平（含实例同一性 toBe） |
+| DOM 断言测试 solid-dom 等价存在 | ✅ React 测试 593→6（余=避让域/岛缝测试），solid 测试 55→160；改写登记在诸测试文件头（汇总见下） |
+| 子 agent 审查结论落在 PR | ✅ 两轴审查（standards PASS-with-notes / spec FAIL→修复环清偿）结论并入 PR 描述与本记录 |
+| 开发记录 + docs 同步 | ✅ 本记录；说明书 4 文件同步（07a10437 + 批8） |
+
+## 测试处置（改写登记汇总）
+
+- **规模**：React 测试 593 → 6；`.solid.test.tsx` 55 → 160。6 个保留 React 测试=避让域（AgentRuntimePanel.default、SettingsSectionHeader）+ 岛缝路径（SettingsPreview.solidMigration、SolidMount.test）。
+- **断言零缩减**为硬规则；典型改写点（逐文件明细在各文件头注释）：`render(<X/>)`→`render(() => <X/>)`、显式 `afterEach(cleanup)`、`rerender`→信号驱动/卸载重挂、`act` 移除（Solid 同步落盘）、`fireEvent.change`→`fireEvent.input`（受控 input）、`useId`→`createUniqueId`、store 夹具改 zustand 门面形态、vi.mock 工厂内 JSX 改 createElement（React 岛兼容）。
+- **登记在案的行为差异**（非缺陷，语义等价改造）：rendererMode 三处「同实例 update」改信号驱动（实体经 getter 链传导）；「从空态重入」三连 rerender 改卸载重挂。
+- **新增**：`solidStoreKernel.test.ts` 11 用例（同引用跳过/replace 置换与不写穿回归钉/persist 信封/corrupt 静默/no-op）。
+- **批8 修复环清偿的产品回归**：批0 的 replace 用 `reconcile` 会就地合并数组、写穿 `ZONE_PRESET_POOL` 等调用方共享引用（defaultPresets「铁律1」×3 必红；二分实证 809aeb92 界界两侧）→ 改 produce 逐键整换 + 缺席键删除，并补回归钉单测。
+
+## 证据
+
+- commits：`809aeb92`（批0）/ `9d2c2919`（批0.5）/ `f0a77629`·`58d0e12e`·`ec1c5ce8`·`89dfacff`·`9ff82b05`·`8f482b13`（批1~2）/ `347645f1`（批3/7/7b）/ `54d125e1`·`87e48eaf`（批8）/ `07a10437`（批10 docs）
+- 门禁（最终轮，commit 87e48eaf+）：`bun run check:frontend:static` exit 0；`bun run check:solid` 全链 exit 0；`bun run lint` 0 诊断；`bun run test` **Test Files 662（1 skipped）/ Tests 5168 passed + 1 skipped + 1 todo，0 失败**（多 worker 两轮 + 单 worker 一轮）
+- 子 agent 审查：standards 轴 PASS-with-notes（P1×2/P2×7 已清偿，内核单测已补）；spec 轴 FAIL→三硬指标中两项达成、「桥删除」按过渡态声明（见偏差）
+
+## 与 spec 的偏差
+
+1. **`solidStoreBridge` 未拆**（spec/ADR 终态判据之一）：48 个 solid 实体以 `createZustandSignal` 为 store 消费范式，直连收敛是一整批独立重构（涉及全部实体的读取面改写）。本轮按「过渡完成、收敛批另立」处理：follow-up issue 登记，ADR-0035 的判据语义在该批才完全兑现。
+2. **避让域 14 文件保持 React**（spec 已声明）：其岛载具（SolidMount/reactStoreShim/Settings.solid 岛段/solidSheetSupport.ReactIslandHost）随之保留，react 系依赖退役推迟到避让域收尾批。
+3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 写了「`'first-party-react'` → `'first-party-solid'`」——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，改名收益不抵扰动，登记为后续卫生批）。
+4. **glob 断链教训**（写进施工指南备查）：基于 basename 的消费者扫描看不见 `import.meta.glob` 字符串引用——TacticalCommandDeck/BrowserSidebar 三件套曾被误删后恢复/补齐。
+
+## 未解问题
+
+- 避让域收尾批：14 文件 Solid 化 + React 岛与载具退役 + react 系依赖（react/react-dom/@types/@testing-library/react/@vitejs/plugin-react/react-refresh/eslint-plugin-react-hooks/lucide-react）终局移除 + `renderKind` 改名 + solidStoreBridge 直连收敛拆桥（follow-up issue 承接）。
+- `settingsSectionShared.solid.tsx` 的 GlobalPresetSection 本地 Group 副本收拢；`MarkdownPreview.solid.tsx` 零消费死件（随 1-A1 复活或删除）。
+- dev-standards「前端全局可变状态」一节的 zustand 措辞收敛（§修订需仓库主批准，未动）。
+
+## 并行交集
+
+- 共享文件：`vitest.setup.ts`（console 白名单改名，多批追加）、`scripts/check-*.mts`（本批独占改动）、`src/components/LucideIcon.solid.tsx`（图标登记追加 + 去重）。`src-tauri/**`、`.agents/decisions/0036*`、`.agents/records/321*`、`src/cli/**` 在途期间全程未触碰。
