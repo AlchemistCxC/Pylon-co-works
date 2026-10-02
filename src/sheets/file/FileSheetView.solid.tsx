@@ -41,8 +41,8 @@ function createRegistrySignal<T>(store: { subscribe(listener: () => void): () =>
 }
 
 /**
- * SessionsActivity 的 Solid 直绘（原 first-party-react 贡献 builtinFileWorkbenchViews.
- * SessionsActivity 的域内克隆，DOM/类名逐项一致；插件面 Solid 化后由实体注册取代）。
+ * SessionsActivity 的 Solid 直绘（原第一方贡献 builtinFileWorkbenchViews.SessionsActivity
+ * 的域内克隆，DOM/类名逐项一致；插件面 Solid 化后由实体注册取代）。
  */
 function SessionsActivitySolid(props: { targetSessionId: string | null; sessions: readonly WorkspaceSession[]; onSelectTarget: (sessionId: string | null) => void }) {
   return (
@@ -82,12 +82,12 @@ function SessionsActivitySolid(props: { targetSessionId: string | null; sessions
  * 主区=恒定 tab 条 + FileViewHost 统一渲染（文件视图 / SCM diff / 空态）。
  * SCM 点击变更 → openDiffTab（diff-mode tab，同路径 file/diff 不互相覆盖）。
  *
- * #515 过渡期分派语义（插件面 builtinFileWorkbench 仍按 first-party-react 注册 React
- * 组件）：activity 内容按已登记的 builtin id 直连域内 Solid 实体（与 React 版渲染的
- * 是同一批实体的直传薄壳），view renderer 的 first-party-react 分支直连 FileViewHost
- * 实体（当前唯一第一方 renderer）；isolated-surface 走 Solid 版挂载面。未登记的第三方
- * first-party-react 贡献以空态提示占位（其出现属产品未决项，不猜）。React 版的
- * Suspense lazy 缝随 lazy 注册退役，不设加载态。
+ * #515 过渡期分派语义（插件面 builtinFileWorkbench 注册的第一方组件是 Solid 实体，
+ * 其 renderKind 字面量 #520 起为 first-party-solid）：activity 内容按已登记的 builtin id
+ * 直连域内 Solid 实体（与 React 版渲染的是同一批实体的直传薄壳），view renderer 的
+ * first-party-solid 分支直连 FileViewHost 实体（当前唯一第一方 renderer）；isolated-surface
+ * 走 Solid 版挂载面。未登记的第三方 first-party-solid 贡献以空态提示占位（其出现属
+ * 产品未决项，不猜）。React 版的 Suspense lazy 缝随 lazy 注册退役，不设加载态。
  */
 export default function FileSheetView(props: FileSheetViewProps) {
   const sessions = createZustandSignal(useIdentityStore, s => s.sessions)

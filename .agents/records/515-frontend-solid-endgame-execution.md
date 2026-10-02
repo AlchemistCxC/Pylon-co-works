@@ -70,7 +70,7 @@ ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆�
 
 1. **`solidStoreBridge` 未拆**（spec/ADR 终态判据之一）：48 个 solid 实体以 `createZustandSignal` 为 store 消费范式，直连收敛是一整批独立重构（涉及全部实体的读取面改写）。本轮按「过渡完成、收敛批另立」处理：follow-up issue 登记，ADR-0035 的判据语义在该批才完全兑现。
 2. **避让域 14 文件保持 React**（spec 已声明）：其岛载具（SolidMount/reactStoreShim/Settings.solid 岛段/solidSheetSupport.ReactIslandHost）随之保留，react 系依赖退役推迟到避让域收尾批。
-3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 写了「`'first-party-react'` → `'first-party-solid'`」——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，改名收益不抵扰动，登记为后续卫生批）。
+3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 原计划把 React 时代旧字面量改成 Solid 命名——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，当时判改名收益不抵扰动，登记为后续卫生批；**后记：该卫生批已由 #520 终局收尾批 W2 执行落地**）。
 4. **glob 断链教训**（写进施工指南备查）：基于 basename 的消费者扫描看不见 `import.meta.glob` 字符串引用——TacticalCommandDeck/BrowserSidebar 三件套曾被误删后恢复/补齐。
 
 ## 审查循环（二轮，2026-10-02）

@@ -41,7 +41,7 @@ export function createBuiltinPluginManagerPlugin(): BuiltinPluginDefinition {
         id: 'pylon-plugin-manager',
         label: '插件管理器',
         description: '安装/启停/重载/卸载、内置组件、启动故障、契约诊断与贡献面透视。',
-        renderKind: 'first-party-react',
+        renderKind: 'first-party-solid',
         component: ManagerSettingsPage,
       } as const)
     },

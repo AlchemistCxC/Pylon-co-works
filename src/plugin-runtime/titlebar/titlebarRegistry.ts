@@ -38,7 +38,7 @@ function validateContribution(contribution: TitlebarContribution): TitlebarContr
   } else if (renderKind === 'command') {
     throw new Error(`renderKind='command' 只用于 slot='app-menu'：${contribution.id}`)
   }
-  if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
+  if (contribution.renderKind === 'first-party-solid' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
     throw new Error(`Titlebar first-party component 非法：${contribution.id}`)
   }
   if (contribution.renderKind === 'isolated-surface' && !contribution.surfaceId.trim()) {

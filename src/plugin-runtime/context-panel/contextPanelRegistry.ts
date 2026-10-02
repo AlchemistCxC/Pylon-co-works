@@ -6,7 +6,7 @@ function validateContribution(contribution: ContextPanelContribution): ContextPa
   if (!contribution.id || contribution.id !== contribution.id.trim()) throw new Error('Context panel contribution id 非法')
   if (contribution.scope !== 'global' && !contribution.workspaceKind?.trim()) throw new Error(`Context panel workspaceKind 不能为空：${contribution.id}`)
   if (!contribution.label.trim()) throw new Error(`Context panel label 不能为空：${contribution.id}`)
-  if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
+  if (contribution.renderKind === 'first-party-solid' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
     throw new Error(`Context panel first-party component 非法：${contribution.id}`)
   }
   if (contribution.renderKind === 'isolated-surface' && !contribution.surfaceId.trim()) {

@@ -6,7 +6,7 @@ import type { PluginManagementApi } from '../../../../sdk/index.ts'
 import { getPluginManagerRuntimeBridge, type PluginManagerRuntimeBridge } from './runtimeBridge.ts'
 
 /**
- * P53 D2 · 管理器设置页薄壳（renderKind 'first-party-react'；#515 贡献面翻转后组件值
+ * P53 D2 · 管理器设置页薄壳（renderKind 'first-party-solid'；#515 贡献面翻转后组件值
  * 为 Solid 实体，本文件为实体，原 React 版同批退役）。
  *
  * 数据一律经 activation context 的 `management` API（runtimeBridge 由包内

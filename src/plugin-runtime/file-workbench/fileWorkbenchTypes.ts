@@ -103,7 +103,7 @@ interface FileActivityBase {
 }
 
 export type FileActivityContribution = FileActivityBase & (
-  | { renderKind: 'first-party-react'; component: unknown }
+  | { renderKind: 'first-party-solid'; component: unknown }
   | { renderKind: 'isolated-surface'; surfaceId: string }
 )
 
@@ -130,7 +130,7 @@ interface FileViewRendererBase {
 }
 
 export type FileViewRendererDefinition = FileViewRendererBase & (
-  | { renderKind: 'first-party-react'; component: unknown }
+  | { renderKind: 'first-party-solid'; component: unknown }
   | { renderKind: 'isolated-surface'; surfaceId: string }
 )
 

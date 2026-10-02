@@ -201,7 +201,7 @@
 | 重绘搜索会话 | 从 36px 描边框改为内联行（图标 + 无框输入，hover/focus 变色）；旧 `.search-input` 规则删除 | 输入框 `border 0` / `background transparent`，行高 24 |
 | 去掉工作区右侧会话数量 | 删 `.cwd-group-count` 与交叉淡出；右侧只剩 hover 显形的动作 | 计数节点 **0 个**；未显形动作 `visibility:hidden` + `pointer-events:none` |
 
-**说明书同步**：`Pylon-插件系统说明书-开发者版.md` §6.8 补全为完整契约——注册字段表（必填/默认/语义）、注册期 fail-closed 校验清单、点击方案三选一表、`first-party-react` props 表、`isolated-surface` 的 `host:input` wire 契约与可发事件表（含 `host:create-chat-session` → `host:create-loose-session` 的更名）、长按拖拽与显隐偏好（独立键）；§1 的 `api` 取值与图标键清单（补 `messages` / `clock` / `plus`，并说明模块图标与 launch 共用同一映射）同步。
+**说明书同步**：`Pylon-插件系统说明书-开发者版.md` §6.8 补全为完整契约——注册字段表（必填/默认/语义）、注册期 fail-closed 校验清单、点击方案三选一表、`first-party-solid` props 表、`isolated-surface` 的 `host:input` wire 契约与可发事件表（含 `host:create-chat-session` → `host:create-loose-session` 的更名）、长按拖拽与显隐偏好（独立键）；§1 的 `api` 取值与图标键清单（补 `messages` / `clock` / `plus`，并说明模块图标与 launch 共用同一映射）同步。
 
 **门禁**：`tsc -b` 无输出；`eslint src/` 0 error；全量 **600 文件 / 4353 用例通过**；`check-doc-links` 通过；`check:maintenance` exit 0。
 

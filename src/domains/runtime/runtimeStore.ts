@@ -46,9 +46,8 @@ interface RuntimeStoreState {
   agentStatuses: Record<string, AgentStatus>
   /**
    * OWNER-04：每会话绑定建立时的 agent generation 快照（load_persisted_session /
-   * new_session 成功时由 agentWorkbenchLifecycle 记录）。重连后 agentStatus.generation
-   * 递增，bindingState.refineBindingGeneration 依此判定 binding_stale——
-   * 旧 binding 必须 Invalidated，不能继续发送旧 remote id（§5.9 rule 4）。
+   * new_session 成功时由 agentWorkbenchLifecycle 记录）；重连后 agentStatus.generation
+   * 递增，新值必须重新记录后发送链路才继续用旧 remote id（§5.9 rule 4）。
    */
   bindingGenerations: Record<string, number | undefined>
   /** Kernel continuity probe 的瞬态健康快照；不持久化、不替代 Session metadata。 */

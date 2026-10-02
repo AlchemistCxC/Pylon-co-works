@@ -57,7 +57,6 @@ const FIXTURE_PATHS: Readonly<Record<string, string>> = {
   'periNormalizer.test.ts': 'src/domains/workbench/normalizers/__tests__/periNormalizer.test.ts',
   'searchLinkClassification.test.ts': 'src/domains/workbench/normalizers/__tests__/searchLinkClassification.test.ts',
   'secretInteractionProjection.test.ts': 'src/domains/workbench/__tests__/secretInteractionProjection.test.ts',
-  'terminalSnapshot.test.ts': 'src/domains/workbench/__tests__/terminalSnapshot.test.ts',
   'usageBudgetProjection.test.ts': 'src/domains/workbench/__tests__/usageBudgetProjection.test.ts',
   'workbenchProjector.test.ts': 'src/domains/workbench/__tests__/workbenchProjector.test.ts',
   'workbenchProjectorLifecycle.test.ts': 'src/domains/workbench/__tests__/workbenchProjectorLifecycle.test.ts',

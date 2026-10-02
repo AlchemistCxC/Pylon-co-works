@@ -8,7 +8,7 @@ import { selectContextPanels, resolveContextPanelDefault } from '../contextPanel
 const Panel = () => null
 
 function contribution(id: string, workspaceKind: string, order: number) {
-  return { id, workspaceKind, order, label: id, renderKind: 'first-party-react' as const, component: Panel }
+  return { id, workspaceKind, order, label: id, renderKind: 'first-party-solid' as const, component: Panel }
 }
 
 describe('ContextPanelRegistry', () => {

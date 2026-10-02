@@ -5,7 +5,7 @@ import { normalizeRendererSettingsSchema } from '../renderers/rendererSettingsTy
 export function validatePluginSettingsPage(page: PluginSettingsPageContribution): PluginSettingsPageContribution {
   if (!page.id || page.id !== page.id.trim()) throw new Error('Plugin settings page id 非法')
   if (!page.label?.trim()) throw new Error(`Plugin settings page label 不能为空：${page.id}`)
-  if (page.renderKind === 'first-party-react' && typeof page.component !== 'function' && typeof page.component !== 'object') {
+  if (page.renderKind === 'first-party-solid' && typeof page.component !== 'function' && typeof page.component !== 'object') {
     throw new Error(`Plugin settings page component 非法：${page.id}`)
   }
   if (page.renderKind === 'isolated-surface' && !page.surfaceId?.trim()) {

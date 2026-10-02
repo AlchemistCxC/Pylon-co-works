@@ -67,7 +67,7 @@ describe('ContextPanelHost', () => {
     const HealthyPanel = () => <div>热替换后的健康面板</div>
     registrations.push(registry.register(oldIdentity, {
       id: 'hot-panel', workspaceKind: sheet.kind, label: '热替换', order: 100,
-      renderKind: 'first-party-react', component: BrokenPanel,
+      renderKind: 'first-party-solid', component: BrokenPanel,
     }))
     render(() => <ContextPanelHost sheet={sheet} ctx={ctx} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('此插件面板暂时不可用')
@@ -75,7 +75,7 @@ describe('ContextPanelHost', () => {
     const transaction = registry.beginShadowTransaction(nextIdentity, oldIdentity.key)
     transaction.register({
       id: 'hot-panel', workspaceKind: sheet.kind, label: '热替换', order: 100,
-      renderKind: 'first-party-react', component: HealthyPanel,
+      renderKind: 'first-party-solid', component: HealthyPanel,
     }, { contributionId: 'hot-panel', priority: 100 })
     registrations.push(...transaction.commit())
 
@@ -87,7 +87,7 @@ describe('ContextPanelHost', () => {
     const identity = createPluginIdentity('test.context.width', 'run-1')
     registrations.push(registry.register(identity, {
       id: 'width-panel', workspaceKind: sheet.kind, label: '宽度', order: 100,
-      renderKind: 'first-party-react', component: panelStub('宽度内容'),
+      renderKind: 'first-party-solid', component: panelStub('宽度内容'),
     }))
     useRightRailStore.getState().setWidth(347)
 
@@ -160,7 +160,7 @@ describe('ContextPanelHost', () => {
       workspaceKind: sheet.kind,
       label: '故障',
       order: 100,
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: BrokenPanel,
     }))
     registrations.push(registry.register(identity, {
@@ -168,7 +168,7 @@ describe('ContextPanelHost', () => {
       workspaceKind: sheet.kind,
       label: '正常',
       order: 200,
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: HealthyPanel,
     }))
 
@@ -188,7 +188,7 @@ describe('ContextPanelHost', () => {
       workspaceKind: sheet.kind,
       label: '本 Sheet 面板',
       order: 100,
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: panelStub('本 Sheet 面板内容'),
     }))
     registrations.push(registry.register(identity, {
@@ -196,7 +196,7 @@ describe('ContextPanelHost', () => {
       workspaceKind: 'file',
       label: 'File 面板',
       order: 200,
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: panelStub('File 面板内容'),
     }))
 
@@ -225,7 +225,7 @@ describe('ContextPanelHost', () => {
       label: '全局面板',
       order: 50,
       scope: 'global',
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: panelStub('全局面板内容'),
     }))
     registrations.push(registry.register(identity, {
@@ -233,7 +233,7 @@ describe('ContextPanelHost', () => {
       workspaceKind: sheet.kind,
       label: '亲和面板',
       order: 900,
-      renderKind: 'first-party-react',
+      renderKind: 'first-party-solid',
       component: panelStub('亲和面板内容'),
     }))
 

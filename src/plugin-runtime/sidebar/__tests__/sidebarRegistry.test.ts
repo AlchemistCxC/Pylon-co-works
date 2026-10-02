@@ -8,7 +8,7 @@ import type { AgentSidebarContribution } from '../sidebarTypes.ts'
 const Panel = () => null
 
 function contribution(id: string, extra: Partial<AgentSidebarContribution> = {}): AgentSidebarContribution {
-  return { id, label: id, renderKind: 'first-party-react', component: Panel, ...extra } as AgentSidebarContribution
+  return { id, label: id, renderKind: 'first-party-solid', component: Panel, ...extra } as AgentSidebarContribution
 }
 
 describe('AgentSidebarRegistry', () => {
