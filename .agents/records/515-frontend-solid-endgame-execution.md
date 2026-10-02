@@ -73,6 +73,24 @@ ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆�
 3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 写了「`'first-party-react'` → `'first-party-solid'`」——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，改名收益不抵扰动，登记为后续卫生批）。
 4. **glob 断链教训**（写进施工指南备查）：基于 basename 的消费者扫描看不见 `import.meta.glob` 字符串引用——TacticalCommandDeck/BrowserSidebar 三件套曾被误删后恢复/补齐。
 
+## 审查循环（二轮，2026-10-02）
+
+按「并行子 agent 审查 → 并行子 agent 改善」循环执行两轮（每波 ≤4 agent）：
+
+**第一轮**（审查 4 轴：响应性/行为契约/性能/死代码 → 改善 4 批）：
+- [P0] `Settings.solid` identity selector（`s => s`）在内核恒定根引用下信号永不传播——主题受控值/ccEditMode 冻结（性能轴实测证实机制）。修法 = 逐通知浅快照 + `shallowEqual` memo。
+- [P1] `AgentRendererSuiteWorkbench` selector 读 `props.modeId`（切界面模式后套件偏好解析滞旧）；`ToolConnector` 丢弃 `onMembershipChange` 退订函数（长会话监听泄漏）；`FileTabView` selector 读组件 memo（桥头注定时炸弹形态复现）。
+- 清理：死 barrel ×16、`lazyMergeView`+`@codemirror/merge`、`lucide-react`/`react-refresh` 退役；GlobalPresetSection 三副本收拢；`sheetRegistry.tsx→.ts` 合并；`SheetContext.ccEditMode` 死契约字段删除（+20 夹具同步）。
+- flake 根因修正：settingsCcNavElements 滚动断言的「点击→navigate→岛异步重挂窗口内 rAF 抢跑」单发竞态，改有界重试点击。
+
+**第二轮**（审查 4 轴：修复验证/断言强度/内核对抗推演/跨框架边界 → 改善 3 批，限额窗口内由主会话直接落地）：
+- 内核三处无意走样对齐 zustand：[P1] writeBack 异常中止 notify 循环；[P2] migrate thenable 覆盖磁盘信封（数据不可逆丢失）；[P2] 版本错位无 migrate 静默混入；[P2] 同引用守卫补对象形态。内核单测 11→15（含「磁盘信封保留原样」数据安全钉）。
+- 测试债：modalOverlay 补回「重复声明不产生重复槽位」用例（初版迁移漏失）；MarkdownPreview.solid 显式死件登记（25 断言契约无门禁，复活须连测试）；23 个 solid 测试批量补 cleanup 网。
+- P3：stderrSamples 证据锚改符号锚、TaskTree/宿主过期注释、App.solid shallowEqual 去双实现、SheetHost/ApplicationMount 补 Suspense、死白名单条目清理。
+- 边界审查确认：混合态（Solid 主体 + 避让域岛）六项核验通过，7 条 P3 全部登记处理。
+
+**审查方法学发现**（供后续批次复用）：basename 消费者扫描必须同时覆盖 side-effect import 与 glob 属性访问（曾差点误判两个在役 wiring 文件、漏判 7 个挂载工厂导出）；「断言零缩减」审查需对 105 对迁移文件做 expect 行 diff 而非抽样。
+
 ## 未解问题
 
 - 避让域收尾批：14 文件 Solid 化 + React 岛与载具退役 + react 系依赖（react/react-dom/@types/@testing-library/react/@vitejs/plugin-react/react-refresh/eslint-plugin-react-hooks/lucide-react）终局移除 + `renderKind` 改名 + solidStoreBridge 直连收敛拆桥（follow-up issue 承接）。
