@@ -89,8 +89,9 @@ const EXPECTED_CONSOLE_ERROR_FILES: readonly string[] = [
   'src/renderers/solid-workbench/__tests__/mountSolidWorkbench.solid.test.tsx',
   'src/plugin-runtime/renderers/__tests__/workbenchHostPort.errorCenter.test.ts',
   'src/plugin-runtime/renderers/__tests__/workbenchHostPort.test.ts',
-  'src/sheets/file/__tests__/FileTabView.readonly.test.tsx',
-  'src/sheets/file/__tests__/gitPanelAcceptance.test.tsx',
+  // #515：两文件随实体迁移改名 .solid.test.tsx（批 1-D2a 漏跟，同一错误路径契约，白名单跟随）。
+  'src/sheets/file/__tests__/FileTabView.readonly.solid.test.tsx',
+  'src/sheets/file/__tests__/gitPanelAcceptance.solid.test.tsx',
   // #515：gateway 两测试随实体迁移改名 .solid.test.tsx（同一错误路径契约，白名单跟随）。
   'src/sheets/gateway/__tests__/gatewayRouteSave.integration.solid.test.tsx',
   'src/sheets/gateway/__tests__/gatewaySheetView.ui.solid.test.tsx',
