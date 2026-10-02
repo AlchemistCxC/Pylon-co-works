@@ -30,7 +30,6 @@ const ctx: SheetContext = {
   openSessionSettings: () => {},
   sidebarCollapsed: false,
   rightInset: 0,
-  ccEditMode: false,
   sessionSource: () => null,
   sessionBySource: () => undefined,
 }

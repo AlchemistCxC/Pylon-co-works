@@ -1,10 +1,10 @@
 /** @jsxImportSource solid-js */
-import { createMemo, createSignal, For, Show, type JSX } from 'solid-js'
+import { createMemo, createSignal, For, Show } from 'solid-js'
 import { createSolidMount } from '../../host/solidBridge.solid'
 import { createZustandSignal } from '../../host/solidStoreBridge.ts'
 import { useStore } from '../../domains/theme/themeStore'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
-import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
+import { resolveRuntimeErrors } from '../../app/runtimeError'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../../application/transactions/applyGlobalPreset.ts'
 import { normalizeCustomPresetId } from '../../domains/theme/customPresets'
 import type { PresetApplyResult } from '../../domains/theme/presetBundle.ts'
@@ -14,41 +14,7 @@ import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStor
 import type { ZoneName } from '../../domains/theme/themeFieldDefs'
 import { ZoneGroupFields, type RenderCtx } from './themeFieldRenderer.solid.tsx'
 import InterfaceModePicker from './InterfaceModePicker.solid.tsx'
-
-/**
- * Settings 域内错误上报/解除的统一 key 口径——与 settingsSectionShared.tsx 的纯函数
- * 逐字一致（该 .ts(x) 是 React 面文件且 eager-glob 自身实体，solid 实体不做静态
- * 回向引用，此处按同源口径本地声明；漂移会被 Settings.customPreset 契约测试钉住）。
- */
-function reportSettingsError(action: string, error: unknown, agentId?: string): ReturnType<typeof reportRuntimeError> {
-  return reportRuntimeError(action, error, agentId, {
-    key: `settings:${action}:${agentId ?? 'app'}`,
-    scope: agentId ? { kind: 'agent', id: agentId } : { kind: 'app', id: 'settings' },
-    source: 'settings',
-  })
-}
-
-function resolveSettingsError(action: string, agentId?: string): void {
-  resolveRuntimeErrors({
-    key: `settings:${action}:${agentId ?? 'app'}`,
-  })
-}
-
-/** 折叠 Group——settingsSectionShared.solid.tsx 内私有 Group 的同构本地副本
- * （该文件属 settings 在途批，不为本批扩其导出面；DOM/aria 逐字一致）。
- * Settings.solid 实体复用本副本（模板库 / 布局编辑 Group），避免养第三份。 */
-export function Group(props: { title: string; children: JSX.Element; defaultOpen?: boolean }) {
-  const [open, setOpen] = createSignal(props.defaultOpen ?? true)
-  return (
-    <div class="set-group">
-      <button type="button" class="set-group-title" aria-expanded={open()} onClick={() => setOpen(!open())}>
-        <span class="set-group-arrow">{open() ? '▾' : '▸'}</span>
-        {props.title}
-      </button>
-      <Show when={open()}>{props.children}</Show>
-    </div>
-  )
-}
+import { Group, reportSettingsError, resolveSettingsError } from './settingsSectionShared.solid.tsx'
 
 export interface GlobalPresetSectionProps {
   isSearching: boolean

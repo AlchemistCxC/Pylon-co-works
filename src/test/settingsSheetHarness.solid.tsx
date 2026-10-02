@@ -39,7 +39,6 @@ export function createSheetContext(overrides: Partial<SheetContext> = {}): Sheet
     openSessionSettings: vi.fn(),
     sidebarCollapsed: false,
     rightInset: 0,
-    ccEditMode: false,
     sessionSource: vi.fn(() => null),
     sessionBySource: vi.fn(() => undefined),
     ...overrides,

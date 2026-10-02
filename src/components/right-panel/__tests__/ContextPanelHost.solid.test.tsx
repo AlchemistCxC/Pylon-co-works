@@ -42,7 +42,6 @@ const ctx: SheetContext = {
   openSessionSettings: vi.fn(),
   sidebarCollapsed: false,
   rightInset: 0,
-  ccEditMode: false,
   sessionSource: vi.fn(() => null),
   sessionBySource: vi.fn(() => undefined),
 }

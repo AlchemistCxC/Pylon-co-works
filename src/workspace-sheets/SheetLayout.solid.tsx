@@ -6,7 +6,7 @@ import { useStore } from '../domains/theme/themeStore'
 import { useHydrationStore } from '../app/bootstrap/hydrationState'
 import { resolveSessionSource } from '../domains/chat/sessionCommandState'
 import { belongsToProfile } from '../domains/chat/sessionProfile'
-import { resolveSheetRender } from './sheetRegistry.tsx'
+import { resolveSheetRender } from './sheetRegistry.ts'
 import { activateAgentSheet } from './activateAgentSheet'
 import SheetHost from './SheetHost.solid.tsx'
 import SheetSidebarSlot from './SheetSidebarSlot.solid.tsx'
@@ -57,7 +57,6 @@ function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): 
     // 右栏由应用级 RightRailHost 作为 .layout 的 flex sibling 占位，主区宽度已天然扣除；
     // renderer 再消费 rightInset 会二次挤压内容，并在折叠切换时产生异常跳宽。
     rightInset: 0,
-    ccEditMode: useStore.getState().ccEditMode,
     // active 主区的 context；非 active 的 keep-alive Sheet 会在下方显式覆盖为 false。
     isActive: true,
     sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
@@ -66,9 +65,8 @@ function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): 
 }
 
 export default function SheetLayout(props: SheetLayoutProps) {
-  // registry 订阅：resolveSheetRender 读注册表，订阅保证热换插件后相关 memo 失效（App 同源形态）。
-  // 快照值本身不直接参与 JSX，仅作失效信号消费。
-  createRegistrySignal({ subscribe: subscribeWorkspaceRegistry }, getWorkspaceRegistrySnapshot)
+  // registry 订阅不设在本层：SheetHost/SheetSidebarSlot/EmptyLayout 各自自持
+  // createRegistrySignal 订阅，顶层订阅是 React 期驱动重渲染的遗留，已删。
   const sheets = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.sheets)
   const activeSheetId = createZustandSignal(useWorkspaceStore, s => s.workspaceSheets.activeSheetId)
   const activeSheet = createMemo(() => sheets().find(sheet => sheet.id === activeSheetId()))

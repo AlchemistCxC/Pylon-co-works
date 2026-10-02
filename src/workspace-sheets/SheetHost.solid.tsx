@@ -1,7 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createMemo, Show, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { resolveSheetRender } from './sheetRegistry.tsx'
+import { resolveSheetRender } from './sheetRegistry.ts'
 import SheetErrorBoundary from './SheetErrorBoundary.solid.tsx'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'

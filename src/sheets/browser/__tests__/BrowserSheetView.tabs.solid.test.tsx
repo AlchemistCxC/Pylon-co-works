@@ -32,7 +32,7 @@ const sheet: SheetRecord = { id: 'browser-tabs', kind: 'browser', title: 'Browse
 const ctx: SheetContext = {
   openSheet: vi.fn(), focusSheet: vi.fn(), closeSheet: vi.fn(), activeSession: null,
   selectSession: vi.fn(), openProfileEdit: vi.fn(), openSessionSettings: vi.fn(),
-  sidebarCollapsed: false, rightInset: 0, ccEditMode: false,
+  sidebarCollapsed: false, rightInset: 0,
   sessionSource: () => null, sessionBySource: () => undefined,
 }
 

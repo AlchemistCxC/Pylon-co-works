@@ -3,7 +3,7 @@ import { createMemo, Show } from 'solid-js'
 import { useStore } from '../domains/theme/themeStore'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
 import type { SheetContext, SheetRecord } from './sheetTypes'
-import { resolveSheetRender } from './sheetRegistry.tsx'
+import { resolveSheetRender } from './sheetRegistry.ts'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
 import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
 

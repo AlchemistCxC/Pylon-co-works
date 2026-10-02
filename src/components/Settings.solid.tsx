@@ -4,6 +4,7 @@ import { createElement, type ComponentType, type ReactElement, type ReactNode } 
 import SolidMount from '../host/SolidMount'
 import { createSolidMount } from '../host/solidBridge.solid'
 import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { shallowEqual } from '../infrastructure/state/reactStoreShim'
 import { createRegistrySignal, ReactIslandHost } from '../sheets/solidSheetSupport.solid.tsx'
 import { useStore } from '../domains/theme/themeStore'
 import { useCustomPresetStore } from '../domains/theme/customPresetStore'
@@ -31,7 +32,7 @@ import { resolveInterfaceModeSuite } from '../application/transactions/activateI
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
 import { projectSettingsContributionCatalog } from './settings/settingsContributionCatalog.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_SECTION_LABELS, sectionZone, SETTINGS_DOMAINS, type SettingsDomainId, type SettingsSectionId, type SettingsSearchItem } from './settings/settingsDomains'
+import { HOSTED_PLUGIN_MANAGER_PAGE_ID, SETTINGS_SECTION_LABELS, sectionZone, SETTINGS_DOMAINS, type SettingsDomainId, type SettingsSectionId, type SettingsSearchItem } from './settings/settingsDomains'
 import type { WorkspaceViewProps } from '../plugin-runtime/workspaces/workspaceTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
@@ -211,7 +212,13 @@ export default function Settings(props: SettingsProps) {
 
   // 只订阅主题字段 + ccEditMode：后台生成时的 live 状态（token/生成源）不再穿透整棵设置树。
   // pickCustomPresetTheme 白名单覆盖 Settings 全部 t.xxx 访问（已核对），ccEditMode 单独补。
-  const themeState = createZustandSignal(useStore, s => s)
+  // 批0 后 kernel getState() 引用跨写入恒定（produce 就地改写同一裸树），identity selector
+  // 的信号按 === 判等永不传播。故 selector 逐通知产浅快照（恢复 zustand 时代「每次写入
+  // 都换根引用」的观察语义，同 reactStoreShim 无 selector 分支），外层 equals memo 以
+  // shallowEqual 滤掉无值变化的写入（App.solid.tsx themeBaseline 同款），预设应用 /
+  // 重置 / 切 profile / ccEditMode 写入即时反映到 t 的受控值。
+  const rawTheme = createZustandSignal(useStore, s => ({ ...s }))
+  const themeState = createMemo(() => rawTheme(), undefined, { equals: shallowEqual })
   const t = createMemo(() => ({ ...pickCustomPresetTheme(themeState()), ccEditMode: themeState().ccEditMode } as ThemeSettings & { ccEditMode: boolean }))
 
   // 刀6（#206）：区域预设池自定义条目的存入口 + Q8 落盘清理（每次打开设置过一遍，
@@ -460,7 +467,7 @@ export default function Settings(props: SettingsProps) {
       case 'pluginManager': {
         // P53：插件管理默认进入管理器插件提供的页面（贡献存在时）；
         // 包未激活/未授权时贡献不存在，回落宿主基础页（承载能力授权卡）。
-        const managerPage = pluginSettingsPages().find(entry => entry.contributionId === 'pylon-plugin-manager')
+        const managerPage = pluginSettingsPages().find(entry => entry.contributionId === HOSTED_PLUGIN_MANAGER_PAGE_ID)
         return managerPage
           ? <PluginSettingsPageHostSolid pageId={managerPage.contributionId} />
           : <PluginManagerSolid />

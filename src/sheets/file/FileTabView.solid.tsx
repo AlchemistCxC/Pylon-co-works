@@ -99,13 +99,18 @@ export default function FileTabView(props: FileTabViewProps) {
   // 0-A3 写冲突锁簿记：冷却窗口内的 touchVersion 时间戳 + 解锁定时器
   let touchTimes: number[] = []
   let unlockTimer: number | null = null
-  // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
-  const touchVersion = createZustandSignal(useWorkspaceStore, s => {
+  // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉。
+  // ⚠️ solidStoreBridge 约定（事故原始形态的清偿）：selector 只读 store 切片；
+  // target/path/context 是组件响应式状态，按 ViewsPanel 范本在组件侧 createMemo
+  // 并读——否则切文件后版本值持旧，直到下一次 store 通知。
+  const touchVersions = createZustandSignal(useWorkspaceStore, s => s.touchVersions)
+  const touchVersion = createMemo(() => {
+    const versions = touchVersions()
     const currentTarget = target()
     const currentPath = path()
     const currentContext = context()
     return (currentTarget && currentPath && currentContext)
-      ? s.touchVersions[touchedFileVersionKey(currentContext, currentPath)]
+      ? versions[touchedFileVersionKey(currentContext, currentPath)]
       : undefined
   })
 

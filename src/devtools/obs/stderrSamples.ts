@@ -3,7 +3,7 @@
  *
  * 目的：现场判定"用户所说监控窗口的具体窗口 + 真实 stderr 样本"，证据链第一手核验：
  *   - 窗口识别：单主窗口应用（src-tauri 无生产多窗口，WebviewWindowBuilder 仅测试）；唯一渲染
- *     运行日志的表面 = Runtime sheet（sheetRegistry.ts:10 'runtime' / sheetRegistry.tsx:54
+ *     运行日志的表面 = Runtime sheet（sheetRegistry.ts:10 'runtime' / sheetRegistry.ts:54
  *     RuntimeSheetView）。用户所报"监控窗口"即 Runtime sheet。
  *   - stderr 双重写（历史，LOG-01 已消除）：每条 agent stderr 行曾以 A/B 两型各入 hub 一次——
  *       A 型（真实文本）：tracing::error!("{agent} stderr: {safe}") 被 RuntimeLogLayer 捕获
@@ -87,7 +87,7 @@ export const RUNTIME_WINDOW_EVIDENCE = {
   evidence: [
     'src/workspace-sheets/sheetRegistry.ts:10',
     'src/workspace-sheets/sheetRegistry.ts:40',
-    'src/workspace-sheets/sheetRegistry.tsx:54',
+    'src/workspace-sheets/sheetRegistry.ts:54',
   ],
 } as const
 

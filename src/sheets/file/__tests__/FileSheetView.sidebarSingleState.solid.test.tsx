@@ -58,7 +58,6 @@ function makeCtx(sidebarCollapsed: boolean): SheetContext {
     openSessionSettings: vi.fn(),
     sidebarCollapsed,
     rightInset: 0,
-    ccEditMode: false,
     sessionSource: () => 'ws-a',
     sessionBySource: () => undefined,
   }

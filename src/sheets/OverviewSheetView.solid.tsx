@@ -68,6 +68,8 @@ const OVERVIEW_ICONS: Readonly<Record<string, IconNode>> = {
 }
 
 function OverviewIcon(props: { name: string; size?: number; class?: string }) {
+  // Invariance 豁免（显式）：props.name 挂载后不变——调用点均随 For 行重挂，name 变化即换
+  // 实例；kebab/iconNode 顶层捕获（非响应式读）是有意为之，不按响应式访问器改写。
   const kebab = props.name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
   const iconNode: IconNode = OVERVIEW_ICONS[props.name] ?? Sparkles
 

@@ -17,7 +17,7 @@ vi.mock('../../../renderers/solid-workbench/loadSolidWorkbench.ts', () => ({
 const ctx: SheetContext = {
   openSheet: () => null, focusSheet: () => {}, closeSheet: () => {},
   activeSession: null, selectSession: () => {}, openProfileEdit: () => {}, openSessionSettings: () => {},
-  sidebarCollapsed: false, rightInset: 0, ccEditMode: false,
+  sidebarCollapsed: false, rightInset: 0,
   sessionSource: () => null, sessionBySource: () => undefined,
 }
 const sheet: SheetRecord = {

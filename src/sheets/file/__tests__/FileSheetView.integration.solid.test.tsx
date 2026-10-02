@@ -46,7 +46,6 @@ const ctx: SheetContext = {
   openSessionSettings: vi.fn(),
   sidebarCollapsed: false,
   rightInset: 0,
-  ccEditMode: false,
   sessionSource: () => 'ws-a',
   sessionBySource: source => useIdentityStore.getState().sessions.find(session => session.source === source),
 }

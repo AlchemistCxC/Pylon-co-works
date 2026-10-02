@@ -38,7 +38,6 @@ function createContext(sidebarCollapsed: boolean): SheetContext {
     openSessionSettings: () => {},
     sidebarCollapsed,
     rightInset: 0,
-    ccEditMode: false,
     sessionSource: () => null,
     sessionBySource: () => undefined,
   }

@@ -133,7 +133,6 @@ describe('会话交互保留', () => {
       openSessionSettings: () => {},
       sidebarCollapsed: false,
       rightInset: 0,
-      ccEditMode: false,
       sessionSource: () => null,
       sessionBySource: () => undefined,
     }

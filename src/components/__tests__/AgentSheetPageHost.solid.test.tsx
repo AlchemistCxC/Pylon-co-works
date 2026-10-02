@@ -27,7 +27,6 @@ const ctx = {
   openSessionSettings: () => {},
   sidebarCollapsed: false,
   rightInset: 0,
-  ccEditMode: false,
   sessionSource: () => null,
   sessionBySource: () => undefined,
 } as SheetContext

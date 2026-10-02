@@ -42,7 +42,7 @@ const sheet: SheetRecord = { id: 'docs-1', kind: 'docs', title: '文档', create
 const baseCtx: SheetContext = {
   openSheet: vi.fn(), focusSheet: vi.fn(), closeSheet: vi.fn(), activeSession: null,
   selectSession: vi.fn(), openProfileEdit: vi.fn(), openSessionSettings: vi.fn(),
-  sidebarCollapsed: false, rightInset: 0, ccEditMode: false, isActive: true,
+  sidebarCollapsed: false, rightInset: 0, isActive: true,
   sessionSource: () => null, sessionBySource: () => undefined,
 }
 

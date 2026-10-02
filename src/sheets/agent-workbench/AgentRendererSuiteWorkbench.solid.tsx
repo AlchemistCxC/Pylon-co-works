@@ -122,9 +122,14 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const sessions = createZustandSignal(useIdentityStore, state => state.sessions)
   const activeAgentId = createZustandSignal(useIdentityStore, state => state.activeAgent)
   const workspaces = createZustandSignal(useWorkspaceEntityStore, state => state.workspaces)
-  const isActiveSheet = createZustandSignal(useWorkspaceStore, state => state.workspaceSheets.activeSheetId === props.sheet.id)
+  const activeSheetId = createZustandSignal(useWorkspaceStore, state => state.workspaceSheets.activeSheetId)
   const activeProfileId = createZustandSignal(usePresentationPreferenceStore, state => state.activeProfileId)
-  const selectedSuiteId = createZustandSignal(usePresentationPreferenceStore, state => state.rendererSuiteIdByMode[props.modeId])
+  const rendererSuiteIdByMode = createZustandSignal(usePresentationPreferenceStore, state => state.rendererSuiteIdByMode)
+  // ⚠️ solidStoreBridge 约定：selector 只读 store 切片，props 经组件侧 createMemo 并读。
+  // 本组件 keep-alive 保活，modeId 随界面模式切换原地变化——selector 内直读 props.modeId
+  // 会在切模式后以旧模式偏好解析套件（store 不通知则 selector 不重跑）。
+  const isActiveSheet = createMemo(() => activeSheetId() === props.sheet.id)
+  const selectedSuiteId = createMemo(() => rendererSuiteIdByMode()[props.modeId])
   const rendererSettings = getRendererSettingsStore()
   const presentationProfiles = getPresentationProfileRegistry()
   const rendererSettingOptions = getPluginSettingOptionsRegistry()

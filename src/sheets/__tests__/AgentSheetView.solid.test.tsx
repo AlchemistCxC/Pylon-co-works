@@ -58,7 +58,7 @@ const ctx: SheetContext = {
   openSheet: () => 'x', focusSheet() {}, closeSheet() {},
   activeSession: 'session-1', selectSession() {},
   openProfileEdit() {}, openSessionSettings() {},
-  sidebarCollapsed: false, rightInset: 0, ccEditMode: false,
+  sidebarCollapsed: false, rightInset: 0,
   sessionSource: () => 'local:s1', sessionBySource: () => undefined,
 }
 

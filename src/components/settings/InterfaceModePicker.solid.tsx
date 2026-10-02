@@ -14,6 +14,8 @@ export interface InterfaceModePickerProps {}
 /** lucide-react 同源路径数据的本地图标渲染（svg 形态与 lucide-react 输出一致：
  *  `.lucide lucide-{kebab}` 类名 + stroke 属性；#515 Solid 实体不进 react 图）。 */
 function LucideSvg(props: { node: IconNode; name: string; size: number }) {
+  // Invariance 豁免（显式）：props.name 挂载后不变——调用点均随 For 行重挂，name 变化即换
+  // 实例；kebab 顶层捕获（非响应式读）是有意为之，不按响应式访问器改写。
   const kebab = props.name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
   const build = (host: SVGSVGElement) => {
     const svgNamespace = 'http://www.w3.org/2000/svg'
