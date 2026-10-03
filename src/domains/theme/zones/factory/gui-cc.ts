@@ -65,31 +65,26 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
         "version": 9,
         "placements": {
           "input": {
-            "slot": "input",
             "order": 1,
             "offsetX": 0,
             "offsetY": 0
           },
           "model": {
-            "slot": "status-secondary",
             "order": 2,
             "offsetX": 0,
             "offsetY": 0
           },
           "reasoning": {
-            "slot": "status-secondary",
             "order": 3,
             "offsetX": 0,
             "offsetY": 0
           },
           "mode": {
-            "slot": "status-secondary",
             "order": 4,
             "offsetX": 0,
             "offsetY": 0
           },
           "tokens": {
-            "slot": "status-secondary",
             "order": 5,
             "offsetX": 0,
             "offsetY": 0
@@ -100,7 +95,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
             "offsetY": 0
           },
           "cc-send-button": {
-            "slot": "actions",
             "order": 0,
             "offsetX": 0,
             "offsetY": 0
