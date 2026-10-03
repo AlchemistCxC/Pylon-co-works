@@ -27,6 +27,8 @@ import { AgentWorkbenchLifecycle } from '../../application/agent-workbench/agent
 
 import { useWorkspaceStore } from '../../domains/workspace/workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
+import { bindingHint, refineBindingGeneration, resolveBindingState } from '../../domains/binding/bindingState.ts'
+import { sessionContext, toAgentContextKey } from '../../domains/agent/agentContext.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
 import { useWorkspaceEntityStore } from '../../infrastructure/persistence/workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from '../../application/agent-workbench/activeWorkbenchHostPort.ts'
@@ -177,6 +179,29 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     const current = session()
     return current?.workspaceId ? workspaces().find(item => item.id === current.workspaceId) : undefined
   })
+  // OWNER-03/CC-30：绑定状态机在宿主侧驱动——渲染子树只收纯数据（bindingHint），
+  // 不自读 runtime store。必须读 runtimeStoreVersion()：连接态/绑定代的推进不经过
+  // 其他被追踪的切片，漏读则该 memo 永远停在首次快照。
+  const bindingHintPayload = createMemo(() => {
+    void runtimeStoreVersion()
+    const sheet = props.sheet
+    const currentSession = session()
+    const runtimeState = useRuntimeStore.getState()
+    const status = sheet.agentId ? runtimeState.agentStatuses[sheet.agentId] : undefined
+    const ctxKey = currentSession ? toAgentContextKey(sessionContext(currentSession)) : undefined
+    const state = resolveBindingState({
+      activeSheet: { kind: sheet.kind, agentId: sheet.agentId },
+      activeSessionId: props.ctx.activeSession,
+      sessions: sessions(),
+      activeAgent: activeAgentId(),
+      ownerStatus: status ?? null,
+    })
+    return bindingHint(refineBindingGeneration(state, {
+      establishedGeneration: ctxKey ? runtimeState.bindingGenerations[ctxKey] : undefined,
+      currentGeneration: status?.generation,
+      backendHealth: ctxKey ? runtimeState.sessionBindingHealth[ctxKey] : undefined,
+    }))
+  })
   const input = createMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session()), sessionId: props.ctx.activeSession,
     // #395：文档按 provider source 建键——渲染器的「这份文档是不是本会话的」判据要用它。
@@ -190,6 +215,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     workspacePath: workspace()?.rootPath ?? session()?.workdir,
     availableWorkspaces: workspaces().map(item => ({ id: item.id, label: item.name, path: item.rootPath, lastActiveAt: item.lastActiveAt })),
     agentAdvertisedModels: agentAdvertisedModels(),
+    bindingHint: bindingHintPayload(),
   }))
   const activation = createMemo<RendererActivationSnapshot | undefined>(() => {
     try {

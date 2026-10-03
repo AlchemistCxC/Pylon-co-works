@@ -1617,6 +1617,72 @@ describe('mountSolidWorkbench', () => {
     })
   })
 
+  it('宿主传入 bindingHint 时渲染绑定状态浮层（中性态无 --error）', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    // CC-30：bindingHint 经 normalizeWorkbenchMountInput 透传——元素出现即证明字段没被静默丢弃。
+    mountSolidWorkbench({
+      host,
+      input: {
+        sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, reducedMotion: true,
+        bindingHint: { text: '正在恢复会话绑定…等待 Agent peri 连接', error: false },
+      },
+      services,
+    })
+
+    const hint = await waitFor(() => {
+      const element = host.querySelector<HTMLElement>('.input-binding-status')
+      expect(element).not.toBeNull()
+      return element!
+    })
+    expect(hint).toHaveTextContent('正在恢复会话绑定…等待 Agent peri 连接')
+    expect(hint).toHaveAttribute('role', 'status')
+    expect(hint.className).toBe('input-binding-status')
+  })
+
+  it('restore_error 提示带 --error 变体', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    mountSolidWorkbench({
+      host,
+      input: {
+        sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, reducedMotion: true,
+        bindingHint: { text: '会话绑定恢复失败：激活会话在 identity 中不存在，无法恢复绑定', error: true },
+      },
+      services,
+    })
+
+    const hint = await waitFor(() => {
+      const element = host.querySelector<HTMLElement>('.input-binding-status--error')
+      expect(element).not.toBeNull()
+      return element!
+    })
+    expect(hint).toHaveTextContent('会话绑定恢复失败')
+    expect(hint.className).toBe('input-binding-status input-binding-status--error')
+  })
+
+  it('宿主不提供 bindingHint 时不渲染绑定状态浮层（legacy 夹具零影响）', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    mountSolidWorkbench({
+      host,
+      input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true, reducedMotion: true },
+      services,
+    })
+
+    await waitFor(() => expect(host.querySelector('.input-textarea')).toBeInTheDocument())
+    expect(host.querySelector('.input-binding-status')).toBeNull()
+  })
+
   it('空态品牌使用聊天 viewport 几何容器且不改写现有 Pylon 向量路径', async () => {
     const { host, lifecycle } = mountPreview()
     lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true, rightInset: 96 })

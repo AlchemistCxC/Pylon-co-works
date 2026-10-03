@@ -67,6 +67,8 @@ export interface SolidWorkbenchInput {
   workspacePath?: string
   availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
   agentAdvertisedModels?: readonly WorkbenchOptionEntry[]
+  /** 见 `WorkbenchMountInput.bindingHint`（宿主派生纯数据）。 */
+  bindingHint?: { readonly text: string; readonly error: boolean }
 }
 
 export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): WorkbenchMountInput {
@@ -86,6 +88,7 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
     ...(input.availableWorkspaces ? { availableWorkspaces: Object.freeze(input.availableWorkspaces.map(item => Object.freeze({ ...item }))) } : {}),
     ...(input.agentAdvertisedModels ? { agentAdvertisedModels: Object.freeze(input.agentAdvertisedModels.map(item => Object.freeze({ ...item }))) } : {}),
+    ...(input.bindingHint ? { bindingHint: Object.freeze({ ...input.bindingHint }) } : {}),
   })
 }
 
