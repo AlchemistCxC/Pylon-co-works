@@ -25,7 +25,9 @@
  *   src/wasm/、src/assets|styles|css01 作为「源侧」不受管辖（插件/演示/测试/产物层）。
  * - 根入口 src/main.solid.tsx、src/App.solid.tsx 是组合根，不设独立规则（#515 批7 改名）。
  * - 视图层 → src/app/**（视图消费 app 客户端/错误中心，现存约 77 边）、视图层 → src/host/**
- *   （SolidMount/solidStoreBridge 挂载桥正用面）、host → domains（桥读域 store）、
+ *   （renderer-suite 渲染套件消费面；SolidMount 挂载桥已随 #520 终局批删除，
+ *   solidStoreBridge 已迁 infrastructure/state 作在役读取原语——视图层 → infrastructure 同不设防）、
+ *   host → domains（renderer-suite 读域事件/预测语义）、
  *   infrastructure/plugin-runtime → src/app/runtimeError（错误上报口）。
  * - kernel → 视图层（KernelRoot.tsx 引 ErrorBoundary/SkinPreviewBar，2 边）与
  *   kernel → plugins（productPluginIds 常量，2 边）：#489 批准条文未含，暂不设防。
@@ -149,6 +151,7 @@ const RULES: LayerRule[] = [
       'src/infrastructure/persistence/workspaceEntityStore.ts -> src/domains/identity/identityStore.ts': '工作区实体仓储读 identity store（端口化待清偿）',
       'src/infrastructure/persistence/workspaceEntityStore.ts -> src/domains/workspace/workspaceEntities.ts': '工作区实体仓储消费实体契约（端口化待清偿）',
       // —— 其余散点
+      'src/infrastructure/state/solidSheetSupport.solid.tsx -> src/domains/interface/interfaceModeStore.ts': 'Solid 界面模式回退读 interfaceModeStore（#520 R3 自 sheets 迁入的既有依赖，非新引；回退表单源在 domains/interface）',
       'src/infrastructure/hooks/hookBridgeDispatcher.ts -> src/domains/identity/identityStore.ts': 'hook 调度桥读 identity store 运行时实例（结构全修批前既有形态）',
       'src/infrastructure/prediction/predictionStandalone.ts -> src/domains/inputPrediction/inputPredictionSettingsCache.ts': '预测降级实现消费预测设置缓存（端口化待清偿）',
       'src/infrastructure/skin/skinRuntimeServices.ts -> src/domains/theme/themeDefaults.ts': '皮肤运行时读主题出厂表（数据单源在 theme 域）',
@@ -181,7 +184,7 @@ const RULES: LayerRule[] = [
       'src/kernel/KernelRoot.solid.tsx -> src/app/startupTiming.ts': 'bootstrap 装配语义（启动相位打点）',
       // bootstrap 装配语义（挂载 application 运行时/事务端口/验收控制）
       'src/kernel/ApplicationMount.solid.tsx -> src/application/applicationRuntime.ts': 'bootstrap 装配语义（挂载 application 运行时）',
-      'src/kernel/kernelAcceptanceControls.ts -> src/application/acceptanceControls.ts': 'bootstrap 装配语义（验收控制装配）',
+      'src/kernel/KernelRoot.solid.tsx -> src/application/acceptanceControls.ts': 'bootstrap 装配语义（验收控制装配；#520 R3 兼容门面退役后直连）',
       'src/kernel/kernelBootstrap.ts -> src/application/applicationMountPort.ts': 'bootstrap 装配语义（application 挂载端口类型）',
       'src/kernel/kernelBootstrapServices.ts -> src/application/applicationRuntimeServices.ts': 'bootstrap 装配语义（application 服务组装）',
       'src/kernel/kernelBootstrapServices.ts -> src/application/applicationMountPort.ts': 'bootstrap 装配语义（application 挂载端口类型）',
@@ -202,9 +205,9 @@ const RULES: LayerRule[] = [
     forbiddenPathIncludes: ['src/host/', 'src/app/', 'src/cli/', 'src/application/'],
     allowlist: {},
     allowEdges: {
-      // 命令解析器现居 host 层（Solid 桥接期形态；迁 domains 待清偿）
-      'src/domains/chat/commandRegistry.ts -> src/host/commandSetResolver.ts': '命令解析器现居 host 层（Solid 桥接期形态；迁 domains 待清偿）',
-      'src/domains/chat/sessionRuntime.ts -> src/host/commandSetResolver.ts': '命令解析器现居 host 层（Solid 桥接期形态；迁 domains 待清偿）',
+      // 命令解析器现居 application 层（#520 R3 自 host 迁入）；域侧直连仍待端口化清偿
+      'src/domains/chat/commandRegistry.ts -> src/application/commandSetResolver.ts': '命令解析器现居 application 层（#520 R3 自 host 迁入）；域侧直连待端口化清偿',
+      'src/domains/chat/sessionRuntime.ts -> src/application/commandSetResolver.ts': '命令解析器现居 application 层（#520 R3 自 host 迁入）；域侧直连待端口化清偿',
       // 域内动作经 app/runtimeError 上报错误（错误口现居 app；下沉待清偿）
       'src/domains/identity/identityProfileActions.ts -> src/app/runtimeError.ts': '域内动作经 app/runtimeError 上报错误（错误口下沉待清偿）',
       'src/domains/identity/identitySessionActions.ts -> src/app/runtimeError.ts': '域内动作经 app/runtimeError 上报错误（错误口下沉待清偿）',

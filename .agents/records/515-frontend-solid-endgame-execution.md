@@ -113,7 +113,7 @@ ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆�
 ## 未解问题
 
 - 避让域收尾批：14 文件 Solid 化 + React 岛与载具退役 + react 系依赖（react/react-dom/@types/@testing-library/react/@vitejs/plugin-react/react-refresh/eslint-plugin-react-hooks/lucide-react）终局移除 + `renderKind` 改名 + solidStoreBridge 直连收敛拆桥（follow-up issue 承接）。
-- `settingsSectionShared.solid.tsx` 的 GlobalPresetSection 本地 Group 副本收拢；`MarkdownPreview.solid.tsx` 零消费死件（随 1-A1 复活或删除）。
+- `settingsSectionShared.solid.tsx` 的 GlobalPresetSection 本地 Group 副本收拢；`MarkdownPreview.solid.tsx` 零消费死件已删除（#520 R2，复活时从 git 历史恢复）。
 - dev-standards「前端全局可变状态」一节的 zustand 措辞收敛（§修订需仓库主批准，未动）。
 
 ## 并行交集
