@@ -85,3 +85,40 @@ describe('applySessionModeChange 变更与回滚（原 test-session-mode.mts）'
     expect(normalizeSessionMode('')).toBe(null)
   })
 })
+
+describe('#531：回包权威覆盖（与 sessionModelState 的 P56/D3 同口径）', () => {
+  it('响应给出 currentModeId ⇒ 以回包为准覆盖乐观值（agent 静默降级不再显示请求值）', async () => {
+    const writes: string[] = []
+    await applySessionModeChange({
+      source: 'local:d',
+      nextMode: 'auto',
+      previousMode: 'default',
+      writeMode: mode => writes.push(mode),
+      // agent 静默降级：请求 auto、回包仍报 default
+      invokeSet: async () => ({ modes: { currentModeId: 'default' } }),
+    })
+    expect(writes).toEqual(['auto', 'default'])
+  })
+
+  it('回包与请求一致 ⇒ 不重复写', async () => {
+    const writes: string[] = []
+    await applySessionModeChange({
+      source: 'local:e',
+      nextMode: 'auto',
+      writeMode: mode => writes.push(mode),
+      invokeSet: async () => ({ modes: { currentModeId: 'auto' } }),
+    })
+    expect(writes).toEqual(['auto'])
+  })
+
+  it('空回声（无可提取）⇒ 保留乐观值（边界见 issue #531）', async () => {
+    const writes: string[] = []
+    await applySessionModeChange({
+      source: 'local:f',
+      nextMode: 'bypass',
+      writeMode: mode => writes.push(mode),
+      invokeSet: async () => ({}),
+    })
+    expect(writes).toEqual(['bypass'])
+  })
+})
