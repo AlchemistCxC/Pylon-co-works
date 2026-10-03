@@ -9,10 +9,9 @@ import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkb
 import { FileTypeIconSolid, WorkbenchIcon } from './fileIcons.solid.tsx'
 
 /**
- * FileTreeProps — 与 React 桥（FileTree.tsx）内声明的同名接口逐字段一致（React 类型图
- * 不触碰 .solid 文件，两侧各自持有唯一事实；漂移由 tsc 双面校验兜住）。
+ * FileTreeProps — 名字承自历史 React 契约（FileTree.tsx，已退役）；本实体即唯一真源。
  */
-export interface FileTreeProps {
+interface FileTreeProps {
   target: WorkspaceTarget | null
   provider: FileProvider | null
   activeFile: string | null

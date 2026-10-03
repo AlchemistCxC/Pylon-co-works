@@ -32,7 +32,7 @@ export interface RendererSettingsCatalogCategory {
 
 /**
  * Read-only projection consumed by Settings navigation, search and Inspector.
- * It owns no values and deliberately keeps registry plumbing out of React
+ * It owns no values and deliberately keeps registry plumbing out of UI
  * components; the registry snapshot remains the only source of truth.
  */
 export interface RendererSettingsCatalogProjection {
@@ -213,7 +213,7 @@ export function rendererSettingsEntryKey(entry: Pick<RendererSettingsCatalogEntr
 
 /**
  * Search projection for the quick-search command surface. It is deliberately
- * built from the catalog rather than mounted React fields, so unselected
+ * built from the catalog rather than mounted UI fields, so unselected
  * renderer objects remain searchable without paying their render cost.
  */
 export function buildRendererSettingsSearchItems(

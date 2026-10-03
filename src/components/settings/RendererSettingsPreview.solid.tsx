@@ -120,7 +120,7 @@ function previewSuiteForEntry(entry: RendererSettingsCatalogEntry, catalog: Rend
 
 /**
  * RendererSettingsPreview — Renderer 设置页真实示例预览（#515 Solid 实体；
- * 原 RendererSettingsPreview.tsx 保留同名薄桥）。surface 挂载 effect（依赖
+ * 原同名 React 薄桥已随批7 退役，本实体为唯一形态）。surface 挂载 effect（依赖
  * entry/kind/suite/catalog/状态/选项贡献）以 createEffect + onCleanup 逐路回收，
  * 与原 React useEffect 的双 return 清理路径语义一致。
  */

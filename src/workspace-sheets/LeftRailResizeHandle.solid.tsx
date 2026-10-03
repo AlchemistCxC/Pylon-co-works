@@ -113,7 +113,7 @@ export default function LeftRailResizeHandle() {
   )
 }
 
-/** zustand rightRailStore → Solid 信号（宽度渲染值；落库走 getState().setWidth）。 */
+/** rightRailStore（Solid 内核）订阅 → 信号（宽度渲染值；落库走 getState().setWidth）。 */
 function createSignalWidth(): () => number {
   const [value, setValue] = createSignal(useRightRailStore.getState().leftRailWidth)
   onCleanup(useRightRailStore.subscribe(state => setValue(state.leftRailWidth)))

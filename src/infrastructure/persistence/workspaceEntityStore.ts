@@ -47,7 +47,7 @@ interface WorkspaceEntityStore {
   deleteWorkspace: (id: string) => Promise<void>
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 已随 R4 收口拆除）。
 const workspaceEntityKernel: SolidStoreKernel<WorkspaceEntityStore> = createSolidStoreKernel<WorkspaceEntityStore>({
   workspaces: [],
   hydrated: false,

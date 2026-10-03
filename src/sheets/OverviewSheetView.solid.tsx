@@ -102,7 +102,7 @@ function OverviewIcon(props: { name: string; size?: number; class?: string }) {
   )
 }
 
-export interface OverviewSheetViewProps {
+interface OverviewSheetViewProps {
   sheet: SheetRecord
   ctx: SheetContext
 }
@@ -116,7 +116,8 @@ export interface OverviewSheetViewProps {
  * 最近 5 个 → 找/建 identity row → selectSession + open agent sheet；load 由 agentWorkbenchLifecycle
  * 挂载后的 controller lifecycle 承担——listener 就绪后才 load）。
  * #515：实体自 React 版逐行为同构迁移——store 消费经 createZustandSignal，能力位经
- * createActiveInterfaceModeContribution；战术指挥台与高级配置编辑器是 React 面，经岛挂载。
+ * createActiveInterfaceModeContribution；战术指挥台与高级配置编辑器已 Solid 实体化
+ * （批7 岛退役直连，见 TacticalCommandDeck.solid 等）。
  */
 export default function OverviewSheetView(props: OverviewSheetViewProps) {
   // A-V9：指挥台 UI 按 contribution 能力位挂载，不再特判模式 id——
@@ -252,7 +253,7 @@ export default function OverviewSheetView(props: OverviewSheetViewProps) {
 
   const navigateTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
-  // 指挥台 React 岛的 props 工厂：effect 追踪本 memo，任一依赖变化即原位重渲。
+  // 指挥台（TacticalCommandDeck.solid 直连）的 props 工厂：effect 追踪本 memo，任一依赖变化即原位重渲。
   const deckProps = createMemo<TacticalCommandDeckProps>(() => ({
     agents: agents().length,
     connected: connectedCount(),

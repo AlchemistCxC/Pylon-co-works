@@ -24,9 +24,9 @@ import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts
 import { WorkbenchIcon } from './fileIcons.solid.tsx'
 
 /**
- * FileSheetViewProps — 与 React 桥（FileSheetView.tsx）内声明的同名接口逐字段一致。
+ * FileSheetViewProps — 名字承自历史 React 契约（FileSheetView.tsx，已退役）；本实体即唯一真源。
  */
-export interface FileSheetViewProps {
+interface FileSheetViewProps {
   sheet: SheetRecord
   ctx: SheetContext
 }
@@ -82,7 +82,7 @@ function SessionsActivitySolid(props: { targetSessionId: string | null; sessions
  */
 export default function FileSheetView(props: FileSheetViewProps) {
   const sessions = createZustandSignal(useIdentityStore, s => s.sessions)
-  // zustand 动作引用稳定（create 期定义）；测试 resetStores 只回滚 state。
+  // 内核 store 动作引用稳定（create 期定义）；测试 resetStores 只回滚 state。
   const patchSheetMetadata = useWorkspaceStore.getState().patchSheetMetadata
 
   // ── 持久化 target 解析（metadata 是当前权威；sheet.state 仅 legacy 回退）──

@@ -33,8 +33,9 @@ const NO_GENERATING_SOURCES: readonly string[] = []
  *
  * 头部（返回 + 标题）由宿主渲染，贡献只画内容——与左栏区块外壳同一条约定。
  *
- * #515：`useSidebarContributionProps` 的 Solid 形态内联在本组件（该 hook 原 .ts 保留给
- * 域外 React 消费者 Sidebar.tsx，两份接线语义逐条对齐）。
+ * #515：`useSidebarContributionProps` 的 Solid 侧接线内联在本组件（原 React hook 已
+ * 删除；接线与 `Sidebar.solid.tsx` 语义逐条对齐，`useSidebarContributionProps.ts`
+ * 仅存共享类型面）。
  */
 export default function AgentSheetPageHost(props: AgentSheetPageHostProps) {
   const activeProfileId = createZustandSignal(useIdentityStore, s => s.activeProfileId)

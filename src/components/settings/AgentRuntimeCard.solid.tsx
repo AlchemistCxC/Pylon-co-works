@@ -20,7 +20,7 @@ function activationLabel(state: AgentEntry['configActivationState']): string {
   return state === 'activated' ? '已生效' : state === 'pendingRestart' ? '待重启生效' : '已存储'
 }
 
-export interface AgentRuntimeCardProps {
+interface AgentRuntimeCardProps {
   agent: AgentEntry
   activeAgent: string
   status: ReturnType<typeof selectAgentStatus>

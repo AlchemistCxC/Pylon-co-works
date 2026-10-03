@@ -33,7 +33,7 @@ function invocationError(executable: string, args: string[]): string | null {
   return error?.message ?? null
 }
 
-export interface AgentRuntimePanelProps {
+interface AgentRuntimePanelProps {
   initialAgentId?: string
 }
 

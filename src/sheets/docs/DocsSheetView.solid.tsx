@@ -16,7 +16,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * 卸载时 close 回收 WebView2 子进程。导航 chrome 保持最小（回首页/后退/前进/刷新）——
  * VitePress 自带 navbar/sidebar/搜索，不复制浏览器语义。
  *
- * 原生子 WebView 是独立于 React DOM 的窗口：display:none 盖不住它，可见性必须走
+ * 原生子 WebView 是独立于宿主 DOM 的窗口：display:none 盖不住它，可见性必须走
  * docs_sheet_set_visible（与 Browser Sheet 同一约束）；外链在 Rust on_navigation
  * fail-closed 取消，壳层不代开系统浏览器。
  *
@@ -28,7 +28,7 @@ const DOCS_CLIENT = appClients.docs
 
 const IDLE_SNAPSHOT: DocsSheetSnapshot = { phase: 'idle', error: null, visible: true }
 
-export interface DocsSheetViewProps {
+interface DocsSheetViewProps {
   sheet: SheetRecord
   ctx: SheetContext
 }

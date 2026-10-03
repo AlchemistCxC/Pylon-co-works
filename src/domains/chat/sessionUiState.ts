@@ -5,8 +5,8 @@
  * 不丢（切回 A 恢复草稿）。多会话基建的一部分（配合 per-source 数据层）。
  * 模块级单例；会话关闭时调 clearSessionUiState(id) 清理，防注册表残留。
  *
- * React 消费钩子 useSessionUiState 在唯一消费者 components/right-panel/AgentContextPanel.tsx 内联
- * （结构审查 WS-C：域模块零 React 依赖）。
+ * 唯一消费者 components/right-panel/AgentContextPanel.solid.tsx 内联其消费钩子
+ * （结构审查 WS-C：域模块零框架依赖）。
  */
 
 

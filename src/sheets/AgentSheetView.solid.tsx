@@ -12,10 +12,10 @@ import { createActiveInterfaceModeContribution, createRegistrySignal } from '../
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.solid.tsx'
 
 // ---- #515 批7：整页宿主与隔离表面均已 Solid 实体化（批1-C/批3-E），React 岛退役，
-// solid-in-solid 直连。IsolatedPluginSurface 的 props 面与原 React 版逐字段一致
-// （className→class 由实体内部映射）。 ----
+// solid-in-solid 直连。IsolatedPluginSurface 的 props 面名字承自历史 React 契约，
+// 本实体即唯一真源（className→class 由实体内部映射）。 ----
 
-export interface AgentSheetViewProps {
+interface AgentSheetViewProps {
   sheet: SheetRecord
   ctx: SheetContext
 }

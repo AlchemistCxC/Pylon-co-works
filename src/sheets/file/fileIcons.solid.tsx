@@ -29,12 +29,11 @@ import {
  *
  * 与 `src/components/LucideIcon.solid.tsx` 同一机制：取 lucide 核心包的 IconNode 数据
  * 自绘 SVG，类名与 lucide-react 逐类一致（`.lucide-{kebab}` 是样式的消费契约），路径
- * 数据同源。不直接复用 LucideIcon 的原因：其映射表在他人迁移域（src/components/**）
- * 且缺少本域图标；新图标按需在此登记（具名静态导入，防 tree-shaking 击穿）。
+ * 数据同源。不直接复用 LucideIcon 的原因：其映射表在 src/components/** 且缺少本域
+ * 图标；新图标按需在此登记（具名静态导入，防 tree-shaking 击穿）。
  *
- * #515 期 `FileTypeIcon.tsx` 仍是 React 文件，`fileTypeOf` 纯函数无法跨编译面共享——
- * 在此按同表重写；真源仍以 FileTypeIcon.tsx 的扩展名映射为准（两表漂移由 FileSheet
- * 样式契约测试兜住），插件面 Solid 化后合并到单一实体。
+ * #515 期原 `FileTypeIcon.tsx` 尚为 React 文件，`fileTypeOf` 曾在此按同表重写；
+ * 该原件已删除，本文件的 `fileTypeOf` 即唯一真源。
  */
 const ICON_NODES: Readonly<Record<string, IconNode>> = {
   Braces,

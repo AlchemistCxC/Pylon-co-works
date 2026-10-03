@@ -188,7 +188,7 @@ export function persistSheetStateV2(storage: StorageLike, state: PersistedSheetS
     storage.setItem(SHEET_STORAGE_KEY, serializeSheetStateV2(normalizeState(state), normalizeLayout(layout)))
     return true
   } catch {
-    // 存储不可用/写满：写盘失败不应让 workspace action（zustand set 内）抛异常；
+    // 存储不可用/写满：写盘失败不应让 workspace action（内核 setState 内）抛异常；
     // 返回 false 供调用方把"未保存"提升为可见状态（报告 FE-AUD-001/阶段 1A.5）
     return false
   }

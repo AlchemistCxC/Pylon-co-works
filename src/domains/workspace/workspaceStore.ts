@@ -94,7 +94,7 @@ function commitWorkspaceMutation(state: WorkspaceStoreState, patch: Partial<Work
   return state.lastPersistError ? { ...patch, lastPersistError: null } : patch
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 已随 R4 收口拆除）。
 const workspaceKernel = createSolidStoreKernel<WorkspaceStoreState>({
   workspaceSheets: createSheetState(),
   sheetAgentStates: {},
@@ -125,7 +125,7 @@ const workspaceKernel = createSolidStoreKernel<WorkspaceStoreState>({
       // 可忽略：写回失败只是延迟持久化——内存已是迁移后 v2 状态（下方立即返回），
       // 后续任意 commitWorkspaceMutation 会重新写盘，失败时经 lastPersistError 可见；
       // persistSheetStateV2 自身已把存储异常收敛为 false 返回，此 catch 仅兜底
-      // 其余意外异常，避免 zustand set（hydrate）中途抛错。
+      // 其余意外异常，避免内核 setState（hydrate）中途抛错。
     }
     return {
       workspaceSheets: result.state,

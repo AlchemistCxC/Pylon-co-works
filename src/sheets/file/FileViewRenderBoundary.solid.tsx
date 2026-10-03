@@ -3,9 +3,9 @@ import { createEffect, ErrorBoundary, on } from 'solid-js'
 import type { JSX } from 'solid-js'
 
 /**
- * FileViewRenderBoundaryProps — 与 React 原件（FileViewRenderBoundary.tsx）逐字段一致。
+ * FileViewRenderBoundaryProps — 名字承自历史 React 契约（FileViewRenderBoundary.tsx，已退役）；本实体即唯一真源。
  */
-export interface FileViewRenderBoundaryProps {
+interface FileViewRenderBoundaryProps {
   rendererId: string
   onError: (error: unknown) => 'fallback' | 'rethrow'
   onFallback: (rendererId: string) => void
@@ -14,8 +14,8 @@ export interface FileViewRenderBoundaryProps {
 
 /**
  * FileViewRenderBoundary — 把坏掉的 renderer 局限在其 tab 内，让宿主选择下一 renderer
- * （#515 Solid 实体；React class 原件保留在 FileViewRenderBoundary.tsx——其 children
- * 按红线不跨 React/Solid 桥，原件随批7 与 React 世界一并退役）。
+ * （#515 Solid 实体；原 React class 原件 FileViewRenderBoundary.tsx 已随批7 与
+ * React 世界一并退役）。
  *
  * 语义与 React 版逐项同构：错误 → onError 裁决；fallback → onFallback(rendererId) 并
  * 展示切换提示；rethrow → 向上重抛。rendererId 变化（宿主已换 renderer）→ 清错误态

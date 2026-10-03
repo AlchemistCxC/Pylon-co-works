@@ -1,7 +1,7 @@
 /**
  * Serializable settings contract owned by the renderer catalog.
  *
- * This module deliberately contains no React/Solid/store imports.  A plugin
+ * This module deliberately contains no UI-framework/store imports.  A plugin
  * contributes data; the host validates it once and every settings surface
  * consumes the same frozen representation.
  */

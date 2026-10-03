@@ -32,7 +32,7 @@ export interface AgentSidebarContributionContext {
 /**
  * 区块头部的动作按钮。声明成数据而不是让贡献自己画，是因为：
  * ① 宿主拥有区块外壳（标题 + 折叠），贡献只画内容，头部才不会有第二份标题；
- * ② 外置插件是隔离表面，无法往宿主头部塞 React 节点。
+ * ② 外置插件是隔离表面，无法往宿主头部塞任意组件节点。
  * `icon` 是由宿主解释的稳定字符串键（与 Workspace launch icon 同一约定），未知键安全降级。
  */
 export interface AgentSidebarHeaderAction {

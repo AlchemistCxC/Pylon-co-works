@@ -53,7 +53,6 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-/** React 贡献组件桩（无 JSX：本文件是 Solid 编译面，React 面在岛内渲染）。 */
 /** Solid 贡献桩（#515 岛退役：注册表组件是 Solid 组件）。 */
 const panelStub = (text: string) => () => <div>{text}</div>
 

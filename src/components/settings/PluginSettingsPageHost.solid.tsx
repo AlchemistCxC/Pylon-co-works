@@ -13,8 +13,8 @@ const EMPTY_VALUES: Readonly<Record<string, SettingsValue>> = Object.freeze({})
 const EMPTY_ADAPTER_SNAPSHOT = Object.freeze({ values: EMPTY_VALUES, unavailable: Object.freeze({}), revision: 0 })
 
 /**
- * PluginSettingsPageHost — 插件设置页宿主（#515 Solid 实体；原
- * PluginSettingsPageHost.tsx 保留同名薄桥）。注册表/选项快照订阅经
+ * PluginSettingsPageHost — 插件设置页宿主（#515 Solid 实体；原同名 React 薄桥已随
+ * 批7 退役，本实体为唯一形态）。注册表/选项快照订阅经
  * createRegistrySignal；页头与空态是 Solid 直出 DOM。贡献面按 #515 贡献面翻转后的
  * 契约原生 Solid 渲染（与 ContextPanelHost.solid 同构）：schema →
  * RendererSettingsSchemaHost 实体；isolated-surface → IsolatedPluginSurface 实体；

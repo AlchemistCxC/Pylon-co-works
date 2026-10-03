@@ -15,7 +15,7 @@ import { ZoneGroupFields, type RenderCtx } from './themeFieldRenderer.solid.tsx'
 import InterfaceModePicker from './InterfaceModePicker.solid.tsx'
 import { Group, reportSettingsError, resolveSettingsError } from './settingsSectionShared.solid.tsx'
 
-export interface GlobalPresetSectionProps {
+interface GlobalPresetSectionProps {
   isSearching: boolean
   /** 声明式字段组渲染上下文（原由 Settings.tsx 注入 children，#515 同批改 solid 直连）。 */
   ctx: RenderCtx

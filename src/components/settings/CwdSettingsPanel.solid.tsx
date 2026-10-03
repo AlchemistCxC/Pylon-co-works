@@ -13,7 +13,7 @@ import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
 import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
 
-export interface CwdSettingsPanelProps {
+interface CwdSettingsPanelProps {
   workspace: Workspace
   onClose: () => void
   showHeader?: boolean
