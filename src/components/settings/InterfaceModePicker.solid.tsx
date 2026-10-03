@@ -8,8 +8,6 @@ import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStor
 import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
-export interface InterfaceModePickerProps {}
-
 /** lucide-react 同源路径数据的本地图标渲染（svg 形态与 lucide-react 输出一致：
  *  `.lucide lucide-{kebab}` 类名 + stroke 属性；#515 Solid 实体不进 react 图）。 */
 function LucideSvg(props: { node: IconNode; name: string; size: number }) {
@@ -43,7 +41,7 @@ export default function InterfaceModePicker() {
   const registry = getInterfaceModeRegistry()
   const snapshot = createZustandSignal(
     { getState: () => registry.getSnapshot(), subscribe: listener => registry.subscribe(() => listener(registry.getSnapshot())) },
-    // registry 的 subscribe 回调不传快照，selector 自取（zustand 形态的 subscribe 才带 state）。
+    // registry 的 subscribe 回调不传快照，selector 自取（内核 subscribe 门面不回传 state）。
     () => registry.getSnapshot(),
   )
   const modes = createMemo(() => snapshot().entries)

@@ -2,7 +2,7 @@ import { useThemeStore } from '../theme/themeStore.ts'
 import type { AppearanceCommand, WorkbenchAppearanceStore } from './appearance.ts'
 import { createVanillaWorkbenchAppearanceStore } from './workbenchAppearanceStore.ts'
 
-export function createZustandWorkbenchAppearanceStore(): WorkbenchAppearanceStore {
+export function createThemeProjectedWorkbenchAppearanceStore(): WorkbenchAppearanceStore {
   // #483：showPet 随宠物链删除退役，外观快照回归纯主题 store 投影。
   const readTheme = () => ({ ...useThemeStore.getState() })
   return createVanillaWorkbenchAppearanceStore(

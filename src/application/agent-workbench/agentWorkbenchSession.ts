@@ -28,7 +28,7 @@ import {
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
-import { createZustandWorkbenchAppearanceStore } from '../../domains/appearance/zustandWorkbenchAppearanceStore.ts'
+import { createThemeProjectedWorkbenchAppearanceStore } from '../../domains/appearance/themeProjectedWorkbenchAppearanceStore.ts'
 import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { discardInterruptedDraft, keepInterruptedDraft, loadCanonicalDraftFragments, tauriCanonicalEventRepository, type CanonicalDraftFragment } from '../../infrastructure/events/canonicalEventRepository.ts'
 import type { CanonicalEventRow } from '../../domains/events/canonicalEventRow.ts'
@@ -174,7 +174,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false,
     promptImage: false, error: null, document: createWorkbenchDocument(''),
   })
-  const appearance = createZustandWorkbenchAppearanceStore()
+  const appearance = createThemeProjectedWorkbenchAppearanceStore()
   const sessionUi = createSessionUiStore()
   // 会话宿主的共享绑定/折叠状态（原散落闭包 let 的单源化，接口见
   // agentWorkbenchOptimisticEcho.ts）：子系统与宿主经同一对象读写，跨块共享的
@@ -243,9 +243,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     liveDuringReconcile: [] as WorkbenchEventEnvelope[],
   }
   /** Responses from the atomic empty-state create transaction can arrive
-   * before React has rebound the Workbench to the newly-added local Session.
-   * Keep them keyed by local Session.id until that bind completes. 排队项连同
-   * 溯源标注一起暂存——排队路径丢掉标注会让 load 响应事后长得像 new 响应。 */
+   * before the Solid host has rebound the Workbench to the newly-added local
+   * Session. Keep them keyed by local Session.id until that bind completes.
+   * 排队项连同溯源标注一起暂存——排队路径丢掉标注会让 load 响应事后长得像 new 响应。 */
   const pendingSessionResponses = new Map<string, Array<{ response: SessionResponseObject; syntheticReason?: string }>>()
   const appliedSessionResponseKeys = new Map<string, { key: string; session: WorkbenchDocument['session'] | undefined }>()
   const transientSequenceBySource = new Map<string, number>()
@@ -1081,8 +1081,8 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
      * Project the response of the atomic `new_session` command into the same
      * disposable Workbench document used by canonical/live events.  This is a
      * transient bridge: it never appends to SQLite or the canonical journal.
-     * The optional local Session.id lets callers publish before React's bind
-     * effect runs; the response is buffered and consumed by bind().
+     * The optional local Session.id lets callers publish before the Solid
+     * host's bind runs; the response is buffered and consumed by bind().
      */
     applySessionResponse,
     runSessionControl,
