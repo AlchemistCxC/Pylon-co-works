@@ -105,8 +105,6 @@
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
 /* The slot owns the themed height; mounted widgets fill it. */
 .cc-input-slot > .cc-widget { height:100%; }
-.cc-footer { display:contents; }
-.cc-footer-status { display:flex; flex-direction:column; gap:0; min-width:0; min-height:0; }
 /* ★ #266 CC-29：悬空的「footer 状态行」那族规则已删（类名在生产代码里零命中，真身是状态行本体）。 */
 /* ★★ #266 刀2.5：**不折行** —— 下边组（模型/思考强度/权限/用量/命令行提示 那一行）行数恒为 1
    （刀 3 的高度算式依赖这条）。原 `flex-wrap:wrap` 与只在折行时才生效的 `row-gap:3px` 一并去掉。
