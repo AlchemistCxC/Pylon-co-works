@@ -870,7 +870,6 @@ body[data-interface-mode="tactical-blue"], .app[data-interface-mode="tactical-bl
   --titlebar-text-muted: #a4b5cc !important; --sidebar-bg: #0c1728 !important;
   --sidebar-text-color: #c2d0e3 !important; --chat-bg: #080f1e !important;
   --chat-text-color: #eef5ff !important; --msg-text: #eef5ff !important;
-  --input-text-color: #eef5ff !important; --input-placeholder: #a4b5cc !important;
   --cc-bg: #0b172b !important; --right-bg: #101c30 !important;
   --success: #6be6ad; --danger: #ff8c99; --warning: #f7cb68;
   --ui-radius-sm: 3px; --ui-radius-md: 4px; --ui-radius-lg: 6px;
