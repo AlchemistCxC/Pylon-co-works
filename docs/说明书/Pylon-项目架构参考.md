@@ -35,7 +35,7 @@ Pylon 是通过 ACP 连接多个本地 Agent runtime 的桌面工作台。它以
 - `src/plugin-runtime` 是 **Kernel 的插件宿主与扩展机制**，不是业务插件层。
 - `src/plugins/product` 是七个第一方 Product Plugin 的激活和依赖定义。
 - `src/plugins/core` 是第一方 Product Plugin 使用的 implementation；虽然叫 `core`，但它不是 Kernel。
-- Session、ACP、持久化与恢复的概念 Kernel implementation 目前跨越 React/TypeScript 和 Rust/Tauri 多个目录。
+- Session、ACP、持久化与恢复的概念 Kernel implementation 目前跨越 TypeScript(Solid) 和 Rust/Tauri 多个目录。
 - `App.solid.tsx` 仍承担大量 bootstrap、hydration、listener 和关闭收敛职责，因此当前 Product Shell 与概念 Kernel 之间并未完全分离。
 
 ## 4. 当前总体拓扑
@@ -56,7 +56,7 @@ flowchart TB
 
   Tools --> ToolImpl["domains/tool + plugins/core/commandSet"]
   Agents --> AgentImpl["domains/agent + session creation/state"]
-  Renderers --> RendererImpl["React/Solid/isolated renderers"]
+  Renderers --> RendererImpl["Solid/isolated renderers（react 仅为第三方兼容 kind）"]
   Workspace --> WorkspaceImpl["Sheets + Sidebar + Context Panel"]
   Shell --> App["src/App.solid.tsx"]
   Gateway --> GatewayImpl["GatewaySheet + 插件包自有样式"]
@@ -244,7 +244,7 @@ GUI 创建、恢复和发送链路会把 `profileId` 送入 Rust runtime 的 `Se
 
 ### 8.3 Workbench 绑定与流式稳定性 seam
 
-Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 后 `chatEventController` 已删除，canonical committed row 的唯一前端入口是应用级单例 `canonicalEventFeed`（cursor/gap 回填/去重与 durable-before-project 发布），`agentWorkbenchSession` 经 pluginEventBus 消费行投影，并以 TurnClock 作为按 source 隔离的唯一生成时钟（终帧信号直接收敛 TurnClock 终态：主轨是 feed 的 onTerminal，另有 `subscribeWindowTerminalFrames` 订阅 `pylon:done`/`pylon:error` 窗口广播作兜底轨——两条路共用同一信号构造，重复投递由 TurnClock 幂等吸收，终态收敛因此不单点依赖 per-source Channel 注册），不拥有第二份渲染历史。Session metadata 更新（标题、`lastReplyAt`、`periId`、workspace 路径）不得被当作文档身份变化。`workbenchSessionBindingKey` 只由 `(session.id, source, agentId, profileId)` 构成，`agentWorkbenchSession.bind` 对同一 key 幂等；因此终态事件不会因 Zustand 产生新 Session 对象而替换整份文档。需要真正重载时，使用显式 session/reload token seam，而不是依赖对象引用。
+Workbench Renderer 的显示事实源是 `Workbench Runtime` 当前文档；P52 后 `chatEventController` 已删除，canonical committed row 的唯一前端入口是应用级单例 `canonicalEventFeed`（cursor/gap 回填/去重与 durable-before-project 发布），`agentWorkbenchSession` 经 pluginEventBus 消费行投影，并以 TurnClock 作为按 source 隔离的唯一生成时钟（终帧信号直接收敛 TurnClock 终态：主轨是 feed 的 onTerminal，另有 `subscribeWindowTerminalFrames` 订阅 `pylon:done`/`pylon:error` 窗口广播作兜底轨——两条路共用同一信号构造，重复投递由 TurnClock 幂等吸收，终态收敛因此不单点依赖 per-source Channel 注册），不拥有第二份渲染历史。Session metadata 更新（标题、`lastReplyAt`、`periId`、workspace 路径）不得被当作文档身份变化。`workbenchSessionBindingKey` 只由 `(session.id, source, agentId, profileId)` 构成，`agentWorkbenchSession.bind` 对同一 key 幂等；因此终态事件不会因内核 store 的内部对象更新产生新 Session 对象而替换整份文档。需要真正重载时，使用显式 session/reload token seam，而不是依赖对象引用。
 
 终态 document 与 generation metadata 可能在同一事件中连续发布。显示层 `streamingDisplayScheduler` 对同一 owner/session 的 terminal transition 在微任务边界做 latest-wins 合并；结构性会话切换和显式 flush 仍同步。该合并只影响 Renderer 消费节奏，不改变 canonical journal、Workbench Runtime 事实或 legacy Adapter 的职责边界。
 
@@ -366,7 +366,7 @@ stateDiagram-v2
 |---|---|---|
 | Agent lifecycle | Rust lifecycle/dispatcher | Kernel |
 | ACP engine/JSON-RPC | Rust `acp`（官方 `agent-client-protocol` SDK engine） | Kernel |
-| Session create/load/prompt | Rust session + React lifecycle | Kernel，UI 只消费 projection |
+| Session create/load/prompt | Rust session + Solid host lifecycle | Kernel，UI 只消费 projection |
 | canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 经 canonicalEventFeed 只读消费 committed row（cursor/gap；#439 起自写轨已退役） | Kernel durable journal |
 | Session metadata persistence | identityStore + UserDataService | Kernel persistence module |
 | PluginRuntime/Scope/registries | `src/plugin-runtime` | Kernel extension mechanism |
