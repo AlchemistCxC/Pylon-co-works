@@ -1772,7 +1772,7 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(prompt).toHaveFocus())
   })
 
-  it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {
+  it('pause 冻结 runtime 推送（外观保持实时），resume 一次收敛最新快照', async () => {
     const { host, services, lifecycle } = mountPreview()
     lifecycle.pause()
     streamInto(services, 'm-paused', '暂停期间的新文本', { tokenCount: 99 })
@@ -1784,6 +1784,20 @@ describe('mountSolidWorkbench', () => {
     lifecycle.resume()
     await waitFor(() => expect(screen.getByText('暂停期间的新文本')).toBeInTheDocument())
     expect(host.querySelector('[data-paused="false"]')).toBeInTheDocument()
+  })
+
+  it('pause 期间外观变更即时生效（后台 DOM 不滞后）', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    lifecycle.pause()
+
+    // 正控：编辑左列此刻还没进编辑态 ⇒ 不在场（否则下面会因为"根本没进编辑态"而假绿）
+    expect(screen.queryByRole('group', { name: '中控元件' })).toBeNull()
+
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+    // 暂停中也即时出现 = 外观订阅不吃暂停门（后台 DOM 不滞后到 resume）
+    await screen.findByRole('group', { name: '中控元件' })
+    expect(host.querySelector('[data-paused="true"]')).toBeInTheDocument()
   })
 
   it('preview 不暴露真实停止按钮，destroy 幂等并清空 DOM', () => {
