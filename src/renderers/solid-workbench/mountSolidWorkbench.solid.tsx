@@ -129,7 +129,8 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     publishRuntimeSnapshot(snapshot)
   })
   const unsubscribeAppearance = services.appearance.subscribe(() => {
-    if (!destroyed && !paused) setAppearanceSnapshot(services.appearance.getSnapshot())
+    // 外观不吃暂停门（低频、用户驱动）；暂停只保 runtime 流；resume 仍补读一次（幂等）。
+    if (!destroyed) setAppearanceSnapshot(services.appearance.getSnapshot())
   })
 
   const context: SolidWorkbenchContextValue = {
