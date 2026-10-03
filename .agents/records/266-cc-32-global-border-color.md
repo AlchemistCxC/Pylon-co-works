@@ -78,7 +78,7 @@
   - `bun run build` → EXIT=0（tsc -b + vite build，✓ built in 9.10s）
   - `bun run check:solid` → EXIT=0（主题字段 176 个；Workbench CSS variables 88 个；ZONE_FIELDS 一致性契约通过）
   - `bun run test` → EXIT=0（Test Files 655 passed | 1 skipped (656)；Tests 5123 passed | 1 skipped | 1 todo (5125)）
-- 判据读数与完整命令输出：`E:\Acode\FILES\任务\工作台优化\待办\17-施工单-CC-32输入边框归位全局与输入栏独立\2026-10-03-工作者汇报.md`
+- 判据读数与完整命令输出：`E:\Acode\FILES\任务\工作台优化\报告等\17-施工单-CC-32输入边框归位全局与输入栏独立\2026-10-03-工作者汇报.md`（10-03 由 `待办\` 子目录移入）
 - 手工验证：实机四条（全局区「边线」组、中控台「输入框本体」减项、两个改色方向互不影响）留翻译复验（施工单 §五 注明非本工人事项）
 
 ## 与 spec 的偏差
@@ -94,3 +94,12 @@
 ## 并行交集
 
 本单碰过的共享文件：`src/domains/theme/themeFieldDefs.ts`（多线共用的字段定义单一真值）、`.agents/records/266-cc-32-global-border-color.md`（新增）。其余改动均在 zones/factory 数据、builtin.pylon-renderers 样式与各自测试文件内。
+
+---
+
+## 收口补记（翻译 · 2026-10-03，只追加）
+
+- **提交**：本记录随施工改动由翻译收口提交为 `8b90ccfd`（分支 `feat/cc-32-global-border-color.1`，rebase 到含 #527 的 main `d98c534a` 之后），已推送并开 PR [#528](https://github.com/Teens-in-Times/Pylon-co-works/pull/528)。上文「证据 → commit：无…」是工作者交回单时的快照，以此补记为准。
+- **汇报移址**：工作者汇报已由 `待办\17-…\` 移至 `报告等\17-…\`（上文路径已同步更正）。
+- **翻译侧独立核验结论**（详见仓外验收报告）：三条判据复跑成立（含四项簿记计数独立重数 105/52/340/85，与本记录一致）；门禁五步在 **rebase 后**独立重跑 `0/0/0/0/0`（`655 files / 5123 passed`；CSS 声明 356 口径闭环、皮肤契约 176/88 不变）；契约快照 `--write` 仅 `generatedAt`；**实机四条全过**（含两侧改色往返、行内 reset 原子还原）。
+
