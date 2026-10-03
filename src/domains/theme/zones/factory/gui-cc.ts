@@ -138,7 +138,6 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "#268bd2",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -253,4 +252,5 @@ export const FACTORY_GUI_CC: readonly ZonePresetEntry[] = [
   },
 ]
 
-// 本文件 5 条 / 127 个字段值（★ #266 刀2：5 条各 +1 `ccHiddenEmpty`）
+// 本文件 5 条 / 105 个字段值（★ #266 CC-32：solarized 桶内 inputBorderColor 搬去 gui-global.ts；
+//   旧计数 127 在更早的字段删除中未同步、早已过时，本次按实际重数 106 − 1 = 105）

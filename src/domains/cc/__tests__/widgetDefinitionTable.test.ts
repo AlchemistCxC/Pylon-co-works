@@ -69,10 +69,12 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
   // ★ #266 CC-07：`sendVariant` / `inputShowPlaceholder` / `prismOnColor` / `pillText` 四字段删除
   //   ⇒ cc 字段 79 → 75（`tokens` 元件的两个字段全删、输入栏少一项、发送按钮少一项）。
   // ★ #266 刀7~13：再删 7 项（`cliLinePadding` / `cliContentOffsetY` / `inputMode` / `inputVariant` /
-  //   `cliOverflowMode` / `footerLayout` / `inputMinHeight`）⇒ cc 字段 75 → **68**。
+  //   `cliOverflowMode` / `footerLayout` / `inputMinHeight`）⇒ cc 字段 75 → 68；
+  //   刀2 的空态切面又把系统桶补到 **69**。
+  // ★ #266 CC-32：`inputBorderColor` 搬去 global 区（全应用通用边线色）⇒ 69 → **68**（用例名的"68"在此对齐）。
   it('68 个 cc 字段每一个恰好有一个归属行，无遗漏', () => {
     const owners = fieldOwners()
-    expect(ccFields).toHaveLength(69)
+    expect(ccFields).toHaveLength(68)
     expect([...owners.keys()].sort()).toEqual([...ccFields].sort())
   })
 
@@ -88,7 +90,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     ]))
     expect(counts).toEqual({
       'cc-surface': 7,
-      input: 26,
+      input: 25,
       model: 7,
       reasoning: 7,
       mode: 9,
@@ -106,9 +108,10 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
     // ★ #266 刀2：显隐的**空态切面** `ccHiddenEmpty` 进系统桶（跨元件）⇒ 系统桶 2 → 3、总数 68 → **69**。
     //   ★ 它取代了原先那句「空态隐藏 6 条」的字面量名单：名单搬进预设数据，
     //     出厂那 10 份空态切面的键集由 `ccVisibilitySliceGuard.test.ts` 钉住。
+    // ★ #266 CC-32：`inputBorderColor` 搬去 global 区 ⇒ 输入栏 26 → 25、总数 69 → **68**。
     expect(CC_SYSTEM_FIELDS).toEqual(['ccLayout', 'ccHidden', 'ccHiddenEmpty'])
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0) + CC_SYSTEM_FIELDS.length
-    expect(total).toBe(69)
+    expect(total).toBe(68)
   })
 
   it('成员字段必须落在 cc zone 内', () => {
@@ -129,7 +132,7 @@ describe('#238 · 定义表不变量 1-2：字段覆盖完整、无重叠', () =
         'inputSurfaceBg', 'inputSurfaceOpacity', 'inputFocusRingEnabled', 'inputFocusRingColor',
         'inputHighlightOpacity', 'inputShadowEnabled', 'inputBg', 'inputBgImage',
         'inputTextColor', 'inputPlaceholder',
-        'inputBorderColor', 'inputFocusBorder', 'inputBorder', 'inputBorderWidth', 'inputBorderOpacity',
+        'inputFocusBorder', 'inputBorder', 'inputBorderWidth', 'inputBorderOpacity',
         'inputRadius', 'inputFontSize', 'inputLineHeight',
         'cliTextColor',
       ],

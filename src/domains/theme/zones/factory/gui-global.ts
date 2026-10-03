@@ -52,6 +52,7 @@ export const FACTORY_GUI_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#268bd2",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
   {
@@ -113,4 +114,5 @@ export const FACTORY_GUI_GLOBAL: readonly ZonePresetEntry[] = [
   },
 ]
 
-// 本文件 5 条 / 52 个字段值
+// 本文件 5 条 / 52 个字段值（★ #266 CC-32：solarized 桶 +1 inputBorderColor，搬自 gui-cc.ts；
+//   旧计数 52 未随更早的字段删除同步、实际为 51，改后恰好回到 52）

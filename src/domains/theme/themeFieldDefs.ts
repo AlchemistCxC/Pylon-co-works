@@ -271,7 +271,7 @@ export const THEME_FIELD_DEFS = {
   //   是输入栏那层"被恒有值的内联 `--cc-input-border` 挡住"的兜底 ⇒ CC-29 删掉那层后它成为死注入。
   //   字段本身照旧生效：它是 `stroke.default` 角色的源（经角色 token 落地），角色解析读的是字段值、
   //   不是这个直投变量 ⇒ 这里只是不再经 THEME_CSS_VAR_MAP 重复注入（同上方 inputFocusBorder 一手）。
-  inputBorderColor: { ...C('cc', '输入边框'), default: '', group: "输入框本体", noCssVar: true, semanticRole: 'stroke.default', semanticSource: true },
+  inputBorderColor: { ...C('global', '通用边线色'), default: '', group: "边线", noCssVar: true, semanticRole: 'stroke.default', semanticSource: true, hint: '全应用边线（面板 / 卡片 / 控件）；输入栏不受它影响——输入栏用「输入栏边框色」' },
   // ★ #266 刀12 连带：焦点边框的**别名变量** `--input-focus-border` 唯一第一方消费者是已删除的
   //   replay 只读条 ⇒ 它成为死注入。字段本身照旧生效：它是 `state.focusRing` 角色的源
   //   （经角色 token `--border-focus` 落地），且该别名仍由 `themeCssSnapshot` 的兼容别名表
@@ -425,7 +425,7 @@ function renderableMemberFields(label: string): readonly ThemeFieldKey[] {
  *   没有可调项的子部件**不进列表**（否则渲染出一个只有标题、点了没东西的分类 —— 那正是本刀要清的病）。
  */
 export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: readonly { title: string; compact?: boolean; defaultOpen?: boolean }[] }[]> = {
-  global: [{ groups: [{ title: '个人信息' }, { title: '强调色' }, { title: '布局骨架' }, { title: '玻璃效果' }, { title: '标题栏' }, { title: '字体' }] }],
+  global: [{ groups: [{ title: '个人信息' }, { title: '强调色' }, { title: '边线' }, { title: '布局骨架' }, { title: '玻璃效果' }, { title: '标题栏' }, { title: '字体' }] }],
   sidebar: [{ groups: [{ title: '背景' }, { title: '布局' }, { title: '玻璃效果' }, { title: '文字' }] }],
   chat: [
     // 高频组默认展开；低频组（语法高亮/代码差异/助手标记）默认折叠，搜索时强制展开
