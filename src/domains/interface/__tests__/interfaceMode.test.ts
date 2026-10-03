@@ -16,8 +16,10 @@ const registrations: AsyncDisposable[] = []
 
 // ★ #266 刀9~11：原列表含 `inputMode` / `inputVariant` / `footerLayout` 三项 —— 字段已删除
 //   ⇒ 摘掉；其余输入 token 仍锁「方案切换会写入 / 切回会恢复」这件事。
+// ★ #266 CC-32：`inputBorderColor` 摘除 —— 它实为全应用通用边线色、已搬去 global 区，
+//   不再是 cc 区输入 token（profile 对它的覆盖与恢复由 builtinPresentationProfiles.test.ts 锁）。
 const CC_INPUT_TOKEN_KEYS = [
-  'inputBg', 'inputBorderColor', 'inputFocusBorder',
+  'inputBg', 'inputFocusBorder',
   'inputRadius', 'cliHintMode',
 ] as const
 

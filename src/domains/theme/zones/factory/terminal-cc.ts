@@ -103,7 +103,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "#505050",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -236,7 +235,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "rgba(136,192,208,0.45)",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -369,7 +367,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "#7aa2f7",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -502,7 +499,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "#ffb000",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -635,7 +631,6 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
       sendButtonIconGenerating: "square",
       sendButtonIconRound: "on",
       sendButtonIconColor: "#ffffff",
-      inputBorderColor: "",
       inputFocusBorder: "#39ff14",
       inputBorder: "transparent",
       inputBorderWidth: 1,
@@ -678,4 +673,5 @@ export const FACTORY_TERMINAL_CC: readonly ZonePresetEntry[] = [
   },
 ]
 
-// 本文件 5 条 / 420 个字段值（★ #266 刀2：5 条各 +1 `ccHiddenEmpty`）
+// 本文件 5 条 / 340 个字段值（★ #266 CC-32：5 桶各删 1 处 inputBorderColor，搬去 terminal-global.ts；
+//   旧计数 420 在更早的字段删除中未同步、早已过时，本次按实际重数 345 − 5 = 340）

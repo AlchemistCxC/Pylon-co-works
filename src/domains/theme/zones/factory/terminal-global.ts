@@ -34,6 +34,7 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#D77757",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
   {
@@ -60,6 +61,7 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#88c0d0",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
   {
@@ -86,6 +88,7 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#bb9af7",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
   {
@@ -112,6 +115,7 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#ffb000",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
   {
@@ -138,8 +142,10 @@ export const FACTORY_TERMINAL_GLOBAL: readonly ZonePresetEntry[] = [
       userColor: "#7fff00",
       showTabBar: true,
       showSidebar: true,
+      inputBorderColor: "",
     },
   },
 ]
 
-// 本文件 5 条 / 85 个字段值
+// 本文件 5 条 / 85 个字段值（★ #266 CC-32：5 桶各 +1 inputBorderColor，搬自 terminal-cc.ts；
+//   旧计数 85 未随更早的字段删除同步、实际为 80，改后恰好回到 85）
