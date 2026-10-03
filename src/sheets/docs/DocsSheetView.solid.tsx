@@ -1,11 +1,10 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { BookOpen, ChevronLeft, ChevronRight, House, RotateCw, type IconNode } from 'lucide'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { appClients } from '../../app/appClients.ts'
 import type { DocsSheetSnapshot } from '../../infrastructure/tauri/docsClient'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { reportRuntimeError } from '../../app/runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
@@ -205,6 +204,3 @@ export default function DocsSheetView(props: DocsSheetViewProps) {
     </div>
   )
 }
-
-/** React 薄桥（DocsSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountDocsSheetView = createSolidMount(DocsSheetView)

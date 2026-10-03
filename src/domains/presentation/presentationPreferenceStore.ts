@@ -1,5 +1,4 @@
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 
 export const DEFAULT_PRESENTATION_PROFILE_ID = 'builtin.presentation.terminal-classic'
 
@@ -50,7 +49,7 @@ export function migratePresentationPreferences(
   }
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 usePresentationPreferenceStore 即内核本体（直连，无 shim）。
 const presentationKernel = createSolidStoreKernel<PresentationPreferenceState>({
   activeProfileId: DEFAULT_PRESENTATION_PROFILE_ID,
   rendererSuiteIdByMode: {},
@@ -80,4 +79,4 @@ attachSolidPersist(presentationKernel, {
   }),
 })
 
-export const usePresentationPreferenceStore: ZustandHook<PresentationPreferenceState> = createReactStoreHook(presentationKernel)
+export const usePresentationPreferenceStore: SolidStoreKernel<PresentationPreferenceState> = presentationKernel

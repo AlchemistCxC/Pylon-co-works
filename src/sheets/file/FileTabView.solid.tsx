@@ -9,8 +9,7 @@ import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type 
 import { workspaceTargetKey, type WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import FileCodeEditor from './FileCodeEditor.solid.tsx'
 import type { FileCodeEditorApi, KernelSummary } from './fileCodeMirrorKernel.ts'
 
@@ -49,13 +48,14 @@ export interface FileTabViewProps {
 }
 
 /**
- * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#515 起收编为直连
- * props 形态，React 桥经 createSolidMount 响应式通道透传）。
+ * FileTabView — 文件视图数据编排（0-A1/A2/A3 语义的 Solid 实体；#515 起收编为
+ * Solid 实体直连 props，React 桥面已随 React 面退役删除）。
  *
  * 渲染恒为 CodeMirror 常驻单内核（FileCodeEditor.solid → fileCodeMirrorKernel 共享工厂）：
  * 0-A2 默认可写，只读仅物理例外（writable=false）；旧「手工 DOM 投影 +
- * highlightCode/sanitizeHtml + MarkdownPreview 只读分支」退役（markdown 渲染态切换归
- * 阶段一 1-A1，裁决：md 默认源码态）。本组件只负责：readText 装载（source guard 防串）、
+ * highlightCode/sanitizeHtml + markdown 只读预览分支」退役，MarkdownPreview 实体亦随
+ * #520 R2 死件清退（markdown 渲染态切换归阶段一 1-A1，裁决：md 默认源码态）。本组件
+ * 只负责：readText 装载（source guard 防串）、
  * touchVersion 感知（编辑中走 probeDisk 不静默覆盖，无编辑安全刷新并落变更行
  * decoration）、0-A3 写冲突锁簿记、saveReceipt 锚点推进、truncated 上报。内容全文
  * 不过框架 state——宿主经 apiRef 句柄取全文。
@@ -200,7 +200,13 @@ export default function FileTabView(props: FileTabViewProps) {
         // 用户有未保存编辑：不覆盖，上报外部修改冲突
         untrack(() => props.onExternalChange)?.()
       }
-    }).catch(() => {})
+    }).catch((error: unknown) => {
+      // 探测失败（文件被删/IO 错）若静默，外部修改检测整条链路无感失效——上报错误中心。
+      reportRuntimeError('探测外部文件变更失败', error, undefined, {
+        key: 'file:probe-disk',
+        source: 'file.external-change',
+      })
+    })
   }
 
   // 0-A3 写冲突锁：冷却窗口内 >=2 次 touchVersion 递增 → 置锁；静默满冷却 → 解锁并
@@ -338,9 +344,6 @@ export default function FileTabView(props: FileTabViewProps) {
     </Show>
   )
 }
-
-/** React 薄桥（FileTabView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileTabView = createSolidMount(FileTabView)
 
 /** 0-A3 写冲突锁：冷却窗口（ms）内 touchVersion >=2 次递增 = agent 正在写盘。 */
 export const WRITE_LOCK_COOLDOWN_MS = 3000

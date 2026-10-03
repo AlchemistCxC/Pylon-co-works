@@ -2,7 +2,6 @@
 import { Suspense, lazy, createMemo, type Component } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import { Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { BUILTIN_TACTICAL_SCENE_SURFACE_ID } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 
 /**
@@ -39,6 +38,3 @@ export function InterfaceModeSceneHost(props: { readonly surfaceId: string }) {
     </Suspense>
   )
 }
-
-/** React 薄桥（interfaceModeScenes.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountInterfaceModeSceneHost = createSolidMount(InterfaceModeSceneHost)

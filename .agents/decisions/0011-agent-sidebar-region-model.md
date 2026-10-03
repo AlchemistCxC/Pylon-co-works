@@ -44,7 +44,7 @@
    - `sessions`（下）：`flex: 1`，占满剩余高度，是左栏唯一的会话滚动态，默认不可折叠。
 2. **区块外壳归宿主**：宿主渲染 `.sidebar-block` 外壳——标题（取自贡献的 `label`）、折叠钮、`headerActions`；贡献只画 `.sidebar-block-body`。贡献**不得**再画自己的标题。
 3. **契约三处新增**：`collapsible` / `defaultCollapsed`（折叠默认值按分区给，`modules` 可折叠、`sessions` 不可）、`headerActions`（数据化的头部动作：`{ id, label, title?, icon?, disabled? }`，`icon` 复用 Workspace launch 的稳定图标键映射）。
-4. **头部动作回派**：宿主渲染按钮，语义留在贡献。`first-party-react` 贡献挂载期经 `props.registerBlockActionHandler` 注册处理器；`isolated-surface` 贡献走 `host:input.blockAction`（带 `nonce`，重复点击可区分）。
+4. **头部动作回派**：宿主渲染按钮，语义留在贡献。`first-party-solid` 贡献挂载期经 `props.registerBlockActionHandler` 注册处理器；`isolated-surface` 贡献走 `host:input.blockAction`（带 `nonce`，重复点击可区分）。
 5. **`order` 与 `when` 真正生效**：同一分区内按 `order` 纵向堆叠；`when(context)` 为假时区块整体不渲染。
 6. **会话按 cwd 分组，无 cwd 组置底**：旧「聊天」面板并入会话区块，无 `workspaceId` 的会话落在**列表最底部的独立分组**（`无工作区`，复用既有 `.cwd-group` / `.cwd-group-sessions.is-collapsed` 折叠机制），不再占一个互斥页签。
 7. **状态换形状、零存储键迁移**：`AgentWorkspaceState` 由 `{ sidebarMode }` 改为 `{ blockCollapsed: Record<string, boolean> }`。用**显式映射**而不是「塌陷 id 清单」，因为贡献可声明 `defaultCollapsed`：只记塌陷项的话，用户把默认塌陷的区块展开后无处落笔。收敛集中在 `normalizeBlockState`，旧形状（含旧 `sidebarMode`）一律回落空映射，持久化键不变。

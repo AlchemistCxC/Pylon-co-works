@@ -1,11 +1,10 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, Suspense, untrack } from 'solid-js'
-import { render } from 'solid-js/web'
 import SheetTabStrip from './SheetTabStrip.solid.tsx'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
-import { useStore } from '../domains/theme/themeStore'
+import { useThemeStore } from '../domains/theme/themeStore'
 import { useWorkspaceStore } from '../domains/workspace/workspaceStore'
 import AgentStatusLights from '../components/AgentStatusLights.solid.tsx'
 import type { SheetRecord } from './sheetTypes'
@@ -20,7 +19,8 @@ import { activateInterfaceMode } from '../application/transactions/activateInter
 import type { TitlebarContext, TitlebarRegistryEntry } from '../plugin-runtime/titlebar/titlebarTypes.ts'
 import { resolveLaunchIcon } from './launchIcons.solid.tsx'
 import { SETTINGS_DOMAINS, SETTINGS_DOMAIN_MENU_META, SETTINGS_DOMAIN_SHORT_LABELS, type SettingsDomainId } from '../components/settings/settingsDomains.ts'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 
 export interface WorkspaceMenuActions {
   onTogglePin: (id: string) => void
@@ -62,21 +62,13 @@ type WorkspaceMenuKind = 'app-menu'
 
 let titlebarSequence = 0
 
-/** 外部 store（subscribe/getSnapshot 快照语义）→ Solid 信号（快照引用等值）。 */
-function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
-  const [value, setValue] = createSignal<T>(store.getSnapshot())
-  // updater 形态：T 可能是任意值（含函数），走 (prev) => next 重载避开 Solid setter
-  // 对「函数值」的排除分支。
-  onCleanup(store.subscribe(() => setValue(() => store.getSnapshot())))
-  return value
-}
-
 /**
  * WorkspaceTitlebar — 标题栏（#279 第 3 梯队 Solid 化实体；与 React 版逐行为同构）。
  *
- * 插件贡献簇（app-actions）按插件 API 是 React 组件（含 ErrorBoundary/Suspense），经
- * `WorkspaceTitlebarPluginIsland`（React 岛）渲染——依赖变化由 effect 调 `rerender()`。
- * 其余全部 Solid：三块 zustand store 经 createZustandSignal，三个插件 registry 经
+ * 插件贡献簇（app-actions）直连渲染（#515 岛退役，原 WorkspaceTitlebarPluginIsland
+ * 已删）：command 贡献不进标题栏、isolated-surface 挂 IsolatedPluginSurface、
+ * first-party 组件包 PluginContributionBoundary + Suspense——见 TitlebarPluginActions。
+ * 其余全部 Solid：store 经 createZustandSignal 订阅，三个插件 registry 经
  * createRegistrySignal（快照引用等值）。
  */
 export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarProps }) {
@@ -95,7 +87,7 @@ export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarPr
   const chromeStyle = createMemo<InterfaceModeChromeStyle>(() => value().chromeStyle ?? (interfaceMode() === 'modern-gui' ? 'icons' : 'glyphs'))
 
   const agentStatuses = createZustandSignal(useRuntimeStore, s => s.agentStatuses)
-  const showTabBar = createZustandSignal(useStore, s => s.showTabBar !== false)
+  const showTabBar = createZustandSignal(useThemeStore, s => s.showTabBar !== false)
   // 「有最近关闭的 Sheet」只服务于**页签右键菜单**里的重开项：标题栏上那个重开按钮已删除
   // （能力没删——命令 `workspace.sheet.reopen` 与页签右键都还在）。
   const canReopenSheet = createZustandSignal(useWorkspaceStore, state => state.workspaceSheets.recentlyClosed.length > 0)
@@ -104,9 +96,9 @@ export default function WorkspaceTitlebar(p: { latest: () => WorkspaceTitlebarPr
   const contextPanelRegistry = getContextPanelRegistry()
   const interfaceModeRegistry = getInterfaceModeRegistry()
   const titlebarRegistry = getTitlebarRegistry()
-  const panelSnapshot = createRegistrySignal(contextPanelRegistry)
-  const modeSnapshot = createRegistrySignal(interfaceModeRegistry)
-  const titlebarSnapshot = createRegistrySignal(titlebarRegistry)
+  const panelSnapshot = createRegistrySignal(contextPanelRegistry, () => contextPanelRegistry.getSnapshot())
+  const modeSnapshot = createRegistrySignal(interfaceModeRegistry, () => interfaceModeRegistry.getSnapshot())
+  const titlebarSnapshot = createRegistrySignal(titlebarRegistry, () => titlebarRegistry.getSnapshot())
 
   const [openMenu, setOpenMenu] = createSignal<WorkspaceMenuKind | null>(null)
   let menuElement: HTMLDivElement | undefined
@@ -395,9 +387,4 @@ function TitlebarPluginActions(props: { entries: TitlebarRegistryEntry[]; contex
       )
     }}</For>
   )
-}
-
-/** React 薄桥（WorkspaceTitlebar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderWorkspaceTitlebar(container: HTMLElement, latest: () => WorkspaceTitlebarProps): () => void {
-  return render(() => <WorkspaceTitlebar latest={latest} />, container)
 }

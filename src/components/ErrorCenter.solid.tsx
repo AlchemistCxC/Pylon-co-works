@@ -1,11 +1,10 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { clearErrors, dismissError, subscribeErrorCenter, getErrors, type ErrorEntry } from '../app/errorCenter'
 import { reportRuntimeError, resolveRuntimeErrors } from '../app/runtimeError.ts'
 import { explainErrorCode } from '../app/errorCodeExplanations.ts'
 import { safeJson } from '../utils/safeJson.ts'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 
 function recoveryLabel(kind: NonNullable<ErrorEntry['recovery']>['kind']): string {
   return {
@@ -203,6 +202,3 @@ export default function ErrorCenter() {
     </Show>
   )
 }
-
-/** React 薄桥（ErrorCenter.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderErrorCenter = createSolidMount(ErrorCenter)

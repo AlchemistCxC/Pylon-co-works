@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 /**
  * HookDiagnosticsPanel — 插件 hook 运行诊断（设置 › 插件 › Hook 诊断）。
@@ -125,9 +124,4 @@ export default function HookDiagnosticsPanel() {
       </section>
     </div>
   )
-}
-
-/** React 薄桥（HookDiagnosticsPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderHookDiagnosticsPanel(container: HTMLElement, latest: () => HookDiagnosticsPanelProps): () => void {
-  return render(() => createComponent(HookDiagnosticsPanel, bridgedProps(latest)), container)
 }

@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 import { Portal } from 'solid-js/web'
-import { createSolidMount } from '../host/solidBridge.solid'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { appClients } from '../app/appClients.ts'
 import { LucideIcon } from './LucideIcon.solid.tsx'
 import { useIdentityStore, refreshSessionsBackend } from '../domains/identity/identityStore'
@@ -17,10 +16,9 @@ import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSe
 export interface SessionSettingsProps { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
 
 /**
- * SessionSettings — 会话设置弹窗（#515 Solid 实体；DOM/aria 契约与 React 版逐字同构）。
- * 原 @radix-ui/react-dialog 由手写最小等价替代（指南 §3，SessionsPanel 同款）：Portal
- * 到 body、遮罩点击/Esc 走 onOpenChange(false) → beforeClose，role=dialog +
- * aria-modal + aria-describedby 词汇保持。
+ * SessionSettings — 会话设置弹窗（#515 Solid 实体）。
+ * 对话框契约（指南 §3，SessionsPanel 同款）：Portal 到 body、遮罩点击/Esc 走
+ * onOpenChange(false) → beforeClose，role=dialog + aria-modal + aria-describedby。
  */
 export default function SessionSettings(props: SessionSettingsProps) {
   const updateSession = useIdentityStore.getState().updateSession
@@ -201,6 +199,3 @@ export default function SessionSettings(props: SessionSettingsProps) {
     </Show>
   )
 }
-
-/** React 薄桥（SessionSettings.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionSettings = createSolidMount(SessionSettings)

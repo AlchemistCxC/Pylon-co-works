@@ -1,5 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { createRoot } from 'solid-js'
 import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type PersistStringStorage } from '../solidStoreKernel'
+import { createZustandSignal } from '../solidStoreBridge.ts'
+import { useReplayPostureStore } from '../../../domains/chat/replayPostureStore'
 
 describe('solidStoreKernel（#515 批0 门面语义）', () => {
   describe('zustand vanilla 门面等价', () => {
@@ -198,5 +201,33 @@ describe('solidStoreKernel（#515 批0 门面语义）', () => {
     const resolved = resolveLocalStorage()
     if (typeof localStorage === 'undefined') expect(resolved).toBeNull()
     else expect(resolved).not.toBeNull()
+  })
+
+  describe('store 直连导出（#515 W3：React hook shim 退役）', () => {
+    it('useXxxStore 即内核本体：createZustandSignal 消费 getState/subscribe 面照常工作', () => {
+      // 真实 store（replayPosture：无 persist、无跨域依赖）冒烟——直连导出后
+      // 内核的 getState/subscribe/getInitialState/getVersion 全面即消费面。
+      createRoot(dispose => {
+        const session = createZustandSignal(useReplayPostureStore, s => s.sessionId)
+        expect(session()).toBeNull()
+        expect(useReplayPostureStore.getInitialState().sessionId).toBeNull()
+
+        const seen: Array<string | null> = []
+        const unsub = useReplayPostureStore.subscribe(state => seen.push(state.sessionId))
+        useReplayPostureStore.getState().enter('session-w3')
+        expect(useReplayPostureStore.getState().sessionId).toBe('session-w3')
+        expect(session()).toBe('session-w3')          // subscribe → 信号跟随
+        expect(useReplayPostureStore.getVersion()).toBeGreaterThan(0)
+
+        unsub()
+        useReplayPostureStore.getState().clear()
+        expect(seen).toEqual(['session-w3'])          // 退订后手动订阅不再收通知
+        expect(session()).toBeNull()                  // 信号自身订阅仍在（dispose 前有效）
+        dispose()
+      })
+      // 还原模块级单例：node-shared 项目共享模块注册表，防状态串入其他测试文件。
+      useReplayPostureStore.setState(useReplayPostureStore.getInitialState(), true)
+      expect(useReplayPostureStore.getState().sessionId).toBeNull()
+    })
   })
 })

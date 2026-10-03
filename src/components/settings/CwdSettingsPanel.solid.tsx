@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+
 import type { IconNode } from 'lucide'
 import { FolderSearch } from 'lucide'
 import { appClients } from '../../app/appClients.ts'
@@ -12,7 +12,6 @@ import type { Workspace } from '../../domains/workspace/workspaceEntities'
 import { isAbsolutePath } from '../../domains/workspace/workspaceEntities'
 import { buildCapabilityOptions } from '../../domains/workspace/capabilityOptions.ts'
 import { getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface CwdSettingsPanelProps {
   workspace: Workspace
@@ -316,9 +315,4 @@ export default function CwdSettingsPanel(props: CwdSettingsPanelProps) {
       </div>
     </div>
   )
-}
-
-/** React 薄桥（CwdSettingsPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderCwdSettingsPanel(container: HTMLElement, latest: () => CwdSettingsPanelProps): () => void {
-  return render(() => createComponent(CwdSettingsPanel, bridgedProps(latest)), container)
 }

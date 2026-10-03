@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import '../../testing/productPluginTestBootstrap.ts'
 import { PromptContributionRegistry } from '../promptContributionRegistry.ts'
 import { validatePromptContribution, PROMPT_CONTRIBUTION_DEFAULT_MAX_BYTES } from '../promptContributionTypes.ts'
-import { assembleSessionPrompt } from '../../../host/commandSetResolver.ts'
+import { assembleSessionPrompt } from '../../../application/commandSetResolver.ts'
 import { getPromptContributionRegistry } from '../../runtimeServices.ts'
 
 import type { PluginIdentity } from '../../pluginIdentity.ts'

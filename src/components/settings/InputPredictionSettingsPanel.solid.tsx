@@ -1,11 +1,10 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, Show, type JSX } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, Show, type JSX } from 'solid-js'
+
 import { DEFAULT_INPUT_PREDICTION_SETTINGS, type InputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettings.ts'
 import { cachedInputPredictionSettings } from '../../domains/inputPrediction/inputPredictionSettingsCache.ts'
 import { persistInputPredictionSettings } from '../../infrastructure/persistence/inputPredictionSettingsRepository.ts'
 import { createStandalonePredictionProvider } from '../../infrastructure/prediction/predictionStandalone.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface InputPredictionSettingsPanelProps {}
 
@@ -66,9 +65,4 @@ export default function InputPredictionSettingsPanel() {
     </section>
     <div class="cwd-settings-footer"><span class="set-hint" role="status">{status() || (configured() ? '配置完整' : '尚未配置完整')}</span><div class="sess-field-actions"><button type="button" class="settings-action" onClick={reset}>恢复默认</button><button type="button" class="settings-action primary" disabled={!configured()} onClick={() => void test()}>测试连接</button></div></div>
   </div>
-}
-
-/** React 薄桥（InputPredictionSettingsPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderInputPredictionSettingsPanel(container: HTMLElement, latest: () => InputPredictionSettingsPanelProps): () => void {
-  return render(() => createComponent(InputPredictionSettingsPanel, bridgedProps(latest)), container)
 }

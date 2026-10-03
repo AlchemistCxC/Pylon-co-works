@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { appClients } from '../../app/appClients.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError } from '../../app/runtimeError'
@@ -120,6 +119,3 @@ export default function DispatchBar(props: DispatchBarProps) {
     </Show>
   )
 }
-
-/** React 薄桥（DispatchBar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountDispatchBar = createSolidMount(DispatchBar)

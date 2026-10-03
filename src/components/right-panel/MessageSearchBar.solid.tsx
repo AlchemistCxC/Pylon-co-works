@@ -1,14 +1,16 @@
 /** @jsxImportSource solid-js */
 import { onMount, Show } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import type { MessageSearchBarProps } from './rightPanelTypes.ts'
 
 export type { MessageSearchBarProps }
 
 const navButton = 'inline-flex items-center justify-center shrink-0 w-[var(--ui-control-compact)] h-[var(--ui-control-compact)] p-0 border-0 rounded-none cursor-pointer text-text-dim bg-transparent enabled:hover:text-text enabled:hover:bg-border disabled:opacity-35 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent'
 
-/** MessageSearchBar — 消息搜索条（#515 Solid 实体；DOM/键盘/aria 契约与 React 版逐字同构）。 */
+/** MessageSearchBar — 消息搜索条（#515 Solid 实体）。DOM/键盘/aria 契约：
+ * div[role=search][aria-label="搜索当前会话消息"]（input aria-label="搜索消息"、
+ * 计数 aria-live=polite、上一/下一个/关闭钮），键盘 Enter=下一个、Shift+Enter=上一个、
+ * Esc=关闭。 */
 export default function MessageSearchBar(props: MessageSearchBarProps) {
   let inputRef: HTMLInputElement | undefined
 
@@ -60,6 +62,3 @@ export default function MessageSearchBar(props: MessageSearchBarProps) {
     </div>
   )
 }
-
-/** React 薄桥（MessageSearchBar.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderMessageSearchBar = createSolidMount(MessageSearchBar)

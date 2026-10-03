@@ -83,6 +83,9 @@ describe('Browser 页面缩放', () => {
     expect(range.step).toBe('10')
     expect(range.value).toBe('90')
 
+    // browser_status 响应跨宏任务落地（applySnapshot → phase=ready）；就绪前滑杆
+    // 按语义禁用，input 会落空。等会话就绪（滑杆可用）再输入，不与时序赌运气。
+    await waitFor(() => expect(range.disabled).toBe(false))
     fireEvent.input(range, { target: { value: '120' } })
     await waitFor(() => {
       expect(fakeInvoke.calls).toContainEqual({ cmd: 'browser_set_zoom', args: { zoomPercent: 120 } })

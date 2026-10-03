@@ -60,7 +60,7 @@ describe('WorkspaceTitlebar Sheet 导航入口', () => {
 
   it('#52 右栏按钮只负责折叠：点它切换 collapsed，面板类型不在这里选', () => {
     const registration = getContextPanelRegistry().register(createPluginIdentity('test.issue52', 'run'), {
-      id: 'test.context', label: '上下文', scope: 'global', renderKind: 'first-party-react', component: () => null,
+      id: 'test.context', label: '上下文', scope: 'global', renderKind: 'first-party-solid', component: () => null,
     })
     try {
       useRightRailStore.setState({ activePanelId: 'test.context', collapsed: true })

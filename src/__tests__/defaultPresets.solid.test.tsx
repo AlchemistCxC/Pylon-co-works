@@ -25,7 +25,7 @@ import { PRESET_ZONES, deriveGlobalStatus, filterPresetTheme } from '../domains/
 import { THEME_PRESET_KEYS } from '../domains/theme/themeFieldDefs.ts'
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
 import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, zonePresetsFor } from '../domains/theme/zones/index.ts'
-import { useStore } from '../domains/theme/themeStore.ts'
+import { useThemeStore } from '../domains/theme/themeStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { activateInterfaceMode, resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 import { lastSettingWriter } from '../domains/theme/settingProvenance.ts'
@@ -34,7 +34,7 @@ import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { mountSettingsSheet } from '../test/settingsSheetHarness.solid'
 import { resetStores } from '../test/resetStores.ts'
 
-vi.mock('../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => null }))
+vi.mock('../components/settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const GLASS = GLOBAL_PRESETS.find(preset => preset.name === 'glass')!
@@ -57,7 +57,7 @@ const PRISTINE_PRESET_THEMES = structuredClone(GLOBAL_PRESETS.map(preset => effe
 
 /** 预设域字段快照（用于「重置 == 应用默认预设」的逐字段比对；标记另测）。 */
 function themeSnapshot(): Record<string, unknown> {
-  const state = useStore.getState() as unknown as Record<string, unknown>
+  const state = useThemeStore.getState() as unknown as Record<string, unknown>
   return Object.fromEntries(THEME_PRESET_KEYS.map(key => [key, state[key]]))
 }
 
@@ -131,37 +131,37 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
 
   it('modern-gui 模式：重置后 == 应用 GUI-默认预设（内容即 glass），且覆盖范围与原来一致', () => {
     // 参照基准：直接应用 glass 全局预设
-    useStore.getState().setGlobalPreset('glass', effectivePresetTheme(GLASS))
+    useThemeStore.getState().setGlobalPreset('glass', effectivePresetTheme(GLASS))
     const appliedGlass = themeSnapshot()
 
     resetStores()
     withInterfaceMode('modern-gui')
-    useStore.setState({ sidebarWidth: 333, accent: '#000000', chatBgImage: 'junk.png' })
-    useStore.getState().resetTheme()
+    useThemeStore.setState({ sidebarWidth: 333, accent: '#000000', chatBgImage: 'junk.png' })
+    useThemeStore.getState().resetTheme()
 
     expect(themeSnapshot()).toEqual(appliedGlass)
     // 覆盖范围未缩水：非预设域字段（归属工作区布局）也被打回默认
-    expect(useStore.getState().sidebarWidth).toBe(DEFAULTS.sidebarWidth)
+    expect(useThemeStore.getState().sidebarWidth).toBe(DEFAULTS.sidebarWidth)
     // 四区逐一切面确实等于 glass 的对应切面（按「可应用」白名单：rightWidth/sidebarWidth
     // 归属工作区布局与右栏，任何预设路径都不写它们，glass 的这两条值本来就不落地）
     const glassApplicable = filterPresetTheme(effectivePresetTheme(GLASS))
     for (const zone of PRESET_ZONES) {
-      expect(pickZoneFields(useStore.getState() as never, zone), `重置后 ${zone} 切面`).toMatchObject(pickZoneFields(glassApplicable, zone))
+      expect(pickZoneFields(useThemeStore.getState() as never, zone), `重置后 ${zone} 切面`).toMatchObject(pickZoneFields(glassApplicable, zone))
     }
   })
 
   it('terminal-like 模式：重置后 == GUI 默认 + 终端契约字段', () => {
     withInterfaceMode('modern-gui')
-    useStore.getState().resetTheme()
+    useThemeStore.getState().resetTheme()
     const guiDefault = themeSnapshot()
 
     withInterfaceMode('terminal-like')
-    useStore.setState({ accent: '#000000', msgStyle: 'bubble' })
-    useStore.getState().resetTheme()
+    useThemeStore.setState({ accent: '#000000', msgStyle: 'bubble' })
+    useThemeStore.getState().resetTheme()
 
     expect(themeSnapshot()).toEqual({ ...guiDefault, ...TERMINAL_CONTRACT })
     for (const [key, value] of Object.entries(TERMINAL_CONTRACT)) {
-      expect((useStore.getState() as unknown as Record<string, unknown>)[key], key).toEqual(value)
+      expect((useThemeStore.getState() as unknown as Record<string, unknown>)[key], key).toEqual(value)
     }
     // 且确实落在了 glass 的外观上（不是「只带契约字段的 DEFAULTS」——否则这条测试
     // 在「重置忽略默认预设」的改坏下也能通过，等于没锁住终端那半）
@@ -171,7 +171,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
         Object.entries(pickZoneFields(filterPresetTheme(effectivePresetTheme(GLASS)), zone))
           .filter(([key]) => !(key in TERMINAL_CONTRACT)),
       )
-      expect(pickZoneFields(useStore.getState() as never, zone), `终端重置后 ${zone} 切面`)
+      expect(pickZoneFields(useThemeStore.getState() as never, zone), `终端重置后 ${zone} 切面`)
         .toMatchObject(glassSlice)
     }
   })
@@ -181,26 +181,26 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
     expect(defaultPresetForInterfaceMode('tactical-blue')).toBeUndefined()
     expect(defaultPresetForInterfaceMode('plugin-registered-unknown')).toBeUndefined()
 
-    useStore.setState({ accent: '#000000', chatBg: '#000000' })
-    expect(() => useStore.getState().resetTheme()).not.toThrow()
+    useThemeStore.setState({ accent: '#000000', chatBg: '#000000' })
+    expect(() => useThemeStore.getState().resetTheme()).not.toThrow()
 
-    expect(useStore.getState().accent).toBe(DEFAULTS.accent)
-    expect(useStore.getState().chatBg).toBe(DEFAULTS.chatBg)
+    expect(useThemeStore.getState().accent).toBe(DEFAULTS.accent)
+    expect(useThemeStore.getState().chatBg).toBe(DEFAULTS.chatBg)
     for (const zone of PRESET_ZONES) {
-      expect(useStore.getState().appliedPreset[zone]).toBe('')
-      expect(useStore.getState().custom[zone]).toBe(false)
+      expect(useThemeStore.getState().appliedPreset[zone]).toBe('')
+      expect(useThemeStore.getState().custom[zone]).toBe(false)
     }
   })
 
   it('重置后四区标记不悬空：基准留空、custom 清零，且不亮「未知预设」兜底 chip', () => {
     withInterfaceMode('terminal-like')
-    useStore.getState().resetTheme()
+    useThemeStore.getState().resetTheme()
 
     for (const zone of PRESET_ZONES) {
-      expect(useStore.getState().appliedPreset[zone]).toBe('')
-      expect(useStore.getState().custom[zone]).toBe(false)
+      expect(useThemeStore.getState().appliedPreset[zone]).toBe('')
+      expect(useThemeStore.getState().custom[zone]).toBe(false)
     }
-    const status = deriveGlobalStatus(useStore.getState())
+    const status = deriveGlobalStatus(useThemeStore.getState())
     expect(status).toBe('')
     expect(fallbackPresetChip(status, [])).toBeNull()
   })
@@ -208,7 +208,7 @@ describe('刀7 · 「重置主题」落点（#214）', () => {
   it('铁律 1 不变：重置不修改任何出厂预设的内容', () => {
     for (const mode of ['modern-gui', 'terminal-like', 'tactical-blue']) {
       withInterfaceMode(mode)
-      useStore.getState().resetTheme()
+      useThemeStore.getState().resetTheme()
     }
     // 刀3：预设不再自带 theme ⇒ 比有效值视图（否则两边都是 undefined，这条守卫会变成永远绿）
     expect(GLOBAL_PRESETS.map(preset => effectivePresetTheme(preset))).toEqual(PRISTINE_PRESET_THEMES)
@@ -243,11 +243,11 @@ describe('刀7 §六 · 呈现方案写入不置 custom（#214）', () => {
     // 事务必须真的生效——返回 false 时它连 resetTheme 都不跑，后面全是假绿
     expect(resetThemeForActiveInterfaceMode()).toBe(true)
 
-    expect(deriveGlobalStatus(useStore.getState())).toBe('')
-    for (const zone of PRESET_ZONES) expect(useStore.getState().custom[zone], `${zone}.custom`).toBe(false)
+    expect(deriveGlobalStatus(useThemeStore.getState())).toBe('')
+    for (const zone of PRESET_ZONES) expect(useThemeStore.getState().custom[zone], `${zone}.custom`).toBe(false)
     // 被呈现方案 token 写过的两区单独点名（本 bug 的直接现场）
-    expect(useStore.getState().custom.chat).toBe(false)
-    expect(useStore.getState().custom.cc).toBe(false)
+    expect(useThemeStore.getState().custom.chat).toBe(false)
+    expect(useThemeStore.getState().custom.cc).toBe(false)
     expect(fallbackCustomChipRendered()).toBe(false)
     // 施工单 §六 原话口径：界面上 queryByText('自定义') 为 null（整屏，不只预设组内）
     expect(screen.queryByText('自定义')).not.toBeInTheDocument()
@@ -257,20 +257,20 @@ describe('刀7 §六 · 呈现方案写入不置 custom（#214）', () => {
     expect(activateInterfaceMode('terminal-like')).toBe(true)
     expect(activateInterfaceMode('modern-gui')).toBe(true)
 
-    expect(deriveGlobalStatus(useStore.getState())).not.toBe('custom')
-    for (const zone of PRESET_ZONES) expect(useStore.getState().custom[zone], `${zone}.custom`).toBe(false)
+    expect(deriveGlobalStatus(useThemeStore.getState())).not.toBe('custom')
+    for (const zone of PRESET_ZONES) expect(useThemeStore.getState().custom[zone], `${zone}.custom`).toBe(false)
     expect(fallbackCustomChipRendered()).toBe(false)
   })
 
   it('其余 source 语义一字不动：user-edit / field-reset 仍置 custom，只有呈现方案例外', () => {
-    useStore.getState().setZoneField('chat', { chatFontSize: 18 })                       // 缺省 user-edit
-    expect(useStore.getState().custom.chat).toBe(true)
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 18 })                       // 缺省 user-edit
+    expect(useThemeStore.getState().custom.chat).toBe(true)
 
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' }, 'field-reset')
-    expect(useStore.getState().custom.sidebar).toBe(true)
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' }, 'field-reset')
+    expect(useThemeStore.getState().custom.sidebar).toBe(true)
 
-    useStore.getState().setZoneField('right', { rightBg: '#123456' }, 'presentation-profile')
-    expect(useStore.getState().custom.right).toBe(false)
+    useThemeStore.getState().setZoneField('right', { rightBg: '#123456' }, 'presentation-profile')
+    expect(useThemeStore.getState().custom.right).toBe(false)
     // 溯源账本照旧记录该来源（D-trace 语义不变，只改 custom 标记）
     expect(lastSettingWriter('rightBg')?.source).toBe('presentation-profile')
   })

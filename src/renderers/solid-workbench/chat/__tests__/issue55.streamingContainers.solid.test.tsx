@@ -7,6 +7,7 @@ import { mountSolidWorkbench } from '../../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench } from '../../../../domains/workbench/workbenchProjector.ts'
+import { flushTask } from '../../../../test/solidTestHelpers.ts'
 
 afterEach(cleanup)
 
@@ -28,7 +29,7 @@ describe('issue 55: streaming Markdown retains container context', () => {
           event: { type: 'reasoning.delta', parts: [{ kind: 'text', text }] },
         }))
         services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'issue55', generation: 1 })
-        await new Promise(resolve => setTimeout(resolve, 0))
+        await flushTask()
       }
       const head = await waitFor(() => {
         const button = host.querySelector<HTMLButtonElement>('.term-reasoning-head')
@@ -59,7 +60,7 @@ describe('issue 55: streaming Markdown retains container context', () => {
     // Yield at each wire fragment: a synchronous loop alone hides async parser transitions.
     for (let length = text().length; length < fullText.length; length += 7) {
       setText(fullText.slice(0, length + 7))
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await flushTask()
     }
     await waitFor(() => expect(live.container).toHaveTextContent('保留列表续写。'))
     expect(live.container.querySelectorAll('.term-code-line')).toHaveLength(0)

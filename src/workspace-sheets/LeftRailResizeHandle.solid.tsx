@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { onCleanup, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
 import {
   useRightRailStore,
   clampLeftRailWidth,
@@ -119,9 +118,4 @@ function createSignalWidth(): () => number {
   const [value, setValue] = createSignal(useRightRailStore.getState().leftRailWidth)
   onCleanup(useRightRailStore.subscribe(state => setValue(state.leftRailWidth)))
   return value
-}
-
-/** React 薄桥（LeftRailResizeHandle.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderLeftRailResizeHandle(container: HTMLElement): () => void {
-  return render(() => <LeftRailResizeHandle />, container)
 }

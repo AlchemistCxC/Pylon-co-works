@@ -27,7 +27,7 @@ import { GLOBAL_PRESETS } from '../../presets/index.ts'
 import { PRESET_ZONES, requireZoneRefs } from '../../presetReducer.ts'
 import { expandGlobalPresetZoneRefs } from '../../../../application/transactions/applyGlobalPreset.ts'
 import { DEFAULTS } from '../../themeDefaults.ts'
-import { useStore } from '../../themeStore.ts'
+import { useThemeStore } from '../../themeStore.ts'
 import { useCustomPresetStore } from '../../customPresetStore.ts'
 import { useInterfaceModeStore } from '../../../interface/interfaceModeStore.ts'
 import { mountSettingsSheet } from '../../../../test/settingsSheetHarness.solid'
@@ -45,7 +45,7 @@ import {
   type ZonePresetEntry,
 } from '../index.ts'
 
-vi.mock('../../components/settings/AgentRuntimePanel.tsx', () => ({ default: () => null }))
+vi.mock('../../components/settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 
 const BUCKETS = ['gui', 'terminal'] as const
@@ -167,7 +167,7 @@ describe('B3 出厂条目不进 zonePresetEntries（结构性闸门）', () => {
     }
 
     assertNoFactoryIds('起点')
-    useStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
+    useThemeStore.getState().setZoneField('sidebar', { sidebarBg: '#123456' })
     const id = useCustomPresetStore.getState().saveZonePresetEntry('gui', 'sidebar', '我的侧栏')!
     expect(useCustomPresetStore.getState().zonePresetEntries.map(entry => entry.id)).toEqual([id])
     assertNoFactoryIds('存之后')

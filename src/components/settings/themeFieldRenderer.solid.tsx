@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, Show, type JSX } from 'solid-js'
+
 import type { ThemeSettings } from '../../domains/theme/themeStore'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, THEME_FIELD_OWNERS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from '../../domains/theme/themeFieldDefs'
 import ColorPopover from '../ColorPopover.solid.tsx'
@@ -15,8 +15,7 @@ import type { PluginSettingOption, PluginSettingOptionsContribution } from '../.
 import type { RegistryEntry } from '../../plugin-runtime/registry/types.ts'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from '../../domains/chat/toolIndicatorAssets.ts'
 import { lastSettingWriter, SETTING_WRITE_SOURCE_LABELS } from '../../domains/theme/settingProvenance.ts'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）的 Solid 实体
@@ -405,12 +404,4 @@ export function ZoneGroupFields(props: ZoneGroupFieldsProps) {
       }}</For>
     </Show>
   )
-}
-
-const mountZoneGroupFields = (container: HTMLElement, latest: () => ZoneGroupFieldsProps): (() => void) =>
-  render(() => createComponent(ZoneGroupFields, bridgedProps(latest)), container)
-
-/** React 薄桥（themeFieldRenderer.tsx）经 eager glob 调用的挂载缝。 */
-export function renderZoneGroupFields(container: HTMLElement, latest: () => ZoneGroupFieldsProps): () => void {
-  return mountZoneGroupFields(container, latest)
 }

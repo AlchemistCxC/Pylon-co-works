@@ -7,8 +7,7 @@ import { settingFieldKey, type RendererSettingOption, type SettingsValue } from 
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { RendererSettingsSchemaHost } from './RendererSettingField.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 
 const EMPTY_VALUES: Readonly<Record<string, SettingsValue>> = Object.freeze({})
 const EMPTY_ADAPTER_SNAPSHOT = Object.freeze({ values: EMPTY_VALUES, unavailable: Object.freeze({}), revision: 0 })
@@ -118,7 +117,7 @@ export default function PluginSettingsPageHost(props: { pageId: string }) {
                     </>
                   )
                 }
-                const Contribution = current.value.renderKind === 'first-party-react' ? current.value.component : null
+                const Contribution = current.value.renderKind === 'first-party-solid' ? current.value.component : null
                 return (
                   <>
                     {schemaHost}
@@ -141,6 +140,3 @@ export default function PluginSettingsPageHost(props: { pageId: string }) {
     </Show>
   )
 }
-
-/** React 薄桥（PluginSettingsPageHost.tsx）经 eager glob 调用的挂载缝。 */
-export const renderPluginSettingsPageHost = createSolidMount(PluginSettingsPageHost)

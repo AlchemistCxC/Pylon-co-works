@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { useIdentityStore } from '../domains/identity/identityStore'
 import { useModalOverlayStore } from '../app/modalOverlayStore'
 import { resolveUnresolvedSessionTransaction } from '../app/bootstrap/resolveUnresolvedSessionTransaction'
@@ -31,7 +30,9 @@ const LI = 'grid grid-cols-[minmax(0,1fr)_160px_auto] items-center gap-2 max-[64
 const SELECT_WRAP = 'min-h-[32px] border border-border rounded-none bg-bg-input text-text [&_.pylon-select]:w-full'
 const BTN = 'min-h-[32px] px-3 py-1.5 border border-border rounded-none bg-bg-input text-text [font:inherit] cursor-pointer disabled:cursor-not-allowed disabled:opacity-[var(--state-disabled-opacity)]'
 
-/** SessionOwnerRecoveryDialog — 遗留会话归属恢复弹窗（#515 Solid 实体；DOM/aria 与 React 版逐字同构）。 */
+/** SessionOwnerRecoveryDialog — 遗留会话归属恢复弹窗（#515 Solid 实体）。DOM/aria 契约：
+ * div[role=dialog][aria-modal][aria-label="恢复遗留会话归属"]，逐会话一行（select +
+ * 「解析」钮），错误行 role=alert，「稍后处理」收起弹窗。 */
 export default function SessionOwnerRecoveryDialog() {
   const hydration = createZustandSignal(useIdentityStore, s => s.sessionHydration)
   const agents = createZustandSignal(useIdentityStore, s => s.agents)
@@ -124,6 +125,3 @@ export default function SessionOwnerRecoveryDialog() {
     </Show>
   )
 }
-
-/** React 薄桥（SessionOwnerRecoveryDialog.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionOwnerRecoveryDialog = createSolidMount(SessionOwnerRecoveryDialog)

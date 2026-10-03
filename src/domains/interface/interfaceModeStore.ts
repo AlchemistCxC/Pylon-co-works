@@ -1,5 +1,4 @@
-import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { attachSolidPersist, createSolidStoreKernel, resolveLocalStorage, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 
 export type InterfaceMode = string
 
@@ -23,7 +22,7 @@ function validMode(value: unknown): value is InterfaceMode {
   return typeof value === 'string' && /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(value)
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useInterfaceModeStore 即内核本体（直连，无 shim）。
 const kernel = createSolidStoreKernel<InterfaceModeState>({
   interfaceMode: DEFAULT_INTERFACE_MODE,
   profileByMode: { ...DEFAULT_INTERFACE_PROFILES },
@@ -61,4 +60,4 @@ attachSolidPersist(kernel, {
   partialize: state => ({ interfaceMode: state.interfaceMode, profileByMode: state.profileByMode }),
 })
 
-export const useInterfaceModeStore: ZustandHook<InterfaceModeState> = createReactStoreHook(kernel)
+export const useInterfaceModeStore: SolidStoreKernel<InterfaceModeState> = kernel

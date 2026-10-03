@@ -74,13 +74,13 @@ export const builtinGitProvider = {
 }
 
 export const BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS: readonly FileWorkbenchContribution[] = [
-  { kind: 'activity', id: 'builtin.file.sessions', label: '会话', description: '切换工作区会话', order: 10, icon: 'sessions', renderKind: 'first-party-react', component: SessionsActivity },
-  { kind: 'activity', id: 'builtin.file.explorer', label: '文件', description: '浏览工作区文件', order: 20, icon: 'files', renderKind: 'first-party-react', component: ExplorerActivity },
-  { kind: 'activity', id: 'builtin.file.search', label: '搜索', description: '搜索工作区内容', order: 30, icon: 'search', renderKind: 'first-party-react', component: SearchActivity },
-  { kind: 'activity', id: 'builtin.file.scm', label: 'SCM', description: '查看完整 Git 状态和历史', order: 40, icon: 'scm', renderKind: 'first-party-react', component: ScmActivity },
-  { kind: 'activity', id: 'builtin.file.views', label: '视图', description: '查看 Agent 最近触碰文件', order: 50, icon: 'views', renderKind: 'first-party-react', component: ViewsActivity },
+  { kind: 'activity', id: 'builtin.file.sessions', label: '会话', description: '切换工作区会话', order: 10, icon: 'sessions', renderKind: 'first-party-solid', component: SessionsActivity },
+  { kind: 'activity', id: 'builtin.file.explorer', label: '文件', description: '浏览工作区文件', order: 20, icon: 'files', renderKind: 'first-party-solid', component: ExplorerActivity },
+  { kind: 'activity', id: 'builtin.file.search', label: '搜索', description: '搜索工作区内容', order: 30, icon: 'search', renderKind: 'first-party-solid', component: SearchActivity },
+  { kind: 'activity', id: 'builtin.file.scm', label: 'SCM', description: '查看完整 Git 状态和历史', order: 40, icon: 'scm', renderKind: 'first-party-solid', component: ScmActivity },
+  { kind: 'activity', id: 'builtin.file.views', label: '视图', description: '查看 Agent 最近触碰文件', order: 50, icon: 'views', renderKind: 'first-party-solid', component: ViewsActivity },
   { kind: 'file-provider', id: builtinFileProvider.id, priority: 100, fallback: true, provider: builtinFileProvider },
   { kind: 'git-provider', id: builtinGitProvider.id, priority: 100, fallback: true, provider: builtinGitProvider },
-  { kind: 'renderer', id: 'builtin.file.text-renderer', priority: 100, fallback: true, canRender: input => fileTabViewType(input.tab) === 'file.text', renderKind: 'first-party-react', component: FileViewHost, onError: () => 'fallback' },
-  { kind: 'renderer', id: 'builtin.file.git-diff-renderer', priority: 100, fallback: false, canRender: input => fileTabViewType(input.tab) === 'git.diff', renderKind: 'first-party-react', component: FileViewHost, onError: () => 'fallback' },
+  { kind: 'renderer', id: 'builtin.file.text-renderer', priority: 100, fallback: true, canRender: input => fileTabViewType(input.tab) === 'file.text', renderKind: 'first-party-solid', component: FileViewHost, onError: () => 'fallback' },
+  { kind: 'renderer', id: 'builtin.file.git-diff-renderer', priority: 100, fallback: false, canRender: input => fileTabViewType(input.tab) === 'git.diff', renderKind: 'first-party-solid', component: FileViewHost, onError: () => 'fallback' },
 ]

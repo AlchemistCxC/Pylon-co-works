@@ -1,8 +1,8 @@
-// eslint flat config（ESLint 9 + typescript-eslint + react-hooks）
-// 目标：抓未使用变量 / React hooks 违规 / 未定义引用，并约束内部绑定命名。
+// eslint flat config（ESLint 9 + typescript-eslint）
+// 目标：抓未使用变量 / 未定义引用，并约束内部绑定命名。
+// （#520 W4：eslint-plugin-react-hooks 随 React 面退役移除——src 已无 React hooks。）
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
-import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
   // src/wasm：wasm-pack 生成物（glue JS + d.ts），参数名是 Rust 的 snake_case，
@@ -12,7 +12,6 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     files: ['**/*.{ts,tsx}'],
-    plugins: { 'react-hooks': reactHooks },
     rules: {
       // TS 已做类型检查；no-undef 关闭避免与 TS 重复
       'no-undef': 'off',
@@ -29,15 +28,6 @@ export default tseslint.config(
         { selector: 'variable', format: ['camelCase', 'PascalCase', 'UPPER_CASE'], leadingUnderscore: 'allow' },
         { selector: 'parameter', format: ['camelCase', 'PascalCase'], leadingUnderscore: 'allow' },
       ],
-    },
-  },
-  {
-    files: ['**/*.tsx'],
-    ignores: ['src/renderers/solid-workbench/**/*.solid.tsx'],
-    plugins: { 'react-hooks': reactHooks },
-    rules: {
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
     },
   },
   {

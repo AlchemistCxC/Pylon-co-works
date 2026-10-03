@@ -7,21 +7,12 @@ import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/plugi
 import { settingFieldKey, type SettingsValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore } from '../../domains/workspace/layoutRailsStore.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.solid.tsx'
 import { RendererSettingsSchemaHost } from '../settings/RendererSettingField.solid.tsx'
 import type { ContextPanelHostProps } from './rightPanelTypes.ts'
-
-/** 外部 store（subscribe/getSnapshot 快照语义）→ Solid 信号（快照引用等值）。 */
-function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
-  const [value, setValue] = createSignal<T>(store.getSnapshot())
-  // updater 形态：T 可能是任意值（含函数），走 (prev) => next 重载避开 Solid setter
-  // 对「函数值」的排除分支。
-  onCleanup(store.subscribe(() => setValue(() => store.getSnapshot())))
-  return value
-}
 
 const EMPTY_ADAPTER_SNAPSHOT = Object.freeze({ values: Object.freeze({}), unavailable: Object.freeze({}), revision: 0 })
 
@@ -39,7 +30,7 @@ export default function ContextPanelHost(props: ContextPanelHostProps) {
   const registry = getContextPanelRegistry()
   const store = getPluginSettingsStore()
   const optionsRegistry = getPluginSettingOptionsRegistry()
-  const snapshot = createRegistrySignal(registry)
+  const snapshot = createRegistrySignal(registry, () => registry.getSnapshot())
   // 可切换的面板 = 通过 `when` 闸门的全部面板（与 Sheet 种类无关）；种类只影响「没选过时默认看谁」。
   const entries = createMemo(() => selectContextPanels(snapshot().entries, {
     workspaceKind: props.sheet.kind,
@@ -69,7 +60,7 @@ export default function ContextPanelHost(props: ContextPanelHostProps) {
       onCleanup(current.subscribe(() => setAdapterSnapshot(current.getSnapshot())))
     }
   })
-  const optionSnapshot = createRegistrySignal(optionsRegistry)
+  const optionSnapshot = createRegistrySignal(optionsRegistry, () => optionsRegistry.getSnapshot())
 
   // choice/multi-choice/color 字段的 option 投影（框架无关计算留在宿主侧）。
   const schemaOptions = createMemo(() => {
@@ -196,6 +187,3 @@ export default function ContextPanelHost(props: ContextPanelHostProps) {
     )}</Show>
   )
 }
-
-/** React 薄桥（ContextPanelHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderContextPanelHost = createSolidMount(ContextPanelHost)

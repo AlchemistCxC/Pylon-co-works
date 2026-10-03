@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createSignal, Show, type JSX } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, Show, type JSX } from 'solid-js'
+
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { buildExportPayloadAsync, configFileName, preflightImportPayload } from '../../application/configExportImport'
 import { loadRetentionPolicyPayload } from '../../infrastructure/persistence/retentionPolicyRepository'
@@ -10,7 +10,6 @@ import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { reportRuntimeError } from '../../app/runtimeError'
 import { selectUserDataRepository } from '../../infrastructure/persistence/userDataRepository'
 import { importConfigurationTransaction } from '../../application/transactions/importConfigurationTransaction'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface ConfigBackupPanelProps {}
 
@@ -111,9 +110,4 @@ function Group(props: { title: string; children: JSX.Element }) {
       <Show when={open()}>{props.children}</Show>
     </div>
   )
-}
-
-/** React 薄桥（ConfigBackupPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderConfigBackupPanel(container: HTMLElement, latest: () => ConfigBackupPanelProps): () => void {
-  return render(() => createComponent(ConfigBackupPanel, bridgedProps(latest)), container)
 }

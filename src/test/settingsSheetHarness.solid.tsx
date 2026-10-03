@@ -17,7 +17,7 @@ import type { SheetContext } from '../workspace-sheets/sheetTypes.ts'
 import type { SettingsSheetState } from '../workspace-sheets/settingsSheetState.ts'
 import Settings from '../components/Settings.solid.tsx'
 import SettingsSheetSidebar from '../sheets/SettingsSheetSidebar.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 
 /**

@@ -1,5 +1,4 @@
-import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 import type { ConfigOption, ModelChoice } from '../../infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from '../chat/sessionRuntime.ts'
 import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from '../../contracts/agentTypes.ts'
@@ -46,9 +45,8 @@ interface RuntimeStoreState {
   agentStatuses: Record<string, AgentStatus>
   /**
    * OWNER-04：每会话绑定建立时的 agent generation 快照（load_persisted_session /
-   * new_session 成功时由 agentWorkbenchLifecycle 记录）。重连后 agentStatus.generation
-   * 递增，bindingState.refineBindingGeneration 依此判定 binding_stale——
-   * 旧 binding 必须 Invalidated，不能继续发送旧 remote id（§5.9 rule 4）。
+   * new_session 成功时由 agentWorkbenchLifecycle 记录）；重连后 agentStatus.generation
+   * 递增，新值必须重新记录后发送链路才继续用旧 remote id（§5.9 rule 4）。
    */
   bindingGenerations: Record<string, number | undefined>
   /** Kernel continuity probe 的瞬态健康快照；不持久化、不替代 Session metadata。 */
@@ -83,7 +81,7 @@ interface RuntimeStoreState {
   resetAll: () => void
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useRuntimeStore 即内核本体（直连，无 shim）。
 const runtimeKernel = createSolidStoreKernel<RuntimeStoreState>({
   liveGenerating: null,
   liveGeneratingSources: [],
@@ -206,4 +204,4 @@ const runtimeKernel = createSolidStoreKernel<RuntimeStoreState>({
   resetAll: () => runtimeKernel.getState().resetSessionRuntime(),
 })
 
-export const useRuntimeStore: ZustandHook<RuntimeStoreState> = createReactStoreHook(runtimeKernel)
+export const useRuntimeStore: SolidStoreKernel<RuntimeStoreState> = runtimeKernel

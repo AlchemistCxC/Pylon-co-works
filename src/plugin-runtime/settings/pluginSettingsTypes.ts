@@ -26,9 +26,9 @@ interface PluginSettingsPageBase {
 export interface FirstPartyPluginSettingsPage extends PluginSettingsPageBase {
   /**
    * #515 契约翻转：第一方设置页组件是 **Solid 组件**（字面量语义见 contextPanelTypes
-   * 同名判别器的注释——历史值保留，框架语义由 component 值承载）。
+   * 同名判别器的注释——#520 已随字面量改名同步，框架语义由 component 值承载）。
    */
-  readonly renderKind: 'first-party-react'
+  readonly renderKind: 'first-party-solid'
   readonly component: Component<PluginSettingsPageProps>
 }
 

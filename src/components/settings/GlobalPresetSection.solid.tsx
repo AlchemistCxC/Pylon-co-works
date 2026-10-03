@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
-import { useStore } from '../../domains/theme/themeStore'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
+import { useThemeStore } from '../../domains/theme/themeStore'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore'
 import { resolveRuntimeErrors } from '../../app/runtimeError'
 import { applyGlobalPreset as applyGlobalPresetTransaction } from '../../application/transactions/applyGlobalPreset.ts'
@@ -24,17 +23,16 @@ export interface GlobalPresetSectionProps {
 }
 
 /**
- * GlobalPresetSection — 设置页 global 分区的预设事务与呈现（A-V3 拆分自
- * Settings.tsx，逻辑逐字随迁）：界面模式组、全局预设 chips（含兜底 chip）、
- * 「保存当前为自定义预设」与应用/覆盖/删除（两段式确认）。自定义预设事务的
+ * GlobalPresetSection — 设置页 global 分区的预设事务与呈现（A-V3 自 Settings 拆出）：
+ * 界面模式组、全局预设 chips（含兜底 chip）、「保存当前为自定义预设」与
+ * 应用/覆盖/删除（两段式确认）。自定义预设事务的
  * 竞态序号（presetApplyRequest）与反馈态由本组件自持。
  *
- * #515：第一批 deferred 项——原 props 含 children（Settings.tsx 注入的 React 子树
- * ZoneGroupFields），Settings 同批 Solid 化后改 solid 直连（本组件按 props.ctx/density
- * 直接渲染 ZoneGroupFields 的 Solid 实体，renderCtx 单源不变）。
+ * #515：本组件按 props.ctx/density 直接渲染 ZoneGroupFields 的 Solid 实体
+ * （renderCtx 单源不变）。
  */
 export default function GlobalPresetSection(props: GlobalPresetSectionProps) {
-  const globalStatus = createZustandSignal(useStore, s => deriveGlobalStatus(s))
+  const globalStatus = createZustandSignal(useThemeStore, s => deriveGlobalStatus(s))
   const customPresets = createZustandSignal(useCustomPresetStore, s => s.customPresets)
   const currentInterfaceMode = createZustandSignal(useInterfaceModeStore, s => s.interfaceMode)
   const modeBucket = () => INTERFACE_MODE_PRESET_BUCKET[currentInterfaceMode()]
@@ -187,6 +185,3 @@ export default function GlobalPresetSection(props: GlobalPresetSectionProps) {
     </>
   )
 }
-
-/** React 薄桥（GlobalPresetSection.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderGlobalPresetSection = createSolidMount(GlobalPresetSection)

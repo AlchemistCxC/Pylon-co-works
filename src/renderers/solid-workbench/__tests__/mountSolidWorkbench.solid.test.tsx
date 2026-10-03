@@ -23,6 +23,7 @@ import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import type { WorkbenchSessionCreationStore } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createAgentWorkbenchCommandFacade } from '../../../application/agent-workbench/agentWorkbenchCommands.ts'
 import type { Session } from '../../../domains/identity/identityStore.ts'
+import { FLUSH_BUDGET } from '../../../test/solidTestHelpers.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -1232,7 +1233,7 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-renderer="solid"]')?.getAttribute('data-preview')).toBe('true')
     // 预算依据：等待对象是 fixture shell 动态 import + 首帧渲染（ms 级）；2s 覆盖
     // 满载并发抖动，原 5s 是 P91 期粗放放宽（#175 已消除满载 paging 根因）。
-    expect(await screen.findByRole('heading', { name: '迁移结果' }, { timeout: 2_000 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '迁移结果' }, FLUSH_BUDGET)).toBeInTheDocument()
     expect(screen.getByText('Read')).toBeInTheDocument()
     expect(host.querySelector('.task-tree')).toBeInTheDocument()
     expect(host.querySelector('.term-spinner')).toBeInTheDocument()
@@ -1396,6 +1397,10 @@ describe('mountSolidWorkbench', () => {
         { id: 'workspace-unknown-b', label: '未知 B', path: 'G:/unknown-b' },
       ],
     })
+    // 第一段 createSession 的调用记录先于其完成（invoke 入口同步 push，await handler
+    // 还在微任务队列里）。此处必须等 submitting 收敛（textarea 重新可用）再喂第二段，
+    // 否则 keydown 落在禁用的 textarea 上被浏览器语义吞掉——这正是本用例曾踩的竞态。
+    await waitFor(() => expect((prompt as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.input(prompt, { target: { value: '未知工作区不预选' } })
     fireEvent.keyDown(prompt, { key: 'Enter', code: 'Enter', shiftKey: false })
     await waitFor(() => {
@@ -1762,7 +1767,9 @@ describe('mountSolidWorkbench', () => {
     expect(screen.queryByRole('status', { name: '正在创建会话' })).toBeNull()
     expect(prompt).toHaveValue('保留这份任务描述')
     expect(prompt).toBeEnabled()
-    expect(prompt).toHaveFocus()
+    // 焦点交还挂在 sendText 失败续体的 queueMicrotask 上，晚于 submitError 落 DOM——
+    // findByRole('alert') 解析时它可能尚未执行，必须等它到位再断言。
+    await waitFor(() => expect(prompt).toHaveFocus())
   })
 
   it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {
@@ -3233,7 +3240,7 @@ function overlapArea(a: DOMRect, b: DOMRect): number {
       const current = updates
       if (lastSeen >= 0) expect(current).toBe(lastSeen)
       lastSeen = current
-    }, { timeout: 2_000 })
+    }, FLUSH_BUDGET)
     expect(mounts).toBe(2)
     expect(host.querySelectorAll('.group-member-probe')).toHaveLength(2)
   })

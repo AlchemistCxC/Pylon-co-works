@@ -1,12 +1,11 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createSignal, onCleanup, Show, type JSX } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, onCleanup, Show, type JSX } from 'solid-js'
+
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../../infrastructure/persistence/windowSizePersistence'
 import { Row } from './themeFieldRenderer.solid.tsx'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface WindowPanelProps {}
 
@@ -47,9 +46,4 @@ function Group(props: { title: string; children: JSX.Element }) {
       <Show when={open()}>{props.children}</Show>
     </div>
   )
-}
-
-/** React 薄桥（WindowPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderWindowPanel(container: HTMLElement, latest: () => WindowPanelProps): () => void {
-  return render(() => createComponent(WindowSizeRow, bridgedProps(latest)), container)
 }

@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { reportRuntimeError } from '../../app/runtimeError'
 import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
 import { SolidDiffCard } from '../../renderers/solid-workbench/chat/DiffCard.solid.tsx'
@@ -69,6 +68,3 @@ export default function DiffView(props: DiffViewProps) {
     </div>
   )
 }
-
-/** React 薄桥（DiffView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountDiffView = createSolidMount(DiffView)

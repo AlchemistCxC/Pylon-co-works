@@ -11,7 +11,7 @@ import {
 import type { AgentSidebarContribution } from '../../../plugin-runtime/sidebar/sidebarTypes.ts'
 
 const buildModule = (id: string, extra: Partial<AgentSidebarContribution> = {}) => ({
-  id, label: id, renderKind: 'first-party-react' as const, component: () => null, ...extra,
+  id, label: id, renderKind: 'first-party-solid' as const, component: () => null, ...extra,
 } as AgentSidebarContribution)
 
 function memoryStorage(initial: Record<string, string> = {}) {

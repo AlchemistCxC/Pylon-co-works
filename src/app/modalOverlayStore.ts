@@ -1,5 +1,4 @@
-import { createSolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../infrastructure/state/solidStoreKernel'
 
 /**
  * modalOverlayStore —— 「有遮挡主区的模态覆盖层打开」这一事实。
@@ -17,7 +16,7 @@ interface ModalOverlayState {
   setOverlayOpen: (key: string, open: boolean) => void
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useModalOverlayStore 即内核本体（直连，无 shim）。
 const kernel = createSolidStoreKernel<ModalOverlayState>({
   openKeys: new Set<string>(),
   setOverlayOpen: (key, open) => kernel.setState(state => {
@@ -28,7 +27,7 @@ const kernel = createSolidStoreKernel<ModalOverlayState>({
   }),
 })
 
-export const useModalOverlayStore: ZustandHook<ModalOverlayState> = createReactStoreHook(kernel)
+export const useModalOverlayStore: SolidStoreKernel<ModalOverlayState> = kernel
 
 // #515 批7：React hook 面（useModalOverlayOpen/useModalOverlayVeil）已随 React 面退役。
 // veil 语义在 Solid 侧内联：`createEffect(on(open, v => { setOverlayOpen(key, v);

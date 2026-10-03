@@ -1,7 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createMemo, createSignal, For, Show } from 'solid-js'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { formatTime } from '../../utils/relativeTime'
 import type { WorkspaceSession } from '../../domains/session/workspaceSession.ts'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
@@ -24,7 +23,10 @@ interface HitGroup { readonly id: string; readonly label: string; readonly hits:
 const LOOSE_GROUP_ID = '__loose__'
 const LOOSE_GROUP_LABEL = '无工作区'
 
-/** SearchPanel — 搜索模块（#515 Solid 实体；DOM/aria 契约与 React 版逐字同构）。 */
+/** SearchPanel — 搜索模块（#515 Solid 实体）。DOM/aria 契约：.search-field >
+ * .search-field-input[aria-label="搜索会话"]（+ .search-field-clear），结果区
+ * .search-results[role=tree] > .search-group[role=group] > .search-hit[role=treeitem]，
+ * 计数 .search-count[role=status]。 */
 export default function SearchPanel(props: AgentSidebarContributionProps) {
   // 查询是**这个模块自己的状态**：它不影响其它模块，也不需要上提到宿主。
   const [query, setQuery] = createSignal('')
@@ -105,6 +107,3 @@ export default function SearchPanel(props: AgentSidebarContributionProps) {
     </>
   )
 }
-
-/** React 薄桥（SearchPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSearchPanel = createSolidMount(SearchPanel)

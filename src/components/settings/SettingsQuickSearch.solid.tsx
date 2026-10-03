@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import type { SettingsSearchItem } from './settingsDomains.ts'
 
 /**
@@ -48,7 +47,7 @@ export default function SettingsQuickSearch(props: {
     })
   })
 
-  // 全局键：'/' 呼出（输入态除外）、Esc 关闭（与原 window keydown 契约逐字一致）
+  // 全局键（window 级 keydown）：'/' 呼出（输入态除外）、Esc 关闭
   createEffect(() => {
     const isOpen = props.open
     const onKey = (event: KeyboardEvent) => {
@@ -131,6 +130,3 @@ export default function SettingsQuickSearch(props: {
     </Show>
   )
 }
-
-/** React 薄桥（SettingsQuickSearch.tsx）经 eager glob 调用的挂载缝。 */
-export const renderSettingsQuickSearch = createSolidMount(SettingsQuickSearch)

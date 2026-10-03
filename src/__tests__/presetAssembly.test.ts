@@ -41,7 +41,7 @@ import {
 import { DEFAULTS } from '../domains/theme/themeDefaults.ts'
 import { ZONE_FIELDS, THEME_PRESET_KEYS } from '../domains/theme/themeFieldDefs.ts'
 import { ZONE_PRESET_POOL, effectivePresetTheme, pickZoneFields, resolveZonePresetEntryTheme } from '../domains/theme/zones/index.ts'
-import { useStore, type ThemeSettings } from '../domains/theme/themeStore.ts'
+import { useThemeStore, type ThemeSettings } from '../domains/theme/themeStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { resetStores } from '../test/resetStores.ts'
 import { expandGlobalPresetZoneRefs, planGlobalPreset } from '../application/transactions/applyGlobalPreset.ts'
@@ -251,13 +251,13 @@ describe('B3 全量换装语义（预设没覆盖的字段回默认值，不保�
     const preset = GLOBAL_PRESETS.find(candidate => candidate.name === 'glass')!
     const keys = uncoveredScalarKeys(preset).slice(0, 3)
     const dirtied = Object.fromEntries(keys.map(key => [key, dirtyValueFor(key)]))
-    useStore.setState(dirtied as unknown as Partial<ThemeSettings>)
-    for (const key of keys) expect((useStore.getState() as unknown as Record<string, unknown>)[key], key).not.toBe(defaultOf(key))
+    useThemeStore.setState(dirtied as unknown as Partial<ThemeSettings>)
+    for (const key of keys) expect((useThemeStore.getState() as unknown as Record<string, unknown>)[key], key).not.toBe(defaultOf(key))
 
     expect(applyGlobalPreset('glass')).toBe(true)
 
     for (const key of keys) {
-      expect((useStore.getState() as unknown as Record<string, unknown>)[key], `${key} 必须回默认值`).toBe(defaultOf(key))
+      expect((useThemeStore.getState() as unknown as Record<string, unknown>)[key], `${key} 必须回默认值`).toBe(defaultOf(key))
     }
   })
 })
@@ -396,11 +396,11 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
     for (const mode of ['modern-gui', 'terminal-like'] as const) {
       resetStores()
       useInterfaceModeStore.setState({ interfaceMode: mode })
-      useStore.getState().resetTheme()
+      useThemeStore.getState().resetTheme()
 
       for (const zone of PRESET_ZONES) {
-        expect(useStore.getState().appliedPreset[zone], `${mode}/${zone}`).toBe('')
-        expect(useStore.getState().custom[zone], `${mode}/${zone}`).toBe(false)
+        expect(useThemeStore.getState().appliedPreset[zone], `${mode}/${zone}`).toBe('')
+        expect(useThemeStore.getState().custom[zone], `${mode}/${zone}`).toBe(false)
       }
 
       // 值与「只留空标记」不同：确实取了当前模式默认预设的值
@@ -409,7 +409,7 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
         key => effectivePresetTheme(preset)[key] !== undefined && effectivePresetTheme(preset)[key] !== defaultOf(key),
       )!
       expect(
-        (useStore.getState() as unknown as Record<string, unknown>)[diffKey],
+        (useThemeStore.getState() as unknown as Record<string, unknown>)[diffKey],
         `${mode}/${diffKey} 应等于默认预设的值`,
       ).toBe(effectivePresetTheme(preset)[diffKey])
     }
@@ -419,9 +419,9 @@ describe('B6 重置路径记名（取值用引用、记名用空串）', () => {
     for (const mode of ['modern-gui', 'terminal-like'] as const) {
       resetStores()
       useInterfaceModeStore.setState({ interfaceMode: mode })
-      useStore.getState().resetTheme()
+      useThemeStore.getState().resetTheme()
 
-      const status = deriveGlobalStatus(useStore.getState())
+      const status = deriveGlobalStatus(useThemeStore.getState())
       // 先断言 chip：这条才是「按默认预设名记名」的直接症状
       expect(fallbackPresetChip(status, []), `${mode} 不得亮兜底 chip`).toBeNull()
       expect(status, mode).toBe('')

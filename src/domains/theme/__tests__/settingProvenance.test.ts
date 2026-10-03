@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // D-trace：设置项写入溯源——漏斗挂钩与贡献者区分（呈现风格 vs 用户编辑）。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../themeStore.ts'
+import { useThemeStore } from '../themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import {
   lastSettingWriter,
@@ -21,7 +21,7 @@ describe('setting provenance ledger', () => {
   })
 
   it('attributes user edits through the setZoneField funnel', () => {
-    useStore.getState().setZoneField('chat', { chatFontSize: 19 })
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 19 })
     expect(lastSettingWriter('chatFontSize')).toMatchObject({ source: 'user-edit', zone: 'chat' })
   })
 
@@ -33,29 +33,29 @@ describe('setting provenance ledger', () => {
       tokens: { chatFontSize: 16, chatFont: 'serif' },
     } as unknown as PresentationProfileContribution
     applyPresentationProfile(profile, {
-      setZoneField: (zone, patch, source) => useStore.getState().setZoneField(zone, patch, source),
+      setZoneField: (zone, patch, source) => useThemeStore.getState().setZoneField(zone, patch, source),
       setActiveProfileId: () => {},
     })
     expect(lastSettingWriter('chatFontSize')).toMatchObject({ source: 'presentation-profile' })
-    expect(useStore.getState().chatFontSize).toBe(16)
+    expect(useThemeStore.getState().chatFontSize).toBe(16)
 
     // 用户随后手改 → 贡献者被覆盖为 user-edit（last-writer-wins）
-    useStore.getState().setZoneField('chat', { chatFontSize: 21 })
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 21 })
     expect(lastSettingWriter('chatFontSize')).toMatchObject({ source: 'user-edit' })
-    expect(useStore.getState().chatFontSize).toBe(21)
+    expect(useThemeStore.getState().chatFontSize).toBe(21)
   })
 
   it('records preset and reset actions with their own sources', () => {
-    useStore.getState().setZoneField('chat', { chatFontSize: 18 })
-    useStore.getState().setGlobalPreset('nord', {})
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 18 })
+    useThemeStore.getState().setGlobalPreset('nord', {})
     expect(lastSettingWriter('chatFontSize')?.source).toBe('global-preset')
 
-    useStore.getState().setZoneField('chat', { chatFontSize: 18 })
-    useStore.getState().resetZone('chat')
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 18 })
+    useThemeStore.getState().resetZone('chat')
     expect(lastSettingWriter('chatFontSize')?.source).toBe('zone-reset')
 
-    useStore.getState().setZoneField('chat', { chatFontSize: 18 })
-    useStore.getState().resetTheme()
+    useThemeStore.getState().setZoneField('chat', { chatFontSize: 18 })
+    useThemeStore.getState().resetTheme()
     expect(lastSettingWriter('chatFontSize')?.source).toBe('theme-reset')
   })
 

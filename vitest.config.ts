@@ -1,11 +1,12 @@
 import { globSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
 import solid from 'vite-plugin-solid'
 
-// #279 逐梯队 Solid 化 → #515 全量终态：solid 编译面扩展到全 src——
+// #279 逐梯队 Solid 化 → #515/#520 全量终态：solid 编译面扩展到全 src——
 // `.solid.tsx` 后缀即 solid 编译与 solid-dom 分组（与 vite.config.ts 同一正则）。
+// #520 W4：React 面退役，@vitejs/plugin-react 不再加载；react-dom/react-shared
+// 分组名保留（历史命名，承载非 solid 的 jsdom 逻辑/纯 DOM 测试）。
 const SOLID_WORKBENCH_FILES = /src\/.*\.solid(?:\.test)?\.tsx$/
 
 // #175：非 watch 模式 vitest 默认吃满 availableParallelism（20 核开发机 = 19 worker）。
@@ -25,9 +26,7 @@ function testGroup(file: string): 'node' | 'node-shared' | 'react-dom' | 'react-
   if (!/@(?:vitest|jest)-environment\s+jsdom/.test(source)) {
     return /\bvi\.(?:mock|doMock|unmock|doUnmock)\s*\(/.test(source) ? 'node' : 'node-shared'
   }
-  // These React hosts mount Solid roots and share Solid's runtime lifetime.
-  const solidHost = file === 'src/components/__tests__/SettingsPreview.solidMigration.test.tsx'
-  if (file.endsWith('.solid.test.tsx') || solidHost) return 'solid-dom'
+  if (file.endsWith('.solid.test.tsx')) return 'solid-dom'
   return /\bvi\.(?:mock|doMock|unmock|doUnmock)\s*\(/.test(source) ? 'react-dom' : 'react-shared'
 }
 
@@ -35,12 +34,11 @@ function testGroup(file: string): 'node' | 'node-shared' | 'react-dom' | 'react-
 // - scripts/*.test.mts：node 环境（#228 批次F 起全部为 vitest describe/it +
 //   expect 形态，旧 runner 的顶层 assert + console.log 已迁清）
 // - src/**/*.test.{ts,tsx}：组件行为测试；文件内可用环境注释声明 jsdom
-// - Solid renderer 只转换 *.solid.tsx，其他 *.tsx 继续走 React transform
+// - Solid renderer 只转换 *.solid.tsx；其余 *.tsx 不含 JSX（#520 W4 起 React 面已退役）
 // 迁移期间保留原 run-frontend-tests.mts runner 作为兼容入口；vitest 为正式门禁。
 export default defineConfig({
   plugins: [
     solid({ include: SOLID_WORKBENCH_FILES, hot: false }),
-    react({ exclude: SOLID_WORKBENCH_FILES }),
   ],
   test: {
     // #220：前端计算核的 wasm 产物是测试前置。挂 globalSetup 而不是某个 npm script，
@@ -50,7 +48,6 @@ export default defineConfig({
     projects: (['node', 'node-shared', 'react-dom', 'react-shared', 'solid-dom'] as const).map(name => ({
       plugins: [
         solid({ include: SOLID_WORKBENCH_FILES, hot: false }),
-        react({ exclude: SOLID_WORKBENCH_FILES }),
       ],
       test: {
         name,

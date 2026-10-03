@@ -6,8 +6,9 @@ import { createStore, produce } from 'solid-js/store'
  *
  * 各域 store 的状态本体从 zustand `create` 换成 `solid-js/store` 细粒度 store，
  * 但对外**保 zustand 门面签名**（getState / setState(partial, replace?) / subscribe /
- * getInitialState + hook 形态经同目录 reactStoreShim 暂供 React 面使用）——消费者
- * 在组件迁移批内零改动，终态 React 面退役后 shim 与本门面一并收敛为直连。
+ * getInitialState）。#515 W3 起 React 面退役、过渡 shim 已删除：各 store 直接
+ * `export const useXxxStore: SolidStoreKernel<T> = kernel` 直连本门面，消费面统一是
+ * getState/setState/subscribe 直用与 createZustandSignal（组件响应式读取）。
  *
  * 语义对齐点（zustand v5 vanilla）：
  * - `setState(partial)` 浅合并；partial / updater **求值结果与当前 state 同一引用时整体跳过**
@@ -31,9 +32,9 @@ export interface SolidStoreKernel<T extends object> {
   subscribe: (listener: (state: T, prevState: T) => void) => () => void
   /** zustand `getInitialState()` 等价：创建时的初始状态对象。 */
   getInitialState: () => T
-  /** 通知计数（每次 set 单调 +1）——React shim 以它判「快照是否过期」。 */
+  /** 通知计数（每次 set 单调 +1）——外部快照缓存以它判「快照是否过期」。 */
   getVersion: () => number
-  /** Solid store 代理本体（终态直连用；过渡期与 getState() 同一对象）。 */
+  /** Solid store 代理本体（终态直连用；state 即终态读取面）。 */
   readonly state: T
 }
 
@@ -92,6 +93,23 @@ export function createSolidStoreKernel<T extends object>(initial: T): SolidStore
     state,
   }
   return kernel
+}
+
+/**
+ * 浅比较判等（原 zustand `useShallow` 的本地等价，React shim 退役后自本文件导出）。
+ * 消费面：createMemo 的 `equals` 选项（App.solid themeBaseline / Settings.solid
+ * themeState）——滤掉「引用变了、浅内容没变」的写入，避免无值变化的下游重算。
+ */
+export function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false
+  const keysA = Object.keys(a as Record<string, unknown>)
+  const keysB = Object.keys(b as Record<string, unknown>)
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    if (!Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false
+  }
+  return true
 }
 
 /** solidStoreBridge 兼容的最小结构面（ getState/subscribe 双件套）。 */

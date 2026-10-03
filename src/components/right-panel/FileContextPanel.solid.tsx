@@ -4,7 +4,7 @@ import { useWorkspaceStore } from '../../domains/workspace/workspaceStore'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { sourcesForPath } from '../../domains/file/fileRelations'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * FileContextPanel — file 右栏（W2-12，FE-AUD-022 反查）。
@@ -13,7 +13,7 @@ import { createZustandSignal } from '../../host/solidStoreBridge.ts'
  * （path → sources，Windows 路径统一 normalize）；点击关联会话 → 返回
  * Agent Sheet 并选中该会话。不猜全局 activeSession。
  *
- * #515 贡献面翻转：实体（原 React 版 FileContextPanel.tsx 的 Solid 移植；原件退役）。
+ * #515 贡献面翻转：Solid 实体。
  * props 形状 = ContextPanelContributionProps（contextPanelTypes 契约）。
  */
 export default function FileContextPanel(props: { ctx: SheetContext }) {

@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, For, Show } from 'solid-js'
-import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
 import { appClients } from '../../app/appClients.ts'
 import { save } from '@tauri-apps/plugin-dialog'
@@ -202,9 +201,4 @@ export default function HistorySheetView(props: HistorySheetViewProps) {
       </main>
     </div>
   )
-}
-
-/** React 薄桥（HistorySheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderHistorySheetView(container: HTMLElement, props: HistorySheetViewProps): () => void {
-  return render(() => <HistorySheetView sheet={props.sheet} ctx={props.ctx} />, container)
 }

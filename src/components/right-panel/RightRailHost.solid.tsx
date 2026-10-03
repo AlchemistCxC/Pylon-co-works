@@ -1,25 +1,18 @@
 /** @jsxImportSource solid-js */
-import { createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, Show } from 'solid-js'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { selectContextPanels, resolveContextPanelDefault } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 import { useRightRailStore, clampRightRailWidth, RIGHT_RAIL_MAX_WIDTH, RIGHT_RAIL_MIN_WIDTH } from '../../domains/workspace/layoutRailsStore.ts'
 import ContextPanelHost from './ContextPanelHost.solid.tsx'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { createBackgroundPresentation } from '../../infrastructure/skin/backgroundImage.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 import type { SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import type { ShellContext } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
 import type { RightRailHostProps } from './rightPanelTypes.ts'
 
 const registry = getContextPanelRegistry()
-
-/** 外部 store（subscribe/getSnapshot 快照语义）→ Solid 信号（快照引用等值）。 */
-function createRegistrySignal<T>(store: { subscribe(listener: () => void): () => void; getSnapshot(): T }): () => T {
-  const [value, setValue] = createSignal<T>(store.getSnapshot())
-  onCleanup(store.subscribe(() => setValue(() => store.getSnapshot())))
-  return value
-}
 
 const VIRTUAL_SHEET: SheetRecord = {
   id: 'right-rail-virtual', kind: 'overview', title: 'Workspace', createdAt: 0, lastFocusedAt: 0,
@@ -31,10 +24,10 @@ export default function RightRailHost(props: RightRailHostProps) {
   const collapsed = createZustandSignal(useRightRailStore, state => state.collapsed)
   const width = createZustandSignal(useRightRailStore, state => state.width)
   const activePanelId = createZustandSignal(useRightRailStore, state => state.activePanelId)
-  const backgroundImage = createZustandSignal(useStore, state => state.rightBgImage)
+  const backgroundImage = createZustandSignal(useThemeStore, state => state.rightBgImage)
   const background = createZustandSignal(useRightRailStore, state => state.background)
   const [dragWidth, setDragWidth] = createSignal<number | null>(null)
-  const panelSnapshot = createRegistrySignal(registry)
+  const panelSnapshot = createRegistrySignal(registry, () => registry.getSnapshot())
   let dragRef: { pointerId: number; startX: number; startWidth: number } | null = null
 
   const shellContext = createMemo<ShellContext>(() => ({
@@ -50,8 +43,8 @@ export default function RightRailHost(props: RightRailHostProps) {
     ? activePanelId()
     : resolveContextPanelDefault(entries(), props.sheet?.kind)?.contributionId)
 
-  // maxWidth 依赖 window.innerWidth：保持「读取时求值」（React 版每次渲染现算），不缓存
-  // 进 memo——窗口 resize 后的下一次渲染/拖拽拿到的都是新值。
+  // maxWidth 依赖 window.innerWidth：保持「读取时求值」，不缓存进 memo——
+  // 窗口 resize 后的下一次渲染/拖拽拿到的都是新值。
   const maxWidth = () => Math.min(RIGHT_RAIL_MAX_WIDTH, Math.max(RIGHT_RAIL_MIN_WIDTH, window.innerWidth - 360))
   const renderedWidth = () => dragWidth() ?? width()
 
@@ -126,6 +119,3 @@ export default function RightRailHost(props: RightRailHostProps) {
     </Show>
   )
 }
-
-/** React 薄桥（RightRailHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderRightRailHost = createSolidMount(RightRailHost)

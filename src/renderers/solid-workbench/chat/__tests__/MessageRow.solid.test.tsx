@@ -5,6 +5,7 @@ import { createSignal } from 'solid-js'
 import { toRenderMessage, type Message } from '../../../../domains/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../../domains/appearance/appearance.ts'
 import { clearMarkdownRenderModelCache } from '../markdownRenderModel.ts'
+import { FLUSH_BUDGET } from '../../../../test/solidTestHelpers.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from '../MessageRow.solid.tsx'
 
 const APPEARANCE: Pick<WorkbenchAppearanceSnapshot,
@@ -196,12 +197,11 @@ describe('SolidMessageRow', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false')
     await fireEvent.click(button)
     expect(button.getAttribute('aria-expanded')).toBe('true')
-    // 正文经 C00 MarkdownContent 异步渲染，等待出现。预算依据：等待对象是
-    // createResource 解析 + Solid 刷帧（微任务级，常态 <50ms，本文件其余 waitFor
-    // 用默认 1s 均稳定通过）；2s 覆盖满载并发抖动，原 5s 是 P91 期粗放放宽。
+    // 正文经 C00 MarkdownContent 异步渲染，等待出现。等待对象是 createResource
+    // 解析 + Solid 刷帧（微任务级）；统一冲刷预算见 solidTestHelpers 的 FLUSH_BUDGET。
     await waitFor(() => {
       if (!result.container.textContent?.includes('第二行')) throw new Error('markdown not flushed')
-    }, { timeout: 2_000 })
+    }, FLUSH_BUDGET)
   })
 
   it('reasoning duration normalizes rounded seconds across the minute boundary', () => {

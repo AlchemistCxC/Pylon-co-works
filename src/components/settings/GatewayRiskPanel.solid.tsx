@@ -1,11 +1,10 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { appClients } from '../../app/appClients.ts'
 import type { AdapterInstance } from '../../infrastructure/tauri/gatewayClient'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 // FE-AUD-008：typed client 收口 gateway 域 command literal
 const gatewayClient = appClients.gateway()
@@ -133,9 +132,4 @@ export default function GatewayRiskPanel() {
       </Show>
     </div>
   )
-}
-
-/** React 薄桥（GatewayRiskPanel.tsx）经 eager glob 调用的挂载缝。 */
-export function renderGatewayRiskPanel(container: HTMLElement, latest: () => GatewayRiskPanelProps): () => void {
-  return render(() => createComponent(GatewayRiskPanel, bridgedProps(latest)), container)
 }

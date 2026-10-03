@@ -65,7 +65,10 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       useWorkspaceStore.getState().focusSheet(agentId)
       const view = render(() => <SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
       await screen.findByText('keep-alive-suite', {}, { timeout: 15_000 })
-      expect(getActiveWorkbenchHostPort(agentId)).toBeDefined()
+      // findByText 在 staging div（display:none，prepare 前就挂进文档）里就能命中，
+      // 而 host port 要等 RendererSuiteHost 提交（phase=active）才登记——文本可见 ≠
+      // 已提交。直接等端口登记这个真条件，避免与挂载微任务竞速。
+      await waitFor(() => expect(getActiveWorkbenchHostPort(agentId)).toBeDefined())
 
       useWorkspaceStore.getState().focusSheet(overviewId)
       await waitFor(() => expect(pause).toHaveBeenCalledOnce())

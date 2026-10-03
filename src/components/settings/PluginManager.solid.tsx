@@ -14,8 +14,7 @@ import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
 import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createRegistrySignal } from '../../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../../infrastructure/state/solidSheetSupport.solid.tsx'
 import PluginCapabilityConsentCard from './PluginCapabilityConsentCard.solid.tsx'
 
 const LOG_LIMIT = 12
@@ -71,15 +70,15 @@ function cleanupResultMessage(result: PluginDeactivateResult): string {
 }
 
 /**
- * PluginManager — 插件管理宿主面板（#515 Solid 实体；原 PluginManager.tsx 保留
- * 同名薄桥）。runtime/bootstrap/契约快照订阅经 createRegistrySignal（引用等值
+ * PluginManager — 插件管理宿主面板（#515 Solid 实体）。runtime/bootstrap/契约快照
+ * 订阅经 createRegistrySignal（引用等值
  * 去重，语义与 useSyncExternalStore 一致）；bootstrap 失败上报的去重簿记为组件体
  * 局部可变量（Solid 组件体只跑一次）。
  */
 export default function PluginManager(props: PluginManagerProps) {
   const runtime = getPluginRuntime()
-  // service/picker/bootstrap 注入在挂载期定型（与 React 版每渲染重取等价：注入值在
-  // 挂载后不变的消费契约下行为一致）。
+  // service/picker/bootstrap 注入在挂载期定型：Solid 组件体只跑一次，此后不再重取
+  // （消费契约：注入值挂载后不变）。
   const service = props.service ?? getPackageInstallationService()
   const pickDirectory = () => props.pickDirectory ?? pickPluginDirectory
   const pickZipFile = () => props.pickZipFile ?? pickPluginZip
@@ -445,6 +444,3 @@ export default function PluginManager(props: PluginManagerProps) {
     </div>
   )
 }
-
-/** React 薄桥（PluginManager.tsx）经 eager glob 调用的挂载缝。 */
-export const renderPluginManager = createSolidMount(PluginManager)

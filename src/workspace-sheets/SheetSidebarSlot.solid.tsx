@@ -1,11 +1,11 @@
 /** @jsxImportSource solid-js */
 import { createMemo, Show } from 'solid-js'
-import { useStore } from '../domains/theme/themeStore'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { useThemeStore } from '../domains/theme/themeStore'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import type { SheetContext, SheetRecord } from './sheetTypes'
 import { resolveSheetRender } from './sheetRegistry.ts'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from '../plugin-runtime/workspaces/workspaceRegistry'
-import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 
 /**
  * SheetSidebarSlot — 左栏内容槽（#154 统一侧栏模型）。
@@ -33,7 +33,7 @@ import { createRegistrySignal } from '../sheets/solidSheetSupport.solid.tsx'
  * try 内执行）——memo 内自兜，抛错即静默收起，行为逐字对齐。
  */
 export default function SheetSidebarSlot(props: { sheet: SheetRecord; ctx: SheetContext }) {
-  const showSidebar = createZustandSignal(useStore, s => s.showSidebar !== false)
+  const showSidebar = createZustandSignal(useThemeStore, s => s.showSidebar !== false)
   const registry = createRegistrySignal({ subscribe: subscribeWorkspaceRegistry }, getWorkspaceRegistrySnapshot)
   type SidebarEntry = NonNullable<NonNullable<ReturnType<typeof resolveSheetRender>>['sidebar']>
   const rendered = createMemo<{ Sidebar: SidebarEntry; state: unknown } | null>(() => {

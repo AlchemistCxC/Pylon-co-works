@@ -3,7 +3,6 @@ import type { JSX } from 'solid-js'
 import { For, Match, Show, Switch } from 'solid-js'
 import { isSettingVisible, type RenderChoiceSettingField, type RenderColorSettingField, type RenderMultiChoiceSettingField, type RenderNumberSettingField, type RenderSettingField, type RendererSettingOption, type RendererPresentation, type RendererSettingValue, type RendererSettingsSchema, type RenderBooleanSettingField, type RenderTextSettingField, type SettingsValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import ColorPopover from '../ColorPopover.solid.tsx'
 import Select from '../ui/Select.solid.tsx'
 
@@ -79,9 +78,8 @@ function labelOf(field: RenderSettingField): string {
 }
 
 /** S2：segmented 按钮组（横排 chip，active 用 accent 底）。
- * K-3 底座 radix ToggleGroup(single) 的手写最小 Solid 等价（指南 §3，不新增依赖）：
- * 容器语义 radiogroup、条目 role=radio + aria-checked + data-state 样式钩子、
- * 方向键在可用条目间移动焦点并选中（roving 语义）、类名逐字沿用。 */
+ * 手写最小实现（指南 §3，不新增依赖）契约：容器 role=radiogroup、条目 role=radio +
+ * aria-checked + data-state 样式钩子、方向键在可用条目间移动焦点并选中（roving 语义）。 */
 function SegmentedControl(props: {
   options: readonly RendererSettingOption[]
   value: string
@@ -145,10 +143,9 @@ function ToggleSwitch(props: { checked: boolean; onChange(checked: boolean): voi
 
 const SLIDER_COMMIT_KEYS = ['ArrowRight', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']
 
-/** K-3 radix Slider(horizontal) 的手写最小 Solid 等价：
+/** 滑杆（horizontal）手写最小实现契约：
  * thumb role=slider + aria-valuemin/max/now + tabindex、方向键步进（keyup commit、
- * Home/End/PageUp/PageDown）、track 点按/拖动取值；DOM class（renderer-slider*）
- * 与 React 版逐项一致。 */
+ * Home/End/PageUp/PageDown）、track 点按/拖动取值；DOM class renderer-slider*。 */
 function Slider(props: {
   id?: string
   ariaLabel?: string
@@ -330,7 +327,7 @@ function MultiChoiceSettingField(props: MultiChoiceFieldProps) {
 function ColorSettingField(props: ColorFieldProps) {
   const label = () => labelOf(props.field)
   const presentation = (): RendererPresentation => resolvePresentation(props.field)
-  // color 字段的 palette 候选只来自调用方注入的 options（schema 契约同原 React 版）
+  // color 字段的 palette 候选只来自调用方注入的 options（schema 契约）
   const options = () => props.options ?? []
   const reset = (): JSX.Element => (
     <Show when={props.onReset && props.field.default !== undefined}>
@@ -467,9 +464,3 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
     </Switch>
   )
 }
-
-/** React 薄桥（RendererSettingField.tsx）经 eager glob 调用的挂载缝。 */
-export const renderRendererSettingField = createSolidMount(RendererSettingField)
-
-/** React 薄桥（RendererSettingField.tsx 具名导出 RendererSettingsSchemaHost）的挂载缝。 */
-export const renderRendererSettingsSchemaHost = createSolidMount(RendererSettingsSchemaHost)

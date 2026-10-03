@@ -25,10 +25,9 @@ import {
 import { getPylonCliService } from '../../cli/pylonCliRuntime.ts'
 import { hasTauriRuntime, isBrowserMockRuntime, IS_TAURI, type TauriWindow } from '../../infrastructure/tauri/env.ts'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { reportRuntimeError } from '../../app/runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { BROWSER_PHASE_LABELS, type BrowserPageSnapshot, type BrowserSnapshot, type BrowserToolId } from './browserSheetTypes.ts'
 import { BrowserViewport } from './BrowserViewport.solid.tsx'
 import { BrowserSidebar } from './BrowserSidebar.solid.tsx'
@@ -728,6 +727,3 @@ export default function BrowserSheetView(props: { sheet: SheetRecord; ctx: Sheet
 // 无状态客户端放模块级：避免组件每渲染重建导致 refreshAgentPanel 身份漂移、
 // 面板 effect 反复触发（issue #82 review 发现）。
 const AGENT_CLIENT = appClients.browserAgentPanel
-
-/** React 薄桥（BrowserSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountBrowserSheetView = createSolidMount(BrowserSheetView)

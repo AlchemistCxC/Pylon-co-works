@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import type { BrowserSnapshot } from './browserSheetTypes.ts'
 
 function browserPreviewUrl(url: string): string {
@@ -45,6 +44,3 @@ export function BrowserViewport(props: BrowserViewportProps) {
     </div>
   )
 }
-
-/** React 薄桥（BrowserViewport.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountBrowserViewport = createSolidMount(BrowserViewport)

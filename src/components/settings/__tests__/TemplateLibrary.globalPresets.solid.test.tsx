@@ -1,19 +1,16 @@
 // @vitest-environment jsdom
 // #515：迁移自 TemplateLibrary.globalPresets.test.tsx（React RTL → Solid 实体直连）。
-// 断言改写点登记：SettingsPreview 经 vi.mock 打桩（岛按同一 resolved id 解析，
-// 桩对 glob 加载的 React 岛同样生效）；断言集原样保留。
+// 断言改写点登记：SettingsPreview 经 vi.mock 打桩（#515 W1 起实体直连，mock 路径随
+// .solid 实体；工厂产 Solid 元素）；断言集原样保留。
 import { cleanup, fireEvent, render, screen, within } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import React from 'react'
 import { resetStores } from '../../../test/resetStores.ts'
 import TemplateLibrary from '../TemplateLibrary.solid.tsx'
-import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../../domains/theme/themeStore.ts'
 import { useCustomPresetStore } from '../../../domains/theme/customPresetStore.ts'
 
-// 注意：本文件是 solid 编译面——工厂内不能用 JSX（会产出 Solid 节点喂给 React 岛），
-// 用 createElement 造 React 元素。
-vi.mock('../../SettingsPreview.tsx', () => ({
-  default: () => React.createElement('div', { 'data-testid': 'settings-preview' }),
+vi.mock('../../SettingsPreview.solid.tsx', () => ({
+  default: () => <div data-testid="settings-preview" />,
 }))
 
 afterEach(() => cleanup())
@@ -29,8 +26,8 @@ describe('TemplateLibrary global presets', () => {
     const card = screen.getByText('我的同名模板').closest('.template-card') as HTMLElement
     fireEvent.click(within(card).getByRole('button', { name: '应用' }))
     await expect(screen.findByRole('status')).resolves.toHaveTextContent('自定义预设已应用')
-    expect(useStore.getState().chatFontSize).toBe(19)
-    expect(useStore.getState().appliedPreset.global).toBe('custom-42')
+    expect(useThemeStore.getState().chatFontSize).toBe(19)
+    expect(useThemeStore.getState().appliedPreset.global).toBe('custom-42')
   })
 
   it('把旧版 bare id 归一化后再交给应用 transaction', async () => {

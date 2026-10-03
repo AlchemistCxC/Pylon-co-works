@@ -785,7 +785,7 @@ context.sidebar.registerAgentSidebarContribution({
 | `page` | 否 | 无 | `{ title }`；声明后该模块可展开成主区整页 |
 | `headerActions` | 否 | `[]` | 头部动作按钮（宿主渲染，见下） |
 | `when` | 否 | 恒可见 | 可见性谓词，入参 `{ activeAgentId, activeSessionId }` |
-| `renderKind` | 是 | — | `'first-party-react'`（仅主构建内置）或 `'isolated-surface'`（外置插件） |
+| `renderKind` | 是 | — | `'first-party-solid'`（仅主构建内置）或 `'isolated-surface'`（外置插件） |
 | `component` / `surfaceId` | 是 | — | 按 `renderKind` 二选一 |
 
 **注册期校验（fail-closed，任一不满足即拒绝注册）**：`id` / `label` 非空且无首尾空格；`onTitleClick` 只能是 `expand` / `page`；**`onTitleClick: 'page'` 必须同时声明 `page`**（点了没处去是死路，不做静默降级）；`headerActions[].id` 非空、不重复且 `label` 非空；`page.title` 非空；`isolated-surface` 的 `surfaceId` 非空。
@@ -800,9 +800,9 @@ context.sidebar.registerAgentSidebarContribution({
 
 **模块外壳（图标、标题、折叠钮、`headerActions`）全部由宿主渲染**，贡献只画模块内容。用户**长按模块头**即可拖拽改次序（没有独立拖拽手柄）。
 
-**`headerActions` 的回派**：宿主渲染按钮，语义留在贡献。`first-party-react` 贡献在挂载期调用 `props.registerBlockActionHandler(fn)` 注册处理器（卸载时传 `null` 注销），宿主点击时以 `actionId` 回调；`isolated-surface` 贡献改为从 `host:input.blockAction` 读请求（含 `nonce`，重复点击可区分）。
+**`headerActions` 的回派**：宿主渲染按钮，语义留在贡献。`first-party-solid` 贡献在挂载期调用 `props.registerBlockActionHandler(fn)` 注册处理器（卸载时传 `null` 注销），宿主点击时以 `actionId` 回调；`isolated-surface` 贡献改为从 `host:input.blockAction` 读请求（含 `nonce`，重复点击可区分）。
 
-**props 契约（`first-party-react`）**：贡献组件收到
+**props 契约（`first-party-solid`）**：贡献组件收到
 
 | 字段 | 语义 |
 | --- | --- |
@@ -870,7 +870,7 @@ context.contextPanel.register({
 
 没显式选过时的默认顺序：**亲和当前 Sheet 种类的面板 → 第一个 `global` 面板 → 列表第一个**。用户一旦在切换器里选过，那次选择跨 Sheet 保持（`layoutRailsStore.activePanelId`），切 Sheet 不会把它抢回默认值。右栏头部的切换器列出全部通过 `when` 的面板；**切换器的标签是宿主渲染的，插件不画自己的标签行**。
 
-`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-react` 只供主构建内置插件使用；外置插件使用 `isolated-surface`。**两类隔离面的输入与回传事件不同**：左栏模块经 `host:input` 接收含 `presentation` / `collapsed` / `pageOpen` / `blockAction` 的可序列化宿主状态，用受控的 `host:*` 事件请求选择会话或创建会话；右栏面板经 `host:input` 接收 `{ workspaceKind, sheet, activeSessionId, values }`（`sheet` 是当前 Sheet 的 `{ id, kind, title, agentId?, metadata? }` 投影，`values` 是面板 settings 适配器的当前值快照），回传事件词表为 `host:collapse` / `host:select-session` / `settings:set` / `settings:remove`（后两者写/删面板内嵌设置，见 SDK 出口 `CONTEXT_PANEL_SURFACE_EVENTS`）。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
+`order` 越小越靠前；相同顺序由 Registry 的稳定 owner/id 顺序决定，**模块栈内按 `order` 纵向堆叠**（旧模型的「一个 mode 只挂一个贡献」使 `order` 形同虚设，现已真正生效）。两类贡献都随插件 Scope 回收，并参与 parallel hot-swap 的 shadow transaction。`first-party-solid` 只供主构建内置插件使用；外置插件使用 `isolated-surface`。**两类隔离面的输入与回传事件不同**：左栏模块经 `host:input` 接收含 `presentation` / `collapsed` / `pageOpen` / `blockAction` 的可序列化宿主状态，用受控的 `host:*` 事件请求选择会话或创建会话；右栏面板经 `host:input` 接收 `{ workspaceKind, sheet, activeSessionId, values }`（`sheet` 是当前 Sheet 的 `{ id, kind, title, agentId?, metadata? }` 投影，`values` 是面板 settings 适配器的当前值快照），回传事件词表为 `host:collapse` / `host:select-session` / `settings:set` / `settings:remove`（后两者写/删面板内嵌设置，见 SDK 出口 `CONTEXT_PANEL_SURFACE_EVENTS`）。每个贡献有独立错误边界，一个插件渲染失败不会卸载主 Sheet 或其他贡献。
 
 Workspace 自身的 `sidebar` 仍负责声明整块左栏壳；Agent 左栏内部内容、FileSheet workbench activity，以及通用右栏内容分别由对应 contribution registry 管理，不建立第二套 `kind → sidebar` 映射。
 
@@ -893,7 +893,7 @@ context.titlebar.register({
 }, { contributionId: 'example.menu.doctor' })
 ```
 
-**槽位（`slot`，封闭词表）**：`left-rail` / `workspace` / `center` / `app-actions` 四个**渲染槽**沿用原语义（渲染成标题栏上的按钮或表面，`first-party-react` 或 `isolated-surface`）；`app-menu` 是唯一的**数据槽**——它不渲染成按钮，而是成为齿轮菜单「插件」段里的一项，点击时宿主执行 `commandId`（走命令注册表，见 §6.1）。
+**槽位（`slot`，封闭词表）**：`left-rail` / `workspace` / `center` / `app-actions` 四个**渲染槽**沿用原语义（渲染成标题栏上的按钮或表面，`first-party-solid` 或 `isolated-surface`）；`app-menu` 是唯一的**数据槽**——它不渲染成按钮，而是成为齿轮菜单「插件」段里的一项，点击时宿主执行 `commandId`（走命令注册表，见 §6.1）。
 
 **菜单项字段**
 
@@ -941,7 +941,7 @@ context.settings.removeValue('density')
 context.settings.subscribe(() => { /* 同插件 namespace 已更新 */ })
 ```
 
-参数必须可 JSON 序列化，按 plugin id 隔离并持久化。设置 Surface 通过 `host:input` 接收 `{ pluginId, pageId, values }`，通过 `settings:set`（`{ key, value }`）或 `settings:remove` 请求宿主写入。外置插件不能贡献宿主 React Component；`first-party-react` 仅供主构建内置插件。
+参数必须可 JSON 序列化，按 plugin id 隔离并持久化。设置 Surface 通过 `host:input` 接收 `{ pluginId, pageId, values }`，通过 `settings:set`（`{ key, value }`）或 `settings:remove` 请求宿主写入。外置插件不能贡献宿主组件（第一方组件值为 Solid `Component`）；`first-party-solid` 仅供主构建内置插件。
 
 插件还可以修改宿主已有候选型设置的选项视图：
 

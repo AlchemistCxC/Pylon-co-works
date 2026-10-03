@@ -21,8 +21,8 @@ export const DEFAULTS: ThemeSettings = {
   //     "预设没写这一项 ⇒ 抄该预设的常态表"这条回落**已随刀4 删除**（`inheritCcEmptySlice` 退场）：
   //     预设没写 ⇒ 该键不进 patch ⇒ 就是这里这 6 件当基准。
   //   ★ 为什么不是空数组：空数组 = "空态不再多藏任何件" ⇒ 新装的空态会突然多出状态行与发送按钮，
-  //     那是**产品行为变化**，本刀只搬位置、不改变观感（既有测试 `mountSolidControlCenterPreview`
-  //     的「04b 空态极简」锁的就是这件事）。
+  //     那是**产品行为变化**，本刀只搬位置、不改变观感（原由 mountSolidControlCenterPreview
+  //     预览基线锁定的「04b 空态极简」，该预览 harness 已随 #520 死代码二批退役）。
   ccHiddenEmpty: ['model', 'reasoning', 'mode', 'tokens', 'cc-send-button', 'cc-command-hint'],
   ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,

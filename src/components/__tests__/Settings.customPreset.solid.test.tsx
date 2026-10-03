@@ -2,19 +2,18 @@
 /** @jsxImportSource solid-js */
 // #515 改写点登记（迁移自 Settings.customPreset.test.tsx，React RTL → Solid）：
 // - RTL 导入改 @solidjs/testing-library；补显式 afterEach(cleanup)（solid 不入 RTL 全局清理）。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素）。
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid 空组件（#515 W1 起实体直连，mock 不产 React 元素）。
 // - 点击后的 status/alert 断言包 vi.waitFor：solid 的 DOM 更新是微任务异步（原 React act
 //   同步提交）；store 状态断言（同步写）保持同步。断言语义不变、集合不缩减。
 import { cleanup, fireEvent, screen, within } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeInvoke } from '../../test/fakeInvoke'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
-import { useStore } from '../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../domains/theme/themeStore.ts'
 import { useCustomPresetStore } from '../../domains/theme/customPresetStore.ts'
 import { resetStores } from '../../test/resetStores.ts'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({ default: () => createElement('div') }))
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({ default: () => null }))
 
 const { invokeRef } = vi.hoisted(() => ({
   invokeRef: { current: null as null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) },
@@ -67,7 +66,7 @@ describe('Settings custom preset controls', () => {
     fireEvent.click(within(row).getByRole('button', { name: '我的预设' }))
 
     await expect(screen.findByRole('status')).resolves.toHaveTextContent('自定义预设已应用')
-    expect(useStore.getState().chatFontSize).toBe(13)
+    expect(useThemeStore.getState().chatFontSize).toBe(13)
   })
 
   it('shows the failed provider when a custom preset transaction rolls back', async () => {

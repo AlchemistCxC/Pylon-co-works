@@ -1,15 +1,14 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { useReplayPostureStore } from '../domains/chat/replayPostureStore'
 import AgentSheetPageHost from '../components/sidebar/AgentSheetPageHost.solid.tsx'
 import { IsolatedPluginSurface as IsolatedPluginSurfaceSolid } from '../plugin-runtime/ui/IsolatedPluginSurface.solid.tsx'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 import { getAgentSidebarRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { normalizePageState, resolveOpenPage } from '../plugin-runtime/sidebar/sidebarBlockState.ts'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
-import { createActiveInterfaceModeContribution, createRegistrySignal } from './solidSheetSupport.solid.tsx'
+import { createActiveInterfaceModeContribution, createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.solid.tsx'
 
 // ---- #515 批7：整页宿主与隔离表面均已 Solid 实体化（批1-C/批3-E），React 岛退役，
@@ -122,6 +121,3 @@ export default function AgentSheetView(props: AgentSheetViewProps) {
     </Show>
   )
 }
-
-/** React 薄桥（AgentSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountAgentSheetView = createSolidMount(AgentSheetView)

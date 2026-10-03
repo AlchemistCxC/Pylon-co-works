@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import { classifyWorkspaceError, mergeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry } from '../../components/right-panel/rightPanelTypes'
@@ -182,6 +181,3 @@ export default function FileTree(props: FileTreeProps) {
     </div>
   )
 }
-
-/** React 薄桥（FileTree.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountFileTree = createSolidMount(FileTree)

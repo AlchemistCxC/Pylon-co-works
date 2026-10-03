@@ -7,7 +7,7 @@ import { getPermissionController } from '../infrastructure/acp/permissionControl
 import { activeForAgent } from '../domains/permission/permissionState.ts'
 import { resolvePermissionButtons } from '../domains/permission/permissionButtons.ts'
 import ElicitationRequestCard from './ElicitationRequestCard.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 /**
  * PermissionDialog — 动态权限弹窗（P0-03）。
@@ -27,8 +27,9 @@ import { createZustandSignal } from '../host/solidStoreBridge.ts'
  * 遮罩同理：原「--bg-panel 取 60%」的写法里 --bg-panel 是面板内层叠的 3~4% 着色 token，
  * 在基础方案只剩约 1.9% 黑，故改用与 `.dialog-overlay` 基线一致的固定 30% 黑（不加模糊）。
  *
- * #515：Solid 实体（App.solid 直连）。原 useModalOverlayVeil（React hook）内联为
- * effect + onCleanup（#309 原生子视图隐藏语义逐字保持）。
+ * #515：Solid 实体（App.solid 直连）。模态覆盖契约（#309）：active 期间经
+ * useModalOverlayStore.setOverlayOpen('permission', true) 让宿主隐藏原生子视图
+ * （浏览器 WebView2，否则审批按钮被原生页面吃掉点击）；关闭/卸载回 false。
  */
 const OVERLAY = 'fixed inset-0 z-[200] flex items-center justify-center bg-[rgba(0,0,0,0.3)]'
 const DIALOG = 'min-w-[320px] max-w-[480px] p-4 border border-border rounded-none bg-[var(--surface-overlay)] shadow-[var(--shadow-float)] text-text font-[family-name:var(--font)]'

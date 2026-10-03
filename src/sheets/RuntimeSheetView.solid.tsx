@@ -1,6 +1,5 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { createSolidMount } from '../host/solidBridge.solid'
 import { appClients } from '../app/appClients.ts'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../domains/runtime/runtimeStore'
@@ -9,8 +8,8 @@ import { getDiagnosticErrors, getErrorHistory, subscribeErrorCenter, type ErrorE
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, RUNTIME_LOG_RENDER_WINDOW, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
-import { createRegistrySignal } from './solidSheetSupport.solid.tsx'
-import { createZustandSignal } from '../host/solidStoreBridge.ts'
+import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.solid.tsx'
+import { createZustandSignal } from '../infrastructure/state/solidStoreBridge.ts'
 
 export interface RuntimeSheetViewProps {
   sheet: SheetRecord
@@ -313,6 +312,3 @@ function DiagnosticChip(props: { label: string; entry: { status: string; message
     </Show>
   )
 }
-
-/** React 薄桥（RuntimeSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountRuntimeSheetView = createSolidMount(RuntimeSheetView)

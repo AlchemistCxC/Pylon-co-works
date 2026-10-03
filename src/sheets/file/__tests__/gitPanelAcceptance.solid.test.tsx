@@ -19,7 +19,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { fireEvent, render, screen, cleanup } from '@solidjs/testing-library'
-import { createZustandSignal } from '../../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../../infrastructure/state/solidStoreBridge.ts'
 import FileSheetView from '../FileSheetView.solid.tsx'
 import { useWorkspaceStore } from '../../../domains/workspace/workspaceStore'
 import { resetStores } from '../../../test/resetStores'

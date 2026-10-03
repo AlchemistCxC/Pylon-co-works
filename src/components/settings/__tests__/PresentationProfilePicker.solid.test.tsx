@@ -3,7 +3,7 @@
 // 断言集原样保留；cleanup 改为 afterEach 显式调用）。
 import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../../domains/theme/themeStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
@@ -30,7 +30,7 @@ describe('PresentationProfilePicker', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /结果风格/ }))
     expect(await screen.findByRole('status')).toHaveTextContent('呈现风格已应用')
-    expect(useStore.getState().chatFontSize).toBe(18)
+    expect(useThemeStore.getState().chatFontSize).toBe(18)
   })
 
   it('shows a failed result when a profile owner rejects a write', async () => {
@@ -40,7 +40,7 @@ describe('PresentationProfilePicker', () => {
       id: profileId, label: '失败风格', family: 'custom', interfaceMode: 'modern-gui',
       tokens: { chatFontSize: 18 },
     }))
-    useStore.setState({ setZoneField: () => { throw new Error('theme owner rejected') } } as never)
+    useThemeStore.setState({ setZoneField: () => { throw new Error('theme owner rejected') } } as never)
     render(() => <PresentationProfilePicker />)
 
     fireEvent.click(screen.getByRole('button', { name: /失败风格/ }))

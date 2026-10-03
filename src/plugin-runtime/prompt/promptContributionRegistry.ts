@@ -4,7 +4,7 @@ import { validatePromptContribution, type PromptContribution, type PromptContrib
 /**
  * #201：prompt 注入贡献注册表。与 FontContributionRegistry 同一注册表基建
  * （PluginIdentity 命名空间 + 快照订阅 + shadow transaction），宿主消费面见
- * `host/commandSetResolver.assembleSessionPrompt`。
+ * `application/commandSetResolver.assembleSessionPrompt`。
  *
  * 启用过滤按**注册属主**（ownerPluginId）判定，与命令清单的 `enabledPluginIds`
  * 语义一致（缺省 = 全部已注册贡献）。

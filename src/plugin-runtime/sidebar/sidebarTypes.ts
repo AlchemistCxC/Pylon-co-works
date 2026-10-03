@@ -109,7 +109,7 @@ interface AgentSidebarContributionBase {
 }
 
 export interface FirstPartyAgentSidebarContribution extends AgentSidebarContributionBase {
-  readonly renderKind: 'first-party-react'
+  readonly renderKind: 'first-party-solid'
   /** Opaque at the runtime boundary; the Solid host (src/components/Sidebar.solid.tsx) narrows it before rendering. */
   readonly component: unknown
 }

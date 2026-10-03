@@ -5,8 +5,9 @@ interface PylonMarkProps {
   title?: string
 }
 
-/** Pylon 品牌标记（Solid 版，#279）：六边形外框中的三个正三角对称 Agent 节点。与
- * `PylonMark.tsx`（React 版）保持同构 SVG——类名是首方样式的消费契约，逐字段一致。 */
+/** Pylon 品牌标记（Solid 版，#279）：六边形外框中的三个正三角对称 Agent 节点。
+ * SVG/class 契约（类名是首方样式的消费契约）：svg.pylon-mark[data-brand-mark=pylon]
+ * [role=img] > path.pylon-mark-frame + circle.pylon-mark-node ×3 + path.pylon-mark-links。 */
 export default function PylonMark(props: PylonMarkProps) {
   return (
     <svg

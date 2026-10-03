@@ -6,7 +6,7 @@ import { getInterfaceModeRegistry, getPresentationProfileRegistry, getRendererRe
 import { DEFAULT_SHELL_RECIPE, type ShellRecipeContribution } from '../../../plugin-runtime/shell-recipe/shellRecipeTypes.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
-import { useStore } from '../../theme/themeStore.ts'
+import { useThemeStore } from '../../theme/themeStore.ts'
 import { DEFAULT_INTERFACE_MODE, DEFAULT_INTERFACE_PROFILES, useInterfaceModeStore } from '../interfaceModeStore.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
@@ -22,13 +22,13 @@ const CC_INPUT_TOKEN_KEYS = [
 ] as const
 
 function resetAppearanceState(): void {
-  useStore.setState(useStore.getInitialState(), true)
+  useThemeStore.setState(useThemeStore.getInitialState(), true)
   useInterfaceModeStore.setState(useInterfaceModeStore.getInitialState(), true)
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)
 }
 
 function appearanceSnapshot(): Record<string, unknown> {
-  const theme = useStore.getState()
+  const theme = useThemeStore.getState()
   return {
     interfaceMode: useInterfaceModeStore.getState().interfaceMode,
     activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
@@ -135,12 +135,12 @@ describe('Interface Mode contract', () => {
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.terminal-classic')
     // ★ #266 刀9：原断言还比对 `inputVariant`（'cli' / 'composer'）—— 该字段已删除，
     //   样例 profile 也不再声明它 ⇒ 断言收缩到仍在的 `msgStyle`（切换确实落地了该 profile 的 token）。
-    expect(useStore.getState()).toMatchObject({ msgStyle: 'terminal' })
+    expect(useThemeStore.getState()).toMatchObject({ msgStyle: 'terminal' })
 
     expect(activateInterfaceMode('modern-gui')).toBe(true)
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('modern-gui')
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.modern-gui')
-    expect(useStore.getState()).toMatchObject({ msgStyle: 'bubble' })
+    expect(useThemeStore.getState()).toMatchObject({ msgStyle: 'bubble' })
   })
 
   it('四条重置/切换路径回到 Modern 后得到同一套中控与输入 token', () => {
@@ -235,7 +235,7 @@ describe('Interface Mode contract', () => {
     expect(activateInterfaceMode('modern-gui')).toBe(true)
     const original = appearanceSnapshot()
     const identity = useIdentityStore.getState()
-    const palette = { accent: useStore.getState().accent, chatBg: useStore.getState().chatBg }
+    const palette = { accent: useThemeStore.getState().accent, chatBg: useThemeStore.getState().chatBg }
     expect(activateInterfaceMode('tactical-blue')).toBe(true)
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.tactical-blue')
     // ★ #266 刀9：原断言 `inputVariant === 'composer'`（那是该 profile 写下的输入 token）；
@@ -244,7 +244,7 @@ describe('Interface Mode contract', () => {
     const mode = BUILTIN_INTERFACE_MODES.find(item => item.id === 'tactical-blue')!
     expect(resolveInterfaceModeSuite(mode, undefined, ['builtin.solid']).activeSuiteId).toBe('builtin.solid')
     expect(useIdentityStore.getState()).toBe(identity)
-    expect({ accent: useStore.getState().accent, chatBg: useStore.getState().chatBg }).toEqual(palette)
+    expect({ accent: useThemeStore.getState().accent, chatBg: useThemeStore.getState().chatBg }).toEqual(palette)
     expect(activateInterfaceMode('modern-gui')).toBe(true)
     expect(appearanceSnapshot()).toEqual(original)
     expect(useIdentityStore.getState()).toBe(identity)

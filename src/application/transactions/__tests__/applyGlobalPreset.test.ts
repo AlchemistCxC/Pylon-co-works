@@ -6,14 +6,14 @@ import { getInterfaceModeRegistry, getPresentationProfileRegistry } from '../../
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../../domains/presentation/presentationPreferenceStore.ts'
-import { useStore } from '../../../domains/theme/themeStore.ts'
+import { useThemeStore } from '../../../domains/theme/themeStore.ts'
 import { applyGlobalPreset } from '../applyGlobalPreset.ts'
 
 const registrations: AsyncDisposable[] = []
 
 beforeEach(() => {
   localStorage.clear()
-  useStore.setState(useStore.getInitialState(), true)
+  useThemeStore.setState(useThemeStore.getInitialState(), true)
   useInterfaceModeStore.setState(useInterfaceModeStore.getInitialState(), true)
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)
 
@@ -38,7 +38,7 @@ describe('applyGlobalPreset', () => {
   it('一次应用 Agent 全局预设会同步主题、Solid 呈现方案与界面模式', () => {
     expect(applyGlobalPreset('agent-command')).toBe(true)
 
-    expect(useStore.getState()).toMatchObject({
+    expect(useThemeStore.getState()).toMatchObject({
       accent: '#38bdf8',
       globalBgColor: '#08111f',
       msgStyle: 'bubble',

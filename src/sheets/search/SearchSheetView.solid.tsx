@@ -1,8 +1,7 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createSignal, For, Show } from 'solid-js'
-import { render } from 'solid-js/web'
 import { LucideIcon } from '../../components/LucideIcon.solid.tsx'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { createStandardSwitchAgent, openOwnedSessionTransaction } from '../../application/transactions/openOwnedSessionTransaction'
@@ -175,9 +174,4 @@ export default function SearchSheetView(props: SearchSheetViewProps) {
       </main>
     </div>
   )
-}
-
-/** React 薄桥（SearchSheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export function renderSearchSheetView(container: HTMLElement, props: SearchSheetViewProps): () => void {
-  return render(() => <SearchSheetView sheet={props.sheet} ctx={props.ctx} />, container)
 }

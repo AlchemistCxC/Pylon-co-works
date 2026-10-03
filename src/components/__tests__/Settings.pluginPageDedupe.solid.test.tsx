@@ -2,15 +2,14 @@
 /** @jsxImportSource solid-js */
 // #515 改写点登记（迁移自 Settings.pluginPageDedupe.test.tsx，React RTL → Solid）：
 // - RTL 导入改 @solidjs/testing-library；显式 afterEach(cleanup)。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素）。
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid JSX（#515 W1 起实体直连，mock 须产 Solid 元素）。
 // - 断言集无改写（点击后断言原本就经 vi.waitFor）。
 import { cleanup, fireEvent, screen } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
-  default: () => createElement('div', { 'data-testid': 'agent-runtime-panel' }, 'runtime onboarding'),
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({
+  default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
 vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')
@@ -75,7 +74,10 @@ describe('plugin manager page navigation (#274)', () => {
     const grants = await bootWithManagerGranted()
     const ui = mountSettingsSheet({ domain: 'plugins' })
     await screen.findByRole('heading', { name: '插件管理器', level: 3 })
-    expect(document.querySelector('[data-plugin-manager-page]')).toBeTruthy()
+    // 页根（data-plugin-manager-page）比标题晚一拍挂载（与上一用例同口径，等真条件）。
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-plugin-manager-page]')).toBeTruthy()
+    })
 
     const hookEntry = [...sidebar().querySelectorAll('.set-nav-btn')].find(btn => btn.textContent?.includes('Hook 诊断'))
     expect(hookEntry).toBeTruthy()

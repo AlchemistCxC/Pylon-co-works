@@ -1,13 +1,12 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { appClients } from '../../app/appClients.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError'
 import type { AdapterCatalogItem, AdapterInstance, GatewayInstanceInput } from '../../infrastructure/tauri/gatewayClient'
 import { migrateLegacyRouteBindings, saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
 import { GATEWAY_ROUTE_RESETS, type GatewayRouteReset, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 
 /**
@@ -584,6 +583,3 @@ export default function GatewaySheetView(props: GatewaySheetViewProps) {
     </div>
   )
 }
-
-/** React 薄桥（GatewaySheetView.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const mountGatewaySheetView = createSolidMount(GatewaySheetView)

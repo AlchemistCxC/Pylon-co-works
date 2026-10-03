@@ -30,7 +30,7 @@ export interface FirstPartyTitlebarContribution extends TitlebarContributionBase
    * #515 契约翻转：第一方贡献组件是 **Solid 组件**（标题栏 Solid 实体直连渲染；
    * 字面量语义见 contextPanelTypes 同名判别器的注释）。
    */
-  readonly renderKind: 'first-party-react'
+  readonly renderKind: 'first-party-solid'
   readonly component: Component<{ context: TitlebarContext }>
 }
 

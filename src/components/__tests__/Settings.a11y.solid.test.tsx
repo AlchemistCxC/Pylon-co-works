@@ -2,17 +2,16 @@
 /** @jsxImportSource solid-js */
 // #515 改写点登记（迁移自 Settings.a11y.test.tsx，React RTL → Solid）：
 // - RTL 导入改 @solidjs/testing-library（screen 经其再导出）；显式 afterEach(cleanup)。
-// - AgentRuntimePanel 的 vi.mock 工厂内 JSX 改 createElement（React 岛只认 React 元素，
+// - AgentRuntimePanel 的 vi.mock 工厂改 Solid JSX（#515 W1 起实体直连，mock 须产 Solid 元素），
 //   本文件 JSX 经 solid 编译，不能进岛）；DOM 契约逐字段不变。
 // - 点击后的 aria-expanded 断言包 vi.waitFor：solid 的 DOM 更新是微任务异步
 //   （原 React act 同步提交），断言语义不变。
 import { cleanup, fireEvent } from '@solidjs/testing-library'
-import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSettingsSheet } from '../../test/settingsSheetHarness.solid'
 
-vi.mock('../settings/AgentRuntimePanel.tsx', () => ({
-  default: () => createElement('div', { 'data-testid': 'agent-runtime-panel' }, 'runtime onboarding'),
+vi.mock('../settings/AgentRuntimePanel.solid.tsx', () => ({
+  default: () => <div data-testid="agent-runtime-panel">runtime onboarding</div>,
 }))
 vi.mock('@tauri-apps/api/core', async () => {
   const { tauriCoreMock } = await import('../../test-utils/tauriCoreMock')

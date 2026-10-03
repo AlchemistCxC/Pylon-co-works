@@ -8,8 +8,7 @@
  * - degraded：Agent 列表/listener/本地数据恢复失败——本地工作区保留，可重试
  * - fatal：不可恢复（保留位；当前无触发路径）
  */
-import { createSolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
-import { createReactStoreHook, type ZustandHook } from '../../infrastructure/state/reactStoreShim'
+import { createSolidStoreKernel, type SolidStoreKernel } from '../../infrastructure/state/solidStoreKernel'
 
 export type HydrationStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'fatal'
 
@@ -21,7 +20,7 @@ interface HydrationState {
   reset: () => void
 }
 
-// #515 批0：zustand → Solid 内核置换（对外签名不变；hook shim 待 React 面退役时拆除）。
+// #515 批0：zustand → Solid 内核置换；W3 起 useHydrationStore 即内核本体（直连，无 shim）。
 const kernel = createSolidStoreKernel<HydrationState>({
   status: 'idle',
   error: null,
@@ -34,4 +33,4 @@ const kernel = createSolidStoreKernel<HydrationState>({
   reset: () => kernel.setState({ status: 'idle', error: null, retryCount: 0 }),
 })
 
-export const useHydrationStore: ZustandHook<HydrationState> = createReactStoreHook(kernel)
+export const useHydrationStore: SolidStoreKernel<HydrationState> = kernel

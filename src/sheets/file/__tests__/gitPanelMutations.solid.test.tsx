@@ -104,8 +104,12 @@ describe('GitPanel 写操作', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '拉取' }))
     await waitFor(() => expect(pull).toHaveBeenCalledWith(target))
+    // pull 调用记录先于事务收敛（busy 复位在 await 续体里）；busy 未清时写操作按钮
+    // 仍禁用，点击会被吞。等按钮恢复可点再继续——React 版靠 act 冲刷掩盖了这一拍。
+    await waitFor(() => expect(screen.getByRole('button', { name: '推送' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '推送' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith(target))
+    await waitFor(() => expect(screen.getByRole('button', { name: '分支' })).toBeEnabled())
 
     fireEvent.click(screen.getByRole('button', { name: '分支' }))
     fireEvent.input(screen.getByLabelText('分支名称'), { target: { value: 'main' } })

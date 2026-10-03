@@ -70,7 +70,7 @@ ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆�
 
 1. **`solidStoreBridge` 未拆**（spec/ADR 终态判据之一）：48 个 solid 实体以 `createZustandSignal` 为 store 消费范式，直连收敛是一整批独立重构（涉及全部实体的读取面改写）。本轮按「过渡完成、收敛批另立」处理：follow-up issue 登记，ADR-0035 的判据语义在该批才完全兑现。
 2. **避让域 14 文件保持 React**（spec 已声明）：其岛载具（SolidMount/reactStoreShim/Settings.solid 岛段/solidSheetSupport.ReactIslandHost）随之保留，react 系依赖退役推迟到避让域收尾批。
-3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 写了「`'first-party-react'` → `'first-party-solid'`」——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，改名收益不抵扰动，登记为后续卫生批）。
+3. **spec 未写的**：批8 修复环（审查发现清偿）与 store 内核单测；`renderKind` 字面量保留不改名（spec 原计划把 React 时代旧字面量改成 Solid 命名——实作发现该字面量被 ~30 处 registry/coverage/cli 测试引用且语义已是「非 isolated 即同运行时组件」，当时判改名收益不抵扰动，登记为后续卫生批；**后记：该卫生批已由 #520 终局收尾批 W2 执行落地**）。
 4. **glob 断链教训**（写进施工指南备查）：基于 basename 的消费者扫描看不见 `import.meta.glob` 字符串引用——TacticalCommandDeck/BrowserSidebar 三件套曾被误删后恢复/补齐。
 
 ## 审查循环（二轮，2026-10-02）
@@ -91,10 +91,29 @@ ADR-0035 终态落地：React/zustand 退出生产树、`solidStoreBridge` 拆�
 
 **审查方法学发现**（供后续批次复用）：basename 消费者扫描必须同时覆盖 side-effect import 与 glob 属性访问（曾差点误判两个在役 wiring 文件、漏判 7 个挂载工厂导出）；「断言零缩减」审查需对 105 对迁移文件做 expect 行 diff 而非抽样。
 
+## #520 终局收尾批（2026-10-02，本记录的完成章）
+
+#521（Codex 避让域工作）并入 main 后障碍清除，#520 以「2 干活 + 2 严查」两波执行完毕：
+
+**wave1**（W1 避让域 + W2 契约改名/死代码 + A1 完整性盘点 + A2 运行时正确性）：
+- W1：避让域 14 文件 → .solid 实体（基线=#521 后版本）；Settings.solid 六段 ReactIslandHost 岛改直连；4 个 RTL 测试迁移；11 个外部 mock 重定向。迁移中修复 4 个 Solid 语义坑（run-once 组件体/effect 嵌套依赖读/For 引用判行/setter 同步性）。
+- W2：renderKind `'first-party-react'`→`'first-party-solid'`（25 文件 63 处）；死代码二批 14 生产文件+9 测试（含 TaskTree.solid、loadSolidControlCenterPreview）；messageRendererResolver 判定为「承诺能力缺口」保留。
+- A1：React 世界生产文件 23 个账目精确闭合（14 避让域+4 载具+5 记录漏计）、避让域外零遗漏、8 对测试断言零弱化、契约零漂移。
+- A2：**P1 复现命中**——TacticalCommandDeck identity selector（Settings.solid 同族），已修；157/158 selector 合规；keep-alive/几何/IPC 红线全在场；#521 逻辑无 P0/P1。
+
+**wave2**（W3 store 直连 + W4 依赖终退 + 分诊修复）：
+- W3：reactStoreShim 退役——14 store 直接导出 SolidStoreKernel（hook 形态零消费核实）；shallowEqual 迁至内核；内核冒烟用例补直连消费面。
+- W4：孤儿挂载工厂清退 50 个；SolidMount/SolidMount.test 删除；solidSheetSupport 岛三件套退役；**react/react-dom/@testing-library/react/@types/react*/@vitejs/plugin-react/eslint-plugin-react-hooks 七依赖删除**；vite/vitest react 插件移除、tsconfig jsx→preserve、eslint react-hooks 段删除；bundle −134KB（react+react-dom+scheduler 出包）。
+- 分诊：W3/W4 后 17 测试失败逐项插桩分诊 = **17 测试竞态 0 产品回归**（统一根因：RTL act() 微任务冲刷的隐式时序在 Solid 无等价物）；修复=等条件就绪，断言零缩减；solidBridge.solid.tsx 删除（孤儿厂清退后零消费者）；solidStoreBridge 头注定稿（读取原语）。
+
+**终态实测**：`git grep "from 'react'\|from 'zustand'" -- src/` = **0**（含测试）；react-dom 0；package.json react 系依赖 0；bundle js gzip 1,443,859/1,615,000。ADR-0035 终态判据全部兑现。
+
+**保留决策**：`solidStoreBridge.ts`（createZustandSignal）保留为**读取原语**——React 退役后它不再是跨框架桥，只是 store 订阅助手（内核对象原生满足其签名）；48 实体改直读 kernel.state 属零框架语义的纯风格重构，未纳入。vitest react-dom/react-shared 分组名保留（承载非 solid jsdom 测试）。messageRendererResolver 待宿主消费承诺裁决。
+
 ## 未解问题
 
 - 避让域收尾批：14 文件 Solid 化 + React 岛与载具退役 + react 系依赖（react/react-dom/@types/@testing-library/react/@vitejs/plugin-react/react-refresh/eslint-plugin-react-hooks/lucide-react）终局移除 + `renderKind` 改名 + solidStoreBridge 直连收敛拆桥（follow-up issue 承接）。
-- `settingsSectionShared.solid.tsx` 的 GlobalPresetSection 本地 Group 副本收拢；`MarkdownPreview.solid.tsx` 零消费死件（随 1-A1 复活或删除）。
+- `settingsSectionShared.solid.tsx` 的 GlobalPresetSection 本地 Group 副本收拢；`MarkdownPreview.solid.tsx` 零消费死件已删除（#520 R2，复活时从 git 历史恢复）。
 - dev-standards「前端全局可变状态」一节的 zustand 措辞收敛（§修订需仓库主批准，未动）。
 
 ## 并行交集

@@ -1,16 +1,16 @@
-import { useStore } from '../theme/themeStore.ts'
+import { useThemeStore } from '../theme/themeStore.ts'
 import type { AppearanceCommand, WorkbenchAppearanceStore } from './appearance.ts'
 import { createVanillaWorkbenchAppearanceStore } from './workbenchAppearanceStore.ts'
 
 export function createZustandWorkbenchAppearanceStore(): WorkbenchAppearanceStore {
   // #483：showPet 随宠物链删除退役，外观快照回归纯主题 store 投影。
-  const readTheme = () => ({ ...useStore.getState() })
+  const readTheme = () => ({ ...useThemeStore.getState() })
   return createVanillaWorkbenchAppearanceStore(
     {
       getState: readTheme,
       subscribe: listener => {
         const notify = () => { const next = readTheme(); listener(next, next) }
-        return useStore.subscribe(notify)
+        return useThemeStore.subscribe(notify)
       },
     },
     dispatchAppearanceCommand,
@@ -18,7 +18,7 @@ export function createZustandWorkbenchAppearanceStore(): WorkbenchAppearanceStor
 }
 
 function dispatchAppearanceCommand(command: AppearanceCommand): void {
-  const state = useStore.getState()
+  const state = useThemeStore.getState()
   switch (command.type) {
     case 'set-cc-edit-mode':
       state.setCcEditMode(command.enabled)

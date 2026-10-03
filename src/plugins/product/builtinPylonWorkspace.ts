@@ -57,7 +57,7 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         label: '搜索',
         icon: 'search',
         order: 800,
-        renderKind: 'first-party-react',
+        renderKind: 'first-party-solid',
         component: SearchPanel,
       })
       context.sidebar.registerAgentSidebarContribution({
@@ -69,7 +69,7 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         alwaysOpen: true,
         order: 900,
         headerActions: [{ id: 'new-workspace', label: '工作区', title: '新建工作区', icon: 'plus' }],
-        renderKind: 'first-party-react',
+        renderKind: 'first-party-solid',
         component: SessionsPanel,
       })
       for (const contribution of BUILTIN_FILE_WORKBENCH_CONTRIBUTIONS) context.fileWorkbench.register(contribution)
@@ -83,7 +83,7 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         workspaceKind: 'agent',
         label: '上下文',
         order: 100,
-        renderKind: 'first-party-react',
+        renderKind: 'first-party-solid',
         component: AgentContextPanel,
       })
       context.contextPanel.register({
@@ -91,7 +91,7 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
         workspaceKind: 'file',
         label: '关联',
         order: 100,
-        renderKind: 'first-party-react',
+        renderKind: 'first-party-solid',
         component: FileContextPanel,
       })
       for (const provider of BUILTIN_SEARCH_PROVIDERS) {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, waitFor } from '@solidjs/testing-library'
+import { cleanup, render, waitFor } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatRowDescriptor } from '../../../../domains/chat/chatRowPipeline.ts'
 import { toRenderMessage, type Message } from '../../../../domains/chat/messageTypes.ts'
@@ -57,6 +57,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })

@@ -3,7 +3,6 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { Portal } from 'solid-js/web'
 import { open } from '@tauri-apps/plugin-dialog'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
 import { formatTime } from '../../utils/relativeTime'
 import { isAbsolutePath, type Workspace } from '../../domains/workspace/workspaceEntities'
 import { useModalOverlayStore } from '../../app/modalOverlayStore'
@@ -326,8 +325,8 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
           </div>
         </Show>
       </div>
-      {/* 手写 Dialog 最小等价（radix @radix-ui/react-dialog 退役，#515 §3）：Portal 到 body、
-          遮罩/Esc 关闭、role=dialog + aria-describedby，DOM 类名与 React 版逐字同构。 */}
+      {/* 手写 Dialog 最小等价（#515 §3）：Portal 到 body、遮罩点击/Esc 关闭，
+          role=dialog + aria-modal + aria-describedby（aria-label="工作区设置"）。 */}
       <Show when={editingWorkspace()}>{workspace => (
         <Portal>
           <div class="dialog-overlay" onClick={() => setEditingCwdId(null)} />
@@ -357,6 +356,3 @@ export default function SessionsPanel(props: AgentSidebarContributionProps) {
     </>
   )
 }
-
-/** React 薄桥（SessionsPanel.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderSessionsPanel = createSolidMount(SessionsPanel)

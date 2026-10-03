@@ -44,7 +44,7 @@ function validateContribution(contribution: AgentSidebarContribution): AgentSide
     throw new Error(`Agent sidebar contribution onTitleClick=page 但未声明 page：${contribution.id}`)
   }
   validateHeaderActions(contribution)
-  if (contribution.renderKind === 'first-party-react' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
+  if (contribution.renderKind === 'first-party-solid' && typeof contribution.component !== 'function' && typeof contribution.component !== 'object') {
     throw new Error(`Agent sidebar first-party component 非法：${contribution.id}`)
   }
   if (contribution.renderKind === 'isolated-surface' && !contribution.surfaceId.trim()) {

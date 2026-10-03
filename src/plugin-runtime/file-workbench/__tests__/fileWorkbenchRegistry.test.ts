@@ -7,7 +7,7 @@ import { resolveFileLanguageProvider } from '../fileWorkbenchResolver.ts'
 import { getFileWorkbenchRegistry } from '../../runtimeServices.ts'
 
 const Component = () => null
-const activity = (id: string) => ({ kind: 'activity' as const, id, label: id, description: id, order: 1, icon: 'files' as const, renderKind: 'first-party-react' as const, component: Component })
+const activity = (id: string) => ({ kind: 'activity' as const, id, label: id, description: id, order: 1, icon: 'files' as const, renderKind: 'first-party-solid' as const, component: Component })
 
 describe('FileWorkbenchRegistry lifecycle', () => {
   it('PluginScope dispose removes owner contributions', async () => {

@@ -2,8 +2,7 @@
 import { createMemo, onCleanup, onMount, Show, Suspense } from 'solid-js'
 import { save } from '@tauri-apps/plugin-dialog'
 import { LucideIcon } from '../LucideIcon.solid.tsx'
-import { createSolidMount } from '../../host/solidBridge.solid'
-import { createZustandSignal } from '../../host/solidStoreBridge.ts'
+import { createZustandSignal } from '../../infrastructure/state/solidStoreBridge.ts'
 import { appClients } from '../../app/appClients.ts'
 import { refreshSessionsBackend, useIdentityStore } from '../../domains/identity/identityStore'
 import { useRuntimeStore } from '../../domains/runtime/runtimeStore'
@@ -235,6 +234,3 @@ export default function AgentSheetPageHost(props: AgentSheetPageHostProps) {
     )}</Show>
   )
 }
-
-/** React 薄桥（AgentSheetPageHost.tsx）的挂载工厂：Solid JSX 只允许出现在本文件。 */
-export const renderAgentSheetPageHost = createSolidMount(AgentSheetPageHost)

@@ -1,13 +1,12 @@
 /** @jsxImportSource solid-js */
-import { createComponent, createSignal, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, Show } from 'solid-js'
+
 import { appClients } from '../../app/appClients.ts'
 import { reportRuntimeError, resolveRuntimeErrors } from '../../app/runtimeError.ts'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
 import type { createAgentClient } from '../../infrastructure/acp/agentClient'
 import { errorCode as wireErrorCode } from '../../infrastructure/tauri/errorPayload.ts'
 import { useIdentityStore } from '../../domains/identity/identityStore'
-import { bridgedProps } from '../../host/solidBridge.solid'
 
 export interface AgentConfigEditorProps {
   agentId: string
@@ -117,9 +116,4 @@ async function saveWithVoucherRetry(
     }
     return await client.updateAgentsConfig({ scope: 'agent', agentId, config })
   }
-}
-
-/** React 薄桥（AgentConfigEditor.tsx）经 eager glob 调用的挂载缝。 */
-export function renderAgentConfigEditor(container: HTMLElement, latest: () => AgentConfigEditorProps): () => void {
-  return render(() => createComponent(AgentConfigEditor, bridgedProps(latest)), container)
 }

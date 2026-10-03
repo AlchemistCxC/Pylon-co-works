@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useStore } from '../themeStore.ts'
+import { useThemeStore } from '../themeStore.ts'
 import { useCustomPresetStore } from '../customPresetStore.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { useInterfaceModeStore } from '../../interface/interfaceModeStore.ts'
@@ -39,9 +39,9 @@ describe('custom preset overwrite', () => {
     )
 
     try {
-      useStore.getState().setZoneField('chat', { chatFontSize: 17 })
+      useThemeStore.getState().setZoneField('chat', { chatFontSize: 17 })
       const firstId = useCustomPresetStore.getState().saveCustomPreset('first')
-      useStore.getState().setZoneField('chat', { chatFontSize: 19 })
+      useThemeStore.getState().setZoneField('chat', { chatFontSize: 19 })
       const secondId = useCustomPresetStore.getState().saveCustomPreset('second')
       const firstCreatedAt = useCustomPresetStore.getState().customPresets.find(item => item.id === firstId)?.createdAt
 
@@ -56,7 +56,7 @@ describe('custom preset overwrite', () => {
         expect(activatePresentationProfile(profileId)).toBe(true)
       }
 
-      useStore.getState().setZoneField('chat', { chatFontSize: 31 })
+      useThemeStore.getState().setZoneField('chat', { chatFontSize: 31 })
       expect(useCustomPresetStore.getState().saveCustomPreset('first', firstId)).toBe(firstId)
 
       const presets = useCustomPresetStore.getState().customPresets
