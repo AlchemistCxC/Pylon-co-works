@@ -115,7 +115,7 @@ function dirtyValueFor(key: string): string | number | boolean {
 /** 用户拖拽过的中控排布（若装配路径不重新归一，它会原样留下）。 */
 function dirtyCcLayout(): CcLayoutV3 {
   const layout = cloneCcLayout(DEFAULT_CC_LAYOUT)
-  layout.placements.model = { slot: 'actions', order: 9, offsetX: 12, offsetY: 0 }
+  layout.placements.model = { order: 9, offsetX: 12, offsetY: 0 }
   return layout
 }
 

@@ -52,9 +52,8 @@ const EXPECTED_CARRIERS = [
   'terminal/cc/tokyo',
 ].sort()
 
-/** 位置记录里允许出现的键：真值三项 + 槽位时代的历史键（运行时一律不读，见 `ccLayoutState.ts`） */
+/** 位置记录里允许出现的键：真值三项（槽位时代的历史键 `slot` 已随 CC-05 从数据与类型一并退场） */
 const POSITION_KEYS = ['order', 'offsetX', 'offsetY']
-const LEGACY_KEYS = ['slot']
 
 describe('#266 遗留⑦ · 出厂区域数据不许与定义表漂移', () => {
   it('携带 ccLayout 的条目清单 = 白名单（多一条 / 少一条都红，防静默跳过）', () => {
@@ -92,8 +91,8 @@ describe('#266 遗留⑦ · 出厂区域数据不许与定义表漂移', () => {
     }
   })
 
-  it('位置记录只带 order / offsetX / offsetY（+ 历史 slot）：多出别的键（gap / anchor / side…）必须先在这里登记并与定义表对拍', () => {
-    const allowed = [...POSITION_KEYS, ...LEGACY_KEYS]
+  it('位置记录只带 order / offsetX / offsetY：多出别的键（gap / anchor / side…）必须先在这里登记并与定义表对拍', () => {
+    const allowed = POSITION_KEYS
     for (const entry of ccLayoutCarriers()) {
       const at = entryKey(entry)
       for (const [id, placement] of Object.entries(placementsOf(entry))) {

@@ -19,15 +19,12 @@ export type CcLayoutWidgetId = CcWidgetId | CcRegisteredSlotId
  * 一个元件在**用户数据**里的位置：只存可变部分（组内序号 + 两个方向的微调）。
  *
  * ★ #238 刀3：槽位层已拆，`slot` **不再是位置真值**（位置由定义表 `layout` 声明）。
- * 这里保留一个**只读的历史键** `slot?: string` 有两个实际原因，且运行时**一律不读**它：
- * 1. 老用户 localStorage 里带着它（用户口径：**不写迁移、不做适配**）；
- * 2. 出厂区域预设的落盘数据（`zones/factory/**`，生成脚本已删、文件头写明请勿手改）里带着它，
- *    而那份数据的类型是 `Partial<ThemeSettings>` —— 删掉本键会让它直接变成编译错误。
- * `normalizeCcLayout` 只取 `order` / `offsetX` / `offsetY`，其余键（含 `slot`）自然丢弃。
+ * ★ CC-05（#266）：历史键 `slot` 已从本类型**退场**——运行时本就一律不读它，
+ * 出厂数据里残留的旧记录也已一并清掉。老用户 localStorage 里带着的 `slot`
+ * 无需迁移：`normalizeCcLayout` 只取 `order` / `offsetX` / `offsetY`，
+ * 其余键（含 `slot`）读盘时自然丢弃，因此无影响。
  */
 export interface CcWidgetPlacement {
-  /** @deprecated 历史键（槽位时代的 `input`/`status-primary`/`status-secondary`/`actions`），永不读取。 */
-  readonly slot?: string
   order: number
   offsetX: number
   offsetY: number
