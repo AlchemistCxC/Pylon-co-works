@@ -28,30 +28,41 @@ import { createRegistrySignal } from '../infrastructure/state/solidSheetSupport.
  * `sidebarMode` 的三个字符串值仍是契约（`'workspace' | 'sheet' | 'none'`），
  * 本文件只按注册表取内容，不改变它们的含义。
  *
- * #515：Solid 实体；registry sidebar 与组件面同为 Solid `Component`，Dynamic 直连。
- * 原实现 try/catch 的保护对象是 deserialize 的同步抛错（React 下组件体本就不在
- * try 内执行）——memo 内自兜，抛错即静默收起，行为逐字对齐。
+ * #515：Solid 实体；registry sidebar 与组件面同为 Solid `Component`。
+ * **#520 修复（切 kind 左栏滞留）**：非键控 Show 只认真值翻转——把「组件+state」
+ * 包成对象当 `when`，agent→settings 切换时两侧皆有侧栏（truthy→truthy），子级
+ * 不重跑，首次捕获的 Sidebar 组件滞留（实测左栏停在 agent 侧栏）。修法 = 组件
+ * **身份**单独作 memo 并作为 keyed Show 的 `when`（组件引用按 kind 稳定 ⇒ 只在
+ * kind/注册表变化时重挂，对齐 React「同类型更新、异类型重挂」）；state 走响应式
+ * prop 原位更新。deserialize 抛错 → 整体收起（React 版 try/catch 同款语义）。
  */
 export default function SheetSidebarSlot(props: { sheet: SheetRecord; ctx: SheetContext }) {
   const showSidebar = createZustandSignal(useThemeStore, s => s.showSidebar !== false)
   const registry = createRegistrySignal({ subscribe: subscribeWorkspaceRegistry }, getWorkspaceRegistrySnapshot)
   type SidebarEntry = NonNullable<NonNullable<ReturnType<typeof resolveSheetRender>>['sidebar']>
-  const rendered = createMemo<{ Sidebar: SidebarEntry; state: unknown } | null>(() => {
+  const resolvedSidebar = createMemo<SidebarEntry | null>(() => {
     try {
       registry()
+      if (!showSidebar()) return null
       const entry = resolveSheetRender(props.sheet.kind)
       if (!entry?.sidebar) return null
-      return { Sidebar: entry.sidebar, state: entry.deserialize(props.sheet.state) }
+      entry.deserialize(props.sheet.state)
+      return entry.sidebar
+    } catch {
+      return null
+    }
+  })
+  const sidebarState = createMemo<unknown>(() => {
+    try {
+      const entry = resolveSheetRender(props.sheet.kind)
+      return entry ? entry.deserialize(props.sheet.state) : null
     } catch {
       return null
     }
   })
   return (
-    <Show when={showSidebar() ? rendered() : null}>
-      {payload => {
-        const Sidebar = payload().Sidebar
-        return <Sidebar sheet={props.sheet} ctx={props.ctx} state={payload().state} />
-      }}
+    <Show when={resolvedSidebar()} keyed>
+      {Sidebar => <Sidebar sheet={props.sheet} ctx={props.ctx} state={sidebarState()} />}
     </Show>
   )
 }
