@@ -153,7 +153,9 @@ afterAll(() => {
 
 // Node 26 的全局 localStorage 是实验性 getter：未传 --localstorage-file 时访问即触发
 // ExperimentalWarning 并返回 undefined（且会遮蔽 jsdom 的）。无条件用内存垫片覆盖该
-// descriptor（configurable: true），消除 warning 并让 zustand persist 可用（仅测试环境）。
+// descriptor（configurable: true），消除 warning 并让 Solid 内核 store 的 persist 复刻
+// （语义对齐 zustand persist，见 infrastructure/state/solidStoreKernel 的
+// attachSolidPersist）可用（仅测试环境）。
 const memory = new Map<string, string>()
 const storage: Storage = {
   getItem: key => (memory.has(key) ? memory.get(key)! : null),
@@ -168,7 +170,9 @@ if (typeof window !== 'undefined' && Object.getOwnPropertyDescriptor(window, 'lo
   Object.defineProperty(window, 'localStorage', { value: storage, configurable: true, writable: true })
 }
 
-// matchMedia：motion/react 的 useReducedMotion 在 jsdom 下会访问
+// matchMedia：垫片的在役消费者是首方 Solid 组件——TacticalScene.solid.tsx 与
+// AgentRendererSuiteWorkbench.solid.tsx 直读 window.matchMedia('(prefers-reduced-motion)')
+// （motion 垫片的 reduced-motion 面）；jsdom 未实现该方法，补最小桩。
 if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -200,7 +204,9 @@ if (typeof Range !== 'undefined' && typeof Range.prototype.getBoundingClientRect
     toJSON: () => ({}),
   })
 }
-// K-3（施工书 09）：Radix Slider 的 use-size 依赖 ResizeObserver；jsdom 未实现。
+// K-3（施工书 09）：jsdom 未实现 ResizeObserver。原 Radix Slider / use-size 时代已随
+// #520 React 退役过去；现在的在役消费者是首方 Solid 组件（ErrorCenter.solid.tsx、
+// SettingsPreview.solid.tsx、createChatScrollController.solid.tsx 等）。
 // 测试环境垫片：立即回调 size 0 即可满足布局观察协议。
 if (typeof globalThis.ResizeObserver === 'undefined') {
   class ResizeObserverShim {

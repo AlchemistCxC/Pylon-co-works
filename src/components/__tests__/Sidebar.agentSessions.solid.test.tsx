@@ -5,7 +5,7 @@
 // createSidebarContributionProps（Solid 形态，逻辑同源内联）。断言集与 DOM 契约不缩减。
 import { fireEvent, render, screen } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import SessionsPanel from '../sidebar/SessionsPanel.solid.tsx'
 import { createSidebarContributionProps } from '../Sidebar.solid.tsx'
 import { useIdentityStore } from '../../domains/identity/identityStore'
@@ -61,11 +61,6 @@ function panelProps(overrides: Partial<AgentSidebarContributionProps> = {}): Age
 function PanelHarness(props: { get: () => AgentSidebarContributionProps }) {
   return <SessionsPanel {...props.get()} />
 }
-
-afterEach(async () => {
-  const { cleanup } = await import('@solidjs/testing-library')
-  cleanup()
-})
 
 describe('会话面板运行点（data-running 按 liveGeneratingSources）', () => {
   it('无 cwd 会话：source 在 live 列表 → 运行点亮；不在 → 无 data-running', () => {
